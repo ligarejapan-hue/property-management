@@ -6,6 +6,7 @@
  * いちばん強い手がかりは「マンション名(表記をそろえた形)+部屋番号」。所在地は書き方が
  * 揺れる(報告書「4丁目12ー3」・物件「4-12-3」)ので、ゆるい形で比べて補助に使う。
  */
+import { Prisma } from "@/generated/prisma";
 import { buildingNameKey } from "@/lib/building-identity";
 import { addressSearchPrefix, toFullWidth } from "@/lib/paste-import/normalize";
 import type { ReportClues } from "./extract";
@@ -112,6 +113,14 @@ export function rankCandidates(
 export interface CandidateDb {
   building: { findMany(args: unknown): Promise<{ id: string }[]> };
   property: { findMany(args: unknown): Promise<CandidateProperty[]> };
+  $queryRaw<T = unknown>(query: Prisma.Sql): Promise<T>;
+}
+
+/** 名前の比べる形(NFKC・小文字・空白なし)。DB 側も同じ形(小文字・空白なし)にそろえて完全一致で引く。 */
+export function compactNameForDb(name: string | null | undefined): string | null {
+  if (name == null) return null;
+  const s = name.normalize("NFKC").replace(/\s/g, "").toLowerCase();
+  return s.length >= 2 ? s : null;
 }
 
 const PROPERTY_SELECT = {
@@ -141,7 +150,8 @@ export async function findReportCandidates(
   let nameHead: unknown = null;
   let addressHead: unknown = null;
   if (nameKey !== null) {
-    const buildings = await db.building.findMany({ where: { nameKey }, select: { id: true }, take: 20 });
+    // ⚠棟は件数で切らない(同じ名前の棟が20を超えると目当ての棟が漏れる・@codex PR#500 19巡目)。
+    const buildings = await db.building.findMany({ where: { nameKey }, select: { id: true } });
     if (buildings.length > 0) {
       sameBuilding = { buildingId: { in: buildings.map((b) => b.id) } };
       ors.push(sameBuilding);
@@ -149,7 +159,7 @@ export async function findReportCandidates(
     // 棟につながっていない区分は物件名で探す(広めに取って、上で比べる形で絞る)。
     const head = (clues.buildingName ?? "").normalize("NFKC").replace(/\s/g, "").slice(0, 4);
     if (head.length >= 2) {
-      nameHead = { buildingName: { contains: head } };
+      nameHead = { buildingName: { contains: head, mode: "insensitive" } };
       ors.push(nameHead);
     }
   }
@@ -164,9 +174,23 @@ export async function findReportCandidates(
   //   強い一致になりうる組(部屋番号つき・棟の名前が一致)を**先に別々に**読み、最後に広い条件で補う。
   //   部屋番号は「含む」ではなく**書き方の揺れを並べた完全一致**で絞り、手がかりの種類ごとに分けて読む
   //   (同じ地域に「101」を含む部屋が300件を超えても、ぴったりの101号室が漏れない・15巡目)。
+  // ⚠棟につながっていない物件は、名前の頭4文字の「含む」だけだと大文字小文字・途中の空白の違いで
+  //   漏れ、件数の上限でも押し出される(19巡目)。**名前の完全一致**(小文字・空白なしにそろえる)を
+  //   別の組として先に引く。完全一致は狭いので件数で切らない(念のための上限だけ)。
+  let sameName: unknown = null;
+  const compact = compactNameForDb(clues.buildingName);
+  if (compact !== null) {
+    const ids = await db.$queryRaw<{ id: string }[]>(Prisma.sql`
+      SELECT p.id FROM "properties" p
+      WHERE p.is_archived = false
+        AND lower(regexp_replace(p.building_name, '[[:space:]　]', '', 'g')) = ${compact}
+      LIMIT 2000
+    `);
+    if (ids.length > 0) sameName = { id: { in: ids.map((r) => r.id) } };
+  }
   const room = roomKey(clues.roomNo);
   const groups: unknown[][] = [];
-  const kinds = [sameBuilding, nameHead, addressHead].filter((c) => c !== null);
+  const kinds = [sameBuilding, sameName, nameHead, addressHead].filter((c) => c !== null);
   if (room !== null) {
     const exactRoom = { roomNo: { in: roomVariants(room) } };
     for (const c of kinds) groups.push([c, exactRoom]);

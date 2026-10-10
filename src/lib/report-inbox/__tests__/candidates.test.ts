@@ -2,6 +2,8 @@ import { describe, it, expect, vi } from "vitest";
 import {
   addressLooseKey,
   findReportCandidates,
+  compactNameForDb,
+  type CandidateDb,
   roomVariants,
   searchPropertiesForReport,
   rankCandidates,
@@ -78,20 +80,53 @@ describe("roomVariants(部屋番号の書き方の揺れ)", () => {
   });
 });
 
+/** 名前の完全一致の生 SQL(既定は一致なし)をつける。 */
+function withRaw(db: Pick<CandidateDb, "building" | "property">, rawIds: string[] = []): CandidateDb {
+  return { ...db, $queryRaw: vi.fn(async () => rawIds.map((id) => ({ id }))) } as unknown as CandidateDb;
+}
+
+describe("compactNameForDb", () => {
+  it("NFKC・小文字・空白なしにそろえる(DB 側の lower+空白除去と同じ形)", () => {
+    expect(compactNameForDb("ＡＢＣ マンション")).toBe("abcマンション");
+    expect(compactNameForDb("abc　マンション")).toBe("abcマンション");
+    expect(compactNameForDb("A")).toBeNull();
+  });
+});
+
 describe("findReportCandidates(DB から読む)", () => {
+  it("★棟につながっていない物件も、大文字小文字・空白だけ違う名前の完全一致で先に引く(@codex PR#500 19巡目)", async () => {
+    const building = { findMany: vi.fn(async () => []) };
+    const target = p("unlinked", { buildingName: "abc マンション", roomNo: "101" });
+    const property = {
+      findMany: vi.fn(async (args: { where: { AND: unknown[] } }) =>
+        JSON.stringify(args.where.AND).includes('"unlinked"') ? [target] : [],
+      ),
+    };
+    const db = withRaw({ building, property }, ["unlinked"]);
+    const r = await findReportCandidates(db, { buildingName: "ABCマンション", roomNo: "101", address: null }, {
+      scopeWhere: {},
+      canAccess: () => true,
+    });
+    expect(r[0]).toMatchObject({ propertyId: "unlinked", match: "name_room" });
+    // 生 SQL には比べる形だけを値として渡す(SQL の文には埋め込まない)
+    const sql = (db.$queryRaw as unknown as { mock: { calls: [{ values: unknown[] }][] } }).mock.calls[0][0];
+    expect(sql.values).toEqual(["abcマンション"]);
+  });
+
+
   it("同じ比べる形の棟の物件・物件名・所在地の頭で読み、アーカイブ済みは除く", async () => {
     const building = { findMany: vi.fn(async () => [{ id: "b1" }]) };
     const property = {
       findMany: vi.fn(async () => [p("hit", { buildingId: "b1", buildingName: "東急サンプルハイツ弐番館", roomNo: "305" })]),
     };
-    const r = await findReportCandidates({ building, property }, clues, { scopeWhere: {}, canAccess: () => true });
+    const r = await findReportCandidates(withRaw({ building, property }), clues, { scopeWhere: {}, canAccess: () => true });
     expect(r[0]).toMatchObject({ propertyId: "hit", match: "name_room" });
     const wheres = (property.findMany.mock.calls as unknown as [{ where: { AND: unknown[] } }][]).map((c) => c[0].where.AND);
     for (const w of wheres) expect(w[0]).toEqual({ isArchived: false });
     // 手がかりの種類ごと(同じ棟・名前の頭・所在地の頭)に、まず部屋番号の完全一致つき、次に単独で読む
     const kinds = [
       { buildingId: { in: ["b1"] } },
-      { buildingName: { contains: "東急サン" } },
+      { buildingName: { contains: "東急サン", mode: "insensitive" } },
       { address: { contains: "東京都世田谷区太子堂" } },
     ];
     expect(wheres.map((w) => w[1])).toEqual([...kinds, ...kinds]);
@@ -109,7 +144,7 @@ describe("findReportCandidates(DB から読む)", () => {
         return exactRoomInBuilding ? [old] : noise; // それ以外では新しい300件だけが返る
       }),
     };
-    const r = await findReportCandidates({ building, property }, clues, { scopeWhere: {}, canAccess: () => true });
+    const r = await findReportCandidates(withRaw({ building, property }), clues, { scopeWhere: {}, canAccess: () => true });
     expect(r[0]).toMatchObject({ propertyId: "old-exact", match: "name_room" });
     // 手がかりの種類ごと×(部屋番号の完全一致つき/単独)で、それぞれ300件まで
     expect(property.findMany).toHaveBeenCalledTimes(6);
@@ -124,7 +159,7 @@ describe("findReportCandidates(DB から読む)", () => {
       ]),
     };
     const scopeWhere = { OR: [{ createdBy: "me" }, { assignedTo: "me" }] };
-    const r = await findReportCandidates({ building, property }, clues, { scopeWhere, canAccess: (q) => q.createdBy === "me" });
+    const r = await findReportCandidates(withRaw({ building, property }), clues, { scopeWhere, canAccess: (q) => q.createdBy === "me" });
     // ⚠件数で切る前に DB の条件として効いている(@codex PR#500 2巡目)
     const where = (property.findMany.mock.calls[0] as unknown as [{ where: { AND: unknown[] } }])[0].where;
     expect(where.AND).toContainEqual(scopeWhere);
@@ -134,7 +169,7 @@ describe("findReportCandidates(DB から読む)", () => {
   it("手がかりが無ければ DB を引かない", async () => {
     const building = { findMany: vi.fn() };
     const property = { findMany: vi.fn() };
-    expect(await findReportCandidates({ building, property }, { buildingName: null, roomNo: null, address: null }, { scopeWhere: {}, canAccess: () => true })).toEqual([]);
+    expect(await findReportCandidates(withRaw({ building, property }), { buildingName: null, roomNo: null, address: null }, { scopeWhere: {}, canAccess: () => true })).toEqual([]);
     expect(property.findMany).not.toHaveBeenCalled();
   });
 });
