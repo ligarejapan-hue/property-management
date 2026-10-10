@@ -87,6 +87,24 @@ describe("findReportCandidates(DB から読む)", () => {
     );
   });
 
+  it("★広い条件で300件を超えても、部屋番号つき・同じ棟の組を先に読むので古い一致が漏れない(@codex PR#500 14巡目)", async () => {
+    const building = { findMany: vi.fn(async () => [{ id: "b1" }]) };
+    const old = p("old-exact", { buildingId: "b1", buildingName: "東急サンプルハイツ弐番館", roomNo: "305" });
+    const noise = Array.from({ length: 300 }, (_, i) => p(`n${i}`, { address: "東京都世田谷区太子堂4丁目1-1" }));
+    const property = {
+      findMany: vi.fn(async (args: { where: { AND: unknown[] } }) => {
+        const hasRoom = JSON.stringify(args.where.AND).includes('"roomNo"');
+        return hasRoom ? [old] : noise; // 広い条件では新しい300件だけが返る
+      }),
+    };
+    const r = await findReportCandidates({ building, property }, clues, { scopeWhere: {}, canAccess: () => true });
+    expect(r[0]).toMatchObject({ propertyId: "old-exact", match: "name_room" });
+    // 部屋番号つき → 同じ棟 → 広い条件 の順に、それぞれ300件まで
+    expect(property.findMany).toHaveBeenCalledTimes(3);
+    const second = (property.findMany.mock.calls[1] as unknown as [{ where: { AND: unknown[] } }])[0].where;
+    expect(second.AND[1]).toEqual({ buildingId: { in: ["b1"] } });
+  });
+
   it("★呼び出した人が開けない物件は候補に出さない(担当外の住所・建物名を見せない・@codex PR#500)", async () => {
     const building = { findMany: vi.fn(async () => []) };
     const property = {

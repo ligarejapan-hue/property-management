@@ -128,9 +128,13 @@ export async function findReportCandidates(
 ): Promise<ReportCandidate[]> {
   const nameKey = buildingNameKey(clues.buildingName);
   const ors: unknown[] = [];
+  let sameBuilding: unknown = null;
   if (nameKey !== null) {
     const buildings = await db.building.findMany({ where: { nameKey }, select: { id: true }, take: 20 });
-    if (buildings.length > 0) ors.push({ buildingId: { in: buildings.map((b) => b.id) } });
+    if (buildings.length > 0) {
+      sameBuilding = { buildingId: { in: buildings.map((b) => b.id) } };
+      ors.push(sameBuilding);
+    }
     // 棟につながっていない区分は物件名で探す(広めに取って、上で比べる形で絞る)。
     const head = (clues.buildingName ?? "").normalize("NFKC").replace(/\s/g, "").slice(0, 4);
     if (head.length >= 2) ors.push({ buildingName: { contains: head } });
@@ -138,12 +142,31 @@ export async function findReportCandidates(
   const prefix = clues.address ? addressSearchPrefix(clues.address.normalize("NFKC")) : null;
   if (prefix) ors.push({ address: { contains: prefix } });
   if (ors.length === 0) return [];
-  const properties = await db.property.findMany({
-    where: { AND: [{ isArchived: false }, { OR: ors }, scope.scopeWhere] },
-    select: PROPERTY_SELECT,
-    take: 300,
-    orderBy: { updatedAt: "desc" },
-  });
+  // ⚠広い条件(所在地の頭・名前の頭4文字)だけで件数を切ると、新しい物件が300件を超える地域では
+  //   古い「名前+部屋」が一致する物件が読み込みから漏れる(@codex PR#500 14巡目)。
+  //   強い一致になりうる組(部屋番号つき・棟の名前が一致)を**先に別々に**読み、最後に広い条件で補う。
+  const room = roomKey(clues.roomNo);
+  const groups: unknown[][] = [];
+  if (room !== null) {
+    groups.push([{ OR: ors }, { OR: [{ roomNo: { contains: room } }, { roomNo: { contains: toFullWidth(room) } }] }]);
+  }
+  if (sameBuilding !== null) groups.push([sameBuilding]);
+  groups.push([{ OR: ors }]);
+  const seen = new Set<string>();
+  const properties: CandidateProperty[] = [];
+  for (const conds of groups) {
+    const rows = await db.property.findMany({
+      where: { AND: [{ isArchived: false }, ...conds, scope.scopeWhere] },
+      select: PROPERTY_SELECT,
+      take: 300,
+      orderBy: { updatedAt: "desc" },
+    });
+    for (const r of rows) {
+      if (seen.has(r.id)) continue;
+      seen.add(r.id);
+      properties.push(r);
+    }
+  }
   return rankCandidates(clues, properties.filter(scope.canAccess));
 }
 
