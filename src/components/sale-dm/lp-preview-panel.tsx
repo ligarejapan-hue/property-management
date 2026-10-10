@@ -46,6 +46,8 @@ export default function LpPreviewPanel({ previewUrl, label, onClose }: { preview
             <ExternalLink className="h-3 w-3" />別タブで開く
           </a>
         </div>
+        {/* 枠は script を止めている(下の sandbox)ため、動き(浮かび上がり・実例の札の横送りなど)はここでは出ない=@codex #501 R2 */}
+        <p className="mt-1 text-gray-500">この枠の中では動きは止まった形(実例の札は2列)で表示されます。動きや実例の札のスワイプは「別タブで開く」で確認できます。</p>
         <div className="mt-2 overflow-x-auto">
           {/* sandbox: 同一オリジンの自前ページなので allow-same-origin だけ許し、
               script・form 送信・別窓・親画面への遷移は禁じる(枠の中から画面を乗っ取らせない)。 */}

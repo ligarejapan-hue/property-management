@@ -335,7 +335,9 @@ describe("実例の札: スワイプで横に送る(案B)", () => {
     expect(js).toMatch(/addEventListener\("click",[^;]*,true\)/);
   });
 
-  it("社内プレビューでも同じ動き(申込・計測の script は出さない)", () => {
+  // 管理画面の小窓は sandbox で script を止めるため、ここでは「別タブで開く」プレビュー(preview モードの HTML)にも
+  // 同じスクリプトが出ることだけを確かめる(小窓の中は2列の札のまま=@codex #501 R2)。
+  it("プレビュー用の HTML にも同じスクリプトを出す(申込・計測の script は出さない)", () => {
     const h = renderLpPage(input({ sections: cases, mode: "preview", form: null, phoneTapToken: null }));
     expect(scriptsOf(h).join("\n")).toContain('"case-track"');
   });
@@ -369,6 +371,11 @@ describe("実例の札: スワイプで横に送る(案B)", () => {
     const go = /function go\(t\)\{[^]*?paint\(\)\}/.exec(js)![0];
     expect(go).toContain('querySelector("details[open]")');
     expect(go).toContain(".open=false");
+  });
+
+  it("札の上でも指2本で拡大できる(縦スクロールに加えて pinch-zoom を許す=@codex #501 R2)", () => {
+    const css = /<style>([\s\S]*?)<\/style>/.exec(renderLpPage(input({ sections: cases })))![1];
+    expect(css).toContain(".cases.swipe{display:block;overflow:hidden;touch-action:pan-y pinch-zoom;");
   });
 
   it("札が多くても(上限30件)矢印と点が狭い画面からはみ出さない(点は折り返す・矢印は縮まない)", () => {

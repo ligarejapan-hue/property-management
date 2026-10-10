@@ -20,6 +20,11 @@ describe("LPプレビュー画面", () => {
     expect(panel).toContain("ModalShell");
     // 同一オリジンの自前ページなので allow-same-origin だけ。script/form/別窓は禁じたまま。
     expect(panel).toContain('sandbox="allow-same-origin"');
+    expect(panel).not.toContain("allow-scripts");
+  });
+  it("枠の中では動き(実例の札の横送りなど)が止まった形になることを書き添え、動きは別タブで見られると案内する(@codex #501 R2)", () => {
+    expect(panel).toContain("枠の中では動きは止まった形");
+    expect(panel).toContain("「別タブで開く」");
   });
   it("LP型の行にプレビューのボタンがあり、文章未保存では押せない", () => {
     expect(manager).toMatch(/aria-label=\{`LP型「\$\{v\.label\}」のプレビュー`\}/);

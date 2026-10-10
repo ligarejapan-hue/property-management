@@ -151,8 +151,8 @@ const CSS = [
   ".case details[open] .case-more{display:none}",
   ".case-body{padding:0 16px 8px;border-top:1px dashed #ddd3bf;padding-top:12px;color:#3d3a33}",
   // 実例の札を横一列に並べてスワイプで送る形(発注者決定 2026-10-10・案B)。CASES_SCRIPT が .swipe を付けたときだけ効く
-  // (JS なし・動きを減らす設定では上の2列の札のまま)。縦のスクロールは指で普通にできる(pan-y)。
-  ".cases.swipe{display:block;overflow:hidden;touch-action:pan-y;padding:4px 0 0}",
+  // (JS なし・動きを減らす設定では上の2列の札のまま)。縦のスクロールと指2本の拡大は普通にできる(pan-y pinch-zoom=@codex #501 R2)。
+  ".cases.swipe{display:block;overflow:hidden;touch-action:pan-y pinch-zoom;padding:4px 0 0}",
   ".cases.swipe .case-track{position:relative;display:flex;gap:14px;align-items:flex-start;will-change:transform;cursor:grab}",
   ".cases.swipe .case-track>.case{flex:0 0 min(82%,340px);transition:none}",
   ".cases.swipe .case-track.snap,.cases.swipe .case-track.snap>.case{transition:transform .45s cubic-bezier(.2,.7,.2,1),opacity .45s ease}",
