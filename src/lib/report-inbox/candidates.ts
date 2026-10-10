@@ -121,6 +121,8 @@ export interface CandidateDb {
  * (一覧の1ページで報告書ごとに表を読み直さない・@codex PR#500 22巡目)。
  * DB 側も NFKC・小文字・空白なしにそろえる(PostgreSQL 13+)。名前ごとに念のための上限 2000。
  */
+const EXACT_NAME_LIMIT = 2000;
+
 export async function findExactNameIds(
   db: Pick<CandidateDb, "$queryRaw">,
   compacts: readonly string[],
@@ -128,18 +130,23 @@ export async function findExactNameIds(
   const keys = [...new Set(compacts)];
   const out = new Map<string, string[]>();
   if (keys.length === 0) return out;
+  // ⚠名前ごとの上限は **SQL の中で** かける(よくある名前で何万行も返して捨てない・23巡目)。
   const rows = await db.$queryRaw<{ id: string; k: string }[]>(Prisma.sql`
-    SELECT x.id, x.k FROM (
-      SELECT p.id,
-             lower(regexp_replace(normalize(p.building_name, NFKC), '[[:space:]　]', '', 'g')) AS k
-      FROM "properties" p
-      WHERE p.is_archived = false AND p.building_name IS NOT NULL
-    ) x
-    WHERE x.k = ANY(${keys})
+    SELECT y.id, y.k FROM (
+      SELECT x.id, x.k, row_number() OVER (PARTITION BY x.k ORDER BY x.updated_at DESC, x.id) AS rn
+      FROM (
+        SELECT p.id, p.updated_at,
+               lower(regexp_replace(normalize(p.building_name, NFKC), '[[:space:]　]', '', 'g')) AS k
+        FROM "properties" p
+        WHERE p.is_archived = false AND p.building_name IS NOT NULL
+      ) x
+      WHERE x.k = ANY(${keys})
+    ) y
+    WHERE y.rn <= ${EXACT_NAME_LIMIT}
   `);
   for (const r of rows) {
     const list = out.get(r.k) ?? [];
-    if (list.length < 2000) list.push(r.id);
+    list.push(r.id);
     out.set(r.k, list);
   }
   return out;

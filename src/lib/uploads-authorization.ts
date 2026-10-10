@@ -502,63 +502,37 @@ export async function resolveProtectedServeMeta(
   //   保護された添付を削除して同じファイルを通常の添付として登録し直しても、
   //   削除済みの記録の種類(または受け取り箱の置き場所)を引き継いで no-store で配る。
   type Row = (typeof attachments)[number];
-  let firstActive: Row | null = null;
-  let protectedHistory: Row | null = null;
-  for (const a of attachments) {
-    if (resolveStoredFileUrlToKey(a.fileUrl) !== key) continue;
-    if (a.isDeleted) {
-      if (protectedHistory === null && (a.type === "registry" || isOwnerPiiDocumentType(a.type))) {
-        protectedHistory = a;
-      }
-      continue;
-    }
-    firstActive ??= a;
-    if (a.type === "registry") {
-      return {
-        kind: "registry",
-        isRegistry: true,
-        attachmentId: a.id,
-        propertyId: a.propertyId ?? a.targetId ?? null,
-        certificateType: a.registryCertificateType ?? null,
-        createdAt: a.createdAt ?? null,
-      };
-    }
-    if (a.type === "referral" || a.type === "report") {
-      return {
-        kind: a.type,
-        attachmentId: a.id,
-        propertyId: a.propertyId ?? a.targetId ?? null,
-        createdAt: a.createdAt ?? null,
-      };
-    }
-  }
-  // ⚠有効な添付が無くても(写真など**別の記録**として登録し直されていても)保護の扱いで配る
-  //   (@codex PR#500 12巡目)。守り(authorizeUploadAccess)を通った人だけがここまで来る。
-  // ⚠種類を引き継ぐときは、記録(監査ログの添付・物件)も**その保護された記録**にそろえる(15巡目)。
-  const basis = protectedHistory ?? firstActive;
-  if (basis === null) {
-    return key.startsWith("report-inbox/")
-      ? { kind: "report", attachmentId: null, propertyId: null, createdAt: null }
-      : null;
-  }
-  {
-    const base = {
-      attachmentId: basis.id,
-      propertyId: basis.propertyId ?? basis.targetId ?? null,
-      createdAt: basis.createdAt ?? null,
+  // ⚠**全部の行を見てから**決める(@codex PR#500 23巡目)。見つけた順で返すと、有効な査定報告書と
+  //   削除済みの謄本が同じファイルを指すとき、DB の返す順しだいで謄本の監査ログが抜ける。
+  //   優先: 謄本(有効→削除済み) > 反響資料・査定報告書(有効→削除済み) > 受け取り箱の置き場所。
+  const rows = attachments.filter((a) => resolveStoredFileUrlToKey(a.fileUrl) === key);
+  const pick = (pred: (a: Row) => boolean): Row | null =>
+    rows.find((a) => !a.isDeleted && pred(a)) ?? rows.find((a) => a.isDeleted && pred(a)) ?? null;
+  const toBase = (a: Row) => ({
+    attachmentId: a.id,
+    propertyId: a.propertyId ?? a.targetId ?? null,
+    createdAt: a.createdAt ?? null,
+  });
+  const registryRow = pick((a) => a.type === "registry");
+  if (registryRow !== null) {
+    return {
+      kind: "registry",
+      isRegistry: true,
+      ...toBase(registryRow),
+      certificateType: registryRow.registryCertificateType ?? null,
     };
-    if (protectedHistory?.type === "registry") {
-      return {
-        kind: "registry",
-        isRegistry: true,
-        ...base,
-        certificateType: protectedHistory.registryCertificateType ?? null,
-      };
-    }
-    if (protectedHistory?.type === "referral" || protectedHistory?.type === "report") {
-      return { kind: protectedHistory.type, ...base };
-    }
-    if (key.startsWith("report-inbox/")) return { kind: "report", ...base };
+  }
+  // 有効な添付が無くても(写真など**別の記録**として登録し直されていても)保護の扱いで配る(12巡目)。
+  //   守り(authorizeUploadAccess)を通った人だけがここまで来る。記録は保護された行にそろえる(15巡目)。
+  const piiRow = pick((a) => isOwnerPiiDocumentType(a.type));
+  if (piiRow !== null) {
+    return { kind: piiRow.type === "report" ? "report" : "referral", ...toBase(piiRow) };
+  }
+  if (key.startsWith("report-inbox/")) {
+    const active = rows.find((a) => !a.isDeleted) ?? null;
+    return active !== null
+      ? { kind: "report", ...toBase(active) }
+      : { kind: "report", attachmentId: null, propertyId: null, createdAt: null };
   }
   return null;
 }

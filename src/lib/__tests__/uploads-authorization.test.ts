@@ -1747,3 +1747,24 @@ describe("元の物件の範囲・別の記録での登録し直しでも守り�
     });
   });
 });
+
+describe("配信の扱いは全部の行を見てから決める(@codex PR#500 23巡目)", () => {
+  const KEY = "properties/p1/paste-import/9.pdf";
+  const row = (o: Partial<Att> & { registryCertificateType?: string | null }): Att =>
+    ({ id: "x", fileUrl: `/uploads/${KEY}`, isDeleted: false, targetType: "property", targetId: "p1", propertyId: "p1", type: "general", ...o }) as Att;
+  const activeReport = row({ id: "rep", type: "report" });
+  const deletedRegistry = row({ id: "reg", isDeleted: true, type: "registry", registryCertificateType: "all" });
+
+  it.each([
+    ["有効な査定報告書が先", [activeReport, deletedRegistry]],
+    ["削除済みの謄本が先", [deletedRegistry, activeReport]],
+  ] as const)("★%sでも、謄本の扱い(監査ログ)になる", async (_label, attachments) => {
+    const prisma = makeDb({ attachments: [...attachments] });
+    expect(await resolveProtectedServeMeta(KEY, prisma)).toMatchObject({ kind: "registry", attachmentId: "reg", certificateType: "all" });
+  });
+
+  it("有効な保護行と削除済みの同じ種類があれば、有効な行にそろえる", async () => {
+    const prisma = makeDb({ attachments: [row({ id: "old", isDeleted: true, type: "report" }), activeReport] });
+    expect(await resolveProtectedServeMeta(KEY, prisma)).toMatchObject({ kind: "report", attachmentId: "rep" });
+  });
+});

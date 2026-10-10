@@ -99,7 +99,7 @@ describe("findExactNameIds(ページ分の名前をまとめて1回で引く・2
     ]);
     const m = await findExactNameIds({ $queryRaw } as unknown as CandidateDb, ["abcマンション", "xyzハイツ", "abcマンション"]);
     expect($queryRaw).toHaveBeenCalledTimes(1);
-    expect(($queryRaw.mock.calls[0] as unknown as [{ values: unknown[] }])[0].values).toEqual([["abcマンション", "xyzハイツ"]]);
+    expect(($queryRaw.mock.calls[0] as unknown as [{ values: unknown[] }])[0].values).toEqual([["abcマンション", "xyzハイツ"], 2000]); // 名前ごとの上限は SQL の中(23巡目)
     expect(m.get("abcマンション")).toEqual(["a1", "a2"]);
     expect(m.get("xyzハイツ")).toEqual(["b1"]);
   });
@@ -149,7 +149,7 @@ describe("findReportCandidates(DB から読む)", () => {
     expect(r[0]).toMatchObject({ propertyId: "unlinked", match: "name_room" });
     // 生 SQL には比べる形だけを値として渡す(SQL の文には埋め込まない)
     const sql = (db.$queryRaw as unknown as { mock: { calls: [{ values: unknown[] }][] } }).mock.calls[0][0];
-    expect(sql.values).toEqual([["abcマンション"]]);
+    expect(sql.values).toEqual([["abcマンション"], 2000]);
   });
 
 
