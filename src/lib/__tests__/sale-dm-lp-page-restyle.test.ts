@@ -286,3 +286,80 @@ describe("3枚の札の並び", () => {
     expect(h).toContain(".options.three{grid-template-columns:repeat(3,minmax(0,1fr))}");
   });
 });
+
+// 発注者決定(2026-10-10・見本 https://claude.ai/artifact/9FAbNjEdPDrwkGhBKiq2my の案B):
+// 実例の札は横一列に並べ、指のスワイプ(PC はマウスで引く・矢印・点)で1枚ずつ正面に送る。
+describe("実例の札: スワイプで横に送る(案B)", () => {
+  const cases = [
+    { heading: "ご相談の例(A)", paragraphs: ["題A\n本文A"], media: null },
+    { heading: "ご相談の例(B)", paragraphs: ["題B\n本文B"], media: null },
+    { heading: "ご相談の例(C)", paragraphs: ["題C\n本文C"], media: null },
+  ];
+  const scriptsOf = (h: string) => [...h.matchAll(/<script>([\s\S]*?)<\/script>/g)].map((m) => m[1]);
+
+  it("JS が札を横一列に組み替える(.cases に swipe を付け、札を .case-track に入れ、矢印と点を足す)", () => {
+    const h = renderLpPage(input({ sections: cases }));
+    const js = scriptsOf(h).join("\n");
+    expect(js).toContain('"case-track"');
+    expect(js).toContain('classList.add("swipe")');
+    expect(js).toContain('"case-nav"');
+    expect(js).toContain("左右にスワイプしてご覧ください");
+    for (const s of scriptsOf(h)) expect(() => new Function(s)).not.toThrow();
+  });
+
+  it("JS なし・動きを減らす設定では今までどおり(HTML は押すと広がる札のまま・横並びの CSS は .swipe のときだけ)", () => {
+    const h = renderLpPage(input({ sections: cases }));
+    expect(h).toContain('<div class="cases"><section class="case"><details>');
+    expect(h).toContain(".cases{display:grid;gap:12px;margin:0 0 36px}");
+    const css = /<style>([\s\S]*?)<\/style>/.exec(h)![1];
+    const swipeRules = css.match(/[^}{]*\{[^}]*\}/g)!.filter((r) => r.includes("case-track") || r.includes("case-nav"));
+    expect(swipeRules.length).toBeGreaterThan(0);
+    for (const r of swipeRules) expect(r.trim().startsWith(".cases.swipe")).toBe(true);
+    const js = scriptsOf(h).find((s) => s.includes('"case-track"'))!;
+    expect(js).toContain('matchMedia("(prefers-reduced-motion: reduce)").matches');
+  });
+
+  it("札は2枚以上のときだけ組み替える(1枚ならそのまま)", () => {
+    const js = scriptsOf(renderLpPage(input({ sections: cases }))).find((s) => s.includes('"case-track"'))!;
+    expect(js).toMatch(/cards\.length<2\)return/);
+  });
+
+  it("横に隠れた札が「浮かび上がる動き」の見張り待ちで消えたままにならない(組み替えた札にはすぐ .in)", () => {
+    const js = scriptsOf(renderLpPage(input({ sections: cases }))).find((s) => s.includes('"case-track"'))!;
+    expect(js).toContain('classList.add("in")');
+  });
+
+  it("引いたあとの指の離しで札が開かない・横の札を押すとその札が正面に来る", () => {
+    const js = scriptsOf(renderLpPage(input({ sections: cases }))).find((s) => s.includes('"case-track"'))!;
+    expect(js).toContain("preventDefault()");
+    expect(js).toMatch(/addEventListener\("click",[^;]*,true\)/);
+  });
+
+  it("社内プレビューでも同じ動き(申込・計測の script は出さない)", () => {
+    const h = renderLpPage(input({ sections: cases, mode: "preview", form: null, phoneTapToken: null }));
+    expect(scriptsOf(h).join("\n")).toContain('"case-track"');
+  });
+
+  it("組み替えの途中で失敗したら、札を元の並びに戻す", () => {
+    const js = scriptsOf(renderLpPage(input({ sections: cases }))).find((s) => s.includes('"case-track"'))!;
+    expect(js).toMatch(/catch\(_\)\{[^}]*box\.appendChild/);
+    expect(js).toContain('classList.remove("swipe")');
+  });
+
+  // 提出前レビュー(2026-10-10)の指摘3件
+  it("マウスのボタンを札の外で離しても、あとで勝手に札が動かない(ボタンが離れていたら引くのをやめる)", () => {
+    const js = scriptsOf(renderLpPage(input({ sections: cases }))).find((s) => s.includes('"case-track"'))!;
+    expect(js).toContain('e.pointerType==="mouse"&&e.buttons===0');
+  });
+
+  it("Tab で横の札へ移ったら、その札を正面に送り、箱の中の勝手な横スクロールを戻す", () => {
+    const js = scriptsOf(renderLpPage(input({ sections: cases }))).find((s) => s.includes('"case-track"'))!;
+    expect(js).toContain('addEventListener("focusin"');
+    expect(js).toContain("box.scrollLeft=0");
+  });
+
+  it("指で引いたあとクリックが来なくても、次のタップは飲み込まない(押し始めで抑止を解く)", () => {
+    const js = scriptsOf(renderLpPage(input({ sections: cases }))).find((s) => s.includes('"case-track"'))!;
+    expect(js).toMatch(/"pointerdown",function\(e\)\{suppress=false;/);
+  });
+});

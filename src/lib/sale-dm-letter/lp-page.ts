@@ -150,6 +150,21 @@ const CSS = [
   ".case-more::after{content:\" ▾\"}",
   ".case details[open] .case-more{display:none}",
   ".case-body{padding:0 16px 8px;border-top:1px dashed #ddd3bf;padding-top:12px;color:#3d3a33}",
+  // 実例の札を横一列に並べてスワイプで送る形(発注者決定 2026-10-10・案B)。CASES_SCRIPT が .swipe を付けたときだけ効く
+  // (JS なし・動きを減らす設定では上の2列の札のまま)。縦のスクロールは指で普通にできる(pan-y)。
+  ".cases.swipe{display:block;overflow:hidden;touch-action:pan-y;padding:4px 0 0}",
+  ".cases.swipe .case-track{position:relative;display:flex;gap:14px;align-items:flex-start;will-change:transform;cursor:grab}",
+  ".cases.swipe .case-track>.case{flex:0 0 min(82%,340px);transition:none}",
+  ".cases.swipe .case-track.snap,.cases.swipe .case-track.snap>.case{transition:transform .45s cubic-bezier(.2,.7,.2,1),opacity .45s ease}",
+  ".cases.swipe .case-track.dragging{cursor:grabbing;user-select:none;-webkit-user-select:none}",
+  ".cases.swipe .case-nav{display:flex;align-items:center;justify-content:center;gap:14px;margin-top:14px}",
+  ".cases.swipe .case-nav .arrow{font:inherit;font-size:22px;line-height:1;width:44px;height:44px;border-radius:50%;border:1px solid #ddd3bf;background:#fffdf8;color:#0a5246;cursor:pointer}",
+  ".cases.swipe .case-nav .arrow:disabled{opacity:.35;cursor:default}",
+  ".cases.swipe .case-dots{display:flex;gap:10px}",
+  ".cases.swipe .case-dots button{width:12px;height:12px;padding:0;border:0;border-radius:50%;background:#ddd3bf;cursor:pointer}",
+  ".cases.swipe .case-dots button.on{background:#0e6b5c;transform:scale(1.25)}",
+  ".cases.swipe .case-nav button:focus-visible{outline:3px solid #0e6b5c;outline-offset:2px}",
+  ".cases.swipe .case-hint{margin:6px 0 0;text-align:center;font-size:13px;color:#6b665b}",
   // 会社案内
   ".company{background:#fffdf8;border:1px solid #ddd3bf;border-radius:12px;padding:16px}",
   ".company .co-logo{display:block;width:140px;height:auto;margin-bottom:8px}",
@@ -293,6 +308,66 @@ const MOTION_SCRIPT = [
   // 安全網: 見張りがうまく動かない閲覧アプリでも、6秒後には全部出す。途中で例外が出たら動きをやめて全部見せる。
   'setTimeout(function(){var h=document.querySelectorAll(".anim main section,.anim .cases-head,.deadline,.flow-box,.options,.network");for(var i=0;i<h.length;i++){h[i].classList.add("in")}},6000);',
   '}catch(_){root.classList.remove("anim")}',
+  "})();",
+].join("");
+
+/**
+ * 実例の札を横一列に並べ、指のスワイプ(PC はマウスで引く・矢印・点)で1枚ずつ正面に送る(固定文字列・live/プレビュー両方)。
+ * 発注者決定 2026-10-10(見本 https://claude.ai/artifact/9FAbNjEdPDrwkGhBKiq2my の案B)。
+ * サーバーの HTML は押すと広がる札のまま。「動きを減らす」設定・札が1枚・JS なしでは組み替えない。
+ * 組み替えの途中で失敗したら札を元の並びに戻す。引いたあとの指の離しで札が開かないようにし、横の札を押すとその札を正面へ。
+ */
+const CASES_SCRIPT = [
+  "(function(){",
+  'if(!window.matchMedia||window.matchMedia("(prefers-reduced-motion: reduce)").matches)return;',
+  'var boxes=document.querySelectorAll(".cases");for(var b=0;b<boxes.length;b++){setup(boxes[b])}',
+  'function mk(cls,txt,label){var e=document.createElement("button");e.type="button";if(cls){e.className=cls}e.textContent=txt;e.setAttribute("aria-label",label);return e}',
+  "function setup(box){",
+  'var cards=[];for(var c=box.firstElementChild;c;c=c.nextElementSibling){if(c.classList.contains("case")){cards.push(c)}}',
+  "if(cards.length<2)return;",
+  'var N=cards.length,track=document.createElement("div"),nav=document.createElement("div"),hint=document.createElement("p"),dw=document.createElement("div"),dots=[],prev,next;',
+  "try{",
+  'track.className="case-track";nav.className="case-nav";hint.className="case-hint";dw.className="case-dots";hint.textContent="左右にスワイプしてご覧ください";',
+  // 横に隠れた札は「浮かび上がる動き」の見張りに入らないので、組み替えた札にはすぐ .in を付ける
+  'for(var i=0;i<N;i++){track.appendChild(cards[i]);cards[i].classList.add("in")}',
+  'prev=mk("arrow","‹","前の実例");next=mk("arrow","›","次の実例");',
+  'for(var k=0;k<N;k++){dots.push(dw.appendChild(mk("",""," "+(k+1)+"件目の実例")))}',
+  "nav.appendChild(prev);nav.appendChild(dw);nav.appendChild(next);",
+  'box.appendChild(track);box.appendChild(nav);box.appendChild(hint);box.classList.add("swipe");',
+  '}catch(_){for(var r=0;r<N;r++){box.appendChild(cards[r])}if(track.parentNode){track.parentNode.removeChild(track)}if(nav.parentNode){nav.parentNode.removeChild(nav)}if(hint.parentNode){hint.parentNode.removeChild(hint)}box.classList.remove("swipe");return}',
+  "var pos=0,startX=0,startPos=0,pid=null,dragging=false,moved=false,suppress=false,lastDown=0;",
+  "function center(i){return cards[i].offsetLeft+cards[i].offsetWidth/2}",
+  "function stepW(){return(center(1)-center(0))||1}",
+  "function at(p){if(p<=0)return center(0)+p*stepW();if(p>=N-1)return center(N-1)+(p-N+1)*stepW();var f=Math.floor(p);return center(f)+(p-f)*(center(f+1)-center(f))}",
+  "function front(){return Math.max(0,Math.min(N-1,Math.round(pos)))}",
+  "function paint(){",
+  'track.style.transform="translateX("+(box.clientWidth/2-at(pos))+"px)";',
+  'for(var i=0;i<N;i++){var d=Math.abs(i-pos);cards[i].style.transform="scale("+Math.max(0.9,1-d*0.1)+")";cards[i].style.opacity=String(Math.max(0.5,1-d*0.5))}',
+  'var f=front();for(var j=0;j<N;j++){dots[j].classList.toggle("on",j===f);dots[j].setAttribute("aria-current",j===f?"true":"false")}',
+  "prev.disabled=f===0;next.disabled=f===N-1}",
+  'function go(t){pos=Math.max(0,Math.min(N-1,t));track.classList.add("snap");paint()}',
+  'prev.addEventListener("click",function(){go(front()-1)});next.addEventListener("click",function(){go(front()+1)});',
+  'for(var q=0;q<N;q++){dots[q].addEventListener("click",(function(n){return function(){go(n)}})(q))}',
+  'box.addEventListener("keydown",function(e){if(e.key==="ArrowRight"){go(front()+1)}else if(e.key==="ArrowLeft"){go(front()-1)}});',
+  // 指で引く。押せる部品と開いた本文の上からは引かない(文字を選べるように)
+  // 押し始めで、前の「引いたあとのクリック抑止」を解く(指で引いたあとはクリックが来ないことがあるため)
+  'track.addEventListener("pointerdown",function(e){suppress=false;lastDown=Date.now();if(e.button>0)return;if(e.target.closest&&e.target.closest("a,input,label,textarea,select,.case-body"))return;dragging=true;moved=false;startX=e.clientX;startPos=pos;pid=e.pointerId});',
+  // マウスのボタンが札の外で離されていたら、引くのをやめる(8px 動く前は捕捉していないため pointerup が届かない)
+  'track.addEventListener("pointermove",function(e){if(!dragging||e.pointerId!==pid)return;if(e.pointerType==="mouse"&&e.buttons===0){dragging=false;if(moved){finish();go(Math.round(pos))}return}var dx=e.clientX-startX;',
+  'if(!moved&&Math.abs(dx)>8){moved=true;track.classList.remove("snap");track.classList.add("dragging");try{track.setPointerCapture(pid)}catch(_){}}',
+  "if(!moved)return;pos=Math.max(-0.35,Math.min(N-0.65,startPos-dx/stepW()));paint()});",
+  'function finish(){dragging=false;track.classList.remove("dragging");suppress=true;setTimeout(function(){suppress=false},400)}',
+  // 指を離したら近い札へ。軽く払っただけでも1枚は進む
+  'track.addEventListener("pointerup",function(e){if(!dragging||e.pointerId!==pid)return;if(!moved){dragging=false;return}finish();var dx=e.clientX-startX,t=Math.round(pos);if(t===Math.round(startPos)&&Math.abs(dx)>40){t+=dx<0?1:-1}go(t)});',
+  'track.addEventListener("pointercancel",function(e){if(!dragging||e.pointerId!==pid)return;if(!moved){dragging=false;return}finish();go(Math.round(pos))});',
+  'function onClick(e){if(suppress){e.preventDefault();e.stopPropagation();suppress=false;return}var c=e.target.closest?e.target.closest(".case"):null;var i=cards.indexOf(c);if(i>=0&&i!==front()&&e.target.closest("summary")){e.preventDefault();go(i)}}',
+  'track.addEventListener("click",onClick,true);',
+  // Tab で横の札へ移ったら正面へ送る(押して移ったときは onClick に任せる)。箱は overflow:hidden でも
+  // フォーカスで横にずれることがあるので、ずれは戻す(位置は transform だけで決める)
+  'box.addEventListener("focusin",function(e){if(Date.now()-lastDown<600)return;var c=e.target.closest?e.target.closest(".case"):null;var i=cards.indexOf(c);box.scrollLeft=0;if(i>=0&&i!==front()){go(i)}});',
+  'box.addEventListener("scroll",function(){if(box.scrollLeft){box.scrollLeft=0}});',
+  'window.addEventListener("resize",paint);window.addEventListener("load",paint);paint()',
+  "}",
   "})();",
 ].join("");
 
@@ -577,5 +652,5 @@ export function renderLpPage(input: LpRenderInput): string {
     (input.hero ? img(input.hero, "hero", "", true) : "") +
     `<div class="wrap">${heroCopy}` +
     introHtml + sections + faq + (input.form ? formSection(input.form) : "") + company + unsub +
-    `</div></main>${bar}${script}${submitGuard}${checklistScript}<script>${MOTION_SCRIPT}</script></body></html>`;
+    `</div></main>${bar}${script}${submitGuard}${checklistScript}<script>${MOTION_SCRIPT}${sections.includes('<div class="cases">') ? CASES_SCRIPT : ""}</script></body></html>`;
 }
