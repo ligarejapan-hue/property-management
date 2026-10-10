@@ -111,6 +111,7 @@ import { DELETE as itemDELETE } from "@/app/api/report-inbox/[id]/route";
 import { GET as fileGET } from "@/app/api/report-inbox/[id]/file/route";
 
 const FULL = [
+  { resource: "import", action: "write", granted: true },
   { resource: "property", action: "read", granted: true },
   { resource: "property", action: "write", granted: true },
   { resource: "owner", action: "read", granted: true },
@@ -183,6 +184,15 @@ describe("使える人", () => {
   it("★物件を見る権限(property:read)を外された人は 403(候補の住所を見せない・@codex PR#500 2巡目)", async () => {
     perms.current = FULL.filter((p) => !(p.resource === "property" && p.action === "read"));
     const res = await listGET(listReq());
+    expect(res.status).toBe(403);
+  });
+
+  it.each([
+    ["一覧", () => listGET(listReq())],
+    ["削除", () => itemDELETE(new Request("http://t/x") as unknown as NextRequest, ctx())],
+  ] as const)("★取り込みの権限(import:write)を外された人は%sも 403(@codex PR#500 18巡目)", async (_label, call) => {
+    perms.current = FULL.filter((p) => p.resource !== "import");
+    const res = await call();
     expect(res.status).toBe(403);
   });
 

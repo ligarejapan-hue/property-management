@@ -18,7 +18,9 @@ export function canUseReportInbox(session: { role: string }, perms: PermissionEn
   //   物件の報告書(依頼者の氏名入り)を開けたり消せたりしてしまう。
   if (isPropertyScopedRole(session.role)) return false;
   // ⚠property:read も必須(@codex PR#500 2巡目)。候補・検索で物件の住所・建物名・部屋番号を見せる。
+  // ⚠取り込みの口なので import:write も必須(他の取り込み=貼り付けて物件化・CSV と同じ境界・18巡目)。
   return (
+    hasPermission(perms, "import", "write") &&
     hasPermission(perms, "property", "read") &&
     hasPermission(perms, "property", "write") &&
     canOpenReferralDocument(perms)
