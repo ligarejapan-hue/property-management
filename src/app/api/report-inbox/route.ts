@@ -10,6 +10,7 @@ import {
 } from "@/lib/api-helpers";
 import { writeAuditLog } from "@/lib/audit";
 import { getStorage } from "@/lib/storage";
+import { UPLOADS_PREFIX } from "@/lib/storage/url-to-key";
 import { MAX_FILE_SIZE } from "@/lib/storage/types";
 import { assertImportMultipartBodySize } from "@/lib/import-body-size";
 import { extractTextFromPdf, isPdfBuffer } from "@/lib/pdf-extract";
@@ -161,7 +162,11 @@ export async function POST(request: NextRequest) {
     const item = await prisma.reportInboxItem.create({
       data: {
         fileName,
-        fileUrl: await storage.getUrl(key),
+        // ⚠保存方式にかかわらず、**アプリの守りを通る /uploads/{key}** を記録する(@codex PR#500 7巡目)。
+        //   server 方式の getUrl() は保存サーバーを直接指す URL を返すことがあり、それが添付に写ると
+        //   依頼者名入りの報告書が所有者の守り(canOpenReferralDocument)を通らずに開けてしまう。
+        //   /uploads/{key} はどの保存方式の keyFromUrl でも key に戻せる。
+        fileUrl: `${UPLOADS_PREFIX}${key}`,
         fileSize: fitted.buffer.length,
         originalSize: fitted.originalSize,
         source: clues.source,

@@ -235,7 +235,9 @@ describe("受け取り", () => {
     const created = db.reportInboxItem.create.mock.calls[0][0].data;
     expect(created.status).toBe("uploading");
     const key = (storage.upload.mock.calls[0] as unknown as [Buffer, { key: string }])[1].key;
+    // ⚠保存方式の getUrl ではなく、アプリの守りを通る /uploads/{key}(@codex PR#500 7巡目)
     expect(created.fileUrl).toBe(`/uploads/${key}`);
+    expect(storage.getUrl).not.toHaveBeenCalled();
     expect(db.reportInboxItem.create.mock.invocationCallOrder[0]).toBeLessThan(storage.upload.mock.invocationCallOrder[0]);
     expect(db.reportInboxItem.updateMany.mock.calls[0][0]).toEqual({
       where: { id: "item-1", status: "uploading" },
