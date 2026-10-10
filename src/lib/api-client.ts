@@ -5264,8 +5264,8 @@ export interface ReportInboxItem {
   fileSize: number;
   originalSize: number | null;
   source: "sre" | "unknown";
-  /** pending=未処理 / discarding=削除が途中で止まった(もう一度「削除」を押す) */
-  status: "pending" | "discarding";
+  /** pending=未処理 / discarding=削除が途中で止まった / uploading=取り込みが途中で止まった(どちらも「削除」を押す) */
+  status: "pending" | "discarding" | "uploading";
   buildingName: string | null;
   roomNo: string | null;
   address: string | null;
@@ -5282,9 +5282,15 @@ export interface ReportInboxSearchRow {
   propertyType: string;
 }
 
-export async function fetchReportInbox(): Promise<ReportInboxItem[]> {
-  const json = await apiFetch<{ data: ReportInboxItem[] }>("/api/report-inbox");
-  return json.data;
+export interface ReportInboxPage {
+  data: ReportInboxItem[];
+  total: number;
+  page: number;
+  pageSize: number;
+}
+
+export async function fetchReportInbox(page = 1): Promise<ReportInboxPage> {
+  return apiFetch<ReportInboxPage>(`/api/report-inbox?page=${page}`);
 }
 
 export async function uploadReportToInbox(file: File): Promise<{ id: string; compressed: boolean }> {

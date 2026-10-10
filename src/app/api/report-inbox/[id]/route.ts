@@ -10,6 +10,7 @@ import {
 import { writeAuditLog } from "@/lib/audit";
 import { getStorage } from "@/lib/storage";
 import { assertReportInboxAccess } from "@/lib/report-inbox/access";
+import { removeFileAndVerify } from "@/lib/report-inbox/remove-file";
 
 // ---------- DELETE /api/report-inbox/:id ----------
 // 受け取り箱から削除する(人が押したときだけ。自動では消さない=発注者決定 2026-10-10)。
@@ -34,8 +35,9 @@ export async function DELETE(_request: NextRequest, { params }: { params: Promis
     //   ⚠失敗しても「未処理」には**戻さない**(@codex PR#500 2巡目)。2か所で同時に押され、片方が
     //     消し終えたあとにもう片方の失敗が「未処理」に戻すと、ファイルの無い報告書が添付できてしまう。
     //     ファイルの削除は「もう無いものを消しても成功」なので、何度押し直しても安全。
+    // 取り込みが途中で止まったもの(uploading)も消せる(置き終える側は、削除されていたら自分のファイルを消す)。
     const claimed = await prisma.reportInboxItem.updateMany({
-      where: { id, status: { in: ["pending", "discarding"] } },
+      where: { id, status: { in: ["pending", "discarding", "uploading"] } },
       data: { status: "discarding" },
     });
     if (claimed.count !== 1) {
@@ -43,18 +45,7 @@ export async function DELETE(_request: NextRequest, { params }: { params: Promis
     }
 
     const storage = getStorage();
-    const key = storage.keyFromUrl(item.fileUrl);
-    let removed = key === null;
-    if (key) {
-      try {
-        await storage.delete(key);
-        removed = (await storage.read(key)) === null;
-      } catch (e) {
-        console.error("[report-inbox] delete failed", (e as { code?: unknown })?.code ?? "");
-        removed = false;
-      }
-    }
-    if (!removed) {
+    if (!(await removeFileAndVerify(storage, storage.keyFromUrl(item.fileUrl)))) {
       throw new ApiError(500, "報告書を削除できませんでした。少し待ってから、もう一度「削除」を押してください。", "DELETE_FAILED");
     }
     await prisma.reportInboxItem.updateMany({

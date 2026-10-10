@@ -52,6 +52,9 @@ interface UploadProgress {
 
 export default function ReportInboxPage() {
   const [items, setItems] = useState<ReportInboxItem[]>([]);
+  const [page, setPage] = useState(1);
+  const [total, setTotal] = useState(0);
+  const [pageSize, setPageSize] = useState(20);
   const [loading, setLoading] = useState(true);
   const [loadError, setLoadError] = useState<string | null>(null);
   const [uploads, setUploads] = useState<UploadProgress[]>([]);
@@ -61,13 +64,21 @@ export default function ReportInboxPage() {
   const load = useCallback(async () => {
     setLoadError(null);
     try {
-      setItems(await fetchReportInbox());
+      const res = await fetchReportInbox(page);
+      // 最後のページの報告書を処理して空になったら、1つ前のページへ戻る。
+      if (res.data.length === 0 && page > 1) {
+        setPage(page - 1);
+        return;
+      }
+      setItems(res.data);
+      setTotal(res.total);
+      setPageSize(res.pageSize);
     } catch (e) {
       setLoadError(e instanceof Error ? e.message : "読み込めませんでした");
     } finally {
       setLoading(false);
     }
-  }, []);
+  }, [page]);
 
   useEffect(() => {
     void load();
@@ -181,7 +192,7 @@ export default function ReportInboxPage() {
 
         <section>
           <h2 className="mb-3 text-sm font-semibold text-gray-800 dark:text-gray-100">
-            未処理の報告書{!loading && !loadError ? `(${items.length}件)` : ""}
+            未処理の報告書{!loading && !loadError ? `(${total}件)` : ""}
           </h2>
           {loading ? (
             <p className="flex items-center gap-2 text-sm text-gray-500 dark:text-gray-400">
@@ -195,11 +206,26 @@ export default function ReportInboxPage() {
           ) : items.length === 0 ? (
             <p className="text-sm text-gray-500 dark:text-gray-400">未処理の報告書はありません。</p>
           ) : (
-            <ul className="space-y-4">
-              {items.map((item) => (
-                <InboxItemCard key={item.id} item={item} onChanged={load} />
-              ))}
-            </ul>
+            <>
+              <ul className="space-y-4">
+                {items.map((item) => (
+                  <InboxItemCard key={item.id} item={item} onChanged={load} />
+                ))}
+              </ul>
+              {total > pageSize && (
+                <div className="mt-4 flex items-center gap-3 text-sm">
+                  <Button variant="secondary" onClick={() => setPage(page - 1)} disabled={page <= 1}>
+                    前へ
+                  </Button>
+                  <span className="text-gray-600 dark:text-gray-300">
+                    {page} / {Math.ceil(total / pageSize)} ページ
+                  </span>
+                  <Button variant="secondary" onClick={() => setPage(page + 1)} disabled={page * pageSize >= total}>
+                    次へ
+                  </Button>
+                </div>
+              )}
+            </>
           )}
         </section>
       </div>
@@ -281,15 +307,17 @@ function InboxItemCard({ item, onChanged }: { item: ReportInboxItem; onChanged: 
           </p>
         </div>
         <div className="flex shrink-0 gap-2">
-          <a
-            href={`/api/report-inbox/${item.id}/file`}
-            target="_blank"
-            rel="noopener noreferrer"
-            className="inline-flex items-center gap-1 rounded-md border border-gray-300 px-3 py-1.5 text-xs text-gray-700 hover:bg-gray-50 dark:border-gray-700 dark:text-gray-200 dark:hover:bg-gray-800"
-          >
-            <ExternalLink className="h-3.5 w-3.5" />
-            報告書を開く
-          </a>
+          {item.status === "pending" && (
+            <a
+              href={`/api/report-inbox/${item.id}/file`}
+              target="_blank"
+              rel="noopener noreferrer"
+              className="inline-flex items-center gap-1 rounded-md border border-gray-300 px-3 py-1.5 text-xs text-gray-700 hover:bg-gray-50 dark:border-gray-700 dark:text-gray-200 dark:hover:bg-gray-800"
+            >
+              <ExternalLink className="h-3.5 w-3.5" />
+              報告書を開く
+            </a>
+          )}
           <button
             type="button"
             onClick={() => setConfirmDelete(true)}
@@ -302,13 +330,15 @@ function InboxItemCard({ item, onChanged }: { item: ReportInboxItem; onChanged: 
         </div>
       </div>
 
-      {item.status === "discarding" && (
+      {item.status !== "pending" && (
         <p role="alert" className="mt-2 text-sm text-amber-700 dark:text-amber-400">
-          削除の途中で止まっています。もう一度「削除」を押してください(この報告書は添付できません)。
+          {item.status === "discarding"
+            ? "削除の途中で止まっています。もう一度「削除」を押してください(この報告書は添付できません)。"
+            : "取り込みの途中で止まっています。「削除」を押してから、必要ならもう一度入れてください。"}
         </p>
       )}
 
-      <fieldset className="mt-3 space-y-1" disabled={item.status === "discarding"}>
+      <fieldset className="mt-3 space-y-1" disabled={item.status !== "pending"}>
         <legend className="mb-1 text-xs font-semibold text-gray-600 dark:text-gray-300">添付先の物件</legend>
         {item.candidates.length === 0 && (
           <p className="text-xs text-gray-500 dark:text-gray-400">
@@ -373,7 +403,7 @@ function InboxItemCard({ item, onChanged }: { item: ReportInboxItem; onChanged: 
       </div>
 
       <div className="mt-3 flex items-center gap-3">
-        <Button onClick={() => void attach()} disabled={!selected || busy || item.status === "discarding"}>
+        <Button onClick={() => void attach()} disabled={!selected || busy || item.status !== "pending"}>
           {busy ? <Loader2 className="mr-1 h-4 w-4 animate-spin" /> : null}
           この物件に添付
         </Button>

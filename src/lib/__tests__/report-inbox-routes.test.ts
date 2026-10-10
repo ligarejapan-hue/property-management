@@ -58,6 +58,7 @@ const { storage } = vi.hoisted(() => ({
     delete: vi.fn(async () => {}),
     read: vi.fn(async () => ({ body: Buffer.from("%PDF-1.7 x"), contentType: "application/pdf", size: 10 })),
     keyFromUrl: vi.fn((u: string) => u.replace(/^\/uploads\//, "")),
+    getUrl: vi.fn(async (k: string) => `/uploads/${k}`),
   },
 }));
 vi.mock("@/lib/storage", () => ({ getStorage: () => storage }));
@@ -79,6 +80,7 @@ const { db, callOrder } = vi.hoisted(() => {
   const db: Record<string, any> = {
     reportInboxItem: {
       findMany: vi.fn(async () => []),
+      count: vi.fn(async () => 0),
       findUnique: vi.fn(),
       create: vi.fn(async ({ data }: { data: Record<string, unknown> }) => ({ id: "item-1", ...data })),
       updateMany: vi.fn(async () => ({ count: 1 })),
@@ -134,6 +136,8 @@ const pending = {
   createdAt: new Date("2026-10-10T01:00:00Z"),
 };
 const ctx = (id = "item-1") => ({ params: Promise.resolve({ id }) });
+const listReq = (page?: number) =>
+  ({ nextUrl: new URL(`http://t/api/report-inbox${page ? `?page=${page}` : ""}`) }) as unknown as NextRequest;
 
 async function uploadReq(body: Buffer, name: string, type = "application/pdf", withLength = true) {
   const fd = new FormData();
@@ -165,7 +169,7 @@ beforeEach(() => {
 
 describe("使える人", () => {
   it.each([
-    ["一覧", () => listGET()],
+    ["一覧", () => listGET(listReq())],
     ["中身", () => fileGET(new Request("http://t/x") as unknown as NextRequest, ctx())],
     ["削除", () => itemDELETE(new Request("http://t/x") as unknown as NextRequest, ctx())],
     ["添付", () => attachPOST(jsonReq("http://t/x", { propertyId: "0b6f6c1e-0000-4000-8000-000000000000" }), ctx())],
@@ -178,7 +182,7 @@ describe("使える人", () => {
 
   it("★物件を見る権限(property:read)を外された人は 403(候補の住所を見せない・@codex PR#500 2巡目)", async () => {
     perms.current = FULL.filter((p) => !(p.resource === "property" && p.action === "read"));
-    const res = await listGET();
+    const res = await listGET(listReq());
     expect(res.status).toBe(403);
   });
 
@@ -225,10 +229,51 @@ describe("受け取り", () => {
     expect(res.status).toBe(411);
   });
 
-  it("★記録が作れなかったら、置いたファイルを消す(どこからも見えない個人情報を残さない)", async () => {
+  it("★記録を先に「取り込み中」で作り、ファイルを置いてから「未処理」にする(@codex PR#500 3巡目)", async () => {
+    const res = await uploadPOST(await uploadReq(Buffer.from("%PDF-1.7 body"), "x.pdf"));
+    expect(res.status).toBe(201);
+    const created = db.reportInboxItem.create.mock.calls[0][0].data;
+    expect(created.status).toBe("uploading");
+    const key = (storage.upload.mock.calls[0] as unknown as [Buffer, { key: string }])[1].key;
+    expect(created.fileUrl).toBe(`/uploads/${key}`);
+    expect(db.reportInboxItem.create.mock.invocationCallOrder[0]).toBeLessThan(storage.upload.mock.invocationCallOrder[0]);
+    expect(db.reportInboxItem.updateMany.mock.calls[0][0]).toEqual({
+      where: { id: "item-1", status: "uploading" },
+      data: { status: "pending" },
+    });
+  });
+
+  it("★記録が作れなければファイルを置かない(どこからも見えない個人情報を作らない)", async () => {
     db.reportInboxItem.create.mockRejectedValueOnce(new Error("db down"));
     const res = await uploadPOST(await uploadReq(Buffer.from("%PDF-1.7 body"), "x.pdf"));
     expect(res.status).toBe(500);
+    expect(storage.upload).not.toHaveBeenCalled();
+  });
+
+  it("ファイルを置けなかったら、消せたことを確かめて記録を「削除済み」に", async () => {
+    storage.upload.mockRejectedValueOnce(new Error("disk full"));
+    storage.read.mockResolvedValueOnce(null as never);
+    const res = await uploadPOST(await uploadReq(Buffer.from("%PDF-1.7 body"), "x.pdf"));
+    expect(res.status).toBe(500);
+    expect(db.reportInboxItem.updateMany.mock.calls[0][0]).toMatchObject({
+      where: { id: "item-1", status: "uploading" },
+      data: { status: "discarded" },
+    });
+  });
+
+  it("★ファイルを置けず、後片付けも確かめられなければ「取り込み中」のまま残す(一覧に出て削除できる)", async () => {
+    storage.upload.mockRejectedValueOnce(new Error("disk full"));
+    // 既定の read はファイルを返す=まだ残っている
+    const res = await uploadPOST(await uploadReq(Buffer.from("%PDF-1.7 body"), "x.pdf"));
+    expect(res.status).toBe(500);
+    expect(db.reportInboxItem.updateMany).not.toHaveBeenCalled();
+  });
+
+  it("★置き終える前に誰かが削除していたら、置いたファイルを消して 409", async () => {
+    db.reportInboxItem.updateMany.mockResolvedValueOnce({ count: 0 });
+    storage.read.mockResolvedValueOnce(null as never);
+    const res = await uploadPOST(await uploadReq(Buffer.from("%PDF-1.7 body"), "x.pdf"));
+    expect(res.status).toBe(409);
     expect(storage.delete).toHaveBeenCalledTimes(1);
   });
 });
@@ -301,7 +346,7 @@ describe("削除", () => {
     const res = await itemDELETE(new Request("http://t/x") as unknown as NextRequest, ctx());
     expect(res.status).toBe(200);
     const calls = db.reportInboxItem.updateMany.mock.calls.map((c: unknown[]) => c[0]);
-    expect(calls[0]).toEqual({ where: { id: "item-1", status: { in: ["pending", "discarding"] } }, data: { status: "discarding" } });
+    expect(calls[0]).toEqual({ where: { id: "item-1", status: { in: ["pending", "discarding", "uploading"] } }, data: { status: "discarding" } });
     expect(storage.delete).toHaveBeenCalledWith("report-inbox/1-abc.pdf");
     expect(calls[1]).toMatchObject({ where: { id: "item-1", status: "discarding" }, data: { status: "discarded" } });
   });
@@ -356,12 +401,12 @@ describe("一覧", () => {
     db.property.findMany.mockResolvedValueOnce([
       { id: "p1", address: "東京都世田谷区太子堂4-12-3", buildingName: "東急サンプルハイツ", roomNo: "305", propertyType: "apartment_unit", buildingId: null },
     ]);
-    const res = await listGET();
+    const res = await listGET(listReq());
     const body = await res.json();
-    expect(db.reportInboxItem.findMany.mock.calls[0][0]).toMatchObject({
-      where: { status: { in: ["pending", "discarding"] } },
-      orderBy: { createdAt: "desc" },
-    });
+    const args = db.reportInboxItem.findMany.mock.calls[0][0];
+    expect(args.where.OR[0]).toEqual({ status: { in: ["pending", "discarding"] } });
+    expect(args.where.OR[1].status).toBe("uploading"); // 取り込みが途中で止まったもの(10分より前)も出す
+    expect(args).toMatchObject({ skip: 0, take: 20 });
     expect(body.data[0]).toMatchObject({ id: "item-1", uploaderName: "事務 太郎", status: "pending" });
     expect(body.data[0].candidates[0]).toMatchObject({ propertyId: "p1", match: "name_room" });
   });
@@ -373,7 +418,15 @@ describe("一覧", () => {
       { id: "mine", address: "東京都世田谷区太子堂4-12-3", buildingName: "東急サンプルハイツ", roomNo: "305", propertyType: "apartment_unit", buildingId: null, createdBy: "u-field", assignedTo: null },
       { id: "others", address: "東京都世田谷区太子堂4-12-3", buildingName: "東急サンプルハイツ", roomNo: "305", propertyType: "apartment_unit", buildingId: null, createdBy: "u-x", assignedTo: "u-y" },
     ]);
-    const body = await (await listGET()).json();
+    const body = await (await listGET(listReq())).json();
     expect(body.data[0].candidates.map((c: { propertyId: string }) => c.propertyId)).toEqual(["mine"]);
+  });
+
+  it("★ページ送りで全件にたどり着ける(件数で打ち切らない・@codex PR#500 3巡目)", async () => {
+    db.reportInboxItem.count.mockResolvedValueOnce(45);
+    db.reportInboxItem.findMany.mockResolvedValueOnce([]);
+    const body = await (await listGET(listReq(3))).json();
+    expect(db.reportInboxItem.findMany.mock.calls[0][0]).toMatchObject({ skip: 40, take: 20 });
+    expect(body).toMatchObject({ total: 45, page: 3, pageSize: 20 });
   });
 });
