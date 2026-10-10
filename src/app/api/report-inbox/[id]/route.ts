@@ -25,22 +25,35 @@ export async function DELETE(_request: NextRequest, { params }: { params: Promis
     const item = await prisma.reportInboxItem.findUnique({ where: { id } });
     if (!item) throw new ApiError(404, "見つかりません", "NOT_FOUND");
 
+    // ⚠消せたことを確かめてから「削除済み」にする(@codex PR#500)。消せないまま削除済みにすると、
+    //   個人情報の入ったファイルが誰にも見えない場所に残り続け、やり直す手段も無い。
+    //   1) 未処理(または前回の削除が途中で止まったもの)を「削除中」にする=この間は添付できない
+    //   2) ファイルを消す
+    //   3) 消せたら「削除済み」。消せなければ「未処理」に戻して、もう一度押してもらう
     const claimed = await prisma.reportInboxItem.updateMany({
-      where: { id, status: "pending" },
-      data: { status: "discarded", resolvedBy: session.id, resolvedAt: new Date() },
+      where: { id, status: { in: ["pending", "discarding"] } },
+      data: { status: "discarding" },
     });
     if (claimed.count !== 1) {
       throw new ApiError(409, "この報告書は、すでに添付または削除されています。一覧を読み直してください。", "CONFLICT");
     }
 
-    // ファイルは削除の記録のあとで消す(消せなくても記録は残る=二度と画面に出ない)。
     const storage = getStorage();
     const key = storage.keyFromUrl(item.fileUrl);
-    if (key) {
-      await storage.delete(key).catch((e: unknown) => {
-        console.error("[report-inbox] delete failed", (e as { code?: unknown })?.code ?? "");
+    try {
+      if (key) await storage.delete(key);
+    } catch (e) {
+      console.error("[report-inbox] delete failed", (e as { code?: unknown })?.code ?? "");
+      await prisma.reportInboxItem.updateMany({
+        where: { id, status: "discarding" },
+        data: { status: "pending" },
       });
+      throw new ApiError(500, "報告書を削除できませんでした。少し待ってから、もう一度「削除」を押してください。", "DELETE_FAILED");
     }
+    await prisma.reportInboxItem.updateMany({
+      where: { id, status: "discarding" },
+      data: { status: "discarded", resolvedBy: session.id, resolvedAt: new Date() },
+    });
 
     await writeAuditLog({
       userId: session.id,

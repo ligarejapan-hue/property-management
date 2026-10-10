@@ -267,14 +267,48 @@ describe("添付", () => {
     const res = await attachPOST(jsonReq("http://t/x", {}), ctx());
     expect(res.status).toBe(422);
   });
+
+  it("★ロックを取った後に担当が替わっていたら付けない(古い判断で書き込まない・@codex PR#500)", async () => {
+    session.current = { id: "u-field", role: "field_staff" };
+    db.property.findUnique
+      .mockResolvedValueOnce({ id: PID, createdBy: "u-field", assignedTo: null, isArchived: false }) // 事前の確認
+      .mockResolvedValueOnce({ createdBy: "u-other", assignedTo: "u-other2", isArchived: false }); // ロック後
+    const res = await attachPOST(jsonReq("http://t/x", { propertyId: PID }), ctx());
+    expect(res.status).toBe(403);
+    expect(db.reportInboxItem.updateMany).not.toHaveBeenCalled();
+    expect(db.attachment.create).not.toHaveBeenCalled();
+  });
+
+  it("★ロックを取った後にしまわれていたら付けない", async () => {
+    db.property.findUnique
+      .mockResolvedValueOnce({ id: PID, createdBy: "u-other", assignedTo: null, isArchived: false })
+      .mockResolvedValueOnce({ createdBy: "u-other", assignedTo: null, isArchived: true });
+    const res = await attachPOST(jsonReq("http://t/x", { propertyId: PID }), ctx());
+    expect(res.status).toBe(422);
+    expect(db.attachment.create).not.toHaveBeenCalled();
+  });
 });
 
 describe("削除", () => {
-  it("未処理のものを削除にし、ファイルも消す", async () => {
+  it("未処理のものを「削除中」にしてファイルを消し、消せたら「削除済み」", async () => {
     const res = await itemDELETE(new Request("http://t/x") as unknown as NextRequest, ctx());
     expect(res.status).toBe(200);
-    expect(db.reportInboxItem.updateMany.mock.calls[0][0].where).toEqual({ id: "item-1", status: "pending" });
+    const calls = db.reportInboxItem.updateMany.mock.calls.map((c: unknown[]) => c[0]);
+    expect(calls[0]).toEqual({ where: { id: "item-1", status: { in: ["pending", "discarding"] } }, data: { status: "discarding" } });
     expect(storage.delete).toHaveBeenCalledWith("report-inbox/1-abc.pdf");
+    expect(calls[1]).toMatchObject({ where: { id: "item-1", status: "discarding" }, data: { status: "discarded" } });
+  });
+
+  it("★ファイルを消せなかったら「未処理」に戻し、500(黙って削除済みにしない・@codex PR#500)", async () => {
+    storage.delete.mockRejectedValueOnce(Object.assign(new Error("io"), { code: "EIO" }));
+    const errSpy = vi.spyOn(console, "error").mockImplementation(() => {});
+    const res = await itemDELETE(new Request("http://t/x") as unknown as NextRequest, ctx());
+    errSpy.mockRestore();
+    expect(res.status).toBe(500);
+    expect((await res.json()).error.message).toContain("もう一度「削除」を押してください");
+    const calls = db.reportInboxItem.updateMany.mock.calls.map((c: unknown[]) => c[0]);
+    expect(calls[1]).toEqual({ where: { id: "item-1", status: "discarding" }, data: { status: "pending" } });
+    expect(calls.some((c: { data: { status: string } }) => c.data.status === "discarded")).toBe(false);
   });
 
   it("★添付済み(物件の添付が同じファイルを指す)は 409・ファイルを消さない", async () => {
@@ -309,8 +343,22 @@ describe("一覧", () => {
     ]);
     const res = await listGET();
     const body = await res.json();
-    expect(db.reportInboxItem.findMany.mock.calls[0][0]).toMatchObject({ where: { status: "pending" }, orderBy: { createdAt: "desc" } });
-    expect(body.data[0]).toMatchObject({ id: "item-1", uploaderName: "事務 太郎" });
+    expect(db.reportInboxItem.findMany.mock.calls[0][0]).toMatchObject({
+      where: { status: { in: ["pending", "discarding"] } },
+      orderBy: { createdAt: "desc" },
+    });
+    expect(body.data[0]).toMatchObject({ id: "item-1", uploaderName: "事務 太郎", status: "pending" });
     expect(body.data[0].candidates[0]).toMatchObject({ propertyId: "p1", match: "name_room" });
+  });
+
+  it("★候補は呼び出した人が開ける物件だけ(現地担当に担当外の住所・建物名を見せない・@codex PR#500)", async () => {
+    session.current = { id: "u-field", role: "field_staff" };
+    db.reportInboxItem.findMany.mockResolvedValueOnce([pending]);
+    db.property.findMany.mockResolvedValueOnce([
+      { id: "mine", address: "東京都世田谷区太子堂4-12-3", buildingName: "東急サンプルハイツ", roomNo: "305", propertyType: "apartment_unit", buildingId: null, createdBy: "u-field", assignedTo: null },
+      { id: "others", address: "東京都世田谷区太子堂4-12-3", buildingName: "東急サンプルハイツ", roomNo: "305", propertyType: "apartment_unit", buildingId: null, createdBy: "u-x", assignedTo: "u-y" },
+    ]);
+    const body = await (await listGET()).json();
+    expect(body.data[0].candidates.map((c: { propertyId: string }) => c.propertyId)).toEqual(["mine"]);
   });
 });

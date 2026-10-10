@@ -843,7 +843,7 @@ model ReportInboxItem {
   buildingName String?   @map("building_name")
   roomNo       String?   @map("room_no")
   address      String?
-  /// "pending"(未処理) | "attached"(添付済み) | "discarded"(削除)
+  /// "pending"(未処理) | "attached"(添付済み) | "discarding"(削除中=ファイルを消している) | "discarded"(削除)
   status       String    @default("pending")
   uploadedBy   String    @map("uploaded_by") @db.Uuid
   createdAt    DateTime  @default(now()) @map("created_at")

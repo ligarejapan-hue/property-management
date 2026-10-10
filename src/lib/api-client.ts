@@ -5264,6 +5264,8 @@ export interface ReportInboxItem {
   fileSize: number;
   originalSize: number | null;
   source: "sre" | "unknown";
+  /** pending=未処理 / discarding=削除が途中で止まった(もう一度「削除」を押す) */
+  status: "pending" | "discarding";
   buildingName: string | null;
   roomNo: string | null;
   address: string | null;

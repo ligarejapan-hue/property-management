@@ -28,6 +28,9 @@ export interface CandidateProperty {
   roomNo: string | null;
   propertyType: string;
   buildingId: string | null;
+  /** 担当の範囲の判定(canAccessPropertyRecord)に使う。 */
+  createdBy?: string | null;
+  assignedTo?: string | null;
 }
 
 /** 部屋番号の比べる形(全角半角・「号室」「号」・空白を吸収)。 */
@@ -109,12 +112,16 @@ const PROPERTY_SELECT = {
   roomNo: true,
   propertyType: true,
   buildingId: true,
+  createdBy: true,
+  assignedTo: true,
 } as const;
 
 /** 名前の比べる形が同じ棟・物件名・所在地の頭から、候補になりうる物件を読む。 */
 export async function findReportCandidates(
   db: CandidateDb,
   clues: Pick<ReportClues, "buildingName" | "roomNo" | "address">,
+  /** ⚠呼び出した人が開ける物件だけを候補にする(担当外の住所・建物名を見せない・@codex PR#500)。 */
+  canAccess: (p: CandidateProperty) => boolean,
 ): Promise<ReportCandidate[]> {
   const nameKey = buildingNameKey(clues.buildingName);
   const ors: unknown[] = [];
@@ -134,7 +141,7 @@ export async function findReportCandidates(
     take: 300,
     orderBy: { updatedAt: "desc" },
   });
-  return rankCandidates(clues, properties);
+  return rankCandidates(clues, properties.filter(canAccess));
 }
 
 /** 手で探す(マンション名・所在地のどちらでも)。2文字以上。 */

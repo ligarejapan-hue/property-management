@@ -57,6 +57,19 @@ export async function POST(request: NextRequest, { params }: { params: Promise<{
       attachmentId = await prisma.$transaction(async (tx) => {
         // 物件配下を書き換える tx は親を先にロック(書き込み規約・attachment-create-parent-lock)。
         await lockPropertyRow(tx, propertyId);
+        // ⚠ロックを取ってから**もう一度**確かめる(@codex PR#500)。上の確認からロックまでの間に
+        //   担当が替わった・しまわれた場合、古い判断のまま書き込まない。
+        const locked = await tx.property.findUnique({
+          where: { id: propertyId },
+          select: { createdBy: true, assignedTo: true, isArchived: true },
+        });
+        if (!locked) throw new ApiError(404, "物件が見つかりません", "NOT_FOUND");
+        if (locked.isArchived) {
+          throw new ApiError(422, "しまってある物件には添付できません。物件を戻してから添付してください。", "VALIDATION_ERROR");
+        }
+        if (!canAccessPropertyRecord(session, locked)) {
+          throw new ApiError(403, "この物件を編集する権限がありません", "FORBIDDEN");
+        }
         const claimed = await tx.reportInboxItem.updateMany({
           where: { id, status: "pending" },
           data: { status: "attached", propertyId, resolvedBy: session.id, resolvedAt: new Date() },

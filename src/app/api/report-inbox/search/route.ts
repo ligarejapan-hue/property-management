@@ -16,16 +16,11 @@ export async function GET(request: NextRequest) {
 
     const q = request.nextUrl.searchParams.get("q") ?? "";
     const rows = await searchPropertiesForReport(prisma as unknown as CandidateDb, q);
-    // 念のため担当の範囲も見る(受け取り箱を使える人は通常すべて見られる)。
-    const ids = rows.map((r) => r.id);
-    const scope = ids.length
-      ? await prisma.property.findMany({
-          where: { id: { in: ids } },
-          select: { id: true, createdBy: true, assignedTo: true },
-        })
-      : [];
-    const allowed = new Set(scope.filter((p) => canAccessPropertyRecord(session, p)).map((p) => p.id));
-    return apiResponse({ data: rows.filter((r) => allowed.has(r.id)) });
+    // 呼び出した人が開ける物件だけ(担当の範囲)。担当者の情報は返さない。
+    const data = rows
+      .filter((r) => canAccessPropertyRecord(session, { createdBy: r.createdBy ?? "", assignedTo: r.assignedTo ?? null }))
+      .map(({ id, address, buildingName, roomNo, propertyType }) => ({ id, address, buildingName, roomNo, propertyType }));
+    return apiResponse({ data });
   } catch (error) {
     return handleApiError(error);
   }

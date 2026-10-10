@@ -23,6 +23,7 @@ import { runExclusive } from "@/lib/pdf-compress/run";
 import { assertReportInboxAccess, reportInboxStorageKey } from "@/lib/report-inbox/access";
 import { extractReportClues } from "@/lib/report-inbox/extract";
 import { findReportCandidates, type CandidateDb } from "@/lib/report-inbox/candidates";
+import { canAccessPropertyRecord } from "@/lib/property-access";
 
 // ---------- 査定報告書の受け取り箱(2026-10-10) ----------
 // GET  /api/report-inbox … 未処理の報告書と、それぞれの添付先の候補
@@ -41,7 +42,8 @@ export async function GET() {
     assertReportInboxAccess(perms);
 
     const items = await prisma.reportInboxItem.findMany({
-      where: { status: "pending" },
+      // 削除が途中で止まったもの(discarding)も出す=もう一度「削除」を押せるように。
+      where: { status: { in: ["pending", "discarding"] } },
       orderBy: { createdAt: "desc" },
       take: LIST_LIMIT,
     });
@@ -53,13 +55,17 @@ export async function GET() {
 
     const data = [];
     for (const item of items) {
-      const candidates = await findReportCandidates(prisma as unknown as CandidateDb, item);
+      // ⚠呼び出した人が開ける物件だけを候補にする(担当外の住所・建物名を見せない・@codex PR#500)。
+      const candidates = await findReportCandidates(prisma as unknown as CandidateDb, item, (p) =>
+        canAccessPropertyRecord(session, { createdBy: p.createdBy ?? "", assignedTo: p.assignedTo ?? null }),
+      );
       data.push({
         id: item.id,
         fileName: item.fileName,
         fileSize: item.fileSize,
         originalSize: item.originalSize,
         source: item.source,
+        status: item.status,
         buildingName: item.buildingName,
         roomNo: item.roomNo,
         address: item.address,

@@ -302,7 +302,13 @@ function InboxItemCard({ item, onChanged }: { item: ReportInboxItem; onChanged: 
         </div>
       </div>
 
-      <fieldset className="mt-3 space-y-1">
+      {item.status === "discarding" && (
+        <p role="alert" className="mt-2 text-sm text-amber-700 dark:text-amber-400">
+          削除の途中で止まっています。もう一度「削除」を押してください(この報告書は添付できません)。
+        </p>
+      )}
+
+      <fieldset className="mt-3 space-y-1" disabled={item.status === "discarding"}>
         <legend className="mb-1 text-xs font-semibold text-gray-600 dark:text-gray-300">添付先の物件</legend>
         {item.candidates.length === 0 && (
           <p className="text-xs text-gray-500 dark:text-gray-400">
@@ -367,7 +373,7 @@ function InboxItemCard({ item, onChanged }: { item: ReportInboxItem; onChanged: 
       </div>
 
       <div className="mt-3 flex items-center gap-3">
-        <Button onClick={() => void attach()} disabled={!selected || busy}>
+        <Button onClick={() => void attach()} disabled={!selected || busy || item.status === "discarding"}>
           {busy ? <Loader2 className="mr-1 h-4 w-4 animate-spin" /> : null}
           この物件に添付
         </Button>

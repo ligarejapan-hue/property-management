@@ -73,7 +73,7 @@ describe("findReportCandidates(DB から読む)", () => {
     const property = {
       findMany: vi.fn(async () => [p("hit", { buildingId: "b1", buildingName: "東急サンプルハイツ弐番館", roomNo: "305" })]),
     };
-    const r = await findReportCandidates({ building, property }, clues);
+    const r = await findReportCandidates({ building, property }, clues, () => true);
     expect(r[0]).toMatchObject({ propertyId: "hit", match: "name_room" });
     const where = (property.findMany.mock.calls[0] as unknown as [{ where: { isArchived: boolean; OR: unknown[] } }])[0].where;
     expect(where.isArchived).toBe(false);
@@ -86,10 +86,22 @@ describe("findReportCandidates(DB から読む)", () => {
     );
   });
 
+  it("★呼び出した人が開けない物件は候補に出さない(担当外の住所・建物名を見せない・@codex PR#500)", async () => {
+    const building = { findMany: vi.fn(async () => []) };
+    const property = {
+      findMany: vi.fn(async () => [
+        p("mine", { buildingName: "東急サンプルハイツ弐番館", roomNo: "305", createdBy: "me", assignedTo: null }),
+        p("others", { buildingName: "東急サンプルハイツ弐番館", roomNo: "305", createdBy: "x", assignedTo: "y" }),
+      ]),
+    };
+    const r = await findReportCandidates({ building, property }, clues, (q) => q.createdBy === "me");
+    expect(r.map((c) => c.propertyId)).toEqual(["mine"]);
+  });
+
   it("手がかりが無ければ DB を引かない", async () => {
     const building = { findMany: vi.fn() };
     const property = { findMany: vi.fn() };
-    expect(await findReportCandidates({ building, property }, { buildingName: null, roomNo: null, address: null })).toEqual([]);
+    expect(await findReportCandidates({ building, property }, { buildingName: null, roomNo: null, address: null }, () => true)).toEqual([]);
     expect(property.findMany).not.toHaveBeenCalled();
   });
 });
