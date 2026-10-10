@@ -7,7 +7,7 @@
  * 揺れる(報告書「4丁目12ー3」・物件「4-12-3」)ので、ゆるい形で比べて補助に使う。
  */
 import { buildingNameKey } from "@/lib/building-identity";
-import { addressSearchPrefix } from "@/lib/paste-import/normalize";
+import { addressSearchPrefix, toFullWidth } from "@/lib/paste-import/normalize";
 import type { ReportClues } from "./extract";
 
 export type CandidateMatch = "name_room" | "name" | "address_room" | "address";
@@ -147,25 +147,41 @@ export async function findReportCandidates(
   return rankCandidates(clues, properties.filter(scope.canAccess));
 }
 
-/** 手で探す(マンション名・所在地のどちらでも)。2文字以上。 */
+/**
+ * 手で探す。空白で区切った語を**すべて**含む物件(語ごとにマンション名・所在地・部屋番号のどれかに合えばよい)。
+ * 例「東急ドエル 302」= 同じ建物の部屋が20件を超えても、部屋番号で目当ての部屋にたどり着ける
+ * (@codex PR#500 6巡目: 名前だけだと新しい順の20件に入らない部屋を選べなかった)。
+ * 全体で2文字以上。部屋番号は「号室」「号」を外して比べる。
+ */
+export function searchTerms(q: string): string[] {
+  const all = q.normalize("NFKC").trim();
+  if (all.length < 2) return [];
+  return all.split(/\s+/).filter(Boolean).slice(0, 5);
+}
+
 export async function searchPropertiesForReport(
   db: Pick<CandidateDb, "property">,
   q: string,
   /** DB で読むときの担当の範囲(件数で切る前に効かせる・@codex PR#500 2巡目)。 */
   scopeWhere: Record<string, unknown>,
 ): Promise<CandidateProperty[]> {
-  const term = q.normalize("NFKC").trim();
-  if (term.length < 2) return [];
+  const terms = searchTerms(q);
+  if (terms.length === 0) return [];
   return db.property.findMany({
     where: {
       AND: [
         { isArchived: false },
-        {
-          OR: [
-            { address: { contains: term, mode: "insensitive" } },
-            { buildingName: { contains: term, mode: "insensitive" } },
-          ],
-        },
+        ...terms.map((t) => {
+          const room = t.replace(/号室?$/, "");
+          return {
+            OR: [
+              { address: { contains: t, mode: "insensitive" } },
+              { buildingName: { contains: t, mode: "insensitive" } },
+              // ⚠本番の物件は全角で入っていることが多いので、半角・全角の両方で引く。
+              ...(room !== "" ? [{ roomNo: { in: [room, toFullWidth(room), `${room}号室`, `${toFullWidth(room)}号室`] } }] : []),
+            ],
+          };
+        }),
         scopeWhere,
       ],
     },

@@ -2,6 +2,7 @@ import { describe, it, expect, vi } from "vitest";
 import {
   addressLooseKey,
   findReportCandidates,
+  searchPropertiesForReport,
   rankCandidates,
   roomKey,
   type CandidateProperty,
@@ -106,6 +107,38 @@ describe("findReportCandidates(DB から読む)", () => {
     const building = { findMany: vi.fn() };
     const property = { findMany: vi.fn() };
     expect(await findReportCandidates({ building, property }, { buildingName: null, roomNo: null, address: null }, { scopeWhere: {}, canAccess: () => true })).toEqual([]);
+    expect(property.findMany).not.toHaveBeenCalled();
+  });
+});
+
+describe("searchPropertiesForReport(手で探す)", () => {
+  it("★空白で区切った語をすべて含む物件。部屋番号でも絞れる(半角・全角・号室)", async () => {
+    const property = { findMany: vi.fn(async () => []) };
+    await searchPropertiesForReport({ property }, "東急ドエル　３０２号室", {});
+    const where = (property.findMany.mock.calls[0] as unknown as [{ where: { AND: unknown[] } }])[0].where;
+    expect(where.AND).toEqual([
+      { isArchived: false },
+      {
+        OR: [
+          { address: { contains: "東急ドエル", mode: "insensitive" } },
+          { buildingName: { contains: "東急ドエル", mode: "insensitive" } },
+          { roomNo: { in: ["東急ドエル", "東急ドエル", "東急ドエル号室", "東急ドエル号室"] } },
+        ],
+      },
+      {
+        OR: [
+          { address: { contains: "302号室", mode: "insensitive" } },
+          { buildingName: { contains: "302号室", mode: "insensitive" } },
+          { roomNo: { in: ["302", "３０２", "302号室", "３０２号室"] } },
+        ],
+      },
+      {},
+    ]);
+  });
+
+  it("2文字未満は探さない", async () => {
+    const property = { findMany: vi.fn() };
+    expect(await searchPropertiesForReport({ property }, " a ", {})).toEqual([]);
     expect(property.findMany).not.toHaveBeenCalled();
   });
 });

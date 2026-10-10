@@ -389,7 +389,7 @@ function InboxItemCard({ item, onChanged }: { item: ReportInboxItem; onChanged: 
               void search();
             }
           }}
-          placeholder="マンション名・所在地で探す(2文字以上)"
+          placeholder="マンション名・所在地・部屋番号で探す(例: 東急ドエル 302)"
           aria-label="物件を探す"
           className="w-72 rounded-md border border-gray-300 px-3 py-1.5 text-sm dark:border-gray-700 dark:bg-gray-950 dark:text-gray-100"
         />
