@@ -43,6 +43,9 @@ import { canAccessPropertyRecord } from "@/lib/property-access";
 /** 一覧の1ページの件数(候補探しは1件ずつ DB を引くので、ページを小さく保つ・@codex PR#500)。 */
 export const PAGE_SIZE = 20;
 
+/** 候補探しを同時に行う件数(1件あたり最大6本の読み込みを同時に流す)。 */
+const CANDIDATE_CONCURRENCY = 4;
+
 /**
  * 一覧に出す行: 未処理・削除が途中で止まったもの・取り込みが途中で止まったもの。
  * ⚠どれも人が「削除」を押せるように出す(個人情報の入ったファイルを置き去りにしない)。
@@ -81,17 +84,29 @@ export async function GET(request: NextRequest) {
       : [];
     const nameOf = new Map(users.map((u) => [u.id, u.name]));
 
+    // ⚠呼び出した人が開ける物件だけを候補にする(担当外の住所・建物名を見せない・@codex PR#500)。
+    // 1件ごとの候補探しは独立なので、CANDIDATE_CONCURRENCY 件ずつ同時に行う
+    // (順に待つと往復が積み重なる・全部同時だと DB の接続を占める・16巡目)。
+    const candidateLists: Awaited<ReturnType<typeof findReportCandidates>>[] = [];
+    for (let i = 0; i < items.length; i += CANDIDATE_CONCURRENCY) {
+      const chunk = items.slice(i, i + CANDIDATE_CONCURRENCY);
+      candidateLists.push(
+        ...(await Promise.all(
+          chunk.map((item) =>
+            item.status === "pending"
+              ? findReportCandidates(prisma as unknown as CandidateDb, item, {
+                  scopeWhere: propertyScopeWhere(session),
+                  canAccess: (p) =>
+                    canAccessPropertyRecord(session, { createdBy: p.createdBy ?? "", assignedTo: p.assignedTo ?? null }),
+                })
+              : Promise.resolve([]),
+          ),
+        )),
+      );
+    }
     const data = [];
-    for (const item of items) {
-      // ⚠呼び出した人が開ける物件だけを候補にする(担当外の住所・建物名を見せない・@codex PR#500)。
-      const candidates =
-        item.status === "pending"
-          ? await findReportCandidates(prisma as unknown as CandidateDb, item, {
-              scopeWhere: propertyScopeWhere(session),
-              canAccess: (p) =>
-                canAccessPropertyRecord(session, { createdBy: p.createdBy ?? "", assignedTo: p.assignedTo ?? null }),
-            })
-          : [];
+    for (const [i, item] of items.entries()) {
+      const candidates = candidateLists[i];
       data.push({
         id: item.id,
         fileName: item.fileName,

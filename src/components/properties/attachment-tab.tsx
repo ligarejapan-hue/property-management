@@ -27,6 +27,7 @@ import {
   uploadFile,
 } from "@/lib/api-client";
 import { normalizeFileUrl } from "@/lib/url-normalize";
+import { sendsDownloadIntent } from "@/lib/attachments/download-intent";
 import { registryDisplayName } from "@/lib/attachments/registry-display-name";
 import { MAX_PDF_UPLOAD_BYTES } from "@/lib/pdf-compress/policy";
 
@@ -449,7 +450,7 @@ function AttachmentRow({
   const previewable = getPreviewKind(att) !== null;
   const isRegistry = att.type === "registry";
   const normalizedUrl = normalizeFileUrl(att.fileUrl);
-  const downloadHref = isRegistry ? withDownloadIntent(normalizedUrl) : normalizedUrl;
+  const downloadHref = sendsDownloadIntent(att.type) ? withDownloadIntent(normalizedUrl) : normalizedUrl;
   // registry は表示名・保存名ともに generic（att.fileName の PII を client 表示にも出さない）。
   const displayName = isRegistry
     ? registryDisplayName(att.registryCertificateType, att.createdAt)
@@ -523,7 +524,7 @@ function PreviewModal({
   const safeUrl = normalizeFileUrl(att.fileUrl);
   const isRegistry = att.type === "registry";
   // preview(iframe) は無 param のまま。download リンクのみ download intent を付ける。
-  const downloadHref = isRegistry ? withDownloadIntent(safeUrl) : safeUrl;
+  const downloadHref = sendsDownloadIntent(att.type) ? withDownloadIntent(safeUrl) : safeUrl;
   // registry は表示名・保存名ともに generic（att.fileName の PII を client 表示にも出さない）。
   const displayName = isRegistry
     ? registryDisplayName(att.registryCertificateType, att.createdAt)

@@ -172,15 +172,20 @@ export async function findReportCandidates(
     for (const c of kinds) groups.push([c, exactRoom]);
   }
   for (const c of kinds) groups.push([c]);
+  // 組どうしは独立なので**まとめて同時に**読む(順に待つと一覧1ページで往復が百回を超える・16巡目)。
+  const results = await Promise.all(
+    groups.map((conds) =>
+      db.property.findMany({
+        where: { AND: [{ isArchived: false }, ...conds, scope.scopeWhere] },
+        select: PROPERTY_SELECT,
+        take: 300,
+        orderBy: { updatedAt: "desc" },
+      }),
+    ),
+  );
   const seen = new Set<string>();
   const properties: CandidateProperty[] = [];
-  for (const conds of groups) {
-    const rows = await db.property.findMany({
-      where: { AND: [{ isArchived: false }, ...conds, scope.scopeWhere] },
-      select: PROPERTY_SELECT,
-      take: 300,
-      orderBy: { updatedAt: "desc" },
-    });
+  for (const rows of results) {
     for (const r of rows) {
       if (seen.has(r.id)) continue;
       seen.add(r.id);

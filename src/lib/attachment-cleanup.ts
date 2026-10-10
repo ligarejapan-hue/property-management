@@ -11,12 +11,14 @@ export const ATTACHMENT_RETENTION_DAYS = 90;
  * (claim→storage.delete→finalize)所要より十分長く、放置(=leak)より十分短い値。
  */
 export const STALE_PURGE_CLAIM_MS = 60 * 60 * 1000; // 1 hour
+/** 残しておく記録の分を読み足す回数の上限(1回の実行が長引きすぎないように)。 */
+const MAX_HELD_REFILL_ROUNDS = 20;
 
 export interface PurgeResult {
   scanned: number;
   purged: number;
-  failed: number;   // storage delete failed → DB row kept for retry (NOT counted as purged)
-  skipped: number;  // no longer eligible at delete time (restored / concurrently purged)
+  failed: number; // storage delete failed → DB row kept for retry (NOT counted as purged)
+  skipped: number; // no longer eligible at delete time (restored / concurrently purged)
 }
 
 /** now から retentionDays 日前（この時刻以前に削除された行が purge 対象）。 */
@@ -33,9 +35,14 @@ export function purgeableCutoff(
  * STALE claim（purgeStartedAt が STALE_PURGE_CLAIM_MS より古い）は再取得対象として含める。
  * 行ごとの claim updateMany と finalize deleteMany の各ガードは別途維持。
  */
-export async function findPurgeableAttachments(now: Date, limit: number) {
+export async function findPurgeableAttachments(
+  now: Date,
+  limit: number,
+  excludeIds: readonly string[] = [],
+) {
   return prisma.attachment.findMany({
     where: {
+      ...(excludeIds.length > 0 ? { id: { notIn: [...excludeIds] } } : {}),
       isDeleted: true,
       type: { not: "registry" }, // 謄本は自動削除しない
       deletedAt: { not: null, lte: purgeableCutoff(now) },
@@ -76,8 +83,7 @@ async function isStorageKeyStillReferenced(
 ): Promise<boolean> {
   const escaped = escapePrismaLikePattern(key);
   const storage = getStorage();
-  const matchesKey = (fileUrl: string | null | undefined) =>
-    storage.keyFromUrl(fileUrl) === key;
+  const matchesKey = (fileUrl: string | null | undefined) => storage.keyFromUrl(fileUrl) === key;
 
   const attachments = await prisma.attachment.findMany({
     where: {
@@ -91,10 +97,7 @@ async function isStorageKeyStillReferenced(
 
   const propertyPhotos = await prisma.propertyPhoto.findMany({
     where: {
-      OR: [
-        { fileUrl: { contains: escaped } },
-        { thumbnailUrl: { contains: escaped } },
-      ],
+      OR: [{ fileUrl: { contains: escaped } }, { thumbnailUrl: { contains: escaped } }],
     },
     select: { fileUrl: true, thumbnailUrl: true },
   });
@@ -102,10 +105,7 @@ async function isStorageKeyStillReferenced(
 
   const buildingPhotos = await prisma.buildingPhoto.findMany({
     where: {
-      OR: [
-        { fileUrl: { contains: escaped } },
-        { thumbnailUrl: { contains: escaped } },
-      ],
+      OR: [{ fileUrl: { contains: escaped } }, { thumbnailUrl: { contains: escaped } }],
     },
     select: { fileUrl: true, thumbnailUrl: true },
   });
@@ -113,10 +113,7 @@ async function isStorageKeyStillReferenced(
 
   const pinPhotos = await prisma.fieldSurveyPinPhoto.findMany({
     where: {
-      OR: [
-        { fileUrl: { contains: escaped } },
-        { thumbnailUrl: { contains: escaped } },
-      ],
+      OR: [{ fileUrl: { contains: escaped } }, { thumbnailUrl: { contains: escaped } }],
     },
     select: { fileUrl: true, thumbnailUrl: true },
   });
@@ -147,7 +144,7 @@ export async function purgeExpiredAttachments(opts: {
 }): Promise<PurgeResult> {
   const cutoff = purgeableCutoff(opts.now);
   const staleClaimCutoff = new Date(opts.now.getTime() - STALE_PURGE_CLAIM_MS);
-  const rows = await findPurgeableAttachments(opts.now, opts.limit);
+  let rows = await findPurgeableAttachments(opts.now, opts.limit);
   if (opts.dryRun) {
     return { scanned: rows.length, purged: 0, failed: 0, skipped: 0 };
   }
@@ -155,86 +152,97 @@ export async function purgeExpiredAttachments(opts: {
   let purged = 0;
   let failed = 0;
   let skipped = 0;
-
-  for (const row of rows) {
-    // (1) Atomically CLAIM: set the marker only if still eligible AND (unclaimed OR stale-claimed).
-    //     FRESH claims (purgeStartedAt within lease) get count=0 → skipped (alive run protected).
-    //     STALE claims (purgeStartedAt older than STALE_PURGE_CLAIM_MS) are re-claimed (recovery).
-    //     Mutually exclusive with restore (which only un-deletes when purgeStartedAt is null).
-    const claim = await prisma.attachment.updateMany({
-      where: {
-        id: row.id,
-        isDeleted: true,
-        type: { not: "registry" },
-        deletedAt: { not: null, lte: cutoff },
-        OR: [
-          { purgeStartedAt: null },
-          { purgeStartedAt: { lte: staleClaimCutoff } },
-        ],
-      },
-      data: { purgeStartedAt: opts.now },
-    });
-    if (claim.count === 0) {
-      skipped++; // restored / changed / already claimed by a concurrent run
-      continue;
-    }
-
-    // (2) Delete the storage object first (claimed row can no longer be restored).
-    //     Only our own self-excluded key, and only if no other row references it.
-    //     active backend の keyFromUrl で URL 形式（local /uploads/ / server /:bucket/）を解決する。
-    const storage = getStorage();
-    const key = storage.keyFromUrl(row.fileUrl);
-    const stillReferenced = key ? await isStorageKeyStillReferenced(key, row.id) : false;
-    // ⚠所有者の個人情報を含む書類(反響資料・査定報告書)の記録は、同じファイルを他の記録がまだ
-    //   指している間は消さない(@codex PR#500 13巡目)。この削除済みの記録が「元の物件の範囲」と
-    //   「書類の守り」を覚えている(uploads-authorization)。消すと、通常の添付や写真として登録し直した
-    //   側の物件の担当者が、元の物件を開けなくても原本を開けてしまう。参照が無くなれば次の回で消す。
-    if (stillReferenced && isOwnerPiiDocumentType(row.type)) {
-      await prisma.attachment.updateMany({
-        where: { id: row.id, purgeStartedAt: opts.now },
-        data: { purgeStartedAt: null },
+  let scanned = 0;
+  // ⚠残しておく記録(反響資料・査定報告書の守りの記録・下の (2))は毎回いちばん古い枠を占めるので、
+  //   その分だけ**続きを読み足す**(@codex PR#500 16巡目)。読み足さないと、残す記録が limit 件
+  //   たまった時点で、後ろの消すべき書類(個人情報入りを含む)がいつまでも処理されない。
+  const seen = new Set<string>();
+  for (let round = 0; round < MAX_HELD_REFILL_ROUNDS && rows.length > 0; round++) {
+    let heldThisRound = 0;
+    for (const row of rows) {
+      seen.add(row.id);
+      scanned++;
+      // (1) Atomically CLAIM: set the marker only if still eligible AND (unclaimed OR stale-claimed).
+      //     FRESH claims (purgeStartedAt within lease) get count=0 → skipped (alive run protected).
+      //     STALE claims (purgeStartedAt older than STALE_PURGE_CLAIM_MS) are re-claimed (recovery).
+      //     Mutually exclusive with restore (which only un-deletes when purgeStartedAt is null).
+      const claim = await prisma.attachment.updateMany({
+        where: {
+          id: row.id,
+          isDeleted: true,
+          type: { not: "registry" },
+          deletedAt: { not: null, lte: cutoff },
+          OR: [{ purgeStartedAt: null }, { purgeStartedAt: { lte: staleClaimCutoff } }],
+        },
+        data: { purgeStartedAt: opts.now },
       });
-      skipped++;
-      continue;
-    }
-    if (key && !stillReferenced) {
-      try {
-        await storage.delete(key);
-        // ⚠**消せたことを読み直して確かめる**(@codex PR#500 4巡目)。このサーバーのディスク版
-        //   (LocalStorageAdapter.delete)は unlink の失敗を黙って飲み込むので、確かめないと
-        //   ファイルが残ったまま記録だけ消え、個人情報の入った書類(反響資料・査定報告書など)が
-        //   誰にも見えない場所に残り続ける。残っていれば失敗として扱い、次の回にやり直す。
-        if ((await storage.read(key)) !== null) throw new Error("still exists");
-      } catch {
-        // Storage failed → release OUR claim so the row is retried next run. Not counted as purged.
-        // Guard by our claim token (purgeStartedAt: opts.now): if our claim went stale and another
-        // worker re-claimed the row, this no-ops (count 0) and does NOT unlock that worker's active purge.
-        // key/err can contain PII → never logged; only counts are aggregated.
+      if (claim.count === 0) {
+        skipped++; // restored / changed / already claimed by a concurrent run
+        continue;
+      }
+
+      // (2) Delete the storage object first (claimed row can no longer be restored).
+      //     Only our own self-excluded key, and only if no other row references it.
+      //     active backend の keyFromUrl で URL 形式（local /uploads/ / server /:bucket/）を解決する。
+      const storage = getStorage();
+      const key = storage.keyFromUrl(row.fileUrl);
+      const stillReferenced = key ? await isStorageKeyStillReferenced(key, row.id) : false;
+      // ⚠所有者の個人情報を含む書類(反響資料・査定報告書)の記録は、同じファイルを他の記録がまだ
+      //   指している間は消さない(@codex PR#500 13巡目)。この削除済みの記録が「元の物件の範囲」と
+      //   「書類の守り」を覚えている(uploads-authorization)。消すと、通常の添付や写真として登録し直した
+      //   側の物件の担当者が、元の物件を開けなくても原本を開けてしまう。参照が無くなれば次の回で消す。
+      if (stillReferenced && isOwnerPiiDocumentType(row.type)) {
         await prisma.attachment.updateMany({
           where: { id: row.id, purgeStartedAt: opts.now },
           data: { purgeStartedAt: null },
         });
-        failed++;
+        skipped++;
+        heldThisRound++;
         continue;
       }
-    }
+      if (key && !stillReferenced) {
+        try {
+          await storage.delete(key);
+          // ⚠**消せたことを読み直して確かめる**(@codex PR#500 4巡目)。このサーバーのディスク版
+          //   (LocalStorageAdapter.delete)は unlink の失敗を黙って飲み込むので、確かめないと
+          //   ファイルが残ったまま記録だけ消え、個人情報の入った書類(反響資料・査定報告書など)が
+          //   誰にも見えない場所に残り続ける。残っていれば失敗として扱い、次の回にやり直す。
+          if ((await storage.read(key)) !== null) throw new Error("still exists");
+        } catch {
+          // Storage failed → release OUR claim so the row is retried next run. Not counted as purged.
+          // Guard by our claim token (purgeStartedAt: opts.now): if our claim went stale and another
+          // worker re-claimed the row, this no-ops (count 0) and does NOT unlock that worker's active purge.
+          // key/err can contain PII → never logged; only counts are aggregated.
+          await prisma.attachment.updateMany({
+            where: { id: row.id, purgeStartedAt: opts.now },
+            data: { purgeStartedAt: null },
+          });
+          failed++;
+          continue;
+        }
+      }
 
-    // (3) Finalize: delete the claimed DB row (re-specify the guard incl. purgeStartedAt not null).
-    const del = await prisma.attachment.deleteMany({
-      where: {
-        id: row.id,
-        isDeleted: true,
-        type: { not: "registry" },
-        deletedAt: { not: null, lte: cutoff },
-        purgeStartedAt: { not: null },
-      },
-    });
-    if (del.count === 0) {
-      skipped++; // defensive: should not happen since we own the claim
-      continue;
+      // (3) Finalize: delete the claimed DB row (re-specify the guard incl. purgeStartedAt not null).
+      const del = await prisma.attachment.deleteMany({
+        where: {
+          id: row.id,
+          isDeleted: true,
+          type: { not: "registry" },
+          deletedAt: { not: null, lte: cutoff },
+          purgeStartedAt: { not: null },
+        },
+      });
+      if (del.count === 0) {
+        skipped++; // defensive: should not happen since we own the claim
+        continue;
+      }
+      purged++;
     }
-    purged++;
+    if (heldThisRound === 0) break;
+    rows = (await findPurgeableAttachments(opts.now, heldThisRound, [...seen])).filter(
+      (r) => !seen.has(r.id),
+    );
   }
 
-  return { scanned: rows.length, purged, failed, skipped };
+  return { scanned, purged, failed, skipped };
 }

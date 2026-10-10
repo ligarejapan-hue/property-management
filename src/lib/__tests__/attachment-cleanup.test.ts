@@ -333,6 +333,26 @@ describe("purgeExpiredAttachments", () => {
     },
   );
 
+  it("★残す記録が枠を占めても、その分だけ続きを読み足して後ろの書類を処理する(@codex PR#500 16巡目)", async () => {
+    const heldKey = "/uploads/report-inbox/1-abc.pdf";
+    const nextKey = "/uploads/properties/p/attachments/next.pdf";
+    let purgeableCalls = 0;
+    pm.attachment.findMany.mockImplementation((args: { where?: { fileUrl?: { contains?: string }; id?: { notIn?: string[] } } }) => {
+      if (args?.where?.fileUrl?.contains !== undefined) return Promise.resolve([]);
+      purgeableCalls++;
+      if (purgeableCalls === 1) return Promise.resolve([{ id: "held", fileUrl: heldKey, type: "report" }]);
+      // 2回目は、残した記録を除いて続きを読む
+      expect(args.where?.id).toEqual({ notIn: ["held"] });
+      return Promise.resolve([{ id: "next", fileUrl: nextKey, type: "general" }]);
+    });
+    pm.propertyPhoto.findMany.mockImplementation((args: { where: { OR: [{ fileUrl: { contains: string } }] } }) =>
+      Promise.resolve(args.where.OR[0].fileUrl.contains.includes("report-inbox") ? [{ fileUrl: heldKey }] : []),
+    );
+    const r = await purgeExpiredAttachments({ now: NOW, limit: 1 });
+    expect(r).toEqual({ scanned: 2, purged: 1, failed: 0, skipped: 1 });
+    expect(pm.attachment.deleteMany).toHaveBeenCalledTimes(1);
+  });
+
   it("report でも、他に指す記録が無ければファイルも記録も消す", async () => {
     const key = "/uploads/report-inbox/1-abc.pdf";
     wireFindMany([{ id: "c1", fileUrl: key, type: "report" }], []);

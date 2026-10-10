@@ -99,11 +99,13 @@ describe("S1b-4: /uploads route の header / 監査", () => {
 });
 
 describe("S1b-4: attachment-tab の download intent", () => {
-  it("registry の download のみ download intent param を付ける", () => {
+  it("保護された書類(謄本・反響資料・査定報告書)の download だけ download intent param を付ける", () => {
     expect(attachSrc).toMatch(/function withDownloadIntent/);
     expect(attachSrc).toMatch(/download=1/);
     expect(attachSrc).toMatch(/att\.type === "registry"/);
-    expect(attachSrc).toMatch(/isRegistry \? withDownloadIntent/);
+    // 判定は共通の関数(@/lib/attachments/download-intent)に1本化(@codex PR#500 16巡目)
+    expect(attachSrc).toMatch(/sendsDownloadIntent\(att\.type\) \? withDownloadIntent/);
+    expect(attachSrc).toMatch(/from "@\/lib\/attachments\/download-intent"/);
   });
 
   it("registry の保存名は generic（att.fileName を使わない）", () => {
