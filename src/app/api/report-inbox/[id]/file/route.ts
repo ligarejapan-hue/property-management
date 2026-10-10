@@ -15,7 +15,7 @@ export async function GET(_request: NextRequest, { params }: { params: Promise<{
     const { id } = await params;
     const session = await getApiSession();
     const perms = await getUserPermissions(session.id);
-    assertReportInboxAccess(perms);
+    assertReportInboxAccess(session, perms);
 
     const item = await prisma.reportInboxItem.findUnique({ where: { id } });
     if (!item || item.status !== "pending") {

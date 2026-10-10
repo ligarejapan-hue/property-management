@@ -28,7 +28,7 @@ export async function POST(request: NextRequest, { params }: { params: Promise<{
     const { id } = await params;
     const session = await getApiSession();
     const perms = await getUserPermissions(session.id);
-    assertReportInboxAccess(perms);
+    assertReportInboxAccess(session, perms);
 
     const parsed = bodySchema.safeParse(await request.json().catch(() => null));
     if (!parsed.success) {

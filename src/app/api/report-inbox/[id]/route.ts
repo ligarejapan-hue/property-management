@@ -21,7 +21,7 @@ export async function DELETE(_request: NextRequest, { params }: { params: Promis
     const { id } = await params;
     const session = await getApiSession();
     const perms = await getUserPermissions(session.id);
-    assertReportInboxAccess(perms);
+    assertReportInboxAccess(session, perms);
 
     const item = await prisma.reportInboxItem.findUnique({ where: { id } });
     if (!item) throw new ApiError(404, "見つかりません", "NOT_FOUND");

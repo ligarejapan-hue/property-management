@@ -276,6 +276,17 @@ describe("受け取り", () => {
     expect(res.status).toBe(409);
     expect(storage.delete).toHaveBeenCalledTimes(1);
   });
+
+  it("★置き終える前に削除され、自分のファイルを消せたと確かめられなければ「削除中」に戻す(押し直せる)", async () => {
+    db.reportInboxItem.updateMany.mockResolvedValueOnce({ count: 0 });
+    // 既定の read はファイルを返す=まだ残っている
+    const res = await uploadPOST(await uploadReq(Buffer.from("%PDF-1.7 body"), "x.pdf"));
+    expect(res.status).toBe(409);
+    expect(db.reportInboxItem.updateMany.mock.calls[1][0]).toEqual({
+      where: { id: "item-1", status: { in: ["discarded", "discarding"] } },
+      data: { status: "discarding" },
+    });
+  });
 });
 
 describe("添付", () => {
@@ -299,7 +310,7 @@ describe("添付", () => {
     expect(db.attachment.create).not.toHaveBeenCalled();
   });
 
-  it("担当外の物件(現地担当)には付けられない", async () => {
+  it("★現地担当は付けられない(受け取り箱そのものを使えない・@codex PR#500 5巡目)", async () => {
     session.current = { id: "u-field", role: "field_staff" };
     db.property.findUnique.mockResolvedValueOnce({ id: PID, createdBy: "u-other", assignedTo: "u-other2", isArchived: false });
     const res = await attachPOST(jsonReq("http://t/x", { propertyId: PID }), ctx());
@@ -317,17 +328,6 @@ describe("添付", () => {
   it("物件の指定が無ければ 422", async () => {
     const res = await attachPOST(jsonReq("http://t/x", {}), ctx());
     expect(res.status).toBe(422);
-  });
-
-  it("★ロックを取った後に担当が替わっていたら付けない(古い判断で書き込まない・@codex PR#500)", async () => {
-    session.current = { id: "u-field", role: "field_staff" };
-    db.property.findUnique
-      .mockResolvedValueOnce({ id: PID, createdBy: "u-field", assignedTo: null, isArchived: false }) // 事前の確認
-      .mockResolvedValueOnce({ createdBy: "u-other", assignedTo: "u-other2", isArchived: false }); // ロック後
-    const res = await attachPOST(jsonReq("http://t/x", { propertyId: PID }), ctx());
-    expect(res.status).toBe(403);
-    expect(db.reportInboxItem.updateMany).not.toHaveBeenCalled();
-    expect(db.attachment.create).not.toHaveBeenCalled();
   });
 
   it("★ロックを取った後にしまわれていたら付けない", async () => {
@@ -411,15 +411,11 @@ describe("一覧", () => {
     expect(body.data[0].candidates[0]).toMatchObject({ propertyId: "p1", match: "name_room" });
   });
 
-  it("★候補は呼び出した人が開ける物件だけ(現地担当に担当外の住所・建物名を見せない・@codex PR#500)", async () => {
+  it("★現地担当には一覧そのものを出さない(まだ物件に付いていない報告書は担当の範囲で絞れない・@codex PR#500 5巡目)", async () => {
     session.current = { id: "u-field", role: "field_staff" };
-    db.reportInboxItem.findMany.mockResolvedValueOnce([pending]);
-    db.property.findMany.mockResolvedValueOnce([
-      { id: "mine", address: "東京都世田谷区太子堂4-12-3", buildingName: "東急サンプルハイツ", roomNo: "305", propertyType: "apartment_unit", buildingId: null, createdBy: "u-field", assignedTo: null },
-      { id: "others", address: "東京都世田谷区太子堂4-12-3", buildingName: "東急サンプルハイツ", roomNo: "305", propertyType: "apartment_unit", buildingId: null, createdBy: "u-x", assignedTo: "u-y" },
-    ]);
-    const body = await (await listGET(listReq())).json();
-    expect(body.data[0].candidates.map((c: { propertyId: string }) => c.propertyId)).toEqual(["mine"]);
+    const res = await listGET(listReq());
+    expect(res.status).toBe(403);
+    expect(db.reportInboxItem.findMany).not.toHaveBeenCalled();
   });
 
   it("★ページ送りで全件にたどり着ける(件数で打ち切らない・@codex PR#500 3巡目)", async () => {

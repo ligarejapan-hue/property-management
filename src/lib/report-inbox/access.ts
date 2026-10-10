@@ -12,7 +12,11 @@ import { isPropertyScopedRole } from "@/lib/property-access";
 export const REPORT_INBOX_FORBIDDEN_MESSAGE =
   "査定報告書の受け取り箱は、所有者情報をすべて見られる方だけが使えます。管理者にご相談ください。";
 
-export function canUseReportInbox(perms: PermissionEntry[]): boolean {
+export function canUseReportInbox(session: { role: string }, perms: PermissionEntry[]): boolean {
+  // ⚠**担当の範囲が限られる役割(現地担当)は使えない**(@codex PR#500 5巡目)。受け取り箱の
+  //   報告書はまだどの物件にも付いていないので、担当の範囲で絞れない。使えると、担当外の
+  //   物件の報告書(依頼者の氏名入り)を開けたり消せたりしてしまう。
+  if (isPropertyScopedRole(session.role)) return false;
   // ⚠property:read も必須(@codex PR#500 2巡目)。候補・検索で物件の住所・建物名・部屋番号を見せる。
   return (
     hasPermission(perms, "property", "read") &&
@@ -31,8 +35,8 @@ export function propertyScopeWhere(session: { id: string; role: string }): Recor
   return { OR: [{ createdBy: session.id }, { assignedTo: session.id }] };
 }
 
-export function assertReportInboxAccess(perms: PermissionEntry[]): void {
-  if (!canUseReportInbox(perms)) {
+export function assertReportInboxAccess(session: { role: string }, perms: PermissionEntry[]): void {
+  if (!canUseReportInbox(session, perms)) {
     throw new ApiError(403, REPORT_INBOX_FORBIDDEN_MESSAGE, "FORBIDDEN");
   }
 }

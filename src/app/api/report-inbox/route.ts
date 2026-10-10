@@ -58,7 +58,7 @@ export async function GET(request: NextRequest) {
   try {
     const session = await getApiSession();
     const perms = await getUserPermissions(session.id);
-    assertReportInboxAccess(perms);
+    assertReportInboxAccess(session, perms);
 
     // ⚠件数で打ち切らず、ページ送りで**全件にたどり着ける**ようにする(@codex PR#500 3巡目)。
     const pageRaw = Number(request.nextUrl.searchParams.get("page") ?? "1");
@@ -116,7 +116,7 @@ export async function POST(request: NextRequest) {
   try {
     const session = await getApiSession();
     const perms = await getUserPermissions(session.id);
-    assertReportInboxAccess(perms);
+    assertReportInboxAccess(session, perms);
 
     assertImportMultipartBodySize(request, MAX_PDF_UPLOAD_BYTES);
     // 8MB を超える送信は、本文を読む前に圧縮・読み取りの席を取る(埋まっていれば 503)。
@@ -193,7 +193,14 @@ export async function POST(request: NextRequest) {
     });
     if (ready.count !== 1) {
       // 置き終える前に誰かが削除した。置いたファイルを残さない。
-      await removeFileAndVerify(storage, key);
+      // ⚠消せたと確かめられなければ、記録を「削除中」に戻して一覧から押し直せるようにする
+      //   (削除した側は、まだファイルが無い時点で「削除済み」にしている・@codex PR#500 5巡目)。
+      if (!(await removeFileAndVerify(storage, key))) {
+        await prisma.reportInboxItem.updateMany({
+          where: { id: item.id, status: { in: ["discarded", "discarding"] } },
+          data: { status: "discarding" },
+        });
+      }
       throw new ApiError(409, "受け取りの途中で削除されました。必要ならもう一度入れてください。", "CONFLICT");
     }
 

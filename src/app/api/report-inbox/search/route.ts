@@ -12,7 +12,7 @@ export async function GET(request: NextRequest) {
   try {
     const session = await getApiSession();
     const perms = await getUserPermissions(session.id);
-    assertReportInboxAccess(perms);
+    assertReportInboxAccess(session, perms);
 
     const q = request.nextUrl.searchParams.get("q") ?? "";
     const rows = await searchPropertiesForReport(prisma as unknown as CandidateDb, q, propertyScopeWhere(session));
