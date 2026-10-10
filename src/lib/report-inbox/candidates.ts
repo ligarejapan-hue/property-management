@@ -177,13 +177,14 @@ export async function findReportCandidates(
   // ⚠棟につながっていない物件は、名前の頭4文字の「含む」だけだと大文字小文字・途中の空白の違いで
   //   漏れ、件数の上限でも押し出される(19巡目)。**名前の完全一致**(小文字・空白なしにそろえる)を
   //   別の組として先に引く。完全一致は狭いので件数で切らない(念のための上限だけ)。
+  //   DB 側も NFKC にそろえる(全角英数「ＡＢＣ」・半角カナで登録された物件も一致させる・20巡目。PostgreSQL 13+)。
   let sameName: unknown = null;
   const compact = compactNameForDb(clues.buildingName);
   if (compact !== null) {
     const ids = await db.$queryRaw<{ id: string }[]>(Prisma.sql`
       SELECT p.id FROM "properties" p
       WHERE p.is_archived = false
-        AND lower(regexp_replace(p.building_name, '[[:space:]　]', '', 'g')) = ${compact}
+        AND lower(regexp_replace(normalize(p.building_name, NFKC), '[[:space:]　]', '', 'g')) = ${compact}
       LIMIT 2000
     `);
     if (ids.length > 0) sameName = { id: { in: ids.map((r) => r.id) } };
