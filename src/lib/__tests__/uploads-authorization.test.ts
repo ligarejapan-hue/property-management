@@ -997,13 +997,15 @@ describe("resolveRegistryServeMeta (S1b-4)", () => {
     expect(await resolveRegistryServeMeta(GEN_KEY, prisma)).toBeNull();
   });
 
-  it("deleted registry → null", async () => {
+  // ⚠削除済みの記録だけなら守り(authorizeUploadAccess)が 404 にするので、ここには来ない。
+  //   写真など別の記録で登録し直された場合に備え、謄本の扱い(no-store)を引き継ぐ(@codex PR#500 12巡目)。
+  it("deleted registry → 謄本の扱いを引き継ぐ(配信まで来るのは別の記録で登録し直されたときだけ)", async () => {
     const prisma = makeDb({
       attachments: [
         { id: "att-reg-1", fileUrl: `/uploads/${REG_KEY}`, isDeleted: true, targetType: "property", targetId: "p1", propertyId: "p1", type: "registry" },
       ],
     });
-    expect(await resolveRegistryServeMeta(REG_KEY, prisma)).toBeNull();
+    expect(await resolveRegistryServeMeta(REG_KEY, prisma)).toMatchObject({ kind: "registry", attachmentId: "att-reg-1" });
   });
 
   it("invalid key(traversal) → null", async () => {
@@ -1440,7 +1442,7 @@ describe("resolveProtectedServeMeta", () => {
     });
   });
 
-  it("★削除済みの referral は null（保護対象として扱わない＝404 経路）", async () => {
+  it("★削除済みの referral も保護の扱いを引き継ぐ(守りが 404 にするので、配信まで来るのは別の記録で登録し直されたときだけ)", async () => {
     const prisma = makeDb({
       attachments: [
         {
@@ -1455,7 +1457,7 @@ describe("resolveProtectedServeMeta", () => {
         },
       ],
     });
-    expect(await resolveProtectedServeMeta(REF_KEY, prisma)).toBeNull();
+    expect(await resolveProtectedServeMeta(REF_KEY, prisma)).toMatchObject({ kind: "referral", attachmentId: "att-ref-2" });
   });
 
   it("★registry も従来どおり kind:'registry' で返る", async () => {
@@ -1691,5 +1693,53 @@ describe("配信の扱い(no-store・定型名)も外れない(@codex PR#500 10�
   it("保護の履歴が無い通常の添付は、これまでどおり保護しない(null)", async () => {
     const prisma = makeDb({ attachments: [att({ id: "g" })] });
     expect(await resolveProtectedServeMeta("properties/p1/paste-import/9.pdf", prisma)).toBeNull();
+  });
+});
+
+describe("元の物件の範囲・別の記録での登録し直しでも守りは外れない(@codex PR#500 12巡目)", () => {
+  const KEY = "properties/pA/paste-import/9.pdf";
+  const piiFull: PermissionEntry[] = [
+    { resource: "property", action: "read", granted: true },
+    { resource: "property", action: "write", granted: true },
+    { resource: "owner", action: "read", granted: true },
+    ...["owner_name", "owner_name_kana", "owner_address", "owner_phone", "owner_email", "owner_zip", "owner_note", "owner_corporate_number"].map(
+      (resource) => ({ resource, action: "full", granted: true }),
+    ),
+  ];
+  const propA: Prop = { id: "pA", createdBy: "u-other", assignedTo: null };
+  const propB: Prop = { id: "pB", createdBy: "u-field", assignedTo: "u-field" };
+  const deletedOnA: Att = {
+    id: "old", fileUrl: `/uploads/${KEY}`, isDeleted: true, targetType: "property", targetId: "pA", propertyId: "pA", type: "report",
+  };
+  const activeOnB: Att = {
+    id: "new", fileUrl: `/uploads/${KEY}`, isDeleted: false, targetType: "property", targetId: "pB", propertyId: "pB", type: "general",
+  };
+
+  it("★担当を外れた物件 A の保護書類を、担当中の物件 B に登録し直しても開けない(404)", async () => {
+    const prisma = makeDb({ attachments: [deletedOnA, activeOnB], properties: [propA, propB] });
+    expect(await authorizeUploadAccess({ key: KEY, session: fieldStaff, permissions: piiFull, prisma })).toBe("not_found");
+  });
+
+  it("元の物件 A を今も開ける人は開ける", async () => {
+    const prisma = makeDb({ attachments: [deletedOnA, activeOnB], properties: [propA, propB] });
+    expect(await authorizeUploadAccess({ key: KEY, session: admin, permissions: piiFull, prisma })).toBe("ok");
+  });
+
+  it("★削除済みの保護書類を写真として登録し直しても、保護の配信(no-store)のまま", async () => {
+    const created = new Date("2026-10-10T03:00:00Z");
+    const prisma = makeDb({
+      attachments: [{ ...deletedOnA, createdAt: created } as Att],
+      photos: [{ fileUrl: `/uploads/${KEY}`, propertyId: "pA" }],
+    });
+    expect(await resolveProtectedServeMeta(KEY, prisma)).toEqual({
+      kind: "report", attachmentId: "old", propertyId: "pA", createdAt: created,
+    });
+  });
+
+  it("★添付の記録が無い受け取り箱のファイルも、査定報告書の配信", async () => {
+    const prisma = makeDb({ photos: [{ fileUrl: "/uploads/report-inbox/1-abc.pdf", propertyId: "pA" }] });
+    expect(await resolveProtectedServeMeta("report-inbox/1-abc.pdf", prisma)).toEqual({
+      kind: "report", attachmentId: null, propertyId: null, createdAt: null,
+    });
   });
 });

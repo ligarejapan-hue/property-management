@@ -295,6 +295,17 @@ export async function authorizeUploadAccess(
           (!hasPermission(permissions, "registry_pdf", "preview") ||
             (downloadIntent && !hasPermission(permissions, "registry_pdf", "download"))));
       if (stickyForbidden) blockedAsNotFound = true;
+      // ⚠**元の物件の範囲も外れない**(@codex PR#500 12巡目)。担当していた物件 A の保護書類を削除し、
+      //   同じ URL を担当中の物件 B に通常の添付として登録し直すと、A の担当を外れても開けてしまう。
+      //   保護書類の削除済みの記録は、元の物件を今も開けるかも念押しする。
+      if (
+        !stickyForbidden &&
+        (a.type === "registry" || isOwnerPiiDocumentType(a.type)) &&
+        a.targetType === "property" &&
+        (await authorizePropertyAccess(a.propertyId ?? a.targetId, session, permissions, db)) !== "ok"
+      ) {
+        blockedAsNotFound = true;
+      }
       decisions.push("not_found");
       continue;
     }
@@ -447,7 +458,8 @@ export interface RegistryServeMeta {
 export interface ReferralServeMeta {
   /** referral=反響資料 / report=査定報告書(保存名だけが違う・扱いは同じ)。 */
   kind: "referral" | "report";
-  attachmentId: string;
+  /** 添付の記録が1件も無い受け取り箱のファイル(写真などとして登録し直されたもの)は null。 */
+  attachmentId: string | null;
   propertyId: string | null;
   /** 保存名の材料（登録日）。生の fileName は**返さない**。 */
   createdAt: Date | null;
@@ -520,12 +532,19 @@ export async function resolveProtectedServeMeta(
       };
     }
   }
-  if (firstActive !== null) {
-    const active = firstActive;
+  // ⚠有効な添付が無くても(写真など**別の記録**として登録し直されていても)保護の扱いで配る
+  //   (@codex PR#500 12巡目)。守り(authorizeUploadAccess)を通った人だけがここまで来る。
+  const basis = firstActive ?? protectedHistory;
+  if (basis === null) {
+    return key.startsWith("report-inbox/")
+      ? { kind: "report", attachmentId: null, propertyId: null, createdAt: null }
+      : null;
+  }
+  {
     const base = {
-      attachmentId: active.id,
-      propertyId: active.propertyId ?? active.targetId ?? null,
-      createdAt: active.createdAt ?? null,
+      attachmentId: basis.id,
+      propertyId: basis.propertyId ?? basis.targetId ?? null,
+      createdAt: basis.createdAt ?? null,
     };
     if (protectedHistory?.type === "registry") {
       return {
