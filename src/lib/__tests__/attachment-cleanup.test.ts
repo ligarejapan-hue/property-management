@@ -42,6 +42,7 @@ vi.mock("@/lib/prisma", () => ({
 // escapePrismaLikePattern is pure & tested elsewhere; mock as identity to avoid pulling its deps.
 vi.mock("@/lib/uploads-authorization", () => ({
   escapePrismaLikePattern: (s: string) => s,
+  isOwnerPiiDocumentType: (t: string | null | undefined) => t === "referral" || t === "report",
 }));
 
 import prisma from "@/lib/prisma";
@@ -108,7 +109,7 @@ describe("findPurgeableAttachments", () => {
       { purgeStartedAt: { lte: expect.any(Date) } },
     ]);
     expect(arg.take).toBe(200);
-    expect(arg.select).toEqual({ id: true, fileUrl: true });
+    expect(arg.select).toEqual({ id: true, fileUrl: true, type: true });
   });
 
   it("物件削除で propertyId=null になった孤児もゴミ箱入りしていれば対象になる（総点検P3）", async () => {
@@ -311,6 +312,32 @@ describe("purgeExpiredAttachments", () => {
     pm.propertyPhoto.findMany.mockResolvedValue([{ fileUrl: key }]);
     const r = await purgeExpiredAttachments({ now: NOW, limit: 200 });
     expect(deleteSpy).not.toHaveBeenCalled();
+    expect(r).toEqual({ scanned: 1, purged: 1, failed: 0, skipped: 0 });
+  });
+
+  it.each(["report", "referral"])(
+    "★%s の記録は、同じファイルを写真などがまだ指している間は消さない(守りの記録を残す・@codex PR#500 13巡目)",
+    async (type) => {
+      const key = "/uploads/report-inbox/1-abc.pdf";
+      wireFindMany([{ id: "c1", fileUrl: key, type }], []);
+      pm.propertyPhoto.findMany.mockResolvedValue([{ fileUrl: key }]);
+      const r = await purgeExpiredAttachments({ now: NOW, limit: 200 });
+      expect(deleteSpy).not.toHaveBeenCalled();
+      expect(pm.attachment.deleteMany).not.toHaveBeenCalled();
+      // 主張を外して次の回に見直す
+      expect(pm.attachment.updateMany).toHaveBeenLastCalledWith({
+        where: { id: "c1", purgeStartedAt: NOW },
+        data: { purgeStartedAt: null },
+      });
+      expect(r).toEqual({ scanned: 1, purged: 0, failed: 0, skipped: 1 });
+    },
+  );
+
+  it("report でも、他に指す記録が無ければファイルも記録も消す", async () => {
+    const key = "/uploads/report-inbox/1-abc.pdf";
+    wireFindMany([{ id: "c1", fileUrl: key, type: "report" }], []);
+    const r = await purgeExpiredAttachments({ now: NOW, limit: 200 });
+    expect(deleteSpy).toHaveBeenCalled();
     expect(r).toEqual({ scanned: 1, purged: 1, failed: 0, skipped: 0 });
   });
 

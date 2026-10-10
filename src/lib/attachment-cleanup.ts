@@ -1,6 +1,6 @@
 import prisma from "@/lib/prisma";
 import { getStorage } from "@/lib/storage";
-import { escapePrismaLikePattern } from "@/lib/uploads-authorization";
+import { escapePrismaLikePattern, isOwnerPiiDocumentType } from "@/lib/uploads-authorization";
 
 /** 一般書類の保持期間（日）。謄本(type="registry")は対象外＝自動削除しない。 */
 export const ATTACHMENT_RETENTION_DAYS = 90;
@@ -44,7 +44,7 @@ export async function findPurgeableAttachments(now: Date, limit: number) {
         { purgeStartedAt: { lte: new Date(now.getTime() - STALE_PURGE_CLAIM_MS) } },
       ],
     },
-    select: { id: true, fileUrl: true },
+    select: { id: true, fileUrl: true, type: true },
     orderBy: { deletedAt: "asc" },
     take: limit,
   });
@@ -184,7 +184,20 @@ export async function purgeExpiredAttachments(opts: {
     //     active backend の keyFromUrl で URL 形式（local /uploads/ / server /:bucket/）を解決する。
     const storage = getStorage();
     const key = storage.keyFromUrl(row.fileUrl);
-    if (key && !(await isStorageKeyStillReferenced(key, row.id))) {
+    const stillReferenced = key ? await isStorageKeyStillReferenced(key, row.id) : false;
+    // ⚠所有者の個人情報を含む書類(反響資料・査定報告書)の記録は、同じファイルを他の記録がまだ
+    //   指している間は消さない(@codex PR#500 13巡目)。この削除済みの記録が「元の物件の範囲」と
+    //   「書類の守り」を覚えている(uploads-authorization)。消すと、通常の添付や写真として登録し直した
+    //   側の物件の担当者が、元の物件を開けなくても原本を開けてしまう。参照が無くなれば次の回で消す。
+    if (stillReferenced && isOwnerPiiDocumentType(row.type)) {
+      await prisma.attachment.updateMany({
+        where: { id: row.id, purgeStartedAt: opts.now },
+        data: { purgeStartedAt: null },
+      });
+      skipped++;
+      continue;
+    }
+    if (key && !stillReferenced) {
       try {
         await storage.delete(key);
         // ⚠**消せたことを読み直して確かめる**(@codex PR#500 4巡目)。このサーバーのディスク版
