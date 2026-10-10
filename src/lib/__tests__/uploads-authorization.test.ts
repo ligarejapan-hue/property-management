@@ -1588,3 +1588,57 @@ describe("査定報告書(report)の守り", () => {
     });
   });
 });
+
+// ============================================================
+// 守りは外れない(@codex PR#500 9巡目)
+//
+// ⚠物件を編集できるだけの人が「保護された添付を削除 → 同じ URL を通常の添付として登録し直す」と、
+//   有効な通常の行だけを見る判定では依頼者名・所有者情報入りの原本が開けてしまう。
+//   削除済みでも保護の種類が一度でもあれば同じ守りを当てる(応答は従来どおり 404)。
+// ============================================================
+describe("保護された書類の守りは、通常の添付として登録し直しても外れない", () => {
+  const KEY = "report-inbox/1-abc.pdf";
+  const prop: Prop = { id: "p1", createdBy: "u-office", assignedTo: null };
+  const propertyRW: PermissionEntry[] = [
+    { resource: "property", action: "read", granted: true },
+    { resource: "property", action: "write", granted: true },
+  ];
+  const allPii: PermissionEntry[] = [
+    ...propertyRW,
+    { resource: "owner", action: "read", granted: true },
+    ...["owner_name", "owner_name_kana", "owner_address", "owner_phone", "owner_email", "owner_zip", "owner_note", "owner_corporate_number"].map(
+      (resource) => ({ resource, action: "full", granted: true }),
+    ),
+  ];
+  const rows = (type: string, key = KEY): Att[] => [
+    { id: "a-old", fileUrl: `/uploads/${key}`, isDeleted: true, targetType: "property", targetId: "p1", propertyId: "p1", type },
+    { id: "a-new", fileUrl: `/uploads/${key}`, isDeleted: false, targetType: "property", targetId: "p1", propertyId: "p1", type: "general" },
+  ];
+
+  it.each(["report", "referral"])("★削除済みの %s と同じファイルを指す通常の添付でも、守りに当たる人は開けない(404)", async (type) => {
+    const prisma = makeDb({ attachments: rows(type, "properties/p1/paste-import/9.pdf"), properties: [prop] });
+    expect(
+      await authorizeUploadAccess({ key: "properties/p1/paste-import/9.pdf", session: officeStaff, permissions: propertyRW, prisma }),
+    ).toBe("not_found");
+  });
+
+  it("所有者情報をすべて見られる人は開ける", async () => {
+    const prisma = makeDb({ attachments: rows("report", "properties/p1/paste-import/9.pdf"), properties: [prop] });
+    expect(
+      await authorizeUploadAccess({ key: "properties/p1/paste-import/9.pdf", session: officeStaff, permissions: allPii, prisma }),
+    ).toBe("ok");
+  });
+
+  it("★削除済みの謄本と同じファイルも、謄本の権限が無ければ開けない", async () => {
+    const prisma = makeDb({ attachments: rows("registry", "properties/p1/registry/9.pdf"), properties: [prop] });
+    expect(
+      await authorizeUploadAccess({ key: "properties/p1/registry/9.pdf", session: officeStaff, permissions: propertyRW, prisma }),
+    ).toBe("not_found");
+  });
+
+  it("★受け取り箱の置き場所のファイルは、記録が通常の添付だけでも守りに当たる", async () => {
+    const prisma = makeDb({ attachments: [rows("general")[1]], properties: [prop] });
+    expect(await authorizeUploadAccess({ key: KEY, session: officeStaff, permissions: propertyRW, prisma })).toBe("not_found");
+    expect(await authorizeUploadAccess({ key: KEY, session: officeStaff, permissions: allPii, prisma })).toBe("ok");
+  });
+});

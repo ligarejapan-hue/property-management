@@ -214,6 +214,12 @@ export async function authorizeUploadAccess(
   // wildcard を含む key で広範囲スキャンが起きる経路自体を塞ぐ。
   const escapedKey = escapePrismaLikePattern(key);
   const decisions: UploadAuthDecision[] = [];
+  /**
+   * 保護された書類(削除済みの記録・受け取り箱の置き場所)に当たる人には、他の記録で「開ける」と
+   * 判定されても開けさせない。⚠応答は 403 ではなく **404(存在しない)** にする
+   * (削除済みの書類が「あること」を、権限の無い人に推測させない=従来の方針のまま)。
+   */
+  let blockedAsNotFound = false;
 
   const photos = await db.propertyPhoto.findMany({
     where: { fileUrl: { contains: escapedKey } },
@@ -272,9 +278,23 @@ export async function authorizeUploadAccess(
       type: true,
     },
   });
+  // ⚠**守りは外れない**(@codex PR#500 9巡目)。同じファイルを指す記録に、謄本・反響資料・査定報告書
+  //   (所有者の個人情報を含む書類)が**一度でもあれば**、削除済みの記録でも同じ守りを当てる。
+  //   当てないと、物件を編集できるだけの人が「保護された添付を削除 → 同じ URL を通常の添付として
+  //   登録し直す」で、依頼者名・所有者情報の入った原本を守りなしで開けてしまう。
+  //   受け取り箱の置き場所(report-inbox/)のファイルは、記録が無くても同じ守りの対象。
+  if (key.startsWith("report-inbox/") && !canOpenReferralDocument(permissions)) {
+    blockedAsNotFound = true;
+  }
   for (const a of attachments) {
     if (resolveStoredFileUrlToKey(a.fileUrl) !== key) continue;
     if (a.isDeleted) {
+      const stickyForbidden =
+        (isOwnerPiiDocumentType(a.type) && !canOpenReferralDocument(permissions)) ||
+        (a.type === "registry" &&
+          (!hasPermission(permissions, "registry_pdf", "preview") ||
+            (downloadIntent && !hasPermission(permissions, "registry_pdf", "download"))));
+      if (stickyForbidden) blockedAsNotFound = true;
       decisions.push("not_found");
       continue;
     }
@@ -324,8 +344,9 @@ export async function authorizeUploadAccess(
     decisions.push("forbidden");
   }
 
-  // 優先順: forbidden > ok > not_found
+  // 優先順: forbidden > (保護に当たる=not_found) > ok > not_found
   if (decisions.some((d) => d === "forbidden")) return "forbidden";
+  if (blockedAsNotFound) return "not_found";
   if (decisions.some((d) => d === "ok")) return "ok";
   return "not_found";
 }
