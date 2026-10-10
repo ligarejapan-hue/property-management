@@ -362,4 +362,21 @@ describe("実例の札: スワイプで横に送る(案B)", () => {
     const js = scriptsOf(renderLpPage(input({ sections: cases }))).find((s) => s.includes('"case-track"'))!;
     expect(js).toMatch(/"pointerdown",function\(e\)\{suppress=false;/);
   });
+
+  // @codex #501 R1
+  it("正面が変わったら、正面以外で開いている札を閉じる(隠れた長い札の高さで空白が残らない)", () => {
+    const js = scriptsOf(renderLpPage(input({ sections: cases }))).find((s) => s.includes('"case-track"'))!;
+    const go = /function go\(t\)\{[^]*?paint\(\)\}/.exec(js)![0];
+    expect(go).toContain('querySelector("details[open]")');
+    expect(go).toContain(".open=false");
+  });
+
+  it("札が多くても(上限30件)矢印と点が狭い画面からはみ出さない(点は折り返す・矢印は縮まない)", () => {
+    const css = /<style>([\s\S]*?)<\/style>/.exec(renderLpPage(input({ sections: cases })))![1];
+    const dots = css.split("\n").find((l) => l.startsWith(".cases.swipe .case-dots{"))!;
+    expect(dots).toContain("flex-wrap:wrap");
+    expect(dots).toContain("min-width:0");
+    const arrow = css.split("\n").find((l) => l.startsWith(".cases.swipe .case-nav .arrow{"))!;
+    expect(arrow).toContain("flex:none");
+  });
 });

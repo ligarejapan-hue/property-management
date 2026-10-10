@@ -158,9 +158,10 @@ const CSS = [
   ".cases.swipe .case-track.snap,.cases.swipe .case-track.snap>.case{transition:transform .45s cubic-bezier(.2,.7,.2,1),opacity .45s ease}",
   ".cases.swipe .case-track.dragging{cursor:grabbing;user-select:none;-webkit-user-select:none}",
   ".cases.swipe .case-nav{display:flex;align-items:center;justify-content:center;gap:14px;margin-top:14px}",
-  ".cases.swipe .case-nav .arrow{font:inherit;font-size:22px;line-height:1;width:44px;height:44px;border-radius:50%;border:1px solid #ddd3bf;background:#fffdf8;color:#0a5246;cursor:pointer}",
+  ".cases.swipe .case-nav .arrow{flex:none;font:inherit;font-size:22px;line-height:1;width:44px;height:44px;border-radius:50%;border:1px solid #ddd3bf;background:#fffdf8;color:#0a5246;cursor:pointer}",
   ".cases.swipe .case-nav .arrow:disabled{opacity:.35;cursor:default}",
-  ".cases.swipe .case-dots{display:flex;gap:10px}",
+  // 札が多いとき(本文の見出しは最大30)も狭い画面からはみ出さないよう、点は折り返す(@codex #501 R1)
+  ".cases.swipe .case-dots{display:flex;flex-wrap:wrap;justify-content:center;gap:8px 10px;min-width:0}",
   ".cases.swipe .case-dots button{width:12px;height:12px;padding:0;border:0;border-radius:50%;background:#ddd3bf;cursor:pointer}",
   ".cases.swipe .case-dots button.on{background:#0e6b5c;transform:scale(1.25)}",
   ".cases.swipe .case-nav button:focus-visible{outline:3px solid #0e6b5c;outline-offset:2px}",
@@ -345,7 +346,8 @@ const CASES_SCRIPT = [
   'for(var i=0;i<N;i++){var d=Math.abs(i-pos);cards[i].style.transform="scale("+Math.max(0.9,1-d*0.1)+")";cards[i].style.opacity=String(Math.max(0.5,1-d*0.5))}',
   'var f=front();for(var j=0;j<N;j++){dots[j].classList.toggle("on",j===f);dots[j].setAttribute("aria-current",j===f?"true":"false")}',
   "prev.disabled=f===0;next.disabled=f===N-1}",
-  'function go(t){pos=Math.max(0,Math.min(N-1,t));track.classList.add("snap");paint()}',
+  // 正面以外で開いている札は閉じる(隠れた長い札の高さが残って、正面の札の下に空白ができないように=@codex #501 R1)
+  'function go(t){pos=Math.max(0,Math.min(N-1,t));var f=front();for(var i=0;i<N;i++){var dd=i!==f?cards[i].querySelector("details[open]"):null;if(dd){dd.open=false}}track.classList.add("snap");paint()}',
   'prev.addEventListener("click",function(){go(front()-1)});next.addEventListener("click",function(){go(front()+1)});',
   'for(var q=0;q<N;q++){dots[q].addEventListener("click",(function(n){return function(){go(n)}})(q))}',
   'box.addEventListener("keydown",function(e){if(e.key==="ArrowRight"){go(front()+1)}else if(e.key==="ArrowLeft"){go(front()-1)}});',
