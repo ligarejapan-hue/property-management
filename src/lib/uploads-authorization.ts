@@ -534,7 +534,8 @@ export async function resolveProtectedServeMeta(
   }
   // ⚠有効な添付が無くても(写真など**別の記録**として登録し直されていても)保護の扱いで配る
   //   (@codex PR#500 12巡目)。守り(authorizeUploadAccess)を通った人だけがここまで来る。
-  const basis = firstActive ?? protectedHistory;
+  // ⚠種類を引き継ぐときは、記録(監査ログの添付・物件)も**その保護された記録**にそろえる(15巡目)。
+  const basis = protectedHistory ?? firstActive;
   if (basis === null) {
     return key.startsWith("report-inbox/")
       ? { kind: "report", attachmentId: null, propertyId: null, createdAt: null }

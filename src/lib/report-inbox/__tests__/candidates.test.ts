@@ -2,6 +2,7 @@ import { describe, it, expect, vi } from "vitest";
 import {
   addressLooseKey,
   findReportCandidates,
+  roomVariants,
   searchPropertiesForReport,
   rankCandidates,
   roomKey,
@@ -68,6 +69,15 @@ describe("rankCandidates", () => {
   });
 });
 
+describe("roomVariants(部屋番号の書き方の揺れ)", () => {
+  it("★半角/全角 × なし・号・号室・空白+号室 を並べる(15巡目: 含むでは同じ地域の 1101 などに押し出される)", () => {
+    expect(roomVariants("101")).toEqual(
+      expect.arrayContaining(["101", "101号", "101号室", "101 号室", "１０１", "１０１号室"]),
+    );
+    expect(roomVariants("101")).not.toContain("1101");
+  });
+});
+
 describe("findReportCandidates(DB から読む)", () => {
   it("同じ比べる形の棟の物件・物件名・所在地の頭で読み、アーカイブ済みは除く", async () => {
     const building = { findMany: vi.fn(async () => [{ id: "b1" }]) };
@@ -76,15 +86,16 @@ describe("findReportCandidates(DB から読む)", () => {
     };
     const r = await findReportCandidates({ building, property }, clues, { scopeWhere: {}, canAccess: () => true });
     expect(r[0]).toMatchObject({ propertyId: "hit", match: "name_room" });
-    const where = (property.findMany.mock.calls[0] as unknown as [{ where: { AND: [{ isArchived: boolean }, { OR: unknown[] }, unknown] } }])[0].where;
-    expect(where.AND[0]).toEqual({ isArchived: false });
-    expect(where.AND[1].OR).toEqual(
-      expect.arrayContaining([
-        { buildingId: { in: ["b1"] } },
-        { buildingName: { contains: "東急サン" } },
-        { address: { contains: "東京都世田谷区太子堂" } },
-      ]),
-    );
+    const wheres = (property.findMany.mock.calls as unknown as [{ where: { AND: unknown[] } }][]).map((c) => c[0].where.AND);
+    for (const w of wheres) expect(w[0]).toEqual({ isArchived: false });
+    // 手がかりの種類ごと(同じ棟・名前の頭・所在地の頭)に、まず部屋番号の完全一致つき、次に単独で読む
+    const kinds = [
+      { buildingId: { in: ["b1"] } },
+      { buildingName: { contains: "東急サン" } },
+      { address: { contains: "東京都世田谷区太子堂" } },
+    ];
+    expect(wheres.map((w) => w[1])).toEqual([...kinds, ...kinds]);
+    expect(wheres[0][2]).toEqual({ roomNo: { in: roomVariants("305") } });
   });
 
   it("★広い条件で300件を超えても、部屋番号つき・同じ棟の組を先に読むので古い一致が漏れない(@codex PR#500 14巡目)", async () => {
@@ -93,16 +104,15 @@ describe("findReportCandidates(DB から読む)", () => {
     const noise = Array.from({ length: 300 }, (_, i) => p(`n${i}`, { address: "東京都世田谷区太子堂4丁目1-1" }));
     const property = {
       findMany: vi.fn(async (args: { where: { AND: unknown[] } }) => {
-        const hasRoom = JSON.stringify(args.where.AND).includes('"roomNo"');
-        return hasRoom ? [old] : noise; // 広い条件では新しい300件だけが返る
+        const exactRoomInBuilding =
+          JSON.stringify(args.where.AND).includes('"roomNo"') && JSON.stringify(args.where.AND).includes('"buildingId"');
+        return exactRoomInBuilding ? [old] : noise; // それ以外では新しい300件だけが返る
       }),
     };
     const r = await findReportCandidates({ building, property }, clues, { scopeWhere: {}, canAccess: () => true });
     expect(r[0]).toMatchObject({ propertyId: "old-exact", match: "name_room" });
-    // 部屋番号つき → 同じ棟 → 広い条件 の順に、それぞれ300件まで
-    expect(property.findMany).toHaveBeenCalledTimes(3);
-    const second = (property.findMany.mock.calls[1] as unknown as [{ where: { AND: unknown[] } }])[0].where;
-    expect(second.AND[1]).toEqual({ buildingId: { in: ["b1"] } });
+    // 手がかりの種類ごと×(部屋番号の完全一致つき/単独)で、それぞれ300件まで
+    expect(property.findMany).toHaveBeenCalledTimes(6);
   });
 
   it("★呼び出した人が開けない物件は候補に出さない(担当外の住所・建物名を見せない・@codex PR#500)", async () => {

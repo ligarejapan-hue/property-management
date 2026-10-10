@@ -58,6 +58,15 @@ export function addressLooseKey(address: string | null | undefined): string | nu
   return s === "" ? null : s;
 }
 
+/** 部屋番号の書き方の揺れ(半角/全角 × なし/号/号室/空白+号室)。DB で完全一致に使う。 */
+export function roomVariants(room: string): string[] {
+  const out = new Set<string>();
+  for (const r of [room, toFullWidth(room)]) {
+    for (const suffix of ["", "号", "号室", " 号室", "　号室"]) out.add(`${r}${suffix}`);
+  }
+  return [...out];
+}
+
 /** 候補の順番: 名前+部屋 > 名前 > 所在地+部屋 > 所在地。 */
 const ORDER: Record<CandidateMatch, number> = { name_room: 0, address_room: 1, name: 2, address: 3 };
 
@@ -129,6 +138,8 @@ export async function findReportCandidates(
   const nameKey = buildingNameKey(clues.buildingName);
   const ors: unknown[] = [];
   let sameBuilding: unknown = null;
+  let nameHead: unknown = null;
+  let addressHead: unknown = null;
   if (nameKey !== null) {
     const buildings = await db.building.findMany({ where: { nameKey }, select: { id: true }, take: 20 });
     if (buildings.length > 0) {
@@ -137,21 +148,30 @@ export async function findReportCandidates(
     }
     // 棟につながっていない区分は物件名で探す(広めに取って、上で比べる形で絞る)。
     const head = (clues.buildingName ?? "").normalize("NFKC").replace(/\s/g, "").slice(0, 4);
-    if (head.length >= 2) ors.push({ buildingName: { contains: head } });
+    if (head.length >= 2) {
+      nameHead = { buildingName: { contains: head } };
+      ors.push(nameHead);
+    }
   }
   const prefix = clues.address ? addressSearchPrefix(clues.address.normalize("NFKC")) : null;
-  if (prefix) ors.push({ address: { contains: prefix } });
+  if (prefix) {
+    addressHead = { address: { contains: prefix } };
+    ors.push(addressHead);
+  }
   if (ors.length === 0) return [];
   // ⚠広い条件(所在地の頭・名前の頭4文字)だけで件数を切ると、新しい物件が300件を超える地域では
   //   古い「名前+部屋」が一致する物件が読み込みから漏れる(@codex PR#500 14巡目)。
   //   強い一致になりうる組(部屋番号つき・棟の名前が一致)を**先に別々に**読み、最後に広い条件で補う。
+  //   部屋番号は「含む」ではなく**書き方の揺れを並べた完全一致**で絞り、手がかりの種類ごとに分けて読む
+  //   (同じ地域に「101」を含む部屋が300件を超えても、ぴったりの101号室が漏れない・15巡目)。
   const room = roomKey(clues.roomNo);
   const groups: unknown[][] = [];
+  const kinds = [sameBuilding, nameHead, addressHead].filter((c) => c !== null);
   if (room !== null) {
-    groups.push([{ OR: ors }, { OR: [{ roomNo: { contains: room } }, { roomNo: { contains: toFullWidth(room) } }] }]);
+    const exactRoom = { roomNo: { in: roomVariants(room) } };
+    for (const c of kinds) groups.push([c, exactRoom]);
   }
-  if (sameBuilding !== null) groups.push([sameBuilding]);
-  groups.push([{ OR: ors }]);
+  for (const c of kinds) groups.push([c]);
   const seen = new Set<string>();
   const properties: CandidateProperty[] = [];
   for (const conds of groups) {

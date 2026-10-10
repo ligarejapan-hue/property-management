@@ -1661,11 +1661,15 @@ describe("配信の扱い(no-store・定型名)も外れない(@codex PR#500 10�
 
   it.each(["report", "referral"] as const)("★削除済みの %s を通常の添付として登録し直しても、保護された配信のまま", async (type) => {
     const prisma = makeDb({
-      attachments: [att({ id: "old", isDeleted: true, type }), att({ id: "new", createdAt: created })],
+      attachments: [
+        att({ id: "old", isDeleted: true, type, createdAt: created }),
+        att({ id: "new", targetId: "p2", propertyId: "p2" }),
+      ],
     });
+    // ★記録(監査ログの添付・物件・保存名の日付)は保護された元の記録にそろえる(15巡目)
     expect(await resolveProtectedServeMeta("properties/p1/paste-import/9.pdf", prisma)).toEqual({
       kind: type,
-      attachmentId: "new",
+      attachmentId: "old",
       propertyId: "p1",
       createdAt: created,
     });
@@ -1680,7 +1684,7 @@ describe("配信の扱い(no-store・定型名)も外れない(@codex PR#500 10�
     });
     expect(await resolveProtectedServeMeta("properties/p1/paste-import/9.pdf", prisma)).toMatchObject({
       kind: "registry",
-      attachmentId: "new",
+      attachmentId: "old",
       certificateType: "owner",
     });
   });
