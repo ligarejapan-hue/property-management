@@ -41,6 +41,19 @@ export function assertReportInboxAccess(session: { role: string }, perms: Permis
   }
 }
 
+/**
+ * 処理が済んだ(削除・添付)行から、個人情報になりうる中身を消すための値(@codex PR#500 8巡目)。
+ * ⚠元のファイル名は依頼者名を含み得る。削除した行は読み取った所在地・建物名も残さない。
+ *   行そのものは「同時に押されたときの判定」のために残す(中身の無い記録)。
+ */
+export const SCRUBBED_FILE_NAME = "(処理済み)";
+export const SCRUB_ON_DISCARD = {
+  fileName: SCRUBBED_FILE_NAME,
+  buildingName: null,
+  roomNo: null,
+  address: null,
+} as const;
+
 /** 受け取り箱のファイルの置き場所(添付とは別の場所)。 */
 export function reportInboxStorageKey(now: number, uuid: string): string {
   return `report-inbox/${now}-${uuid}.pdf`;

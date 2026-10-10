@@ -11,7 +11,7 @@ import {
 import { writeAuditLog } from "@/lib/audit";
 import { lockPropertyRow } from "@/lib/property-record-guard";
 import { canAccessPropertyRecord } from "@/lib/property-access";
-import { assertReportInboxAccess } from "@/lib/report-inbox/access";
+import { assertReportInboxAccess, SCRUBBED_FILE_NAME } from "@/lib/report-inbox/access";
 import { REPORT_ATTACHMENT_TYPE, reportDisplayName } from "@/lib/attachments/report-display-name";
 
 // ---------- POST /api/report-inbox/:id/attach  { propertyId } ----------
@@ -72,7 +72,14 @@ export async function POST(request: NextRequest, { params }: { params: Promise<{
         }
         const claimed = await tx.reportInboxItem.updateMany({
           where: { id, status: "pending" },
-          data: { status: "attached", propertyId, resolvedBy: session.id, resolvedAt: new Date() },
+          // 元のファイル名(依頼者名を含み得る)は添付にも使わないので、ここで消す(@codex PR#500 8巡目)。
+          data: {
+            status: "attached",
+            propertyId,
+            resolvedBy: session.id,
+            resolvedAt: new Date(),
+            fileName: SCRUBBED_FILE_NAME,
+          },
         });
         if (claimed.count !== 1) throw new AlreadyResolved();
         const now = new Date();

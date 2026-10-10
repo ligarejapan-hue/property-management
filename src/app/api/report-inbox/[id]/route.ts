@@ -9,7 +9,7 @@ import {
 } from "@/lib/api-helpers";
 import { writeAuditLog } from "@/lib/audit";
 import { getStorage } from "@/lib/storage";
-import { assertReportInboxAccess } from "@/lib/report-inbox/access";
+import { assertReportInboxAccess, SCRUB_ON_DISCARD } from "@/lib/report-inbox/access";
 import { removeFileAndVerify } from "@/lib/report-inbox/remove-file";
 
 // ---------- DELETE /api/report-inbox/:id ----------
@@ -50,7 +50,8 @@ export async function DELETE(_request: NextRequest, { params }: { params: Promis
     }
     await prisma.reportInboxItem.updateMany({
       where: { id, status: "discarding" },
-      data: { status: "discarded", resolvedBy: session.id, resolvedAt: new Date() },
+      // 消せたら、元のファイル名・読み取った所在地なども消す(@codex PR#500 8巡目)。
+      data: { status: "discarded", resolvedBy: session.id, resolvedAt: new Date(), ...SCRUB_ON_DISCARD },
     });
 
     await writeAuditLog({

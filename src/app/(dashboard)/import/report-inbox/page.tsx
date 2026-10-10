@@ -30,6 +30,7 @@ import {
   type ReportInboxSearchRow,
 } from "@/lib/api-client";
 import { PROPERTY_TYPE_LABELS } from "@/lib/property-types";
+import { keepSelectionIfShown } from "@/lib/report-inbox/selection";
 import { MAX_PDF_UPLOAD_BYTES } from "@/lib/pdf-compress/policy";
 
 const MATCH_LABELS: Record<ReportInboxCandidate["match"], string> = {
@@ -277,7 +278,13 @@ function InboxItemCard({ item, onChanged }: { item: ReportInboxItem; onChanged: 
     setSearching(true);
     setError(null);
     try {
-      setResults(await searchPropertiesForReportInbox(query));
+      const rows = await searchPropertiesForReportInbox(query);
+      setResults(rows);
+      // ⚠表示から消えた物件の選択は外す(@codex PR#500 8巡目)。残すと、どれも選ばれていない見た目のまま
+      //   「この物件に添付」で前に選んだ物件へ付いてしまう。
+      setSelected((cur) =>
+        keepSelectionIfShown(cur, [...item.candidates.map((c) => c.propertyId), ...rows.map((r) => r.id)]),
+      );
     } catch (e) {
       setError(e instanceof Error ? e.message : "探せませんでした");
     } finally {

@@ -21,7 +21,12 @@ import {
 } from "@/lib/pdf-compress/policy";
 import { fitPdfToLimit, reserveLargePdfSlot } from "@/lib/pdf-compress/fit";
 import { runExclusive } from "@/lib/pdf-compress/run";
-import { assertReportInboxAccess, propertyScopeWhere, reportInboxStorageKey } from "@/lib/report-inbox/access";
+import {
+  assertReportInboxAccess,
+  propertyScopeWhere,
+  reportInboxStorageKey,
+  SCRUB_ON_DISCARD,
+} from "@/lib/report-inbox/access";
 import { extractReportClues } from "@/lib/report-inbox/extract";
 import { removeFileAndVerify } from "@/lib/report-inbox/remove-file";
 import { findReportCandidates, type CandidateDb } from "@/lib/report-inbox/candidates";
@@ -186,7 +191,7 @@ export async function POST(request: NextRequest) {
       if (await removeFileAndVerify(storage, key)) {
         await prisma.reportInboxItem.updateMany({
           where: { id: item.id, status: "uploading" },
-          data: { status: "discarded", resolvedAt: new Date() },
+          data: { status: "discarded", resolvedAt: new Date(), ...SCRUB_ON_DISCARD },
         });
       }
       throw e;
