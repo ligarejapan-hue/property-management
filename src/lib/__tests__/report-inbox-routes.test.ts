@@ -176,6 +176,12 @@ describe("使える人", () => {
     expect((await res.json()).error.message).toContain("所有者情報をすべて見られる方だけ");
   });
 
+  it("★物件を見る権限(property:read)を外された人は 403(候補の住所を見せない・@codex PR#500 2巡目)", async () => {
+    perms.current = FULL.filter((p) => !(p.resource === "property" && p.action === "read"));
+    const res = await listGET();
+    expect(res.status).toBe(403);
+  });
+
   it("受け取りも 403(本文を読む前)", async () => {
     perms.current = MASKED;
     const res = await uploadPOST(await uploadReq(Buffer.from("%PDF-1.7 x"), "a.pdf"));
@@ -290,7 +296,8 @@ describe("添付", () => {
 });
 
 describe("削除", () => {
-  it("未処理のものを「削除中」にしてファイルを消し、消せたら「削除済み」", async () => {
+  it("未処理のものを「削除中」にしてファイルを消し、もう読めないのを確かめて「削除済み」", async () => {
+    storage.read.mockResolvedValueOnce(null as never);
     const res = await itemDELETE(new Request("http://t/x") as unknown as NextRequest, ctx());
     expect(res.status).toBe(200);
     const calls = db.reportInboxItem.updateMany.mock.calls.map((c: unknown[]) => c[0]);
@@ -299,7 +306,7 @@ describe("削除", () => {
     expect(calls[1]).toMatchObject({ where: { id: "item-1", status: "discarding" }, data: { status: "discarded" } });
   });
 
-  it("★ファイルを消せなかったら「未処理」に戻し、500(黙って削除済みにしない・@codex PR#500)", async () => {
+  it("★ファイルを消せなかったら「削除中」のまま 500(未処理に戻さない=同時に押されても添付できない・@codex PR#500)", async () => {
     storage.delete.mockRejectedValueOnce(Object.assign(new Error("io"), { code: "EIO" }));
     const errSpy = vi.spyOn(console, "error").mockImplementation(() => {});
     const res = await itemDELETE(new Request("http://t/x") as unknown as NextRequest, ctx());
@@ -307,7 +314,15 @@ describe("削除", () => {
     expect(res.status).toBe(500);
     expect((await res.json()).error.message).toContain("もう一度「削除」を押してください");
     const calls = db.reportInboxItem.updateMany.mock.calls.map((c: unknown[]) => c[0]);
-    expect(calls[1]).toEqual({ where: { id: "item-1", status: "discarding" }, data: { status: "pending" } });
+    expect(calls).toHaveLength(1);
+    expect(calls.some((c: { data: { status: string } }) => c.data.status !== "discarding")).toBe(false);
+  });
+
+  it("★「消した」はずでもファイルが読めたら(黙って失敗する保存先)削除済みにしない", async () => {
+    // 既定の read はファイルを返す=まだ残っている
+    const res = await itemDELETE(new Request("http://t/x") as unknown as NextRequest, ctx());
+    expect(res.status).toBe(500);
+    const calls = db.reportInboxItem.updateMany.mock.calls.map((c: unknown[]) => c[0]);
     expect(calls.some((c: { data: { status: string } }) => c.data.status === "discarded")).toBe(false);
   });
 

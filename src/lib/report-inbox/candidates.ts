@@ -120,8 +120,11 @@ const PROPERTY_SELECT = {
 export async function findReportCandidates(
   db: CandidateDb,
   clues: Pick<ReportClues, "buildingName" | "roomNo" | "address">,
-  /** ⚠呼び出した人が開ける物件だけを候補にする(担当外の住所・建物名を見せない・@codex PR#500)。 */
-  canAccess: (p: CandidateProperty) => boolean,
+  /**
+   * ⚠呼び出した人が開ける物件だけを候補にする(担当外の住所・建物名を見せない・@codex PR#500)。
+   * scopeWhere = DB で読むときの範囲(件数で切る前に効かせる)・canAccess = 読んだ後の念押し。
+   */
+  scope: { scopeWhere: Record<string, unknown>; canAccess: (p: CandidateProperty) => boolean },
 ): Promise<ReportCandidate[]> {
   const nameKey = buildingNameKey(clues.buildingName);
   const ors: unknown[] = [];
@@ -136,27 +139,34 @@ export async function findReportCandidates(
   if (prefix) ors.push({ address: { contains: prefix } });
   if (ors.length === 0) return [];
   const properties = await db.property.findMany({
-    where: { isArchived: false, OR: ors },
+    where: { AND: [{ isArchived: false }, { OR: ors }, scope.scopeWhere] },
     select: PROPERTY_SELECT,
     take: 300,
     orderBy: { updatedAt: "desc" },
   });
-  return rankCandidates(clues, properties.filter(canAccess));
+  return rankCandidates(clues, properties.filter(scope.canAccess));
 }
 
 /** 手で探す(マンション名・所在地のどちらでも)。2文字以上。 */
 export async function searchPropertiesForReport(
   db: Pick<CandidateDb, "property">,
   q: string,
+  /** DB で読むときの担当の範囲(件数で切る前に効かせる・@codex PR#500 2巡目)。 */
+  scopeWhere: Record<string, unknown>,
 ): Promise<CandidateProperty[]> {
   const term = q.normalize("NFKC").trim();
   if (term.length < 2) return [];
   return db.property.findMany({
     where: {
-      isArchived: false,
-      OR: [
-        { address: { contains: term, mode: "insensitive" } },
-        { buildingName: { contains: term, mode: "insensitive" } },
+      AND: [
+        { isArchived: false },
+        {
+          OR: [
+            { address: { contains: term, mode: "insensitive" } },
+            { buildingName: { contains: term, mode: "insensitive" } },
+          ],
+        },
+        scopeWhere,
       ],
     },
     select: PROPERTY_SELECT,

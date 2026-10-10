@@ -20,7 +20,7 @@ import {
 } from "@/lib/pdf-compress/policy";
 import { fitPdfToLimit, reserveLargePdfSlot } from "@/lib/pdf-compress/fit";
 import { runExclusive } from "@/lib/pdf-compress/run";
-import { assertReportInboxAccess, reportInboxStorageKey } from "@/lib/report-inbox/access";
+import { assertReportInboxAccess, propertyScopeWhere, reportInboxStorageKey } from "@/lib/report-inbox/access";
 import { extractReportClues } from "@/lib/report-inbox/extract";
 import { findReportCandidates, type CandidateDb } from "@/lib/report-inbox/candidates";
 import { canAccessPropertyRecord } from "@/lib/property-access";
@@ -56,9 +56,11 @@ export async function GET() {
     const data = [];
     for (const item of items) {
       // ⚠呼び出した人が開ける物件だけを候補にする(担当外の住所・建物名を見せない・@codex PR#500)。
-      const candidates = await findReportCandidates(prisma as unknown as CandidateDb, item, (p) =>
-        canAccessPropertyRecord(session, { createdBy: p.createdBy ?? "", assignedTo: p.assignedTo ?? null }),
-      );
+      const candidates = await findReportCandidates(prisma as unknown as CandidateDb, item, {
+        scopeWhere: propertyScopeWhere(session),
+        canAccess: (p) =>
+          canAccessPropertyRecord(session, { createdBy: p.createdBy ?? "", assignedTo: p.assignedTo ?? null }),
+      });
       data.push({
         id: item.id,
         fileName: item.fileName,

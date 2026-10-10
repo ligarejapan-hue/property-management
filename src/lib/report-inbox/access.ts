@@ -7,12 +7,28 @@ import { ApiError } from "@/lib/api-helpers";
 import { hasPermission } from "@/lib/permissions";
 import type { PermissionEntry } from "@/lib/api-helpers";
 import { canOpenReferralDocument } from "@/lib/uploads-authorization";
+import { isPropertyScopedRole } from "@/lib/property-access";
 
 export const REPORT_INBOX_FORBIDDEN_MESSAGE =
   "査定報告書の受け取り箱は、所有者情報をすべて見られる方だけが使えます。管理者にご相談ください。";
 
 export function canUseReportInbox(perms: PermissionEntry[]): boolean {
-  return hasPermission(perms, "property", "write") && canOpenReferralDocument(perms);
+  // ⚠property:read も必須(@codex PR#500 2巡目)。候補・検索で物件の住所・建物名・部屋番号を見せる。
+  return (
+    hasPermission(perms, "property", "read") &&
+    hasPermission(perms, "property", "write") &&
+    canOpenReferralDocument(perms)
+  );
+}
+
+/**
+ * DB で読むときの担当の範囲(現地担当は自分が作った・担当の物件だけ)。
+ * ⚠件数で切る(take)**前**に条件へ入れる(@codex PR#500 2巡目)。後から絞ると、新しい順の
+ *   上位が他人の物件で埋まったとき、自分の古い物件が候補・検索に出なくなる。
+ */
+export function propertyScopeWhere(session: { id: string; role: string }): Record<string, unknown> {
+  if (!isPropertyScopedRole(session.role)) return {};
+  return { OR: [{ createdBy: session.id }, { assignedTo: session.id }] };
 }
 
 export function assertReportInboxAccess(perms: PermissionEntry[]): void {

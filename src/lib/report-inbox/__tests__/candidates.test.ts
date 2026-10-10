@@ -73,11 +73,11 @@ describe("findReportCandidates(DB から読む)", () => {
     const property = {
       findMany: vi.fn(async () => [p("hit", { buildingId: "b1", buildingName: "東急サンプルハイツ弐番館", roomNo: "305" })]),
     };
-    const r = await findReportCandidates({ building, property }, clues, () => true);
+    const r = await findReportCandidates({ building, property }, clues, { scopeWhere: {}, canAccess: () => true });
     expect(r[0]).toMatchObject({ propertyId: "hit", match: "name_room" });
-    const where = (property.findMany.mock.calls[0] as unknown as [{ where: { isArchived: boolean; OR: unknown[] } }])[0].where;
-    expect(where.isArchived).toBe(false);
-    expect(where.OR).toEqual(
+    const where = (property.findMany.mock.calls[0] as unknown as [{ where: { AND: [{ isArchived: boolean }, { OR: unknown[] }, unknown] } }])[0].where;
+    expect(where.AND[0]).toEqual({ isArchived: false });
+    expect(where.AND[1].OR).toEqual(
       expect.arrayContaining([
         { buildingId: { in: ["b1"] } },
         { buildingName: { contains: "東急サン" } },
@@ -94,14 +94,18 @@ describe("findReportCandidates(DB から読む)", () => {
         p("others", { buildingName: "東急サンプルハイツ弐番館", roomNo: "305", createdBy: "x", assignedTo: "y" }),
       ]),
     };
-    const r = await findReportCandidates({ building, property }, clues, (q) => q.createdBy === "me");
+    const scopeWhere = { OR: [{ createdBy: "me" }, { assignedTo: "me" }] };
+    const r = await findReportCandidates({ building, property }, clues, { scopeWhere, canAccess: (q) => q.createdBy === "me" });
+    // ⚠件数で切る前に DB の条件として効いている(@codex PR#500 2巡目)
+    const where = (property.findMany.mock.calls[0] as unknown as [{ where: { AND: unknown[] } }])[0].where;
+    expect(where.AND).toContainEqual(scopeWhere);
     expect(r.map((c) => c.propertyId)).toEqual(["mine"]);
   });
 
   it("手がかりが無ければ DB を引かない", async () => {
     const building = { findMany: vi.fn() };
     const property = { findMany: vi.fn() };
-    expect(await findReportCandidates({ building, property }, { buildingName: null, roomNo: null, address: null }, () => true)).toEqual([]);
+    expect(await findReportCandidates({ building, property }, { buildingName: null, roomNo: null, address: null }, { scopeWhere: {}, canAccess: () => true })).toEqual([]);
     expect(property.findMany).not.toHaveBeenCalled();
   });
 });

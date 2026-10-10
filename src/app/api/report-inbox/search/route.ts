@@ -1,7 +1,7 @@
 import { NextRequest } from "next/server";
 import prisma from "@/lib/prisma";
 import { getApiSession, getUserPermissions, handleApiError, apiResponse } from "@/lib/api-helpers";
-import { assertReportInboxAccess } from "@/lib/report-inbox/access";
+import { assertReportInboxAccess, propertyScopeWhere } from "@/lib/report-inbox/access";
 import { canAccessPropertyRecord } from "@/lib/property-access";
 import { searchPropertiesForReport, type CandidateDb } from "@/lib/report-inbox/candidates";
 
@@ -15,7 +15,7 @@ export async function GET(request: NextRequest) {
     assertReportInboxAccess(perms);
 
     const q = request.nextUrl.searchParams.get("q") ?? "";
-    const rows = await searchPropertiesForReport(prisma as unknown as CandidateDb, q);
+    const rows = await searchPropertiesForReport(prisma as unknown as CandidateDb, q, propertyScopeWhere(session));
     // 呼び出した人が開ける物件だけ(担当の範囲)。担当者の情報は返さない。
     const data = rows
       .filter((r) => canAccessPropertyRecord(session, { createdBy: r.createdBy ?? "", assignedTo: r.assignedTo ?? null }))

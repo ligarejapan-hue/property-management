@@ -28,8 +28,12 @@ export async function DELETE(_request: NextRequest, { params }: { params: Promis
     // ⚠消せたことを確かめてから「削除済み」にする(@codex PR#500)。消せないまま削除済みにすると、
     //   個人情報の入ったファイルが誰にも見えない場所に残り続け、やり直す手段も無い。
     //   1) 未処理(または前回の削除が途中で止まったもの)を「削除中」にする=この間は添付できない
-    //   2) ファイルを消す
-    //   3) 消せたら「削除済み」。消せなければ「未処理」に戻して、もう一度押してもらう
+    //   2) ファイルを消し、**もう読めないこと**を確かめる(このサーバーのディスク版は失敗を黙って
+    //      飲み込むので、消したつもりで残っていないかを読み直して見る)
+    //   3) 消せたら「削除済み」。消せなければ「削除中」のまま=一覧に出て、もう一度押せる
+    //   ⚠失敗しても「未処理」には**戻さない**(@codex PR#500 2巡目)。2か所で同時に押され、片方が
+    //     消し終えたあとにもう片方の失敗が「未処理」に戻すと、ファイルの無い報告書が添付できてしまう。
+    //     ファイルの削除は「もう無いものを消しても成功」なので、何度押し直しても安全。
     const claimed = await prisma.reportInboxItem.updateMany({
       where: { id, status: { in: ["pending", "discarding"] } },
       data: { status: "discarding" },
@@ -40,14 +44,17 @@ export async function DELETE(_request: NextRequest, { params }: { params: Promis
 
     const storage = getStorage();
     const key = storage.keyFromUrl(item.fileUrl);
-    try {
-      if (key) await storage.delete(key);
-    } catch (e) {
-      console.error("[report-inbox] delete failed", (e as { code?: unknown })?.code ?? "");
-      await prisma.reportInboxItem.updateMany({
-        where: { id, status: "discarding" },
-        data: { status: "pending" },
-      });
+    let removed = key === null;
+    if (key) {
+      try {
+        await storage.delete(key);
+        removed = (await storage.read(key)) === null;
+      } catch (e) {
+        console.error("[report-inbox] delete failed", (e as { code?: unknown })?.code ?? "");
+        removed = false;
+      }
+    }
+    if (!removed) {
       throw new ApiError(500, "報告書を削除できませんでした。少し待ってから、もう一度「削除」を押してください。", "DELETE_FAILED");
     }
     await prisma.reportInboxItem.updateMany({
