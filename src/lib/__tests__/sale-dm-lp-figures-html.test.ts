@@ -62,6 +62,24 @@ describe("renderFigureHtml", () => {
     expect(thumb).not.toContain("当社の相談窓口");
   });
 
+  it("提携先は「廃棄物処理業者」(2026-10-10 発注者指定・「片付け業者」は使わない)", () => {
+    expect(LP_BRAND.partners).toContain("廃棄物処理業者");
+    expect(LP_BRAND.partners).not.toContain("片付け業者");
+    expect(renderFigureHtml("partner_network")).toContain("廃棄物処理業者");
+    expect(renderFigureHtml("partner_network")).not.toContain("片付け");
+  });
+
+  it("円形の図は左右対称(同じ文字数の札が真ん中の円をはさんで鏡の位置)", () => {
+    const ns = partnerNetworkNodes();
+    for (const n of ns) {
+      if (n.x === NETWORK_HUB.x) continue;
+      const mirror = ns.find((m) => m !== n && m.y === n.y && m.x === 2 * NETWORK_HUB.x - n.x);
+      expect(mirror, n.label).toBeDefined();
+      expect(mirror!.label.length, n.label).toBe(n.label.length);
+    }
+    expect(NETWORK_VIEW.w).toBe(2 * NETWORK_HUB.x);
+  });
+
   it("配置表は提携先の名前と一致する(名前を変えたら配置も作り直す)", () => {
     expect(partnerNetworkNodes().map((n) => n.label).sort()).toEqual([...LP_BRAND.partners].sort());
   });

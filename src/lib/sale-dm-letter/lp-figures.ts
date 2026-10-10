@@ -239,26 +239,27 @@ function brandImg(image: LpBrandImage, cls: string): string {
  * 「窓口はひとつ」の図(発注者要望 2026-10-07): リガーレジャパンを真ん中の円に、提携先7つを
  * 周りに並べ、真ん中から1本ずつ線でつなぐ。専門家/業者の色分けはしない(発注者指定)。
  * 配置は計算で決めた固定値: ①線の見える長さ(真ん中の円の縁から、線に沿って札の丸い縁に当たるまで)を
- * どれも36にそろえ(@codex #488 R8: 軸方向の距離ではなく線に沿って測る)、②そのうえで隣り合う札どうしの
- * すき間がそろう角度を選んだ(どこも約39・ばらつき約1)。
- * 長い札(土地家屋調査士)は上、文字数の近い札を左右対称に置く。外側の余白は上下左右とも約12。
+ * どれも約34.5にそろえ(@codex #488 R8: 軸方向の距離ではなく線に沿って測る)、②そのうえで隣り合う札どうしの
+ * すき間がそろう角度を選んだ(どこも約38.5)。
+ * 2026-10-10「片付け業者」→「廃棄物処理業者」(発注者指定)で7文字の札が2枚になったため、
+ * 同じ文字数の札を左右対称に置き直した(上=司法書士、下の左右=7文字の2枚)。外側の余白は上下左右とも約12。
  * ⚠提携先の名前(LP_BRAND.partners)を変えたら、この表も作り直す(テストが名前の一致を確かめる)。
  */
-export const NETWORK_VIEW = { w: 372, h: 269 } as const;
+export const NETWORK_VIEW = { w: 382, h: 261 } as const;
 export const NETWORK_PILL_H = 36;
 const NET_FONT = 15;
-export const NETWORK_HUB = { x: 191, y: 146, r: 62 } as const;
+export const NETWORK_HUB = { x: 191, y: 145, r: 62 } as const;
 const NET_CX = NETWORK_HUB.x;
 const NET_CY = NETWORK_HUB.y;
 const NET_CENTER_R = NETWORK_HUB.r;
 const NETWORK_LAYOUT: ReadonlyArray<{ label: string; x: number; y: number }> = [
-  { label: "土地家屋調査士", x: 191, y: 30 },
-  { label: "司法書士", x: 315, y: 90 },
-  { label: "税理士", x: 324, y: 164 },
-  { label: "引っ越し業者", x: 269, y: 239 },
-  { label: "内装工事業者", x: 113, y: 239 },
-  { label: "弁護士", x: 58, y: 164 },
-  { label: "片付け業者", x: 64, y: 88 },
+  { label: "司法書士", x: 191, y: 30 },
+  { label: "引っ越し業者", x: 311, y: 82 },
+  { label: "税理士", x: 323, y: 157 },
+  { label: "土地家屋調査士", x: 277, y: 231 },
+  { label: "廃棄物処理業者", x: 105, y: 231 },
+  { label: "弁護士", x: 59, y: 157 },
+  { label: "内装工事業者", x: 71, y: 82 },
 ];
 export function partnerNetworkNodes(): Array<{ label: string; x: number; y: number; w: number }> {
   return NETWORK_LAYOUT.map((n) => ({ ...n, w: n.label.length * NET_FONT + 28 }));
