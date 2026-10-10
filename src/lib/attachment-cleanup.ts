@@ -187,6 +187,11 @@ export async function purgeExpiredAttachments(opts: {
     if (key && !(await isStorageKeyStillReferenced(key, row.id))) {
       try {
         await storage.delete(key);
+        // ⚠**消せたことを読み直して確かめる**(@codex PR#500 4巡目)。このサーバーのディスク版
+        //   (LocalStorageAdapter.delete)は unlink の失敗を黙って飲み込むので、確かめないと
+        //   ファイルが残ったまま記録だけ消え、個人情報の入った書類(反響資料・査定報告書など)が
+        //   誰にも見えない場所に残り続ける。残っていれば失敗として扱い、次の回にやり直す。
+        if ((await storage.read(key)) !== null) throw new Error("still exists");
       } catch {
         // Storage failed → release OUR claim so the row is retried next run. Not counted as purged.
         // Guard by our claim token (purgeStartedAt: opts.now): if our claim went stale and another

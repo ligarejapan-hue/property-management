@@ -1,6 +1,6 @@
 import { describe, it, expect, vi, beforeEach, type Mock } from "vitest";
 
-const { deleteSpy } = vi.hoisted(() => ({ deleteSpy: vi.fn() }));
+const { deleteSpy, readSpy } = vi.hoisted(() => ({ deleteSpy: vi.fn(), readSpy: vi.fn() }));
 
 // keyFromUrl: resolves /uploads/{key} (any host) and /:bucket/{key} for server backend.
 // The test bucket is "testbucket" (matches server URLs used in tests).
@@ -26,6 +26,8 @@ function testKeyFromUrl(u: string | null | undefined): string | null {
 vi.mock("@/lib/storage", () => ({
   getStorage: () => ({
     delete: deleteSpy,
+    // 削除後に読み直して、消えたことを確かめる(@codex PR#500 4巡目)。既定=消えている。
+    read: readSpy,
     keyFromUrl: testKeyFromUrl,
   }),
 }));
@@ -74,6 +76,7 @@ function wireFindMany(purgeable: unknown[], sharedRefs: unknown[] = []) {
 beforeEach(() => {
   vi.clearAllMocks();
   deleteSpy.mockResolvedValue(undefined);
+  readSpy.mockResolvedValue(null);
   // claim updateMany: first call = CLAIM (count 1), further calls = RELEASE (count 1)
   pm.attachment.updateMany.mockResolvedValue({ count: 1 });
   pm.attachment.deleteMany.mockResolvedValue({ count: 1 });
@@ -222,6 +225,20 @@ describe("purgeExpiredAttachments", () => {
     // b1 row kept (deleteMany called only once, for b2)
     expect(pm.attachment.deleteMany).toHaveBeenCalledTimes(1);
     expect(pm.attachment.deleteMany.mock.calls[0][0].where.id).toBe("b2");
+  });
+
+  it("★削除が黙って失敗した(読み直すとまだある)ときは、記録を消さず次の回にやり直す(@codex PR#500 4巡目)", async () => {
+    wireFindMany([{ id: "r1", fileUrl: "/uploads/report-inbox/1-abc.pdf" }]);
+    // 削除は成功を返すが、ファイルはまだ読める(LocalStorageAdapter は unlink の失敗を飲み込む)
+    readSpy.mockResolvedValueOnce({ body: Buffer.from("x"), contentType: "application/pdf", size: 1 });
+    const r = await purgeExpiredAttachments({ now: NOW, limit: 200 });
+    expect(r).toMatchObject({ purged: 0, failed: 1 });
+    expect(pm.attachment.deleteMany).not.toHaveBeenCalled();
+    // 自分の claim を外して、次の回にやり直せるようにする
+    expect(pm.attachment.updateMany).toHaveBeenLastCalledWith({
+      where: { id: "r1", purgeStartedAt: NOW },
+      data: { purgeStartedAt: null },
+    });
   });
 
   // ─── 8. shared key (another row references it): storage NOT deleted, DB row IS deleted ─
