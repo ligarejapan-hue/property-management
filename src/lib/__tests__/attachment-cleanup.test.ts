@@ -109,8 +109,12 @@ describe("findPurgeableAttachments", () => {
       { purgeStartedAt: { lte: expect.any(Date) } },
     ]);
     expect(arg.take).toBe(200);
-    expect(arg.select).toEqual({ id: true, fileUrl: true, type: true, deletedAt: true });
+    expect(arg.select).toEqual({ id: true, fileUrl: true, type: true });
     expect(arg.orderBy).toEqual([{ deletedAt: "asc" }, { id: "asc" }]);
+    // ★守りの記録として残した行は、見直しの間隔(7日)が過ぎるまで外す(@codex PR#500 21巡目)
+    const holdCutoff = arg.where.AND[0].OR[1].purgeHeldAt.lte as Date;
+    expect(arg.where.AND).toEqual([{ OR: [{ purgeHeldAt: null }, { purgeHeldAt: { lte: expect.any(Date) } }] }]);
+    expect(NOW.getTime() - holdCutoff.getTime()).toBe(7 * 24 * 60 * 60 * 1000);
   });
 
   it("物件削除で propertyId=null になった孤児もゴミ箱入りしていれば対象になる（総点検P3）", async () => {
@@ -325,39 +329,14 @@ describe("purgeExpiredAttachments", () => {
       const r = await purgeExpiredAttachments({ now: NOW, limit: 200 });
       expect(deleteSpy).not.toHaveBeenCalled();
       expect(pm.attachment.deleteMany).not.toHaveBeenCalled();
-      // 主張を外して次の回に見直す
+      // 主張を外し、残した印を書く(7日間は対象から外れ、後ろの行が処理される・21巡目)
       expect(pm.attachment.updateMany).toHaveBeenLastCalledWith({
         where: { id: "c1", purgeStartedAt: NOW },
-        data: { purgeStartedAt: null },
+        data: { purgeStartedAt: null, purgeHeldAt: NOW },
       });
       expect(r).toEqual({ scanned: 1, purged: 0, failed: 0, skipped: 1 });
     },
   );
-
-  it("★残す記録が枠を占めても、その分だけ続きを読み足して後ろの書類を処理する(@codex PR#500 16巡目)", async () => {
-    const heldKey = "/uploads/report-inbox/1-abc.pdf";
-    const nextKey = "/uploads/properties/p/attachments/next.pdf";
-    let purgeableCalls = 0;
-    const heldAt = new Date("2026-01-01T00:00:00Z");
-    pm.attachment.findMany.mockImplementation((args: { where?: { fileUrl?: { contains?: string }; AND?: unknown[] }; take?: number }) => {
-      if (args?.where?.fileUrl?.contains !== undefined) return Promise.resolve([]);
-      purgeableCalls++;
-      if (purgeableCalls === 1) return Promise.resolve([{ id: "held", fileUrl: heldKey, type: "report", deletedAt: heldAt }]);
-      if (purgeableCalls > 2) return Promise.resolve([]);
-      // 2回目は、残した記録の**後ろから**、残した件数だけ続きを読む(回数の上限は無い・17巡目)
-      expect(args.where?.AND).toEqual([
-        { OR: [{ deletedAt: { gt: heldAt } }, { deletedAt: heldAt, id: { gt: "held" } }] },
-      ]);
-      expect(args.take).toBe(1);
-      return Promise.resolve([{ id: "next", fileUrl: nextKey, type: "general" }]);
-    });
-    pm.propertyPhoto.findMany.mockImplementation((args: { where: { OR: [{ fileUrl: { contains: string } }] } }) =>
-      Promise.resolve(args.where.OR[0].fileUrl.contains.includes("report-inbox") ? [{ fileUrl: heldKey }] : []),
-    );
-    const r = await purgeExpiredAttachments({ now: NOW, limit: 1 });
-    expect(r).toEqual({ scanned: 2, purged: 1, failed: 0, skipped: 1 });
-    expect(pm.attachment.deleteMany).toHaveBeenCalledTimes(1);
-  });
 
   it("report でも、他に指す記録が無ければファイルも記録も消す", async () => {
     const key = "/uploads/report-inbox/1-abc.pdf";

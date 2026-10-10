@@ -875,6 +875,8 @@ model Attachment {
   isDeleted  Boolean  @default(false) @map("is_deleted")
   deletedAt      DateTime? @map("deleted_at")
   purgeStartedAt DateTime? @map("purge_started_at")
+  /// 90日後の自動削除で「守りの記録として残した」時刻(反響資料・査定報告書)。7日ごとに見直す。
+  purgeHeldAt    DateTime? @map("purge_held_at")
   createdAt  DateTime @default(now()) @map("created_at")
 
   uploader   User      @relation(fields: [uploadedBy], references: [id])

@@ -21,3 +21,6 @@ CREATE TABLE "report_inbox_items" (
 );
 
 CREATE INDEX "report_inbox_items_status_created_at_idx" ON "report_inbox_items"("status", "created_at");
+
+-- 90日後の自動削除で、守りの記録として残した行の印(反響資料・査定報告書・追加のみ)。
+ALTER TABLE "attachments" ADD COLUMN "purge_held_at" TIMESTAMP(3);
