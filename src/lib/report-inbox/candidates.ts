@@ -116,6 +116,35 @@ export interface CandidateDb {
   $queryRaw<T = unknown>(query: Prisma.Sql): Promise<T>;
 }
 
+/**
+ * 名前の完全一致(比べる形)で物件 id を引く。複数の名前を**1回の問い合わせ**でまとめて引く
+ * (一覧の1ページで報告書ごとに表を読み直さない・@codex PR#500 22巡目)。
+ * DB 側も NFKC・小文字・空白なしにそろえる(PostgreSQL 13+)。名前ごとに念のための上限 2000。
+ */
+export async function findExactNameIds(
+  db: Pick<CandidateDb, "$queryRaw">,
+  compacts: readonly string[],
+): Promise<Map<string, string[]>> {
+  const keys = [...new Set(compacts)];
+  const out = new Map<string, string[]>();
+  if (keys.length === 0) return out;
+  const rows = await db.$queryRaw<{ id: string; k: string }[]>(Prisma.sql`
+    SELECT x.id, x.k FROM (
+      SELECT p.id,
+             lower(regexp_replace(normalize(p.building_name, NFKC), '[[:space:]　]', '', 'g')) AS k
+      FROM "properties" p
+      WHERE p.is_archived = false AND p.building_name IS NOT NULL
+    ) x
+    WHERE x.k = ANY(${keys})
+  `);
+  for (const r of rows) {
+    const list = out.get(r.k) ?? [];
+    if (list.length < 2000) list.push(r.id);
+    out.set(r.k, list);
+  }
+  return out;
+}
+
 /** 名前の比べる形(NFKC・小文字・空白なし)。DB 側も同じ形(小文字・空白なし)にそろえて完全一致で引く。 */
 export function compactNameForDb(name: string | null | undefined): string | null {
   if (name == null) return null;
@@ -142,7 +171,12 @@ export async function findReportCandidates(
    * ⚠呼び出した人が開ける物件だけを候補にする(担当外の住所・建物名を見せない・@codex PR#500)。
    * scopeWhere = DB で読むときの範囲(件数で切る前に効かせる)・canAccess = 読んだ後の念押し。
    */
-  scope: { scopeWhere: Record<string, unknown>; canAccess: (p: CandidateProperty) => boolean },
+  scope: {
+    scopeWhere: Record<string, unknown>;
+    canAccess: (p: CandidateProperty) => boolean;
+    /** 名前の完全一致の結果(比べる形 → 物件 id)。一覧ではページ分をまとめて引いて渡す。 */
+    exactNameIds?: ReadonlyMap<string, string[]>;
+  },
 ): Promise<ReportCandidate[]> {
   const nameKey = buildingNameKey(clues.buildingName);
   const ors: unknown[] = [];
@@ -178,16 +212,14 @@ export async function findReportCandidates(
   //   漏れ、件数の上限でも押し出される(19巡目)。**名前の完全一致**(小文字・空白なしにそろえる)を
   //   別の組として先に引く。完全一致は狭いので件数で切らない(念のための上限だけ)。
   //   DB 側も NFKC にそろえる(全角英数「ＡＢＣ」・半角カナで登録された物件も一致させる・20巡目。PostgreSQL 13+)。
+  //   ⚠一覧の1ページ分は呼び出し側で**まとめて1回**引いて渡す(scope.exactNameIds・22巡目)。
   let sameName: unknown = null;
   const compact = compactNameForDb(clues.buildingName);
   if (compact !== null) {
-    const ids = await db.$queryRaw<{ id: string }[]>(Prisma.sql`
-      SELECT p.id FROM "properties" p
-      WHERE p.is_archived = false
-        AND lower(regexp_replace(normalize(p.building_name, NFKC), '[[:space:]　]', '', 'g')) = ${compact}
-      LIMIT 2000
-    `);
-    if (ids.length > 0) sameName = { id: { in: ids.map((r) => r.id) } };
+    const ids = scope.exactNameIds
+      ? (scope.exactNameIds.get(compact) ?? [])
+      : ((await findExactNameIds(db, [compact])).get(compact) ?? []);
+    if (ids.length > 0) sameName = { id: { in: ids } };
   }
   const room = roomKey(clues.roomNo);
   const groups: unknown[][] = [];

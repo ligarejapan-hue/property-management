@@ -30,7 +30,12 @@ import {
 } from "@/lib/report-inbox/access";
 import { extractReportClues } from "@/lib/report-inbox/extract";
 import { removeFileAndVerify } from "@/lib/report-inbox/remove-file";
-import { findReportCandidates, type CandidateDb } from "@/lib/report-inbox/candidates";
+import {
+  compactNameForDb,
+  findExactNameIds,
+  findReportCandidates,
+  type CandidateDb,
+} from "@/lib/report-inbox/candidates";
 import { canAccessPropertyRecord } from "@/lib/property-access";
 
 // ---------- 査定報告書の受け取り箱(2026-10-10) ----------
@@ -87,6 +92,14 @@ export async function GET(request: NextRequest) {
     // ⚠呼び出した人が開ける物件だけを候補にする(担当外の住所・建物名を見せない・@codex PR#500)。
     // 1件ごとの候補探しは独立なので、CANDIDATE_CONCURRENCY 件ずつ同時に行う
     // (順に待つと往復が積み重なる・全部同時だと DB の接続を占める・16巡目)。
+    // 名前の完全一致はページ分をまとめて1回で引く(報告書ごとに表を読み直さない・22巡目)。
+    const exactNameIds = await findExactNameIds(
+      prisma as unknown as CandidateDb,
+      items
+        .filter((i) => i.status === "pending")
+        .map((i) => compactNameForDb(i.buildingName))
+        .filter((k): k is string => k !== null),
+    );
     const candidateLists: Awaited<ReturnType<typeof findReportCandidates>>[] = [];
     for (let i = 0; i < items.length; i += CANDIDATE_CONCURRENCY) {
       const chunk = items.slice(i, i + CANDIDATE_CONCURRENCY);
@@ -96,6 +109,7 @@ export async function GET(request: NextRequest) {
             item.status === "pending"
               ? findReportCandidates(prisma as unknown as CandidateDb, item, {
                   scopeWhere: propertyScopeWhere(session),
+                  exactNameIds,
                   canAccess: (p) =>
                     canAccessPropertyRecord(session, { createdBy: p.createdBy ?? "", assignedTo: p.assignedTo ?? null }),
                 })

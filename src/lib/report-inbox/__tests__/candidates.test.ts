@@ -3,6 +3,7 @@ import {
   addressLooseKey,
   findReportCandidates,
   compactNameForDb,
+  findExactNameIds,
   type CandidateDb,
   roomVariants,
   searchPropertiesForReport,
@@ -81,9 +82,47 @@ describe("roomVariants(部屋番号の書き方の揺れ)", () => {
 });
 
 /** 名前の完全一致の生 SQL(既定は一致なし)をつける。 */
-function withRaw(db: Pick<CandidateDb, "building" | "property">, rawIds: string[] = []): CandidateDb {
-  return { ...db, $queryRaw: vi.fn(async () => rawIds.map((id) => ({ id }))) } as unknown as CandidateDb;
+function withRaw(
+  db: Pick<CandidateDb, "building" | "property">,
+  rawIds: string[] = [],
+  key = "abcマンション",
+): CandidateDb {
+  return { ...db, $queryRaw: vi.fn(async () => rawIds.map((id) => ({ id, k: key }))) } as unknown as CandidateDb;
 }
+
+describe("findExactNameIds(ページ分の名前をまとめて1回で引く・22巡目)", () => {
+  it("★複数の名前を1回の問い合わせで引き、名前ごとに分ける", async () => {
+    const $queryRaw = vi.fn(async () => [
+      { id: "a1", k: "abcマンション" },
+      { id: "b1", k: "xyzハイツ" },
+      { id: "a2", k: "abcマンション" },
+    ]);
+    const m = await findExactNameIds({ $queryRaw } as unknown as CandidateDb, ["abcマンション", "xyzハイツ", "abcマンション"]);
+    expect($queryRaw).toHaveBeenCalledTimes(1);
+    expect(($queryRaw.mock.calls[0] as unknown as [{ values: unknown[] }])[0].values).toEqual([["abcマンション", "xyzハイツ"]]);
+    expect(m.get("abcマンション")).toEqual(["a1", "a2"]);
+    expect(m.get("xyzハイツ")).toEqual(["b1"]);
+  });
+
+  it("名前が無ければ問い合わせない", async () => {
+    const $queryRaw = vi.fn();
+    expect((await findExactNameIds({ $queryRaw } as unknown as CandidateDb, [])).size).toBe(0);
+    expect($queryRaw).not.toHaveBeenCalled();
+  });
+
+  it("★渡された結果があれば findReportCandidates は自分では引かない", async () => {
+    const building = { findMany: vi.fn(async () => []) };
+    const property = { findMany: vi.fn(async () => []) };
+    const db = withRaw({ building, property });
+    await findReportCandidates(db, { buildingName: "ABCマンション", roomNo: null, address: null }, {
+      scopeWhere: {},
+      canAccess: () => true,
+      exactNameIds: new Map([["abcマンション", ["x"]]]),
+    });
+    expect(db.$queryRaw).not.toHaveBeenCalled();
+    expect(JSON.stringify(property.findMany.mock.calls)).toContain('"x"');
+  });
+});
 
 describe("compactNameForDb", () => {
   it("NFKC・小文字・空白なしにそろえる(DB 側の lower+空白除去と同じ形)", () => {
@@ -110,7 +149,7 @@ describe("findReportCandidates(DB から読む)", () => {
     expect(r[0]).toMatchObject({ propertyId: "unlinked", match: "name_room" });
     // 生 SQL には比べる形だけを値として渡す(SQL の文には埋め込まない)
     const sql = (db.$queryRaw as unknown as { mock: { calls: [{ values: unknown[] }][] } }).mock.calls[0][0];
-    expect(sql.values).toEqual(["abcマンション"]);
+    expect(sql.values).toEqual([["abcマンション"]]);
   });
 
 
