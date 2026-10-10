@@ -17,6 +17,7 @@ import { ExternalLink, FileText, Loader2, Search, Trash2, Upload } from "lucide-
 import { PageHeader } from "@/components/ui/page-header";
 import { Button } from "@/components/ui/button";
 import { ConfirmDialog } from "@/components/ui/confirm-dialog";
+import { Pagination } from "@/components/ui/pagination";
 import ImportSwitcher from "@/components/import/import-switcher";
 import {
   attachReportInboxItem,
@@ -213,17 +214,15 @@ export default function ReportInboxPage() {
                 ))}
               </ul>
               {total > pageSize && (
-                <div className="mt-4 flex items-center gap-3 text-sm">
-                  <Button variant="secondary" onClick={() => setPage(page - 1)} disabled={page <= 1}>
-                    前へ
-                  </Button>
-                  <span className="text-gray-600 dark:text-gray-300">
-                    {page} / {Math.ceil(total / pageSize)} ページ
-                  </span>
-                  <Button variant="secondary" onClick={() => setPage(page + 1)} disabled={page * pageSize >= total}>
-                    次へ
-                  </Button>
-                </div>
+                <Pagination
+                  className="mt-4"
+                  page={page}
+                  totalPages={Math.ceil(total / pageSize)}
+                  total={total}
+                  pageSize={pageSize}
+                  onPrev={() => setPage(page - 1)}
+                  onNext={() => setPage(page + 1)}
+                />
               )}
             </>
           )}
