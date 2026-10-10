@@ -54,6 +54,15 @@ export const SCRUB_ON_DISCARD = {
   address: null,
 } as const;
 
+/**
+ * 取り込みが途中で止まった(記録は作ったがファイルを置き終えていない)とみなすまでの時間。
+ * ⚠これより新しい「取り込み中」は**いま取り込んでいる最中**の可能性があるので、一覧に出さず
+ *   削除もさせない(@codex PR#500 11巡目)。動いている受け取りの記録を横から「削除済み」にすると、
+ *   そのあと置かれたファイルが残る。受け取りは圧縮の打ち切り(2分)+保存で数分以内に終わるので、
+ *   1時間たっても「取り込み中」なら、その受け取りは止まっている(プロセスの停止など)。
+ */
+export const STALE_UPLOAD_MS = 60 * 60 * 1000;
+
 /** 受け取り箱のファイルの置き場所(添付とは別の場所)。 */
 export function reportInboxStorageKey(now: number, uuid: string): string {
   return `report-inbox/${now}-${uuid}.pdf`;

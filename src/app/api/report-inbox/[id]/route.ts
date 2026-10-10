@@ -9,7 +9,7 @@ import {
 } from "@/lib/api-helpers";
 import { writeAuditLog } from "@/lib/audit";
 import { getStorage } from "@/lib/storage";
-import { assertReportInboxAccess, SCRUB_ON_DISCARD } from "@/lib/report-inbox/access";
+import { assertReportInboxAccess, SCRUB_ON_DISCARD, STALE_UPLOAD_MS } from "@/lib/report-inbox/access";
 import { removeFileAndVerify } from "@/lib/report-inbox/remove-file";
 
 // ---------- DELETE /api/report-inbox/:id ----------
@@ -37,7 +37,14 @@ export async function DELETE(_request: NextRequest, { params }: { params: Promis
     //     ファイルの削除は「もう無いものを消しても成功」なので、何度押し直しても安全。
     // 取り込みが途中で止まったもの(uploading)も消せる(置き終える側は、削除されていたら自分のファイルを消す)。
     const claimed = await prisma.reportInboxItem.updateMany({
-      where: { id, status: { in: ["pending", "discarding", "uploading"] } },
+      where: {
+        id,
+        OR: [
+          { status: { in: ["pending", "discarding"] } },
+          // ⚠取り込み中は、止まっていると判断できる(STALE_UPLOAD_MS を過ぎた)ものだけ
+          { status: "uploading", createdAt: { lt: new Date(Date.now() - STALE_UPLOAD_MS) } },
+        ],
+      },
       data: { status: "discarding" },
     });
     if (claimed.count !== 1) {

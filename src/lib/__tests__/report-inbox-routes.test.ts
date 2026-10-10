@@ -355,7 +355,11 @@ describe("削除", () => {
     const res = await itemDELETE(new Request("http://t/x") as unknown as NextRequest, ctx());
     expect(res.status).toBe(200);
     const calls = db.reportInboxItem.updateMany.mock.calls.map((c: unknown[]) => c[0]);
-    expect(calls[0]).toEqual({ where: { id: "item-1", status: { in: ["pending", "discarding", "uploading"] } }, data: { status: "discarding" } });
+    expect(calls[0].where.OR[0]).toEqual({ status: { in: ["pending", "discarding"] } });
+    // ★取り込み中は、止まっていると判断できる(1時間を過ぎた)ものだけ削除できる(@codex PR#500 11巡目)
+    expect(calls[0].where.OR[1].status).toBe("uploading");
+    expect(Date.now() - calls[0].where.OR[1].createdAt.lt.getTime()).toBeGreaterThanOrEqual(60 * 60 * 1000 - 1000);
+    expect(calls[0].data).toEqual({ status: "discarding" });
     expect(storage.delete).toHaveBeenCalledWith("report-inbox/1-abc.pdf");
     expect(calls[1]).toMatchObject({ where: { id: "item-1", status: "discarding" }, data: { status: "discarded" } });
     // ★消せたら、元のファイル名(依頼者名を含み得る)・読み取った所在地なども消す(@codex PR#500 8巡目)

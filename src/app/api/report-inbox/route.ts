@@ -26,6 +26,7 @@ import {
   propertyScopeWhere,
   reportInboxStorageKey,
   SCRUB_ON_DISCARD,
+  STALE_UPLOAD_MS,
 } from "@/lib/report-inbox/access";
 import { extractReportClues } from "@/lib/report-inbox/extract";
 import { removeFileAndVerify } from "@/lib/report-inbox/remove-file";
@@ -41,11 +42,6 @@ import { canAccessPropertyRecord } from "@/lib/property-access";
 
 /** 一覧の1ページの件数(候補探しは1件ずつ DB を引くので、ページを小さく保つ・@codex PR#500)。 */
 export const PAGE_SIZE = 20;
-/**
- * 取り込みが途中で止まった(記録は作ったがファイルを置き終えていない)とみなすまでの時間。
- * これより新しい「取り込み中」は、いま取り込んでいる最中なので一覧に出さない。
- */
-const STALE_UPLOAD_MS = 10 * 60 * 1000;
 
 /**
  * 一覧に出す行: 未処理・削除が途中で止まったもの・取り込みが途中で止まったもの。
