@@ -1642,3 +1642,54 @@ describe("保護された書類の守りは、通常の添付として登録し�
     expect(await authorizeUploadAccess({ key: KEY, session: officeStaff, permissions: allPii, prisma })).toBe("ok");
   });
 });
+
+describe("配信の扱い(no-store・定型名)も外れない(@codex PR#500 10巡目)", () => {
+  const att = (o: Partial<Att> & { createdAt?: Date; registryCertificateType?: string | null }): Att =>
+    ({
+      id: "x",
+      fileUrl: "/uploads/properties/p1/paste-import/9.pdf",
+      isDeleted: false,
+      targetType: "property",
+      targetId: "p1",
+      propertyId: "p1",
+      type: "general",
+      ...o,
+    }) as Att;
+  const created = new Date("2026-10-10T03:00:00Z");
+
+  it.each(["report", "referral"] as const)("★削除済みの %s を通常の添付として登録し直しても、保護された配信のまま", async (type) => {
+    const prisma = makeDb({
+      attachments: [att({ id: "old", isDeleted: true, type }), att({ id: "new", createdAt: created })],
+    });
+    expect(await resolveProtectedServeMeta("properties/p1/paste-import/9.pdf", prisma)).toEqual({
+      kind: type,
+      attachmentId: "new",
+      propertyId: "p1",
+      createdAt: created,
+    });
+  });
+
+  it("★削除済みの謄本を登録し直しても、謄本の配信のまま", async () => {
+    const prisma = makeDb({
+      attachments: [
+        att({ id: "old", isDeleted: true, type: "registry", registryCertificateType: "owner" }),
+        att({ id: "new", createdAt: created }),
+      ],
+    });
+    expect(await resolveProtectedServeMeta("properties/p1/paste-import/9.pdf", prisma)).toMatchObject({
+      kind: "registry",
+      attachmentId: "new",
+      certificateType: "owner",
+    });
+  });
+
+  it("受け取り箱の置き場所のファイルは、通常の添付として登録されていても査定報告書の配信", async () => {
+    const prisma = makeDb({ attachments: [att({ id: "g", fileUrl: "/uploads/report-inbox/1-abc.pdf", createdAt: created })] });
+    expect(await resolveProtectedServeMeta("report-inbox/1-abc.pdf", prisma)).toMatchObject({ kind: "report", attachmentId: "g" });
+  });
+
+  it("保護の履歴が無い通常の添付は、これまでどおり保護しない(null)", async () => {
+    const prisma = makeDb({ attachments: [att({ id: "g" })] });
+    expect(await resolveProtectedServeMeta("properties/p1/paste-import/9.pdf", prisma)).toBeNull();
+  });
+});

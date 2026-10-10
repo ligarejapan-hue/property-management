@@ -304,7 +304,12 @@ describe("添付", () => {
     expect(callOrder.indexOf("lockPropertyRow")).toBeLessThan(callOrder.indexOf("attachment.create"));
     expect(db.reportInboxItem.updateMany.mock.calls[0][0].where).toEqual({ id: "item-1", status: "pending" });
     // ★元のファイル名(依頼者名を含み得る)は添付の時点で消す
-    expect(db.reportInboxItem.updateMany.mock.calls[0][0].data.fileName).toBe("(処理済み)");
+    expect(db.reportInboxItem.updateMany.mock.calls[0][0].data).toMatchObject({
+      fileName: "(処理済み)",
+      buildingName: null,
+      roomNo: null,
+      address: null,
+    });
   });
 
   it("★すでに添付・削除済み(同時に押した2人目)は 409・添付を作らない", async () => {

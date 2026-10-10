@@ -11,7 +11,7 @@ import {
 import { writeAuditLog } from "@/lib/audit";
 import { lockPropertyRow } from "@/lib/property-record-guard";
 import { canAccessPropertyRecord } from "@/lib/property-access";
-import { assertReportInboxAccess, SCRUBBED_FILE_NAME } from "@/lib/report-inbox/access";
+import { assertReportInboxAccess, SCRUB_ON_DISCARD } from "@/lib/report-inbox/access";
 import { REPORT_ATTACHMENT_TYPE, reportDisplayName } from "@/lib/attachments/report-display-name";
 
 // ---------- POST /api/report-inbox/:id/attach  { propertyId } ----------
@@ -78,7 +78,8 @@ export async function POST(request: NextRequest, { params }: { params: Promise<{
             propertyId,
             resolvedBy: session.id,
             resolvedAt: new Date(),
-            fileName: SCRUBBED_FILE_NAME,
+            // 読み取った手がかりも、物件と添付が決まった時点で要らない(@codex PR#500 10巡目)。
+            ...SCRUB_ON_DISCARD,
           },
         });
         if (claimed.count !== 1) throw new AlreadyResolved();

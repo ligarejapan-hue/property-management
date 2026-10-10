@@ -486,9 +486,21 @@ export async function resolveProtectedServeMeta(
       createdAt: true,
     },
   });
+  // ⚠配信の扱い(キャッシュさせない・定型名)も**守りと同じく外れない**(@codex PR#500 10巡目)。
+  //   保護された添付を削除して同じファイルを通常の添付として登録し直しても、
+  //   削除済みの記録の種類(または受け取り箱の置き場所)を引き継いで no-store で配る。
+  type Row = (typeof attachments)[number];
+  let firstActive: Row | null = null;
+  let protectedHistory: Row | null = null;
   for (const a of attachments) {
-    if (a.isDeleted) continue;
     if (resolveStoredFileUrlToKey(a.fileUrl) !== key) continue;
+    if (a.isDeleted) {
+      if (protectedHistory === null && (a.type === "registry" || isOwnerPiiDocumentType(a.type))) {
+        protectedHistory = a;
+      }
+      continue;
+    }
+    firstActive ??= a;
     if (a.type === "registry") {
       return {
         kind: "registry",
@@ -507,6 +519,26 @@ export async function resolveProtectedServeMeta(
         createdAt: a.createdAt ?? null,
       };
     }
+  }
+  if (firstActive !== null) {
+    const active = firstActive;
+    const base = {
+      attachmentId: active.id,
+      propertyId: active.propertyId ?? active.targetId ?? null,
+      createdAt: active.createdAt ?? null,
+    };
+    if (protectedHistory?.type === "registry") {
+      return {
+        kind: "registry",
+        isRegistry: true,
+        ...base,
+        certificateType: protectedHistory.registryCertificateType ?? null,
+      };
+    }
+    if (protectedHistory?.type === "referral" || protectedHistory?.type === "report") {
+      return { kind: protectedHistory.type, ...base };
+    }
+    if (key.startsWith("report-inbox/")) return { kind: "report", ...base };
   }
   return null;
 }

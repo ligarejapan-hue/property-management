@@ -112,7 +112,7 @@ describe("findReportCandidates(DB から読む)", () => {
 });
 
 describe("searchPropertiesForReport(手で探す)", () => {
-  it("★空白で区切った語をすべて含む物件。部屋番号でも絞れる(半角・全角・号室)", async () => {
+  it("★空白で区切った語をすべて含む物件。部屋番号でも絞れる(半角・全角・号/号室・空白入りも「含む」で拾う)", async () => {
     const property = { findMany: vi.fn(async () => []) };
     await searchPropertiesForReport({ property }, "東急ドエル　３０２号室", {});
     const where = (property.findMany.mock.calls[0] as unknown as [{ where: { AND: unknown[] } }])[0].where;
@@ -122,14 +122,16 @@ describe("searchPropertiesForReport(手で探す)", () => {
         OR: [
           { address: { contains: "東急ドエル", mode: "insensitive" } },
           { buildingName: { contains: "東急ドエル", mode: "insensitive" } },
-          { roomNo: { in: ["東急ドエル", "東急ドエル", "東急ドエル号室", "東急ドエル号室"] } },
+          { roomNo: { contains: "東急ドエル" } },
+          { roomNo: { contains: "東急ドエル" } },
         ],
       },
       {
         OR: [
           { address: { contains: "302号室", mode: "insensitive" } },
           { buildingName: { contains: "302号室", mode: "insensitive" } },
-          { roomNo: { in: ["302", "３０２", "302号室", "３０２号室"] } },
+          { roomNo: { contains: "302" } },
+          { roomNo: { contains: "３０２" } },
         ],
       },
       {},

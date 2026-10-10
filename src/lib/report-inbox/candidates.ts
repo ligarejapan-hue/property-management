@@ -177,8 +177,11 @@ export async function searchPropertiesForReport(
             OR: [
               { address: { contains: t, mode: "insensitive" } },
               { buildingName: { contains: t, mode: "insensitive" } },
-              // ⚠本番の物件は全角で入っていることが多いので、半角・全角の両方で引く。
-              ...(room !== "" ? [{ roomNo: { in: [room, toFullWidth(room), `${room}号室`, `${toFullWidth(room)}号室`] } }] : []),
+              // ⚠部屋番号は「101」「１０１」「101号」「101 号室」など書き方がまちまち(@codex PR#500 10巡目)。
+              //   半角・全角の両方で「含む」かを見る(建物名などの他の語と AND なので広がりすぎない)。
+              ...(room !== ""
+                ? [{ roomNo: { contains: room } }, { roomNo: { contains: toFullWidth(room) } }]
+                : []),
             ],
           };
         }),
