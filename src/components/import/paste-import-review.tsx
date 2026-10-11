@@ -748,7 +748,7 @@ export function PasteImportReview({
             data-section="owner-candidates-truncated"
             className="mb-3 rounded-md border border-amber-400 bg-amber-50 px-3 py-2 text-sm text-amber-800 dark:border-amber-500 dark:bg-amber-950/40 dark:text-amber-300"
           >
-            同名の候補が多すぎて確認できませんでした。所有者一覧から手で確認してください。
+            同名の候補が多すぎて確認できませんでした。下の「新しい所有者として登録する」か「所有者なしで登録する」を選び、登録したあと物件の画面の所有者欄で確かめてください。
           </div>
         )}
 

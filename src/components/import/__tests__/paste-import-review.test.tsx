@@ -1016,7 +1016,9 @@ describe("候補を確認しきれなかったことを画面で伝える（21�
     );
     expect(out).toContain('data-section="owner-candidates-truncated"');
     expect(out).toContain("同名の候補が多すぎて確認できませんでした");
-    expect(out).toContain("所有者一覧から手で確認してください");
+    expect(out).toContain("登録したあと物件の画面の所有者欄で確かめてください");
+    // 所有者の一覧画面は無い=存在しない画面へ案内しない(発注者 2026-10-12)。
+    expect(out).not.toContain("所有者一覧から");
   });
 
   it("★普通に候補ゼロのときは出さない（「候補なし」と区別する）", () => {
