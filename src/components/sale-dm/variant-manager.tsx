@@ -20,6 +20,7 @@ import {
   STRENGTH_OPTIONS,
 } from "@/lib/sale-dm-letter/adjust-model";
 import { AiTextSteps } from "@/components/sale-dm/ai-text-steps";
+import ScenarioEditLink from "@/components/sale-dm/scenario-edit-link";
 import { guideTargetIds } from "@/lib/sale-dm-letter/step-guide";
 import { isScenarioCampaignView } from "@/lib/sale-dm-letter/scenario-campaign-ui";
 
@@ -325,7 +326,7 @@ export default function SaleDmVariantManager({
           {letter.frozen && letter.bodyTemplate ? (
             <p className="mt-2 rounded bg-amber-50 px-2 py-1.5 text-amber-800">
               {scenario
-                ? "この種類の手紙はすでに送付の実績があるため、文面は変更できません。文面を変えるときは「DMの種類」の画面で直し、新しい発送を作ってください。"
+                ? <>この種類の手紙はすでに送付の実績があるため、文面は変更できません。文面を変えるときは「DMの種類」の画面で直し、新しい発送を作ってください。<ScenarioEditLink scenarioId={letterFor.scenarioId} /></>
                 : "この型はすでに送付の実績があるため、文面は変更できません。文面を変えるときは新しい型を追加してください。"}
               なお、保存済みの文面を「まだ本文が入っていない宛先」へ入れ直すことはできます（下のボタン）。
             </p>

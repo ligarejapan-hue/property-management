@@ -131,7 +131,7 @@ export default function AgentsPage() {
               {shown && !shown.failed && shown.hits.length > 0 && <AgentSearchHits hits={shown.hits} />}
               {shown && !shown.failed && shown.hits.length === 0 && (
                 <p className="text-sm text-gray-500 dark:text-gray-400">
-                  見つかりません(しまった業者は検索に出ません。「しまった業者」の一覧で探してください)。
+                  見つかりません(しまった業者は検索に出ません。<button type="button" onClick={() => { setQuery(""); setFilter("archived"); }} className="font-semibold underline underline-offset-2">「しまった業者」の一覧</button>で探してください)。
                 </p>
               )}
               {canWrite && createAction !== "none" && (

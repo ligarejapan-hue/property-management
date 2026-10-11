@@ -1,12 +1,13 @@
 "use client";
 
-import { useState } from "react";
+import { useState, type ReactNode } from "react";
+import RoleLink from "@/components/ui/role-link";
 import { PageHeader } from "@/components/ui/page-header";
 import { ChevronDown, ChevronRight } from "lucide-react";
 
 interface HelpSection {
   title: string;
-  description: string;
+  description: ReactNode;
 }
 
 const helpSections: HelpSection[] = [
@@ -17,8 +18,9 @@ const helpSections: HelpSection[] = [
   },
   {
     title: "現地登録の使い方",
-    description:
-      "現地調査時に物件情報を登録する際は、物件一覧画面から「新規登録」ボタンを押し、住所・地番・種別などの基本情報を入力してください。写真の添付や位置情報の記録も可能です。（Phase 2以降で実装予定）",
+    description: (
+      <>現地調査時に物件情報を登録する際は、<RoleLink href="/properties" minRole="office_staff">物件一覧画面</RoleLink>から「新規登録」ボタンを押し、住所・地番・種別などの基本情報を入力してください。写真の添付や位置情報の記録も可能です。（Phase 2以降で実装予定）</>
+    ),
   },
   {
     title: "候補確認について",
@@ -37,18 +39,21 @@ const helpSections: HelpSection[] = [
   },
   {
     title: "CSV出力ルール",
-    description:
-      "CSV出力は物件一覧画面の「エクスポート」ボタンから実行できます。出力されるデータは、ログインユーザーの権限レベルに応じてフィルタリングされます。個人情報を含むフィールドは権限に基づいてマスク処理されます。（Phase 2以降で実装予定）",
+    description: (
+      <>CSV出力は<RoleLink href="/properties" minRole="office_staff">物件一覧画面</RoleLink>の「エクスポート」ボタンから実行できます。出力されるデータは、ログインユーザーの権限レベルに応じてフィルタリングされます。個人情報を含むフィールドは権限に基づいてマスク処理されます。（Phase 2以降で実装予定）</>
+    ),
   },
   {
     title: "取込手順",
-    description:
-      "外部データの取り込みは、CSV形式のファイルをアップロードすることで実施します。テンプレートファイルをダウンロードし、必要なデータを入力の上アップロードしてください。重複データの検出と既存データとのマージ処理が自動的に行われます。（Phase 2以降で実装予定）「貼り付けて物件化」画面では、メールやPDF、コピーしたウェブページの文章をそのまま貼り付けるだけで、読み取れた項目を自動で入力欄に埋めてくれます。登録前に内容を確認できます。",
+    description: (
+      <>外部データの取り込みは、CSV形式のファイルをアップロードすることで実施します。テンプレートファイルをダウンロードし、必要なデータを入力の上アップロードしてください。重複データの検出と既存データとのマージ処理が自動的に行われます。（Phase 2以降で実装予定）<RoleLink href="/import/paste" minRole="office_staff">「貼り付けて物件化」画面</RoleLink>では、メールやPDF、コピーしたウェブページの文章をそのまま貼り付けるだけで、読み取れた項目を自動で入力欄に埋めてくれます。登録前に内容を確認できます。</>
+    ),
   },
   {
     title: "権限とセキュリティ",
-    description:
-      "本システムでは4つの権限レベル（管理者・マネージャー・オペレーター・閲覧者）を設定できます。各権限レベルに応じて、閲覧可能な情報や実行可能な操作が異なります。管理者は「ユーザー管理」画面から権限の割り当てや変更を行えます。すべての操作は監査ログに記録されます。",
+    description: (
+      <>本システムでは4つの権限レベル（管理者・マネージャー・オペレーター・閲覧者）を設定できます。各権限レベルに応じて、閲覧可能な情報や実行可能な操作が異なります。管理者は<RoleLink href="/admin/users" minRole="admin">「ユーザー管理」画面</RoleLink>から権限の割り当てや変更を行えます。すべての操作は監査ログに記録されます。</>
+    ),
   },
   {
     title: "よくある質問 (FAQ)",

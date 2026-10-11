@@ -10,7 +10,9 @@
  * ⚠光らせる・吹き出しの位置合わせは DOM を直接触る(React の state を effect で書かない=
  *   react-hooks/set-state-in-effect を避け、開閉のたびに描き直しを起こさない)。
  */
-import { useEffect, useRef, useState, useSyncExternalStore } from "react";
+import { useEffect, useRef, useState, useSyncExternalStore, type ReactNode } from "react";
+import Link from "next/link";
+import RoleLink from "@/components/ui/role-link";
 import {
   currentGuideStep,
   guideStepIndex,
@@ -50,9 +52,9 @@ function subscribe(l: () => void) {
 const getSnapshot = () => (memoryOff ?? readOff());
 const getServerSnapshot = () => false;
 
-const STATE_MESSAGES: Partial<Record<SaleDmGuideState, string>> = {
-  no_recipients: "宛先がありません。物件一覧で、DM状態が「送付可」で住所のある所有者がいる物件を選び、売却DMを作り直してください。",
-  done: "すべて送付済みです。申込は「査定の申込」に届きます。",
+const STATE_MESSAGES: Partial<Record<SaleDmGuideState, ReactNode>> = {
+  no_recipients: <>宛先がありません。<RoleLink href="/properties" minRole="office_staff">物件一覧</RoleLink>で、DM状態が「送付可」で住所のある所有者がいる物件を選び、売却DMを作り直してください。</>,
+  done: <>すべて送付済みです。申込は<Link href="/properties/sale-dm/inquiries" className="font-semibold underline underline-offset-2">「査定の申込」</Link>に届きます。</>,
   done_excluded: "送れる宛先はすべて送付済みです。残りの宛先は拒否・宛先不明の記録があるため、印刷にも送付にも使えません。",
 };
 

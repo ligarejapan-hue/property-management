@@ -1,6 +1,7 @@
 "use client";
 
 import { use, useCallback, useEffect, useMemo, useState } from "react";
+import Link from "next/link";
 import { Loader2, Image as ImageIcon, Eye } from "lucide-react";
 import { PageHeader } from "@/components/ui/page-header";
 import { Button } from "@/components/ui/button";
@@ -91,7 +92,7 @@ export default function AdminDmScenarioDetailPage({ params }: { params: Promise<
     <div className="space-y-4">
       <PageHeader
         title={`DMの種類「${scenario.name}」`}
-        description={scenario.autoKey ? "この種類は、導入ルートから自動で選ばれます(削除はできません。止めるときは一覧で「使わない」にしてください)。" : undefined}
+        description={scenario.autoKey ? <>この種類は、導入ルートから自動で選ばれます(削除はできません。止めるときは<Link href="/admin/dm-scenarios" className="font-semibold underline underline-offset-2">一覧</Link>で「使わない」にしてください)。</> : undefined}
         back={{ href: "/admin/dm-scenarios", to: "DMの種類" }}
       />
       {!scenario.active && <p className="rounded bg-amber-50 px-3 py-2 text-sm text-amber-800 dark:bg-amber-950/40 dark:text-amber-200">この種類は「使わない」になっています。物件や発送では選べません。</p>}

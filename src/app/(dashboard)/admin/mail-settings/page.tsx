@@ -394,7 +394,7 @@ export default function MailSettingsPage() {
             className="w-full rounded-md border border-gray-300 px-2 py-1.5 text-sm dark:border-gray-700 dark:bg-gray-900 dark:text-gray-100"
           />
           <span className="mt-1 block text-xs text-gray-500">
-            薄い文字は、空欄のときに送る既定の文面です(差出人名・連絡先は「売却DM設定」の値)。会社名や連絡先も、ここに書いたとおりに送ります。
+            薄い文字は、空欄のときに送る既定の文面です(差出人名・連絡先は<Link href="/admin/sale-dm-settings" className="font-semibold underline underline-offset-2">「売却DM設定」</Link>の値)。会社名や連絡先も、ここに書いたとおりに送ります。
           </span>
         </Field>
         <div className="flex flex-wrap items-center gap-3">
