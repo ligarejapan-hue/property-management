@@ -18,7 +18,10 @@ import { lockScenarioForShare } from "@/lib/sale-dm-letter/scenario-guard";
 import { canAccessPropertyRecord, isPropertyScopedRole } from "@/lib/property-access";
 import {
   normalizeBuildingName,
+  normalizeUnitOnlyFields,
   supportsBuildingName,
+  supportsUnitFields,
+  UNIT_ONLY_PROPERTY_FIELDS,
 } from "@/lib/property-building-name";
 import { applyDisplayToOwner } from "@/lib/display-level";
 import {
@@ -363,7 +366,16 @@ export async function PATCH(
     //   - 種別だけ変えて物件名が消えたとき → 消えた事実が記録されない
     //   - 物件名を書き換えたとき → 変更前が常に「空」になる (上の select で是正)
     //   - 正規化(空白除去・上限切り詰め・対象外なら null)後の値でなく生の入力が残る
-    const persistedFields = { ...updateFields, ...buildingNamePatch };
+    // 区分専用の欄(部屋番号・現況・持分メモ・専有面積など)も「更新後の種別」で判定する(@codex #505 P2)。
+    // 区分マンション以外へ送られた値は null に落とし、種別を区分以外へ変えたときは残っている値も消す
+    // (物件名と同じ扱い・消した値は変更履歴に残る)。
+    const unitOnlySent: Record<string, unknown> = {};
+    for (const k of UNIT_ONLY_PROPERTY_FIELDS) {
+      if (k in updateFields) unitOnlySent[k] = (updateFields as Record<string, unknown>)[k];
+      else if (updateFields.propertyType !== undefined && !supportsUnitFields(effectiveType)) unitOnlySent[k] = null;
+    }
+    const unitOnlyPatch = normalizeUnitOnlyFields(effectiveType, unitOnlySent) as Partial<typeof updateFields>;
+    const persistedFields = { ...updateFields, ...unitOnlyPatch, ...buildingNamePatch };
 
     // 棟へのつなぎ直しが要るか(設計 2026-10-04 §4.4)。物件名・種別・住所のどれかが変わったとき、
     // または画面が棟を選んで送ってきたときだけ。⚠メモだけの保存で棟を触らない。
