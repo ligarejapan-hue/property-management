@@ -204,7 +204,7 @@ describe("配線 — 同じ判定を UI と API の両方が通る", () => {
     expect(create).toMatch(
       /const buildingName = normalizeBuildingName\(data\.propertyType, data\.buildingName\)/,
     );
-    expect(create).toMatch(/data: \{ \.\.\.data, buildingName, createdBy: session\.id \}/);
+    expect(create).toMatch(/data: \{ \.\.\.data, buildingName, roomNo, createdBy: session\.id \}/);
     const update = read("src/app/api/properties/[id]/route.ts");
     expect(update).toMatch(/normalizeBuildingName\(\s*effectiveType/);
     // 種別だけ対象外へ変えた更新でも、残っている物件名を消す
@@ -217,9 +217,11 @@ describe("配線 — 同じ判定を UI と API の両方が通る", () => {
     // 選ばないと、書き換えても履歴が「空 → 〇〇」になり元の名前が残らない。
     expect(src).toMatch(/buildingName: true,/);
     // 履歴は正規化後の値を混ぜた persistedFields から作る。
+    // 区分専用の欄も同じ判定(normalizeUnitOnlyFields)を通した値を混ぜる(@codex #505 P2)。
     expect(src).toMatch(
-      /const persistedFields = \{ \.\.\.updateFields, \.\.\.buildingNamePatch \}/,
+      /const persistedFields = \{ \.\.\.updateFields, \.\.\.unitOnlyPatch, \.\.\.buildingNamePatch \}/,
     );
+    expect(src).toMatch(/const unitOnlyPatch = normalizeUnitOnlyFields\(effectiveType, unitOnlySent\)/);
     expect(src).toMatch(/Object\.entries\(persistedFields\)/);
     // 保存も同じ値を使う (二重に組み立てない = 履歴と実データがずれない)。
     expect(src).toMatch(/data: \{\s*\.\.\.persistedFields,/);

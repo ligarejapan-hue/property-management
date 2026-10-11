@@ -55,6 +55,8 @@ export default function NewPropertyModal({ onClose, typeFilter, onCreated }: Pro
   const [buildingName, setBuildingName] = useState("");
   // 物件名から棟へつなぐ選び方(区分マンションのときだけ使う)。候補を選ぶ/「新しい棟」で変わる。
   const [buildingChoice, setBuildingChoice] = useState<BuildingChoice>(AUTO_CHOICE);
+  // 部屋番号(任意)。区分マンションのときだけ入力欄を出す(発注者の指示 2026-10-11)。
+  const [roomNo, setRoomNo] = useState("");
   const [introductionRoute, setIntroductionRoute] = useState("");
   const [note, setNote] = useState("");
   const [submitting, setSubmitting] = useState(false);
@@ -85,6 +87,11 @@ export default function NewPropertyModal({ onClose, typeFilter, onCreated }: Pro
       setError(BUILDING_NAME_TOO_LONG_MESSAGE);
       return;
     }
+    // 部屋番号も入力欄では打ち切らない(物件名と同じ)。整えてから測る。
+    if (propertyType === "apartment_unit" && roomNo.trim().length > 50) {
+      setError("部屋番号は50文字以内で入力してください");
+      return;
+    }
 
     setSubmitting(true);
     try {
@@ -94,6 +101,7 @@ export default function NewPropertyModal({ onClose, typeFilter, onCreated }: Pro
         address: address.trim(),
         lotNumber: lotNumber.trim() || null,
         buildingName: normalizeBuildingName(propertyType, buildingName),
+        roomNo: propertyType === "apartment_unit" ? roomNo.trim() || null : null,
         introductionRoute: introductionRoute || null,
         note: note.trim() || null,
         buildingChoice: propertyType === "apartment_unit" ? buildingChoice : undefined,
@@ -146,6 +154,7 @@ export default function NewPropertyModal({ onClose, typeFilter, onCreated }: Pro
                 // ⚠対象外の種別に変えたら物件名を**その場で消す**。隠すだけだと
                 // 画面に無い値を送ることになり、入力した本人にも分からない。
                 if (!supportsBuildingName(next)) setBuildingName("");
+                if (next !== "apartment_unit") setRoomNo("");
                 // 棟の選び方は種別ごとの話なので、種別を変えたら自動に戻す。
                 setBuildingChoice(AUTO_CHOICE);
               }}
@@ -213,6 +222,28 @@ export default function NewPropertyModal({ onClose, typeFilter, onCreated }: Pro
                   {BUILDING_NAME_TOO_LONG_MESSAGE}
                 </p>
               )}
+            </div>
+          )}
+
+          {/* 部屋番号 — 区分マンションのときだけ出す (任意)。 */}
+          {propertyType === "apartment_unit" && (
+            <div>
+              <label
+                htmlFor="new-property-room-no"
+                className="mb-1 block text-sm font-medium text-gray-700 dark:text-gray-200"
+              >
+                部屋番号 <span className="text-xs text-gray-400 dark:text-gray-500">任意</span>
+              </label>
+              <input
+                id="new-property-room-no"
+                data-testid="new-property-room-no"
+                type="text"
+                value={roomNo}
+                onChange={(e) => setRoomNo(e.target.value)}
+                disabled={submitting}
+                placeholder="例: 201"
+                className="w-full rounded-md border border-gray-300 dark:border-gray-700 bg-white dark:bg-gray-900 px-3 py-2 text-sm text-gray-900 dark:text-gray-100 placeholder:text-gray-400 dark:placeholder:text-gray-500 focus:border-indigo-500 focus:outline-none focus:ring-1 focus:ring-indigo-500 disabled:bg-gray-50 dark:disabled:bg-gray-800"
+              />
             </div>
           )}
 

@@ -3776,6 +3776,8 @@ export async function createProperty(data: {
   lotNumber?: string | null;
   /** 物件名(任意)。集合住宅の種別のときだけ値が入る。 */
   buildingName?: string | null;
+  /** 部屋番号(任意)。区分マンションのときだけ値が入る。 */
+  roomNo?: string | null;
   introductionRoute?: string | null;
   note?: string | null;
   /** 物件名から棟へつなぐ選び方(区分マンションのときだけ)。省略=auto。 */

@@ -14,7 +14,7 @@ import {
   propertyListQuerySchema,
   createPropertySchema,
 } from "@/lib/validators";
-import { normalizeBuildingName } from "@/lib/property-building-name";
+import { normalizeBuildingName, normalizeUnitOnlyFields } from "@/lib/property-building-name";
 import { applyBuildingLink, writeBuildingLinkAudit } from "@/lib/building-link/apply";
 import { AUTO_CHOICE } from "@/lib/building-link/resolve";
 import {
@@ -165,11 +165,13 @@ export async function POST(request: NextRequest) {
     // **画面に出ないデータが DB に残る**(誰も直せず、CSV 出力や DM 差込で
     // 初めて表に出る)。判定は UI と同じ純関数を通す。
     const buildingName = normalizeBuildingName(data.propertyType, data.buildingName);
+    // 部屋番号も同じ。区分マンション専用の欄の決まり(normalizeUnitOnlyFields)を通す。
+    const { roomNo } = normalizeUnitOnlyFields(data.propertyType, { roomNo: data.roomNo ?? null });
 
     // 作成と棟へのつなぎは同じトランザクション(片方だけ残らないように・設計 2026-10-04 §4.4)。
     const { property, buildingLink } = await prisma.$transaction(async (tx) => {
       const created = await tx.property.create({
-        data: { ...data, buildingName, createdBy: session.id },
+        data: { ...data, buildingName, roomNo, createdBy: session.id },
         select: { id: true },
       });
       const buildingLink = await applyBuildingLink(tx, {

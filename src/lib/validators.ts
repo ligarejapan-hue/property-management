@@ -198,6 +198,9 @@ export const createPropertySchema = z.object({
     .max(BUILDING_NAME_MAX_LENGTH, "物件名が長すぎます")
     .optional()
     .nullable(),
+  // 部屋番号(任意・区分マンションだけ)。種別に合わない値は保存側で null に落とす
+  // (normalizeUnitOnlyFields)。発注者の指示 2026-10-11。
+  roomNo: z.string().trim().max(50, "部屋番号は50文字以内で入力してください").transform((v) => (v === "" ? null : v)).optional().nullable(),
   realEstateNumber: clearOnlyRealEstateNumber,
   registryStatus: z.enum(["unconfirmed", "scheduled", "obtained"]).default("unconfirmed"),
   dmStatus: z.enum(["send", "hold", "no_send"]).default("hold"),
@@ -297,6 +300,11 @@ export const updatePropertySchema = z.object({
   floorNo: z.number().int().min(-10).max(200).optional().nullable(), // 地下の部屋があるため下限は負
   managementFee: z.number().int().min(0).max(10000000).optional().nullable(), // 円/月
   repairReserveFee: z.number().int().min(0).max(10000000).optional().nullable(), // 円/月
+  // 部屋番号・現況・持分メモ(2026-10-11 発注者のご指摘で追加=詳細に出ているのに直せなかった)。
+  // 空白だけなら空(null)にする(空文字を残さない)。
+  roomNo: z.string().trim().max(50, "部屋番号は50文字以内で入力してください").transform((v) => (v === "" ? null : v)).optional().nullable(),
+  occupancyStatus: z.enum(["vacant", "occupied", "unknown"]).optional().nullable(),
+  ownershipShareNote: z.string().max(500).optional().nullable(),
   // 棟の選び方(列ではない=保存前に取り除く)。省略=auto。
   buildingChoice: buildingChoiceSchema.optional(),
   version: z.number().int(), // optimistic locking
