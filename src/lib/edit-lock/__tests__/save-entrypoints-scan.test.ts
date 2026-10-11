@@ -92,7 +92,7 @@ const KNOWN_SAVE_SITES: Record<string, { label: string; headers: HeaderRequireme
     },
   },
   "src/app/(dashboard)/properties/[id]/page.tsx::PATCH /api/properties/[id]": {
-    label: "案件ステータス・導入ルートのプルダウン(runNoLockPropertyPatch)",
+    label: "案件ステータス・導入ルートのプルダウンと物件名から棟につなぐ確認(patchPropertyNoLock を共有)",
     headers: { inCall: /\.\.\.editLockHeaders\(/ },
   },
   "src/components/properties/registry-chiban-popup.tsx::PATCH /api/properties/[id]": {

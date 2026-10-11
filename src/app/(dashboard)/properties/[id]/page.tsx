@@ -35,6 +35,9 @@ import RegistryOwnerApplyButton from "@/components/properties/registry-owner-app
 import { isLandPropertyType } from "@/lib/registry-fetch/registry-target";
 import PropertyEditForm from "@/components/properties/property-edit-form";
 import { BuildingLinkNotice } from "@/components/buildings/building-link-notice";
+import BuildingLinkDialog from "@/components/buildings/building-link-dialog";
+import { buildingNameLinkMode } from "@/lib/building-link/link-dialog-model";
+import type { BuildingChoice } from "@/lib/building-link/resolve";
 import { takeBuildingLinkNotice } from "@/lib/building-link/notice";
 // ⚠apply.ts は prisma を読むサーバー側のファイル。型だけを読む。
 import type { BuildingLinkOutcome } from "@/lib/building-link/apply";
@@ -1076,6 +1079,36 @@ function BasicTab({
     property.propertyType === "unit";
   // 現況ラベルは shared 定数 (src/lib/property-types.ts) から参照
   const OCCUPANCY_LABELS = OCCUPANCY_STATUS_LABELS;
+  // 物件名から棟へ(発注者の指示 2026-10-11): つながっていれば棟の画面へのリンク、
+  // つながっていない区分マンションは確認(候補から選ぶ/新しく作る)を開いてつなぐ。
+  const router = useRouter();
+  const nameMode = buildingNameLinkMode({
+    propertyType: property.propertyType,
+    buildingName: property.buildingName,
+    building: property.building,
+    canWrite,
+    lockedByOther: editLockHeld,
+  });
+  const [linkOpen, setLinkOpen] = useState(false);
+  const [linkSaving, setLinkSaving] = useState(false);
+  const [linkError, setLinkError] = useState<string | null>(null);
+  const connectBuilding = async (choice: BuildingChoice) => {
+    setLinkSaving(true);
+    setLinkError(null);
+    try {
+      const buildingId = await runBuildingLinkPatch(property.id, property.version, choice);
+      if (buildingId) {
+        router.push(`/buildings/${buildingId}`);
+        return;
+      }
+      setLinkOpen(false);
+      onRefresh();
+    } catch (err) {
+      setLinkError(err instanceof Error ? err.message : "棟につなげませんでした");
+    } finally {
+      setLinkSaving(false);
+    }
+  };
 
   return (
     <div className="grid grid-cols-1 gap-6 md:grid-cols-2">
@@ -1086,8 +1119,8 @@ function BasicTab({
         value={PROPERTY_TYPE_LABELS[property.propertyType] ?? property.propertyType}
       />
 
-      {/* Building link for units */}
-      {isUnit && property.building && (
+      {/* Building link for units(物件名が空の旧データだけ。物件名があれば物件名がリンクになる) */}
+      {isUnit && property.building && !property.buildingName && (
         <div className="md:col-span-2">
           <dt className="mb-1 text-xs font-medium uppercase tracking-wider text-gray-500 dark:text-gray-400">
             所属マンション
@@ -1107,8 +1140,62 @@ function BasicTab({
       <Field label="物件住所" value={property.address} />
       {/* 物件名は集合住宅の種別でのみ入る (任意)。値があるときだけ出す＝
           土地や戸建の詳細に空欄が増えない。 */}
-      {property.buildingName && (
+      {property.buildingName && nameMode === "text" && (
         <Field label="物件名" value={property.buildingName} />
+      )}
+      {property.buildingName && nameMode !== "text" && (
+        <div>
+          <dt className="mb-1 text-xs font-medium uppercase tracking-wider text-gray-500 dark:text-gray-400">
+            物件名
+          </dt>
+          <dd className="text-sm">
+            {nameMode === "link" && property.building ? (
+              <Link
+                href={`/buildings/${property.building.id}`}
+                data-testid="building-name-link"
+                className="inline-flex items-center gap-1 font-medium text-blue-600 underline hover:text-blue-800 dark:text-blue-400 dark:hover:text-blue-300"
+              >
+                <Building2 className="h-4 w-4" />
+                {property.buildingName}
+              </Link>
+            ) : (
+              <button
+                type="button"
+                data-testid="building-name-connect"
+                onClick={() => {
+                  setLinkError(null);
+                  setLinkOpen(true);
+                }}
+                className="inline-flex items-center gap-1 font-medium text-blue-600 underline hover:text-blue-800 dark:text-blue-400 dark:hover:text-blue-300"
+                title="棟（マンション1棟）につないで、棟の画面を開きます"
+              >
+                <Building2 className="h-4 w-4" />
+                {property.buildingName}
+              </button>
+            )}
+          </dd>
+          {nameMode === "connect" && (
+            <p className="mt-0.5 text-xs text-gray-500 dark:text-gray-400">
+              まだ棟につながっていません。押すと棟を選んでつなげます。
+            </p>
+          )}
+        </div>
+      )}
+      {linkOpen && property.buildingName && (
+        <BuildingLinkDialog
+          buildingName={property.buildingName}
+          address={property.address}
+          saving={linkSaving}
+          error={linkError}
+          onConfirm={(c) => void connectBuilding(c)}
+          onClose={() => {
+            setLinkOpen(false);
+            // ⚠失敗のあとは、閉じたときに読み直す(@codex P2)。失敗の直後に読み直すと画面が
+            //   読み込み中に切り替わって小窓ごと消え、理由が読めない。版番号の食い違いなども、
+            //   閉じて開き直せば新しい版で送れる。
+            if (linkError) onRefresh();
+          }}
+        />
       )}
       <Field label="地番" value={property.lotNumber} />
       <Field label="家屋番号" value={property.buildingNumber} />
@@ -2356,6 +2443,46 @@ function PropertyOwnerNoteEditor({ po }: { po: ApiPropertyOwner }) {
 }
 
 /**
+ * 物件名から棟につなぐ保存(基本情報の物件名の確認から)。棟の選び方だけを送る=物件の他の項目は変えない。
+ * 編集の鍵はほかの保存と同じヘッダで渡し、ほかの人が編集中ならサーバーが止める。
+ * @returns つないだ棟の id(つながらなかったときは null)
+ */
+export async function runBuildingLinkPatch(
+  propertyId: string,
+  version: number,
+  choice: BuildingChoice,
+): Promise<string | null> {
+  const body = (await patchPropertyNoLock(propertyId, version, { buildingChoice: choice })) as
+    | { buildingLink?: { building?: { id?: string } | null } | null }
+    | null;
+  return body?.buildingLink?.building?.id ?? null;
+}
+
+/**
+ * 物件の画面から、編集ウィンドウを開かずに保存する窓口(この画面で PATCH を叩くのはここだけ)。
+ * ⚠編集の鍵のヘッダは必ずここで付ける(保存の入口の走査はこの1箇所を見る)。
+ * 失敗はサーバーの文言と code を持たせて投げる。成功時は応答の本文を返す。
+ */
+async function patchPropertyNoLock(
+  propertyId: string,
+  version: number,
+  patch: Record<string, unknown>,
+): Promise<unknown> {
+  const res = await fetch(`/api/properties/${propertyId}`, {
+    method: "PATCH",
+    headers: { "Content-Type": "application/json", ...editLockHeaders() },
+    body: JSON.stringify({ ...patch, version }),
+  });
+  const body = await res.json().catch(() => null);
+  if (!res.ok) {
+    throw Object.assign(new Error(body?.error?.message ?? `エラー: ${res.status}`), {
+      code: codeFromErrorBody(body),
+    });
+  }
+  return body;
+}
+
+/**
  * 鍵を持たない入口(案件ステータス・導入ルートのプルダウン)の保存(仕様 6.5)。
  * ⚠合言葉は必ず `editLockHeaders()`(世代なし=このプルダウンは鍵を取らない)を通す
  *   (仕様 6.1・6入口すべてが通す契約)。
@@ -2413,17 +2540,7 @@ export async function runNoLockPropertyPatch(
   setSaving(true);
   setError(null);
   try {
-    const res = await fetch(`/api/properties/${propertyId}`, {
-      method: "PATCH",
-      headers: { "Content-Type": "application/json", ...editLockHeaders() },
-      body: JSON.stringify({ ...patch, version }),
-    });
-    if (!res.ok) {
-      const body = await res.json().catch(() => null);
-      throw Object.assign(new Error(body?.error?.message ?? `エラー: ${res.status}`), {
-        code: codeFromErrorBody(body),
-      });
-    }
+    await patchPropertyNoLock(propertyId, version, patch);
     onRefresh();
   } catch (err) {
     if (apiErrorCode(err) === "EDIT_LOCKED" && err instanceof Error) {
