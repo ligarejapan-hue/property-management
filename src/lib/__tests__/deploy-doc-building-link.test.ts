@@ -44,6 +44,12 @@ describe("物件名から棟の画面へ(2026-10-11): 資料の文言が画面�
     expect(linkModelSrc).toContain('return "つなぐ";');
     expect(manualSrc).toContain('<span class="btn">つなぐ</span>');
   });
+  it("古い棟を全部は確かめられなかったとき(partial)は新しい棟を作れないこともマニュアルにある(@codex P2)", () => {
+    const note = "古い棟を全部は確かめられなかったため、新しい棟は作れません。候補から選んでください。";
+    expect(linkDialogSrc).toContain(note);
+    expect(manualSrc).toContain(note);
+    expect(linkModelSrc).toContain("return allowsNewBuilding(state) ? { kind: \"new\" } : null;");
+  });
   it("ガイドにも物件名から棟の画面への項目がある", () => {
     expect(guideSrc).toContain("物件名から棟の画面へ（新）");
   });
