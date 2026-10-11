@@ -2,7 +2,7 @@ import { describe, it, expect } from "vitest";
 import { readFileSync } from "node:fs";
 import { resolve } from "node:path";
 import { salesFieldsFor } from "../property-edit-form";
-import { updatePropertySchema } from "@/lib/validators";
+import { createPropertySchema, updatePropertySchema } from "@/lib/validators";
 
 /**
  * 区分マンションの部屋番号・現況・持分メモを物件の編集から直せる(発注者のご指摘 2026-10-11
@@ -61,6 +61,28 @@ describe("編集の欄", () => {
   it("部屋番号は基本の欄にあり、区分マンション(新旧)のときだけ出す", () => {
     expect(formSrc).toMatch(/\{ key: "roomNo", label: "部屋番号", type: "text", section: "基本", maxLength: 50 \}/);
     expect(formSrc).toMatch(/if \(field\.key === "roomNo"\) \{\s*return isMansionUnit\(values\.propertyType\);\s*\}/);
+  });
+});
+
+describe("新規登録(発注者の指示 2026-10-11「種別が区分マンションの場合はつける」)", () => {
+  const modalSrc = read("src/components/properties/new-property-modal.tsx");
+  const postSrc = read("src/app/api/properties/route.ts");
+  it("登録の入力の決まりで部屋番号を受け取る(空白だけなら空・長すぎると止める)", () => {
+    const base = { propertyType: "apartment_unit", address: "東京都杉並区西荻北3-1-1" };
+    expect(createPropertySchema.parse({ ...base, roomNo: " 201 " }).roomNo).toBe("201");
+    expect(createPropertySchema.parse({ ...base, roomNo: "　 " }).roomNo).toBeNull();
+    expect(() => createPropertySchema.parse({ ...base, roomNo: "1".repeat(51) })).toThrow();
+  });
+  it("登録の画面では区分マンションのときだけ部屋番号の欄を出し、種別を変えたら消す", () => {
+    expect(modalSrc).toMatch(/\{propertyType === "apartment_unit" && \(\s*<div>\s*<label\s+htmlFor="new-property-room-no"/);
+    expect(modalSrc).toMatch(/if \(next !== "apartment_unit"\) setRoomNo\(""\);/);
+    expect(modalSrc).toContain('roomNo: propertyType === "apartment_unit" ? roomNo.trim() || null : null,');
+    // 入力欄では打ち切らず(物件名と同じ)、保存前に整えてから長さを見る
+    expect(modalSrc).toContain('if (propertyType === "apartment_unit" && roomNo.trim().length > 50) {');
+  });
+  it("保存では種別に合わない部屋番号を落とす(区分マンション専用の欄の決まりを通す)", () => {
+    expect(postSrc).toMatch(/const \{ roomNo \} = normalizeUnitOnlyFields\(data\.propertyType, \{ roomNo: data\.roomNo \?\? null \}\);/);
+    expect(postSrc).toContain("data: { ...data, buildingName, roomNo, createdBy: session.id },");
   });
 });
 

@@ -204,7 +204,7 @@ describe("配線 — 同じ判定を UI と API の両方が通る", () => {
     expect(create).toMatch(
       /const buildingName = normalizeBuildingName\(data\.propertyType, data\.buildingName\)/,
     );
-    expect(create).toMatch(/data: \{ \.\.\.data, buildingName, createdBy: session\.id \}/);
+    expect(create).toMatch(/data: \{ \.\.\.data, buildingName, roomNo, createdBy: session\.id \}/);
     const update = read("src/app/api/properties/[id]/route.ts");
     expect(update).toMatch(/normalizeBuildingName\(\s*effectiveType/);
     // 種別だけ対象外へ変えた更新でも、残っている物件名を消す

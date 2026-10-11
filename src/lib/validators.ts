@@ -198,6 +198,9 @@ export const createPropertySchema = z.object({
     .max(BUILDING_NAME_MAX_LENGTH, "物件名が長すぎます")
     .optional()
     .nullable(),
+  // 部屋番号(任意・区分マンションだけ)。種別に合わない値は保存側で null に落とす
+  // (normalizeUnitOnlyFields)。発注者の指示 2026-10-11。
+  roomNo: z.string().trim().max(50, "部屋番号は50文字以内で入力してください").transform((v) => (v === "" ? null : v)).optional().nullable(),
   realEstateNumber: clearOnlyRealEstateNumber,
   registryStatus: z.enum(["unconfirmed", "scheduled", "obtained"]).default("unconfirmed"),
   dmStatus: z.enum(["send", "hold", "no_send"]).default("hold"),
