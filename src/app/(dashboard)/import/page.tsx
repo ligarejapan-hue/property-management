@@ -1091,7 +1091,7 @@ export default function ImportPage() {
             <span className="ml-1 text-blue-700 dark:text-blue-300">— ①で作成した物件に所有者情報を紐づけます</span>
           </li>
           <li>
-            <span className="font-medium">③ 謄本PDF</span> は物件詳細または専用ページから登録します
+            <span className="font-medium">③ 謄本PDF</span> は物件詳細または<Link href="/import/registry-pdf" className="font-semibold underline underline-offset-2">専用ページ</Link>から登録します
           </li>
         </ol>
         <p className="mt-2 text-xs text-blue-700 dark:text-blue-300">

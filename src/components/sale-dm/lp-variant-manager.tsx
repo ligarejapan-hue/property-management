@@ -16,6 +16,7 @@ import { TONE_OPTIONS, LENGTH_OPTIONS, APPEAL_OPTIONS, STRENGTH_OPTIONS } from "
 import LpMediaPanel from "./lp-media-panel";
 import LpPreviewPanel from "./lp-preview-panel";
 import { AiTextSteps } from "@/components/sale-dm/ai-text-steps";
+import ScenarioEditLink from "@/components/sale-dm/scenario-edit-link";
 import { guideTargetIds } from "@/lib/sale-dm-letter/step-guide";
 import { isScenarioCampaignView } from "@/lib/sale-dm-letter/scenario-campaign-ui";
 
@@ -210,7 +211,7 @@ export default function SaleDmLpVariantManager({ campaign, onChanged }: { campai
             <button type="button" onClick={() => { setLetterFor(null); setLetter(null); setLetterNotice(null); }} className="text-gray-500 hover:underline">閉じる</button>
           </div>
           {letter.frozen && letter.rawTemplate ? (
-            <p className="mt-2 rounded bg-amber-50 px-2 py-1.5 text-amber-800">{scenario ? "この種類のご案内ページはすでに送付の実績があるため、文章は変更できません。文章を変えるときは「DMの種類」の画面で直し、新しい発送を作ってください。" : "このLP型はすでに送付の実績があるため、文章は変更できません。文章を変えるときは新しいLP型を追加してください。"}</p>
+            <p className="mt-2 rounded bg-amber-50 px-2 py-1.5 text-amber-800">{scenario ? <>この種類のご案内ページはすでに送付の実績があるため、文章は変更できません。文章を変えるときは「DMの種類」の画面で直し、新しい発送を作ってください。<ScenarioEditLink scenarioId={letterFor.scenarioId} /></> : "このLP型はすでに送付の実績があるため、文章は変更できません。文章を変えるときは新しいLP型を追加してください。"}</p>
           ) : (
             <>
               {letter.frozen && <p className="mt-2 rounded bg-amber-50 px-2 py-1.5 text-amber-800">このLP型には送付の実績がありますが、文章がまだ保存されていません。最初の1回だけ登録できます。</p>}

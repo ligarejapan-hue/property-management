@@ -1,12 +1,13 @@
 "use client";
 
 import { useEffect, useState } from "react";
+import Link from "next/link";
 import { Loader2, Trash2 } from "lucide-react";
 import { PageHeader } from "@/components/ui/page-header";
 import { ConfirmDialog } from "@/components/ui/confirm-dialog";
 import { fetchSaleDmLpAssets, deleteSaleDmLpAsset, LP_ASSET_URL, type SaleDmLpAsset } from "@/lib/api-client";
 
-/** LP用写真ライブラリの管理(管理者)。追加は売却DMの各LP型の「写真と図」から。ここは一覧と削除だけ。 */
+/** LP用写真ライブラリの管理(管理者)。追加は「DMの種類」の各種類(または各キャンペーンのLP型)の「写真と図」から。ここは一覧と削除だけ。 */
 export default function AdminLpAssetsPage() {
   const [assets, setAssets] = useState<SaleDmLpAsset[] | null>(null);
   const [target, setTarget] = useState<SaleDmLpAsset | null>(null);
@@ -35,7 +36,10 @@ export default function AdminLpAssetsPage() {
 
   return (
     <div>
-      <PageHeader title="LPの写真" description="売却DMのご案内ページ(LP)で使う写真の一覧です。追加は各キャンペーンのLP型「写真と図」から行います。LP型で使われている写真は削除できません。" />
+      <PageHeader
+        title="LPの写真"
+        description={<>売却DMのご案内ページ(LP)で使う写真の一覧です。追加は<Link href="/admin/dm-scenarios" className="font-semibold underline underline-offset-2">「DMの種類」</Link>の各種類の「写真と図」から行います。LP型で使われている写真は削除できません。</>}
+      />
       {error && <p className="mb-3 text-sm text-red-600">{error}</p>}
       {assets === null ? (
         error ? null : <p className="text-sm text-gray-500"><Loader2 className="inline h-4 w-4 animate-spin" /> 読み込み中</p>

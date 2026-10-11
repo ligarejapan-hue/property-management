@@ -63,7 +63,7 @@ export default function AdminDmScenariosPage() {
     <div>
       <PageHeader
         title="DMの種類"
-        description="売却DMの手紙とご案内ページ(LP)の文面を、種類ごとに1回だけ作って使い回します。物件ごとの種類は物件の画面の「DMの種類」で選べます(空欄なら導入ルートから自動で決まります)。"
+        description={<>売却DMの手紙とご案内ページ(LP)の文面を、種類ごとに1回だけ作って使い回します。物件ごとの種類は物件の画面の「DMの種類」で選べます(<Link href="/properties" className="font-semibold underline underline-offset-2">物件一覧</Link>から物件を開く・空欄なら導入ルートから自動で決まります)。</>}
       />
       {error && <p className="mb-3 text-sm text-red-600 dark:text-red-400">{error}</p>}
 

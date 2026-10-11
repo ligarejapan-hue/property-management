@@ -4,6 +4,7 @@ import { fileURLToPath } from "node:url";
 import { dirname, join } from "node:path";
 import { createElement } from "react";
 import { renderToStaticMarkup } from "react-dom/server";
+import { SessionProvider } from "next-auth/react";
 import { SaleDmStepGuide } from "../../components/sale-dm/step-guide";
 import { AiTextSteps } from "../../components/sale-dm/ai-text-steps";
 import { SALE_DM_GUIDE_STEPS, guideTargetCandidates } from "../sale-dm-letter/step-guide";
@@ -41,7 +42,10 @@ describe("手順の案内の帯(サーバー描画=案内は既定で出る)", (
     expect(html).not.toContain("申込は「査定の申込」に届きます");
   });
   it("宛先0件・全部送付済みは、手順の並びの代わりに一文", () => {
-    expect(renderToStaticMarkup(createElement(SaleDmStepGuide, { state: "no_recipients" }))).toContain("宛先がありません");
+    // 宛先なしの一文は「物件一覧」を役割つきのリンクで出す=ログイン情報の箱の中で描く。
+    const asOffice = (el: ReturnType<typeof createElement>) =>
+      createElement(SessionProvider, { session: { user: { role: "office_staff" }, expires: "2999-01-01T00:00:00.000Z" } } as never, el);
+    expect(renderToStaticMarkup(asOffice(createElement(SaleDmStepGuide, { state: "no_recipients" })))).toContain("宛先がありません");
     expect(renderToStaticMarkup(createElement(SaleDmStepGuide, { state: "done" }))).toContain("すべて送付済みです");
   });
 

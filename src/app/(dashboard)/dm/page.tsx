@@ -1,6 +1,7 @@
 "use client";
 
 import Link from "next/link";
+import type { ReactNode } from "react";
 import { useSession } from "next-auth/react";
 import { PageHeader } from "@/components/ui/page-header";
 import { USE_MOCK } from "@/lib/api-client";
@@ -22,14 +23,14 @@ import { Mail, MailX, FileSpreadsheet, Settings2 } from "lucide-react";
 interface Step {
   no: string;
   title: string;
-  body: string;
+  body: ReactNode;
   href: string;
   linkLabel: string;
   icon: React.ReactNode;
   /** この道具を使える役割。足りない人にはリンクを出さない。 */
   minRole: AppRole;
   /** 使えない人へ出す案内。 */
-  unavailable?: string;
+  unavailable?: ReactNode;
 }
 
 const STEPS: Step[] = [
@@ -75,15 +76,21 @@ const STEPS: Step[] = [
   {
     no: "STEP 4",
     title: "送ったあとの記録を整える",
-    body:
-      "反響や宛先不明の記録は、ふだんは各物件の「DM送付履歴」で行います。" +
-      "物件を削除した後に残った記録だけは、こちらで訂正・取消ができます。",
+    body: (
+      <>
+        反響や宛先不明の記録は、ふだんは各<Link href="/properties" className="font-semibold underline underline-offset-2">物件</Link>の「DM送付履歴」で行います。
+        物件を削除した後に残った記録だけは、こちらで訂正・取消ができます。
+      </>
+    ),
     href: "/admin/orphan-dm-logs",
     linkLabel: "送付記録の訂正を開く",
     icon: <MailX className="h-5 w-5" />,
     minRole: "admin",
-    unavailable:
-      "ふだんの記録は各物件の「DM送付履歴」で行えます。削除した物件の記録の訂正は管理者にご依頼ください。",
+    unavailable: (
+      <>
+        ふだんの記録は各<Link href="/properties" className="font-semibold underline underline-offset-2">物件</Link>の「DM送付履歴」で行えます。削除した物件の記録の訂正は管理者にご依頼ください。
+      </>
+    ),
   },
 ];
 
@@ -141,7 +148,7 @@ export default function DmMenuPage() {
       </ol>
 
       <p className="mt-6 text-xs text-gray-500 dark:text-gray-400">
-        送付済みの履歴は、各物件のページの「DM送付履歴」で確認できます。
+        送付済みの履歴は、各物件のページの「DM送付履歴」で確認できます(<Link href="/properties" className="font-semibold underline underline-offset-2">物件一覧</Link>から物件を開く)。
       </p>
     </div>
   );
