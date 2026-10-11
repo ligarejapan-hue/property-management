@@ -19,6 +19,29 @@ const noticeSrc = readRepoFile("src/lib/building-link/notice.ts");
 const hintSrc = readRepoFile("src/components/properties/photo-tab-building-hint.tsx");
 const buildingRouteSrc = readRepoFile("src/app/api/buildings/[id]/route.ts");
 const sidebarSrc = readRepoFile("src/components/layout/sidebar-model.tsx");
+const linkDialogSrc = readRepoFile("src/components/buildings/building-link-dialog.tsx");
+const linkModelSrc = readRepoFile("src/lib/building-link/link-dialog-model.ts");
+const propertyPageSrc = readRepoFile("src/app/(dashboard)/properties/[id]/page.tsx");
+
+describe("物件名から棟の画面へ(2026-10-11): 資料の文言が画面と同じ", () => {
+  it("つながっていない物件の物件名の下の案内", () => {
+    const hint = "まだ棟につながっていません。押すと棟を選んでつなげます。";
+    expect(propertyPageSrc).toContain(hint);
+    expect(manualSrc).toContain(hint);
+  });
+  it("確認の小窓のボタンと「新しい棟として作る」", () => {
+    for (const label of ["この棟につなぐ", "新しい棟を作ってつなぐ"]) {
+      expect(linkModelSrc).toContain(`"${label}"`);
+      expect(manualSrc).toContain(label);
+    }
+    expect(linkDialogSrc).toContain("新しい棟として作る");
+    expect(linkDialogSrc).toContain("やめる");
+    expect(manualSrc).toContain("「新しい棟として作る」");
+  });
+  it("ガイドにも物件名から棟の画面への項目がある", () => {
+    expect(guideSrc).toContain("物件名から棟の画面へ（新）");
+  });
+});
 
 describe("棟の自動つなぎ: 画面の文言が実装と同じ", () => {
   it("候補の一番下「新しい棟として登録する」", () => {
