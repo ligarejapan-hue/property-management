@@ -85,10 +85,30 @@ export const DETAIL_EXHAUSTED_LIMIT = 20;
 const JST_OFFSET_MS = 9 * 60 * 60 * 1000;
 const DAY_MS = 24 * 60 * 60 * 1000;
 
-/** 日本時間 22:00〜翌7:00 だけ動く(計画 G1)。 */
-export function inNightWindow(now: Date): boolean {
-  const h = new Date(now.getTime() + JST_OFFSET_MS).getUTCHours();
-  return h >= 22 || h < 7;
+/**
+ * 日本時間 22:00〜翌7:00 だけ動く(計画 G1)。
+ * `daytimeDays`(日本時間の日付 "YYYY-MM-DD")に入っている日は終日動く(祝日に昼も集める・発注者 2026-10-11)。
+ */
+export function inNightWindow(now: Date, daytimeDays: readonly string[] = []): boolean {
+  const jst = new Date(now.getTime() + JST_OFFSET_MS);
+  const h = jst.getUTCHours();
+  return h >= 22 || h < 7 || daytimeDays.includes(jst.toISOString().slice(0, 10));
+}
+
+/**
+ * 昼も動かす日の設定(`AGENT_REGISTRY_DAYTIME_DAYS="2026-10-11,2026-10-12"`)を読む。
+ * 実在する "YYYY-MM-DD" だけ拾い、それ以外(打ち間違い・"*" 等)は捨てる=毎日昼に動く読み方はしない。
+ */
+export function parseDaytimeDays(raw: string | undefined): string[] {
+  if (!raw) return [];
+  return raw
+    .split(",")
+    .map((s) => s.trim())
+    .filter((s) => {
+      if (!/^\d{4}-\d{2}-\d{2}$/.test(s)) return false;
+      const d = new Date(`${s}T00:00:00Z`);
+      return !Number.isNaN(d.getTime()) && d.toISOString().slice(0, 10) === s;
+    });
 }
 
 /** 一巡の名前=日本時間の年月 "YYYY-MM"。 */
@@ -150,11 +170,14 @@ export async function crawlStep(deps: {
   store: CrawlStore;
   now: () => Date;
   budget: StepBudget;
+  /** 昼も動かす日(日本時間の日付)。無ければ夜間だけ。 */
+  daytimeDays?: readonly string[];
 }): Promise<StepResult> {
   const { client, store, now, budget } = deps;
+  const daytimeDays = deps.daytimeDays ?? [];
   const t0 = now();
   const result: StepResult = { requests: 0, listed: 0, detailed: 0, stopped: null };
-  if (!inNightWindow(t0)) return { ...result, stopped: "outside_window" };
+  if (!inNightWindow(t0, daytimeDays)) return { ...result, stopped: "outside_window" };
 
   let states = alignStates(await store.loadStates(), t0);
   // dayOffUntil=この時刻までは先方に頼まない。続けて3回失敗した=翌晩まで/それより少ない=失敗から30分(待ち)。
@@ -201,7 +224,7 @@ export async function crawlStep(deps: {
 
   const stopReason = (): StepResult["stopped"] => {
     const t = now();
-    if (!inNightWindow(t)) return "outside_window";
+    if (!inNightWindow(t, daytimeDays)) return "outside_window";
     if (client.requestCount - startRequests >= budget.maxRequests) return "budget";
     if (t.getTime() - t0.getTime() >= budget.deadlineMs) return "budget";
     return null;

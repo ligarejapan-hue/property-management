@@ -5,6 +5,7 @@ import {
   crawlStep,
   cycleOf,
   inNightWindow,
+  parseDaytimeDays,
   nextNightStart,
   nightOf,
   type CrawlState,
@@ -157,6 +158,21 @@ describe("夜間の判定・一巡の名前", () => {
     expect(inNightWindow(new Date("2026-10-05T21:59:00Z"))).toBe(true); // 翌6:59
     expect(inNightWindow(new Date("2026-10-05T22:00:00Z"))).toBe(false); // 翌7:00
   });
+  it("昼も動かす日(日本時間の日付)を指定すると、その日は終日動く・ほかの日の昼は動かない(発注者 2026-10-11 祝日)", () => {
+    const days = ["2026-10-11", "2026-10-12"];
+    expect(inNightWindow(new Date("2026-10-11T05:00:00Z"))).toBe(false); // JST 10/11 14:00・指定なし
+    expect(inNightWindow(new Date("2026-10-11T05:00:00Z"), days)).toBe(true); // JST 10/11 14:00
+    expect(inNightWindow(new Date("2026-10-10T22:00:00Z"), days)).toBe(true); // JST 10/11 07:00
+    expect(inNightWindow(new Date("2026-10-12T14:59:00Z"), days)).toBe(true); // JST 10/12 23:59
+    expect(inNightWindow(new Date("2026-10-13T01:00:00Z"), days)).toBe(false); // JST 10/13 10:00
+    expect(inNightWindow(new Date("2026-10-10T05:00:00Z"), days)).toBe(false); // JST 10/10 14:00
+  });
+  it("昼も動かす日の設定の読み取り: 正しい日付だけ拾う(打ち間違いで毎日昼に動かない)", () => {
+    expect(parseDaytimeDays(undefined)).toEqual([]);
+    expect(parseDaytimeDays("")).toEqual([]);
+    expect(parseDaytimeDays(" 2026-10-11, 2026-10-12 ")).toEqual(["2026-10-11", "2026-10-12"]);
+    expect(parseDaytimeDays("2026-10-11,2026-1-1,abc,2026-13-01,2026-02-30,*")).toEqual(["2026-10-11"]);
+  });
   it("晩の名前: 22時と翌3時は同じ晩・翌22時は次の晩", () => {
     expect(nightOf(new Date("2026-10-05T13:00:00Z"))).toBe("2026-10-05"); // JST 10/5 22:00
     expect(nightOf(new Date("2026-10-05T18:00:00Z"))).toBe("2026-10-05"); // JST 10/6 03:00
@@ -177,6 +193,21 @@ describe("進め方", () => {
     const r = await crawlStep({ client, store, now: () => new Date("2026-10-05T03:00:00Z"), budget: BIG });
     expect(r.stopped).toBe("outside_window");
     expect(log).toEqual([]);
+  });
+
+  it("昼も動かす日に指定した日なら、昼でも進む(指定の無い日の昼は動かない)", async () => {
+    const { client, log } = fakeClient(smallSite());
+    const { store } = memoryStore();
+    const noon = () => new Date("2026-10-11T05:00:00Z"); // JST 10/11 14:00
+    const r = await crawlStep({ client, store, now: noon, budget: BIG, daytimeDays: ["2026-10-11"] });
+    expect(r.stopped).not.toBe("outside_window");
+    expect(r.requests).toBeGreaterThan(0);
+    expect(log.length).toBeGreaterThan(0);
+
+    const other = fakeClient(smallSite());
+    const r2 = await crawlStep({ client: other.client, store: memoryStore().store, now: noon, budget: BIG, daytimeDays: ["2026-10-12"] });
+    expect(r2.stopped).toBe("outside_window");
+    expect(other.log).toEqual([]);
   });
 
   it("一覧(5行政庁の全ページ)→詳細→一巡の締め、の順に最後まで進む", async () => {

@@ -136,6 +136,39 @@ describe("POST /api/agent-registry/crawl-run", () => {
     }
   });
 
+  it("★昼も動かす日(AGENT_REGISTRY_DAYTIME_DAYS)を、進め方と client の両方に渡す(片方だけだと昼に1回も取れない)", async () => {
+    const prevDays = process.env.AGENT_REGISTRY_DAYTIME_DAYS;
+    process.env.AGENT_REGISTRY_DAYTIME_DAYS = "2026-10-11, 2026-10-12, typo";
+    try {
+      await POST(req({ secret: SECRET }));
+      expect(crawlStep.mock.calls[0][0]).toMatchObject({ daytimeDays: ["2026-10-11", "2026-10-12"] });
+      const allow = createRegistryClient.mock.calls[0][0]?.allowRequest;
+      vi.useFakeTimers();
+      try {
+        vi.setSystemTime(new Date("2026-10-11T05:00:00Z")); // JST 10/11 14:00=指定日の昼
+        expect(allow!()).toBe(true);
+        vi.setSystemTime(new Date("2026-10-13T05:00:00Z")); // JST 10/13 14:00=指定の無い日の昼
+        expect(allow!()).toBe(false);
+      } finally {
+        vi.useRealTimers();
+      }
+    } finally {
+      if (prevDays === undefined) delete process.env.AGENT_REGISTRY_DAYTIME_DAYS;
+      else process.env.AGENT_REGISTRY_DAYTIME_DAYS = prevDays;
+    }
+  });
+
+  it("昼も動かす日が未設定なら、進め方には空の指定を渡す(夜間だけ)", async () => {
+    const prevDays = process.env.AGENT_REGISTRY_DAYTIME_DAYS;
+    delete process.env.AGENT_REGISTRY_DAYTIME_DAYS;
+    try {
+      await POST(req({ secret: SECRET }));
+      expect(crawlStep.mock.calls[0][0]).toMatchObject({ daytimeDays: [] });
+    } finally {
+      if (prevDays !== undefined) process.env.AGENT_REGISTRY_DAYTIME_DAYS = prevDays;
+    }
+  });
+
   it("★前の回がまだ走っていたら 409 で何もしない(先方へ2本同時にアクセスしない)", async () => {
     let release!: () => void;
     crawlStep.mockImplementationOnce(
@@ -169,12 +202,12 @@ describe("POST /api/agent-registry/crawl-run", () => {
     expect(proxy).toMatch(/PUBLIC_EXACT_PATHS = \[[\s\S]*"\/api\/agent-registry\/crawl-run"/);
   });
 
-  it("timer の設定例: 合言葉を argv に載せない・% は %% と書く・夜間だけ", () => {
+  it("timer の設定例: 合言葉を argv に載せない・% は %% と書く・終日10分ごと(夜間か・昼も動かす日かは route が決める)", () => {
     const svc = readFileSync(join(process.cwd(), "deploy/systemd/pm-agent-registry.service.example"), "utf8");
     expect(svc).toContain('printf "%%s" "x-agent-registry-secret: $AGENT_REGISTRY_CRAWL_SECRET"');
     expect(svc).toContain("-H @-");
     expect(svc).toContain("http://127.0.0.1:3000/api/agent-registry/crawl-run");
     const timer = readFileSync(join(process.cwd(), "deploy/systemd/pm-agent-registry.timer.example"), "utf8");
-    expect(timer).toMatch(/OnCalendar=\*-\*-\* 22,23,00,01,02,03,04,05,06:00\/10:00/);
+    expect(timer).toMatch(/^OnCalendar=\*-\*-\* \*:00\/10:00$/m);
   });
 });
