@@ -125,6 +125,24 @@ export function nightOf(at: Date): string {
   return new Date(at.getTime() + JST_OFFSET_MS - 12 * 60 * 60 * 1000).toISOString().slice(0, 10);
 }
 
+/**
+ * from と to のあいだに「動かない時間」(昼も動かす日でない日の日本時間 7:00〜22:00)をはさんだか。
+ * はさんだ=新しい区切り(失敗の数を数え直す)。昼も動かす日は前の晩・その日・次の晩が切れ目なく
+ * つながるので、正午や朝7時をまたいでも同じ区切り=続けての失敗は3回で止める(@codex #502)。
+ */
+export function crossedRestPeriod(from: Date, to: Date, daytimeDays: readonly string[] = []): boolean {
+  if (to.getTime() <= from.getTime()) return false;
+  const start = new Date(from.getTime() + JST_OFFSET_MS);
+  let day = Date.UTC(start.getUTCFullYear(), start.getUTCMonth(), start.getUTCDate()); // 日本時間の日付の 0:00(UTC表記)
+  for (; day - JST_OFFSET_MS < to.getTime(); day += DAY_MS) {
+    if (daytimeDays.includes(new Date(day).toISOString().slice(0, 10))) continue;
+    const restStart = day + 7 * 60 * 60 * 1000 - JST_OFFSET_MS;
+    const restEnd = day + 22 * 60 * 60 * 1000 - JST_OFFSET_MS;
+    if (restStart < to.getTime() && restEnd > from.getTime()) return true;
+  }
+  return false;
+}
+
 /** 次の晩の始まり(日本時間 22:00)。今が 23 時なら翌日の 22 時、深夜 3 時ならその日の 22 時。 */
 export function nextNightStart(now: Date): Date {
   const d = new Date(now.getTime() + JST_OFFSET_MS);
@@ -187,7 +205,7 @@ export async function crawlStep(deps: {
   }
   // 失敗の数はその晩のもの。前の晩の失敗(明け方の失敗の待ちが朝をまたいだ等)は持ち越さない(@codex #494)。
   const lastRun = states[0].lastRunAt;
-  const newNight = !!lastRun && nightOf(lastRun) !== nightOf(t0);
+  const newNight = !!lastRun && crossedRestPeriod(lastRun, t0, daytimeDays);
   if (states.some((s) => s.dayOffUntil) || (newNight && states[0].failStreak > 0)) {
     // 止めていた晩が明けた・新しい晩になった=失敗の回数を数え直す(次の晩も3回まで試せる・@codex #477)。
     // 同じ晩の30分の待ちが明けただけなら数え直さない(待ちをはさんでも続けての失敗は3回で晩じゅう止める)。
