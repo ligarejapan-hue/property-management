@@ -2,6 +2,7 @@ import { describe, it, expect } from "vitest";
 import {
   initialLinkChoice,
   allowsAutoLink,
+  shortNameLinkChoice,
   linkConfirmButtonLabel,
   buildingNameLinkMode,
   linkNeedsSuggestions,
@@ -72,4 +73,11 @@ describe("linkNeedsSuggestions(候補を探せる物件名か・@codex P2)", () 
     expect(linkNeedsSuggestions("A")).toBe(false);
     expect(linkConfirmButtonLabel({ kind: "auto" })).toBe("つなぐ");
   });
+});
+
+describe("shortNameLinkChoice(物件名が1文字で候補を探せないとき・@codex P2)", () => {
+  it("町丁目が分かれば自動の判断で送る", () =>
+    expect(shortNameLinkChoice("東京都品川区西五反田5丁目")).toEqual({ kind: "auto" }));
+  it("町丁目が読めなければ何も選ばない(サーバーが探さず新しく作り、重複するため)", () =>
+    expect(shortNameLinkChoice("")).toBeNull());
 });

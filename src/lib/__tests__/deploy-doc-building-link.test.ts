@@ -43,6 +43,9 @@ describe("物件名から棟の画面へ(2026-10-11): 資料の文言が画面�
     expect(manualSrc).toContain("物件名が短いため、候補は出せません");
     expect(linkModelSrc).toContain('return "つなぐ";');
     expect(manualSrc).toContain('<span class="btn">つなぐ</span>');
+    // 町丁目も読めないときは自動でつながない(@codex P2)
+    expect(linkDialogSrc).toContain("物件名が短く、住所から町丁目も読み取れないため、自動ではつなげません。");
+    expect(manualSrc).toContain("住所から町丁目も読み取れないときは自動ではつなげない");
   });
   it("棟が多くて候補を全部出せないとき(partial)は「自動で判断してつなぐ」を選べることもマニュアルにある(@codex P2)", () => {
     const option = "自動で判断してつなぐ（同じ町丁目の同じ名前の棟へ・無ければ新しく作る）";

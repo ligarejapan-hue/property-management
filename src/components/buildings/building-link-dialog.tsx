@@ -19,7 +19,13 @@ import {
   suggestQueryStringForArea,
   type SuggestResult,
 } from "@/lib/building-link/combobox-model";
-import { allowsAutoLink, initialLinkChoice, linkConfirmButtonLabel, linkNeedsSuggestions } from "@/lib/building-link/link-dialog-model";
+import {
+  allowsAutoLink,
+  initialLinkChoice,
+  linkConfirmButtonLabel,
+  linkNeedsSuggestions,
+  shortNameLinkChoice,
+} from "@/lib/building-link/link-dialog-model";
 import type { BuildingChoice } from "@/lib/building-link/resolve";
 import type { BuildingSuggestion } from "@/lib/building-link/suggest";
 
@@ -80,7 +86,7 @@ export default function BuildingLinkDialog({
   const suggestions = (state === "ready" || state === "partial") && result ? result.data : [];
   const allowNew = allowsNewBuilding(state);
   const choice: BuildingChoice | null = !searchable
-    ? { kind: "auto" }
+    ? shortNameLinkChoice(area)
     : picked ?? initialLinkChoice(suggestions, state, area);
   const isChosen = (c: BuildingChoice) =>
     choice !== null &&
@@ -116,9 +122,14 @@ export default function BuildingLinkDialog({
       <p className="text-sm text-gray-600 dark:text-gray-300">
         つなぐ棟を選んでください。つなぐと、棟の画面へ移ります。
       </p>
-      {!searchable && (
+      {!searchable && area !== "" && (
         <p className="mt-3 text-sm text-gray-600 dark:text-gray-300">
           物件名が短いため、候補は出せません。つなぐと、同じ町丁目に同じ名前の棟があればそこへつなぎ、無ければ新しく作ります。
+        </p>
+      )}
+      {!searchable && area === "" && (
+        <p className="mt-3 text-sm text-gray-600 dark:text-gray-300">
+          物件名が短く、住所から町丁目も読み取れないため、自動ではつなげません。物件の住所か物件名を直してからもう一度お試しください。
         </p>
       )}
       {searchable && state === "loading" && (

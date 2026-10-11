@@ -31,6 +31,14 @@ export function initialLinkChoice(
   return allowsAutoLink(state, area) ? { kind: "auto" } : null;
 }
 
+/**
+ * 物件名が短くて候補を探せないときの選び方(@codex P2)。町丁目が分かれば自動の判断(auto)、
+ * 読めなければ選ばない(サーバーは町丁目が分からないと探さずに新しく作るため、重複する)。
+ */
+export function shortNameLinkChoice(area: string): BuildingChoice | null {
+  return area !== "" ? { kind: "auto" } : null;
+}
+
 /** 「自動で判断してつなぐ」を出せるか: 候補を全部出せなかった(partial)・町丁目が分かるときだけ。 */
 export function allowsAutoLink(state: SuggestListState, area: string): boolean {
   return state === "partial" && area !== "";
