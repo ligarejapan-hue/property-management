@@ -44,11 +44,12 @@ describe("物件名から棟の画面へ(2026-10-11): 資料の文言が画面�
     expect(linkModelSrc).toContain('return "つなぐ";');
     expect(manualSrc).toContain('<span class="btn">つなぐ</span>');
   });
-  it("古い棟を全部は確かめられなかったとき(partial)は新しい棟を作れないこともマニュアルにある(@codex P2)", () => {
-    const note = "古い棟を全部は確かめられなかったため、新しい棟は作れません。候補から選んでください。";
-    expect(linkDialogSrc).toContain(note);
-    expect(manualSrc).toContain(note);
-    expect(linkModelSrc).toContain("return allowsNewBuilding(state) ? { kind: \"new\" } : null;");
+  it("棟が多くて候補を全部出せないとき(partial)は「自動で判断してつなぐ」を選べることもマニュアルにある(@codex P2)", () => {
+    const option = "自動で判断してつなぐ（同じ町丁目の同じ名前の棟へ・無ければ新しく作る）";
+    expect(linkDialogSrc).toContain(option);
+    expect(manualSrc).toContain(option);
+    // partial は候補が0件でも自動の判断で先へ進める(行き止まりにしない)
+    expect(linkModelSrc).toContain('return state === "partial" ? { kind: "auto" } : null;');
   });
   it("ガイドにも物件名から棟の画面への項目がある", () => {
     expect(guideSrc).toContain("物件名から棟の画面へ（新）");

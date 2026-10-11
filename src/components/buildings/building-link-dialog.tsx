@@ -176,9 +176,23 @@ export default function BuildingLinkDialog({
             </button>
           )}
           {state === "partial" && (
-            <p className="text-xs text-gray-500 dark:text-gray-400">
-              古い棟を全部は確かめられなかったため、新しい棟は作れません。候補から選んでください。
-            </p>
+            <>
+              <button
+                type="button"
+                role="radio"
+                aria-checked={isChosen({ kind: "auto" })}
+                disabled={saving}
+                className={rowClass(isChosen({ kind: "auto" }))}
+                onClick={() => setPicked({ kind: "auto" })}
+              >
+                <span className="font-medium text-gray-900 dark:text-gray-100">
+                  自動で判断してつなぐ（同じ町丁目の同じ名前の棟へ・無ければ新しく作る）
+                </span>
+              </button>
+              <p className="text-xs text-gray-500 dark:text-gray-400">
+                棟が多く、候補に全部は出せませんでした。当てはまる候補が無いときは「自動で判断してつなぐ」を選んでください（保存のときに全部の棟を確かめます）。
+              </p>
+            </>
           )}
         </div>
       )}

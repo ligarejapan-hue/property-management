@@ -20,8 +20,12 @@ describe("initialLinkChoice(物件名から棟につなぐ確認の、最初に�
   it("同じ名前でも丁目が違うだけなら選ばず、新しい棟", () =>
     expect(initialLinkChoice([s({ sameName: true, sameArea: false })], "ready")).toEqual({ kind: "new" }));
   it("候補が無ければ新しい棟", () => expect(initialLinkChoice([], "ready")).toEqual({ kind: "new" }));
-  it("古い棟を全部確かめられなかった(partial)ときは新しい棟を選んでおかない", () =>
-    expect(initialLinkChoice([s({})], "partial")).toBeNull());
+  it("古い棟を全部確かめられなかった(partial)ときは新しい棟ではなく自動の判断を選んでおく(@codex P2)", () =>
+    expect(initialLinkChoice([s({})], "partial")).toEqual({ kind: "auto" }));
+  it("partial で候補が0件でも、自動の判断で先へ進める(行き止まりにしない)", () =>
+    expect(initialLinkChoice([], "partial")).toEqual({ kind: "auto" }));
+  it("partial でも同じ町丁目・同じ名前の棟が見えていればそれを選ぶ", () =>
+    expect(initialLinkChoice([s({ id: "z", sameName: true, sameArea: true })], "partial")).toEqual({ kind: "existing", buildingId: "z" }));
   it("読み込み中・失敗は何も選ばない", () => {
     expect(initialLinkChoice([], "loading")).toBeNull();
     expect(initialLinkChoice([], "error")).toBeNull();

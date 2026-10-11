@@ -12,6 +12,9 @@ import type { BuildingSuggestion } from "./suggest";
  * 同じ町丁目・同じ名前の棟があればそれ、無ければ新しい棟。
  * ⚠一覧を全部確かめられていない(partial・読み込み中・失敗)ときは「新しい棟」を選んでおかない
  *   (同じ名前の棟を見落としたまま新しく作るのを防ぐ・入力欄の候補と同じ決まり)。
+ * ⚠partial は「自動の判断」(auto)を選んでおく(@codex P2)。候補が0件だと選べるものが無く
+ *   行き止まりになるため。auto はサーバーが保存の中で全部の棟を確かめて、同じ町丁目の同じ名前の
+ *   棟へつなぎ、無ければ作る(見落としによる重複は起きない)。
  */
 export function initialLinkChoice(
   suggestions: BuildingSuggestion[],
@@ -20,7 +23,8 @@ export function initialLinkChoice(
   if (state !== "ready" && state !== "partial") return null;
   const same = suggestions.find((x) => x.sameName && x.sameArea);
   if (same) return { kind: "existing", buildingId: same.id };
-  return allowsNewBuilding(state) ? { kind: "new" } : null;
+  if (allowsNewBuilding(state)) return { kind: "new" };
+  return state === "partial" ? { kind: "auto" } : null;
 }
 
 /**
