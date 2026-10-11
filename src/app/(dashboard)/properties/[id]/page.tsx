@@ -1105,8 +1105,6 @@ function BasicTab({
       onRefresh();
     } catch (err) {
       setLinkError(err instanceof Error ? err.message : "棟につなげませんでした");
-      // ⚠版番号の食い違い(ほかの保存と重なった)なら、読み直して次の「つなぐ」を新しい版で送る。
-      onRefresh();
     } finally {
       setLinkSaving(false);
     }
@@ -1190,7 +1188,13 @@ function BasicTab({
           saving={linkSaving}
           error={linkError}
           onConfirm={(c) => void connectBuilding(c)}
-          onClose={() => setLinkOpen(false)}
+          onClose={() => {
+            setLinkOpen(false);
+            // ⚠失敗のあとは、閉じたときに読み直す(@codex P2)。失敗の直後に読み直すと画面が
+            //   読み込み中に切り替わって小窓ごと消え、理由が読めない。版番号の食い違いなども、
+            //   閉じて開き直せば新しい版で送れる。
+            if (linkError) onRefresh();
+          }}
         />
       )}
       <Field label="地番" value={property.lotNumber} />

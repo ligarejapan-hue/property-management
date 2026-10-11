@@ -20,7 +20,7 @@ describe("確認の小窓(building-link-dialog)", () => {
     expect(dialog).not.toMatch(/suggest\?[^`]*address/);
   });
   it("選び直していなければ、最初に選んでおくもの(initialLinkChoice)を使う", () => {
-    expect(dialog).toContain("const choice = picked ?? initialLinkChoice(suggestions, state);");
+    expect(dialog).toContain(": picked ?? initialLinkChoice(suggestions, state);");
   });
   it("「新しい棟として作る」は一覧を全部確かめられたときだけ出す", () => {
     expect(dialog).toContain("const allowNew = allowsNewBuilding(state);");
@@ -29,6 +29,11 @@ describe("確認の小窓(building-link-dialog)", () => {
   it("何も選べていない・保存中は確定できない。確定は onConfirm に選んだものを渡すだけ", () => {
     expect(dialog).toMatch(/disabled=\{saving \|\| choice === null\}/);
     expect(dialog).toMatch(/onClick=\{\(\) => choice && onConfirm\(choice\)\}/);
+  });
+  it("物件名が短くて候補を探せないときは問い合わせず、自動の判断(auto)で送る(@codex P2)", () => {
+    expect(dialog).toContain("const searchable = linkNeedsSuggestions(buildingName);");
+    expect(dialog).toMatch(/useEffect\(\(\) => \{\s*if \(!searchable\) return;/);
+    expect(dialog).toMatch(/const choice: BuildingChoice \| null = !searchable\s*\? \{ kind: "auto" \}/);
   });
   it("保存中は Escape で閉じない", () => {
     expect(dialog).toContain("onClose={saving ? undefined : onClose}");
@@ -50,8 +55,9 @@ describe("物件詳細の基本情報(page.tsx)", () => {
     expect(page).toMatch(/router\.push\(`\/buildings\/\$\{buildingId\}`\)/);
     expect(page).toContain("await patchPropertyNoLock(propertyId, version, { buildingChoice: choice })");
   });
-  it("つなげなかったら読み直す(版番号の食い違いでも、次の「つなぐ」は新しい版で送る)", () => {
-    expect(page).toMatch(/setLinkError\(err instanceof Error \? err\.message : "棟につなげませんでした"\);\s*\/\/[^\n]*\n\s*onRefresh\(\);/);
+  it("失敗の理由は小窓に残し、閉じたときに読み直す(すぐ読み直すと小窓ごと消える・@codex P2)", () => {
+    expect(page).not.toMatch(/setLinkError\(err instanceof Error[^;]*;\s*(\/\/[^\n]*\n\s*)*onRefresh\(\);/);
+    expect(page).toMatch(/onClose=\{\(\) => \{\s*setLinkOpen\(false\);[\s\S]*?if \(linkError\) onRefresh\(\);\s*\}\}/);
   });
   it("所属マンションの行は物件名が空の旧データのときだけ(物件名があれば物件名がリンク)", () => {
     expect(page).toContain("{isUnit && property.building && !property.buildingName && (");

@@ -3,6 +3,7 @@ import {
   initialLinkChoice,
   linkConfirmButtonLabel,
   buildingNameLinkMode,
+  linkNeedsSuggestions,
 } from "@/lib/building-link/link-dialog-model";
 import type { BuildingSuggestion } from "@/lib/building-link/suggest";
 
@@ -51,4 +52,12 @@ describe("buildingNameLinkMode(基本情報の物件名をどう出すか)", () 
     expect(buildingNameLinkMode({ ...base, propertyType: "apartment_building" })).toBe("text"));
   it("物件名が空白だけなら文字だけ", () =>
     expect(buildingNameLinkMode({ ...base, buildingName: "　" })).toBe("text"));
+});
+
+describe("linkNeedsSuggestions(候補を探せる物件名か・@codex P2)", () => {
+  it("比べる形が2文字以上なら候補を探す", () => expect(linkNeedsSuggestions("パーク")).toBe(true));
+  it("1文字の物件名は候補を探せない=自動の判断(同じ町丁目の同じ名前へ・無ければ作る)に任せる", () => {
+    expect(linkNeedsSuggestions("A")).toBe(false);
+    expect(linkConfirmButtonLabel({ kind: "auto" })).toBe("つなぐ");
+  });
 });

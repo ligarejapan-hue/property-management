@@ -19,7 +19,7 @@ import {
   suggestQueryStringForArea,
   type SuggestResult,
 } from "@/lib/building-link/combobox-model";
-import { initialLinkChoice, linkConfirmButtonLabel } from "@/lib/building-link/link-dialog-model";
+import { initialLinkChoice, linkConfirmButtonLabel, linkNeedsSuggestions } from "@/lib/building-link/link-dialog-model";
 import type { BuildingChoice } from "@/lib/building-link/resolve";
 import type { BuildingSuggestion } from "@/lib/building-link/suggest";
 
@@ -41,11 +41,14 @@ export default function BuildingLinkDialog({
   onClose,
 }: BuildingLinkDialogProps) {
   const area = suggestArea(address);
+  // 物件名が短くて候補を探せないときは問い合わせず、自動の判断に任せる(@codex P2)。
+  const searchable = linkNeedsSuggestions(buildingName);
   const [result, setResult] = useState<SuggestResult | null>(null);
   // 利用者が選び直したもの(選んでいなければ最初に選んでおくものを使う)。
   const [picked, setPicked] = useState<BuildingChoice | null>(null);
 
   useEffect(() => {
+    if (!searchable) return;
     let alive = true;
     (async () => {
       try {
@@ -71,12 +74,14 @@ export default function BuildingLinkDialog({
     return () => {
       alive = false;
     };
-  }, [buildingName, area]);
+  }, [buildingName, area, searchable]);
 
   const state = listState(result, buildingName, area);
   const suggestions = (state === "ready" || state === "partial") && result ? result.data : [];
   const allowNew = allowsNewBuilding(state);
-  const choice = picked ?? initialLinkChoice(suggestions, state);
+  const choice: BuildingChoice | null = !searchable
+    ? { kind: "auto" }
+    : picked ?? initialLinkChoice(suggestions, state);
   const isChosen = (c: BuildingChoice) =>
     choice !== null &&
     choice.kind === c.kind &&
@@ -111,15 +116,20 @@ export default function BuildingLinkDialog({
       <p className="text-sm text-gray-600 dark:text-gray-300">
         つなぐ棟を選んでください。つなぐと、棟の画面へ移ります。
       </p>
-      {state === "loading" && (
+      {!searchable && (
+        <p className="mt-3 text-sm text-gray-600 dark:text-gray-300">
+          物件名が短いため、候補は出せません。つなぐと、同じ町丁目に同じ名前の棟があればそこへつなぎ、無ければ新しく作ります。
+        </p>
+      )}
+      {searchable && state === "loading" && (
         <p className="mt-3 text-sm text-gray-500 dark:text-gray-400">候補を探しています…</p>
       )}
-      {state === "error" && (
+      {searchable && state === "error" && (
         <p className="mt-3 text-sm text-red-600 dark:text-red-400">
           候補を読み込めませんでした。閉じてからもう一度お試しください。
         </p>
       )}
-      {(state === "ready" || state === "partial") && (
+      {searchable && (state === "ready" || state === "partial") && (
         <div className="mt-3 space-y-2" role="radiogroup" aria-label="つなぐ棟">
           {suggestions.map((s) => {
             const c: BuildingChoice = { kind: "existing", buildingId: s.id };

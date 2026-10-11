@@ -4,7 +4,7 @@
  * 押したら確認を出す・似た名前の棟があれば確認の中で選ばせる。
  */
 import type { BuildingChoice } from "./resolve";
-import { allowsNewBuilding, type SuggestListState } from "./combobox-model";
+import { allowsNewBuilding, shouldFetchSuggestions, type SuggestListState } from "./combobox-model";
 import type { BuildingSuggestion } from "./suggest";
 
 /**
@@ -21,6 +21,15 @@ export function initialLinkChoice(
   const same = suggestions.find((x) => x.sameName && x.sameArea);
   if (same) return { kind: "existing", buildingId: same.id };
   return allowsNewBuilding(state) ? { kind: "new" } : null;
+}
+
+/**
+ * 候補を探せる物件名か(@codex P2)。比べる形が短い(1文字)と候補の問い合わせは何も探さずに空を返す。
+ * ⚠その空を「全部確かめた」と読むと「新しい棟」を選んでおき、同じ名前の棟があっても新しく作ってしまう。
+ *   探せない名前は候補を出さず、自動の判断(同じ町丁目の同じ名前の棟へ・無ければ作る)に任せる。
+ */
+export function linkNeedsSuggestions(buildingName: string): boolean {
+  return shouldFetchSuggestions(buildingName);
 }
 
 /** 確定ボタンの文言。 */
