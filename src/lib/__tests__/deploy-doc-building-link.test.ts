@@ -38,6 +38,12 @@ describe("物件名から棟の画面へ(2026-10-11): 資料の文言が画面�
     expect(linkDialogSrc).toContain("やめる");
     expect(manualSrc).toContain("「新しい棟として作る」");
   });
+  it("物件名が1文字のときの流れ(候補なし・「つなぐ」)もマニュアルにある(@codex P2)", () => {
+    expect(linkDialogSrc).toContain("物件名が短いため、候補は出せません");
+    expect(manualSrc).toContain("物件名が短いため、候補は出せません");
+    expect(linkModelSrc).toContain('return "つなぐ";');
+    expect(manualSrc).toContain('<span class="btn">つなぐ</span>');
+  });
   it("ガイドにも物件名から棟の画面への項目がある", () => {
     expect(guideSrc).toContain("物件名から棟の画面へ（新）");
   });
