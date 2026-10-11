@@ -52,6 +52,8 @@ describe("説明文の中の画面へのリンク", () => {
   it("ヘルプ(全員が見る画面)のリンクは、開ける役割の人にだけリンクで出す", () => {
     const src = read("app/(dashboard)/help/page.tsx");
     expect(src).not.toContain("<Link");
+    // 存在しない画面(候補一覧画面)へは案内しない(発注者 2026-10-12)。
+    expect(src).not.toContain("候補一覧画面");
     expect(src).toContain('<RoleLink href="/properties" minRole="office_staff">');
     expect(src).toContain('<RoleLink href="/import/paste" minRole="office_staff">「貼り付けて物件化」画面</RoleLink>');
     expect(src).toContain('<RoleLink href="/admin/users" minRole="admin">「ユーザー管理」画面</RoleLink>');
