@@ -2,11 +2,12 @@ import { timingSafeEqual } from "crypto";
 import prisma from "@/lib/prisma";
 import { ApiError, handleApiError, apiResponse } from "@/lib/api-helpers";
 import { createRegistryClient } from "@/lib/agent-registry/client";
-import { crawlStep, DEFAULT_BUDGET, inNightWindow } from "@/lib/agent-registry/crawl";
+import { crawlStep, DEFAULT_BUDGET, inNightWindow, parseDaytimeDays } from "@/lib/agent-registry/crawl";
 import { createPrismaCrawlStore } from "@/lib/agent-registry/store";
 
 /**
- * POST /api/agent-registry/crawl-run — 国交省の業者一覧を集める口(timer 用・夜間10分ごと)。
+ * POST /api/agent-registry/crawl-run — 国交省の業者一覧を集める口(timer 用・10分ごと)。
+ * 動くのは日本時間 22:00〜翌7:00 と、`AGENT_REGISTRY_DAYTIME_DAYS` に書いた日(終日)だけ。外なら先方にアクセスしない。
  *
  * 作りは巡回の自動終了(`/api/field-survey/sessions/auto-end-run`)と同じ:
  * - `AGENT_REGISTRY_CRAWL_SECRET` 未設定なら **503(休眠=先方にアクセスしない)**
@@ -42,15 +43,18 @@ export async function POST(request: Request) {
     if (running) throw new ApiError(409, "前の回がまだ動いています", "ALREADY_RUNNING");
     running = true;
     try {
+      // 昼も動かす日(祝日など・日本時間の日付)。未設定なら夜間だけ。
+      const daytimeDays = parseDaytimeDays(process.env.AGENT_REGISTRY_DAYTIME_DAYS);
       const result = await crawlStep({
         // 取り直しを含むすべての呼び出しの直前に、夜間か・予算の内かを確かめる(7時を越えない・100回を超えない・@codex #477)。
         client: createRegistryClient({
-          allowRequest: () => inNightWindow(new Date()),
+          allowRequest: () => inNightWindow(new Date(), daytimeDays),
           budget: { maxRequests: DEFAULT_BUDGET.maxRequests, deadlineMs: DEFAULT_BUDGET.deadlineMs },
         }),
         store,
         now: () => new Date(),
         budget: DEFAULT_BUDGET,
+        daytimeDays,
       });
       console.log(
         `[agent-registry] requests=${result.requests} listed=${result.listed} detailed=${result.detailed} stopped=${result.stopped ?? "none"}`,

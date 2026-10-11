@@ -3,8 +3,10 @@ import {
   AUTHORITIES,
   DEFAULT_BUDGET,
   crawlStep,
+  crossedRestPeriod,
   cycleOf,
   inNightWindow,
+  parseDaytimeDays,
   nextNightStart,
   nightOf,
   type CrawlState,
@@ -157,6 +159,21 @@ describe("夜間の判定・一巡の名前", () => {
     expect(inNightWindow(new Date("2026-10-05T21:59:00Z"))).toBe(true); // 翌6:59
     expect(inNightWindow(new Date("2026-10-05T22:00:00Z"))).toBe(false); // 翌7:00
   });
+  it("昼も動かす日(日本時間の日付)を指定すると、その日は終日動く・ほかの日の昼は動かない(発注者 2026-10-11 祝日)", () => {
+    const days = ["2026-10-11", "2026-10-12"];
+    expect(inNightWindow(new Date("2026-10-11T05:00:00Z"))).toBe(false); // JST 10/11 14:00・指定なし
+    expect(inNightWindow(new Date("2026-10-11T05:00:00Z"), days)).toBe(true); // JST 10/11 14:00
+    expect(inNightWindow(new Date("2026-10-10T22:00:00Z"), days)).toBe(true); // JST 10/11 07:00
+    expect(inNightWindow(new Date("2026-10-12T14:59:00Z"), days)).toBe(true); // JST 10/12 23:59
+    expect(inNightWindow(new Date("2026-10-13T01:00:00Z"), days)).toBe(false); // JST 10/13 10:00
+    expect(inNightWindow(new Date("2026-10-10T05:00:00Z"), days)).toBe(false); // JST 10/10 14:00
+  });
+  it("昼も動かす日の設定の読み取り: 正しい日付だけ拾う(打ち間違いで毎日昼に動かない)", () => {
+    expect(parseDaytimeDays(undefined)).toEqual([]);
+    expect(parseDaytimeDays("")).toEqual([]);
+    expect(parseDaytimeDays(" 2026-10-11, 2026-10-12 ")).toEqual(["2026-10-11", "2026-10-12"]);
+    expect(parseDaytimeDays("2026-10-11,2026-1-1,abc,2026-13-01,2026-02-30,*")).toEqual(["2026-10-11"]);
+  });
   it("晩の名前: 22時と翌3時は同じ晩・翌22時は次の晩", () => {
     expect(nightOf(new Date("2026-10-05T13:00:00Z"))).toBe("2026-10-05"); // JST 10/5 22:00
     expect(nightOf(new Date("2026-10-05T18:00:00Z"))).toBe("2026-10-05"); // JST 10/6 03:00
@@ -167,6 +184,11 @@ describe("夜間の判定・一巡の名前", () => {
     expect(cycleOf(new Date("2026-10-31T15:30:00Z"))).toBe("2026-11"); // JST 11/1 0:30
     expect(nextNightStart(new Date("2026-10-05T14:00:00Z")).toISOString()).toBe("2026-10-06T13:00:00.000Z"); // 23時→翌22時
     expect(nextNightStart(new Date("2026-10-05T18:00:00Z")).toISOString()).toBe("2026-10-06T13:00:00.000Z"); // 3時→その日の22時
+    // 昼も動かす日は動かない時間が無い=その次のふつうの日の 22 時(動かない時間が明けたとき)
+    const days = ["2026-10-11", "2026-10-12"];
+    expect(nextNightStart(new Date("2026-10-11T03:30:00Z"), days).toISOString()).toBe("2026-10-13T13:00:00.000Z"); // 10/11 12:30→10/13 22時
+    expect(nextNightStart(new Date("2026-10-10T18:00:00Z"), days).toISOString()).toBe("2026-10-13T13:00:00.000Z"); // 10/11 3時→10/13 22時
+    expect(nextNightStart(new Date("2026-10-09T14:00:00Z"), days).toISOString()).toBe("2026-10-10T13:00:00.000Z"); // 10/9 23時→10/10 22時
   });
 });
 
@@ -177,6 +199,21 @@ describe("進め方", () => {
     const r = await crawlStep({ client, store, now: () => new Date("2026-10-05T03:00:00Z"), budget: BIG });
     expect(r.stopped).toBe("outside_window");
     expect(log).toEqual([]);
+  });
+
+  it("昼も動かす日に指定した日なら、昼でも進む(指定の無い日の昼は動かない)", async () => {
+    const { client, log } = fakeClient(smallSite());
+    const { store } = memoryStore();
+    const noon = () => new Date("2026-10-11T05:00:00Z"); // JST 10/11 14:00
+    const r = await crawlStep({ client, store, now: noon, budget: BIG, daytimeDays: ["2026-10-11"] });
+    expect(r.stopped).not.toBe("outside_window");
+    expect(r.requests).toBeGreaterThan(0);
+    expect(log.length).toBeGreaterThan(0);
+
+    const other = fakeClient(smallSite());
+    const r2 = await crawlStep({ client: other.client, store: memoryStore().store, now: noon, budget: BIG, daytimeDays: ["2026-10-12"] });
+    expect(r2.stopped).toBe("outside_window");
+    expect(other.log).toEqual([]);
   });
 
   it("一覧(5行政庁の全ページ)→詳細→一巡の締め、の順に最後まで進む", async () => {
@@ -324,6 +361,41 @@ describe("進め方", () => {
       expect(log).toHaveLength(3);
       const tomorrow = await crawlStep({ client, store, now: () => new Date("2026-10-06T13:10:00Z"), budget: WAIT });
       expect(tomorrow.stopped).toBeNull();
+    });
+
+    it("★昼も動かす日は、正午や朝7時をまたいでも続けての失敗を数え直さない(3回で止める・@codex #502)", async () => {
+      const { client, log } = fakeClient(smallSite(), { failAt: new Set([1, 2, 3, 4]) });
+      const { store, getStates } = memoryStore();
+      const days = ["2026-10-11"];
+      const jst = (iso: string) => () => new Date(iso);
+      // JST 11:30・12:00(正午をまたぐ)・12:30 で3回続けて失敗=その日は止まる
+      expect((await crawlStep({ client, store, now: jst("2026-10-11T02:30:00Z"), budget: WAIT, daytimeDays: days })).stopped).toBe("http_5xx");
+      expect((await crawlStep({ client, store, now: jst("2026-10-11T03:00:00Z"), budget: WAIT, daytimeDays: days })).stopped).toBe("http_5xx");
+      expect(getStates()[0].failStreak).toBe(2);
+      expect((await crawlStep({ client, store, now: jst("2026-10-11T03:30:00Z"), budget: WAIT, daytimeDays: days })).stopped).toBe("http_5xx");
+      expect((await crawlStep({ client, store, now: jst("2026-10-11T04:10:00Z"), budget: WAIT, daytimeDays: days })).stopped).toBe("day_off");
+      // 止めるのは「動かない時間」(10/12 7:00〜22:00)が明けるまで。同じ日の 22:00 で4回目を試さない(@codex #502)
+      expect(getStates()[0].dayOffUntil?.toISOString()).toBe("2026-10-12T13:00:00.000Z"); // JST 10/12 22:00
+      expect((await crawlStep({ client, store, now: jst("2026-10-11T13:10:00Z"), budget: WAIT, daytimeDays: days })).stopped).toBe("day_off"); // 10/11 22:10
+      expect(log).toHaveLength(3);
+
+      // 明け方 06:30(前の晩)と 07:00 以降(昼も動かす日)も切れ目なく続く=数え直さない
+      const b = fakeClient(smallSite(), { failAt: new Set([1, 2]) });
+      const m = memoryStore();
+      expect((await crawlStep({ client: b.client, store: m.store, now: jst("2026-10-10T21:30:00Z"), budget: WAIT, daytimeDays: days })).stopped).toBe("http_5xx");
+      expect((await crawlStep({ client: b.client, store: m.store, now: jst("2026-10-10T22:00:00Z"), budget: WAIT, daytimeDays: days })).stopped).toBe("http_5xx");
+      expect(m.getStates()[0].failStreak).toBe(2);
+    });
+
+    it("切れ目の判定: 動かない時間(指定の無い日の 7:00〜22:00)をはさんだときだけ新しい区切り", () => {
+      const days = ["2026-10-11"];
+      const d = (iso: string) => new Date(iso);
+      expect(crossedRestPeriod(d("2026-10-05T21:00:00Z"), d("2026-10-06T13:00:00Z"))).toBe(true); // 6:00→翌22:00
+      expect(crossedRestPeriod(d("2026-10-05T13:00:00Z"), d("2026-10-05T21:00:00Z"))).toBe(false); // 22:00→翌6:00
+      expect(crossedRestPeriod(d("2026-10-11T02:30:00Z"), d("2026-10-11T03:30:00Z"), days)).toBe(false); // 11:30→12:30
+      expect(crossedRestPeriod(d("2026-10-10T21:30:00Z"), d("2026-10-11T14:00:00Z"), days)).toBe(false); // 6:30→23:00(終日の日)
+      expect(crossedRestPeriod(d("2026-10-11T14:00:00Z"), d("2026-10-12T13:10:00Z"), days)).toBe(true); // 10/11 23:00→10/12 22:10
+      expect(crossedRestPeriod(d("2026-10-11T02:30:00Z"), d("2026-10-11T03:30:00Z"))).toBe(true); // 指定なしなら昼は動かない時間
     });
 
     it("★明け方の失敗の数は次の晩に持ち越さない(待ちが朝7時をまたいでも、次の晩は3回まで試せる・@codex #494)", async () => {
