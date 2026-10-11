@@ -143,11 +143,18 @@ export function crossedRestPeriod(from: Date, to: Date, daytimeDays: readonly st
   return false;
 }
 
-/** 次の晩の始まり(日本時間 22:00)。今が 23 時なら翌日の 22 時、深夜 3 時ならその日の 22 時。 */
-export function nextNightStart(now: Date): Date {
+/**
+ * 次の晩の始まり(日本時間 22:00)=次の「動かない時間」が明けるとき。今が 23 時なら翌日の 22 時、深夜 3 時ならその日の 22 時。
+ * 昼も動かす日には動かない時間が無いので、その先のふつうの日の 22 時(3回の失敗で止めたら、本当に休んでから再開・@codex #502)。
+ */
+export function nextNightStart(now: Date, daytimeDays: readonly string[] = []): Date {
   const d = new Date(now.getTime() + JST_OFFSET_MS);
-  const today22 = Date.UTC(d.getUTCFullYear(), d.getUTCMonth(), d.getUTCDate(), 22) - JST_OFFSET_MS;
-  return new Date(today22 > now.getTime() ? today22 : today22 + DAY_MS);
+  let day = Date.UTC(d.getUTCFullYear(), d.getUTCMonth(), d.getUTCDate());
+  for (;; day += DAY_MS) {
+    if (daytimeDays.includes(new Date(day).toISOString().slice(0, 10))) continue;
+    const restEnd = day + 22 * 60 * 60 * 1000 - JST_OFFSET_MS;
+    if (restEnd > now.getTime()) return new Date(restEnd);
+  }
 }
 
 function freshState(authority: string, cycle: string): CrawlState {
@@ -369,7 +376,7 @@ export async function crawlStep(deps: {
     // 続けて3回で翌晩まで止める。それより少なければ、30分あけてから取り直す(混んでいる先方を10分おきに叩かない)。
     const dayOffUntil =
       streak >= FAIL_STREAK_LIMIT
-        ? nextNightStart(now())
+        ? nextNightStart(now(), daytimeDays)
         : budget.retryWaitMs
           ? new Date(now().getTime() + budget.retryWaitMs)
           : null;

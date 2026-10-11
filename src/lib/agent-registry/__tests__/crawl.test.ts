@@ -184,6 +184,11 @@ describe("夜間の判定・一巡の名前", () => {
     expect(cycleOf(new Date("2026-10-31T15:30:00Z"))).toBe("2026-11"); // JST 11/1 0:30
     expect(nextNightStart(new Date("2026-10-05T14:00:00Z")).toISOString()).toBe("2026-10-06T13:00:00.000Z"); // 23時→翌22時
     expect(nextNightStart(new Date("2026-10-05T18:00:00Z")).toISOString()).toBe("2026-10-06T13:00:00.000Z"); // 3時→その日の22時
+    // 昼も動かす日は動かない時間が無い=その次のふつうの日の 22 時(動かない時間が明けたとき)
+    const days = ["2026-10-11", "2026-10-12"];
+    expect(nextNightStart(new Date("2026-10-11T03:30:00Z"), days).toISOString()).toBe("2026-10-13T13:00:00.000Z"); // 10/11 12:30→10/13 22時
+    expect(nextNightStart(new Date("2026-10-10T18:00:00Z"), days).toISOString()).toBe("2026-10-13T13:00:00.000Z"); // 10/11 3時→10/13 22時
+    expect(nextNightStart(new Date("2026-10-09T14:00:00Z"), days).toISOString()).toBe("2026-10-10T13:00:00.000Z"); // 10/9 23時→10/10 22時
   });
 });
 
@@ -369,6 +374,9 @@ describe("進め方", () => {
       expect(getStates()[0].failStreak).toBe(2);
       expect((await crawlStep({ client, store, now: jst("2026-10-11T03:30:00Z"), budget: WAIT, daytimeDays: days })).stopped).toBe("http_5xx");
       expect((await crawlStep({ client, store, now: jst("2026-10-11T04:10:00Z"), budget: WAIT, daytimeDays: days })).stopped).toBe("day_off");
+      // 止めるのは「動かない時間」(10/12 7:00〜22:00)が明けるまで。同じ日の 22:00 で4回目を試さない(@codex #502)
+      expect(getStates()[0].dayOffUntil?.toISOString()).toBe("2026-10-12T13:00:00.000Z"); // JST 10/12 22:00
+      expect((await crawlStep({ client, store, now: jst("2026-10-11T13:10:00Z"), budget: WAIT, daytimeDays: days })).stopped).toBe("day_off"); // 10/11 22:10
       expect(log).toHaveLength(3);
 
       // 明け方 06:30(前の晩)と 07:00 以降(昼も動かす日)も切れ目なく続く=数え直さない
