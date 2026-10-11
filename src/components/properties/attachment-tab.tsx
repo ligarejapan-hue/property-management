@@ -28,6 +28,12 @@ import {
 } from "@/lib/api-client";
 import { normalizeFileUrl } from "@/lib/url-normalize";
 import { sendsDownloadIntent } from "@/lib/attachments/download-intent";
+import {
+  uploadFailureMessage,
+  uploadProgressLabel,
+  type UploadFailure,
+  type UploadProgress,
+} from "@/lib/attachments/multi-upload";
 import { registryDisplayName } from "@/lib/attachments/registry-display-name";
 import { MAX_PDF_UPLOAD_BYTES } from "@/lib/pdf-compress/policy";
 
@@ -130,6 +136,9 @@ export default function AttachmentTab({
   const [uploadingGeneral, setUploadingGeneral] = useState(false);
   // 8MB を超える PDF を送っている間は「圧縮しています」と出す(数秒〜十数秒かかる)。
   const [compressingGeneral, setCompressingGeneral] = useState(false);
+  // 複数ファイルを送っている間の「N件中M件目」(1件だけのときは null)。
+  const [uploadProgressGeneral, setUploadProgressGeneral] = useState<UploadProgress | null>(null);
+  const [uploadProgressRegistry, setUploadProgressRegistry] = useState<UploadProgress | null>(null);
   const [uploadingRegistry, setUploadingRegistry] = useState(false);
   const [uploadErrorGeneral, setUploadErrorGeneral] = useState<string | null>(null);
   const [uploadErrorRegistry, setUploadErrorRegistry] = useState<string | null>(null);
@@ -186,43 +195,63 @@ export default function AttachmentTab({
     void fetchAttachmentsData({ silent: true });
   }, [refreshToken, fetchAttachmentsData]);
 
-  const handleUpload = async (file: File, type: AttachmentType) => {
-    const setUploading = type === "registry" ? setUploadingRegistry : setUploadingGeneral;
-    const setUploadError =
-      type === "registry" ? setUploadErrorRegistry : setUploadErrorGeneral;
-
-    setUploadError(null);
-    if (file.size <= 0) {
-      setUploadError("空ファイルはアップロードできません");
-      return;
-    }
+  /** 1件を確かめて送る。失敗の理由を返す(成功は null)。一覧の読み直しは呼び出し側でまとめて行う。 */
+  const uploadOne = async (file: File, type: AttachmentType): Promise<string | null> => {
+    if (file.size <= 0) return "空ファイルはアップロードできません";
     // 種類(MIME)が空でも拡張子が .pdf なら PDF とみなす(サーバーと同じ判定・@codex PR#498 P2)。
     const compressible = type === "general" && isPdfFile(file);
     const limitMb = compressible ? MAX_PDF_MB : MAX_SIZE_MB;
     if (file.size > limitMb * 1024 * 1024) {
-      setUploadError(`ファイルサイズが上限 (${limitMb}MB) を超えています`);
-      return;
+      return `ファイルサイズが上限 (${limitMb}MB) を超えています`;
+    }
+    // 謄本PDF はクライアント側でも PDF のみ受け付け（サーバ側でも 422 で再チェック）
+    if (type === "registry" && !isPdfFile(file)) {
+      return "謄本PDFは PDF ファイルのみアップロードできます";
     }
     if (type === "general") {
       setCompressingGeneral(compressible && file.size > MAX_SIZE_MB * 1024 * 1024);
     }
-    // 謄本PDF はクライアント側でも PDF のみ受け付け（サーバ側でも 422 で再チェック）
-    if (type === "registry" && !isPdfFile(file)) {
-      setUploadError("謄本PDFは PDF ファイルのみアップロードできます");
-      return;
-    }
-    setUploading(true);
     try {
       await uploadFile(propertyId, file, "attachment", { attachmentType: type });
-      await fetchAttachmentsData();
-      // 謄本の増減時だけ親へ通知(基本情報の件数を取り直す)。一般添付は件数行に無関係。
-      if (type === "registry") onRegistryMutated?.();
+      return null;
     } catch (err) {
-      setUploadError(
-        err instanceof Error ? err.message : "アップロードに失敗しました",
-      );
+      return err instanceof Error ? err.message : "アップロードに失敗しました";
+    }
+  };
+
+  /**
+   * 選んだ・ドロップした**すべて**のファイルを1件ずつ順に送る(2026-10-12 ご指摘: 複数ドロップで1件しか入らない)。
+   * ⚠同時に送らない(大きいPDFの圧縮はサーバーで1件ずつ・席は「処理中1+待ち1」)。
+   * 1件が失敗しても残りは続け、最後に失敗した分だけをまとめて出す。
+   */
+  const handleUploads = async (files: File[], type: AttachmentType) => {
+    if (files.length === 0) return;
+    const setUploading = type === "registry" ? setUploadingRegistry : setUploadingGeneral;
+    const setUploadError =
+      type === "registry" ? setUploadErrorRegistry : setUploadErrorGeneral;
+    const setProgress = type === "registry" ? setUploadProgressRegistry : setUploadProgressGeneral;
+    setUploadError(null);
+    setUploading(true);
+    const failures: UploadFailure[] = [];
+    let succeeded = 0;
+    try {
+      for (const [i, file] of files.entries()) {
+        setProgress(files.length > 1 ? { current: i + 1, total: files.length } : null);
+        const reason = await uploadOne(file, type);
+        if (reason === null) succeeded++;
+        else failures.push({ index: i + 1, fileName: file.name, reason });
+      }
+      if (succeeded > 0) {
+        await fetchAttachmentsData();
+        // 謄本の増減時だけ親へ通知(基本情報の件数を取り直す)。一般添付は件数行に無関係。
+        if (type === "registry") onRegistryMutated?.();
+      }
+      // ⚠謄本のファイル名は所有者名を含み得るので出さない(何件目かだけ)。
+      setUploadError(uploadFailureMessage(failures, files.length, { showFileNames: type !== "registry" }));
     } finally {
       setUploading(false);
+      setProgress(null);
+      if (type === "general") setCompressingGeneral(false);
     }
   };
 
@@ -230,17 +259,16 @@ export default function AttachmentTab({
     e.preventDefault();
     if (type === "registry") setDragOverRegistry(false);
     else setDragOverGeneral(false);
-    const file = e.dataTransfer.files[0];
-    if (file) handleUpload(file, type);
+    void handleUploads(Array.from(e.dataTransfer.files), type);
   };
 
   const handleFileSelect = (
     e: React.ChangeEvent<HTMLInputElement>,
     type: AttachmentType,
   ) => {
-    const file = e.target.files?.[0];
-    if (file) handleUpload(file, type);
+    const files = Array.from(e.target.files ?? []);
     e.target.value = "";
+    void handleUploads(files, type);
   };
 
   const handleDelete = async (id: string) => {
@@ -294,6 +322,7 @@ export default function AttachmentTab({
             <div className="flex items-center justify-center gap-2">
               <Loader2 className="h-5 w-5 animate-spin text-blue-500" />
               <span className="text-sm text-gray-600 dark:text-gray-300">
+                {uploadProgressLabel(uploadProgressGeneral)}
                 {compressingGeneral
                   ? "大きいPDFを圧縮して保存しています…（数十秒かかることがあります）"
                   : "アップロード中..."}
@@ -303,7 +332,7 @@ export default function AttachmentTab({
             <>
               <Upload className="mx-auto mb-2 h-8 w-8 text-gray-400 dark:text-gray-500" />
               <p className="text-sm text-gray-600 dark:text-gray-300">
-                ファイルをドラッグ＆ドロップ、またはクリックして選択
+                ファイルをドラッグ＆ドロップ、またはクリックして選択（まとめて複数可）
               </p>
               <p className="mt-1 text-xs text-gray-400 dark:text-gray-500">
                 上限 {MAX_SIZE_MB}MB / PDF, Excel, CSV, Word, 画像
@@ -315,6 +344,7 @@ export default function AttachmentTab({
             ref={fileInputRefGeneral}
             type="file"
             className="hidden"
+            multiple
             onChange={(e) => handleFileSelect(e, "general")}
             accept=".pdf,.xlsx,.xls,.csv,.docx,.jpg,.jpeg,.png,.webp,.heic"
           />
@@ -365,13 +395,15 @@ export default function AttachmentTab({
           {uploadingRegistry ? (
             <div className="flex items-center justify-center gap-2">
               <Loader2 className="h-5 w-5 animate-spin text-amber-500" />
-              <span className="text-sm text-gray-600 dark:text-gray-300">アップロード中...</span>
+              <span className="text-sm text-gray-600 dark:text-gray-300">
+                {uploadProgressLabel(uploadProgressRegistry)}アップロード中...
+              </span>
             </div>
           ) : (
             <>
               <FileText className="mx-auto mb-2 h-8 w-8 text-amber-500" />
               <p className="text-sm text-gray-600 dark:text-gray-300">
-                謄本PDFをドラッグ＆ドロップ、またはクリックして選択
+                謄本PDFをドラッグ＆ドロップ、またはクリックして選択（まとめて複数可）
               </p>
               <p className="mt-1 text-xs text-gray-400 dark:text-gray-500">
                 PDF のみ / 上限 {MAX_SIZE_MB}MB
@@ -382,6 +414,7 @@ export default function AttachmentTab({
             ref={fileInputRefRegistry}
             type="file"
             className="hidden"
+            multiple
             onChange={(e) => handleFileSelect(e, "registry")}
             accept="application/pdf,.pdf"
           />
