@@ -1,34 +1,42 @@
 import { describe, it, expect } from "vitest";
 import {
   initialLinkChoice,
+  allowsAutoLink,
   linkConfirmButtonLabel,
   buildingNameLinkMode,
   linkNeedsSuggestions,
 } from "@/lib/building-link/link-dialog-model";
 import type { BuildingSuggestion } from "@/lib/building-link/suggest";
 
+const AREA = "東京都品川区西五反田5丁目";
 const s = (o: Partial<BuildingSuggestion>): BuildingSuggestion => ({
   id: "b1", name: "パーク第一", area: "東京都品川区西五反田5丁目", unitCount: 3, sameName: false, sameArea: false, ...o,
 });
 
 describe("initialLinkChoice(物件名から棟につなぐ確認の、最初に選んでおくもの)", () => {
   it("同じ町丁目に同じ名前の棟があれば、その棟", () =>
-    expect(initialLinkChoice([s({ id: "x", sameName: true, sameArea: true })], "ready")).toEqual({ kind: "existing", buildingId: "x" }));
+    expect(initialLinkChoice([s({ id: "x", sameName: true, sameArea: true })], "ready", AREA)).toEqual({ kind: "existing", buildingId: "x" }));
   it("並びの先頭でなくても、同じ名前・同じ町丁目の棟を選ぶ", () =>
-    expect(initialLinkChoice([s({ id: "a", sameName: true }), s({ id: "b", sameName: true, sameArea: true })], "ready"))
+    expect(initialLinkChoice([s({ id: "a", sameName: true }), s({ id: "b", sameName: true, sameArea: true })], "ready", AREA))
       .toEqual({ kind: "existing", buildingId: "b" }));
   it("同じ名前でも丁目が違うだけなら選ばず、新しい棟", () =>
-    expect(initialLinkChoice([s({ sameName: true, sameArea: false })], "ready")).toEqual({ kind: "new" }));
-  it("候補が無ければ新しい棟", () => expect(initialLinkChoice([], "ready")).toEqual({ kind: "new" }));
+    expect(initialLinkChoice([s({ sameName: true, sameArea: false })], "ready", AREA)).toEqual({ kind: "new" }));
+  it("候補が無ければ新しい棟", () => expect(initialLinkChoice([], "ready", AREA)).toEqual({ kind: "new" }));
   it("古い棟を全部確かめられなかった(partial)ときは新しい棟ではなく自動の判断を選んでおく(@codex P2)", () =>
-    expect(initialLinkChoice([s({})], "partial")).toEqual({ kind: "auto" }));
+    expect(initialLinkChoice([s({})], "partial", AREA)).toEqual({ kind: "auto" }));
   it("partial で候補が0件でも、自動の判断で先へ進める(行き止まりにしない)", () =>
-    expect(initialLinkChoice([], "partial")).toEqual({ kind: "auto" }));
+    expect(initialLinkChoice([], "partial", AREA)).toEqual({ kind: "auto" }));
   it("partial でも同じ町丁目・同じ名前の棟が見えていればそれを選ぶ", () =>
-    expect(initialLinkChoice([s({ id: "z", sameName: true, sameArea: true })], "partial")).toEqual({ kind: "existing", buildingId: "z" }));
+    expect(initialLinkChoice([s({ id: "z", sameName: true, sameArea: true })], "partial", AREA)).toEqual({ kind: "existing", buildingId: "z" }));
+  it("partial で住所から町丁目が読めない物件は自動の判断も選ばない(サーバーが探さず作ってしまう・@codex P2)", () => {
+    expect(initialLinkChoice([], "partial", "")).toBeNull();
+    expect(allowsAutoLink("partial", "")).toBe(false);
+    expect(allowsAutoLink("partial", AREA)).toBe(true);
+    expect(allowsAutoLink("ready", AREA)).toBe(false);
+  });
   it("読み込み中・失敗は何も選ばない", () => {
-    expect(initialLinkChoice([], "loading")).toBeNull();
-    expect(initialLinkChoice([], "error")).toBeNull();
+    expect(initialLinkChoice([], "loading", AREA)).toBeNull();
+    expect(initialLinkChoice([], "error", AREA)).toBeNull();
   });
 });
 

@@ -19,7 +19,7 @@ import {
   suggestQueryStringForArea,
   type SuggestResult,
 } from "@/lib/building-link/combobox-model";
-import { initialLinkChoice, linkConfirmButtonLabel, linkNeedsSuggestions } from "@/lib/building-link/link-dialog-model";
+import { allowsAutoLink, initialLinkChoice, linkConfirmButtonLabel, linkNeedsSuggestions } from "@/lib/building-link/link-dialog-model";
 import type { BuildingChoice } from "@/lib/building-link/resolve";
 import type { BuildingSuggestion } from "@/lib/building-link/suggest";
 
@@ -81,7 +81,7 @@ export default function BuildingLinkDialog({
   const allowNew = allowsNewBuilding(state);
   const choice: BuildingChoice | null = !searchable
     ? { kind: "auto" }
-    : picked ?? initialLinkChoice(suggestions, state);
+    : picked ?? initialLinkChoice(suggestions, state, area);
   const isChosen = (c: BuildingChoice) =>
     choice !== null &&
     choice.kind === c.kind &&
@@ -175,7 +175,7 @@ export default function BuildingLinkDialog({
               </span>
             </button>
           )}
-          {state === "partial" && (
+          {allowsAutoLink(state, area) && (
             <>
               <button
                 type="button"
@@ -193,6 +193,11 @@ export default function BuildingLinkDialog({
                 棟が多く、候補に全部は出せませんでした。当てはまる候補が無いときは「自動で判断してつなぐ」を選んでください（保存のときに全部の棟を確かめます）。
               </p>
             </>
+          )}
+          {state === "partial" && !allowsAutoLink(state, area) && (
+            <p className="text-xs text-gray-500 dark:text-gray-400">
+              棟が多く候補に全部は出せず、住所から町丁目も読み取れないため、自動ではつなげません。候補から選ぶか、物件の住所を直してからもう一度お試しください。
+            </p>
           )}
         </div>
       )}

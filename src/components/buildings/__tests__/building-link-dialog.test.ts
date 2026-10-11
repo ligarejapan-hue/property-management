@@ -20,7 +20,7 @@ describe("確認の小窓(building-link-dialog)", () => {
     expect(dialog).not.toMatch(/suggest\?[^`]*address/);
   });
   it("選び直していなければ、最初に選んでおくもの(initialLinkChoice)を使う", () => {
-    expect(dialog).toContain(": picked ?? initialLinkChoice(suggestions, state);");
+    expect(dialog).toContain(": picked ?? initialLinkChoice(suggestions, state, area);");
   });
   it("「新しい棟として作る」は一覧を全部確かめられたときだけ出す", () => {
     expect(dialog).toContain("const allowNew = allowsNewBuilding(state);");

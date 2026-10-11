@@ -49,7 +49,11 @@ describe("物件名から棟の画面へ(2026-10-11): 資料の文言が画面�
     expect(linkDialogSrc).toContain(option);
     expect(manualSrc).toContain(option);
     // partial は候補が0件でも自動の判断で先へ進める(行き止まりにしない)
-    expect(linkModelSrc).toContain('return state === "partial" ? { kind: "auto" } : null;');
+    expect(linkModelSrc).toContain('return allowsAutoLink(state, area) ? { kind: "auto" } : null;');
+    // 町丁目が読めない物件では出さない(サーバーが探さず作るため)
+    const noArea = "棟が多く候補に全部は出せず、住所から町丁目も読み取れないため、自動ではつなげません。";
+    expect(linkDialogSrc).toContain(noArea);
+    expect(manualSrc).toContain("住所から町丁目を読み取れない物件ではこの選択は出ない");
   });
   it("ガイドにも物件名から棟の画面への項目がある", () => {
     expect(guideSrc).toContain("物件名から棟の画面へ（新）");
