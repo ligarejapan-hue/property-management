@@ -20,7 +20,7 @@ describe("確認の小窓(building-link-dialog)", () => {
     expect(dialog).not.toMatch(/suggest\?[^`]*address/);
   });
   it("選び直していなければ、最初に選んでおくもの(initialLinkChoice)を使う", () => {
-    expect(dialog).toContain(": picked ?? initialLinkChoice(suggestions, state);");
+    expect(dialog).toContain(": picked ?? initialLinkChoice(suggestions, state, area);");
   });
   it("「新しい棟として作る」は一覧を全部確かめられたときだけ出す", () => {
     expect(dialog).toContain("const allowNew = allowsNewBuilding(state);");
@@ -30,10 +30,10 @@ describe("確認の小窓(building-link-dialog)", () => {
     expect(dialog).toMatch(/disabled=\{saving \|\| choice === null\}/);
     expect(dialog).toMatch(/onClick=\{\(\) => choice && onConfirm\(choice\)\}/);
   });
-  it("物件名が短くて候補を探せないときは問い合わせず、自動の判断(auto)で送る(@codex P2)", () => {
+  it("物件名が短くて候補を探せないときは問い合わせず、町丁目が分かるときだけ自動の判断(auto)で送る(@codex P2)", () => {
     expect(dialog).toContain("const searchable = linkNeedsSuggestions(buildingName);");
     expect(dialog).toMatch(/useEffect\(\(\) => \{\s*if \(!searchable\) return;/);
-    expect(dialog).toMatch(/const choice: BuildingChoice \| null = !searchable\s*\? \{ kind: "auto" \}/);
+    expect(dialog).toMatch(/const choice: BuildingChoice \| null = !searchable\s*\? shortNameLinkChoice\(area\)/);
   });
   it("保存中は Escape で閉じない", () => {
     expect(dialog).toContain("onClose={saving ? undefined : onClose}");

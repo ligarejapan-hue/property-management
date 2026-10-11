@@ -19,6 +19,52 @@ const noticeSrc = readRepoFile("src/lib/building-link/notice.ts");
 const hintSrc = readRepoFile("src/components/properties/photo-tab-building-hint.tsx");
 const buildingRouteSrc = readRepoFile("src/app/api/buildings/[id]/route.ts");
 const sidebarSrc = readRepoFile("src/components/layout/sidebar-model.tsx");
+const linkDialogSrc = readRepoFile("src/components/buildings/building-link-dialog.tsx");
+const linkModelSrc = readRepoFile("src/lib/building-link/link-dialog-model.ts");
+const propertyPageSrc = readRepoFile("src/app/(dashboard)/properties/[id]/page.tsx");
+
+describe("物件名から棟の画面へ(2026-10-11): 資料の文言が画面と同じ", () => {
+  it("つながっていない物件の物件名の下の案内", () => {
+    const hint = "まだ棟につながっていません。押すと棟を選んでつなげます。";
+    expect(propertyPageSrc).toContain(hint);
+    expect(manualSrc).toContain(hint);
+  });
+  it("確認の小窓のボタンと「新しい棟として作る」", () => {
+    for (const label of ["この棟につなぐ", "新しい棟を作ってつなぐ"]) {
+      expect(linkModelSrc).toContain(`"${label}"`);
+      expect(manualSrc).toContain(label);
+    }
+    expect(linkDialogSrc).toContain("新しい棟として作る");
+    expect(linkDialogSrc).toContain("やめる");
+    expect(manualSrc).toContain("「新しい棟として作る」");
+  });
+  it("物件名が1文字のときの流れ(候補なし・「つなぐ」)もマニュアルにある(@codex P2)", () => {
+    expect(linkDialogSrc).toContain("物件名が短いため、候補は出せません");
+    expect(manualSrc).toContain("物件名が短いため、候補は出せません");
+    expect(linkModelSrc).toContain('return "つなぐ";');
+    expect(manualSrc).toContain('<span class="btn">つなぐ</span>');
+    // 町丁目も読めないときは自動でつながない(@codex P2)
+    expect(linkDialogSrc).toContain("物件名が短く、住所から町丁目も読み取れないため、自動ではつなげません。");
+    expect(manualSrc).toContain("住所から町丁目も読み取れないときは自動ではつなげない");
+  });
+  it("棟が多くて候補を全部出せないとき(partial)は「自動で判断してつなぐ」を選べることもマニュアルにある(@codex P2)", () => {
+    const option = "自動で判断してつなぐ（同じ町丁目の同じ名前の棟へ・無ければ新しく作る）";
+    expect(linkDialogSrc).toContain(option);
+    expect(manualSrc).toContain(option);
+    // partial は候補が0件でも自動の判断で先へ進める(行き止まりにしない)
+    expect(linkModelSrc).toContain('return allowsAutoLink(state, area) ? { kind: "auto" } : null;');
+    // 町丁目が読めない物件では出さない(サーバーが探さず作るため)
+    const noArea = "棟が多く候補に全部は出せず、住所から町丁目も読み取れないため、自動ではつなげません。";
+    expect(linkDialogSrc).toContain(noArea);
+    expect(manualSrc).toContain("住所から町丁目を読み取れない物件ではこの選択は出ない");
+  });
+  it("ガイドにも物件名から棟の画面への項目がある", () => {
+    expect(guideSrc).toContain("物件名から棟の画面へ（新）");
+    // 1文字・町丁目不明の例外と「自動で判断してつなぐ」もガイドに書く(@codex P2)
+    expect(guideSrc).toContain("住所から町丁目を読み取れないときは自動ではつなげない");
+    expect(guideSrc).toContain("「自動で判断してつなぐ」を選べます（これも町丁目が読み取れるときだけです）");
+  });
+});
 
 describe("棟の自動つなぎ: 画面の文言が実装と同じ", () => {
   it("候補の一番下「新しい棟として登録する」", () => {

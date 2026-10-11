@@ -19,7 +19,13 @@ import {
   suggestQueryStringForArea,
   type SuggestResult,
 } from "@/lib/building-link/combobox-model";
-import { initialLinkChoice, linkConfirmButtonLabel, linkNeedsSuggestions } from "@/lib/building-link/link-dialog-model";
+import {
+  allowsAutoLink,
+  initialLinkChoice,
+  linkConfirmButtonLabel,
+  linkNeedsSuggestions,
+  shortNameLinkChoice,
+} from "@/lib/building-link/link-dialog-model";
 import type { BuildingChoice } from "@/lib/building-link/resolve";
 import type { BuildingSuggestion } from "@/lib/building-link/suggest";
 
@@ -80,8 +86,8 @@ export default function BuildingLinkDialog({
   const suggestions = (state === "ready" || state === "partial") && result ? result.data : [];
   const allowNew = allowsNewBuilding(state);
   const choice: BuildingChoice | null = !searchable
-    ? { kind: "auto" }
-    : picked ?? initialLinkChoice(suggestions, state);
+    ? shortNameLinkChoice(area)
+    : picked ?? initialLinkChoice(suggestions, state, area);
   const isChosen = (c: BuildingChoice) =>
     choice !== null &&
     choice.kind === c.kind &&
@@ -116,9 +122,14 @@ export default function BuildingLinkDialog({
       <p className="text-sm text-gray-600 dark:text-gray-300">
         つなぐ棟を選んでください。つなぐと、棟の画面へ移ります。
       </p>
-      {!searchable && (
+      {!searchable && area !== "" && (
         <p className="mt-3 text-sm text-gray-600 dark:text-gray-300">
           物件名が短いため、候補は出せません。つなぐと、同じ町丁目に同じ名前の棟があればそこへつなぎ、無ければ新しく作ります。
+        </p>
+      )}
+      {!searchable && area === "" && (
+        <p className="mt-3 text-sm text-gray-600 dark:text-gray-300">
+          物件名が短く、住所から町丁目も読み取れないため、自動ではつなげません。物件の住所か物件名を直してからもう一度お試しください。
         </p>
       )}
       {searchable && state === "loading" && (
@@ -175,9 +186,28 @@ export default function BuildingLinkDialog({
               </span>
             </button>
           )}
-          {state === "partial" && (
+          {allowsAutoLink(state, area) && (
+            <>
+              <button
+                type="button"
+                role="radio"
+                aria-checked={isChosen({ kind: "auto" })}
+                disabled={saving}
+                className={rowClass(isChosen({ kind: "auto" }))}
+                onClick={() => setPicked({ kind: "auto" })}
+              >
+                <span className="font-medium text-gray-900 dark:text-gray-100">
+                  自動で判断してつなぐ（同じ町丁目の同じ名前の棟へ・無ければ新しく作る）
+                </span>
+              </button>
+              <p className="text-xs text-gray-500 dark:text-gray-400">
+                棟が多く、候補に全部は出せませんでした。当てはまる候補が無いときは「自動で判断してつなぐ」を選んでください（保存のときに全部の棟を確かめます）。
+              </p>
+            </>
+          )}
+          {state === "partial" && !allowsAutoLink(state, area) && (
             <p className="text-xs text-gray-500 dark:text-gray-400">
-              古い棟を全部は確かめられなかったため、新しい棟は作れません。候補から選んでください。
+              棟が多く候補に全部は出せず、住所から町丁目も読み取れないため、自動ではつなげません。候補から選ぶか、物件の住所を直してからもう一度お試しください。
             </p>
           )}
         </div>
