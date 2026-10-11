@@ -150,6 +150,9 @@ function isFieldVisible(
   if (field.key === "buildingName") {
     return supportsBuildingName(values.propertyType);
   }
+  if (field.key === "roomNo") {
+    return isMansionUnit(values.propertyType);
+  }
   // ⚠clearOnly は「新しく入れる」ためではなく「消す」ための欄。
   //   元から値がある物件でだけ出す(空の物件に欄が生えると、入れられてしまう)。
   //   判定は**開いた時点の値**で固定する。編集中に消した瞬間に欄が消えると、
@@ -296,6 +299,13 @@ export function salesFieldsFor(
         { key: "floorNo", label: "所在階", type: "number", section: "販売" },
         { key: "managementFee", label: "管理費(円/月)", type: "number", section: "販売" },
         { key: "repairReserveFee", label: "修繕積立金(円/月)", type: "number", section: "販売" },
+        { key: "occupancyStatus", label: "現況", type: "select", section: "販売", options: [
+          { value: "", label: "(未設定)" },
+          { value: "vacant", label: "空室" },
+          { value: "occupied", label: "入居中" },
+          { value: "unknown", label: "不明" },
+        ] },
+        { key: "ownershipShareNote", label: "持分メモ", type: "text", section: "販売" },
         { key: "parking", label: "駐車場", type: "text", section: "販売" },
         // 棟に紐づいていない区分は、棟の項目を物件の欄として入れる。
         ...(hasBuilding
@@ -353,6 +363,8 @@ const FORM_FIELDS: FormField[] = [
     section: "基本",
     maxLength: BUILDING_NAME_MAX_LENGTH,
   },
+  // 部屋番号。⚠区分マンション(新旧)のときだけ出す(描画側で判定・isFieldVisible)。
+  { key: "roomNo", label: "部屋番号", type: "text", section: "基本", maxLength: 50 },
   // ⚠不動産番号は**新しく入れられない**が、**消すことはできる**(clearOnly)。
   //   番号が入ると所在検索の対象外になり、番号での取得は実サイトへ未配線=
   //   **謄本が取れない行き止まり**になる(2026-09-08 発注者判断=番号は作らない)。

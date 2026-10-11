@@ -288,6 +288,9 @@ export async function PATCH(
         floorNo: true,
         managementFee: true,
         repairReserveFee: true,
+        roomNo: true,
+        occupancyStatus: true,
+        ownershipShareNote: true,
         note: true,
       },
     });

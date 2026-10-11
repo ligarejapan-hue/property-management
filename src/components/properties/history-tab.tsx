@@ -82,6 +82,8 @@ const FIELD_LABELS: Record<string, string> = {
   managementFee: "管理費",
   repairReserveFee: "修繕積立金",
   ownershipShareNote: "持分メモ",
+  roomNo: "部屋番号",
+  occupancyStatus: "現況",
 };
 
 const SOURCE_LABELS: Record<string, string> = {
