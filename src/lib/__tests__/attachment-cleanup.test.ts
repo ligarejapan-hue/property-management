@@ -1,6 +1,6 @@
 import { describe, it, expect, vi, beforeEach, type Mock } from "vitest";
 
-const { deleteSpy } = vi.hoisted(() => ({ deleteSpy: vi.fn() }));
+const { deleteSpy, readSpy } = vi.hoisted(() => ({ deleteSpy: vi.fn(), readSpy: vi.fn() }));
 
 // keyFromUrl: resolves /uploads/{key} (any host) and /:bucket/{key} for server backend.
 // The test bucket is "testbucket" (matches server URLs used in tests).
@@ -26,6 +26,8 @@ function testKeyFromUrl(u: string | null | undefined): string | null {
 vi.mock("@/lib/storage", () => ({
   getStorage: () => ({
     delete: deleteSpy,
+    // 削除後に読み直して、消えたことを確かめる(@codex PR#500 4巡目)。既定=消えている。
+    read: readSpy,
     keyFromUrl: testKeyFromUrl,
   }),
 }));
@@ -40,6 +42,7 @@ vi.mock("@/lib/prisma", () => ({
 // escapePrismaLikePattern is pure & tested elsewhere; mock as identity to avoid pulling its deps.
 vi.mock("@/lib/uploads-authorization", () => ({
   escapePrismaLikePattern: (s: string) => s,
+  isOwnerPiiDocumentType: (t: string | null | undefined) => t === "referral" || t === "report",
 }));
 
 import prisma from "@/lib/prisma";
@@ -74,6 +77,7 @@ function wireFindMany(purgeable: unknown[], sharedRefs: unknown[] = []) {
 beforeEach(() => {
   vi.clearAllMocks();
   deleteSpy.mockResolvedValue(undefined);
+  readSpy.mockResolvedValue(null);
   // claim updateMany: first call = CLAIM (count 1), further calls = RELEASE (count 1)
   pm.attachment.updateMany.mockResolvedValue({ count: 1 });
   pm.attachment.deleteMany.mockResolvedValue({ count: 1 });
@@ -105,7 +109,12 @@ describe("findPurgeableAttachments", () => {
       { purgeStartedAt: { lte: expect.any(Date) } },
     ]);
     expect(arg.take).toBe(200);
-    expect(arg.select).toEqual({ id: true, fileUrl: true });
+    expect(arg.select).toEqual({ id: true, fileUrl: true, type: true });
+    expect(arg.orderBy).toEqual([{ deletedAt: "asc" }, { id: "asc" }]);
+    // ★守りの記録として残した行は、見直しの間隔(7日)が過ぎるまで外す(@codex PR#500 21巡目)
+    const holdCutoff = arg.where.AND[0].OR[1].purgeHeldAt.lte as Date;
+    expect(arg.where.AND).toEqual([{ OR: [{ purgeHeldAt: null }, { purgeHeldAt: { lte: expect.any(Date) } }] }]);
+    expect(NOW.getTime() - holdCutoff.getTime()).toBe(7 * 24 * 60 * 60 * 1000);
   });
 
   it("物件削除で propertyId=null になった孤児もゴミ箱入りしていれば対象になる（総点検P3）", async () => {
@@ -224,6 +233,20 @@ describe("purgeExpiredAttachments", () => {
     expect(pm.attachment.deleteMany.mock.calls[0][0].where.id).toBe("b2");
   });
 
+  it("★削除が黙って失敗した(読み直すとまだある)ときは、記録を消さず次の回にやり直す(@codex PR#500 4巡目)", async () => {
+    wireFindMany([{ id: "r1", fileUrl: "/uploads/report-inbox/1-abc.pdf" }]);
+    // 削除は成功を返すが、ファイルはまだ読める(LocalStorageAdapter は unlink の失敗を飲み込む)
+    readSpy.mockResolvedValueOnce({ body: Buffer.from("x"), contentType: "application/pdf", size: 1 });
+    const r = await purgeExpiredAttachments({ now: NOW, limit: 200 });
+    expect(r).toMatchObject({ purged: 0, failed: 1 });
+    expect(pm.attachment.deleteMany).not.toHaveBeenCalled();
+    // 自分の claim を外して、次の回にやり直せるようにする
+    expect(pm.attachment.updateMany).toHaveBeenLastCalledWith({
+      where: { id: "r1", purgeStartedAt: NOW },
+      data: { purgeStartedAt: null },
+    });
+  });
+
   // ─── 8. shared key (another row references it): storage NOT deleted, DB row IS deleted ─
   it("他の添付行が同一 key を参照 → storage は消さず DB 行は purge（共有object保護）", async () => {
     wireFindMany(
@@ -294,6 +317,32 @@ describe("purgeExpiredAttachments", () => {
     pm.propertyPhoto.findMany.mockResolvedValue([{ fileUrl: key }]);
     const r = await purgeExpiredAttachments({ now: NOW, limit: 200 });
     expect(deleteSpy).not.toHaveBeenCalled();
+    expect(r).toEqual({ scanned: 1, purged: 1, failed: 0, skipped: 0 });
+  });
+
+  it.each(["report", "referral"])(
+    "★%s の記録は、同じファイルを写真などがまだ指している間は消さない(守りの記録を残す・@codex PR#500 13巡目)",
+    async (type) => {
+      const key = "/uploads/report-inbox/1-abc.pdf";
+      wireFindMany([{ id: "c1", fileUrl: key, type }], []);
+      pm.propertyPhoto.findMany.mockResolvedValue([{ fileUrl: key }]);
+      const r = await purgeExpiredAttachments({ now: NOW, limit: 200 });
+      expect(deleteSpy).not.toHaveBeenCalled();
+      expect(pm.attachment.deleteMany).not.toHaveBeenCalled();
+      // 主張を外し、残した印を書く(7日間は対象から外れ、後ろの行が処理される・21巡目)
+      expect(pm.attachment.updateMany).toHaveBeenLastCalledWith({
+        where: { id: "c1", purgeStartedAt: NOW },
+        data: { purgeStartedAt: null, purgeHeldAt: NOW },
+      });
+      expect(r).toEqual({ scanned: 1, purged: 0, failed: 0, skipped: 1 });
+    },
+  );
+
+  it("report でも、他に指す記録が無ければファイルも記録も消す", async () => {
+    const key = "/uploads/report-inbox/1-abc.pdf";
+    wireFindMany([{ id: "c1", fileUrl: key, type: "report" }], []);
+    const r = await purgeExpiredAttachments({ now: NOW, limit: 200 });
+    expect(deleteSpy).toHaveBeenCalled();
     expect(r).toEqual({ scanned: 1, purged: 1, failed: 0, skipped: 0 });
   });
 

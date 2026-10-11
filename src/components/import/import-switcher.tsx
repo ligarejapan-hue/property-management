@@ -2,7 +2,7 @@
 
 import Link from "next/link";
 import { usePathname } from "next/navigation";
-import { Upload, FileText, Files, ClipboardPaste } from "lucide-react";
+import { Upload, FileText, Files, ClipboardPaste, FileCheck } from "lucide-react";
 import { IMPORT_TYPE_LABELS } from "@/lib/import-labels";
 
 /**
@@ -21,6 +21,7 @@ const ITEMS: { href: string; label: string; icon: React.ComponentType<{ classNam
   { href: "/import/registry-pdf", label: IMPORT_TYPE_LABELS.registry_pdf, icon: FileText },
   { href: "/import/registry-dm", label: "登記DM取込", icon: Files },
   { href: "/import/paste", label: "貼り付けて物件化", icon: ClipboardPaste },
+  { href: "/import/report-inbox", label: "査定報告書の受け取り箱", icon: FileCheck },
 ];
 
 export default function ImportSwitcher() {

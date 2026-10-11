@@ -826,6 +826,37 @@ model DmRecipientDraftOwner {
 // 運用
 // ============================================================
 
+/// 査定報告書の受け取り箱(2026-10-10)。SRE AI査定などからダウンロードした報告書PDFを
+/// ここへ上げ、読み取ったマンション名・部屋番号・所在地から物件の候補を出して、人が添付する。
+/// ⚠報告書には依頼者の氏名が載る=所有者の項目をすべて素通しで見られる人だけが扱う
+///   (canOpenReferralDocument と同じ判定)。添付しなかったものも消さない(発注者決定)。
+model ReportInboxItem {
+  id           String    @id @default(uuid()) @db.Uuid
+  /// 元のファイル名(受け取り箱の中でだけ見せる。添付の名前には使わない)
+  fileName     String    @map("file_name")
+  fileUrl      String    @map("file_url")
+  fileSize     Int       @map("file_size")
+  /// 大きいPDFを自動で縮めたときだけ、圧縮前の大きさ
+  originalSize Int?      @map("original_size")
+  /// 読み取った書式: "sre" | "unknown"
+  source       String    @default("unknown")
+  buildingName String?   @map("building_name")
+  roomNo       String?   @map("room_no")
+  address      String?
+  /// "uploading"(取り込み中=記録を先に作ってからファイルを置く) | "pending"(未処理) | "attached"(添付済み)
+  /// | "discarding"(削除中=ファイルを消している) | "discarded"(削除)
+  status       String    @default("pending")
+  uploadedBy   String    @map("uploaded_by") @db.Uuid
+  createdAt    DateTime  @default(now()) @map("created_at")
+  attachmentId String?   @map("attachment_id") @db.Uuid
+  propertyId   String?   @map("property_id") @db.Uuid
+  resolvedBy   String?   @map("resolved_by") @db.Uuid
+  resolvedAt   DateTime? @map("resolved_at")
+
+  @@index([status, createdAt])
+  @@map("report_inbox_items")
+}
+
 model Attachment {
   id         String   @id @default(uuid()) @db.Uuid
   targetType String   @map("target_type") // "property" | "owner" | "comment"
@@ -844,6 +875,8 @@ model Attachment {
   isDeleted  Boolean  @default(false) @map("is_deleted")
   deletedAt      DateTime? @map("deleted_at")
   purgeStartedAt DateTime? @map("purge_started_at")
+  /// 90日後の自動削除で「守りの記録として残した」時刻(反響資料・査定報告書)。7日ごとに見直す。
+  purgeHeldAt    DateTime? @map("purge_held_at")
   createdAt  DateTime @default(now()) @map("created_at")
 
   uploader   User      @relation(fields: [uploadedBy], references: [id])

@@ -13,6 +13,7 @@ import {
   escapePrismaLikePattern,
   isEveryOwnerFieldMaskFree,
   referralGatedOwnerFields,
+  isOwnerPiiDocumentType,
 } from "@/lib/uploads-authorization";
 import { __resetStorageForTest } from "@/lib/storage";
 import type { ApiSession, PermissionEntry } from "@/lib/api-helpers";
@@ -996,13 +997,15 @@ describe("resolveRegistryServeMeta (S1b-4)", () => {
     expect(await resolveRegistryServeMeta(GEN_KEY, prisma)).toBeNull();
   });
 
-  it("deleted registry → null", async () => {
+  // ⚠削除済みの記録だけなら守り(authorizeUploadAccess)が 404 にするので、ここには来ない。
+  //   写真など別の記録で登録し直された場合に備え、謄本の扱い(no-store)を引き継ぐ(@codex PR#500 12巡目)。
+  it("deleted registry → 謄本の扱いを引き継ぐ(配信まで来るのは別の記録で登録し直されたときだけ)", async () => {
     const prisma = makeDb({
       attachments: [
         { id: "att-reg-1", fileUrl: `/uploads/${REG_KEY}`, isDeleted: true, targetType: "property", targetId: "p1", propertyId: "p1", type: "registry" },
       ],
     });
-    expect(await resolveRegistryServeMeta(REG_KEY, prisma)).toBeNull();
+    expect(await resolveRegistryServeMeta(REG_KEY, prisma)).toMatchObject({ kind: "registry", attachmentId: "att-reg-1" });
   });
 
   it("invalid key(traversal) → null", async () => {
@@ -1439,7 +1442,7 @@ describe("resolveProtectedServeMeta", () => {
     });
   });
 
-  it("★削除済みの referral は null（保護対象として扱わない＝404 経路）", async () => {
+  it("★削除済みの referral も保護の扱いを引き継ぐ(守りが 404 にするので、配信まで来るのは別の記録で登録し直されたときだけ)", async () => {
     const prisma = makeDb({
       attachments: [
         {
@@ -1454,7 +1457,7 @@ describe("resolveProtectedServeMeta", () => {
         },
       ],
     });
-    expect(await resolveProtectedServeMeta(REF_KEY, prisma)).toBeNull();
+    expect(await resolveProtectedServeMeta(REF_KEY, prisma)).toMatchObject({ kind: "referral", attachmentId: "att-ref-2" });
   });
 
   it("★registry も従来どおり kind:'registry' で返る", async () => {
@@ -1518,5 +1521,250 @@ describe("resolveProtectedServeMeta", () => {
       ],
     });
     expect(await resolveRegistryServeMeta(REF_KEY, prisma)).toBeNull();
+  });
+});
+
+// ============================================================
+// 査定報告書(report・2026-10-10)も反響資料と同じ扱い
+//
+// ⚠報告書には依頼者の氏名が載る。general のままだと物件を読めるだけの利用者全員が開ける。
+//   開ける人(所有者の項目をすべて素通しで見られる人)・キャッシュさせない、を referral と揃える。
+// ============================================================
+describe("査定報告書(report)の守り", () => {
+  const KEY = "report-inbox/1-abc.pdf";
+  const att = (over: Partial<Att> = {}): Att => ({
+    id: "att-rep-1",
+    fileUrl: `/uploads/${KEY}`,
+    isDeleted: false,
+    targetType: "property",
+    targetId: "p1",
+    propertyId: "p1",
+    type: "report",
+    ...over,
+  });
+  const prop: Prop = { id: "p1", createdBy: "u-office", assignedTo: null };
+  const propertyReadOnly: PermissionEntry[] = [{ resource: "property", action: "read", granted: true }];
+  const allPiiVisible: PermissionEntry[] = [
+    ...propertyReadOnly,
+    { resource: "owner", action: "read", granted: true },
+    { resource: "owner_name", action: "full", granted: true },
+    { resource: "owner_name_kana", action: "full", granted: true },
+    { resource: "owner_address", action: "full", granted: true },
+    { resource: "owner_phone", action: "full", granted: true },
+    { resource: "owner_email", action: "full", granted: true },
+    { resource: "owner_zip", action: "full", granted: true },
+    { resource: "owner_note", action: "full", granted: true },
+    { resource: "owner_corporate_number", action: "full", granted: true },
+  ];
+
+  it("種類の一覧: referral と report が対象・general / registry は対象外", () => {
+    expect(isOwnerPiiDocumentType("referral")).toBe(true);
+    expect(isOwnerPiiDocumentType("report")).toBe(true);
+    expect(isOwnerPiiDocumentType("general")).toBe(false);
+    expect(isOwnerPiiDocumentType("registry")).toBe(false);
+    expect(isOwnerPiiDocumentType(null)).toBe(false);
+  });
+
+  it("★物件を読めるだけの人には開けない(forbidden)", async () => {
+    const prisma = makeDb({ attachments: [att()], properties: [prop] });
+    expect(
+      await authorizeUploadAccess({ key: KEY, session: officeStaff, permissions: propertyReadOnly, prisma }),
+    ).toBe("forbidden");
+  });
+
+  it("所有者の項目をすべて素通しで見られる人は開ける", async () => {
+    const prisma = makeDb({ attachments: [att()], properties: [prop] });
+    expect(
+      await authorizeUploadAccess({ key: KEY, session: officeStaff, permissions: allPiiVisible, prisma }),
+    ).toBe("ok");
+  });
+
+  it("★配信は kind:'report'(キャッシュさせない・保存名の材料は登録日だけ)", async () => {
+    const created = new Date("2026-10-10T01:00:00.000Z");
+    const prisma = makeDb({ attachments: [att({ createdAt: created } as Partial<Att>)] });
+    expect(await resolveProtectedServeMeta(KEY, prisma)).toEqual({
+      kind: "report",
+      attachmentId: "att-rep-1",
+      propertyId: "p1",
+      createdAt: created,
+    });
+  });
+});
+
+// ============================================================
+// 守りは外れない(@codex PR#500 9巡目)
+//
+// ⚠物件を編集できるだけの人が「保護された添付を削除 → 同じ URL を通常の添付として登録し直す」と、
+//   有効な通常の行だけを見る判定では依頼者名・所有者情報入りの原本が開けてしまう。
+//   削除済みでも保護の種類が一度でもあれば同じ守りを当てる(応答は従来どおり 404)。
+// ============================================================
+describe("保護された書類の守りは、通常の添付として登録し直しても外れない", () => {
+  const KEY = "report-inbox/1-abc.pdf";
+  const prop: Prop = { id: "p1", createdBy: "u-office", assignedTo: null };
+  const propertyRW: PermissionEntry[] = [
+    { resource: "property", action: "read", granted: true },
+    { resource: "property", action: "write", granted: true },
+  ];
+  const allPii: PermissionEntry[] = [
+    ...propertyRW,
+    { resource: "owner", action: "read", granted: true },
+    ...["owner_name", "owner_name_kana", "owner_address", "owner_phone", "owner_email", "owner_zip", "owner_note", "owner_corporate_number"].map(
+      (resource) => ({ resource, action: "full", granted: true }),
+    ),
+  ];
+  const rows = (type: string, key = KEY): Att[] => [
+    { id: "a-old", fileUrl: `/uploads/${key}`, isDeleted: true, targetType: "property", targetId: "p1", propertyId: "p1", type },
+    { id: "a-new", fileUrl: `/uploads/${key}`, isDeleted: false, targetType: "property", targetId: "p1", propertyId: "p1", type: "general" },
+  ];
+
+  it.each(["report", "referral"])("★削除済みの %s と同じファイルを指す通常の添付でも、守りに当たる人は開けない(404)", async (type) => {
+    const prisma = makeDb({ attachments: rows(type, "properties/p1/paste-import/9.pdf"), properties: [prop] });
+    expect(
+      await authorizeUploadAccess({ key: "properties/p1/paste-import/9.pdf", session: officeStaff, permissions: propertyRW, prisma }),
+    ).toBe("not_found");
+  });
+
+  it("所有者情報をすべて見られる人は開ける", async () => {
+    const prisma = makeDb({ attachments: rows("report", "properties/p1/paste-import/9.pdf"), properties: [prop] });
+    expect(
+      await authorizeUploadAccess({ key: "properties/p1/paste-import/9.pdf", session: officeStaff, permissions: allPii, prisma }),
+    ).toBe("ok");
+  });
+
+  it("★削除済みの謄本と同じファイルも、謄本の権限が無ければ開けない", async () => {
+    const prisma = makeDb({ attachments: rows("registry", "properties/p1/registry/9.pdf"), properties: [prop] });
+    expect(
+      await authorizeUploadAccess({ key: "properties/p1/registry/9.pdf", session: officeStaff, permissions: propertyRW, prisma }),
+    ).toBe("not_found");
+  });
+
+  it("★受け取り箱の置き場所のファイルは、記録が通常の添付だけでも守りに当たる", async () => {
+    const prisma = makeDb({ attachments: [rows("general")[1]], properties: [prop] });
+    expect(await authorizeUploadAccess({ key: KEY, session: officeStaff, permissions: propertyRW, prisma })).toBe("not_found");
+    expect(await authorizeUploadAccess({ key: KEY, session: officeStaff, permissions: allPii, prisma })).toBe("ok");
+  });
+});
+
+describe("配信の扱い(no-store・定型名)も外れない(@codex PR#500 10巡目)", () => {
+  const att = (o: Partial<Att> & { createdAt?: Date; registryCertificateType?: string | null }): Att =>
+    ({
+      id: "x",
+      fileUrl: "/uploads/properties/p1/paste-import/9.pdf",
+      isDeleted: false,
+      targetType: "property",
+      targetId: "p1",
+      propertyId: "p1",
+      type: "general",
+      ...o,
+    }) as Att;
+  const created = new Date("2026-10-10T03:00:00Z");
+
+  it.each(["report", "referral"] as const)("★削除済みの %s を通常の添付として登録し直しても、保護された配信のまま", async (type) => {
+    const prisma = makeDb({
+      attachments: [
+        att({ id: "old", isDeleted: true, type, createdAt: created }),
+        att({ id: "new", targetId: "p2", propertyId: "p2" }),
+      ],
+    });
+    // ★記録(監査ログの添付・物件・保存名の日付)は保護された元の記録にそろえる(15巡目)
+    expect(await resolveProtectedServeMeta("properties/p1/paste-import/9.pdf", prisma)).toEqual({
+      kind: type,
+      attachmentId: "old",
+      propertyId: "p1",
+      createdAt: created,
+    });
+  });
+
+  it("★削除済みの謄本を登録し直しても、謄本の配信のまま", async () => {
+    const prisma = makeDb({
+      attachments: [
+        att({ id: "old", isDeleted: true, type: "registry", registryCertificateType: "owner" }),
+        att({ id: "new", createdAt: created }),
+      ],
+    });
+    expect(await resolveProtectedServeMeta("properties/p1/paste-import/9.pdf", prisma)).toMatchObject({
+      kind: "registry",
+      attachmentId: "old",
+      certificateType: "owner",
+    });
+  });
+
+  it("受け取り箱の置き場所のファイルは、通常の添付として登録されていても査定報告書の配信", async () => {
+    const prisma = makeDb({ attachments: [att({ id: "g", fileUrl: "/uploads/report-inbox/1-abc.pdf", createdAt: created })] });
+    expect(await resolveProtectedServeMeta("report-inbox/1-abc.pdf", prisma)).toMatchObject({ kind: "report", attachmentId: "g" });
+  });
+
+  it("保護の履歴が無い通常の添付は、これまでどおり保護しない(null)", async () => {
+    const prisma = makeDb({ attachments: [att({ id: "g" })] });
+    expect(await resolveProtectedServeMeta("properties/p1/paste-import/9.pdf", prisma)).toBeNull();
+  });
+});
+
+describe("元の物件の範囲・別の記録での登録し直しでも守りは外れない(@codex PR#500 12巡目)", () => {
+  const KEY = "properties/pA/paste-import/9.pdf";
+  const piiFull: PermissionEntry[] = [
+    { resource: "property", action: "read", granted: true },
+    { resource: "property", action: "write", granted: true },
+    { resource: "owner", action: "read", granted: true },
+    ...["owner_name", "owner_name_kana", "owner_address", "owner_phone", "owner_email", "owner_zip", "owner_note", "owner_corporate_number"].map(
+      (resource) => ({ resource, action: "full", granted: true }),
+    ),
+  ];
+  const propA: Prop = { id: "pA", createdBy: "u-other", assignedTo: null };
+  const propB: Prop = { id: "pB", createdBy: "u-field", assignedTo: "u-field" };
+  const deletedOnA: Att = {
+    id: "old", fileUrl: `/uploads/${KEY}`, isDeleted: true, targetType: "property", targetId: "pA", propertyId: "pA", type: "report",
+  };
+  const activeOnB: Att = {
+    id: "new", fileUrl: `/uploads/${KEY}`, isDeleted: false, targetType: "property", targetId: "pB", propertyId: "pB", type: "general",
+  };
+
+  it("★担当を外れた物件 A の保護書類を、担当中の物件 B に登録し直しても開けない(404)", async () => {
+    const prisma = makeDb({ attachments: [deletedOnA, activeOnB], properties: [propA, propB] });
+    expect(await authorizeUploadAccess({ key: KEY, session: fieldStaff, permissions: piiFull, prisma })).toBe("not_found");
+  });
+
+  it("元の物件 A を今も開ける人は開ける", async () => {
+    const prisma = makeDb({ attachments: [deletedOnA, activeOnB], properties: [propA, propB] });
+    expect(await authorizeUploadAccess({ key: KEY, session: admin, permissions: piiFull, prisma })).toBe("ok");
+  });
+
+  it("★削除済みの保護書類を写真として登録し直しても、保護の配信(no-store)のまま", async () => {
+    const created = new Date("2026-10-10T03:00:00Z");
+    const prisma = makeDb({
+      attachments: [{ ...deletedOnA, createdAt: created } as Att],
+      photos: [{ fileUrl: `/uploads/${KEY}`, propertyId: "pA" }],
+    });
+    expect(await resolveProtectedServeMeta(KEY, prisma)).toEqual({
+      kind: "report", attachmentId: "old", propertyId: "pA", createdAt: created,
+    });
+  });
+
+  it("★添付の記録が無い受け取り箱のファイルも、査定報告書の配信", async () => {
+    const prisma = makeDb({ photos: [{ fileUrl: "/uploads/report-inbox/1-abc.pdf", propertyId: "pA" }] });
+    expect(await resolveProtectedServeMeta("report-inbox/1-abc.pdf", prisma)).toEqual({
+      kind: "report", attachmentId: null, propertyId: null, createdAt: null,
+    });
+  });
+});
+
+describe("配信の扱いは全部の行を見てから決める(@codex PR#500 23巡目)", () => {
+  const KEY = "properties/p1/paste-import/9.pdf";
+  const row = (o: Partial<Att> & { registryCertificateType?: string | null }): Att =>
+    ({ id: "x", fileUrl: `/uploads/${KEY}`, isDeleted: false, targetType: "property", targetId: "p1", propertyId: "p1", type: "general", ...o }) as Att;
+  const activeReport = row({ id: "rep", type: "report" });
+  const deletedRegistry = row({ id: "reg", isDeleted: true, type: "registry", registryCertificateType: "all" });
+
+  it.each([
+    ["有効な査定報告書が先", [activeReport, deletedRegistry]],
+    ["削除済みの謄本が先", [deletedRegistry, activeReport]],
+  ] as const)("★%sでも、謄本の扱い(監査ログ)になる", async (_label, attachments) => {
+    const prisma = makeDb({ attachments: [...attachments] });
+    expect(await resolveProtectedServeMeta(KEY, prisma)).toMatchObject({ kind: "registry", attachmentId: "reg", certificateType: "all" });
+  });
+
+  it("有効な保護行と削除済みの同じ種類があれば、有効な行にそろえる", async () => {
+    const prisma = makeDb({ attachments: [row({ id: "old", isDeleted: true, type: "report" }), activeReport] });
+    expect(await resolveProtectedServeMeta(KEY, prisma)).toMatchObject({ kind: "report", attachmentId: "rep" });
   });
 });

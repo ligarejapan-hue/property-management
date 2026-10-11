@@ -71,7 +71,7 @@ export default async function proxy(request: NextRequest) {
 }
 
 /**
- * ⚠**大きいPDFを受け取る3つの API は proxy を通さない**(2026-10-10・@codex PR#498 P1)。
+ * ⚠**大きいPDFを受け取る4つの API は proxy を通さない**(2026-10-10・@codex PR#498 P1)。
  *   proxy があると Next.js は本文を proxyClientMaxBodySize(既定 10MB)まで先読みし、超えた分を
  *   黙って切る。上限を全体に上げると、クッキーの「有無」しか見ない proxy の手前で、認証前の
  *   送信に 51MB までメモリを使わせることになる。そこで対象の口だけを外す。
@@ -81,10 +81,10 @@ export default async function proxy(request: NextRequest) {
  *   順になっていることを確かめること(proxy-matcher-large-upload.test.ts)。
  */
 export const LARGE_UPLOAD_API_PATTERN =
-  "api/properties/[^/]+/attachments$|api/import/paste$|api/import/paste/commit$";
+  "api/properties/[^/]+/attachments$|api/import/paste$|api/import/paste/commit$|api/report-inbox$";
 
 export const config = {
   matcher: [
-    "/((?!_next/static|_next/image|favicon.ico|uploads/|api/properties/[^/]+/attachments$|api/import/paste$|api/import/paste/commit$).*)",
+    "/((?!_next/static|_next/image|favicon.ico|uploads/|api/properties/[^/]+/attachments$|api/import/paste$|api/import/paste/commit$|api/report-inbox$).*)",
   ],
 };

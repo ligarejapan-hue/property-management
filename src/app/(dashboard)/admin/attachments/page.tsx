@@ -70,6 +70,7 @@ const TYPE_LABELS: Record<string, string> = {
   general: "一般",
   registry: "謄本",
   referral: "反響資料",
+  report: "査定報告書",
 };
 
 const TARGET_TYPE_LABELS: Record<string, string> = {
@@ -199,6 +200,7 @@ export default function AttachmentSearchPage() {
               <option value="general">一般</option>
               <option value="registry">謄本</option>
               <option value="referral">反響資料</option>
+              <option value="report">査定報告書</option>
             </select>
             <Button onClick={handleSearch}>
               <Search className="h-4 w-4" />

@@ -145,14 +145,14 @@ server {
         return 404;
     }
 
-    # 大きいPDFを受け取る3つの口(2026-10-10・@codex PR#498)。8MB を超える PDF を 50MB まで受け、
+    # 大きいPDFを受け取る4つの口(2026-10-10・@codex PR#498・査定報告書の受け取り箱を追加)。8MB を超える PDF を 50MB まで受け、
     # サーバー側で自動で縮める。全体の上限(client_max_body_size 12m)と待ち時間(60s)では
     # 18.8MB の査定報告書が手前で断られ、圧縮の順番待ち(実行1本 最大120秒+自分の分 最大120秒)の
     # 途中で 504 になる(画面は失敗でもサーバーは保存を続け、やり直すと二重登録になりうる)。
     # ⚠ここだけ上限 52MB(50MB+multipart の上乗せ分)・待ち 300 秒にする。ほかの道は今のまま。
     # ⚠本番(app.ligarejapan.com)は社内の画面・API を nginx で出さない(location / は 404・
     #   社内は Tailscale の入口)ので、この location は要らない。アプリ全体を nginx で出す構成だけで使う。
-    location ~ ^/api/(properties/[^/]+/attachments|import/paste(/commit)?)$ {
+    location ~ ^/api/(properties/[^/]+/attachments|import/paste(/commit)?|report-inbox)$ {
         client_max_body_size 52m;
         proxy_pass         http://127.0.0.1:3000;
         proxy_http_version 1.1;
