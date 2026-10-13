@@ -22,7 +22,8 @@ describe("新規物件登録の小窓: 作業中の入力を消さない", () =>
     expect(src).not.toMatch(/catch \(err\) \{\n\s*draft\.unmarkSubmitting\(\);/);
   });
   it("キャンセル・×は控えを消して閉じる", () => {
-    expect(src).toMatch(/const handleCancel = \(\) => \{\n\s*draft\.close\(\);\n\s*onClose\(\);/);
+    // ⚠送信途中の帯が出ている間は控え(印)を残して閉じる=一覧で確かめに行ける(@codex P1)。
+    expect(src).toMatch(/const handleCancel = \(\) => \{\n(?:\s*\/\/.*\n)*\s*if \(pendingBlocked\) \{\n\s*onClose\(\);\n\s*return;\n\s*\}\n\s*draft\.close\(\);\n\s*onClose\(\);/);
     expect((src.match(/onClick=\{handleCancel\}/g) ?? []).length).toBe(2);
     expect(src).not.toMatch(/onClick=\{onClose\}/);
   });
@@ -41,14 +42,15 @@ describe("新規物件登録の小窓を開き直す", () => {
     const src = read("src/app/(dashboard)/properties/page.tsx");
     expect(src).toMatch(/useDraftExists\(draftKey\("new-property:properties"\)\)/);
     // 控えが現れたら開く(開いた状態を保つ)。控えが消えても閉じない=「最初からやり直す」で閉じない。
-    expect(src).toMatch(/if \(newPropertyDraftExists && !showNewModal\) setShowNewModal\(true\);/);
+    // 画面に来るたびに1回だけ開く(送信途中の控えを残して閉じたとき、すぐ開き直さない)。
+    expect(src).toMatch(/if \(newPropertyDraftExists && !newDraftAutoOpened\) \{\n\s*setNewDraftAutoOpened\(true\);\n\s*setShowNewModal\(true\);\n\s*\}/);
     expect(src).toMatch(/\{showNewModal && \(\n\s*<NewPropertyModal draftScreen="new-property:properties"/);
     expect(src).not.toMatch(/showNewModal \|\| newPropertyDraftExists/);
   });
   it("販売図面の新規作成: 控えがあれば開く", () => {
     const src = read("src/app/(dashboard)/sales-sheets/new/page.tsx");
     expect(src).toMatch(/useDraftExists\(draftKey\("new-property:sales-sheet"\)\)/);
-    expect(src).toMatch(/if \(registerDraftExists && !showRegister\) setShowRegister\(true\);/);
+    expect(src).toMatch(/if \(registerDraftExists && !registerDraftAutoOpened\) \{\n\s*setRegisterDraftAutoOpened\(true\);\n\s*setShowRegister\(true\);\n\s*\}/);
     expect(src).toMatch(/\{showRegister && \(\n\s*<NewPropertyModal\n\s*draftScreen="new-property:sales-sheet"/);
     expect(src).not.toMatch(/showRegister \|\| registerDraftExists/);
   });

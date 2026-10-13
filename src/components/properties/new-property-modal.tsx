@@ -103,7 +103,14 @@ export default function NewPropertyModal({ onClose, typeFilter, onCreated, draft
   const draft = useDraftAutosave(draftKeyValue, draftData, isNewPropertyDraftEmpty, restored);
 
   // キャンセル・×: 控えを消して閉じる(閉じた後の unmount で書き戻さない)。
+  // ⚠送信途中の帯が出ている間は、控え(送信中の印)を残して閉じる。一覧で確かめに行くために
+  //   閉じるので、ここで印を消すと次に開いたとき帯が出ず、同じ物件をもう一度登録できてしまう
+  //   (@codex P1)。印を外すのは「確かめたので続ける」だけ。
   const handleCancel = () => {
+    if (pendingBlocked) {
+      onClose();
+      return;
+    }
     draft.close();
     onClose();
   };

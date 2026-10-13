@@ -356,7 +356,12 @@ function PropertiesPageInner() {
   // 新規登録の途中で別のメニューへ移って戻ったら、小窓を開き直す(設計書 2026-10-13 §3-3)。
   const newPropertyDraftExists = useDraftExists(draftKey("new-property:properties"));
   // ⚠開いた状態として保つ(控えが消えても閉じない=「最初からやり直す」・全部消したときに小窓が消えない)。
-  if (newPropertyDraftExists && !showNewModal) setShowNewModal(true);
+  // ⚠この画面に来るたびに1回だけ開く(送信途中の控えを残して閉じたとき、すぐ開き直さない)。
+  const [newDraftAutoOpened, setNewDraftAutoOpened] = useState(false);
+  if (newPropertyDraftExists && !newDraftAutoOpened) {
+    setNewDraftAutoOpened(true);
+    setShowNewModal(true);
+  }
   const [deletingId, setDeletingId] = useState<string | null>(null);
   const [bulkDeleting, setBulkDeleting] = useState(false);
   // 一括削除の結果サマリ。null のときは表示しない。
