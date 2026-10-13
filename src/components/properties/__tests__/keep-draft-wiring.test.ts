@@ -28,6 +28,9 @@ describe("新規物件登録の小窓: 作業中の入力を消さない", () =>
     expect(src).toMatch(/<DraftRestoredNotice/);
     expect(src).toMatch(/<DraftPendingNotice/);
     expect(src).toMatch(/<fieldset disabled=\{pendingBlocked\}/);
+    // ⚠display: contents だと form の space-y-4 が中の欄に効かず、欄の間が詰まる。
+    expect(src).not.toMatch(/<fieldset[^>]*className="contents"/);
+    expect(src).toMatch(/<fieldset disabled=\{pendingBlocked\} className="[^"]*space-y-4/);
   });
 });
 
@@ -35,12 +38,17 @@ describe("新規物件登録の小窓を開き直す", () => {
   it("物件一覧: 控えがあれば開く", () => {
     const src = read("src/app/(dashboard)/properties/page.tsx");
     expect(src).toMatch(/useDraftExists\(draftKey\("new-property:properties"\)\)/);
-    expect(src).toMatch(/\(showNewModal \|\| newPropertyDraftExists\) && \(\n\s*<NewPropertyModal draftScreen="new-property:properties"/);
+    // 控えが現れたら開く(開いた状態を保つ)。控えが消えても閉じない=「最初からやり直す」で閉じない。
+    expect(src).toMatch(/if \(newPropertyDraftExists && !showNewModal\) setShowNewModal\(true\);/);
+    expect(src).toMatch(/\{showNewModal && \(\n\s*<NewPropertyModal draftScreen="new-property:properties"/);
+    expect(src).not.toMatch(/showNewModal \|\| newPropertyDraftExists/);
   });
   it("販売図面の新規作成: 控えがあれば開く", () => {
     const src = read("src/app/(dashboard)/sales-sheets/new/page.tsx");
     expect(src).toMatch(/useDraftExists\(draftKey\("new-property:sales-sheet"\)\)/);
-    expect(src).toMatch(/\(showRegister \|\| registerDraftExists\) && \(\n\s*<NewPropertyModal\n\s*draftScreen="new-property:sales-sheet"/);
+    expect(src).toMatch(/if \(registerDraftExists && !showRegister\) setShowRegister\(true\);/);
+    expect(src).toMatch(/\{showRegister && \(\n\s*<NewPropertyModal\n\s*draftScreen="new-property:sales-sheet"/);
+    expect(src).not.toMatch(/showRegister \|\| registerDraftExists/);
   });
 });
 

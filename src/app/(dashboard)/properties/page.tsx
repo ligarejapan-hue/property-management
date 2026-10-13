@@ -355,6 +355,8 @@ function PropertiesPageInner() {
   const [showNewModal, setShowNewModal] = useState(false);
   // 新規登録の途中で別のメニューへ移って戻ったら、小窓を開き直す(設計書 2026-10-13 §3-3)。
   const newPropertyDraftExists = useDraftExists(draftKey("new-property:properties"));
+  // ⚠開いた状態として保つ(控えが消えても閉じない=「最初からやり直す」・全部消したときに小窓が消えない)。
+  if (newPropertyDraftExists && !showNewModal) setShowNewModal(true);
   const [deletingId, setDeletingId] = useState<string | null>(null);
   const [bulkDeleting, setBulkDeleting] = useState(false);
   // 一括削除の結果サマリ。null のときは表示しない。
@@ -1168,7 +1170,7 @@ function PropertiesPageInner() {
         </button>
       </div>
 
-      {(showNewModal || newPropertyDraftExists) && (
+      {showNewModal && (
         <NewPropertyModal draftScreen="new-property:properties" onClose={() => setShowNewModal(false)} />
       )}
 

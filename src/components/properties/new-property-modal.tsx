@@ -211,7 +211,8 @@ export default function NewPropertyModal({ onClose, typeFilter, onCreated, draft
             restored &&
             !restoredDismissed && <DraftRestoredNotice savedAt={restored.savedAt} onDiscard={handleDiscardDraft} />
           )}
-          <fieldset disabled={pendingBlocked} className="contents">
+          {/* ⚠display: contents にしない(form の space-y-4 が中の欄に効かなくなる) */}
+          <fieldset disabled={pendingBlocked} className="m-0 min-w-0 space-y-4 border-0 p-0">
             {error && (
               <div className="flex items-start gap-2 rounded-md border border-red-200 bg-red-50 p-3 text-sm text-red-700 dark:border-red-800 dark:bg-red-950/40 dark:text-red-300">
                 <AlertTriangle className="mt-0.5 h-4 w-4 shrink-0" />

@@ -136,6 +136,8 @@ export default function SalesSheetNewEntryPage() {
   const [showRegister, setShowRegister] = useState(false);
   // 新規登録の途中で別のメニューへ移って戻ったら、小窓を開き直す(設計書 2026-10-13 §3-3)。
   const registerDraftExists = useDraftExists(draftKey("new-property:sales-sheet"));
+  // ⚠開いた状態として保つ(控えが消えても閉じない=「最初からやり直す」・全部消したときに小窓が消えない)。
+  if (registerDraftExists && !showRegister) setShowRegister(true);
   // 登録した物件を棟へつないだ結果の知らせ(@codex R6)。この画面に留まるので、ここで出す。
   const [buildingNotice, setBuildingNotice] = useState<BuildingLinkOutcome | null>(null);
 
@@ -189,7 +191,7 @@ export default function SalesSheetNewEntryPage() {
         />
       )}
 
-      {(showRegister || registerDraftExists) && (
+      {showRegister && (
         <NewPropertyModal
           draftScreen="new-property:sales-sheet"
           onClose={() => setShowRegister(false)}
