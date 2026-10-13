@@ -52,6 +52,8 @@ function notify(): void {
 
 /** 控えが書かれた・消えたときに呼ばれる(小窓の自動再オープン用)。戻り値で解除。 */
 export function subscribeDrafts(listener: () => void): () => void {
+  // 見張りを始める画面(物件一覧など)を開くたびに、期限切れの控えを掃除する。
+  purgeExpiredDrafts();
   listeners.add(listener);
   return () => {
     listeners.delete(listener);
@@ -123,15 +125,25 @@ export function readDraft<T>(
   return { ...env, data };
 }
 
-/** 控えがあるか(封筒と期限だけ見る・消さない)。 */
+/**
+ * 控えがあるか(封筒と期限だけ見る)。期限切れ・壊れた控えはここで消す(12時間を過ぎて
+ * 残さない・@codex P2)。⚠知らせない=useSyncExternalStore の描画中に呼ばれるため
+ * (消した結果も false で、見えている状態と食い違わない)。
+ */
 export function hasDraft(key: string, now: number = Date.now()): boolean {
-  return parseEnvelope(getRaw(key), now) != null;
+  const raw = getRaw(key);
+  if (raw == null) return false;
+  if (parseEnvelope(raw, now) != null) return true;
+  removeRaw(key);
+  return false;
 }
 
 export function writeDraft<T>(key: string, draft: StoredDraft<T>): WriteResult {
   if (lockedUntilReload) return "failed";
   const s = store();
   if (!s) return "failed";
+  // 書くたびに期限切れの控えを掃除する(12時間を過ぎて残さない・容量も空ける)。
+  purgeExpiredDrafts();
   let text: string;
   try {
     text = JSON.stringify(draft);
@@ -155,6 +167,25 @@ export function writeDraft<T>(key: string, draft: StoredDraft<T>): WriteResult {
 export function clearDraft(key: string): void {
   removeRaw(key);
   notify();
+}
+
+/**
+ * 期限切れ・壊れた控えをすべて消す(開かれないままの物件の控えも 12時間で消すため)。
+ * ⚠知らせない(消えるのは「無い」と扱われていた控えだけ=見えている状態は変わらない)。
+ */
+export function purgeExpiredDrafts(now: number = Date.now()): void {
+  const s = store();
+  if (!s) return;
+  try {
+    const stale: string[] = [];
+    for (let i = 0; i < s.length; i++) {
+      const k = s.key(i);
+      if (k && k.startsWith(DRAFT_PREFIX) && parseEnvelope(s.getItem(k), now) == null) stale.push(k);
+    }
+    for (const k of stale) s.removeItem(k);
+  } catch {
+    /* 使えない端末では何もしない */
+  }
 }
 
 /**

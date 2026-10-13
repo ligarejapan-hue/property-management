@@ -1,4 +1,6 @@
 import { describe, it, expect, beforeEach, afterEach, vi } from "vitest";
+import { readFileSync } from "node:fs";
+import { resolve } from "node:path";
 import {
   DRAFT_MAX_AGE_MS,
   DRAFT_MAX_CHARS,
@@ -6,6 +8,7 @@ import {
   clearDraft,
   draftKey,
   hasDraft,
+  purgeExpiredDrafts,
   readDraft,
   subscribeDrafts,
   writeDraft,
@@ -98,6 +101,24 @@ describe("hasDraft", () => {
     s.setItem(k, "{");
     expect(hasDraft(k, 5)).toBe(false);
   });
+  it("期限切れ・壊れた控えは、あるかを確かめた時点で消す(12時間を過ぎて残さない)", () => {
+    const k = draftKey("new-property:properties");
+    writeDraft(k, { v: 1, savedAt: 1, data: { name: "A" } });
+    expect(hasDraft(k, DRAFT_MAX_AGE_MS + 2)).toBe(false);
+    expect(s.getItem(k)).toBeNull();
+    s.setItem(k, "{");
+    expect(hasDraft(k, 5)).toBe(false);
+    expect(s.getItem(k)).toBeNull();
+  });
+  it("あるかを確かめるだけでは知らせない(描画中に呼ばれるため)", () => {
+    const k = draftKey("new-property:properties");
+    writeDraft(k, { v: 1, savedAt: 1, data: { name: "A" } });
+    const fn = vi.fn();
+    const off = subscribeDrafts(fn);
+    hasDraft(k, DRAFT_MAX_AGE_MS + 2);
+    expect(fn).not.toHaveBeenCalled();
+    off();
+  });
 });
 
 describe("clearAllDrafts", () => {
@@ -108,6 +129,27 @@ describe("clearAllDrafts", () => {
     clearAllDrafts();
     expect(s.length).toBe(1);
     expect(s.getItem("edit-screen-token")).toBe("t");
+  });
+});
+
+describe("purgeExpiredDrafts", () => {
+  it("期限切れ・壊れた控えだけを全部消す(ほかの物件の控えも)", () => {
+    const old = draftKey("property-edit", "p-old");
+    const fresh = draftKey("property-edit", "p-new");
+    writeDraft(old, { v: 1, savedAt: 1, data: { name: "A" } });
+    writeDraft(fresh, { v: 1, savedAt: DRAFT_MAX_AGE_MS, data: { name: "B" } });
+    s.setItem(draftKey("paste"), "{");
+    s.setItem("edit-screen-token", "t");
+    purgeExpiredDrafts(DRAFT_MAX_AGE_MS + 2);
+    expect(s.getItem(old)).toBeNull();
+    expect(s.getItem(draftKey("paste"))).toBeNull();
+    expect(s.getItem(fresh)).not.toBeNull();
+    expect(s.getItem("edit-screen-token")).toBe("t");
+  });
+  it("書いたとき・見張りを始めたときに掃除する", () => {
+    const src = readFileSync(resolve(process.cwd(), "src/lib/drafts/draft-store.ts"), "utf8").replace(/\r\n/g, "\n");
+    expect(src).toMatch(/export function subscribeDrafts[\s\S]*?purgeExpiredDrafts\(\);/);
+    expect(src).toMatch(/export function writeDraft[\s\S]*?purgeExpiredDrafts\(\);/);
   });
 });
 
