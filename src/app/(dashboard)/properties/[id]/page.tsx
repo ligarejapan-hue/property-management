@@ -349,6 +349,8 @@ export default function PropertyDetailPage({
   // ⚠物件ごとに最初の読み込みで1回だけ判定する(編集中の取り直しで控えを消さない)。
   const editDraftCheckedRef = useRef<string | null>(null);
   const [editDraftStale, setEditDraftStale] = useState(false);
+  // 読み込みで「開き直したい」と分かった印。開くのは物件の書き込み権限を確かめてから(下の描画の頭)。
+  const [editDraftReopenPending, setEditDraftReopenPending] = useState(false);
   const [deleting, setDeleting] = useState(false);
   // 棟へつないだ結果の知らせ(設計 §6.2)。編集の保存後か、新規登録・貼り付けから
   // 預かったもの(読み込みが終わった後に1回だけ取り出す)。
@@ -455,7 +457,7 @@ export default function PropertyDetailPage({
           id,
           (data as unknown as ApiProperty).version,
         );
-        if (decision === "reopen") setShowEditForm(true);
+        if (decision === "reopen") setEditDraftReopenPending(true);
         else if (decision === "stale") {
           clearDraft(editKey);
           setEditDraftStale(true);
@@ -542,6 +544,7 @@ export default function PropertyDetailPage({
     // 前の物件の編集の小窓・版違いの帯も引き継がない(戻る/進むで同じ画面が使い回されたとき)。
     setShowEditForm(false);
     setEditDraftStale(false);
+    setEditDraftReopenPending(false);
   }, [id]);
 
   // 編集中の鍵(仕様 6.1)。複製タブ確認(ensureUniqueScreenToken・最大300ms)は
@@ -760,6 +763,13 @@ export default function PropertyDetailPage({
       ownerEditableFields,
     };
   }, [permissionsRefreshPending, permissionsLoading, mePermissions, meCapabilities]);
+
+  // 編集の途中の控えで小窓を開き直すのは、物件の書き込み権限を確かめてから(@codex P2)。
+  // 権限が無ければ開かない(控えは残す=権限が戻れば次に来たとき開く)。
+  if (editDraftReopenPending && canWriteProperty) {
+    setEditDraftReopenPending(false);
+    setShowEditForm(true);
+  }
 
   if (loading) {
     return (

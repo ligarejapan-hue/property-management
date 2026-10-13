@@ -90,11 +90,14 @@ describe("物件詳細: 読み込み完了時に編集の小窓を開き直す",
   it("物件ごとに最初の読み込みで1回だけ判定する", () => {
     expect(src).toMatch(/if \(applied && editDraftCheckedRef\.current !== id\) \{/);
     expect(src).toMatch(/decideEditDraftOnLoad\(/);
-    expect(src).toMatch(/if \(decision === "reopen"\) setShowEditForm\(true\);/);
+    // 読み込みでは「開き直したい」と覚えるだけ。開くのは物件の書き込み権限を確かめてから(@codex P2)。
+    expect(src).toMatch(/if \(decision === "reopen"\) setEditDraftReopenPending\(true\);/);
+    expect(src).not.toMatch(/if \(decision === "reopen"\) setShowEditForm\(true\);/);
+    expect(src).toMatch(/if \(editDraftReopenPending && canWriteProperty\) \{\n\s*setEditDraftReopenPending\(false\);\n\s*setShowEditForm\(true\);\n\s*\}/);
     expect(src).toMatch(/clearDraft\(editKey\);\n\s*setEditDraftStale\(true\);/);
   });
   it("別の物件へ移ったら、前の物件の開き直し・版違いの帯を引き継がない(@codex P2)", () => {
-    expect(src).toMatch(/useEffect\(\(\) => \{[^}]*?setShowEditForm\(false\);\n\s*setEditDraftStale\(false\);[^}]*?\}, \[id\]\);/);
+    expect(src).toMatch(/useEffect\(\(\) => \{[^}]*?setShowEditForm\(false\);\n\s*setEditDraftStale\(false\);\n\s*setEditDraftReopenPending\(false\);[^}]*?\}, \[id\]\);/);
   });
   it("版違いの帯を出す", () => {
     expect(src).toMatch(/\{editDraftStale && <DraftStaleNotice onDismiss=\{\(\) => setEditDraftStale\(false\)\} \/>\}/);
