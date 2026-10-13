@@ -95,13 +95,21 @@ describe("保存(prisma 版)", () => {
     expect(upserts()["13000001"].update.needsDetail).toBe(true);
   });
 
-  it("★本店の行が無いページ(支店だけ)では所在地を上書きしない・所在地の違いで取り直さない", async () => {
-    agent.findMany.mockResolvedValue([prevRow("00000201", { address: "本店の住所" })]);
+  it("★営業所名が「本店」でない行では所在地を上書きしない(ページの境目で支店だけが載ることがある)が、所在地が違えば詳細を取り直す=本店の引っ越しは詳細の「主たる事務所の所在地」で反映する(@codex #509)", async () => {
+    agent.findMany.mockResolvedValue([
+      prevRow("00000201", { address: "旧本店の住所" }),
+      prevRow("00000202", { address: "本社の住所" }),
+    ]);
     const store = createPrismaCrawlStore();
-    await store.upsertListRows([row("00000201", { address: "大阪支店の住所", isMain: false })], "2026-10");
-    const u = upserts()["00000201"];
-    expect(u.update).not.toHaveProperty("address");
-    expect(u.update).not.toHaveProperty("needsDetail");
+    await store.upsertListRows(
+      [row("00000201", { address: "新本社の住所", isMain: false }), row("00000202", { address: "本社の住所", isMain: false })],
+      "2026-10",
+    );
+    const moved = upserts()["00000201"];
+    expect(moved.update).not.toHaveProperty("address");
+    expect(moved.update.needsDetail).toBe(true);
+    // 所在地が同じなら取り直さない(実物は一覧と詳細の書き方が同じ=毎月の見直しで取り直しが増えない)
+    expect(upserts()["00000202"].update).not.toHaveProperty("needsDetail");
   });
 
   it("本店の行なら所在地を更新し、変わっていれば取り直す", async () => {
@@ -185,7 +193,7 @@ describe("保存(prisma 版)", () => {
     );
   });
 
-  it("詳細を保存: 電話の数字・ふりがな・印を外す。所在地は一覧の値を上書きしない(空のときだけ埋める)", async () => {
+  it("★詳細を保存: 電話の数字・ふりがな・印を外す。所在地は詳細の「主たる事務所の所在地」で上書きする(営業所名が「本店」でない会社も本店の引っ越しが反映される・2026-10-13)", async () => {
     agent.updateMany.mockResolvedValue({ count: 1 });
     const store = createPrismaCrawlStore();
     const at = new Date("2026-10-05T14:00:00Z");
@@ -193,9 +201,12 @@ describe("保存(prisma 版)", () => {
       { licenseKey: "13000001", companyKana: "カブシキガイシヤ ミホン", address: "詳細の住所", phone: "03-0000-1212", validUntil: "R10年04月26日" },
       at,
     );
+    // ★所在地と「取り終えた」の印は1回の書き込みでまとめて書く(間に所在地の無いまま写されない・@codex #477)
+    expect(agent.updateMany).toHaveBeenCalledTimes(1);
     expect(agent.updateMany).toHaveBeenCalledWith({
       where: { licenseKey: "13000001" },
       data: {
+        address: "詳細の住所",
         companyKana: "カブシキガイシヤ ミホン",
         phone: "03-0000-1212",
         phoneDigits: "0300001212",
@@ -205,13 +216,17 @@ describe("保存(prisma 版)", () => {
         detailFailCount: 0,
       },
     });
-    expect(agent.updateMany).toHaveBeenCalledWith({
-      where: { licenseKey: "13000001", address: null },
-      data: { address: "詳細の住所" },
-    });
-    // ★所在地と「取り終えた」の印は1つの取引でまとめて書く(間に所在地の無いまま写されない・@codex #477)
-    expect($transaction).toHaveBeenCalledTimes(1);
-    expect(($transaction.mock.calls[0] as unknown as [unknown[]])[0]).toHaveLength(2);
+  });
+
+  it("詳細の所在地が空なら、一覧の所在地を消さない", async () => {
+    agent.updateMany.mockResolvedValue({ count: 1 });
+    const store = createPrismaCrawlStore();
+    await store.saveDetail(
+      { licenseKey: "13000001", companyKana: null, address: null, phone: null, validUntil: null },
+      new Date("2026-10-05T14:00:00Z"),
+    );
+    expect(agent.updateMany).toHaveBeenCalledTimes(1);
+    expect(agent.updateMany.mock.calls[0][0].data).not.toHaveProperty("address");
   });
 
   it("一巡の締め: この一巡とその前の一巡のどちらでも見なかった会社(と一度も見ていない会社)だけ「一覧に無い」に(@codex #477)", async () => {

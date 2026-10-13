@@ -80,7 +80,9 @@ export function createPrismaCrawlStore(now: () => Date = () => new Date()): Craw
             !p.listed ||
             p.companyName !== r.companyName ||
             p.licenseLabel !== r.licenseLabel ||
-            (r.isMain && p.address !== r.address);
+            // 所在地の違い: 本店の行なら書き換えて取り直す。「本店」以外の名前の行(「本社」「大阪本店」・ページの境目の支店)は
+            // 書き換えずに取り直すだけ=詳細の「主たる事務所の所在地」で正しい値にする(本店の引っ越しを拾う・@codex #509)。
+            p.address !== r.address;
           const stale = !!p?.detailAt && p.detailAt.getTime() < staleBefore;
           const update: Record<string, unknown> = {
             authority: r.authority,
@@ -138,25 +140,23 @@ export function createPrismaCrawlStore(now: () => Date = () => new Date()): Craw
 
     async saveDetail(d: Detail, at: Date) {
       const digits = d.phone?.replace(/\D/g, "") ?? "";
-      // 所在地(一覧に無いときだけ詳細の値で埋める)と「取り終えた」の印は1つの取引で書く=
-      // 間に所在地の無いまま候補に出て写される・途中で落ちて所在地が欠けたまま「取り終えた」になる、を防ぐ(@codex #477)。
-      await prisma.$transaction([
-        ...(d.address
-          ? [prisma.mlitAgent.updateMany({ where: { licenseKey: d.licenseKey, address: null }, data: { address: d.address } })]
-          : []),
-        prisma.mlitAgent.updateMany({
-          where: { licenseKey: d.licenseKey },
-          data: {
-            companyKana: d.companyKana,
-            phone: d.phone,
-            phoneDigits: digits || null,
-            validUntil: d.validUntil,
-            needsDetail: false,
-            detailAt: at,
-            detailFailCount: 0,
-          },
-        }),
-      ]);
+      // 所在地は詳細の「主たる事務所の所在地」を正とする(一覧は1社1行=本店だが、営業所名が「本店」でない会社
+      // 「本社」「大阪本店」等は一覧側で所在地を書き換えないため、本店の引っ越しをここで反映する・2026-10-13 実物で
+      // 一覧と詳細の書き方が同じことを確認=月ごとの見直しで「変わった」と誤判定しない)。詳細が空なら一覧の値を残す。
+      // 所在地と「取り終えた」の印は1回の書き込みでまとめて書く=間に所在地の無いまま候補に出て写されない(@codex #477)。
+      await prisma.mlitAgent.updateMany({
+        where: { licenseKey: d.licenseKey },
+        data: {
+          ...(d.address ? { address: d.address } : {}),
+          companyKana: d.companyKana,
+          phone: d.phone,
+          phoneDigits: digits || null,
+          validUntil: d.validUntil,
+          needsDetail: false,
+          detailAt: at,
+          detailFailCount: 0,
+        },
+      });
     },
 
     async closeCycle(cycle: string, prevCycle: string) {
