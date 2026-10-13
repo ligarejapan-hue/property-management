@@ -41,15 +41,15 @@
 ### 4.1 共通の部品(新規)
 
 - `src/lib/drafts/draft-store.ts` — 純関数+薄い保存層。
-  - 鍵: `pm-draft:v1:<利用者ID>:<画面名>[:<物件ID>]`。画面名は定数の一覧(`DRAFT_SCREENS`)で固定。
+  - 鍵: `pm-draft:v1:<画面名>[:<物件ID>]`。画面名は定数の一覧(`DRAFT_SCREENS`)で固定。
+    ⚠利用者IDは鍵に入れない(2026-10-13 計画時に変更): 画面を開いた直後は `useSession()` がまだ読み込み中のことがあり、物件詳細の読み込み完了時に控えを見つけ損ねる。代わりに**ログイン成功時にもそのタブの控えを全消し**する(§4.2)ので、タブの控えは常に今ログインしている人のもの。
   - 中身: `{ v: 1, savedAt: <ms>, data: <画面ごとのJSON>, pendingSubmit?: { at: <ms> } }`。
-  - `readDraft(key, now)` は壊れたJSON・形の違い・12時間超・別の利用者の鍵を**無かったことにして消す**。
+  - `readDraft(key, parse, now)` は壊れたJSON・形の違い・12時間超を**無かったことにして消す**。
   - `writeDraft(key, data)`: JSON化した長さが **1,500,000文字**を超えたら書かずに `"too_large"` を返す。`QuotaExceededError` 等は握りつぶして `"failed"`。成功は `"ok"`。
   - `clearDraft(key)` / `clearAllDrafts()`(`pm-draft:` で始まる鍵をすべて消す)。
   - sessionStorage の読み書きはすべて try/catch(既存 `desk-step-guide.tsx` の型)。使えない端末では**何もしない**(これまでどおり消えるだけ・画面は壊れない)。
 - `src/hooks/use-screen-draft.ts` — 画面用の hook。
-  - `useScreenDraft<T>({ screen, resourceId?, enabled, serialize, isEmpty })` → `{ restored: T | null, restoredAt, pendingSubmitAt, save(), clear(), markSubmitting(), tooLarge }`。
-  - 利用者IDは `useSession()` から。取れるまで読み書きしない。
+  - `useRestoredDraft(key, parse)` → 開いた時点の控え(`StoredDraft<T> | null`)を1回だけ読む。`useDraftAutosave(key, data, isEmpty, restored)` → `{ tooLarge, discard(), close(), markSubmitting(), unmarkSubmitting() }`(`discard`=控えを消して作業は続ける/`close`=控えを消して以後書かない=完了・キャンセル用)。`useDraftExists(key)` → 控えがあるか(小窓の自動再オープン用・useSyncExternalStore)。
   - 書き込みは約1秒の間引き+**画面を離れるとき(unmount)と `pagehide` で即時**。メニューでの移動は Next.js の画面切り替え=部品の unmount なので、ここで必ず書く。
   - `isEmpty(data)` が真(まだ何も入れていない)なら書かずに消す=空の控えを残さない。
 - `src/components/drafts/draft-restored-notice.tsx` — 帯の部品(文言は §3-2)。SSRテストできる見た目だけの部品にする。
@@ -57,7 +57,7 @@
 ### 4.2 ログアウトでの片付け
 
 `src/lib/notifications/logout.ts` の `signOutWithNotificationCleanup` で、`clearNoticeStorage()` の隣で `clearAllDrafts()` を呼ぶ。next-auth の `signOut` を直接呼ぶことは既存テストで禁じられているので、ここが全経路(手動・自動ログアウト・パスワード変更)の一か所。
-加えて、ログアウトを通らずにセッションが切れて別の人がそのタブでログインした場合に備え、**鍵に利用者IDを入れ、読むときに他人の鍵は消す**。
+加えて、ログアウトを通らずにセッションが切れて別の人がそのタブでログインした場合に備え、**ログイン成功時(`src/app/(auth)/login/page.tsx`)にも `clearAllDrafts()`** を呼ぶ。
 
 ### 4.3 各画面の組み込み
 
@@ -92,17 +92,17 @@
 ## 6. 守り(PII)
 
 - 置き場は **sessionStorage のみ**(タブを閉じると消える)。localStorage・IndexedDB は使わない。
-- 鍵に利用者ID・物件IDを含むが、**中身はサーバーの応答と同じ範囲**(画面にもともと出ている情報だけ)。新たにサーバーから取る情報は無い。
+- 鍵に物件IDを含むが、**中身はサーバーの応答と同じ範囲**(画面にもともと出ている情報だけ)。新たにサーバーから取る情報は無い。
 - ログアウトで全消し(§4.2)/12時間で失効/作業完了で消す。
 - 控えの中身をログ・エラー表示・監査に出さない。
 - サーバー側の変更は**無い**(API・DB・migration なし)。
 
 ## 7. テスト
 
-- `draft-store`: 鍵の組み立て/12時間失効/他人の鍵を捨てる/壊れたJSON/大きさ上限/sessionStorage が例外を投げる環境/`clearAllDrafts` が `pm-draft:` 以外を消さない。(vitest node 環境なので、メモリ上の Storage の偽物を `globalThis.sessionStorage` に差して試す)
+- `draft-store`: 鍵の組み立て/12時間失効/壊れたJSON/大きさ上限/sessionStorage が例外を投げる環境/`clearAllDrafts` が `pm-draft:` 以外を消さない。(vitest node 環境なので、メモリ上の Storage の偽物を `globalThis.sessionStorage` に差して試す)
 - 画面ごとの serialize/restore 純関数: 往復で同じになる/`File` が混ざらない/形の違う控えを捨てる/S5 の版違いで戻さない/`pendingSubmit` が残る場合の判定。
 - S2 の行の状態判定(送信中のまま→要確認・まとめて登録から除外)は純関数で総当たり。
-- 配線(ソース走査型): 各画面が `useScreenDraft` を使い、完了・キャンセル・やり直しで `clear()` を呼ぶ/送信前に `markSubmitting()` を呼ぶ/`logout.ts` が `clearAllDrafts()` を呼ぶ/対象外の現地調査画面が使っていない。
+- 配線(ソース走査型): 各画面が `useRestoredDraft`/`useDraftAutosave` を使い、完了・キャンセルで `close()`・やり直しで `discard()` を呼ぶ/送信前に `markSubmitting()` を呼ぶ/`logout.ts` が `clearAllDrafts()` を呼ぶ/対象外の現地調査画面が使っていない。
 - 帯の部品: SSR で文言と［最初からやり直す］ボタン。
 - 手元の実機(ローカル): 各画面で入力→別メニュー→戻る/F5/ログアウト→ログイン/タブを閉じて開き直す/送信直後に移動。
 
@@ -121,5 +121,5 @@
 | 戻した値が古い(ほかの人が保存済み) | S5 は版番号で判定して捨てる。読み取り系は新規登録なので既存の重複判定で気づける |
 | 送信の結果が分からないまま再送 | §5.1 `pendingSubmit` で再送できる形に戻さない |
 | 控えの書き込みが重く入力がもたつく | 約1秒の間引き。大きい控えは書かない(§5.4) |
-| 共用PCで次の人に見える | sessionStorage+ログアウト全消し+利用者IDの鍵+12時間失効 |
+| 共用PCで次の人に見える | sessionStorage+ログアウト/ログイン成功時の全消し+12時間失効 |
 | 既存の「物件が変わったら初期化」処理に上書きされる | S5 は初期化の後に戻す順序をテストで固定 |
