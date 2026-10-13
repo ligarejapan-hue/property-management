@@ -32,7 +32,7 @@ import {
   type NewPropertyDraft,
 } from "@/lib/drafts/screens/new-property";
 import { useDraftAutosave, useRestoredDraft } from "@/hooks/use-draft";
-import { DraftPendingNotice, DraftRestoredNotice } from "@/components/drafts/draft-notices";
+import { DraftPendingNotice, DraftRestoredNotice, DraftTooLargeNotice } from "@/components/drafts/draft-notices";
 
 interface Props {
   onClose: () => void;
@@ -222,6 +222,7 @@ export default function NewPropertyModal({ onClose, typeFilter, onCreated, draft
             restored &&
             !restoredDismissed && <DraftRestoredNotice savedAt={restored.savedAt} onDiscard={handleDiscardDraft} />
           )}
+          {draft.tooLarge && <DraftTooLargeNotice kind="input" />}
           {/* ⚠display: contents にしない(form の space-y-4 が中の欄に効かなくなる) */}
           <fieldset disabled={pendingBlocked} className="m-0 min-w-0 space-y-4 border-0 p-0">
             {error && (

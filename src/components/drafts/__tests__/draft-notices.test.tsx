@@ -34,5 +34,8 @@ describe("帯", () => {
   });
   it("大きすぎの帯", () => {
     expect(renderToStaticMarkup(<DraftTooLargeNotice />)).toContain("このファイルは大きいため、別の画面へ移ると消えます。");
+    expect(renderToStaticMarkup(<DraftTooLargeNotice kind="input" />)).toContain(
+      "入力した内容が大きいため、別の画面へ移ると消えます。",
+    );
   });
 });

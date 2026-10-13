@@ -25,7 +25,7 @@ import {
   type PropertyEditDraft,
 } from "@/lib/drafts/screens/property-edit";
 import { useDraftAutosave, useRestoredDraft } from "@/hooks/use-draft";
-import { DraftRestoredNotice } from "@/components/drafts/draft-notices";
+import { DraftRestoredNotice, DraftTooLargeNotice } from "@/components/drafts/draft-notices";
 // 編集中の鍵(仕様 6.1・6.2)。この画面が最初に配線する画面(Task 5)。
 import { useEditLock } from "@/hooks/use-edit-lock";
 import { ensureUniqueScreenToken, editLockHeaders } from "@/lib/edit-lock/screen-token-client";
@@ -751,6 +751,7 @@ export default function PropertyEditForm({
           {showRestoredNotice && restored && (
             <DraftRestoredNotice savedAt={restored.savedAt} onDiscard={handleDiscardDraft} />
           )}
+          {editDraft.tooLarge && <DraftTooLargeNotice kind="input" />}
           {/* 通知 段階1(N1・N2): 別の画面を見ているときだけベル・OS の通知に出す。帯はそのまま */}
           <EditLockNotices
             state={lock.state}

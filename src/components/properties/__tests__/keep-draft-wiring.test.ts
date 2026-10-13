@@ -31,6 +31,8 @@ describe("新規物件登録の小窓: 作業中の入力を消さない", () =>
     expect(src).toMatch(/<DraftRestoredNotice/);
     expect(src).toMatch(/<DraftPendingNotice/);
     expect(src).toMatch(/<fieldset disabled=\{pendingBlocked\}/);
+    // 大きすぎて控えられないときは知らせる(@codex P2)。
+    expect(src).toMatch(/\{draft\.tooLarge && <DraftTooLargeNotice kind="input" \/>\}/);
     // ⚠display: contents だと form の space-y-4 が中の欄に効かず、欄の間が詰まる。
     expect(src).not.toMatch(/<fieldset[^>]*className="contents"/);
     expect(src).toMatch(/<fieldset disabled=\{pendingBlocked\} className="[^"]*space-y-4/);
@@ -79,6 +81,7 @@ describe("物件の編集の小窓: 作業中の入力を消さない", () => {
   });
   it("帯", () => {
     expect(src).toMatch(/<DraftRestoredNotice/);
+    expect(src).toMatch(/\{editDraft\.tooLarge && <DraftTooLargeNotice kind="input" \/>\}/);
   });
 });
 
@@ -89,6 +92,9 @@ describe("物件詳細: 読み込み完了時に編集の小窓を開き直す",
     expect(src).toMatch(/decideEditDraftOnLoad\(/);
     expect(src).toMatch(/if \(decision === "reopen"\) setShowEditForm\(true\);/);
     expect(src).toMatch(/clearDraft\(editKey\);\n\s*setEditDraftStale\(true\);/);
+  });
+  it("別の物件へ移ったら、前の物件の開き直し・版違いの帯を引き継がない(@codex P2)", () => {
+    expect(src).toMatch(/useEffect\(\(\) => \{[^}]*?setShowEditForm\(false\);\n\s*setEditDraftStale\(false\);[^}]*?\}, \[id\]\);/);
   });
   it("版違いの帯を出す", () => {
     expect(src).toMatch(/\{editDraftStale && <DraftStaleNotice onDismiss=\{\(\) => setEditDraftStale\(false\)\} \/>\}/);

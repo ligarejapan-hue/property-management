@@ -539,6 +539,9 @@ export default function PropertyDetailPage({
     setQualityIssues([]);
     // 別の物件へ移ったら、前の物件の棟の知らせも消す。
     setBuildingNotice(null);
+    // 前の物件の編集の小窓・版違いの帯も引き継がない(戻る/進むで同じ画面が使い回されたとき)。
+    setShowEditForm(false);
+    setEditDraftStale(false);
   }, [id]);
 
   // 編集中の鍵(仕様 6.1)。複製タブ確認(ensureUniqueScreenToken・最大300ms)は

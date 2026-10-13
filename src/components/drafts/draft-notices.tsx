@@ -58,11 +58,14 @@ export function DraftStaleNotice({ onDismiss }: { onDismiss: () => void }) {
   );
 }
 
-export function DraftTooLargeNotice() {
+/** 大きすぎて控えられないときの知らせ。kind="input"=入力欄(小窓)、既定=読み込んだファイル。 */
+export function DraftTooLargeNotice({ kind = "file" }: { kind?: "file" | "input" }) {
   return (
     <div role="status" data-testid="draft-too-large-notice" className={WARN}>
       <AlertTriangle className="h-4 w-4 shrink-0" />
-      <span>このファイルは大きいため、別の画面へ移ると消えます。</span>
+      <span>
+        {kind === "input" ? "入力した内容が大きいため" : "このファイルは大きいため"}、別の画面へ移ると消えます。
+      </span>
     </div>
   );
 }
