@@ -17,7 +17,9 @@ describe("新規物件登録の小窓: 作業中の入力を消さない", () =>
   it("送る直前に送信中の印・成功で close・失敗で印を外す", () => {
     expect(src).toMatch(/draft\.markSubmitting\(\);[\s\S]*?await createProperty\(/);
     expect(src).toMatch(/draft\.close\(\);\n\s*resolvePostCreate\(/);
-    expect(src).toMatch(/catch \(err\) \{\n\s*draft\.unmarkSubmitting\(\);/);
+    // 登録されていないと言い切れる失敗(4xx)のときだけ印を外す。通信切れ・5xx は印を残し、確かめる帯を出す。
+    expect(src).toMatch(/catch \(err\) \{\n(?:\s*\/\/.*\n)*\s*if \(isDefiniteSubmitFailure\(err\)\) draft\.unmarkSubmitting\(\);\n\s*else setPendingBlocked\(true\);/);
+    expect(src).not.toMatch(/catch \(err\) \{\n\s*draft\.unmarkSubmitting\(\);/);
   });
   it("キャンセル・×は控えを消して閉じる", () => {
     expect(src).toMatch(/const handleCancel = \(\) => \{\n\s*draft\.close\(\);\n\s*onClose\(\);/);
@@ -66,6 +68,9 @@ describe("物件の編集の小窓: 作業中の入力を消さない", () => {
   });
   it("保存できたら控えを消してから onSaved", () => {
     expect(src).toMatch(/editDraft\.close\(\);\n\s*void lock\.release\(\);\n\s*onSaved\(/);
+  });
+  it("お試し(モック)の保存でも控えを消してから onSaved", () => {
+    expect(src).toMatch(/if \(USE_MOCK\) \{[\s\S]*?editDraft\.close\(\);\n\s*void lock\.release\(\);\n\s*onSaved\(\);\n\s*return;/);
   });
   it("閉じる・キャンセルで控えを消す", () => {
     expect(src).toMatch(/const handleClose = \(\) => \{\n\s*editDraft\.close\(\);\n\s*void lock\.release\(\);\n\s*onClose\(\);/);

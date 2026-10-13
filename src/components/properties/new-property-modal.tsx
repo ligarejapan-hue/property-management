@@ -24,6 +24,7 @@ export interface PostCreateResult {
 }
 import { AddressLookupControls } from "@/components/address/address-lookup-controls";
 import { draftKey } from "@/lib/drafts/draft-store";
+import { isDefiniteSubmitFailure } from "@/lib/drafts/submit-outcome";
 import {
   EMPTY_NEW_PROPERTY_DRAFT,
   isNewPropertyDraftEmpty,
@@ -177,7 +178,10 @@ export default function NewPropertyModal({ onClose, typeFilter, onCreated, draft
       draft.close();
       resolvePostCreate(onCreated, router)(result.id, propertyType, { buildingLink: result.buildingLink ?? null });
     } catch (err) {
-      draft.unmarkSubmitting();
+      // ⚠登録されていないと言い切れる失敗(4xx)のときだけ印を外す。通信切れ・5xx は
+      //   サーバーで登録が済んでいるかもしれない=印を残し、確かめるまで止める(二重登録を防ぐ)。
+      if (isDefiniteSubmitFailure(err)) draft.unmarkSubmitting();
+      else setPendingBlocked(true);
       setError(err instanceof Error ? err.message : "登録に失敗しました");
       setSubmitting(false);
     }

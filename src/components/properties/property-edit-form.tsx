@@ -648,6 +648,7 @@ export default function PropertyEditForm({
       if (USE_MOCK) {
         // Mock: just simulate delay
         await new Promise((r) => setTimeout(r, 300));
+        editDraft.close();
         void lock.release();
         onSaved();
         return;
