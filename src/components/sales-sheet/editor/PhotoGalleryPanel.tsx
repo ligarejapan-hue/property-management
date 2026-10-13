@@ -9,9 +9,9 @@
  * 実データの認可（この物件に属するか）は保存時 assertDocumentImagesAuthorized が担保する。
  */
 
-import { useCallback, useEffect, useState, type ChangeEvent } from "react";
+import { useCallback, useEffect, useState } from "react";
 import { isSafeImageSrc } from "@/lib/sales-sheet/css-safety";
-import FilePickerButton from "@/components/import/file-picker-button";
+import FileDropZone from "@/components/ui/file-drop-zone";
 
 export interface GalleryPhoto {
   id: string;
@@ -194,11 +194,9 @@ export function PhotoGalleryPanel({
     };
   }, [loadPhotos]);
 
-  async function handleUploadChange(e: ChangeEvent<HTMLInputElement>) {
-    const fileList = e.target.files;
-    const inputEl = e.target;
-    if (!fileList || fileList.length === 0) return;
-    const files = Array.from(fileList);
+  // ドロップ枠(選択・ドロップの両方)から届く。選び直しは枠の側で毎回届くようにしてある。
+  async function handleUploadFiles(files: File[]) {
+    if (files.length === 0) return;
 
     setUploading(true);
     setUploadError(null);
@@ -223,7 +221,6 @@ export function PhotoGalleryPanel({
       if (result.succeededCount > 0) await loadPhotos();
     } finally {
       setUploading(false);
-      inputEl.value = ""; // 同じファイルを選び直しても onChange が発火するようにする
     }
   }
 
@@ -253,17 +250,14 @@ export function PhotoGalleryPanel({
           <h3 className="text-sm font-medium text-gray-800 dark:text-gray-200">
             ローカルからアップロード
           </h3>
-          <FilePickerButton
+          <FileDropZone
             accept="image/*"
             multiple
-            label="写真をアップロード"
+            title="写真をアップロード（ここにドラッグ＆ドロップ）"
             hint="JPEG/PNG/WebP・1枚8MBまで・複数可"
-            disabled={uploading}
-            onChange={handleUploadChange}
+            onFiles={(files) => void handleUploadFiles(files)}
+            busy={uploading ? <span>アップロード中…</span> : undefined}
           />
-          {uploading && (
-            <p className="text-sm text-neutral-500 dark:text-neutral-400">アップロード中…</p>
-          )}
           {uploadError && <p className="text-sm text-red-600 dark:text-red-400">{uploadError}</p>}
         </div>
 

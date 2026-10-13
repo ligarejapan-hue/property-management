@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useEffect, useCallback, useRef, useMemo } from "react";
+import { useState, useEffect, useCallback, useMemo } from "react";
 import { PageHeader } from "@/components/ui/page-header";
 import { FilterPanel } from "@/components/ui/filter-panel";
 import { Button } from "@/components/ui/button";
@@ -50,6 +50,7 @@ import { detectImportFileType } from "@/lib/import-file-type";
 import { readCsvFileAsText } from "@/lib/csv-decode";
 import { filterNonBlankHeaders } from "@/lib/csv-parser";
 import ImportSwitcher from "@/components/import/import-switcher";
+import FileDropZone from "@/components/ui/file-drop-zone";
 import {
   IMPORT_TYPE_FILTER_OPTIONS,
   getImportTypeLabel,
@@ -492,12 +493,6 @@ export default function ImportPage() {
   const [csvText, setCsvText] = useState("");
   const [xlsxBase64, setXlsxBase64] = useState<string | null>(null);
   const [fileName, setFileName] = useState("");
-  const [dragActive, setDragActive] = useState(false);
-
-  // D&D state for ① and ②
-  const [rpDragActive, setRpDragActive] = useState(false);
-  const [roDragActiveReception, setRoDragActiveReception] = useState(false);
-  const [roDragActiveOwner, setRoDragActiveOwner] = useState(false);
 
   // Template
   const [template, setTemplate] = useState<string>("standard");
@@ -599,10 +594,6 @@ export default function ImportPage() {
   const [rpDlFilter, setRpDlFilter] = useState<"marked" | "unmarked" | "all">("marked");
   const [rpShinkiFilter, setRpShinkiFilter] = useState<"existing" | "new" | "all">("existing");
 
-  const fileInputRef = useRef<HTMLInputElement>(null);
-  const rpFileInputRef = useRef<HTMLInputElement>(null);
-  const roReceptionInputRef = useRef<HTMLInputElement>(null);
-  const roOwnerInputRef = useRef<HTMLInputElement>(null);
 
   // ------ Jobs ------
   // jobFilters / jobPage / jobLimit はクライアント State なので
@@ -807,34 +798,6 @@ export default function ImportPage() {
     }
   }, []);
 
-  const handleFileSelect = (e: React.ChangeEvent<HTMLInputElement>) => {
-    const file = e.target.files?.[0];
-    if (!file) return;
-    void processFile(file);
-  };
-
-  // ------ Drag & Drop ------
-  const handleDrag = useCallback((e: React.DragEvent) => {
-    e.preventDefault();
-    e.stopPropagation();
-    if (e.type === "dragenter" || e.type === "dragover") {
-      setDragActive(true);
-    } else if (e.type === "dragleave") {
-      setDragActive(false);
-    }
-  }, []);
-
-  const handleDrop = useCallback(
-    (e: React.DragEvent) => {
-      e.preventDefault();
-      e.stopPropagation();
-      setDragActive(false);
-      const file = e.dataTransfer.files?.[0];
-      if (file) void processFile(file);
-    },
-    [processFile]
-  );
-
   // ------ Mapping ------
   const updateMapping = (header: string, value: string) => {
     setColumnMapping((prev) => {
@@ -906,7 +869,6 @@ export default function ImportPage() {
     setError(null);
     setDuplicatePreview(null);
     setPreviewLoading(false);
-    if (fileInputRef.current) fileInputRef.current.value = "";
   };
 
   // ------ Reception × Owner ------
@@ -1177,37 +1139,12 @@ export default function ImportPage() {
           </div>
 
           {/* Drag & Drop zone */}
-          <div
-            onDragEnter={handleDrag}
-            onDragOver={handleDrag}
-            onDragLeave={handleDrag}
-            onDrop={handleDrop}
-            onClick={() => fileInputRef.current?.click()}
-            className={`group cursor-pointer rounded-lg border-2 border-dashed p-12 text-center transition-colors ${
-              dragActive
-                ? "border-blue-500 bg-blue-50 dark:bg-blue-500/10"
-                : "border-gray-300 dark:border-gray-700 bg-gray-50 dark:bg-gray-800/50 hover:border-gray-400 dark:hover:border-gray-600 hover:bg-gray-100 dark:hover:bg-gray-800"
-            }`}
-          >
-            <Upload
-              className={`mx-auto mb-3 h-10 w-10 ${
-                dragActive ? "text-blue-500" : "text-gray-400 dark:text-gray-500"
-              }`}
-            />
-            <p className="mb-1 text-sm font-medium text-gray-700 dark:text-gray-200">
-              CSV または Excel(.xlsx) ファイルをここにドラッグ＆ドロップ
-            </p>
-            <p className="text-xs text-gray-400 dark:text-gray-500">
-              またはクリックしてファイルを選択
-            </p>
-            <input
-              ref={fileInputRef}
-              type="file"
-              accept=".csv,.tsv,.txt,.xlsx"
-              onChange={handleFileSelect}
-              className="hidden"
-            />
-          </div>
+          <FileDropZone
+            size="lg"
+            accept=".csv,.tsv,.txt,.xlsx"
+            onFiles={(files) => void processFile(files[0])}
+            title="CSV または Excel(.xlsx) ファイルをここにドラッグ＆ドロップ"
+          />
 
           {fileName && (
             <div className="mt-4 space-y-2">
@@ -1781,38 +1718,13 @@ export default function ImportPage() {
 
         {/* ファイル選択 (D&D) */}
         <div className="mb-4">
-          <div
-            onDragEnter={(e) => { e.preventDefault(); e.stopPropagation(); setRpDragActive(true); }}
-            onDragOver={(e) => { e.preventDefault(); e.stopPropagation(); setRpDragActive(true); }}
-            onDragLeave={(e) => { e.preventDefault(); e.stopPropagation(); setRpDragActive(false); }}
-            onDrop={(e) => {
-              e.preventDefault(); e.stopPropagation(); setRpDragActive(false);
-              const file = e.dataTransfer.files?.[0];
-              if (file) void handleRpFile(file);
-            }}
-            onClick={() => rpFileInputRef.current?.click()}
-            className={`cursor-pointer rounded-lg border-2 border-dashed p-5 text-center transition-colors ${
-              rpDragActive ? "border-blue-400 bg-blue-50 dark:bg-blue-500/10" : "border-gray-300 dark:border-gray-700 bg-white dark:bg-gray-900 hover:border-gray-400 dark:hover:border-gray-600"
-            }`}
-          >
-            <Upload className="mx-auto mb-2 h-7 w-7 text-gray-400 dark:text-gray-500" />
-            <p className="text-sm text-gray-600 dark:text-gray-300">CSV または Excel(.xlsx) ファイルをここにドラッグ＆ドロップ</p>
-            <p className="mt-1 text-xs text-gray-400 dark:text-gray-500">またはクリックしてファイルを選択</p>
-            <p className="mt-0.5 text-xs text-gray-400 dark:text-gray-500">（受付帳のファイル — 種別は中身の列構成から自動判定します）</p>
-            <input
-              ref={rpFileInputRef}
-              type="file"
-              accept=".csv,.tsv,.txt,.xlsx"
-              className="hidden"
-              onChange={(e) => handleRpFile(e.target.files?.[0] ?? null)}
-            />
-          </div>
-          {rpFile && (
-            <div className="mt-1 text-xs text-green-700 dark:text-green-300">
-              <CheckCircle2 className="mr-1 inline h-3.5 w-3.5" />
-              {rpFile.name}
-            </div>
-          )}
+          <FileDropZone
+            accept=".csv,.tsv,.txt,.xlsx"
+            onFiles={(files) => void handleRpFile(files[0])}
+            title="CSV または Excel(.xlsx) ファイルをここにドラッグ＆ドロップ"
+            hint="受付帳のファイル — 種別は中身の列構成から自動判定します"
+            fileName={rpFile?.name ?? null}
+          />
         </div>
 
         {/* ボタン */}
@@ -2008,75 +1920,21 @@ export default function ImportPage() {
 
         <div className="mb-4 grid grid-cols-1 gap-4 md:grid-cols-2">
           {/* 受付帳 D&D */}
-          <div>
-            <div
-              onDragEnter={(e) => { e.preventDefault(); e.stopPropagation(); setRoDragActiveReception(true); }}
-              onDragOver={(e) => { e.preventDefault(); e.stopPropagation(); setRoDragActiveReception(true); }}
-              onDragLeave={(e) => { e.preventDefault(); e.stopPropagation(); setRoDragActiveReception(false); }}
-              onDrop={(e) => {
-                e.preventDefault(); e.stopPropagation(); setRoDragActiveReception(false);
-                const file = e.dataTransfer.files?.[0];
-                if (file) void handleRoFile("reception", file);
-              }}
-              onClick={() => roReceptionInputRef.current?.click()}
-              className={`cursor-pointer rounded-lg border-2 border-dashed p-4 text-center transition-colors ${
-                roDragActiveReception ? "border-blue-400 bg-blue-50 dark:bg-blue-500/10" : "border-gray-300 dark:border-gray-700 bg-white dark:bg-gray-900 hover:border-gray-400 dark:hover:border-gray-600"
-              }`}
-            >
-              <Upload className="mx-auto mb-1 h-6 w-6 text-gray-400 dark:text-gray-500" />
-              <p className="text-sm text-gray-600 dark:text-gray-300">CSV または Excel(.xlsx) ファイルをここにドラッグ＆ドロップ</p>
-              <p className="mt-0.5 text-xs text-gray-400 dark:text-gray-500">またはクリックしてファイルを選択</p>
-              <p className="mt-0.5 text-xs text-gray-400 dark:text-gray-500">（受付帳 — 種別は中身の列構成から自動判定します）</p>
-              <input
-                ref={roReceptionInputRef}
-                type="file"
-                accept=".csv,.tsv,.txt,.xlsx"
-                className="hidden"
-                onChange={(e) => handleRoFile("reception", e.target.files?.[0] ?? null)}
-              />
-            </div>
-            {receptionFile && (
-              <div className="mt-1 text-xs text-green-700 dark:text-green-300">
-                <CheckCircle2 className="mr-1 inline h-3.5 w-3.5" />
-                {receptionFile.name}
-              </div>
-            )}
-          </div>
+          <FileDropZone
+            accept=".csv,.tsv,.txt,.xlsx"
+            onFiles={(files) => void handleRoFile("reception", files[0])}
+            title="CSV または Excel(.xlsx) ファイルをここにドラッグ＆ドロップ"
+            hint="受付帳 — 種別は中身の列構成から自動判定します"
+            fileName={receptionFile?.name ?? null}
+          />
           {/* 所有者 D&D */}
-          <div>
-            <div
-              onDragEnter={(e) => { e.preventDefault(); e.stopPropagation(); setRoDragActiveOwner(true); }}
-              onDragOver={(e) => { e.preventDefault(); e.stopPropagation(); setRoDragActiveOwner(true); }}
-              onDragLeave={(e) => { e.preventDefault(); e.stopPropagation(); setRoDragActiveOwner(false); }}
-              onDrop={(e) => {
-                e.preventDefault(); e.stopPropagation(); setRoDragActiveOwner(false);
-                const file = e.dataTransfer.files?.[0];
-                if (file) void handleRoFile("owner", file);
-              }}
-              onClick={() => roOwnerInputRef.current?.click()}
-              className={`cursor-pointer rounded-lg border-2 border-dashed p-4 text-center transition-colors ${
-                roDragActiveOwner ? "border-blue-400 bg-blue-50 dark:bg-blue-500/10" : "border-gray-300 dark:border-gray-700 bg-white dark:bg-gray-900 hover:border-gray-400 dark:hover:border-gray-600"
-              }`}
-            >
-              <Upload className="mx-auto mb-1 h-6 w-6 text-gray-400 dark:text-gray-500" />
-              <p className="text-sm text-gray-600 dark:text-gray-300">CSV または Excel(.xlsx) ファイルをここにドラッグ＆ドロップ</p>
-              <p className="mt-0.5 text-xs text-gray-400 dark:text-gray-500">またはクリックしてファイルを選択</p>
-              <p className="mt-0.5 text-xs text-gray-400 dark:text-gray-500">（所有者 — 種別は中身の列構成から自動判定します）</p>
-              <input
-                ref={roOwnerInputRef}
-                type="file"
-                accept=".csv,.tsv,.txt,.xlsx"
-                className="hidden"
-                onChange={(e) => handleRoFile("owner", e.target.files?.[0] ?? null)}
-              />
-            </div>
-            {ownerFile && (
-              <div className="mt-1 text-xs text-green-700 dark:text-green-300">
-                <CheckCircle2 className="mr-1 inline h-3.5 w-3.5" />
-                {ownerFile.name}
-              </div>
-            )}
-          </div>
+          <FileDropZone
+            accept=".csv,.tsv,.txt,.xlsx"
+            onFiles={(files) => void handleRoFile("owner", files[0])}
+            title="CSV または Excel(.xlsx) ファイルをここにドラッグ＆ドロップ"
+            hint="所有者 — 種別は中身の列構成から自動判定します"
+            fileName={ownerFile?.name ?? null}
+          />
         </div>
 
         <div className="mb-4 flex flex-wrap items-center gap-2">

@@ -31,9 +31,11 @@ describe("photo-tab.tsx dark: 配色 (物件詳細タブ群)", () => {
     expect(src).toContain("dark:hover:bg-gray-800");
   });
 
-  // --- drag-active accent ---
-  it("drag-active 時の bg-blue-50 に dark:bg-blue-500/15 がある", () => {
-    expect(src).toContain("dark:bg-blue-500/15");
+  // --- drag-active accent(2026-10-13 から共通のドロップ枠 file-drop-zone.tsx が持つ) ---
+  it("ドロップ枠は共通部品で、drag-active 時の bg-blue-50 に暗い背景がある", () => {
+    const dropZoneSrc = readFileSync(join(dir, "..", "..", "ui", "file-drop-zone.tsx"), "utf8");
+    expect(src).toContain("<FileDropZone");
+    expect(dropZoneSrc).toContain("bg-blue-50 dark:border-blue-400 dark:bg-blue-500/10");
   });
 
   // --- reorder active (T1レビュー対応) ---

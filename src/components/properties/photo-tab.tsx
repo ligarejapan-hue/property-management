@@ -2,6 +2,7 @@
 
 import { useState, useEffect, useCallback, useRef } from "react";
 import { ConfirmDialog } from "@/components/ui/confirm-dialog";
+import FileDropZone from "@/components/ui/file-drop-zone";
 import {
   Camera,
   Upload,
@@ -103,8 +104,6 @@ export default function PhotoTab({
   const [editingCaptionId, setEditingCaptionId] = useState<string | null>(null);
   const [captionDraft, setCaptionDraft] = useState("");
   const fileInputRef = useRef<HTMLInputElement>(null);
-  const [isDragging, setIsDragging] = useState(false);
-  const dragCounterRef = useRef(0);
 
   const fetchPhotosData = useCallback(async () => {
     setLoading(true);
@@ -166,28 +165,6 @@ export default function PhotoTab({
     const files = Array.from(e.target.files ?? []);
     e.target.value = "";
     await uploadFiles(files);
-  };
-
-  const handleDragEnter = (e: React.DragEvent) => {
-    e.preventDefault();
-    dragCounterRef.current++;
-    setIsDragging(true);
-  };
-  const handleDragLeave = (e: React.DragEvent) => {
-    e.preventDefault();
-    if (--dragCounterRef.current <= 0) {
-      dragCounterRef.current = 0;
-      setIsDragging(false);
-    }
-  };
-  const handleDragOver = (e: React.DragEvent) => {
-    e.preventDefault();
-  };
-  const handleDrop = async (e: React.DragEvent) => {
-    e.preventDefault();
-    dragCounterRef.current = 0;
-    setIsDragging(false);
-    if (!uploading) await uploadFiles(Array.from(e.dataTransfer.files));
   };
 
   const handleDelete = async (id: string) => {
@@ -349,45 +326,20 @@ export default function PhotoTab({
       </div>
 
       {/* Drop zone */}
-      <div
-        onDrop={handleDrop}
-        onDragOver={handleDragOver}
-        onDragEnter={handleDragEnter}
-        onDragLeave={handleDragLeave}
-        onClick={handleUploadClick}
-        className={`flex cursor-pointer items-center justify-center rounded-lg border-2 border-dashed transition-colors ${
-          isDragging
-            ? "border-blue-400 bg-blue-50 dark:bg-blue-500/15"
-            : "border-gray-300 hover:border-gray-400 dark:border-gray-700 dark:hover:border-gray-600"
-        } ${photos.length === 0 ? "flex-col py-16" : "gap-2 py-3"}`}
-      >
-        {photos.length === 0 ? (
-          <>
-            <Camera
-              className={`mb-3 h-12 w-12 ${isDragging ? "text-blue-400" : "text-gray-400 dark:text-gray-500"}`}
-            />
-            <p
-              className={`text-sm ${isDragging ? "text-blue-500" : "text-gray-400 dark:text-gray-500"}`}
-            >
-              写真をドラッグ＆ドロップ、またはクリックして選択
-            </p>
-            <p className="mt-1 text-xs text-gray-400 dark:text-gray-500">
-              JPEG / PNG / WebP / HEIC（最大 {MAX_PHOTO_SIZE_MB}MB）
-            </p>
-          </>
-        ) : (
-          <>
-            <Upload
-              className={`h-4 w-4 ${isDragging ? "text-blue-400" : "text-gray-400 dark:text-gray-500"}`}
-            />
-            <span
-              className={`text-sm ${isDragging ? "text-blue-500" : "text-gray-400 dark:text-gray-500"}`}
-            >
-              ここに写真をドロップして追加
-            </span>
-          </>
-        )}
-      </div>
+      {/* 写真が無いときは大きい枠・あるときは一覧の上の細い帯 */}
+      <FileDropZone
+        size={photos.length === 0 ? "lg" : "sm"}
+        icon={photos.length === 0 ? Camera : Upload}
+        accept={ACCEPTED_PHOTO_TYPES}
+        multiple
+        disabled={uploading}
+        title="写真をここにドラッグ＆ドロップ"
+        hint={`JPEG / PNG / WebP / HEIC（最大 ${MAX_PHOTO_SIZE_MB}MB）`}
+        onFiles={(files) => {
+          setError(null);
+          void uploadFiles(files);
+        }}
+      />
 
       {/* Photo grid */}
       {photos.length > 0 && (

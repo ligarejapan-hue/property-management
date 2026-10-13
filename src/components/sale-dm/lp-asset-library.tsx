@@ -1,8 +1,9 @@
 "use client";
 
-import { useRef, useState, type ClipboardEvent, type DragEvent } from "react";
-import { Loader2, Upload, ImagePlus } from "lucide-react";
+import { useState, type ClipboardEvent, type DragEvent } from "react";
+import { Loader2, ImagePlus } from "lucide-react";
 import { ModalShell } from "@/components/ui/modal-shell";
+import FileDropZone from "@/components/ui/file-drop-zone";
 import { Button } from "@/components/ui/button";
 import { uploadSaleDmLpAsset, LP_ASSET_URL, type SaleDmLpAsset } from "@/lib/api-client";
 import { prepareLpAssetForUpload } from "@/lib/lp-asset-prepare";
@@ -20,7 +21,6 @@ export default function LpAssetLibrary({ open, onClose, onPick, assets, onAssets
   const [error, setError] = useState<string | null>(null);
   const [label, setLabel] = useState("");
   const [progress, setProgress] = useState<{ done: number; total: number } | null>(null);
-  const fileRef = useRef<HTMLInputElement>(null);
 
   const addFiles = async (files: File[]) => {
     if (busy) return;
@@ -68,17 +68,26 @@ export default function LpAssetLibrary({ open, onClose, onPick, assets, onAssets
       footer={<Button type="button" variant="secondary" onClick={onClose}>閉じる</Button>}
     >
       <div tabIndex={0} onPaste={onPaste} onDrop={onDrop} onDragOver={(e) => e.preventDefault()} className="space-y-3 outline-none">
-        <div className="rounded-md border border-dashed border-gray-300 bg-gray-50 p-3 text-xs text-gray-600">
-          <p>写真をここに<strong>貼り付け(Ctrl+V)</strong>するか、ドラッグして置くか、「ファイルを選ぶ」で追加します。JPEG / PNG / WebP。iPhoneの写真(HEIC)はiPhone・iPad・Macのブラウザなら自動で変換されます。Windows/Androidでは JPEG に変換してから追加してください(iPhoneは「設定 &gt; カメラ &gt; フォーマット &gt; 互換性優先」にすると最初からJPEGで撮れます)。写真はどの形式でも端末側でJPEGに変換して登録します(長辺1600pxに縮小・透過は白・撮影情報は残しません)。</p>
-          <div className="mt-2 flex flex-wrap items-center gap-2">
-            <input value={label} onChange={(e) => setLabel(e.target.value)} maxLength={80} placeholder="ラベル(任意・例: 会社の外観)" className="rounded border border-gray-300 px-2 py-1 text-xs" />
-            <Button type="button" variant="secondary" size="sm" disabled={busy} onClick={() => fileRef.current?.click()}>
-              {busy ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <Upload className="h-3.5 w-3.5" />} ファイルを選ぶ
-            </Button>
-            <input ref={fileRef} type="file" accept="image/*" multiple hidden onChange={(e) => { void addFiles(Array.from(e.target.files ?? [])); e.target.value = ""; }} />
-          </div>
-          {progress && <p className="mt-2 text-gray-500">{progress.done}/{progress.total} 枚を登録中…</p>}
-          {error && <p className="mt-2 text-red-600">{error}</p>}
+        <div className="space-y-2 text-xs text-gray-600 dark:text-gray-300">
+          <input value={label} onChange={(e) => setLabel(e.target.value)} maxLength={80} placeholder="ラベル(任意・例: 会社の外観)" className="rounded border border-gray-300 px-2 py-1 text-xs" />
+          <FileDropZone
+            accept="image/*"
+            multiple
+            icon={ImagePlus}
+            title={<>写真をここにドラッグ＆ドロップ（<strong>貼り付け Ctrl+V</strong> もできます）</>}
+            hint="JPEG / PNG / WebP"
+            onFiles={(files) => void addFiles(files)}
+            busy={
+              busy ? (
+                <>
+                  <Loader2 className="h-4 w-4 animate-spin" />
+                  <span>{progress ? `${progress.done}/${progress.total} 枚を登録中…` : "登録中…"}</span>
+                </>
+              ) : undefined
+            }
+          />
+          <p>iPhoneの写真(HEIC)はiPhone・iPad・Macのブラウザなら自動で変換されます。Windows/Androidでは JPEG に変換してから追加してください(iPhoneは「設定 &gt; カメラ &gt; フォーマット &gt; 互換性優先」にすると最初からJPEGで撮れます)。写真はどの形式でも端末側でJPEGに変換して登録します(長辺1600pxに縮小・透過は白・撮影情報は残しません)。</p>
+          {error && <p className="text-red-600">{error}</p>}
         </div>
         {assets.length === 0 ? (
           <p className="text-xs text-gray-500">まだ写真がありません。</p>
