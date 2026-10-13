@@ -4,14 +4,22 @@
  * ⚠useRestoredDraft は useState の初期化で sessionStorage を読む=サーバー描画の最初の出力に
  *   含まれない部品(開いたときだけ描く小窓)でだけ使う。
  */
-import { useEffect, useState, useSyncExternalStore } from "react";
+import { useEffect, useMemo, useState, useSyncExternalStore } from "react";
 import { hasDraft, readDraft, subscribeDrafts, type StoredDraft } from "@/lib/drafts/draft-store";
 import { createDraftWriter } from "@/lib/drafts/draft-writer";
 
-/** 開いた時点の控えを1回だけ読む(key が null なら控えを使わない)。 */
+/**
+ * 開いた時点の控えを1回だけ読む(key が null なら控えを使わない)。
+ * 鍵が変わったら(別の物件など)その鍵で読み直す。
+ */
 export function useRestoredDraft<T>(key: string | null, parse: (d: unknown) => T | null): StoredDraft<T> | null {
-  const [restored] = useState(() => (key ? readDraft(key, parse) : null));
-  return restored;
+  const [state, setState] = useState(() => ({ key, value: key ? readDraft(key, parse) : null }));
+  if (state.key !== key) {
+    const next = { key, value: key ? readDraft(key, parse) : null };
+    setState(next);
+    return next.value;
+  }
+  return state.value;
 }
 
 /** 入力が変わるたびに控えを書く(約1秒間引き・離れるときは即時)。 */
@@ -22,17 +30,20 @@ export function useDraftAutosave<T>(
   restored: StoredDraft<T> | null,
 ) {
   const [tooLarge, setTooLarge] = useState(false);
-  const [writer] = useState(() =>
-    key
-      ? createDraftWriter<T>({
-          key,
-          isEmpty,
-          initialPendingAt: restored?.pendingSubmit?.at ?? null,
-          onResult: (r) => {
-            if (r === "too_large") setTooLarge(true);
-          },
-        })
-      : null,
+  // 鍵が変わったら作り直す(前の鍵へ書き続けない)。前の書き手は下の片付けで flush される。
+  const writer = useMemo(
+    () =>
+      key
+        ? createDraftWriter<T>({
+            key,
+            isEmpty,
+            initialPendingAt: restored?.pendingSubmit?.at ?? null,
+            onResult: (r) => {
+              if (r === "too_large") setTooLarge(true);
+            },
+          })
+        : null,
+    [key, isEmpty, restored],
   );
 
   useEffect(() => {

@@ -56,6 +56,8 @@ export default function LoginPage() {
   // 通知 段階1(共用 PC 対策): ログイン画面を開いた時点で、前の人のお知らせと OS の通知を片付ける。
   useEffect(() => {
     clearNoticeStorage();
+    // 作業中の入力の控えも同じく片付ける(ログアウトを通らずにここへ来た場合の備え)。
+    clearAllDrafts();
     void cleanupNotifications();
   }, []);
 

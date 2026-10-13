@@ -39,6 +39,13 @@ export function draftKey(screen: DraftScreen, resourceId?: string): string {
 
 const listeners = new Set<() => void>();
 
+/**
+ * ログアウトで全消しした後は、このページが読み込み直されるまで書かない。
+ * ⚠ログアウトの移動で小窓が閉じる瞬間(unmount・pagehide)の即時書き込みが、消したばかりの
+ *   控えを書き戻すのを防ぐ(共用PC対策)。signOut は読み込み直しを伴うので、次の画面では外れている。
+ */
+let lockedUntilReload = false;
+
 function notify(): void {
   for (const fn of [...listeners]) fn();
 }
@@ -122,6 +129,7 @@ export function hasDraft(key: string, now: number = Date.now()): boolean {
 }
 
 export function writeDraft<T>(key: string, draft: StoredDraft<T>): WriteResult {
+  if (lockedUntilReload) return "failed";
   const s = store();
   if (!s) return "failed";
   let text: string;
@@ -145,8 +153,12 @@ export function clearDraft(key: string): void {
   notify();
 }
 
-/** pm-draft: で始まる鍵をすべて消す(ログアウト・ログイン成功時)。 */
-export function clearAllDrafts(): void {
+/**
+ * pm-draft: で始まる鍵をすべて消す(ログアウト・ログイン画面・ログイン成功時)。
+ * lockUntilReload=ログアウト用。消した後、読み込み直すまで書かない。
+ */
+export function clearAllDrafts(opts: { lockUntilReload?: boolean } = {}): void {
+  if (opts.lockUntilReload) lockedUntilReload = true;
   const s = store();
   if (s) {
     try {

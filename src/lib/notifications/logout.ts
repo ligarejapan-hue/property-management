@@ -11,7 +11,9 @@ import { cleanupNotifications, unregisterPushDevice } from "./sw-client";
 
 export async function signOutWithNotificationCleanup(callbackUrl = "/login"): Promise<void> {
   clearNoticeStorage();
-  clearAllDrafts(); // 作業中の入力の控え(所有者名などが入りうる)も共用PC対策で消す。
+  // 作業中の入力の控え(所有者名などが入りうる)も共用PC対策で消す。鍵をかけ、ログアウトの
+  // 移動で小窓が閉じる瞬間の書き込みで書き戻されないようにする。
+  clearAllDrafts({ lockUntilReload: true });
   // 段階4a: この端末への送信をサーバー側で止める(ログインしている間に呼ぶ必要がある)。
   await unregisterPushDevice();
   try {
