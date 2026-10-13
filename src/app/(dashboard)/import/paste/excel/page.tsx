@@ -15,6 +15,7 @@ import { PageHeader } from "@/components/ui/page-header";
 import { Button } from "@/components/ui/button";
 import { ModalShell } from "@/components/ui/modal-shell";
 import ImportSwitcher from "@/components/import/import-switcher";
+import FileDropZone from "@/components/ui/file-drop-zone";
 import {
   ExcelLeadTable,
   excelLeadRowKey,
@@ -141,20 +142,24 @@ export default function ExcelLeadImportPage() {
       </p>
 
       <section className="space-y-3 rounded-lg border border-gray-200 bg-white p-4 dark:border-gray-700 dark:bg-gray-800">
-        <label htmlFor="excel-lead-file" className="block text-sm font-medium text-gray-800 dark:text-gray-200">
+        <h2 className="block text-sm font-medium text-gray-800 dark:text-gray-200">
           顧客管理表（.xlsx）
-        </label>
-        <input
-          id="excel-lead-file"
-          type="file"
+        </h2>
+        <FileDropZone
           accept=".xlsx"
-          className="block text-sm text-gray-700 dark:text-gray-300"
           disabled={reading || running}
-          onChange={(e) => {
-            setFile(e.target.files?.[0] ?? null);
+          title="Excel(.xlsx) ファイルをここにドラッグ＆ドロップ"
+          fileName={file?.name ?? null}
+          onFiles={(files) => {
+            setFile(files[0]);
             setRows(null);
             setResults({});
             setReadError(null);
+          }}
+          onNoneAccepted={() => {
+            setFile(null);
+            setRows(null);
+            setResults({});
           }}
         />
         <p className="text-xs text-gray-500 dark:text-gray-400">

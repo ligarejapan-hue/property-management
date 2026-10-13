@@ -27,6 +27,7 @@ import {
   searchProperties,
 } from "@/lib/api-client";
 import ImportSwitcher from "@/components/import/import-switcher";
+import FileDropZone from "@/components/ui/file-drop-zone";
 
 // ---------------------------------------------------------------------------
 // Types
@@ -324,8 +325,6 @@ export default function RegistryPdfPage() {
   const [text, setText] = useState("");
   const [fileName, setFileName] = useState<string | null>(null);
   const [selectedFile, setSelectedFile] = useState<File | null>(null); // 実 PDF ファイル
-  const [dragOver, setDragOver] = useState(false);
-  const fileInputRef = useRef<HTMLInputElement>(null);
 
   // Extract/Edit step
   const [fields, setFields] = useState<Record<string, ExtractedField>>({});
@@ -376,23 +375,6 @@ export default function RegistryPdfPage() {
     // プレビュー表示用に「ファイル選択済み」をマーク
     setText(""); // クリア（file モード時は text は使わない）
   }, []);
-
-  const handleFileDrop = useCallback((e: React.DragEvent) => {
-    e.preventDefault();
-    setDragOver(false);
-    const file = e.dataTransfer.files[0];
-    if (!file) return;
-    setFileState(file);
-  }, [setFileState]);
-
-  const handleFileSelect = useCallback(
-    (e: React.ChangeEvent<HTMLInputElement>) => {
-      const file = e.target.files?.[0];
-      if (!file) return;
-      setFileState(file);
-    },
-    [setFileState],
-  );
 
   const handleParse = useCallback(async () => {
     setParsing(true);
@@ -632,41 +614,18 @@ export default function RegistryPdfPage() {
           {/* File upload tab */}
           {uploadTab === "file" && (
             <div>
-              <div
-                onDragOver={(e) => {
-                  e.preventDefault();
-                  setDragOver(true);
+              <FileDropZone
+                size="lg"
+                accept=".pdf"
+                icon={FileText}
+                title="PDFファイルをここにドラッグ＆ドロップ"
+                fileName={fileName}
+                onFiles={(files) => setFileState(files[0])}
+                onNoneAccepted={() => {
+                  setFileName(null);
+                  setSelectedFile(null);
                 }}
-                onDragLeave={() => setDragOver(false)}
-                onDrop={handleFileDrop}
-                onClick={() => fileInputRef.current?.click()}
-                className={`flex cursor-pointer flex-col items-center justify-center rounded-lg border-2 border-dashed p-12 transition-colors ${
-                  dragOver
-                    ? "border-blue-400 bg-blue-50 dark:bg-blue-500/10"
-                    : "border-gray-300 dark:border-gray-700 bg-gray-50 dark:bg-gray-800/50 hover:border-gray-400 dark:hover:border-gray-600 hover:bg-gray-100 dark:hover:bg-gray-700"
-                }`}
-              >
-                <FileText className="mb-3 h-10 w-10 text-gray-400 dark:text-gray-500" />
-                <p className="text-sm font-medium text-gray-700 dark:text-gray-200">
-                  PDFファイルをドラッグ＆ドロップ
-                </p>
-                <p className="mt-1 text-xs text-gray-500 dark:text-gray-400">
-                  またはクリックしてファイルを選択
-                </p>
-                {fileName && (
-                  <p className="mt-3 rounded bg-blue-50 dark:bg-blue-500/10 px-3 py-1 text-sm text-blue-700 dark:text-blue-300">
-                    <FileText className="mr-1 inline h-3.5 w-3.5" />
-                    {fileName}
-                  </p>
-                )}
-                <input
-                  ref={fileInputRef}
-                  type="file"
-                  accept=".pdf"
-                  className="hidden"
-                  onChange={handleFileSelect}
-                />
-              </div>
+              />
               <p className="mt-2 text-xs text-gray-400 dark:text-gray-500">
                 <Info className="mr-1 inline h-3 w-3" />
                 PDFファイルをサーバー側で抽出します。テキストは「テキスト貼り付け」タブを、画像化された謄本PDFは本文を手で貼り付けてご利用ください。

@@ -7,7 +7,7 @@ import ImportSwitcher from "@/components/import/import-switcher";
 import BulkFolderUpload, {
   type BulkUploadSummary,
 } from "@/components/import/bulk-folder-upload";
-import FilePickerButton from "@/components/import/file-picker-button";
+import FileDropZone from "@/components/ui/file-drop-zone";
 import {
   readFileForImport,
   previewReceptionPropertyCsv,
@@ -126,14 +126,18 @@ export default function RegistryDmImportPage() {
           <h2 className="font-medium text-gray-900 dark:text-gray-100">
             ① 受付帳Excelから物件を作成
           </h2>
-          <FilePickerButton
+          <FileDropZone
             accept=".xlsx,.csv"
-            label="受付帳を選択"
-            hint="Excel(.xlsx) または CSV"
+            title="受付帳の Excel(.xlsx) または CSV をここにドラッグ＆ドロップ"
             fileName={rpFile?.fileName ?? null}
-            onChange={async (e) => {
-              const f = e.target.files?.[0];
-              if (!f) return;
+            onNoneAccepted={() => {
+              setRpFile(null);
+              setRpPreview(null);
+              setRpResult(null);
+              setRoPreview(null);
+              setRoResult(null);
+            }}
+            onFiles={async ([f]) => {
               await run(async () => {
                 setRpFile(await readFileForImport(f));
                 setRpPreview(null);
@@ -274,13 +278,18 @@ export default function RegistryDmImportPage() {
               <span className="block text-sm font-medium text-gray-800 dark:text-gray-200">
                 受付帳Excel(①と同じ)
               </span>
-              <FilePickerButton
+              <FileDropZone
                 accept=".xlsx,.csv"
-                label="受付帳を選択"
+                title="受付帳の Excel(.xlsx) または CSV をここにドラッグ＆ドロップ"
                 fileName={rpFile?.fileName ?? null}
-                onChange={async (e) => {
-                  const f = e.target.files?.[0];
-                  if (!f) return;
+                onNoneAccepted={() => {
+                  setRpFile(null);
+                  setRpPreview(null);
+                  setRpResult(null);
+                  setRoPreview(null);
+                  setRoResult(null);
+                }}
+                onFiles={async ([f]) => {
                   await run(async () => {
                     setRpFile(await readFileForImport(f));
                     setRoPreview(null);
@@ -297,13 +306,16 @@ export default function RegistryDmImportPage() {
               <span className="block text-sm font-medium text-gray-800 dark:text-gray-200">
                 所有者Excel
               </span>
-              <FilePickerButton
+              <FileDropZone
                 accept=".xlsx,.csv"
-                label="所有者を選択"
+                title="所有者の Excel(.xlsx) または CSV をここにドラッグ＆ドロップ"
                 fileName={ownerFile?.fileName ?? null}
-                onChange={async (e) => {
-                  const f = e.target.files?.[0];
-                  if (!f) return;
+                onNoneAccepted={() => {
+                  setOwnerFile(null);
+                  setRoPreview(null);
+                  setRoResult(null);
+                }}
+                onFiles={async ([f]) => {
                   await run(async () => {
                     setOwnerFile(await readFileForImport(f));
                     setRoPreview(null);

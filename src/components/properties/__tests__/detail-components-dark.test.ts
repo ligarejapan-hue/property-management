@@ -6,6 +6,7 @@ import { dirname, join } from "node:path";
 const dir = dirname(fileURLToPath(import.meta.url));
 const actionBarSrc = readFileSync(join(dir, "..", "action-bar.tsx"), "utf8");
 const attachmentTabSrc = readFileSync(join(dir, "..", "attachment-tab.tsx"), "utf8");
+const dropZoneSrc = readFileSync(join(dir, "..", "..", "ui", "file-drop-zone.tsx"), "utf8");
 
 // ===== action-bar.tsx =====
 describe("action-bar.tsx dark: 配色 (phase2b 2b-3)", () => {
@@ -38,9 +39,11 @@ describe("attachment-tab.tsx dark: 配色 (phase2b 2b-3)", () => {
     expect(attachmentTabSrc).toContain("dark:bg-gray-800");
   });
 
-  // --- drop ゾーン枠線 ---
-  it("drop ゾーンの点線枠に dark:border-gray-700 がある", () => {
-    expect(attachmentTabSrc).toContain("dark:border-gray-700");
+  // --- drop ゾーン枠線(2026-10-13 から共通のドロップ枠 file-drop-zone.tsx が持つ) ---
+  it("drop ゾーンは共通のドロップ枠を使い、その点線枠に dark:border-gray-700 がある", () => {
+    expect(attachmentTabSrc).toContain("<FileDropZone");
+    expect(dropZoneSrc).toContain("border-dashed");
+    expect(dropZoneSrc).toContain("dark:border-gray-700");
   });
 
   // --- 行/ボタン hover ---
@@ -89,8 +92,8 @@ describe("attachment-tab.tsx dark: 配色 (phase2b 2b-3)", () => {
   it("ライトモード text-gray-600 は残っている", () => {
     expect(attachmentTabSrc).toContain("text-gray-600");
   });
-  it("ライトモード border-gray-300 は残っている（drop ゾーン枠）", () => {
-    expect(attachmentTabSrc).toContain("border-gray-300");
+  it("ライトモード border-gray-300 は残っている（drop ゾーン枠＝共通のドロップ枠）", () => {
+    expect(dropZoneSrc).toContain("border-gray-300");
   });
   it("ライトモード border-gray-200 は残っている（行カード枠）", () => {
     expect(attachmentTabSrc).toContain("border-gray-200");
@@ -118,12 +121,9 @@ describe("attachment-tab.tsx dark: 配色 (phase2b 2b-3)", () => {
     expect(attachmentTabSrc).toContain("dark:text-indigo-400");
   });
 
-  // --- P2-2: ドロップゾーン drag-active 暗背景 ---
-  it("general ドロップゾーン active 分岐に dark:bg-blue-500/15 がある", () => {
-    expect(attachmentTabSrc).toContain("dark:bg-blue-500/15");
-  });
-  it("registry ドロップゾーン active 分岐に dark:bg-amber-500/15 がある", () => {
-    expect(attachmentTabSrc).toContain("dark:bg-amber-500/15");
+  // --- P2-2: ドロップゾーン drag-active 暗背景(共通のドロップ枠・添付/謄本とも同じ青) ---
+  it("ドロップゾーン active 分岐に暗い背景 dark:bg-blue-500/10 がある", () => {
+    expect(dropZoneSrc).toContain("border-blue-500 bg-blue-50 dark:border-blue-400 dark:bg-blue-500/10");
   });
 
   // --- 既存 lint ワーニング（pre-existing: line 383 付近 static-components）は放置 ---

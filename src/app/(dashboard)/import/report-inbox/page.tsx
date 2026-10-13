@@ -10,15 +10,16 @@
  * ⚠自動では添付しない(候補を出すだけ)。⚠添付しなかったものも消さない(発注者決定)。
  * ⚠使えるのは所有者情報をすべて見られる人だけ(報告書に依頼者の氏名が載るため)。
  */
-import { useCallback, useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useState } from "react";
 import Link from "next/link";
-import { ExternalLink, FileText, Loader2, Search, Trash2, Upload } from "lucide-react";
+import { ExternalLink, FileText, Loader2, Search, Trash2 } from "lucide-react";
 
 import { PageHeader } from "@/components/ui/page-header";
 import { Button } from "@/components/ui/button";
 import { ConfirmDialog } from "@/components/ui/confirm-dialog";
 import { Pagination } from "@/components/ui/pagination";
 import ImportSwitcher from "@/components/import/import-switcher";
+import FileDropZone from "@/components/ui/file-drop-zone";
 import {
   attachReportInboxItem,
   deleteReportInboxItem,
@@ -60,8 +61,6 @@ export default function ReportInboxPage() {
   const [loading, setLoading] = useState(true);
   const [loadError, setLoadError] = useState<string | null>(null);
   const [uploads, setUploads] = useState<UploadProgress[]>([]);
-  const [dragOver, setDragOver] = useState(false);
-  const fileInputRef = useRef<HTMLInputElement>(null);
 
   const load = useCallback(async () => {
     setLoadError(null);
@@ -117,13 +116,6 @@ export default function ReportInboxPage() {
     await load();
   };
 
-  const onDrop = (e: React.DragEvent) => {
-    e.preventDefault();
-    setDragOver(false);
-    const files = Array.from(e.dataTransfer.files);
-    if (files.length) void handleFiles(files);
-  };
-
   const uploading = uploads.some((u) => u.state === "uploading" || u.state === "waiting");
 
   return (
@@ -135,40 +127,14 @@ export default function ReportInboxPage() {
       />
 
       <div className="max-w-4xl space-y-6">
-        <section
-          onDragOver={(e) => {
-            e.preventDefault();
-            setDragOver(true);
-          }}
-          onDragLeave={() => setDragOver(false)}
-          onDrop={onDrop}
-          onClick={() => !uploading && fileInputRef.current?.click()}
-          className={`cursor-pointer rounded-md border-2 border-dashed p-6 text-center transition-colors ${
-            dragOver
-              ? "border-blue-400 bg-blue-50 dark:border-blue-400/40 dark:bg-blue-500/15"
-              : "border-gray-300 bg-gray-50 hover:border-gray-400 hover:bg-gray-100 dark:border-gray-700 dark:bg-gray-900 dark:hover:border-gray-600 dark:hover:bg-gray-800"
-          }`}
-        >
-          <Upload className="mx-auto mb-2 h-8 w-8 text-gray-400 dark:text-gray-500" />
-          <p className="text-sm text-gray-600 dark:text-gray-300">
-            報告書のPDFをドラッグ＆ドロップ、またはクリックして選択(いくつでも)
-          </p>
-          <p className="mt-1 text-xs text-gray-400 dark:text-gray-500">
-            PDFのみ・{formatMb(MAX_PDF_UPLOAD_BYTES)}まで(8MBを超えるものは自動で圧縮して保存)
-          </p>
-          <input
-            ref={fileInputRef}
-            type="file"
-            accept="application/pdf,.pdf"
-            multiple
-            className="hidden"
-            onChange={(e) => {
-              const files = Array.from(e.target.files ?? []);
-              e.target.value = "";
-              if (files.length) void handleFiles(files);
-            }}
-          />
-        </section>
+        <FileDropZone
+          accept="application/pdf,.pdf"
+          multiple
+          disabled={uploading}
+          title="報告書のPDFをここにドラッグ＆ドロップ"
+          hint={`PDFのみ・${formatMb(MAX_PDF_UPLOAD_BYTES)}まで(8MBを超えるものは自動で圧縮して保存)`}
+          onFiles={(files) => void handleFiles(files)}
+        />
 
         {uploads.length > 0 && (
           <ul className="space-y-1 text-sm" aria-live="polite">

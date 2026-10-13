@@ -2,6 +2,7 @@
 
 import { useState, useEffect, useCallback, useRef } from "react";
 import { ConfirmDialog } from "@/components/ui/confirm-dialog";
+import FileDropZone from "@/components/ui/file-drop-zone";
 import {
   Loader2,
   Paperclip,
@@ -9,7 +10,6 @@ import {
   ImageIcon,
   Trash2,
   Download,
-  Upload,
   AlertTriangle,
   Eye,
   X,
@@ -142,12 +142,8 @@ export default function AttachmentTab({
   const [uploadingRegistry, setUploadingRegistry] = useState(false);
   const [uploadErrorGeneral, setUploadErrorGeneral] = useState<string | null>(null);
   const [uploadErrorRegistry, setUploadErrorRegistry] = useState<string | null>(null);
-  const [dragOverGeneral, setDragOverGeneral] = useState(false);
-  const [dragOverRegistry, setDragOverRegistry] = useState(false);
   const [deleteTargetId, setDeleteTargetId] = useState<string | null>(null);
   const [previewTarget, setPreviewTarget] = useState<AttachmentData | null>(null);
-  const fileInputRefGeneral = useRef<HTMLInputElement>(null);
-  const fileInputRefRegistry = useRef<HTMLInputElement>(null);
   // 一覧の取り直しの交通整理は、物件ページと**同じ純関数**に委ねる
   // （@codex #395 R7 P2）。独自の世代ガードだと、**新しい取り直しが失敗しただけ**で
   // 先に届いていた使える一覧を捨て、タブが空/古いままエラーになる。
@@ -255,22 +251,6 @@ export default function AttachmentTab({
     }
   };
 
-  const handleDrop = (e: React.DragEvent, type: AttachmentType) => {
-    e.preventDefault();
-    if (type === "registry") setDragOverRegistry(false);
-    else setDragOverGeneral(false);
-    void handleUploads(Array.from(e.dataTransfer.files), type);
-  };
-
-  const handleFileSelect = (
-    e: React.ChangeEvent<HTMLInputElement>,
-    type: AttachmentType,
-  ) => {
-    const files = Array.from(e.target.files ?? []);
-    e.target.value = "";
-    void handleUploads(files, type);
-  };
-
   const handleDelete = async (id: string) => {
     // 削除前に種別を控える(削除後は一覧から消えて判定できない)。謄本のときだけ親へ通知。
     const wasRegistry =
@@ -307,48 +287,27 @@ export default function AttachmentTab({
         <h3 className="mb-2 text-sm font-semibold text-gray-700 dark:text-gray-200">添付ファイル</h3>
 
         {/* Upload area: general */}
-        <div
-          onDragOver={(e) => { e.preventDefault(); setDragOverGeneral(true); }}
-          onDragLeave={() => setDragOverGeneral(false)}
-          onDrop={(e) => handleDrop(e, "general")}
-          onClick={() => fileInputRefGeneral.current?.click()}
-          className={`mb-3 cursor-pointer rounded-md border-2 border-dashed p-6 text-center transition-colors ${
-            dragOverGeneral
-              ? "border-blue-400 bg-blue-50 dark:border-blue-400/40 dark:bg-blue-500/15"
-              : "border-gray-300 bg-gray-50 hover:border-gray-400 hover:bg-gray-100 dark:border-gray-700 dark:bg-gray-900 dark:hover:border-gray-600 dark:hover:bg-gray-800"
-          }`}
-        >
-          {uploadingGeneral ? (
-            <div className="flex items-center justify-center gap-2">
-              <Loader2 className="h-5 w-5 animate-spin text-blue-500" />
-              <span className="text-sm text-gray-600 dark:text-gray-300">
-                {uploadProgressLabel(uploadProgressGeneral)}
-                {compressingGeneral
-                  ? "大きいPDFを圧縮して保存しています…（数十秒かかることがあります）"
-                  : "アップロード中..."}
-              </span>
-            </div>
-          ) : (
-            <>
-              <Upload className="mx-auto mb-2 h-8 w-8 text-gray-400 dark:text-gray-500" />
-              <p className="text-sm text-gray-600 dark:text-gray-300">
-                ファイルをドラッグ＆ドロップ、またはクリックして選択（まとめて複数可）
-              </p>
-              <p className="mt-1 text-xs text-gray-400 dark:text-gray-500">
-                上限 {MAX_SIZE_MB}MB / PDF, Excel, CSV, Word, 画像
-                （{MAX_SIZE_MB}MB を超えるPDFは{MAX_PDF_MB}MBまで自動で圧縮して保存）
-              </p>
-            </>
-          )}
-          <input
-            ref={fileInputRefGeneral}
-            type="file"
-            className="hidden"
-            multiple
-            onChange={(e) => handleFileSelect(e, "general")}
-            accept=".pdf,.xlsx,.xls,.csv,.docx,.jpg,.jpeg,.png,.webp,.heic"
-          />
-        </div>
+        <FileDropZone
+          className="mb-3"
+          accept=".pdf,.xlsx,.xls,.csv,.docx,.jpg,.jpeg,.png,.webp,.heic"
+          multiple
+          title="ファイルをここにドラッグ＆ドロップ"
+          hint={`上限 ${MAX_SIZE_MB}MB / PDF, Excel, CSV, Word, 画像（${MAX_SIZE_MB}MB を超えるPDFは${MAX_PDF_MB}MBまで自動で圧縮して保存）`}
+          onFiles={(files) => void handleUploads(files, "general")}
+          busy={
+            uploadingGeneral ? (
+              <>
+                <Loader2 className="h-5 w-5 animate-spin text-blue-500" />
+                <span>
+                  {uploadProgressLabel(uploadProgressGeneral)}
+                  {compressingGeneral
+                    ? "大きいPDFを圧縮して保存しています…（数十秒かかることがあります）"
+                    : "アップロード中..."}
+                </span>
+              </>
+            ) : undefined
+          }
+        />
 
         {uploadErrorGeneral && (
           <div className="mb-3 flex items-center gap-2 rounded-md border border-red-200 bg-red-50 p-3 text-sm text-red-700 dark:border-red-800 dark:bg-red-950/40 dark:text-red-300">
@@ -381,44 +340,24 @@ export default function AttachmentTab({
         <h3 className="mb-2 text-sm font-semibold text-gray-700 dark:text-gray-200">謄本PDF</h3>
 
         {/* Upload area: registry */}
-        <div
-          onDragOver={(e) => { e.preventDefault(); setDragOverRegistry(true); }}
-          onDragLeave={() => setDragOverRegistry(false)}
-          onDrop={(e) => handleDrop(e, "registry")}
-          onClick={() => fileInputRefRegistry.current?.click()}
-          className={`mb-3 cursor-pointer rounded-md border-2 border-dashed p-6 text-center transition-colors ${
-            dragOverRegistry
-              ? "border-amber-400 bg-amber-50 dark:border-amber-400/40 dark:bg-amber-500/15"
-              : "border-gray-300 bg-gray-50 hover:border-gray-400 hover:bg-gray-100 dark:border-gray-700 dark:bg-gray-900 dark:hover:border-gray-600 dark:hover:bg-gray-800"
-          }`}
-        >
-          {uploadingRegistry ? (
-            <div className="flex items-center justify-center gap-2">
-              <Loader2 className="h-5 w-5 animate-spin text-amber-500" />
-              <span className="text-sm text-gray-600 dark:text-gray-300">
-                {uploadProgressLabel(uploadProgressRegistry)}アップロード中...
-              </span>
-            </div>
-          ) : (
-            <>
-              <FileText className="mx-auto mb-2 h-8 w-8 text-amber-500" />
-              <p className="text-sm text-gray-600 dark:text-gray-300">
-                謄本PDFをドラッグ＆ドロップ、またはクリックして選択（まとめて複数可）
-              </p>
-              <p className="mt-1 text-xs text-gray-400 dark:text-gray-500">
-                PDF のみ / 上限 {MAX_SIZE_MB}MB
-              </p>
-            </>
-          )}
-          <input
-            ref={fileInputRefRegistry}
-            type="file"
-            className="hidden"
-            multiple
-            onChange={(e) => handleFileSelect(e, "registry")}
-            accept="application/pdf,.pdf"
-          />
-        </div>
+        <FileDropZone
+          className="mb-3"
+          accept="application/pdf,.pdf"
+          multiple
+          hideFileNames
+          icon={FileText}
+          title="謄本PDFをここにドラッグ＆ドロップ"
+          hint={`PDF のみ / 上限 ${MAX_SIZE_MB}MB`}
+          onFiles={(files) => void handleUploads(files, "registry")}
+          busy={
+            uploadingRegistry ? (
+              <>
+                <Loader2 className="h-5 w-5 animate-spin text-amber-500" />
+                <span>{uploadProgressLabel(uploadProgressRegistry)}アップロード中...</span>
+              </>
+            ) : undefined
+          }
+        />
 
         {uploadErrorRegistry && (
           <div className="mb-3 flex items-center gap-2 rounded-md border border-red-200 bg-red-50 p-3 text-sm text-red-700 dark:border-red-800 dark:bg-red-950/40 dark:text-red-300">

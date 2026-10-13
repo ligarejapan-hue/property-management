@@ -2,6 +2,8 @@
 
 import { useCallback, useState, type ChangeEvent } from "react";
 import Link from "next/link";
+import { FileText } from "lucide-react";
+import FileDropZone from "@/components/ui/file-drop-zone";
 import {
   uploadRegistryPdfBulk,
   type RegistryPdfBulkUploadResponse,
@@ -66,13 +68,9 @@ export default function BulkFolderUpload({
     if (el) el.setAttribute("webkitdirectory", "");
   }, []);
 
-  const onPick = useCallback((e: ChangeEvent<HTMLInputElement>) => {
-    const input = e.currentTarget;
-    const picked = Array.from(input.files ?? []).filter((f) =>
-      f.name.toLowerCase().endsWith(".pdf"),
-    );
-    // 同じフォルダ/ファイルを選び直しても onChange が再発火するよう value をクリア。
-    input.value = "";
+  // フォルダ選択・ドロップ枠(ファイル)の両方の入口。
+  const applyPicked = useCallback((list: File[]) => {
+    const picked = list.filter((f) => f.name.toLowerCase().endsWith(".pdf"));
     // 新しい選択に切り替わったら、親(Step4)の前回サマリを消して未実行に戻す。
     onUploaded?.(null);
     if (picked.length === 0) {
@@ -95,6 +93,14 @@ export default function BulkFolderUpload({
     setSummary(null);
     setShowExcluded(false);
   }, [onUploaded]);
+
+  const onPick = useCallback((e: ChangeEvent<HTMLInputElement>) => {
+    const input = e.currentTarget;
+    const list = Array.from(input.files ?? []);
+    // 同じフォルダを選び直しても onChange が再発火するよう value をクリア。
+    input.value = "";
+    applyPicked(list);
+  }, [applyPicked]);
 
   const start = useCallback(async () => {
     if (files.length === 0) return;
@@ -231,27 +237,23 @@ export default function BulkFolderUpload({
             className="hidden"
           />
         </label>
-        <label
-          className={`inline-flex items-center gap-2 rounded-md border border-gray-300 px-4 py-2 text-sm font-medium text-gray-700 dark:border-gray-600 dark:text-gray-200 ${
-            uploading
-              ? "cursor-not-allowed opacity-50"
-              : "cursor-pointer hover:bg-gray-50 dark:hover:bg-gray-700"
-          }`}
-        >
-          ファイルを選択（複数可）
-          <input
-            type="file"
-            accept=".pdf,application/pdf"
-            multiple
-            disabled={uploading}
-            onChange={onPick}
-            className="hidden"
-          />
-        </label>
         <span className="text-xs text-gray-500 dark:text-gray-400">
-          対応形式: PDF（1ファイル5MBまで）
+          フォルダごと送るときはこちら。ファイルを選んで送るときは下の枠へ。
         </span>
       </div>
+
+      <FileDropZone
+        accept=".pdf,application/pdf"
+        multiple
+        hideFileNames
+        disabled={uploading}
+        icon={FileText}
+        title="PDFファイルをここにドラッグ＆ドロップ"
+        hint="対応形式: PDF（1ファイル5MBまで）・フォルダは上の「フォルダを選択」から"
+        onFiles={applyPicked}
+        // PDFが1件も無い置き方でも、フォルダ選択と同じく前の選択と計画を捨てる(@codex #510 P2)。
+        onNoneAccepted={() => applyPicked([])}
+      />
 
       {plan && !summary && (
         <div className="space-y-2 rounded-md border border-gray-200 bg-gray-50 p-3 text-sm dark:border-gray-700 dark:bg-gray-900/40">

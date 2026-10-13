@@ -2,6 +2,7 @@
 
 import { useState, useEffect, useCallback, useRef } from "react";
 import { ConfirmDialog } from "@/components/ui/confirm-dialog";
+import FileDropZone from "@/components/ui/file-drop-zone";
 import {
   Camera,
   Upload,
@@ -83,7 +84,10 @@ export default function BuildingPhotoTab({
     if (!file) return;
     // Reset so the same file can be selected again
     e.target.value = "";
+    await uploadOne(file);
+  };
 
+  const uploadOne = async (file: File) => {
     setUploading(true);
     setError(null);
     try {
@@ -254,16 +258,16 @@ export default function BuildingPhotoTab({
         </div>
       </div>
 
-      {/* Empty state */}
-      {photos.length === 0 && (
-        <div className="flex flex-col items-center justify-center rounded-lg border-2 border-dashed border-gray-300 py-12 text-gray-400 dark:border-gray-700 dark:text-gray-500">
-          <Camera className="mb-3 h-10 w-10" />
-          <p className="text-sm">棟写真はありません</p>
-          <p className="mt-1 text-xs">
-            外観・エントランス・館銘板などをアップロードしてください
-          </p>
-        </div>
-      )}
+      {/* 写真が無いときは大きい枠・あるときは一覧の上の細い帯(物件の写真タブと同じ) */}
+      <FileDropZone
+        size={photos.length === 0 ? "lg" : "sm"}
+        icon={photos.length === 0 ? Camera : Upload}
+        accept="image/jpeg,image/png,image/webp,image/heic,image/heif"
+        disabled={uploading}
+        title={photos.length === 0 ? "棟写真はありません。写真をここにドラッグ＆ドロップ" : "写真をここにドラッグ＆ドロップ"}
+        hint="外観・エントランス・館銘板など（JPEG / PNG / WebP / HEIC）"
+        onFiles={(files) => void uploadOne(files[0])}
+      />
 
       {/* Photo grid */}
       {photos.length > 0 && (

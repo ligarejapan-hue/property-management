@@ -16,6 +16,8 @@ import Link from "next/link";
 import { PageHeader } from "@/components/ui/page-header";
 import { Button } from "@/components/ui/button";
 import ImportSwitcher from "@/components/import/import-switcher";
+import FileDropZone from "@/components/ui/file-drop-zone";
+import { FileText } from "lucide-react";
 import {
   PasteImportReview,
   defaultPropertyValues,
@@ -479,26 +481,21 @@ export default function PasteImportPage() {
           </div>
 
           <div>
-            <label htmlFor="paste-pdf-file" className="mb-1 block text-sm font-medium text-gray-800 dark:text-gray-200">
+            <h2 className="mb-1 block text-sm font-medium text-gray-800 dark:text-gray-200">
               PDFをアップロード
-            </label>
-            <input
-              id="paste-pdf-file"
-              type="file"
-              accept="application/pdf"
-              className="block text-sm text-gray-700 dark:text-gray-300"
+            </h2>
+            <FileDropZone
+              accept="application/pdf,.pdf"
               disabled={reading}
-              onChange={(e) => {
-                const f = e.target.files?.[0] ?? null;
-                setPdfFile(f);
-                if (f) setRawText("");
+              icon={FileText}
+              title="PDFファイルをここにドラッグ＆ドロップ"
+              fileName={pdfFile?.name ?? null}
+              onFiles={(files) => {
+                setPdfFile(files[0]);
+                setRawText("");
               }}
+              onNoneAccepted={() => setPdfFile(null)}
             />
-            {pdfFile && (
-              <p className="mt-1 text-xs text-gray-500 dark:text-gray-400">
-                選択中: {pdfFile.name}
-              </p>
-            )}
           </div>
 
           {readError && (

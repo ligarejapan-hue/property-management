@@ -35,11 +35,12 @@ describe("PhotoGalleryPanel — SSR構造", () => {
     expect(html).toContain("読み込み中"); // useEffect 未実行 = 初期 loading 状態
   });
 
-  it("ローカルアップロード用の FilePickerButton(複数選択可・image/*)を描画する", () => {
+  it("ローカルアップロード用の共通ドロップ枠(複数選択可・image/*)を描画する", () => {
     const html = renderToStaticMarkup(
       <PhotoGalleryPanel propertyId="p1" onClose={() => {}} onAddPhoto={() => {}} />,
     );
-    expect(html).toContain("data-file-picker");
+    expect(html).toContain("data-file-drop-zone");
+    expect(html).toContain("ドラッグ＆ドロップ");
     expect(html).toContain("写真をアップロード");
     expect(html).toContain('type="file"');
     expect(html).toContain('accept="image/*"');
