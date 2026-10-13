@@ -5,7 +5,7 @@
  * 片付けに失敗してもログアウト自体は止めない(ログイン画面でもう一度確かめる)。
  */
 import { signOut } from "next-auth/react";
-import { clearAllDrafts } from "@/lib/drafts/draft-store";
+import { clearAllDrafts, unlockDrafts } from "@/lib/drafts/draft-store";
 import { clearNoticeStorage } from "./notice-store";
 import { cleanupNotifications, unregisterPushDevice } from "./sw-client";
 
@@ -14,12 +14,17 @@ export async function signOutWithNotificationCleanup(callbackUrl = "/login"): Pr
   // 作業中の入力の控え(所有者名などが入りうる)も共用PC対策で消す。鍵をかけ、ログアウトの
   // 移動で小窓が閉じる瞬間の書き込みで書き戻されないようにする。
   clearAllDrafts({ lockUntilReload: true });
-  // 段階4a: この端末への送信をサーバー側で止める(ログインしている間に呼ぶ必要がある)。
-  await unregisterPushDevice();
   try {
-    await cleanupNotifications();
-  } catch {
-    /* ログイン画面で再確認する */
+    // 段階4a: この端末への送信をサーバー側で止める(ログインしている間に呼ぶ必要がある)。
+    await unregisterPushDevice();
+    try {
+      await cleanupNotifications();
+    } catch {
+      /* ログイン画面で再確認する */
+    }
+    await signOut({ callbackUrl });
+  } catch (err) {
+    unlockDrafts();
+    throw err;
   }
-  await signOut({ callbackUrl });
 }

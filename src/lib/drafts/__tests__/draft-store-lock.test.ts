@@ -19,6 +19,13 @@ describe("ログアウト時の全消しの後は書かない", () => {
     expect(m.writeDraft(k, { v: 1, savedAt: 2, data: { name: "A" } })).toBe("failed");
     expect(s.getItem(k)).toBeNull();
   });
+  it("ログアウトに失敗して画面に残ったら unlockDrafts でまた書ける", async () => {
+    const m = await import("../draft-store");
+    const k = m.draftKey("new-property:properties");
+    m.clearAllDrafts({ lockUntilReload: true });
+    m.unlockDrafts();
+    expect(m.writeDraft(k, { v: 1, savedAt: 2, data: { name: "A" } })).toBe("ok");
+  });
   it("ふつうの全消し(ログイン成功時)の後はまた書ける", async () => {
     const m = await import("../draft-store");
     const k = m.draftKey("new-property:properties");

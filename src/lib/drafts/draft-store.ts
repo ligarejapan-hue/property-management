@@ -46,6 +46,11 @@ const listeners = new Set<() => void>();
  */
 let lockedUntilReload = false;
 
+/** ログアウトに失敗して画面に残ったとき、鍵を外してまた控えられるようにする(@codex P2)。 */
+export function unlockDrafts(): void {
+  lockedUntilReload = false;
+}
+
 function notify(): void {
   for (const fn of [...listeners]) fn();
 }
