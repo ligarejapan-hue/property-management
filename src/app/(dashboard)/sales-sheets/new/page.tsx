@@ -138,8 +138,9 @@ export default function SalesSheetNewEntryPage() {
   const registerDraftExists = useDraftExists(draftKey("new-property:sales-sheet"));
   // ⚠開いた状態として保つ(控えが消えても閉じない=「最初からやり直す」・全部消したときに小窓が消えない)。
   // ⚠この画面に来るたびに1回だけ開く(送信途中の控えを残して閉じたとき、すぐ開き直さない)。
+  // ⚠物件の書き込み権限が確かめられてから開く(権限を外された人には開かない・控えは残す・@codex P2)。
   const [registerDraftAutoOpened, setRegisterDraftAutoOpened] = useState(false);
-  if (registerDraftExists && !registerDraftAutoOpened) {
+  if (registerDraftExists && canWriteProperty && !registerDraftAutoOpened) {
     setRegisterDraftAutoOpened(true);
     setShowRegister(true);
   }

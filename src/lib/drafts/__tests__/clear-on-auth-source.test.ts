@@ -11,9 +11,10 @@ describe("ログアウト・ログインで控えを全消しする", () => {
     // 鍵をかけて消す=ログアウトで小窓が閉じる瞬間(unmount・pagehide)に書き戻させない。
     expect(src).toMatch(/clearNoticeStorage\(\);\n(?:\s*\/\/.*\n)*\s*clearAllDrafts\(\{ lockUntilReload: true \}\);[\s\S]*await signOut\(/);
   });
-  it("login: 画面を開いた時点でも、通知と同じく全消しする", () => {
+  it("login: 画面を開いた時点では、ログインしていないときだけ全消しする(@codex P2)", () => {
     const src = read("src/app/(auth)/login/page.tsx");
-    expect(src).toMatch(/useEffect\(\(\) => \{\n\s*clearNoticeStorage\(\);\n(?:\s*\/\/.*\n)*\s*clearAllDrafts\(\);/);
+    // ログイン中の人が戻るでログイン画面を見ただけでは消さない。
+    expect(src).toMatch(/useEffect\(\(\) => \{\n\s*clearNoticeStorage\(\);\n(?:\s*\/\/.*\n)*\s*void getSession\(\)\n\s*\.then\(\(session\) => \{\n\s*if \(!session\) clearAllDrafts\(\);/);
   });
   it("login: 成功したら移動の前に clearAllDrafts を呼ぶ", () => {
     const src = read("src/app/(auth)/login/page.tsx");

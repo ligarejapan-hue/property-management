@@ -357,8 +357,9 @@ function PropertiesPageInner() {
   const newPropertyDraftExists = useDraftExists(draftKey("new-property:properties"));
   // ⚠開いた状態として保つ(控えが消えても閉じない=「最初からやり直す」・全部消したときに小窓が消えない)。
   // ⚠この画面に来るたびに1回だけ開く(送信途中の控えを残して閉じたとき、すぐ開き直さない)。
+  // ⚠物件の書き込み権限が確かめられてから開く(権限を外された人には開かない・控えは残す・@codex P2)。
   const [newDraftAutoOpened, setNewDraftAutoOpened] = useState(false);
-  if (newPropertyDraftExists && !newDraftAutoOpened) {
+  if (newPropertyDraftExists && canWriteProperty && !newDraftAutoOpened) {
     setNewDraftAutoOpened(true);
     setShowNewModal(true);
   }

@@ -4,7 +4,7 @@ import { useEffect, useState, useSyncExternalStore } from "react";
 import { useForm } from "react-hook-form";
 import { z } from "zod/v4";
 import { zodResolver } from "@hookform/resolvers/zod";
-import { signIn } from "next-auth/react";
+import { getSession, signIn } from "next-auth/react";
 import { useRouter } from "next/navigation";
 import { Clock, Eye, EyeOff, FileText } from "lucide-react";
 import { writeSharedLastActivity } from "@/lib/session-activity";
@@ -56,8 +56,16 @@ export default function LoginPage() {
   // 通知 段階1(共用 PC 対策): ログイン画面を開いた時点で、前の人のお知らせと OS の通知を片付ける。
   useEffect(() => {
     clearNoticeStorage();
-    // 作業中の入力の控えも同じく片付ける(ログアウトを通らずにここへ来た場合の備え)。
-    clearAllDrafts();
+    // 作業中の入力の控えも片付ける(ログアウトを通らずにここへ来た場合の備え)。
+    // ⚠ログインしていないときだけ。ログイン中の人が「戻る」でこの画面を見ただけでは消さない
+    //   (人の入れ替わりはログイン成功時の全消しでも守られる・@codex P2)。
+    void getSession()
+      .then((session) => {
+        if (!session) clearAllDrafts();
+      })
+      .catch(() => {
+        /* 確かめられないときは消さない(ログイン成功時に消える) */
+      });
     void cleanupNotifications();
   }, []);
 
