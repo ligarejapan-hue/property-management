@@ -145,6 +145,8 @@ export function parseListPage(html: string): ListPage {
   if (headers.join("|") !== LIST_HEADERS.join("|")) throw new LayoutChanged("一覧の見出し");
 
   const byKey = new Map<string, ListRow>();
+  /** 会社ごとの行の数(1行だけの会社はその行が本店)。 */
+  const rowCount = new Map<string, number>();
   let dataRows = 0;
   for (const tr of table.matchAll(/<tr>([\s\S]*?)<\/tr>/g)) {
     const cells = [...tr[1].matchAll(/<td[^>]*>([\s\S]*?)<\/td>/g)].map((m) => m[1]);
@@ -161,6 +163,7 @@ export function parseListPage(html: string): ListPage {
     const office = cleanText(cells[5]);
     const address = cleanText(cells[6]) || null;
     const isMain = office === "本店";
+    rowCount.set(licenseKey, (rowCount.get(licenseKey) ?? 0) + 1);
     const prev = byKey.get(licenseKey);
     if (prev && (prev.isMain || !isMain)) continue;
     byKey.set(licenseKey, {
@@ -178,7 +181,10 @@ export function parseListPage(html: string): ListPage {
   if (dataRows !== (table.match(/js_ShowDetail\(/g) ?? []).length) throw new LayoutChanged("読めなかった行");
   // 表示している範囲の行の数と違う=行が欠けた画面。そのまま進めると締めで欠けた会社を消してしまう(@codex #477)。
   if (dataRows !== expectedRows) throw new LayoutChanged("表示している範囲と行の数が違う");
-  return { total, pages, page, rows: [...byKey.values()] };
+  // 実物の一覧は1社1行=本店の行(営業所名は「本社」「大阪本店」等もある・2026-10-13 確認)。そのページに1行しか無い
+  // 会社はその行を本店とみなす=所在地が変われば書き換えて詳細を取り直す(本店の引っ越しを反映・@codex #509)。
+  const rows = [...byKey.values()].map((r) => (!r.isMain && rowCount.get(r.licenseKey) === 1 ? { ...r, isMain: true } : r));
+  return { total, pages, page, rows };
 }
 
 /** 詳細(tkGaiyo.do)を読む。開いた会社と違う免許番号なら取り違えとして止める。 */
