@@ -251,6 +251,8 @@ export default function BulkFolderUpload({
         title="PDFファイルをここにドラッグ＆ドロップ"
         hint="対応形式: PDF（1ファイル5MBまで）・フォルダは上の「フォルダを選択」から"
         onFiles={applyPicked}
+        // PDFが1件も無い置き方でも、フォルダ選択と同じく前の選択と計画を捨てる(@codex #510 P2)。
+        onNoneAccepted={() => applyPicked([])}
       />
 
       {plan && !summary && (

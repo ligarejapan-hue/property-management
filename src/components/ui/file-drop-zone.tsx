@@ -2,7 +2,7 @@
 
 import { useRef, useState, type DragEvent, type KeyboardEvent, type ReactNode } from "react";
 import { FileText, Upload, type LucideIcon } from "lucide-react";
-import { pickAcceptedFiles, pickNotice } from "@/lib/file-accept";
+import { pickAcceptedFiles, pickAction, pickNotice } from "@/lib/file-accept";
 
 /**
  * システム共通のファイルを入れる枠(点線の枠)。
@@ -17,6 +17,7 @@ export default function FileDropZone({
   multiple = false,
   disabled = false,
   onFiles,
+  onNoneAccepted,
   title,
   hint,
   fileName,
@@ -31,6 +32,8 @@ export default function FileDropZone({
   disabled?: boolean;
   /** 形式が合ったファイルだけが届く(1件以上のときだけ呼ばれる)。 */
   onFiles: (files: File[]) => void;
+  /** ファイルは置かれたが形式が1件も合わなかったとき(前の選択を無効にしたい画面用)。 */
+  onNoneAccepted?: () => void;
   /** 1行目。例: 「CSV または Excel(.xlsx) ファイルをここにドラッグ＆ドロップ」 */
   title: ReactNode;
   /** 対応形式・上限などの小さな注記。 */
@@ -55,7 +58,10 @@ export default function FileDropZone({
   const deliver = (list: FileList | null | undefined) => {
     const picked = pickAcceptedFiles(Array.from(list ?? []), accept, multiple);
     setNotice(pickNotice(picked, { hideFileNames }));
-    if (picked.accepted.length > 0) onFiles(picked.accepted);
+    const action = pickAction(picked);
+    if (action === "files") onFiles(picked.accepted);
+    // 置いた・選んだのに1件も使えなかった。前の選択を捨てたい呼び出し側へ知らせる。
+    else if (action === "none-accepted") onNoneAccepted?.();
   };
 
   const openPicker = () => {

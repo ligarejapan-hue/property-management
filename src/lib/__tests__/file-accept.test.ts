@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { fileMatchesAccept, pickAcceptedFiles, pickNotice } from "../file-accept";
+import { fileMatchesAccept, pickAcceptedFiles, pickAction, pickNotice } from "../file-accept";
 
 const f = (name: string, type = "") => ({ name, type });
 
@@ -64,6 +64,18 @@ describe("pickAcceptedFiles", () => {
     const r = pickAcceptedFiles([f("b.png", "image/png")], ".pdf", false);
     expect(r.accepted).toEqual([]);
     expect(r.rejected).toHaveLength(1);
+  });
+});
+
+describe("pickAction", () => {
+  it("使えるファイルがあれば files", () => {
+    expect(pickAction(pickAcceptedFiles([f("a.pdf"), f("b.png", "image/png")], ".pdf", true))).toBe("files");
+  });
+  it("置かれたが1件も使えなければ none-accepted(前の選択を捨てる合図・@codex #510 P2)", () => {
+    expect(pickAction(pickAcceptedFiles([f("b.png", "image/png")], ".pdf", true))).toBe("none-accepted");
+  });
+  it("何も置かれていなければ nothing(選択の窓を取り消した)", () => {
+    expect(pickAction(pickAcceptedFiles([], ".pdf", true))).toBe("nothing");
   });
 });
 

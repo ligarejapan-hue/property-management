@@ -75,6 +75,16 @@ export function pickAcceptedFiles<T extends FileLike>(
 }
 
 /**
+ * 選り分けた結果、呼び出し側へ何を知らせるか。
+ *  files=使えるファイルを渡す / none-accepted=置かれたが1件も使えない(前の選択を捨てたい画面へ)
+ *  / nothing=何も置かれていない(選択の窓を取り消した等)
+ */
+export function pickAction(picked: PickedFiles<FileLike>): "files" | "none-accepted" | "nothing" {
+  if (picked.accepted.length > 0) return "files";
+  return picked.rejected.length > 0 ? "none-accepted" : "nothing";
+}
+
+/**
  * 除いたファイルがあったときに枠の中へ出す一文(無ければ null)。
  * hideFileNames=true のときはファイル名を出さず件数だけ(謄本のファイル名は所有者名を含み得る)。
  */

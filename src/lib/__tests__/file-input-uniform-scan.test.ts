@@ -48,6 +48,12 @@ describe("ファイル選択欄は共通のドロップ枠にそろえる", () =
     expect(Object.keys(ALLOWED).filter((f) => !users.includes(f))).toEqual([]);
   });
 
+  it("謄本PDFの一括は、PDFが1件も無い置き方でも前の選択を捨てる(@codex #510 P2)", () => {
+    const src = readFileSync(path.join(root, "src/components/import/bulk-folder-upload.tsx"), "utf8");
+    expect(src).toContain("onNoneAccepted={() => applyPicked([])}");
+    expect(src).toContain("hideFileNames");
+  });
+
   it("FilePickerButton(古いボタン型)は使わない", () => {
     const stale = files.filter((f) => readFileSync(f, "utf8").includes("file-picker-button"));
     expect(stale).toEqual([]);
