@@ -8,6 +8,7 @@ import { signIn } from "next-auth/react";
 import { useRouter } from "next/navigation";
 import { Clock, Eye, EyeOff, FileText } from "lucide-react";
 import { writeSharedLastActivity } from "@/lib/session-activity";
+import { clearAllDrafts } from "@/lib/drafts/draft-store";
 import { clearNoticeStorage } from "@/lib/notifications/notice-store";
 import { cleanupNotifications } from "@/lib/notifications/sw-client";
 import { IDLE_LOGGED_OUT_MESSAGE } from "@/lib/notifications/idle-warning";
@@ -89,6 +90,9 @@ export default function LoginPage() {
         // 認証成功時に「今」を最終操作として seed する。これがないと、前セッションの古い値が
         // 残っている場合にダッシュボード初回マウントで即ログアウトしてしまう(@codex #290 R7 P2)。
         writeSharedLastActivity(Date.now());
+        // 作業中の入力の控えは、前にこのタブを使っていた人のものかもしれないので消す
+        // (ログアウトを通らずにセッションが切れた場合の備え・設計書 §4.2)。
+        clearAllDrafts();
         // ログイン必須画面からの再ログイン誘導(A3)で付く callbackUrl を尊重し、元の画面へ戻す(@codex R3/R4)。
         const cb = new URLSearchParams(window.location.search).get("callbackUrl");
         router.push(safeInternalDest(cb));
