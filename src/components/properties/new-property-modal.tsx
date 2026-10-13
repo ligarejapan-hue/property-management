@@ -27,6 +27,7 @@ import { draftKey } from "@/lib/drafts/draft-store";
 import { isDefiniteSubmitFailure } from "@/lib/drafts/submit-outcome";
 import {
   EMPTY_NEW_PROPERTY_DRAFT,
+  compactNewPropertyDraftForPending,
   isNewPropertyDraftEmpty,
   parseNewPropertyDraft,
   type NewPropertyDraft,
@@ -100,7 +101,9 @@ export default function NewPropertyModal({ onClose, typeFilter, onCreated, draft
     }),
     [propertyType, postalCode, address, addressEdited, lotNumber, buildingName, roomNo, introductionRoute, note, buildingChoice],
   );
-  const draft = useDraftAutosave(draftKeyValue, draftData, isNewPropertyDraftEmpty, restored);
+  const draft = useDraftAutosave(draftKeyValue, draftData, isNewPropertyDraftEmpty, restored, {
+    compactForPending: compactNewPropertyDraftForPending,
+  });
 
   // キャンセル・×: 控えを消して閉じる(閉じた後の unmount で書き戻さない)。
   // ⚠送信途中の帯が出ている間は、控え(送信中の印)を残して閉じる。一覧で確かめに行くために

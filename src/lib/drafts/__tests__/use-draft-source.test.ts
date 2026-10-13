@@ -14,7 +14,7 @@ describe("use-draft の配線", () => {
   });
   it("鍵が変わったら控えを読み直し、書き手も作り直す(前の鍵へ書き続けない)", () => {
     expect(src).not.toMatch(/const \[writer\] = useState/);
-    expect(src).toMatch(/const writer = useMemo\([\s\S]*?\[key, isEmpty, restored\],?\s*\)/);
+    expect(src).toMatch(/const writer = useMemo\([\s\S]*?\[key, isEmpty, restored, compactForPending\],?\s*\)/);
     expect(src).toMatch(/if \(state\.key !== key\)/);
   });
   it("localStorage・indexedDB を使わない", () => {

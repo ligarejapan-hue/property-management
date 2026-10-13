@@ -23,6 +23,11 @@ export function createDraftWriter<T>(opts: {
   delayMs?: number;
   now?: () => number;
   onResult?: (r: WriteResult) => void;
+  /**
+   * 大きすぎて控えを止めた後でも、送信中の印だけは残すための小さな中身(@codex P2)。
+   * 無ければ印も残せない(その画面は送信中の印を使わない前提)。
+   */
+  compactForPending?: (data: T) => T;
 }): DraftWriter<T> {
   const delay = opts.delayMs ?? DRAFT_WRITE_DELAY_MS;
   const now = opts.now ?? Date.now;
@@ -39,7 +44,11 @@ export function createDraftWriter<T>(opts: {
 
   const write = () => {
     cancelTimer();
-    if (closed || tooLarge || latest == null) return;
+    if (closed || latest == null) return;
+    if (tooLarge) {
+      writePendingOnly(latest.data);
+      return;
+    }
     if (pendingAt == null && opts.isEmpty(latest.data)) {
       clearDraft(opts.key);
       return;
@@ -52,9 +61,27 @@ export function createDraftWriter<T>(opts: {
     });
     if (r === "too_large") {
       tooLarge = true;
-      clearDraft(opts.key);
+      writePendingOnly(latest.data);
     }
     opts.onResult?.(r);
+  };
+
+  /**
+   * 大きすぎて止まった後: 送信中なら小さな中身で印だけを残す(返事が来ずに離れても、戻ったとき
+   * 「登録されたか確かめて」を出す=二重登録を防ぐ)。送信中でなければ控えを消す。
+   */
+  const writePendingOnly = (data: T) => {
+    if (pendingAt == null || !opts.compactForPending) {
+      clearDraft(opts.key);
+      return;
+    }
+    const r = writeDraft(opts.key, {
+      v: 1,
+      savedAt: now(),
+      data: opts.compactForPending(data),
+      pendingSubmit: { at: pendingAt },
+    });
+    if (r !== "ok") clearDraft(opts.key);
   };
 
   return {

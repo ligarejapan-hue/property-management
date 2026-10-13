@@ -47,6 +47,14 @@ export function parseNewPropertyDraft(d: unknown): NewPropertyDraft | null {
   return r.success ? r.data : null;
 }
 
+/**
+ * 入力が大きすぎて控えられないときに、送信中の印だけを残すための中身(空)。
+ * 戻ったときは「登録されたか確かめて」の帯だけが出る(入力は戻らない)。
+ */
+export function compactNewPropertyDraftForPending(): NewPropertyDraft {
+  return EMPTY_NEW_PROPERTY_DRAFT;
+}
+
 export function isNewPropertyDraftEmpty(d: NewPropertyDraft): boolean {
   return (
     d.propertyType === "" &&

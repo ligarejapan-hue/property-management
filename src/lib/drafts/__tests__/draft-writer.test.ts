@@ -90,6 +90,24 @@ describe("createDraftWriter", () => {
     w.flush();
     expect(stored()).toBeNull();
   });
+  it("大きすぎて止まった後も、送信中の印だけは小さな控えで残す(二重登録を防ぐ・@codex P2)", () => {
+    const w = createDraftWriter<D>({ key: K, isEmpty, now: () => 5, compactForPending: () => ({ name: "" }) });
+    w.update({ name: "x".repeat(DRAFT_MAX_CHARS) });
+    w.flush();
+    expect(stored()).toBeNull();
+    w.markSubmitting();
+    expect(stored()).toEqual({ v: 1, savedAt: 5, data: { name: "" }, pendingSubmit: { at: 5 } });
+    w.flush();
+    expect(stored()?.pendingSubmit).toEqual({ at: 5 });
+    w.unmarkSubmitting();
+    expect(stored()).toBeNull();
+  });
+  it("大きすぎた後に送信中になっても、小さくする方法が無ければ書かない", () => {
+    const w = createDraftWriter<D>({ key: K, isEmpty });
+    w.update({ name: "x".repeat(DRAFT_MAX_CHARS) });
+    w.markSubmitting();
+    expect(stored()).toBeNull();
+  });
   it("一度も update していなければ flush は何もしない", () => {
     s.setItem(K, JSON.stringify({ v: 1, savedAt: 1, data: { name: "restored" } }));
     const w = createDraftWriter<D>({ key: K, isEmpty });

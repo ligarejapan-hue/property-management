@@ -28,7 +28,9 @@ export function useDraftAutosave<T>(
   data: T,
   isEmpty: (d: T) => boolean,
   restored: StoredDraft<T> | null,
+  opts: { compactForPending?: (d: T) => T } = {},
 ) {
+  const compactForPending = opts.compactForPending;
   const [tooLarge, setTooLarge] = useState(false);
   // 鍵が変わったら作り直す(前の鍵へ書き続けない)。前の書き手は下の片付けで flush される。
   const writer = useMemo(
@@ -38,12 +40,13 @@ export function useDraftAutosave<T>(
             key,
             isEmpty,
             initialPendingAt: restored?.pendingSubmit?.at ?? null,
+            compactForPending,
             onResult: (r) => {
               if (r === "too_large") setTooLarge(true);
             },
           })
         : null,
-    [key, isEmpty, restored],
+    [key, isEmpty, restored, compactForPending],
   );
 
   useEffect(() => {

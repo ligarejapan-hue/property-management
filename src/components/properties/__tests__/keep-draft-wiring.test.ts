@@ -12,7 +12,8 @@ describe("新規物件登録の小窓: 作業中の入力を消さない", () =>
     expect(src).toMatch(/useState<BuildingChoice>\(start\.buildingChoice\)/);
   });
   it("自動で控える(useDraftAutosave)", () => {
-    expect(src).toMatch(/useDraftAutosave\(draftKeyValue, draftData, isNewPropertyDraftEmpty, restored\)/);
+    // 大きすぎて控えられないときも、送信中の印は小さな控えで残す(@codex P2)。
+    expect(src).toMatch(/useDraftAutosave\(draftKeyValue, draftData, isNewPropertyDraftEmpty, restored, \{\n?\s*compactForPending: compactNewPropertyDraftForPending,?\n?\s*\}\)/);
   });
   it("送る直前に送信中の印・成功で close・失敗で印を外す", () => {
     expect(src).toMatch(/draft\.markSubmitting\(\);[\s\S]*?await createProperty\(/);
