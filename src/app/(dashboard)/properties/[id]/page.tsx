@@ -1,6 +1,9 @@
 "use client";
 
 import { useState, useEffect, useCallback, useMemo, useRef, use, type Dispatch, type SetStateAction } from "react";
+import { clearDraft, draftKey, readDraft } from "@/lib/drafts/draft-store";
+import { decideEditDraftOnLoad, parsePropertyEditDraft } from "@/lib/drafts/screens/property-edit";
+import { DraftStaleNotice } from "@/components/drafts/draft-notices";
 import { BackLink } from "@/components/ui/back-link";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
@@ -342,6 +345,10 @@ export default function PropertyDetailPage({
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [showEditForm, setShowEditForm] = useState(false);
+  // 編集の途中で別のメニューへ移って戻ったら、編集の小窓を開き直す(設計書 2026-10-13 §3-3)。
+  // ⚠物件ごとに最初の読み込みで1回だけ判定する(編集中の取り直しで控えを消さない)。
+  const editDraftCheckedRef = useRef<string | null>(null);
+  const [editDraftStale, setEditDraftStale] = useState(false);
   const [deleting, setDeleting] = useState(false);
   // 棟へつないだ結果の知らせ(設計 §6.2)。編集の保存後か、新規登録・貼り付けから
   // 預かったもの(読み込みが終わった後に1回だけ取り出す)。
@@ -438,6 +445,21 @@ export default function PropertyDetailPage({
       if (applied) {
         const stashed = takeBuildingLinkNotice(id);
         if (stashed) setBuildingNotice(stashed);
+      }
+      // 編集の途中の控えがあれば開き直す。版が違えば(ほかの方が保存した)使わずに知らせる。
+      if (applied && editDraftCheckedRef.current !== id) {
+        editDraftCheckedRef.current = id;
+        const editKey = draftKey("property-edit", id);
+        const decision = decideEditDraftOnLoad(
+          readDraft(editKey, parsePropertyEditDraft)?.data ?? null,
+          id,
+          (data as unknown as ApiProperty).version,
+        );
+        if (decision === "reopen") setShowEditForm(true);
+        else if (decision === "stale") {
+          clearDraft(editKey);
+          setEditDraftStale(true);
+        }
       }
     } catch (err) {
       applyRefreshOutcome(
@@ -939,6 +961,8 @@ export default function PropertyDetailPage({
           ))}
         </div>
       )}
+
+      {editDraftStale && <DraftStaleNotice onDismiss={() => setEditDraftStale(false)} />}
 
       {/* 棟へつないだ結果の知らせ(設計 §6.2)。閉じるまで出したまま。 */}
       <BuildingLinkNotice outcome={buildingNotice} onClose={() => setBuildingNotice(null)} />

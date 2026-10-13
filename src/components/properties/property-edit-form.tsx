@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useEffect } from "react";
+import { useState, useEffect, useMemo } from "react";
 import { Loader2, X, Save, AlertTriangle } from "lucide-react";
 import { USE_MOCK, fetchUsers, apiErrorCode, codeFromErrorBody } from "@/lib/api-client";
 import { PROPERTY_TYPE_OPTIONS } from "@/lib/property-types";
@@ -16,6 +16,16 @@ import { areaChanged } from "@/lib/building-link/combobox-model";
 // ⚠apply.ts は prisma を読むサーバー側のファイル。型だけを読む(画面の束に prisma を入れない)。
 import type { BuildingLinkOutcome } from "@/lib/building-link/apply";
 import { formatBuiltYearMonth } from "@/lib/built-year-month";
+import { draftKey } from "@/lib/drafts/draft-store";
+import {
+  changedValues,
+  isPropertyEditDraftEmpty,
+  mergeDraftIntoInitial,
+  parsePropertyEditDraft,
+  type PropertyEditDraft,
+} from "@/lib/drafts/screens/property-edit";
+import { useDraftAutosave, useRestoredDraft } from "@/hooks/use-draft";
+import { DraftRestoredNotice } from "@/components/drafts/draft-notices";
 // 編集中の鍵(仕様 6.1・6.2)。この画面が最初に配線する画面(Task 5)。
 import { useEditLock } from "@/hooks/use-edit-lock";
 import { ensureUniqueScreenToken, editLockHeaders } from "@/lib/edit-lock/screen-token-client";
@@ -409,6 +419,11 @@ export default function PropertyEditForm({
   onClose,
   onSaved,
 }: PropertyEditFormProps) {
+  // 作業中の入力の控え(設計書 2026-10-13 §2 S5)。変えた欄だけ+基にした版番号。
+  // ⚠版が違えば重ねない(mergeDraftIntoInitial)=ほかの人の保存を古い入力で上書きしない。
+  const editDraftKey = draftKey("property-edit", property.id);
+  const restored = useRestoredDraft(editDraftKey, parsePropertyEditDraft);
+  const [draftDiscarded, setDraftDiscarded] = useState(false);
   const [values, setValues] = useState<Record<string, string>>({});
   // 通知 段階1(N2): 開いた時点の値から変わった欄があるか(外れた知らせの一言だけに使う)。
   const hasUnsavedInput = Object.entries(values).some(([key, v]) => {
@@ -423,7 +438,11 @@ export default function PropertyEditForm({
   const [usersLoading, setUsersLoading] = useState(true);
   // 物件名から棟へつなぐ選び方(区分マンションのときだけ)。⚠auto のときは送らない
   //   (サーバーは「送られず・名前が同じ・つながっている」なら今の棟を保つ)。
-  const [buildingChoice, setBuildingChoice] = useState<BuildingChoice>(AUTO_CHOICE);
+  const [buildingChoice, setBuildingChoice] = useState<BuildingChoice>(() =>
+    restored && restored.data.propertyId === property.id && restored.data.baseVersion === property.version
+      ? restored.data.buildingChoice
+      : AUTO_CHOICE,
+  );
 
   // 編集中の鍵(仕様 6.1・6.2)。この物件の編集ウィンドウが最初に配線する画面。
   const lock = useEditLock({ resourceType: "property", resourceId: property.id });
@@ -474,7 +493,15 @@ export default function PropertyEditForm({
       const val = (property as unknown as Record<string, unknown>)[f.key];
       initial[f.key] = val != null ? String(val) : "";
     }
-    setValues(initial);
+    // 控えがあれば、開いた時点の値の上に重ねる(版が同じときだけ)。
+    // ⚠消すだけの欄(下の clearableKeys)は initial のまま=開いた時点の値で決める約束を守る。
+    const merged = mergeDraftIntoInitial(
+      initial,
+      draftDiscarded ? null : restored?.data ?? null,
+      property.id,
+      property.version,
+    );
+    setValues(merged.values);
     setClearableKeys(
       new Set(
         fieldsToLoad
@@ -486,7 +513,7 @@ export default function PropertyEditForm({
     );
     // prop（既存値）再投入は user-edit ではない＝signal をリセット（初期ロードで検索しない）。
     setAddressEdited(false);
-  }, [property]);
+  }, [property, restored, draftDiscarded]);
 
   // 「販売」区分の欄は種別ごとに変わる(編集中の select 変更にも追従する)。
   // ⚠values.propertyType は上の effect が走るまで未設定なので property.propertyType へ
@@ -496,6 +523,29 @@ export default function PropertyEditForm({
   });
   const allFields = [...FORM_FIELDS, ...salesFields];
   const isMansion = isMansionUnit(values.propertyType ?? property.propertyType);
+
+  const editDraftData = useMemo<PropertyEditDraft>(
+    () => ({
+      propertyId: property.id,
+      baseVersion: property.version,
+      changed: changedValues(values, property as unknown as Record<string, unknown>),
+      buildingChoice,
+    }),
+    [property, values, buildingChoice],
+  );
+  const editDraft = useDraftAutosave(editDraftKey, editDraftData, isPropertyEditDraftEmpty, restored);
+  const showRestoredNotice =
+    !draftDiscarded &&
+    restored != null &&
+    restored.data.propertyId === property.id &&
+    restored.data.baseVersion === property.version;
+
+  /** 「最初からやり直す」: 控えを消して開いた時点の値に戻す(小窓は開いたまま)。 */
+  const handleDiscardDraft = () => {
+    editDraft.discard();
+    setBuildingChoice(AUTO_CHOICE);
+    setDraftDiscarded(true);
+  };
 
   useEffect(() => {
     let cancelled = false;
@@ -623,6 +673,7 @@ export default function PropertyEditForm({
       const saved = (await res.json().catch(() => null)) as
         | { buildingLink?: BuildingLinkOutcome | null }
         | null;
+      editDraft.close();
       void lock.release();
       onSaved({ buildingLink: saved?.buildingLink ?? null });
     } catch (err) {
@@ -649,8 +700,9 @@ export default function PropertyEditForm({
     }
   };
 
-  /** 閉じる・キャンセルの共通後始末。⚠入力は消さず、鍵だけ返す。 */
+  /** 閉じる・キャンセルの共通後始末。作業中の入力の控えを消し、鍵を返す。 */
   const handleClose = () => {
+    editDraft.close();
     void lock.release();
     onClose();
   };
@@ -695,6 +747,9 @@ export default function PropertyEditForm({
             </div>
           )}
           <EditLockBanner state={lock.state} warnIdle={lock.warnIdle} />
+          {showRestoredNotice && restored && (
+            <DraftRestoredNotice savedAt={restored.savedAt} onDiscard={handleDiscardDraft} />
+          )}
           {/* 通知 段階1(N1・N2): 別の画面を見ているときだけベル・OS の通知に出す。帯はそのまま */}
           <EditLockNotices
             state={lock.state}

@@ -43,3 +43,39 @@ describe("新規物件登録の小窓を開き直す", () => {
     expect(src).toMatch(/\(showRegister \|\| registerDraftExists\) && \(\n\s*<NewPropertyModal\n\s*draftScreen="new-property:sales-sheet"/);
   });
 });
+
+describe("物件の編集の小窓: 作業中の入力を消さない", () => {
+  const src = read("src/components/properties/property-edit-form.tsx");
+  it("開いた時点の控えを読み、[property] の初期化のあとに重ねる", () => {
+    expect(src).toMatch(/useRestoredDraft\(editDraftKey, parsePropertyEditDraft\)/);
+    expect(src).toMatch(/const merged = mergeDraftIntoInitial\(\s*initial,\s*draftDiscarded \? null : restored\?\.data \?\? null,\s*property\.id,\s*property\.version,?\s*\);\n\s*setValues\(merged\.values\);/);
+    expect(src).toMatch(/\}, \[property, restored, draftDiscarded\]\);/);
+  });
+  it("変えた欄だけを控える(版つき)", () => {
+    expect(src).toMatch(/changed: changedValues\(values, property as unknown as Record<string, unknown>\)/);
+    expect(src).toMatch(/baseVersion: property\.version/);
+    expect(src).toMatch(/useDraftAutosave\(editDraftKey, editDraftData, isPropertyEditDraftEmpty, restored\)/);
+  });
+  it("保存できたら控えを消してから onSaved", () => {
+    expect(src).toMatch(/editDraft\.close\(\);\n\s*void lock\.release\(\);\n\s*onSaved\(/);
+  });
+  it("閉じる・キャンセルで控えを消す", () => {
+    expect(src).toMatch(/const handleClose = \(\) => \{\n\s*editDraft\.close\(\);\n\s*void lock\.release\(\);\n\s*onClose\(\);/);
+  });
+  it("帯", () => {
+    expect(src).toMatch(/<DraftRestoredNotice/);
+  });
+});
+
+describe("物件詳細: 読み込み完了時に編集の小窓を開き直す", () => {
+  const src = read("src/app/(dashboard)/properties/[id]/page.tsx");
+  it("物件ごとに最初の読み込みで1回だけ判定する", () => {
+    expect(src).toMatch(/if \(applied && editDraftCheckedRef\.current !== id\) \{/);
+    expect(src).toMatch(/decideEditDraftOnLoad\(/);
+    expect(src).toMatch(/if \(decision === "reopen"\) setShowEditForm\(true\);/);
+    expect(src).toMatch(/clearDraft\(editKey\);\n\s*setEditDraftStale\(true\);/);
+  });
+  it("版違いの帯を出す", () => {
+    expect(src).toMatch(/\{editDraftStale && <DraftStaleNotice onDismiss=\{\(\) => setEditDraftStale\(false\)\} \/>\}/);
+  });
+});

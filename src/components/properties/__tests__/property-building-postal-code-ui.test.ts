@@ -51,7 +51,7 @@ describe("Property edit（property-edit-form）postalCode UI（21-C PR-2）", ()
   });
   it("prop（既存値）再投入の useEffect で addressEdited=false にリセット", () => {
     expect(propEdit).toMatch(
-      /setValues\(initial\)[\s\S]*?setAddressEdited\(false\)[\s\S]*?\},\s*\[property\]\)/,
+      /setValues\(merged\.values\)[\s\S]*?setAddressEdited\(false\)[\s\S]*?\},\s*\[property, restored, draftDiscarded\]\)/,
     );
   });
 });
