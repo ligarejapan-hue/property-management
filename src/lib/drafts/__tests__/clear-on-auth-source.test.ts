@@ -18,7 +18,12 @@ describe("ログアウト・ログインで控えを全消しする", () => {
   it("login: 画面を開いた時点では、ログインしていないときだけ全消しする(@codex P2)", () => {
     const src = read("src/app/(auth)/login/page.tsx");
     // ログイン中の人が戻るでログイン画面を見ただけでは消さない。
-    expect(src).toMatch(/useEffect\(\(\) => \{\n\s*clearNoticeStorage\(\);\n(?:\s*\/\/.*\n)*\s*void getSession\(\)\n\s*\.then\(\(session\) => \{\n\s*if \(!session\) clearAllDrafts\(\);/);
+    expect(src).toMatch(/useEffect\(\(\) => \{\n\s*clearNoticeStorage\(\);\n(?:\s*\/\/.*\n)*\s*let alive = true;\n\s*void getSession\(\)\n\s*\.then\(\(session\) => \{\n\s*if \(alive && !session\) clearAllDrafts\(\);/);
+  });
+  it("login: 画面を離れた後に遅れて届いた確認の結果では消さない(@codex P2)", () => {
+    const src = read("src/app/(auth)/login/page.tsx");
+    expect(src).toMatch(/if \(alive && !session\) clearAllDrafts\(\);/);
+    expect(src).toMatch(/return \(\) => \{\n\s*alive = false;\n\s*\};/);
   });
   it("login: 成功したら移動の前に clearAllDrafts を呼ぶ", () => {
     const src = read("src/app/(auth)/login/page.tsx");

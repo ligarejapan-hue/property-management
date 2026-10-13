@@ -59,14 +59,19 @@ export default function LoginPage() {
     // 作業中の入力の控えも片付ける(ログアウトを通らずにここへ来た場合の備え)。
     // ⚠ログインしていないときだけ。ログイン中の人が「戻る」でこの画面を見ただけでは消さない
     //   (人の入れ替わりはログイン成功時の全消しでも守られる・@codex P2)。
+    // ⚠画面を離れた後に遅れて届いた結果では消さない(ログイン後の新しい入力を消さない・@codex P2)。
+    let alive = true;
     void getSession()
       .then((session) => {
-        if (!session) clearAllDrafts();
+        if (alive && !session) clearAllDrafts();
       })
       .catch(() => {
         /* 確かめられないときは消さない(ログイン成功時に消える) */
       });
     void cleanupNotifications();
+    return () => {
+      alive = false;
+    };
   }, []);
 
   const {

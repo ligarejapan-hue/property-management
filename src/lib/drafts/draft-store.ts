@@ -11,6 +11,8 @@
 export const DRAFT_PREFIX = "pm-draft:v1:";
 export const DRAFT_MAX_AGE_MS = 12 * 60 * 60 * 1000;
 export const DRAFT_MAX_CHARS = 1_500_000;
+/** 期限切れの控えを掃除する間隔(何も操作しないタブでも 12時間+1分以内に消す)。 */
+export const DRAFT_SWEEP_INTERVAL_MS = 60 * 1000;
 
 export const DRAFT_SCREENS = [
   "new-property:properties",
@@ -214,3 +216,18 @@ export function clearAllDrafts(opts: { lockUntilReload?: boolean } = {}): void {
   }
   notify();
 }
+
+let sweeper: ReturnType<typeof setInterval> | null = null;
+
+/**
+ * 期限切れの控えを1分ごとに掃除する(何も操作しないタブでも 12時間で消すため・@codex P2)。
+ * 何度呼んでも1つだけ。画面(ブラウザ)でこのモジュールが読み込まれた時点で始める
+ * (ログアウト処理がダッシュボードの枠から読み込むので、ログイン中はどの画面でも動く)。
+ */
+export function startDraftExpirySweeper(): void {
+  if (sweeper) return;
+  purgeExpiredDrafts();
+  sweeper = setInterval(() => purgeExpiredDrafts(), DRAFT_SWEEP_INTERVAL_MS);
+}
+
+if (typeof window !== "undefined") startDraftExpirySweeper();
