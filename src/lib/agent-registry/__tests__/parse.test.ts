@@ -37,15 +37,6 @@ describe("一覧のページを読む", () => {
     expect(r.isMain).toBe(false);
   });
 
-  it("★そのページに1行しか無い会社は、営業所名が「本店」でなくても(本社・大阪本店など)isMain=true(実物の一覧は1社1行=本店・2026-10-13・@codex #509)", () => {
-    const html = listHtml.replace('<td style="text-align:left; ">本店</td>', '<td style="text-align:left; ">本社</td>');
-    const first = parseListPage(listHtml).rows[0];
-    const r = parseListPage(html).rows.find((x) => x.licenseKey === first.licenseKey)!;
-    expect(parseListPage(listHtml).rows.filter((x) => x.licenseKey === first.licenseKey)).toHaveLength(1);
-    expect(r.isMain).toBe(true);
-    expect(r.address).toBe(first.address);
-  });
-
   it("★読めなかった行がある(詳細を開く引数の数と読めた行の数が違う)→ LayoutChanged(黙って落とさない)", () => {
     const html = listHtml.replace(/<tr>(\s*<td style="text-align:right;">4<\/td>)/, '<tr class="odd">$1');
     expect(html).not.toBe(listHtml);

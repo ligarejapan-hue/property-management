@@ -80,7 +80,9 @@ export function createPrismaCrawlStore(now: () => Date = () => new Date()): Craw
             !p.listed ||
             p.companyName !== r.companyName ||
             p.licenseLabel !== r.licenseLabel ||
-            (r.isMain && p.address !== r.address);
+            // 所在地の違い: 本店の行なら書き換えて取り直す。「本店」以外の名前の行(「本社」「大阪本店」・ページの境目の支店)は
+            // 書き換えずに取り直すだけ=詳細の「主たる事務所の所在地」で正しい値にする(本店の引っ越しを拾う・@codex #509)。
+            p.address !== r.address;
           const stale = !!p?.detailAt && p.detailAt.getTime() < staleBefore;
           const update: Record<string, unknown> = {
             authority: r.authority,

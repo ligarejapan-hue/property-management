@@ -95,13 +95,21 @@ describe("保存(prisma 版)", () => {
     expect(upserts()["13000001"].update.needsDetail).toBe(true);
   });
 
-  it("★本店の行が無いページ(支店だけ)では所在地を上書きしない・所在地の違いで取り直さない", async () => {
-    agent.findMany.mockResolvedValue([prevRow("00000201", { address: "本店の住所" })]);
+  it("★営業所名が「本店」でない行では所在地を上書きしない(ページの境目で支店だけが載ることがある)が、所在地が違えば詳細を取り直す=本店の引っ越しは詳細の「主たる事務所の所在地」で反映する(@codex #509)", async () => {
+    agent.findMany.mockResolvedValue([
+      prevRow("00000201", { address: "旧本店の住所" }),
+      prevRow("00000202", { address: "本社の住所" }),
+    ]);
     const store = createPrismaCrawlStore();
-    await store.upsertListRows([row("00000201", { address: "大阪支店の住所", isMain: false })], "2026-10");
-    const u = upserts()["00000201"];
-    expect(u.update).not.toHaveProperty("address");
-    expect(u.update).not.toHaveProperty("needsDetail");
+    await store.upsertListRows(
+      [row("00000201", { address: "新本社の住所", isMain: false }), row("00000202", { address: "本社の住所", isMain: false })],
+      "2026-10",
+    );
+    const moved = upserts()["00000201"];
+    expect(moved.update).not.toHaveProperty("address");
+    expect(moved.update.needsDetail).toBe(true);
+    // 所在地が同じなら取り直さない(実物は一覧と詳細の書き方が同じ=毎月の見直しで取り直しが増えない)
+    expect(upserts()["00000202"].update).not.toHaveProperty("needsDetail");
   });
 
   it("本店の行なら所在地を更新し、変わっていれば取り直す", async () => {
