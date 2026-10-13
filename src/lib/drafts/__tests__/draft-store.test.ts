@@ -70,6 +70,13 @@ describe("writeDraft / readDraft", () => {
     s.throwOnSet = new Error("QuotaExceededError");
     expect(writeDraft(draftKey("paste"), { v: 1, savedAt: 1, data: { name: "A" } })).toBe("failed");
   });
+  it("書き換えに失敗したら古い控えを消す(古い入力を最新のように戻さない)", () => {
+    const k = draftKey("property-edit", "p1");
+    writeDraft(k, { v: 1, savedAt: 1, data: { name: "古い" } });
+    s.throwOnSet = new Error("QuotaExceededError");
+    expect(writeDraft(k, { v: 1, savedAt: 2, data: { name: "新しい" } })).toBe("failed");
+    expect(s.getItem(k)).toBeNull();
+  });
   it("sessionStorage が無い環境でも例外にしない", () => {
     uninstallStorage();
     const k = draftKey("paste");

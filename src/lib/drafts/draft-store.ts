@@ -142,6 +142,10 @@ export function writeDraft<T>(key: string, draft: StoredDraft<T>): WriteResult {
   try {
     s.setItem(key, text);
   } catch {
+    // ⚠書き換えに失敗したら(容量いっぱいなど)前の控えを消す。残すと、古い入力が
+    //   最新の続きのように戻ってしまう(@codex P2)。
+    removeRaw(key);
+    notify();
     return "failed";
   }
   notify();
