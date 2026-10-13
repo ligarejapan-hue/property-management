@@ -1721,6 +1721,7 @@ export default function ImportPage() {
           <FileDropZone
             accept=".csv,.tsv,.txt,.xlsx"
             onFiles={(files) => void handleRpFile(files[0])}
+            onNoneAccepted={() => void handleRpFile(null)}
             title="CSV または Excel(.xlsx) ファイルをここにドラッグ＆ドロップ"
             hint="受付帳のファイル — 種別は中身の列構成から自動判定します"
             fileName={rpFile?.name ?? null}
@@ -1923,6 +1924,7 @@ export default function ImportPage() {
           <FileDropZone
             accept=".csv,.tsv,.txt,.xlsx"
             onFiles={(files) => void handleRoFile("reception", files[0])}
+            onNoneAccepted={() => void handleRoFile("reception", null)}
             title="CSV または Excel(.xlsx) ファイルをここにドラッグ＆ドロップ"
             hint="受付帳 — 種別は中身の列構成から自動判定します"
             fileName={receptionFile?.name ?? null}
@@ -1931,6 +1933,7 @@ export default function ImportPage() {
           <FileDropZone
             accept=".csv,.tsv,.txt,.xlsx"
             onFiles={(files) => void handleRoFile("owner", files[0])}
+            onNoneAccepted={() => void handleRoFile("owner", null)}
             title="CSV または Excel(.xlsx) ファイルをここにドラッグ＆ドロップ"
             hint="所有者 — 種別は中身の列構成から自動判定します"
             fileName={ownerFile?.name ?? null}

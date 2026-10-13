@@ -54,6 +54,21 @@ describe("ファイル選択欄は共通のドロップ枠にそろえる", () =
     expect(src).toContain("hideFileNames");
   });
 
+  it("選んだファイルを持ち続ける枠(fileName を出す枠)は、形式違いを置かれたら選択を捨てる(@codex #510 P2)", () => {
+    const missing: string[] = [];
+    let count = 0;
+    for (const f of files) {
+      const src = readFileSync(f, "utf8").replace(/\r\n/g, "\n");
+      for (const m of src.matchAll(/<FileDropZone\b[\s\S]*?\/>/g)) {
+        if (!/\bfileName=/.test(m[0])) continue;
+        count++;
+        if (!/\bonNoneAccepted=/.test(m[0])) missing.push(path.relative(root, f));
+      }
+    }
+    expect(count).toBeGreaterThanOrEqual(8); // 空振りしていない
+    expect(missing).toEqual([]);
+  });
+
   it("FilePickerButton(古いボタン型)は使わない", () => {
     const stale = files.filter((f) => readFileSync(f, "utf8").includes("file-picker-button"));
     expect(stale).toEqual([]);

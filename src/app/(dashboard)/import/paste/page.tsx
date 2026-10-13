@@ -494,6 +494,7 @@ export default function PasteImportPage() {
                 setPdfFile(files[0]);
                 setRawText("");
               }}
+              onNoneAccepted={() => setPdfFile(null)}
             />
           </div>
 

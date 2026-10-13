@@ -130,6 +130,13 @@ export default function RegistryDmImportPage() {
             accept=".xlsx,.csv"
             title="受付帳の Excel(.xlsx) または CSV をここにドラッグ＆ドロップ"
             fileName={rpFile?.fileName ?? null}
+            onNoneAccepted={() => {
+              setRpFile(null);
+              setRpPreview(null);
+              setRpResult(null);
+              setRoPreview(null);
+              setRoResult(null);
+            }}
             onFiles={async ([f]) => {
               await run(async () => {
                 setRpFile(await readFileForImport(f));
@@ -275,6 +282,13 @@ export default function RegistryDmImportPage() {
                 accept=".xlsx,.csv"
                 title="受付帳の Excel(.xlsx) または CSV をここにドラッグ＆ドロップ"
                 fileName={rpFile?.fileName ?? null}
+                onNoneAccepted={() => {
+                  setRpFile(null);
+                  setRpPreview(null);
+                  setRpResult(null);
+                  setRoPreview(null);
+                  setRoResult(null);
+                }}
                 onFiles={async ([f]) => {
                   await run(async () => {
                     setRpFile(await readFileForImport(f));
@@ -296,6 +310,11 @@ export default function RegistryDmImportPage() {
                 accept=".xlsx,.csv"
                 title="所有者の Excel(.xlsx) または CSV をここにドラッグ＆ドロップ"
                 fileName={ownerFile?.fileName ?? null}
+                onNoneAccepted={() => {
+                  setOwnerFile(null);
+                  setRoPreview(null);
+                  setRoResult(null);
+                }}
                 onFiles={async ([f]) => {
                   await run(async () => {
                     setOwnerFile(await readFileForImport(f));

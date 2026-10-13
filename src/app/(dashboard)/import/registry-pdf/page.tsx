@@ -621,6 +621,10 @@ export default function RegistryPdfPage() {
                 title="PDFファイルをここにドラッグ＆ドロップ"
                 fileName={fileName}
                 onFiles={(files) => setFileState(files[0])}
+                onNoneAccepted={() => {
+                  setFileName(null);
+                  setSelectedFile(null);
+                }}
               />
               <p className="mt-2 text-xs text-gray-400 dark:text-gray-500">
                 <Info className="mr-1 inline h-3 w-3" />

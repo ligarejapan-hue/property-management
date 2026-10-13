@@ -156,6 +156,11 @@ export default function ExcelLeadImportPage() {
             setResults({});
             setReadError(null);
           }}
+          onNoneAccepted={() => {
+            setFile(null);
+            setRows(null);
+            setResults({});
+          }}
         />
         <p className="text-xs text-gray-500 dark:text-gray-400">
           すべてのシートを読みます。「姓名」の列がある表（反響メール本文の「URL」列つき、または「物件所在地」の列つき）に対応しています。読み取っただけでは何も登録されません。
