@@ -8,6 +8,8 @@ import { useScreenProtection } from "@/components/screen-protection/screen-prote
 import { SalesSheetPropertyPicker } from "@/components/sales-sheet/SalesSheetPropertyPicker";
 import { SalesSheetCreateDialog } from "@/components/sales-sheet/SalesSheetCreateButton";
 import NewPropertyModal, { type PostCreateResult } from "@/components/properties/new-property-modal";
+import { useDraftExists } from "@/hooks/use-draft";
+import { draftKey } from "@/lib/drafts/draft-store";
 import { BuildingLinkNotice } from "@/components/buildings/building-link-notice";
 // ⚠apply.ts は prisma を読むサーバー側のファイル。型だけを読む。
 import type { BuildingLinkOutcome } from "@/lib/building-link/apply";
@@ -132,6 +134,8 @@ export default function SalesSheetNewEntryPage() {
     kind: SalesSheetTemplateKind;
   } | null>(null);
   const [showRegister, setShowRegister] = useState(false);
+  // 新規登録の途中で別のメニューへ移って戻ったら、小窓を開き直す(設計書 2026-10-13 §3-3)。
+  const registerDraftExists = useDraftExists(draftKey("new-property:sales-sheet"));
   // 登録した物件を棟へつないだ結果の知らせ(@codex R6)。この画面に留まるので、ここで出す。
   const [buildingNotice, setBuildingNotice] = useState<BuildingLinkOutcome | null>(null);
 
@@ -185,8 +189,9 @@ export default function SalesSheetNewEntryPage() {
         />
       )}
 
-      {showRegister && (
+      {(showRegister || registerDraftExists) && (
         <NewPropertyModal
+          draftScreen="new-property:sales-sheet"
           onClose={() => setShowRegister(false)}
           typeFilter={[...SALES_SHEET_REGISTRABLE_PROPERTY_TYPES]}
           onCreated={handleCreated}
