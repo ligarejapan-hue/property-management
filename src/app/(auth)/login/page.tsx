@@ -4,10 +4,11 @@ import { useEffect, useState, useSyncExternalStore } from "react";
 import { useForm } from "react-hook-form";
 import { z } from "zod/v4";
 import { zodResolver } from "@hookform/resolvers/zod";
-import { signIn } from "next-auth/react";
+import { getSession, signIn } from "next-auth/react";
 import { useRouter } from "next/navigation";
 import { Clock, Eye, EyeOff, FileText } from "lucide-react";
 import { writeSharedLastActivity } from "@/lib/session-activity";
+import { clearAllDrafts } from "@/lib/drafts/draft-store";
 import { clearNoticeStorage } from "@/lib/notifications/notice-store";
 import { cleanupNotifications } from "@/lib/notifications/sw-client";
 import { IDLE_LOGGED_OUT_MESSAGE } from "@/lib/notifications/idle-warning";
@@ -55,7 +56,22 @@ export default function LoginPage() {
   // 通知 段階1(共用 PC 対策): ログイン画面を開いた時点で、前の人のお知らせと OS の通知を片付ける。
   useEffect(() => {
     clearNoticeStorage();
+    // 作業中の入力の控えも片付ける(ログアウトを通らずにここへ来た場合の備え)。
+    // ⚠ログインしていないときだけ。ログイン中の人が「戻る」でこの画面を見ただけでは消さない
+    //   (人の入れ替わりはログイン成功時の全消しでも守られる・@codex P2)。
+    // ⚠画面を離れた後に遅れて届いた結果では消さない(ログイン後の新しい入力を消さない・@codex P2)。
+    let alive = true;
+    void getSession()
+      .then((session) => {
+        if (alive && !session) clearAllDrafts();
+      })
+      .catch(() => {
+        /* 確かめられないときは消さない(ログイン成功時に消える) */
+      });
     void cleanupNotifications();
+    return () => {
+      alive = false;
+    };
   }, []);
 
   const {
@@ -89,6 +105,9 @@ export default function LoginPage() {
         // 認証成功時に「今」を最終操作として seed する。これがないと、前セッションの古い値が
         // 残っている場合にダッシュボード初回マウントで即ログアウトしてしまう(@codex #290 R7 P2)。
         writeSharedLastActivity(Date.now());
+        // 作業中の入力の控えは、前にこのタブを使っていた人のものかもしれないので消す
+        // (ログアウトを通らずにセッションが切れた場合の備え・設計書 §4.2)。
+        clearAllDrafts();
         // ログイン必須画面からの再ログイン誘導(A3)で付く callbackUrl を尊重し、元の画面へ戻す(@codex R3/R4)。
         const cb = new URLSearchParams(window.location.search).get("callbackUrl");
         router.push(safeInternalDest(cb));

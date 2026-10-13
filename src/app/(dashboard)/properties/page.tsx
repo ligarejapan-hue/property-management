@@ -12,6 +12,8 @@ import { canCreateSaleDm, buildSaleDmPartialNotice } from "@/lib/sale-dm-letter/
 import { debounce } from "@/lib/debounce";
 import { EXPORT_COLUMNS } from "@/lib/property-export-columns";
 import NewPropertyModal from "@/components/properties/new-property-modal";
+import { useDraftExists } from "@/hooks/use-draft";
+import { draftKey } from "@/lib/drafts/draft-store";
 import DmBatchConfirmModal from "@/components/properties/dm-batch-confirm-modal";
 import { RegistryBulkFetchButton } from "@/components/properties/registry-bulk-fetch-button";
 import { SaleDmCreateCampaignDialog } from "@/components/sale-dm/create-campaign-dialog";
@@ -351,6 +353,16 @@ function PropertiesPageInner() {
   }, []);
   const [bulkUpdating, setBulkUpdating] = useState(false);
   const [showNewModal, setShowNewModal] = useState(false);
+  // 新規登録の途中で別のメニューへ移って戻ったら、小窓を開き直す(設計書 2026-10-13 §3-3)。
+  const newPropertyDraftExists = useDraftExists(draftKey("new-property:properties"));
+  // ⚠開いた状態として保つ(控えが消えても閉じない=「最初からやり直す」・全部消したときに小窓が消えない)。
+  // ⚠この画面に来るたびに1回だけ開く(送信途中の控えを残して閉じたとき、すぐ開き直さない)。
+  // ⚠物件の書き込み権限が確かめられてから開く(権限を外された人には開かない・控えは残す・@codex P2)。
+  const [newDraftAutoOpened, setNewDraftAutoOpened] = useState(false);
+  if (newPropertyDraftExists && canWriteProperty && !newDraftAutoOpened) {
+    setNewDraftAutoOpened(true);
+    setShowNewModal(true);
+  }
   const [deletingId, setDeletingId] = useState<string | null>(null);
   const [bulkDeleting, setBulkDeleting] = useState(false);
   // 一括削除の結果サマリ。null のときは表示しない。
@@ -1165,7 +1177,7 @@ function PropertiesPageInner() {
       </div>
 
       {showNewModal && (
-        <NewPropertyModal onClose={() => setShowNewModal(false)} />
+        <NewPropertyModal draftScreen="new-property:properties" onClose={() => setShowNewModal(false)} />
       )}
 
       <DmBatchConfirmModal open={dmConfirmOpen} onClose={() => setDmConfirmOpen(false)} />

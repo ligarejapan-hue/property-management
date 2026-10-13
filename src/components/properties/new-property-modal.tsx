@@ -1,6 +1,6 @@
 "use client";
 
-import { useState } from "react";
+import { useMemo, useState } from "react";
 import { useRouter } from "next/navigation";
 import { X, Loader2, AlertTriangle } from "lucide-react";
 import { PROPERTY_TYPE_OPTIONS, INTRODUCTION_ROUTE_OPTIONS } from "@/lib/property-types";
@@ -23,6 +23,17 @@ export interface PostCreateResult {
   buildingLink?: BuildingLinkOutcome | null;
 }
 import { AddressLookupControls } from "@/components/address/address-lookup-controls";
+import { draftKey } from "@/lib/drafts/draft-store";
+import { isDefiniteSubmitFailure } from "@/lib/drafts/submit-outcome";
+import {
+  EMPTY_NEW_PROPERTY_DRAFT,
+  compactNewPropertyDraftForPending,
+  isNewPropertyDraftEmpty,
+  parseNewPropertyDraft,
+  type NewPropertyDraft,
+} from "@/lib/drafts/screens/new-property";
+import { useDraftAutosave, useRestoredDraft } from "@/hooks/use-draft";
+import { DraftPendingNotice, DraftRestoredNotice, DraftTooLargeNotice } from "@/components/drafts/draft-notices";
 
 interface Props {
   onClose: () => void;
@@ -31,6 +42,11 @@ interface Props {
   /** 登録成功時の遷移を差し替える。未指定は従来どおり物件詳細へ router.push。 */
   /** ⚠物件詳細へ移らない呼び出し元は、3つめの引数の buildingLink を自分の画面で知らせる(@codex R6)。 */
   onCreated?: (id: string, propertyType: string, result?: PostCreateResult) => void;
+  /**
+   * 作業中の入力の控えの置き場(設計書 2026-10-13 §2 S6)。開いた画面ごとに分ける。
+   * 未指定なら控えを使わない(従来どおり)。
+   */
+  draftScreen?: "new-property:properties" | "new-property:sales-sheet";
 }
 
 /** 登録成功後のアクション（onCreated 指定時はそれ・未指定は物件詳細へ遷移）を返す純関数。 */
@@ -42,25 +58,82 @@ export function resolvePostCreate(
   return (id) => router.push(`/properties/${id}`);
 }
 
-export default function NewPropertyModal({ onClose, typeFilter, onCreated }: Props) {
+export default function NewPropertyModal({ onClose, typeFilter, onCreated, draftScreen }: Props) {
   const router = useRouter();
 
-  const [propertyType, setPropertyType] = useState("");
-  const [postalCode, setPostalCode] = useState("");
-  const [address, setAddress] = useState("");
+  // 作業中の入力の控え。別のメニューへ移って戻っても続きから(設計書 2026-10-13)。
+  const draftKeyValue = draftScreen ? draftKey(draftScreen) : null;
+  const restored = useRestoredDraft(draftKeyValue, parseNewPropertyDraft);
+  const start: NewPropertyDraft = restored?.data ?? EMPTY_NEW_PROPERTY_DRAFT;
+
+  const [propertyType, setPropertyType] = useState(start.propertyType);
+  const [postalCode, setPostalCode] = useState(start.postalCode);
+  const [address, setAddress] = useState(start.address);
   // 住所補完の user-edit signal（Codex P2-G）。住所 input をユーザーが直接編集した時だけ true。
-  const [addressEdited, setAddressEdited] = useState(false);
-  const [lotNumber, setLotNumber] = useState("");
+  const [addressEdited, setAddressEdited] = useState(start.addressEdited);
+  const [lotNumber, setLotNumber] = useState(start.lotNumber);
   // 物件名(任意)。集合住宅の種別のときだけ入力欄を出す。
-  const [buildingName, setBuildingName] = useState("");
+  const [buildingName, setBuildingName] = useState(start.buildingName);
   // 物件名から棟へつなぐ選び方(区分マンションのときだけ使う)。候補を選ぶ/「新しい棟」で変わる。
-  const [buildingChoice, setBuildingChoice] = useState<BuildingChoice>(AUTO_CHOICE);
+  const [buildingChoice, setBuildingChoice] = useState<BuildingChoice>(start.buildingChoice);
   // 部屋番号(任意)。区分マンションのときだけ入力欄を出す(発注者の指示 2026-10-11)。
-  const [roomNo, setRoomNo] = useState("");
-  const [introductionRoute, setIntroductionRoute] = useState("");
-  const [note, setNote] = useState("");
+  const [roomNo, setRoomNo] = useState(start.roomNo);
+  const [introductionRoute, setIntroductionRoute] = useState(start.introductionRoute);
+  const [note, setNote] = useState(start.note);
   const [submitting, setSubmitting] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  // 前回、登録の返事が来る前に離れた=登録されたか分からない。確かめるまで入力も登録も止める(§5.1)。
+  const [pendingBlocked, setPendingBlocked] = useState(restored?.pendingSubmit != null);
+  const [restoredDismissed, setRestoredDismissed] = useState(false);
+
+  const draftData = useMemo<NewPropertyDraft>(
+    () => ({
+      propertyType,
+      postalCode,
+      address,
+      addressEdited,
+      lotNumber,
+      buildingName,
+      roomNo,
+      introductionRoute,
+      note,
+      buildingChoice,
+    }),
+    [propertyType, postalCode, address, addressEdited, lotNumber, buildingName, roomNo, introductionRoute, note, buildingChoice],
+  );
+  const draft = useDraftAutosave(draftKeyValue, draftData, isNewPropertyDraftEmpty, restored, {
+    compactForPending: compactNewPropertyDraftForPending,
+  });
+
+  // キャンセル・×: 控えを消して閉じる(閉じた後の unmount で書き戻さない)。
+  // ⚠送信途中の帯が出ている間は、控え(送信中の印)を残して閉じる。一覧で確かめに行くために
+  //   閉じるので、ここで印を消すと次に開いたとき帯が出ず、同じ物件をもう一度登録できてしまう
+  //   (@codex P1)。印を外すのは「確かめたので続ける」だけ。
+  const handleCancel = () => {
+    if (pendingBlocked) {
+      onClose();
+      return;
+    }
+    draft.close();
+    onClose();
+  };
+
+  /** 「最初からやり直す」: 控えを消して空に戻す(小窓は開いたまま)。 */
+  const handleDiscardDraft = () => {
+    draft.discard();
+    const e = EMPTY_NEW_PROPERTY_DRAFT;
+    setPropertyType(e.propertyType);
+    setPostalCode(e.postalCode);
+    setAddress(e.address);
+    setAddressEdited(e.addressEdited);
+    setLotNumber(e.lotNumber);
+    setBuildingName(e.buildingName);
+    setBuildingChoice(e.buildingChoice);
+    setRoomNo(e.roomNo);
+    setIntroductionRoute(e.introductionRoute);
+    setNote(e.note);
+    setRestoredDismissed(true);
+  };
 
   // 住所の変更(直接入力・住所補完の両方)。⚠町丁目が変わったら選んだ棟を外して auto に
   // 戻す(@codex R4。前の丁目で選んだ棟へつないだり、新しい丁目に同じ名前の棟があるのに
@@ -94,6 +167,8 @@ export default function NewPropertyModal({ onClose, typeFilter, onCreated }: Pro
     }
 
     setSubmitting(true);
+    // 返事が来る前に離れたら、戻ったとき「登録されたか確かめて」と出す(二重登録を防ぐ・§5.1)。
+    draft.markSubmitting();
     try {
       const result = await createProperty({
         propertyType,
@@ -110,8 +185,13 @@ export default function NewPropertyModal({ onClose, typeFilter, onCreated }: Pro
       // 預けずに、結果を onCreated へ渡す(呼び出し元の画面で知らせる・@codex R6)。
       // 預けない(あとで別の機会に古い知らせが出てしまうため)。
       if (!onCreated) stashBuildingLinkNotice(result.id, result.buildingLink);
+      draft.close();
       resolvePostCreate(onCreated, router)(result.id, propertyType, { buildingLink: result.buildingLink ?? null });
     } catch (err) {
+      // ⚠登録されていないと言い切れる失敗(4xx)のときだけ印を外す。通信切れ・5xx は
+      //   サーバーで登録が済んでいるかもしれない=印を残し、確かめるまで止める(二重登録を防ぐ)。
+      if (isDefiniteSubmitFailure(err)) draft.unmarkSubmitting();
+      else setPendingBlocked(true);
       setError(err instanceof Error ? err.message : "登録に失敗しました");
       setSubmitting(false);
     }
@@ -124,7 +204,7 @@ export default function NewPropertyModal({ onClose, typeFilter, onCreated }: Pro
         <div className="flex items-center justify-between border-b border-gray-200 dark:border-gray-800 px-6 py-4">
           <h2 className="text-base font-semibold text-gray-800 dark:text-gray-100">新規物件登録</h2>
           <button
-            onClick={onClose}
+            onClick={handleCancel}
             disabled={submitting}
             className="rounded-md p-1 text-gray-400 dark:text-gray-500 hover:bg-gray-100 dark:hover:bg-gray-800 hover:text-gray-600 dark:hover:text-gray-300 disabled:opacity-50"
           >
@@ -134,236 +214,251 @@ export default function NewPropertyModal({ onClose, typeFilter, onCreated }: Pro
 
         {/* Form */}
         <form onSubmit={handleSubmit} className="space-y-4 px-6 py-5">
-          {error && (
-            <div className="flex items-start gap-2 rounded-md border border-red-200 bg-red-50 p-3 text-sm text-red-700 dark:border-red-800 dark:bg-red-950/40 dark:text-red-300">
-              <AlertTriangle className="mt-0.5 h-4 w-4 shrink-0" />
-              {error}
-            </div>
-          )}
-
-          {/* 物件種別 */}
-          <div>
-            <label className="mb-1 block text-sm font-medium text-gray-700 dark:text-gray-200">
-              物件種別 <span className="text-red-500">*</span>
-            </label>
-            <select
-              value={propertyType}
-              onChange={(e) => {
-                const next = e.target.value;
-                setPropertyType(next);
-                // ⚠対象外の種別に変えたら物件名を**その場で消す**。隠すだけだと
-                // 画面に無い値を送ることになり、入力した本人にも分からない。
-                if (!supportsBuildingName(next)) setBuildingName("");
-                if (next !== "apartment_unit") setRoomNo("");
-                // 棟の選び方は種別ごとの話なので、種別を変えたら自動に戻す。
-                setBuildingChoice(AUTO_CHOICE);
+          {pendingBlocked ? (
+            <DraftPendingNotice
+              onConfirm={() => {
+                draft.unmarkSubmitting();
+                setPendingBlocked(false);
               }}
-              disabled={submitting}
-              className="w-full rounded-md border border-gray-300 dark:border-gray-700 bg-white dark:bg-gray-900 px-3 py-2 text-sm text-gray-900 dark:text-gray-100 focus:border-indigo-500 focus:outline-none focus:ring-1 focus:ring-indigo-500 disabled:bg-gray-50 dark:disabled:bg-gray-800"
-            >
-              <option value="">選択してください</option>
-              {PROPERTY_TYPE_OPTIONS.filter(
-                (o) => !["building", "unit"].includes(o.value),
-              )
-                .filter((o) => !typeFilter || typeFilter.includes(o.value))
-                .map((o) => (
-                <option key={o.value} value={o.value}>
-                  {o.label}
-                </option>
-              ))}
-            </select>
-          </div>
+            />
+          ) : (
+            restored &&
+            !restoredDismissed && <DraftRestoredNotice savedAt={restored.savedAt} onDiscard={handleDiscardDraft} />
+          )}
+          {draft.tooLarge && <DraftTooLargeNotice kind="input" />}
+          {/* ⚠display: contents にしない(form の space-y-4 が中の欄に効かなくなる) */}
+          <fieldset disabled={pendingBlocked} className="m-0 min-w-0 space-y-4 border-0 p-0">
+            {error && (
+              <div className="flex items-start gap-2 rounded-md border border-red-200 bg-red-50 p-3 text-sm text-red-700 dark:border-red-800 dark:bg-red-950/40 dark:text-red-300">
+                <AlertTriangle className="mt-0.5 h-4 w-4 shrink-0" />
+                {error}
+              </div>
+            )}
 
-          {/* 物件名 — 集合住宅の種別のときだけ出す (任意)。
-              住所だけでは特定しづらく、現場でも所有者との会話でも建物名で通る。 */}
-          {supportsBuildingName(propertyType) && (
+            {/* 物件種別 */}
             <div>
-              <label
-                htmlFor="new-property-building-name"
-                className="mb-1 block text-sm font-medium text-gray-700 dark:text-gray-200"
-              >
-                物件名 <span className="text-xs text-gray-400 dark:text-gray-500">任意</span>
+              <label className="mb-1 block text-sm font-medium text-gray-700 dark:text-gray-200">
+                物件種別 <span className="text-red-500">*</span>
               </label>
-              {propertyType === "apartment_unit" ? (
-                // 区分マンションは棟へつなぐので、既存の棟の候補を出す。
-                <BuildingNameCombobox
-                  id="new-property-building-name"
-                  testId="new-property-building-name"
-                  value={buildingName}
-                  onChange={setBuildingName}
-                  address={address}
-                  choice={buildingChoice}
-                  onChoiceChange={setBuildingChoice}
-                  disabled={submitting}
-                  placeholder="例: リガーレ西荻マンション"
-                  inputClassName="w-full rounded-md border border-gray-300 dark:border-gray-700 bg-white dark:bg-gray-900 px-3 py-2 text-sm text-gray-900 dark:text-gray-100 placeholder:text-gray-400 dark:placeholder:text-gray-500 focus:border-indigo-500 focus:outline-none focus:ring-1 focus:ring-indigo-500 disabled:bg-gray-50 dark:disabled:bg-gray-800"
-                />
-              ) : (
+              <select
+                value={propertyType}
+                onChange={(e) => {
+                  const next = e.target.value;
+                  setPropertyType(next);
+                  // ⚠対象外の種別に変えたら物件名を**その場で消す**。隠すだけだと
+                  // 画面に無い値を送ることになり、入力した本人にも分からない。
+                  if (!supportsBuildingName(next)) setBuildingName("");
+                  if (next !== "apartment_unit") setRoomNo("");
+                  // 棟の選び方は種別ごとの話なので、種別を変えたら自動に戻す。
+                  setBuildingChoice(AUTO_CHOICE);
+                }}
+                disabled={submitting}
+                className="w-full rounded-md border border-gray-300 dark:border-gray-700 bg-white dark:bg-gray-900 px-3 py-2 text-sm text-gray-900 dark:text-gray-100 focus:border-indigo-500 focus:outline-none focus:ring-1 focus:ring-indigo-500 disabled:bg-gray-50 dark:disabled:bg-gray-800"
+              >
+                <option value="">選択してください</option>
+                {PROPERTY_TYPE_OPTIONS.filter(
+                  (o) => !["building", "unit"].includes(o.value),
+                )
+                  .filter((o) => !typeFilter || typeFilter.includes(o.value))
+                  .map((o) => (
+                  <option key={o.value} value={o.value}>
+                    {o.label}
+                  </option>
+                ))}
+              </select>
+            </div>
+
+            {/* 物件名 — 集合住宅の種別のときだけ出す (任意)。
+                住所だけでは特定しづらく、現場でも所有者との会話でも建物名で通る。 */}
+            {supportsBuildingName(propertyType) && (
+              <div>
+                <label
+                  htmlFor="new-property-building-name"
+                  className="mb-1 block text-sm font-medium text-gray-700 dark:text-gray-200"
+                >
+                  物件名 <span className="text-xs text-gray-400 dark:text-gray-500">任意</span>
+                </label>
+                {propertyType === "apartment_unit" ? (
+                  // 区分マンションは棟へつなぐので、既存の棟の候補を出す。
+                  <BuildingNameCombobox
+                    id="new-property-building-name"
+                    testId="new-property-building-name"
+                    value={buildingName}
+                    onChange={setBuildingName}
+                    address={address}
+                    choice={buildingChoice}
+                    onChoiceChange={setBuildingChoice}
+                    disabled={submitting}
+                    placeholder="例: リガーレ西荻マンション"
+                    inputClassName="w-full rounded-md border border-gray-300 dark:border-gray-700 bg-white dark:bg-gray-900 px-3 py-2 text-sm text-gray-900 dark:text-gray-100 placeholder:text-gray-400 dark:placeholder:text-gray-500 focus:border-indigo-500 focus:outline-none focus:ring-1 focus:ring-indigo-500 disabled:bg-gray-50 dark:disabled:bg-gray-800"
+                  />
+                ) : (
+                  <input
+                    id="new-property-building-name"
+                    data-testid="new-property-building-name"
+                    type="text"
+                    value={buildingName}
+                    onChange={(e) => setBuildingName(e.target.value)}
+                    disabled={submitting}
+                    placeholder="例: リガーレ西荻マンション"
+                    className="w-full rounded-md border border-gray-300 dark:border-gray-700 bg-white dark:bg-gray-900 px-3 py-2 text-sm text-gray-900 dark:text-gray-100 placeholder:text-gray-400 dark:placeholder:text-gray-500 focus:border-indigo-500 focus:outline-none focus:ring-1 focus:ring-indigo-500 disabled:bg-gray-50 dark:disabled:bg-gray-800"
+                  />
+                )}
+                {/* ⚠maxLength は使わない。生の文字数で打ち切るため、前後に空白の
+                    ある上限ちょうどの名前を貼ると**黙って実文字が削られる**。
+                    打ち終えてから 422 で返すのも不親切なので、入力中に伝える。 */}
+                {isBuildingNameTooLong(buildingName) && (
+                  <p
+                    role="status"
+                    data-testid="new-property-building-name-error"
+                    className="mt-1 text-xs text-amber-700 dark:text-amber-300"
+                  >
+                    {BUILDING_NAME_TOO_LONG_MESSAGE}
+                  </p>
+                )}
+              </div>
+            )}
+
+            {/* 部屋番号 — 区分マンションのときだけ出す (任意)。 */}
+            {propertyType === "apartment_unit" && (
+              <div>
+                <label
+                  htmlFor="new-property-room-no"
+                  className="mb-1 block text-sm font-medium text-gray-700 dark:text-gray-200"
+                >
+                  部屋番号 <span className="text-xs text-gray-400 dark:text-gray-500">任意</span>
+                </label>
                 <input
-                  id="new-property-building-name"
-                  data-testid="new-property-building-name"
+                  id="new-property-room-no"
+                  data-testid="new-property-room-no"
                   type="text"
-                  value={buildingName}
-                  onChange={(e) => setBuildingName(e.target.value)}
+                  value={roomNo}
+                  onChange={(e) => setRoomNo(e.target.value)}
                   disabled={submitting}
-                  placeholder="例: リガーレ西荻マンション"
+                  placeholder="例: 201"
                   className="w-full rounded-md border border-gray-300 dark:border-gray-700 bg-white dark:bg-gray-900 px-3 py-2 text-sm text-gray-900 dark:text-gray-100 placeholder:text-gray-400 dark:placeholder:text-gray-500 focus:border-indigo-500 focus:outline-none focus:ring-1 focus:ring-indigo-500 disabled:bg-gray-50 dark:disabled:bg-gray-800"
                 />
-              )}
-              {/* ⚠maxLength は使わない。生の文字数で打ち切るため、前後に空白の
-                  ある上限ちょうどの名前を貼ると**黙って実文字が削られる**。
-                  打ち終えてから 422 で返すのも不親切なので、入力中に伝える。 */}
-              {isBuildingNameTooLong(buildingName) && (
-                <p
-                  role="status"
-                  data-testid="new-property-building-name-error"
-                  className="mt-1 text-xs text-amber-700 dark:text-amber-300"
-                >
-                  {BUILDING_NAME_TOO_LONG_MESSAGE}
-                </p>
-              )}
-            </div>
-          )}
+              </div>
+            )}
 
-          {/* 部屋番号 — 区分マンションのときだけ出す (任意)。 */}
-          {propertyType === "apartment_unit" && (
+            {/* 郵便番号 */}
             <div>
-              <label
-                htmlFor="new-property-room-no"
-                className="mb-1 block text-sm font-medium text-gray-700 dark:text-gray-200"
-              >
-                部屋番号 <span className="text-xs text-gray-400 dark:text-gray-500">任意</span>
+              <label className="mb-1 block text-sm font-medium text-gray-700 dark:text-gray-200">
+                郵便番号 <span className="text-xs text-gray-400 dark:text-gray-500">任意</span>
               </label>
               <input
-                id="new-property-room-no"
-                data-testid="new-property-room-no"
                 type="text"
-                value={roomNo}
-                onChange={(e) => setRoomNo(e.target.value)}
+                inputMode="numeric"
+                value={postalCode}
+                onChange={(e) => setPostalCode(e.target.value)}
                 disabled={submitting}
-                placeholder="例: 201"
+                placeholder="例: 1000005"
                 className="w-full rounded-md border border-gray-300 dark:border-gray-700 bg-white dark:bg-gray-900 px-3 py-2 text-sm text-gray-900 dark:text-gray-100 placeholder:text-gray-400 dark:placeholder:text-gray-500 focus:border-indigo-500 focus:outline-none focus:ring-1 focus:ring-indigo-500 disabled:bg-gray-50 dark:disabled:bg-gray-800"
               />
             </div>
-          )}
 
-          {/* 郵便番号 */}
-          <div>
-            <label className="mb-1 block text-sm font-medium text-gray-700 dark:text-gray-200">
-              郵便番号 <span className="text-xs text-gray-400 dark:text-gray-500">任意</span>
-            </label>
-            <input
-              type="text"
-              inputMode="numeric"
-              value={postalCode}
-              onChange={(e) => setPostalCode(e.target.value)}
-              disabled={submitting}
-              placeholder="例: 1000005"
-              className="w-full rounded-md border border-gray-300 dark:border-gray-700 bg-white dark:bg-gray-900 px-3 py-2 text-sm text-gray-900 dark:text-gray-100 placeholder:text-gray-400 dark:placeholder:text-gray-500 focus:border-indigo-500 focus:outline-none focus:ring-1 focus:ring-indigo-500 disabled:bg-gray-50 dark:disabled:bg-gray-800"
-            />
-          </div>
-
-          {/* 住所 */}
-          <div>
-            <label className="mb-1 block text-sm font-medium text-gray-700 dark:text-gray-200">
-              住所 <span className="text-red-500">*</span>
-            </label>
-            <input
-              type="text"
-              value={address}
-              onChange={(e) => {
-                // ユーザーの直接編集＝user-edit signal（住所検索のトリガー）。
-                setAddressEdited(true);
-                handleAddressChange(e.target.value);
-              }}
-              disabled={submitting}
-              placeholder="例: 東京都千代田区丸の内1-1-1"
-              className="w-full rounded-md border border-gray-300 dark:border-gray-700 bg-white dark:bg-gray-900 px-3 py-2 text-sm text-gray-900 dark:text-gray-100 placeholder:text-gray-400 dark:placeholder:text-gray-500 focus:border-indigo-500 focus:outline-none focus:ring-1 focus:ring-indigo-500 disabled:bg-gray-50 dark:disabled:bg-gray-800"
-            />
-            {/* 郵便番号⇄住所 補完。onZipChange/onAddressChange は state 更新のみ＝
-                addressEdited は立てない（候補 apply で再検索しない）。 */}
-            <div className="mt-1.5">
-              <AddressLookupControls
-                zip={postalCode}
-                address={address}
-                onZipChange={setPostalCode}
-                onAddressChange={handleAddressChange}
-                addressEdited={addressEdited}
+            {/* 住所 */}
+            <div>
+              <label className="mb-1 block text-sm font-medium text-gray-700 dark:text-gray-200">
+                住所 <span className="text-red-500">*</span>
+              </label>
+              <input
+                type="text"
+                value={address}
+                onChange={(e) => {
+                  // ユーザーの直接編集＝user-edit signal（住所検索のトリガー）。
+                  setAddressEdited(true);
+                  handleAddressChange(e.target.value);
+                }}
                 disabled={submitting}
-                mode="both"
+                placeholder="例: 東京都千代田区丸の内1-1-1"
+                className="w-full rounded-md border border-gray-300 dark:border-gray-700 bg-white dark:bg-gray-900 px-3 py-2 text-sm text-gray-900 dark:text-gray-100 placeholder:text-gray-400 dark:placeholder:text-gray-500 focus:border-indigo-500 focus:outline-none focus:ring-1 focus:ring-indigo-500 disabled:bg-gray-50 dark:disabled:bg-gray-800"
+              />
+              {/* 郵便番号⇄住所 補完。onZipChange/onAddressChange は state 更新のみ＝
+                  addressEdited は立てない（候補 apply で再検索しない）。 */}
+              <div className="mt-1.5">
+                <AddressLookupControls
+                  zip={postalCode}
+                  address={address}
+                  onZipChange={setPostalCode}
+                  onAddressChange={handleAddressChange}
+                  addressEdited={addressEdited}
+                  disabled={submitting}
+                  mode="both"
+                />
+              </div>
+            </div>
+
+            {/* 地番 */}
+            <div>
+              <label className="mb-1 block text-sm font-medium text-gray-700 dark:text-gray-200">
+                地番 <span className="text-xs text-gray-400 dark:text-gray-500">任意</span>
+              </label>
+              <input
+                type="text"
+                value={lotNumber}
+                onChange={(e) => setLotNumber(e.target.value)}
+                disabled={submitting}
+                placeholder="例: 1番1"
+                className="w-full rounded-md border border-gray-300 dark:border-gray-700 bg-white dark:bg-gray-900 px-3 py-2 text-sm text-gray-900 dark:text-gray-100 placeholder:text-gray-400 dark:placeholder:text-gray-500 focus:border-indigo-500 focus:outline-none focus:ring-1 focus:ring-indigo-500 disabled:bg-gray-50 dark:disabled:bg-gray-800"
               />
             </div>
-          </div>
 
-          {/* 地番 */}
-          <div>
-            <label className="mb-1 block text-sm font-medium text-gray-700 dark:text-gray-200">
-              地番 <span className="text-xs text-gray-400 dark:text-gray-500">任意</span>
-            </label>
-            <input
-              type="text"
-              value={lotNumber}
-              onChange={(e) => setLotNumber(e.target.value)}
-              disabled={submitting}
-              placeholder="例: 1番1"
-              className="w-full rounded-md border border-gray-300 dark:border-gray-700 bg-white dark:bg-gray-900 px-3 py-2 text-sm text-gray-900 dark:text-gray-100 placeholder:text-gray-400 dark:placeholder:text-gray-500 focus:border-indigo-500 focus:outline-none focus:ring-1 focus:ring-indigo-500 disabled:bg-gray-50 dark:disabled:bg-gray-800"
-            />
-          </div>
+            {/* 導入ルート */}
+            <div>
+              <label className="mb-1 block text-sm font-medium text-gray-700 dark:text-gray-200">
+                導入ルート <span className="text-xs text-gray-400 dark:text-gray-500">任意</span>
+              </label>
+              <select
+                value={introductionRoute}
+                onChange={(e) => setIntroductionRoute(e.target.value)}
+                disabled={submitting}
+                className="w-full rounded-md border border-gray-300 dark:border-gray-700 bg-white dark:bg-gray-900 px-3 py-2 text-sm text-gray-900 dark:text-gray-100 focus:border-indigo-500 focus:outline-none focus:ring-1 focus:ring-indigo-500 disabled:bg-gray-50 dark:disabled:bg-gray-800"
+              >
+                <option value="">未設定</option>
+                {INTRODUCTION_ROUTE_OPTIONS.map((o) => (
+                  <option key={o.value} value={o.value}>
+                    {o.label}
+                  </option>
+                ))}
+              </select>
+            </div>
 
-          {/* 導入ルート */}
-          <div>
-            <label className="mb-1 block text-sm font-medium text-gray-700 dark:text-gray-200">
-              導入ルート <span className="text-xs text-gray-400 dark:text-gray-500">任意</span>
-            </label>
-            <select
-              value={introductionRoute}
-              onChange={(e) => setIntroductionRoute(e.target.value)}
-              disabled={submitting}
-              className="w-full rounded-md border border-gray-300 dark:border-gray-700 bg-white dark:bg-gray-900 px-3 py-2 text-sm text-gray-900 dark:text-gray-100 focus:border-indigo-500 focus:outline-none focus:ring-1 focus:ring-indigo-500 disabled:bg-gray-50 dark:disabled:bg-gray-800"
-            >
-              <option value="">未設定</option>
-              {INTRODUCTION_ROUTE_OPTIONS.map((o) => (
-                <option key={o.value} value={o.value}>
-                  {o.label}
-                </option>
-              ))}
-            </select>
-          </div>
+            {/* メモ */}
+            <div>
+              <label className="mb-1 block text-sm font-medium text-gray-700 dark:text-gray-200">
+                メモ <span className="text-xs text-gray-400 dark:text-gray-500">任意</span>
+              </label>
+              <textarea
+                value={note}
+                onChange={(e) => setNote(e.target.value)}
+                disabled={submitting}
+                rows={3}
+                placeholder="登録メモがあれば入力してください"
+                className="w-full resize-y rounded-md border border-gray-300 dark:border-gray-700 bg-white dark:bg-gray-900 px-3 py-2 text-sm text-gray-900 dark:text-gray-100 placeholder:text-gray-400 dark:placeholder:text-gray-500 focus:border-indigo-500 focus:outline-none focus:ring-1 focus:ring-indigo-500 disabled:bg-gray-50 dark:disabled:bg-gray-800"
+              />
+            </div>
 
-          {/* メモ */}
-          <div>
-            <label className="mb-1 block text-sm font-medium text-gray-700 dark:text-gray-200">
-              メモ <span className="text-xs text-gray-400 dark:text-gray-500">任意</span>
-            </label>
-            <textarea
-              value={note}
-              onChange={(e) => setNote(e.target.value)}
-              disabled={submitting}
-              rows={3}
-              placeholder="登録メモがあれば入力してください"
-              className="w-full resize-y rounded-md border border-gray-300 dark:border-gray-700 bg-white dark:bg-gray-900 px-3 py-2 text-sm text-gray-900 dark:text-gray-100 placeholder:text-gray-400 dark:placeholder:text-gray-500 focus:border-indigo-500 focus:outline-none focus:ring-1 focus:ring-indigo-500 disabled:bg-gray-50 dark:disabled:bg-gray-800"
-            />
-          </div>
-
-          {/* Buttons */}
-          <div className="flex items-center justify-end gap-2 border-t border-gray-100 dark:border-gray-800 pt-4">
-            <button
-              type="button"
-              onClick={onClose}
-              disabled={submitting}
-              className="rounded-md border border-gray-300 dark:border-gray-700 px-4 py-2 text-sm text-gray-700 dark:text-gray-200 hover:bg-gray-50 dark:hover:bg-gray-800 disabled:opacity-50"
-            >
-              キャンセル
-            </button>
-            <button
-              type="submit"
-              disabled={submitting}
-              className="flex items-center gap-2 rounded-md bg-indigo-600 px-4 py-2 text-sm font-medium text-white hover:bg-indigo-700 disabled:opacity-50"
-            >
-              {submitting && <Loader2 className="h-4 w-4 animate-spin" />}
-              登録する
-            </button>
-          </div>
+            {/* Buttons */}
+            <div className="flex items-center justify-end gap-2 border-t border-gray-100 dark:border-gray-800 pt-4">
+              <button
+                type="button"
+                onClick={handleCancel}
+                disabled={submitting}
+                className="rounded-md border border-gray-300 dark:border-gray-700 px-4 py-2 text-sm text-gray-700 dark:text-gray-200 hover:bg-gray-50 dark:hover:bg-gray-800 disabled:opacity-50"
+              >
+                キャンセル
+              </button>
+              <button
+                type="submit"
+                disabled={submitting}
+                className="flex items-center gap-2 rounded-md bg-indigo-600 px-4 py-2 text-sm font-medium text-white hover:bg-indigo-700 disabled:opacity-50"
+              >
+                {submitting && <Loader2 className="h-4 w-4 animate-spin" />}
+                登録する
+              </button>
+            </div>
+          </fieldset>
         </form>
       </div>
     </div>

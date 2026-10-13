@@ -74,7 +74,7 @@ describe("区分マンションの物件名から棟へつなぐ(棟の自動づ
   });
   it("★物件詳細へ移るときだけ、移る前に知らせを預ける", () => {
     expect(src).toMatch(
-      /if \(!onCreated\) stashBuildingLinkNotice\(result\.id, result\.buildingLink\);\n\s*resolvePostCreate\(onCreated, router\)/,
+      /if \(!onCreated\) stashBuildingLinkNotice\(result\.id, result\.buildingLink\);\n\s*draft\.close\(\);\n\s*resolvePostCreate\(onCreated, router\)/,
     );
   });
 });

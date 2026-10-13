@@ -8,6 +8,8 @@ import { useScreenProtection } from "@/components/screen-protection/screen-prote
 import { SalesSheetPropertyPicker } from "@/components/sales-sheet/SalesSheetPropertyPicker";
 import { SalesSheetCreateDialog } from "@/components/sales-sheet/SalesSheetCreateButton";
 import NewPropertyModal, { type PostCreateResult } from "@/components/properties/new-property-modal";
+import { useDraftExists } from "@/hooks/use-draft";
+import { draftKey } from "@/lib/drafts/draft-store";
 import { BuildingLinkNotice } from "@/components/buildings/building-link-notice";
 // ⚠apply.ts は prisma を読むサーバー側のファイル。型だけを読む。
 import type { BuildingLinkOutcome } from "@/lib/building-link/apply";
@@ -132,6 +134,16 @@ export default function SalesSheetNewEntryPage() {
     kind: SalesSheetTemplateKind;
   } | null>(null);
   const [showRegister, setShowRegister] = useState(false);
+  // 新規登録の途中で別のメニューへ移って戻ったら、小窓を開き直す(設計書 2026-10-13 §3-3)。
+  const registerDraftExists = useDraftExists(draftKey("new-property:sales-sheet"));
+  // ⚠開いた状態として保つ(控えが消えても閉じない=「最初からやり直す」・全部消したときに小窓が消えない)。
+  // ⚠この画面に来るたびに1回だけ開く(送信途中の控えを残して閉じたとき、すぐ開き直さない)。
+  // ⚠物件の書き込み権限が確かめられてから開く(権限を外された人には開かない・控えは残す・@codex P2)。
+  const [registerDraftAutoOpened, setRegisterDraftAutoOpened] = useState(false);
+  if (registerDraftExists && canWriteProperty && !registerDraftAutoOpened) {
+    setRegisterDraftAutoOpened(true);
+    setShowRegister(true);
+  }
   // 登録した物件を棟へつないだ結果の知らせ(@codex R6)。この画面に留まるので、ここで出す。
   const [buildingNotice, setBuildingNotice] = useState<BuildingLinkOutcome | null>(null);
 
@@ -187,6 +199,7 @@ export default function SalesSheetNewEntryPage() {
 
       {showRegister && (
         <NewPropertyModal
+          draftScreen="new-property:sales-sheet"
           onClose={() => setShowRegister(false)}
           typeFilter={[...SALES_SHEET_REGISTRABLE_PROPERTY_TYPES]}
           onCreated={handleCreated}
