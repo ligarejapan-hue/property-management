@@ -108,6 +108,13 @@ interface ImportJobFilters {
   to: string; // YYYY-MM-DD
 }
 
+const DEFAULT_JOB_FILTERS: ImportJobFilters = { jobType: "", executedBy: "", from: "", to: "" };
+
+/** 絞り込みなしの1ページ目か(取り込んだばかりの履歴が必ず見える表示)。 */
+function isDefaultJobView(f: ImportJobFilters, page: number): boolean {
+  return page === 1 && f.jobType === "" && f.executedBy === "" && f.from === "" && f.to === "";
+}
+
 const JOB_TYPE_OPTIONS = IMPORT_TYPE_FILTER_OPTIONS;
 
 interface ImportResult {
@@ -679,8 +686,11 @@ function ImportScreen({ draftEnabled }: { draftEnabled: boolean }) {
     if (e === "start") draftSaver.markSubmitting();
     if (r.unmark) draftSaver.unmarkSubmitting();
     if (e === "unknown") {
+      // 履歴を古い扱いにし、今回の取り込みが必ず見えるよう絞り込みを外して1ページ目へ戻す(@codex P1)。
       historyGenRef.current += 1;
       setHistoryStale(true);
+      setJobFilters(DEFAULT_JOB_FILTERS);
+      setJobPage(1);
       setImportBlocked(true);
       setImportBlockReason("unknown");
     }
@@ -727,7 +737,8 @@ function ImportScreen({ draftEnabled }: { draftEnabled: boolean }) {
       if (req !== jobsReqRef.current) return;
       setJobs((json.data ?? []) as ImportJob[]);
       setJobPagination(json.pagination ?? null);
-      if (gen === historyGenRef.current) setHistoryStale(false);
+      // ⚠絞り込みや2ページ目以降では今回の取り込みが見えないことがある=外さない。
+      if (gen === historyGenRef.current && isDefaultJobView(jobFilters, jobPage)) setHistoryStale(false);
     } catch {
       // ignore
     } finally {

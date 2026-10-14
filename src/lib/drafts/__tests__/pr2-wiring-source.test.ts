@@ -190,7 +190,7 @@ describe("取り込み(CSV): 履歴の読み直しが成功するまで「確か
     expect(src).toMatch(/const \[historyStale, setHistoryStale\] = useState\(restoreDecision\.showPending\);/);
     expect(src).toMatch(/historyGenRef\.current \+= 1;\s*setHistoryStale\(true\);/);
     expect(src).toMatch(/const gen = historyGenRef\.current;\s*const req = \+\+jobsReqRef\.current;\s*setJobsLoading\(true\);/);
-    expect(src).toMatch(/setJobPagination\(json\.pagination \?\? null\);\s*if \(gen === historyGenRef\.current\) setHistoryStale\(false\);/);
+    expect(src).toMatch(/setJobPagination\(json\.pagination \?\? null\);\s*(?:\/\/[^\n]*\n\s*)?if \(gen === historyGenRef\.current && isDefaultJobView\(jobFilters, jobPage\)\) setHistoryStale\(false\);/);
   });
   it("帯のボタンは読み込み中・古いままのとき押せず、読めなかったことを伝える", () => {
     expect(src).toContain("confirmDisabled={jobsLoading || historyStale}");
@@ -204,5 +204,17 @@ describe("取り込み(CSV): 履歴は最後に始めた読み込みの結果だ
     expect(src).toMatch(/const req = \+\+jobsReqRef\.current;/);
     expect(src).toMatch(/const json = await fetchImportJobs\(\{[\s\S]*?\}\);\s*if \(req !== jobsReqRef\.current\) return;\s*setJobs\(/);
     expect(src).toMatch(/if \(req === jobsReqRef\.current\) setJobsLoading\(false\);/);
+  });
+});
+
+describe("取り込み(CSV): 確かめる履歴は絞り込みなしの1ページ目(今回の取り込みが必ず見える・@codex P1)", () => {
+  const src = read("src/app/(dashboard)/import/page.tsx");
+  it("結果が分からなくなったら絞り込みを外して1ページ目へ戻す", () => {
+    expect(src).toMatch(/setHistoryStale\(true\);\s*setJobFilters\(DEFAULT_JOB_FILTERS\);\s*setJobPage\(1\);/);
+  });
+  it("古い扱いを外すのは、絞り込みなしの1ページ目を読めたときだけ", () => {
+    expect(src).toMatch(
+      /if \(gen === historyGenRef\.current && isDefaultJobView\(jobFilters, jobPage\)\) setHistoryStale\(false\);/,
+    );
   });
 });
