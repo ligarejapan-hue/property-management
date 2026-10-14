@@ -10,7 +10,7 @@
  * この画面自体は状態(state)を持つだけの薄い入れ物。表示は
  * `PasteImportReview`（表示専用部品）に委ねる。
  */
-import { useCallback, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useRouter } from "next/navigation";
 import Link from "next/link";
 import { PageHeader } from "@/components/ui/page-header";
@@ -173,6 +173,15 @@ function PasteImportScreen({ draftEnabled }: { draftEnabled: boolean }) {
   const draftSaver = useDraftAutosave(draftKeyValue, draftData, isPasteDraftEmpty, restored, {
     compactForPending: compactPasteDraftForPending,
   });
+  // 画面に出ているか。⚠登録の直前の見直しの間に画面を離れたら、その登録は送らない
+  //   (戻った画面にも同じ内容があり、二重に登録できてしまう・@codex P1)。
+  const mountedRef = useRef(false);
+  useEffect(() => {
+    mountedRef.current = true;
+    return () => {
+      mountedRef.current = false;
+    };
+  }, []);
   const reselectReason = pdfReselectReason({ hasReview: draft !== null, pdfFileName: reselectName, hasPdfFile: pdfFile !== null });
 
   const handleRead = useCallback(async () => {
@@ -350,6 +359,7 @@ function PasteImportScreen({ draftEnabled }: { draftEnabled: boolean }) {
       const ownerKey = (c: OwnerCandidateSummary) => `${c.id}:${c.matchKind}`;
       const beforeOwners = ownerCandidates.map(ownerKey).sort().join(",");
       const latest = await recheckDuplicates();
+      if (!mountedRef.current) return;
 
       // ⚠**確認できなかったときに通してはいけない**(確認しないより悪い＝
       //   確認したつもりになる)。やり直せるようにして止める。

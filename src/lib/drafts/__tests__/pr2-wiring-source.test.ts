@@ -227,3 +227,13 @@ describe("貼り付けて物件化: 成功の返事に物件番号が無けれ�
     );
   });
 });
+
+describe("貼り付けて物件化: 見直しの間に画面を離れたら登録を送らない(@codex P1)", () => {
+  const src = read("src/app/(dashboard)/import/paste/page.tsx");
+  it("画面に出ている間だけ true の印を持つ", () => {
+    expect(src).toMatch(/useEffect\(\(\) => \{\s*mountedRef\.current = true;\s*return \(\) => \{\s*mountedRef\.current = false;\s*\};\s*\}, \[\]\);/);
+  });
+  it("見直しの返事の後、離れていたら止める", () => {
+    expect(src).toMatch(/const latest = await recheckDuplicates\(\);\s*(?:\/\/[^\n]*\n\s*)*if \(!mountedRef\.current\) return;/);
+  });
+});
