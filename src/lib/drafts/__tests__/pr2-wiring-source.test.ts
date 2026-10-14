@@ -218,3 +218,12 @@ describe("取り込み(CSV): 確かめる履歴は絞り込みなしの1ペー�
     );
   });
 });
+
+describe("貼り付けて物件化: 成功の返事に物件番号が無ければ「分からない」扱い(印を消さない・@codex P2)", () => {
+  it("番号を確かめてから控えを閉じる", () => {
+    const src = read("src/app/(dashboard)/import/paste/page.tsx");
+    expect(src).toMatch(
+      /const result = \(await res\.json\(\)\) as CommitApiResponse;\s*if \(typeof result\?\.propertyId !== "string" \|\| result\.propertyId === ""\) \{\s*throw new Error\(/,
+    );
+  });
+});

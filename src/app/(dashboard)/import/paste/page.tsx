@@ -471,7 +471,12 @@ function PasteImportScreen({ draftEnabled }: { draftEnabled: boolean }) {
         });
       }
       if (!res.ok) throw httpError(await readApiErrorMessage(res), res.status);
+      // ⚠成功なのに物件の番号が無い返事は、登録されたか分からない(印を消さずに止める)。
+      //   status を付けない Error=4xx ではない扱いで、下の catch が確認待ちにする。
       const result = (await res.json()) as CommitApiResponse;
+      if (typeof result?.propertyId !== "string" || result.propertyId === "") {
+        throw new Error("登録の返事を読み取れませんでした。物件一覧で登録されたか確かめてください。");
+      }
       stashBuildingLinkNotice(result.propertyId, result.buildingLink);
       draftSaver.close();
       router.push(`/properties/${result.propertyId}`);
