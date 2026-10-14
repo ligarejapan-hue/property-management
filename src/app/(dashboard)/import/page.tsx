@@ -657,7 +657,8 @@ function ImportScreen({ draftEnabled }: { draftEnabled: boolean }) {
   const [importBlocked, setImportBlocked] = useState(restoreDecision.showPending);
   const [importBlockReason, setImportBlockReason] = useState<"left" | "unknown">("left");
   // ⚠どれかの取り込み中・結果が分からない間は「最初からやり直す」を出さない(送信中の印を消させない)。
-  const importBusy = uploading || roLoading || rpLoading || importBlocked;
+  //   下見の返事を待つ間も出さない(届いた結果が控えを作り直す)。
+  const importBusy = uploading || previewLoading || roLoading || rpLoading || importBlocked;
   const applyCsvPending = (e: CsvPendingEvent) => {
     const r = nextCsvPending(csvPendingRef.current, e);
     csvPendingRef.current = r.state;

@@ -534,8 +534,8 @@ function PasteImportScreen({ draftEnabled }: { draftEnabled: boolean }) {
           }}
         />
       ) : (
-        // ⚠登録中は出さない(「最初からやり直す」で送信中の印を消させない)。
-        restored && !restoredDismissed && !registering && <DraftRestoredNotice savedAt={restored.savedAt} onDiscard={handleDiscardDraft} />
+        // ⚠登録中は出さない(「最初からやり直す」で送信中の印を消させない)。読み取り中も出さない(届いた結果が控えを作り直す)。
+        restored && !restoredDismissed && !registering && !reading && <DraftRestoredNotice savedAt={restored.savedAt} onDiscard={handleDiscardDraft} />
       )}
       {draftSaver.tooLarge && <DraftTooLargeNotice kind="input" />}
 
