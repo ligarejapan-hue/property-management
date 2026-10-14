@@ -117,6 +117,15 @@ function occupancyFor(raw: string): string | null {
   if (tenantMarker) return "rented";
   // 本人でない人が住んでいる(家族か借り手か分からない)=賃貸の語が無ければ決めない(15巡目)。
   if (NOT_OWNER.test(s) && !explicitRental) return null;
+  //   本人以外の人(親族・家族・第三者・知人など)が住んでいると言っているときも同じ(21巡目)。
+  //   ⚠本人も一緒に住んでいる(「自身・親族が居住中」)なら居住中のまま=下の本人の判定へ。
+  if (
+    !explicitRental &&
+    !ownerSelf &&
+    has(["親族", "家族", "第三者", "知人", "親戚", "息子", "娘", "両親", "子供", "子ども", "従業員", "社宅", "他人"])
+  ) {
+    return null;
+  }
   // 本人の居住を言っていて賃貸の語が無ければ居住中(「入居者：所有者本人」)。
   if (ownerSelf && !explicitRental && !someoneNotLiving) return "occupied";
   // `所有者は居住していない（賃貸中）` = 本人は住まず人に貸している=賃貸中(10/14 から決められる)。
