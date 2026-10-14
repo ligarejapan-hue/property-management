@@ -116,7 +116,8 @@ function isOwnerOrTenantWord(subj: string): boolean {
  *   そこで、下の判定(occupancyJudge)の結果は、値の全体がこの一覧のどれかに**そのまま**合うときだけ採用する。
  *   合わない文は全部「読み取れない」=警告+原文を備考へ・Excel は人の確認へ(誤って決めるより安全)。
  */
-const TENANT_NOUN = "(賃借人|入居者|テナント|借主|借り手|借り主|賃借者|店子|借家人)";
+// ⚠「入居者」は住んでいる人一般(借り手とは限らない)なので、許可リストの借り手の語に入れない(65巡目)。
+const TENANT_NOUN = "(賃借人|テナント|借主|借り手|借り主|賃借者|店子|借家人)";
 const OWNER_NOUN = "(自身|本人|所有者|オーナー|名義人|売主)";
 const NOW = "(現在|現況)?[：:]?";
 const OCCUPANCY_ALLOWLIST: Record<"vacant" | "occupied" | "rented", RegExp[]> = {
