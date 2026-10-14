@@ -109,7 +109,10 @@ function occupancyFor(raw: string): string | null {
   // ⚠本人の居住と借り手の居住が**両方**言われていれば決めない(「本人が居住中、賃借人も入居中」・29巡目)。
   if (ownerSelf && tenantEvidence) return null;
   const tenantMarker = tenantEvidence && !ownerSelf;
-  const explicitRental = has(["賃貸中", "賃貸している", "貸している", "賃貸に出している"]);
+  //   「現在入居中（賃貸）」「賃貸物件として入居中」のように、賃貸が今の入居を説明しているときも賃貸中(30巡目)。
+  const rentalQualifiesOccupancy = /賃貸[^、。,，．]{0,8}?(入居|居住)|(入居中|居住中)[（(：:・]{0,2}賃貸/.test(s);
+  const explicitRental =
+    has(["賃貸中", "賃貸している", "貸している", "賃貸に出している"]) || rentalQualifiesOccupancy;
   const rentedMarker = tenantMarker || explicitRental;
   // ⚠賃貸の打ち消し(「賃貸中ではない」「貸していない」)は賃貸中と読まない=決めない(@codex PR#512)。
   //   ていねいな打ち消し(「賃貸中ではありません」「貸していません」)も同じ(@codex PR#512 2巡目)。
@@ -137,6 +140,7 @@ function occupancyFor(raw: string): string | null {
   }
   // 借りている人が「入居中」なら賃貸中(本人の居住を言う語は tenantMarker の時点で外してある)。
   if (tenantMarker) return "rented";
+  if (rentalQualifiesOccupancy && !ownerSelf) return "rented";
   // 本人でない人が住んでいる(家族か借り手か分からない)=賃貸の語が無ければ決めない(15巡目)。
   if (NOT_OWNER.test(s) && !explicitRental) return null;
   //   本人以外の人(親族・家族・第三者・知人など)が住んでいると言っているときも同じ(21巡目)。
