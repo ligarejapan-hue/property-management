@@ -841,7 +841,8 @@ INSERT INTO occupancy_rented_backup (id, updated_at)
   SELECT id, updated_at FROM properties WHERE occupancy_status = 'rented'
   ON CONFLICT (id) DO UPDATE SET updated_at = EXCLUDED.updated_at;
 -- ② 旧版の「入居中」(occupied)は賃貸中も含む意味だったので、occupied へ戻す。
-UPDATE properties SET occupancy_status = 'occupied' WHERE occupancy_status = 'rented';
+-- ⚠版番号(version)も進める=開いたままの編集画面の古い保存を止める(@codex PR#512 45巡目)。
+UPDATE properties SET occupancy_status = 'occupied', version = version + 1 WHERE occupancy_status = 'rented';
 COMMIT;
 ```
 
@@ -854,7 +855,7 @@ COMMIT;
 -- ⚠戻した行だけを控えから消す(旧版で保存されて戻さなかった行は控えに残す=人が確かめる・13巡目)。
 BEGIN;
 WITH restored AS (
-  UPDATE properties p SET occupancy_status = 'rented'
+  UPDATE properties p SET occupancy_status = 'rented', version = p.version + 1
     FROM occupancy_rented_backup b
     WHERE p.id = b.id AND p.occupancy_status = 'occupied' AND p.updated_at = b.updated_at
     RETURNING p.id
