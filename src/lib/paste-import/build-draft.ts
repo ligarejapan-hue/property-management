@@ -50,7 +50,10 @@ function occupancyFor(raw: string): string | null {
   //   ⚠「入居者なし」「テナント募集中」「賃借人は退去済み」は住んでいない側=賃貸中と読まない(8巡目)。
   const tenantAbsent = has(["なし", "無し", "いない", "おらず", "募集", "退去", "空き", "不在"]);
   // ⚠「入居者：所有者本人」「入居者はオーナー本人」は本人の居住=借り手の語として数えない(10巡目)。
-  const ownerSelf = has(["所有者本人", "オーナー本人", "本人", "自己居住", "自身"]);
+  //   「本人ではなく賃借人が入居中」「本人以外」のような本人の打ち消しは本人の居住と数えない(11巡目)。
+  const ownerSelf =
+    has(["所有者本人", "オーナー本人", "本人", "自己居住", "自身"]) &&
+    !/(本人|オーナー|所有者|自身)(では|で|じゃ)?(な|無)|本人以外|自身以外/.test(s);
   const tenantMarker = !tenantAbsent && !ownerSelf && has(["賃借人", "借主", "入居者", "テナント", "借家人"]);
   const explicitRental = has(["賃貸中", "賃貸している", "貸している", "賃貸に出している"]);
   const rentedMarker = tenantMarker || explicitRental;
