@@ -97,7 +97,8 @@ function occupancyFor(raw: string): string | null {
   //   ⚠親族・家族などが住んでいる言い方は借り手と決めない(「親族が入居者として居住中」・23巡目)。
   const familyWord = has([...RELATIVE_WORDS, "第三者", "社宅", "他人"]);
   //   ⚠「テナントではありません」「賃借人ではない」は借り手の印にしない=決めない(29巡目)。
-  if (/(賃借人|借主|入居者|テナント|借家人)(では|で|じゃ)?(な|無|ありません|ございません)/.test(s)) return null;
+  //   「賃借人以外」「入居者以外」も同じ(33巡目)。
+  if (/(賃借人|借主|入居者|テナント|借家人)((では|で|じゃ)?(な|無|ありません|ございません)|以外)/.test(s)) return null;
   const tenantEvidence =
     !familyWord &&
     !tenantAbsent &&
