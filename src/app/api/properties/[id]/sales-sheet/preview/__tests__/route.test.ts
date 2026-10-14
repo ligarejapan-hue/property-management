@@ -235,7 +235,7 @@ describe("POST sales-sheet/preview", () => {
     expect(buildCall.property.occupancyStatus).toBe("空室");
   });
 
-  it("現況 occupied → 入居中 に変換してドキュメントを構築する", async () => {
+  it("現況 occupied → 居住中 に変換してドキュメントを構築する", async () => {
     pm.property.findUnique.mockResolvedValue({
       id: "p1", address: "addr", propertyType: "land", createdBy: "u1", assignedTo: null,
       occupancyStatus: "occupied", building: null, photos: [],
@@ -243,7 +243,7 @@ describe("POST sales-sheet/preview", () => {
     const res = await POST(req(), ctx);
     expect(res.status).toBe(200);
     const buildCall = (buildInitialSalesSheetDocument as unknown as Mock).mock.calls[0][0];
-    expect(buildCall.property.occupancyStatus).toBe("入居中");
+    expect(buildCall.property.occupancyStatus).toBe("居住中");
   });
 
   it("現況 unknown → 不明 に変換してドキュメントを構築する", async () => {

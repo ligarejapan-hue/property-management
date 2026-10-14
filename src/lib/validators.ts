@@ -1,5 +1,10 @@
 import { z } from "zod";
-import { PROPERTY_TYPE_VALUES, CASE_STATUS_VALUES, INTRODUCTION_ROUTE_VALUES } from "@/lib/property-types";
+import {
+  PROPERTY_TYPE_VALUES,
+  CASE_STATUS_VALUES,
+  INTRODUCTION_ROUTE_VALUES,
+  OCCUPANCY_STATUS_VALUES,
+} from "@/lib/property-types";
 import {
   normalizeCorporateNumber,
   normalizeCompanyRegistryNumber,
@@ -303,7 +308,7 @@ export const updatePropertySchema = z.object({
   // 部屋番号・現況・持分メモ(2026-10-11 発注者のご指摘で追加=詳細に出ているのに直せなかった)。
   // 空白だけなら空(null)にする(空文字を残さない)。
   roomNo: z.string().trim().max(50, "部屋番号は50文字以内で入力してください").transform((v) => (v === "" ? null : v)).optional().nullable(),
-  occupancyStatus: z.enum(["vacant", "occupied", "unknown"]).optional().nullable(),
+  occupancyStatus: z.enum(OCCUPANCY_STATUS_VALUES).optional().nullable(),
   ownershipShareNote: z.string().max(500).optional().nullable(),
   // 棟の選び方(列ではない=保存前に取り除く)。省略=auto。
   buildingChoice: buildingChoiceSchema.optional(),

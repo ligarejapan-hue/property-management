@@ -64,9 +64,10 @@ describe("取込行の確定で部屋の欄を落とさない", () => {
     expect(d).not.toHaveProperty("managementFee");
   });
 
-  it("入居状況は決まった値だけ(それ以外は入れない)", () => {
-    const d = buildPropertyCreateData({ "住所": ADDR, "入居状況": "空室" }, "u");
-    expect(d).not.toHaveProperty("occupancyStatus");
+  it("入居状況は決まった値と日本語の表示名だけ(それ以外は入れない・2026-10-14)", () => {
+    expect(buildPropertyCreateData({ "住所": ADDR, "入居状況": "空室" }, "u").occupancyStatus).toBe("vacant");
+    expect(buildPropertyCreateData({ "住所": ADDR, "入居状況": "賃貸中" }, "u").occupancyStatus).toBe("rented");
+    expect(buildPropertyCreateData({ "住所": ADDR, "入居状況": "ほぼ空き" }, "u")).not.toHaveProperty("occupancyStatus");
   });
 
   it("郵便番号は7桁をハイフンなしにそろえ、不正な値は入れない", () => {

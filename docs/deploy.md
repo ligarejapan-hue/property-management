@@ -815,6 +815,60 @@ sudo systemctl status property-management --no-pager
 > スキーマ変更がない場合はステップ 2 不要。  
 > デプロイ前に `pg_dump` でバックアップを取っておくこと。
 
+### 現況「賃貸中」(`20261014090000_occupancy_rented`)より前へ戻すとき
+
+この migration は enum `OccupancyStatus` に値 `rented`(賃貸中)を足すだけ。PostgreSQL は enum の値を消せないので、
+値そのものは残してよい。ただし**古い版のアプリは `rented` を知らず、その行を読むと失敗し得る**ため、
+旧版を起動する**前**に `rented` の行を古い版が知っている値へ戻す。
+
+⚠**先にアプリを止めてから**変換する(@codex PR#512 2巡目)。動いている新しい版が変換の後に「賃貸中」を
+保存すると、また `rented` の行ができて旧版が読めなくなる。順番:
+
+1. `sudo systemctl stop property-management`(新しい版を止める=書き込みを止める)
+2. 下の SQL を実行する
+3. 上の手順 1・3・4(旧版へ戻してビルド)→ 手順 5 で起動(`restart` は停止中でも起動する)
+   ⚠**手順 2(`prisma migrate resolve --rolled-back`)はこの migration では行わない**(@codex PR#512 4巡目)。
+   `migrate resolve` は失敗した migration にしか使えず、成功済みのものには誤りを返して手順が止まる。
+   enum の値も残すので、適用済みの記録はそのままでよい(再び新しい版へ進めても二重には当たらない)。
+
+```sql
+-- ① どの物件が賃貸中だったかを控える(再び新しい版へ進めたときに戻すため・@codex PR#512 5巡目)。
+--    ⚠控えは消さずに**足していく**(やり直しても前回の控えが残る=10巡目・今の賃貸中も加わる=6巡目)。
+--    psql は `-v ON_ERROR_STOP=1` で実行する(途中で失敗したら全体を取り消す)。
+BEGIN;
+CREATE TABLE IF NOT EXISTS occupancy_rented_backup (id uuid PRIMARY KEY, updated_at timestamp(3));
+INSERT INTO occupancy_rented_backup (id, updated_at)
+  SELECT id, updated_at FROM properties WHERE occupancy_status = 'rented'
+  ON CONFLICT (id) DO UPDATE SET updated_at = EXCLUDED.updated_at;
+-- ② 旧版の「入居中」(occupied)は賃貸中も含む意味だったので、occupied へ戻す。
+-- ⚠版番号(version)も進める=開いたままの編集画面の古い保存を止める(@codex PR#512 45巡目)。
+UPDATE properties SET occupancy_status = 'occupied', version = version + 1 WHERE occupancy_status = 'rented';
+COMMIT;
+```
+
+再び新しい版へ進めるときは、**新しい版を起動する前**に控えから賃貸中に戻し、控えの表を消す
+(起動してからだと、その間に人が直した現況を上書きしうる・6巡目)。順番: 旧版を止める →
+新しい版をビルドし `prisma migrate deploy` → 下の SQL → 起動。
+
+```sql
+-- psql は `-v ON_ERROR_STOP=1` で。戻すのと控えから消すのは1つのトランザクション(片方だけ起きない・10巡目)。
+-- ⚠戻した行だけを控えから消す(旧版で保存されて戻さなかった行は控えに残す=人が確かめる・13巡目)。
+BEGIN;
+WITH restored AS (
+  UPDATE properties p SET occupancy_status = 'rented', version = p.version + 1
+    FROM occupancy_rented_backup b
+    WHERE p.id = b.id AND p.occupancy_status = 'occupied' AND p.updated_at = b.updated_at
+    RETURNING p.id
+)
+DELETE FROM occupancy_rented_backup WHERE id IN (SELECT id FROM restored);
+COMMIT;
+-- 残った行(SELECT id FROM occupancy_rented_backup)は、旧版の間に保存された物件。
+-- 画面で現況を確かめて必要なら賃貸中に直し、終わったら DROP TABLE occupancy_rented_backup;
+```
+
+(旧版で動いていた間に**一度でも保存された物件**は、`updated_at` が控えと違うので戻さない=人が直した現況を
+上書きしない・@codex PR#512 8巡目。SQL の UPDATE は `updated_at` を動かさないので、控えの変換自体では変わらない。)
+
 ---
 
 ## 9. デプロイ資材テンプレート

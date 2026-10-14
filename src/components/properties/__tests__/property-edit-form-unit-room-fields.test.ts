@@ -49,7 +49,7 @@ describe("編集の欄", () => {
       const occ = fields.find((f) => f.key === "occupancyStatus");
       expect(occ?.label).toBe("現況");
       expect(occ?.type).toBe("select");
-      expect(occ?.options?.map((o) => o.value)).toEqual(["", "vacant", "occupied", "unknown"]);
+      expect(occ?.options?.map((o) => o.value)).toEqual(["", "vacant", "occupied", "rented", "unknown"]);
       expect(fields.find((f) => f.key === "ownershipShareNote")?.label).toBe("持分メモ");
     }
   });
