@@ -88,3 +88,42 @@ describe("Excelまとめ取込の控え", () => {
     expect(Object.fromEntries(Object.entries(out).map(([k, v]) => [k, v.kind]))).toEqual(expected);
   });
 });
+
+import {
+  compactRegistryPdfDraftForPending,
+  isRegistryPdfDraftEmpty,
+  parseRegistryPdfDraft,
+  registryNeedsReselect,
+} from "../screens/registry-pdf";
+
+describe("謄本PDF取込の控え", () => {
+  const d = {
+    rev: 1, step: "confirm", uploadTab: "file", text: "", fileName: "謄本.pdf", fromFile: true,
+    fields: { address: { value: "東京都", confidence: "high" } },
+    owners: [{ name: "山田", address: "", share: "" }], warnings: [], isLikelyScanned: false,
+    embeddedTextLength: 1200, target: "existing", existingPropertyId: "p1", propertySearchQuery: "港区",
+    existingProperty: { id: "p1", address: "港区1-1", lotNumber: null, realEstateNumber: null },
+  };
+  it("往復して同じ・形違いは捨てる", () => {
+    expect(parseRegistryPdfDraft(JSON.parse(JSON.stringify(d)))).toEqual(d);
+    expect(parseRegistryPdfDraft({ ...d, step: "result" })).toBeNull();
+    expect(parseRegistryPdfDraft({ ...d, fields: { a: { value: "x", confidence: "?" } } })).toBeNull();
+    expect(parseRegistryPdfDraft({ ...d, rev: 2 })).toBeNull();
+  });
+  it("最初の段階で文章も無ければ空(ファイルだけ選んだ状態は戻せないので控えない)", () => {
+    const empty = compactRegistryPdfDraftForPending();
+    expect(isRegistryPdfDraftEmpty(empty)).toBe(true);
+    expect(isRegistryPdfDraftEmpty({ ...empty, fileName: "a.pdf", fromFile: true })).toBe(true);
+    expect(isRegistryPdfDraftEmpty({ ...empty, text: "所在" })).toBe(false);
+    expect(isRegistryPdfDraftEmpty(d as never)).toBe(false);
+  });
+  it.each([
+    ["upload", "file", true, false, false],
+    ["extract", "file", true, false, true],
+    ["confirm", "file", true, false, true],
+    ["confirm", "file", true, true, false],
+    ["confirm", "text", false, false, false],
+  ] as const)("段階 %s・%s・ファイルで読んだ=%s・ファイルあり=%s → 選び直し=%s", (step, uploadTab, fromFile, hasFile, expected) => {
+    expect(registryNeedsReselect({ step, uploadTab, fromFile, hasFile })).toBe(expected);
+  });
+});

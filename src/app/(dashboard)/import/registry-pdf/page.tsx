@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useCallback, useRef } from "react";
+import { useState, useCallback, useMemo, useRef } from "react";
 import { PageHeader } from "@/components/ui/page-header";
 import Link from "next/link";
 import {
@@ -28,6 +28,22 @@ import {
 } from "@/lib/api-client";
 import ImportSwitcher from "@/components/import/import-switcher";
 import FileDropZone from "@/components/ui/file-drop-zone";
+import { draftKey } from "@/lib/drafts/draft-store";
+import { isDefiniteSubmitFailure } from "@/lib/drafts/submit-outcome";
+import {
+  compactRegistryPdfDraftForPending,
+  isRegistryPdfDraftEmpty,
+  parseRegistryPdfDraft,
+  registryNeedsReselect,
+  type RegistryPdfDraft,
+} from "@/lib/drafts/screens/registry-pdf";
+import { useClientReady, useDraftAutosave, useRestoredDraft } from "@/hooks/use-draft";
+import {
+  DraftPendingNotice,
+  DraftReselectFileNotice,
+  DraftRestoredNotice,
+  DraftTooLargeNotice,
+} from "@/components/drafts/draft-notices";
 
 // ---------------------------------------------------------------------------
 // Types
@@ -316,35 +332,43 @@ const FIELD_LABELS: Record<string, string> = {
 // Main Component
 // ---------------------------------------------------------------------------
 
-export default function RegistryPdfPage() {
+function RegistryPdfScreen({ draftEnabled }: { draftEnabled: boolean }) {
+  // 作業中の控え(設計書 §2 S3)。
+  const draftKeyValue = draftEnabled ? draftKey("registry-pdf") : null;
+  const restored = useRestoredDraft(draftKeyValue, parseRegistryPdfDraft);
+  const r0 = restored?.data ?? null;
+
   // Step state
-  const [step, setStep] = useState<Step>("upload");
+  const [step, setStep] = useState<Step>(r0?.step ?? "upload");
 
   // Upload step
-  const [uploadTab, setUploadTab] = useState<UploadTab>("file");
-  const [text, setText] = useState("");
-  const [fileName, setFileName] = useState<string | null>(null);
+  const [uploadTab, setUploadTab] = useState<UploadTab>(r0?.uploadTab ?? "file");
+  const [text, setText] = useState(r0?.text ?? "");
+  const [fileName, setFileName] = useState<string | null>(r0?.fileName ?? null);
   const [selectedFile, setSelectedFile] = useState<File | null>(null); // 実 PDF ファイル
+  /** 解析に使ったのがファイルか(取り込みのときもう一度ファイルが要る)。 */
+  const [fromFile, setFromFile] = useState(r0?.fromFile ?? false);
 
   // Extract/Edit step
-  const [fields, setFields] = useState<Record<string, ExtractedField>>({});
-  const [owners, setOwners] = useState<ExtractedOwner[]>([]);
-  const [warnings, setWarnings] = useState<string[]>([]);
+  const [fields, setFields] = useState<Record<string, ExtractedField>>(r0?.fields ?? {});
+  const [owners, setOwners] = useState<ExtractedOwner[]>(r0?.owners ?? []);
+  const [warnings, setWarnings] = useState<string[]>(r0?.warnings ?? []);
   const [parsing, setParsing] = useState(false);
-  const [isLikelyScanned, setIsLikelyScanned] = useState(false);
+  const [isLikelyScanned, setIsLikelyScanned] = useState(r0?.isLikelyScanned ?? false);
   // Phase F-2a: parse response の extraction.embeddedTextLength を保持する。
   // raw text 本文は持たない（文字数のみ）。UI 上で「ほぼ取れていない」目安として表示する。
   const [embeddedTextLength, setEmbeddedTextLength] = useState<number | null>(
-    null,
+    r0?.embeddedTextLength ?? null,
   );
 
   // Target selection
-  const [target, setTarget] = useState<RegistrationTarget>("auto");
-  const [existingPropertyId, setExistingPropertyId] = useState("");
-  const [propertySearchQuery, setPropertySearchQuery] = useState("");
+  const [target, setTarget] = useState<RegistrationTarget>(r0?.target ?? "auto");
+  const [existingPropertyId, setExistingPropertyId] = useState(r0?.existingPropertyId ?? "");
+  const [propertySearchQuery, setPropertySearchQuery] = useState(r0?.propertySearchQuery ?? "");
+  // 選んであった物件は、検索し直さなくても選べた状態で見えるよう結果の一覧に入れておく。
   const [propertySearchResults, setPropertySearchResults] = useState<
     Array<{ id: string; address: string; lotNumber?: string | null; realEstateNumber?: string | null }>
-  >([]);
+  >(r0?.existingProperty ? [r0.existingProperty] : []);
   const [propertySearchLoading, setPropertySearchLoading] = useState(false);
   const searchTimerRef2 = useRef<ReturnType<typeof setTimeout> | null>(null);
 
@@ -352,6 +376,39 @@ export default function RegistryPdfPage() {
   const [importing, setImporting] = useState(false);
   const [result, setResult] = useState<ImportResult | null>(null);
   const [error, setError] = useState<string | null>(null);
+
+  // 前回、取り込みの返事が来る前に離れた=取り込まれたか分からない。確かめるまで止める(§5.1)。
+  const [pendingBlocked, setPendingBlocked] = useState(restored?.pendingSubmit != null);
+  const [restoredDismissed, setRestoredDismissed] = useState(false);
+  const existingProperty = propertySearchResults.find((p) => p.id === existingPropertyId) ?? null;
+  const draftData = useMemo<RegistryPdfDraft>(
+    () => ({
+      rev: 1,
+      // 結果の段階(取り込み済み)は控えない: 最初の段階で文章なし=空の形にして、書き手に消させる。
+      step: step === "result" ? "upload" : step,
+      text: step === "result" ? "" : text,
+      uploadTab, fileName, fromFile, fields, owners, warnings, isLikelyScanned, embeddedTextLength,
+      target, existingPropertyId, propertySearchQuery,
+      existingProperty: existingProperty
+        ? {
+            id: existingProperty.id,
+            address: existingProperty.address,
+            lotNumber: existingProperty.lotNumber ?? null,
+            realEstateNumber: existingProperty.realEstateNumber ?? null,
+          }
+        : null,
+    }),
+    [step, uploadTab, text, fileName, fromFile, fields, owners, warnings, isLikelyScanned, embeddedTextLength,
+      target, existingPropertyId, propertySearchQuery, existingProperty],
+  );
+  const draftSaver = useDraftAutosave(draftKeyValue, draftData, isRegistryPdfDraftEmpty, restored, {
+    compactForPending: compactRegistryPdfDraftForPending,
+  });
+  const needsReselect = registryNeedsReselect({ step, uploadTab, fromFile, hasFile: selectedFile !== null });
+  /** 戻した控えがファイルで読んだ確認画面だったときの、前回のファイル名(選び直しの帯に出す)。 */
+  const [reselectExpected, setReselectExpected] = useState<string | null>(
+    r0 && r0.fromFile && r0.step !== "upload" ? r0.fileName : null,
+  );
 
   // ⚠OCR の画面導線は **2026-09-08 発注者判断で撤去**(機能そのものは残す)。
   //   試し入れの実測で、きれいなA4は約82%読めたが**横向き・低品質のスキャンは
@@ -430,6 +487,9 @@ export default function RegistryPdfPage() {
         })),
       );
       setWarnings(parsed.warnings);
+      // 読み直したら選び直しの帯は不要。
+      setFromFile(uploadTab === "file" && selectedFile !== null);
+      setReselectExpected(null);
       setStep("extract");
     } catch (err) {
       setError(err instanceof Error ? err.message : "解析に失敗しました");
@@ -466,6 +526,7 @@ export default function RegistryPdfPage() {
   };
 
   const handleImport = async () => {
+    if (needsReselect || pendingBlocked) return;
     setImporting(true);
     setError(null);
     setResult(null);
@@ -491,6 +552,8 @@ export default function RegistryPdfPage() {
       })),
     };
 
+    // 返事が来る前に離れたら、戻ったとき「登録されたか確かめて」と出す(二重登録を防ぐ・§5.1)。
+    draftSaver.markSubmitting();
     try {
       let json;
       if (uploadTab === "file" && selectedFile) {
@@ -510,9 +573,13 @@ export default function RegistryPdfPage() {
           edited,
         );
       }
+      // ⚠close ではなく discard: 「続けて取り込む」で次の謄本へ進んだとき、また控えられるように。
+      draftSaver.discard();
       setResult(json as ImportResult);
       setStep("result");
     } catch (err) {
+      if (isDefiniteSubmitFailure(err)) draftSaver.unmarkSubmitting();
+      else setPendingBlocked(true);
       setError(err instanceof Error ? err.message : "取込に失敗しました");
     } finally {
       setImporting(false);
@@ -542,6 +609,7 @@ export default function RegistryPdfPage() {
   };
 
   const handleReset = () => {
+    draftSaver.discard();
     setStep("upload");
     setText("");
     setFileName(null);
@@ -554,6 +622,10 @@ export default function RegistryPdfPage() {
     setExistingPropertyId("");
     setResult(null);
     setError(null);
+    setFromFile(false);
+    setReselectExpected(null);
+    setRestoredDismissed(true);
+    setPendingBlocked(false);
   };
 
   // レビュー round1 #7: レンダリングのたびに2回呼んでいたのを1回にまとめる。
@@ -572,6 +644,40 @@ export default function RegistryPdfPage() {
       />
 
       <StepIndicator current={step} />
+
+      {pendingBlocked ? (
+        <div className="mb-4">
+          <DraftPendingNotice
+            onConfirm={() => {
+              draftSaver.unmarkSubmitting();
+              setPendingBlocked(false);
+            }}
+          />
+        </div>
+      ) : (
+        restored && !restoredDismissed && step !== "result" && (
+          <div className="mb-4">
+            <DraftRestoredNotice savedAt={restored.savedAt} onDiscard={handleReset} />
+          </div>
+        )
+      )}
+      {draftSaver.tooLarge && <div className="mb-4"><DraftTooLargeNotice /></div>}
+      {reselectExpected && (step === "extract" || step === "confirm") ? (
+        <div className="mb-4 space-y-2">
+          <DraftReselectFileNotice expectedName={reselectExpected} chosenName={selectedFile?.name ?? null} />
+          {needsReselect && (
+            <FileDropZone
+              accept=".pdf"
+              icon={FileText}
+              title="PDFファイルをここにドラッグ＆ドロップ"
+              fileName={null}
+              // ⚠読み取りはし直さない(結果はそのまま・設計書 §4.3)。名前は前回のものを残す。
+              onFiles={(files) => setSelectedFile(files[0])}
+              onNoneAccepted={() => setSelectedFile(null)}
+            />
+          )}
+        </div>
+      ) : null}
 
       {error && (
         <div className="mb-4 rounded-md border border-red-200 dark:border-red-400/20 bg-red-50 dark:bg-red-500/10 p-3 text-sm text-red-700 dark:text-red-300">
@@ -1136,7 +1242,7 @@ export default function RegistryPdfPage() {
               </button>
               <button
                 onClick={handleImport}
-                disabled={importing}
+                disabled={importing || needsReselect || pendingBlocked}
                 className="flex items-center gap-2 rounded-md bg-indigo-600 px-5 py-2.5 text-sm font-medium text-white hover:bg-indigo-700 disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
               >
                 {importing ? (
@@ -1323,4 +1429,10 @@ export default function RegistryPdfPage() {
       )}
     </div>
   );
+}
+
+/** 控えはブラウザで描き直した後だけ読む(F5 でサーバー描画と食い違わないように)。 */
+export default function RegistryPdfPage() {
+  const clientReady = useClientReady();
+  return <RegistryPdfScreen key={clientReady ? "client" : "server"} draftEnabled={clientReady} />;
 }

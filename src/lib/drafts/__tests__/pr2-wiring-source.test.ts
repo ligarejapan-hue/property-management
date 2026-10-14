@@ -46,3 +46,23 @@ describe("Excelまとめ取込の配線", () => {
     expect(src).toContain("restoreExcelResults(");
   });
 });
+
+describe("謄本PDF取込の配線", () => {
+  const src = read("src/app/(dashboard)/import/registry-pdf/page.tsx");
+  it("F5 でも食い違わない", () => {
+    expectClientReadyGate(src, "RegistryPdfScreen");
+    expect(src).toMatch(/draftEnabled \? draftKey\("registry-pdf"\) : null/);
+  });
+  it("取り込みの直前に送信中の印・成功で消す(続けて取り込めるよう discard)・4xx だけ印を外す", () => {
+    expect(src).toMatch(/draftSaver\.markSubmitting\(\);[\s\S]{0,300}importRegistryPdf/);
+    expect(src).toMatch(/draftSaver\.discard\(\);\s*setResult\(json as ImportResult\);/);
+    expect(src).toMatch(/if \(isDefiniteSubmitFailure\(err\)\) draftSaver\.unmarkSubmitting\(\);\s*else setPendingBlocked\(true\);/);
+  });
+  it("ファイルを選び直すまで「登録実行」を押せない", () => {
+    expect(src).toMatch(/disabled=\{importing \|\| needsReselect \|\| pendingBlocked\}/);
+    expect(src).toContain("<DraftReselectFileNotice");
+  });
+  it("キャンセル(最初に戻る)で控えを消す", () => {
+    expect(src).toMatch(/const handleReset = \(\) => \{\s*draftSaver\.discard\(\);/);
+  });
+});
