@@ -105,3 +105,21 @@ describe("取り込み(CSV)の配線", () => {
     }
   });
 });
+
+describe("送っている途中は「最初からやり直す」を出さない(送信中の印を消させない・@codex P1)", () => {
+  it("貼り付けて物件化: 登録中は帯を出さない", () => {
+    expect(read("src/app/(dashboard)/import/paste/page.tsx")).toMatch(
+      /restored && !restoredDismissed && !registering && <DraftRestoredNotice/,
+    );
+  });
+  it("謄本PDF: 取り込み中は帯を出さない", () => {
+    expect(read("src/app/(dashboard)/import/registry-pdf/page.tsx")).toMatch(
+      /restored && !restoredDismissed && !importing && step !== "result" &&/,
+    );
+  });
+  it("取り込み(CSV): どれかの取り込み中・結果が分からない間は帯を出さない", () => {
+    const src = read("src/app/(dashboard)/import/page.tsx");
+    expect(src).toMatch(/const importBusy = uploading \|\| roLoading \|\| rpLoading \|\| importBlocked;/);
+    expect(src).toMatch(/restoreDecision\.start && restored && !restoredDismissed && !importBusy &&/);
+  });
+});

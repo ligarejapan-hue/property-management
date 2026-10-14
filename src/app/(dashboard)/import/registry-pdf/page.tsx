@@ -655,7 +655,8 @@ function RegistryPdfScreen({ draftEnabled }: { draftEnabled: boolean }) {
           />
         </div>
       ) : (
-        restored && !restoredDismissed && step !== "result" && (
+        // ⚠取り込み中は出さない(「最初からやり直す」で送信中の印を消させない)。
+        restored && !restoredDismissed && !importing && step !== "result" && (
           <div className="mb-4">
             <DraftRestoredNotice savedAt={restored.savedAt} onDiscard={handleReset} />
           </div>

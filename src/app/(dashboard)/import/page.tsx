@@ -655,6 +655,8 @@ function ImportScreen({ draftEnabled }: { draftEnabled: boolean }) {
   const csvPendingRef = useRef(INITIAL_CSV_PENDING);
   /** 画面に残ったまま結果が分からなくなった。履歴で確かめるまで取り込みを止める。 */
   const [importBlocked, setImportBlocked] = useState(false);
+  // ⚠どれかの取り込み中・結果が分からない間は「最初からやり直す」を出さない(送信中の印を消させない)。
+  const importBusy = uploading || roLoading || rpLoading || importBlocked;
   const applyCsvPending = (e: CsvPendingEvent) => {
     const r = nextCsvPending(csvPendingRef.current, e);
     csvPendingRef.current = r.state;
@@ -1145,7 +1147,7 @@ function ImportScreen({ draftEnabled }: { draftEnabled: boolean }) {
           <DraftImportPendingNotice reason="unknown" onDismiss={() => applyCsvPending("confirm")} />
         </div>
       )}
-      {restoreDecision.start && restored && !restoredDismissed && (
+      {restoreDecision.start && restored && !restoredDismissed && !importBusy && (
         <div className="mb-4">
           <DraftRestoredNotice savedAt={restored.savedAt} onDiscard={handleDiscardDraft} />
         </div>
