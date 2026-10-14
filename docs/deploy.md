@@ -850,13 +850,19 @@ COMMIT;
 新しい版をビルドし `prisma migrate deploy` → 下の SQL → 起動。
 
 ```sql
--- psql は `-v ON_ERROR_STOP=1` で。戻すのと控えを消すのは1つのトランザクション(片方だけ起きない・10巡目)。
+-- psql は `-v ON_ERROR_STOP=1` で。戻すのと控えから消すのは1つのトランザクション(片方だけ起きない・10巡目)。
+-- ⚠戻した行だけを控えから消す(旧版で保存されて戻さなかった行は控えに残す=人が確かめる・13巡目)。
 BEGIN;
-UPDATE properties p SET occupancy_status = 'rented'
-  FROM occupancy_rented_backup b
-  WHERE p.id = b.id AND p.occupancy_status = 'occupied' AND p.updated_at = b.updated_at;
-DROP TABLE occupancy_rented_backup;
+WITH restored AS (
+  UPDATE properties p SET occupancy_status = 'rented'
+    FROM occupancy_rented_backup b
+    WHERE p.id = b.id AND p.occupancy_status = 'occupied' AND p.updated_at = b.updated_at
+    RETURNING p.id
+)
+DELETE FROM occupancy_rented_backup WHERE id IN (SELECT id FROM restored);
 COMMIT;
+-- 残った行(SELECT id FROM occupancy_rented_backup)は、旧版の間に保存された物件。
+-- 画面で現況を確かめて必要なら賃貸中に直し、終わったら DROP TABLE occupancy_rented_backup;
 ```
 
 (旧版で動いていた間に**一度でも保存された物件**は、`updated_at` が控えと違うので戻さない=人が直した現況を
