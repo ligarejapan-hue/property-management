@@ -662,6 +662,12 @@ function ImportScreen({ draftEnabled }: { draftEnabled: boolean }) {
   /** 結果が分からない(前回離れた/画面に残ったまま 5xx・通信切れ)。履歴で確かめるまで取り込みを止める。 */
   const [importBlocked, setImportBlocked] = useState(restoreDecision.showPending);
   const [importBlockReason, setImportBlockReason] = useState<"left" | "unknown">("left");
+  /**
+   * 下の取り込み履歴が、結果が分からなくなる前のままか。⚠古い履歴を見て「無かった」と
+   *   確かめたことにさせない: 分からなくなった後に始めた読み込みが成功するまで true(@codex P1)。
+   */
+  const [historyStale, setHistoryStale] = useState(restoreDecision.showPending);
+  const historyGenRef = useRef(0);
   // ⚠どれかの取り込み中・結果が分からない間は「最初からやり直す」を出さない(送信中の印を消させない)。
   //   下見の返事を待つ間も出さない(届いた結果が控えを作り直す)。
   const importBusy = uploading || previewLoading || roLoading || rpLoading || importBlocked;
@@ -671,6 +677,8 @@ function ImportScreen({ draftEnabled }: { draftEnabled: boolean }) {
     if (e === "start") draftSaver.markSubmitting();
     if (r.unmark) draftSaver.unmarkSubmitting();
     if (e === "unknown") {
+      historyGenRef.current += 1;
+      setHistoryStale(true);
       setImportBlocked(true);
       setImportBlockReason("unknown");
     }
@@ -692,6 +700,7 @@ function ImportScreen({ draftEnabled }: { draftEnabled: boolean }) {
   // jobFilters / jobPage / jobLimit はクライアント State なので
   // 最新値をクロージャに焼き込むため useCallback の deps に含める。
   const fetchJobs = useCallback(async () => {
+    const gen = historyGenRef.current;
     setJobsLoading(true);
     try {
       // 日付フィルタは「YYYY-MM-DD」を受け取り、ISO 文字列に変換して渡す。
@@ -714,6 +723,7 @@ function ImportScreen({ draftEnabled }: { draftEnabled: boolean }) {
       });
       setJobs((json.data ?? []) as ImportJob[]);
       setJobPagination(json.pagination ?? null);
+      if (gen === historyGenRef.current) setHistoryStale(false);
     } catch {
       // ignore
     } finally {
@@ -1171,7 +1181,7 @@ function ImportScreen({ draftEnabled }: { draftEnabled: boolean }) {
       />
       {importBlocked && (
         <div className="mb-4">
-          <DraftImportPendingNotice reason={importBlockReason} confirmDisabled={jobsLoading} onDismiss={() => applyCsvPending("confirm")} />
+          <DraftImportPendingNotice reason={importBlockReason} confirmDisabled={jobsLoading || historyStale} historyError={historyStale && !jobsLoading} onDismiss={() => applyCsvPending("confirm")} />
         </div>
       )}
       {restoreDecision.start && restored && !restoredDismissed && !importBusy && (

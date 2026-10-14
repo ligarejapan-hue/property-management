@@ -47,3 +47,12 @@ describe("取り込みの結果が分からない帯: 履歴を読み込み中",
     expect(on).not.toMatch(/<button[^>]*disabled=""/);
   });
 });
+
+describe("取り込みの結果が分からない帯: 履歴を読み込めなかった", () => {
+  it("historyError のとき読み込み直すよう伝える", () => {
+    const html = renderToStaticMarkup(
+      createElement(DraftImportPendingNotice, { onDismiss: () => {}, reason: "unknown", confirmDisabled: true, historyError: true }),
+    );
+    expect(html).toContain("取り込み履歴を読み込めませんでした。下の取り込み履歴を読み込み直してから続けてください。");
+  });
+});

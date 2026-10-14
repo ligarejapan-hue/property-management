@@ -180,6 +180,20 @@ describe("取り込み(CSV): 結果が分からないときは履歴を読み直
     expect(m.length).toBe(3);
   });
   it("履歴を読んでいる間は「確かめたので続ける」を押せない", () => {
-    expect(src).toContain('reason={importBlockReason} confirmDisabled={jobsLoading} onDismiss={() => applyCsvPending("confirm")}');
+    expect(src).toContain('reason={importBlockReason} confirmDisabled={jobsLoading || historyStale} historyError={historyStale && !jobsLoading} onDismiss={() => applyCsvPending("confirm")}');
+  });
+});
+
+describe("取り込み(CSV): 履歴の読み直しが成功するまで「確かめた」を押せない(@codex P1)", () => {
+  const src = read("src/app/(dashboard)/import/page.tsx");
+  it("結果が分からなくなったら履歴を古い扱いにし、その後に始めた読み込みが成功したときだけ外す", () => {
+    expect(src).toMatch(/const \[historyStale, setHistoryStale\] = useState\(restoreDecision\.showPending\);/);
+    expect(src).toMatch(/historyGenRef\.current \+= 1;\s*setHistoryStale\(true\);/);
+    expect(src).toMatch(/const gen = historyGenRef\.current;\s*setJobsLoading\(true\);/);
+    expect(src).toMatch(/setJobPagination\(json\.pagination \?\? null\);\s*if \(gen === historyGenRef\.current\) setHistoryStale\(false\);/);
+  });
+  it("帯のボタンは読み込み中・古いままのとき押せず、読めなかったことを伝える", () => {
+    expect(src).toContain("confirmDisabled={jobsLoading || historyStale}");
+    expect(src).toContain("historyError={historyStale && !jobsLoading}");
   });
 });
