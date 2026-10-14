@@ -83,6 +83,9 @@ function occupancyFor(raw: string): string | null {
     !tenantAbsent &&
     !ownerSelf &&
     TENANT_PRESENT.test(s) &&
+    // 打ち消し(「居住してない」)・過去(「居住していた」「入居していた」)は今住んでいる印にしない(19巡目)。
+    !OCCUPIED_NEGATION.test(s) &&
+    !has(["ていた", "でいた", "だった", "ていました", "でいました"]) &&
     !has(["探し", "確認中", "未定", "かどうか", "いるか", "あるか"]);
   const explicitRental = has(["賃貸中", "賃貸している", "貸している", "賃貸に出している"]);
   const rentedMarker = tenantMarker || explicitRental;
