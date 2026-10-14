@@ -459,6 +459,10 @@ export interface PasteImportReviewProps {
   onRegister?: () => void;
   registering?: boolean;
   registerError?: string | null;
+  /** 控えから戻した画面などで、登録を止める理由(PDFの選び直し・送信途中の確認待ち)。 */
+  registerBlockedReason?: string | null;
+  /** 入力欄を触れなくする(前回の登録が済んだか確かめるまで)。 */
+  readOnly?: boolean;
 
   /** 建物名から棟へつなぐ選び方(区分マンションのときだけ使う)。 */
   buildingChoice?: BuildingChoice;
@@ -490,6 +494,8 @@ export function PasteImportReview({
   onRegister,
   registering,
   registerError,
+  registerBlockedReason,
+  readOnly,
   buildingChoice,
   onBuildingChoiceChange,
 }: PasteImportReviewProps) {
@@ -523,14 +529,14 @@ export function PasteImportReview({
    *   間に直しても登録は捕捉済みの値で進み、**その修正は黙って無視された**。
    *   利用者は直したつもりでいる。
    */
-  const busy = Boolean(registering);
+  const busy = Boolean(registering) || Boolean(readOnly);
   const blockReason = dup.blocked
     ? "この案件は登録済みのため登録できません"
     : ownerNameMissing
       ? "所有者の氏名を入力してください（所有者を作らない場合は「所有者なしで登録する」を選んでください）"
       : linkTargetMissing
         ? "紐付ける所有者が選ばれていません"
-        : null;
+        : (registerBlockedReason ?? null);
 
   return (
     <div className="grid gap-4 lg:grid-cols-[minmax(0,1fr)_minmax(0,1.15fr)]">
@@ -822,6 +828,9 @@ export function PasteImportReview({
           >
             {registering ? "登録しています…" : "この内容で登録"}
           </Button>
+          {registerBlockedReason && blockReason === registerBlockedReason && (
+            <span className="text-sm text-amber-700 dark:text-amber-300">{registerBlockedReason}</span>
+          )}
           {registerError && (
             <span role="alert" className="text-sm text-red-600 dark:text-red-400">
               {registerError}
