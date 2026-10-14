@@ -837,7 +837,7 @@ sudo systemctl status property-management --no-pager
 BEGIN;
 DROP TABLE IF EXISTS occupancy_rented_backup;
 CREATE TABLE occupancy_rented_backup AS
-  SELECT id FROM properties WHERE occupancy_status = 'rented';
+  SELECT id, updated_at FROM properties WHERE occupancy_status = 'rented';
 -- ② 旧版の「入居中」(occupied)は賃貸中も含む意味だったので、occupied へ戻す。
 UPDATE properties SET occupancy_status = 'occupied' WHERE occupancy_status = 'rented';
 COMMIT;
@@ -848,12 +848,14 @@ COMMIT;
 新しい版をビルドし `prisma migrate deploy` → 下の SQL → 起動。
 
 ```sql
-UPDATE properties SET occupancy_status = 'rented'
-  WHERE id IN (SELECT id FROM occupancy_rented_backup) AND occupancy_status = 'occupied';
+UPDATE properties p SET occupancy_status = 'rented'
+  FROM occupancy_rented_backup b
+  WHERE p.id = b.id AND p.occupancy_status = 'occupied' AND p.updated_at = b.updated_at;
 DROP TABLE occupancy_rented_backup;
 ```
 
-(旧版で動いていた間に人が現況を直した物件は、`occupancy_status = 'occupied'` の条件で上書きしない。)
+(旧版で動いていた間に**一度でも保存された物件**は、`updated_at` が控えと違うので戻さない=人が直した現況を
+上書きしない・@codex PR#512 8巡目。SQL の UPDATE は `updated_at` を動かさないので、控えの変換自体では変わらない。)
 
 ---
 
