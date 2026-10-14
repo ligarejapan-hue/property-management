@@ -7,6 +7,14 @@ import { clearDraft, writeDraft, type WriteResult } from "./draft-store";
 
 export const DRAFT_WRITE_DELAY_MS = 1000;
 
+/**
+ * 鍵ごとの「いま画面に出ている書き手」。⚠画面を離れても、返事を待っている処理は古い書き手を
+ *   持ったまま動き続ける。戻ってきた画面が持ち主になった後に古い書き手が届いた返事で
+ *   close・discard・書き込みをすると、新しい作業や送信中の印を消してしまう(@codex P1)。
+ *   同じタブの中だけの話なので、モジュールの変数で足りる(読み込み直せば古い処理は消える)。
+ */
+const owners = new Map<string, object>();
+
 export interface DraftWriter<T> {
   update(data: T): void;
   flush(): void;
@@ -14,6 +22,8 @@ export interface DraftWriter<T> {
   close(): void;
   markSubmitting(): void;
   unmarkSubmitting(): void;
+  /** この書き手を鍵の持ち主にする(画面に出たとき)。以後、他の書き手は控えを変えない。 */
+  claim(): void;
 }
 
 export function createDraftWriter<T>(opts: {
@@ -36,6 +46,12 @@ export function createDraftWriter<T>(opts: {
   let closed = false;
   let tooLarge = false;
   let pendingAt: number | null = opts.initialPendingAt ?? null;
+  const token = {};
+  /** 持ち主がいない(claim を使わない書き手)か、自分が持ち主のときだけ控えを変える。 */
+  const owns = () => {
+    const o = owners.get(opts.key);
+    return o === undefined || o === token;
+  };
 
   const cancelTimer = () => {
     if (timer) clearTimeout(timer);
@@ -44,7 +60,7 @@ export function createDraftWriter<T>(opts: {
 
   const write = () => {
     cancelTimer();
-    if (closed || latest == null) return;
+    if (closed || latest == null || !owns()) return;
     if (tooLarge) {
       writePendingOnly(latest.data);
       return;
@@ -98,13 +114,16 @@ export function createDraftWriter<T>(opts: {
       cancelTimer();
       latest = null;
       pendingAt = null;
-      clearDraft(opts.key);
+      if (owns()) clearDraft(opts.key);
     },
     close() {
       cancelTimer();
       closed = true;
       latest = null;
-      clearDraft(opts.key);
+      if (owns()) clearDraft(opts.key);
+    },
+    claim() {
+      owners.set(opts.key, token);
     },
     markSubmitting() {
       if (closed) return;

@@ -25,6 +25,9 @@ describe("use-draft の配線", () => {
   it("writeNow は間引きを待たずにすぐ書く(送る直前の印)", () => {
     expect(src).toMatch(/writeNow: \(d: T\) => \{\s*writer\?\.update\(d\);\s*writer\?\.flush\(\);/);
   });
+  it("画面に出たら(mount の effect)書き手が控えの持ち主になる(離れた画面の書き手に消させない)", () => {
+    expect(src).toMatch(/useEffect\(\(\) => \{\s*if \(!writer\) return;\s*(?:\/\/[^\n]*\n\s*)?writer\.claim\(\);/);
+  });
   it("localStorage・indexedDB を使わない", () => {
     expect(src).not.toMatch(/localStorage|indexedDB/);
   });

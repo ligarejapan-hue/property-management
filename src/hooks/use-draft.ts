@@ -55,6 +55,8 @@ export function useDraftAutosave<T>(
 
   useEffect(() => {
     if (!writer) return;
+    // 画面に出たら持ち主になる(離れた画面の書き手が、遅れて届いた返事で控えを消さないように)。
+    writer.claim();
     const onHide = () => writer.flush();
     window.addEventListener("pagehide", onHide);
     return () => {
