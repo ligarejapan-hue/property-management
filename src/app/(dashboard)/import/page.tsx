@@ -51,6 +51,17 @@ import { readCsvFileAsText } from "@/lib/csv-decode";
 import { filterNonBlankHeaders } from "@/lib/csv-parser";
 import ImportSwitcher from "@/components/import/import-switcher";
 import FileDropZone from "@/components/ui/file-drop-zone";
+import { draftKey } from "@/lib/drafts/draft-store";
+import { isDefiniteSubmitFailure } from "@/lib/drafts/submit-outcome";
+import {
+  compactCsvImportDraftForPending,
+  decideCsvImportRestore,
+  isCsvImportDraftEmpty,
+  parseCsvImportDraft,
+  type CsvImportDraft,
+} from "@/lib/drafts/screens/csv-import";
+import { useClientReady, useDraftAutosave, useRestoredDraft } from "@/hooks/use-draft";
+import { DraftImportPendingNotice, DraftRestoredNotice, DraftTooLargeNotice } from "@/components/drafts/draft-notices";
 import {
   IMPORT_TYPE_FILTER_OPTIONS,
   getImportTypeLabel,
@@ -485,25 +496,32 @@ function ReviewActionHint({
   }
 }
 
-export default function ImportPage() {
+function ImportScreen({ draftEnabled }: { draftEnabled: boolean }) {
+  // 作業中の控え(設計書 §2 S4)。3つの流れをまとめて1つの鍵に置く。
+  const draftKeyValue = draftEnabled ? draftKey("csv-import") : null;
+  const restored = useRestoredDraft(draftKeyValue, parseCsvImportDraft);
+  // ⚠この画面は useState の初期化で1回だけ決める(描き直しで変わらない)。
+  const [restoreDecision] = useState(() => decideCsvImportRestore(restored));
+  const s0 = restoreDecision.start;
+
   // Step state
-  const [step, setStep] = useState<Step>(1);
+  const [step, setStep] = useState<Step>(s0?.main?.step ?? 1);
 
   // File state
-  const [csvText, setCsvText] = useState("");
-  const [xlsxBase64, setXlsxBase64] = useState<string | null>(null);
-  const [fileName, setFileName] = useState("");
+  const [csvText, setCsvText] = useState(s0?.main?.csvText ?? "");
+  const [xlsxBase64, setXlsxBase64] = useState<string | null>(s0?.main?.xlsxBase64 ?? null);
+  const [fileName, setFileName] = useState(s0?.main?.fileName ?? "");
 
   // Template
-  const [template, setTemplate] = useState<string>("standard");
+  const [template, setTemplate] = useState<string>(s0?.main?.template ?? "standard");
 
   // Parsed CSV
-  const [headers, setHeaders] = useState<string[]>([]);
-  const [rows, setRows] = useState<string[][]>([]);
+  const [headers, setHeaders] = useState<string[]>(s0?.main?.headers ?? []);
+  const [rows, setRows] = useState<string[][]>(s0?.main?.rows ?? []);
 
   // Column mapping
   const [columnMapping, setColumnMapping] = useState<Record<string, string>>(
-    {}
+    s0?.main?.columnMapping ?? {}
   );
 
   // Import state
@@ -523,7 +541,7 @@ export default function ImportPage() {
     fileType?: "reception" | "owner" | "ambiguous" | "unknown";
     fileTypeLabel?: string | null;
     fileTypeError?: string | null;
-  } | null>(null);
+  } | null>((s0?.main?.duplicatePreview as never) ?? null);
   const [previewLoading, setPreviewLoading] = useState(false);
 
   // Job history
@@ -567,32 +585,62 @@ export default function ImportPage() {
     name: string;
     csvText?: string;
     xlsxBase64?: string;
-  } | null>(null);
+  } | null>(s0?.ro?.receptionFile ?? null);
   const [ownerFile, setOwnerFile] = useState<{
     name: string;
     csvText?: string;
     xlsxBase64?: string;
-  } | null>(null);
-  const [roPreview, setRoPreview] = useState<ReceptionOwnerPreviewResponse | null>(null);
+  } | null>(s0?.ro?.ownerFile ?? null);
+  const [roPreview, setRoPreview] = useState<ReceptionOwnerPreviewResponse | null>((s0?.ro?.roPreview as never) ?? null);
   const [roResult, setRoResult] = useState<ReceptionOwnerImportResponse | null>(null);
   const [roLoading, setRoLoading] = useState(false);
   const [roError, setRoError] = useState<string | null>(null);
   // 取込条件: 既定は「DLに〇がついている物件のみ」かつ「既存のみ」
-  const [dlFilter, setDlFilter] = useState<"marked" | "unmarked" | "all">("marked");
-  const [shinkiFilter, setShinkiFilter] = useState<"existing" | "new" | "all">("existing");
+  const [dlFilter, setDlFilter] = useState<"marked" | "unmarked" | "all">(s0?.ro?.dlFilter ?? "marked");
+  const [shinkiFilter, setShinkiFilter] = useState<"existing" | "new" | "all">(s0?.ro?.shinkiFilter ?? "existing");
 
   // Reception → Property (1-file) state
   const [rpFile, setRpFile] = useState<{
     name: string;
     csvText?: string;
     xlsxBase64?: string;
-  } | null>(null);
-  const [rpPreview, setRpPreview] = useState<ReceptionPropertyPreviewResponse | null>(null);
+  } | null>(s0?.rp?.rpFile ?? null);
+  const [rpPreview, setRpPreview] = useState<ReceptionPropertyPreviewResponse | null>((s0?.rp?.rpPreview as never) ?? null);
   const [rpResult, setRpResult] = useState<ReceptionPropertyImportResponse | null>(null);
   const [rpLoading, setRpLoading] = useState(false);
   const [rpError, setRpError] = useState<string | null>(null);
-  const [rpDlFilter, setRpDlFilter] = useState<"marked" | "unmarked" | "all">("marked");
-  const [rpShinkiFilter, setRpShinkiFilter] = useState<"existing" | "new" | "all">("existing");
+  const [rpDlFilter, setRpDlFilter] = useState<"marked" | "unmarked" | "all">(s0?.rp?.rpDlFilter ?? "marked");
+  const [rpShinkiFilter, setRpShinkiFilter] = useState<"existing" | "new" | "all">(s0?.rp?.rpShinkiFilter ?? "existing");
+
+  const [pendingNoticeShown, setPendingNoticeShown] = useState(restoreDecision.showPending);
+  const [restoredDismissed, setRestoredDismissed] = useState(false);
+
+  const draftData = useMemo<CsvImportDraft>(
+    () => ({
+      rev: 1,
+      main:
+        step === 2 || step === 3
+          ? { step, fileName, csvText, xlsxBase64, template, headers, rows, columnMapping, duplicatePreview }
+          : null,
+      // 結果が出たら(取り込み済み)その流れは控えない。
+      ro:
+        (receptionFile || ownerFile) && !roResult
+          ? { receptionFile, ownerFile, dlFilter, shinkiFilter, roPreview: roPreview as Record<string, unknown> | null }
+          : null,
+      rp:
+        rpFile && !rpResult
+          ? { rpFile, rpDlFilter, rpShinkiFilter, rpPreview: rpPreview as Record<string, unknown> | null }
+          : null,
+    }),
+    [step, fileName, csvText, xlsxBase64, template, headers, rows, columnMapping, duplicatePreview,
+      receptionFile, ownerFile, dlFilter, shinkiFilter, roPreview, roResult,
+      rpFile, rpDlFilter, rpShinkiFilter, rpPreview, rpResult],
+  );
+  // ⚠送信中の印が残っていた控えは書き手に渡さない(印を引き継がない)。最初の書き込みで
+  //   空の中身になり、控えは消える(§5.1 S4)。
+  const draftSaver = useDraftAutosave(draftKeyValue, draftData, isCsvImportDraftEmpty, restoreDecision.start ? restored : null, {
+    compactForPending: compactCsvImportDraftForPending,
+  });
 
 
   // ------ Jobs ------
@@ -839,6 +887,8 @@ export default function ImportPage() {
     setError(null);
     setResult(null);
 
+    // 返事が来る前に離れたら、戻ったとき「取り込み履歴で確かめて」と出す(二重取り込みを防ぐ・§5.1)。
+    draftSaver.markSubmitting();
     try {
       const json = await importCsv(
         fileName || "import.csv",
@@ -847,9 +897,12 @@ export default function ImportPage() {
         xlsxBase64 ?? undefined,
       );
       setResult(json as ImportResult);
+      draftSaver.unmarkSubmitting();
       setStep(4);
       fetchJobs();
     } catch (err) {
+      // ⚠5xx・通信切れは印を残す(取り込まれたか分からない)。画面に残っていれば履歴で見られる。
+      if (isDefiniteSubmitFailure(err)) draftSaver.unmarkSubmitting();
       setError(err instanceof Error ? err.message : "取込に失敗しました");
     } finally {
       setUploading(false);
@@ -926,6 +979,7 @@ export default function ImportPage() {
     if (!window.confirm("一意特定できた行だけを既存物件に反映します。よろしいですか？")) return;
     setRoLoading(true);
     setRoError(null);
+    draftSaver.markSubmitting();
     try {
       const res = await importReceptionOwnerCsv({
         receptionFileName: receptionFile.name,
@@ -938,8 +992,10 @@ export default function ImportPage() {
         shinkiFilter,
       });
       setRoResult(res);
+      draftSaver.unmarkSubmitting();
       fetchJobs();
     } catch (e) {
+      if (isDefiniteSubmitFailure(e)) draftSaver.unmarkSubmitting();
       setRoError(e instanceof Error ? e.message : "取込に失敗しました");
     } finally {
       setRoLoading(false);
@@ -997,6 +1053,7 @@ export default function ImportPage() {
     if (!window.confirm("住所が既存物件と重複しない行を物件として新規作成します。よろしいですか？")) return;
     setRpLoading(true);
     setRpError(null);
+    draftSaver.markSubmitting();
     try {
       const res = await importReceptionPropertyCsv({
         receptionFileName: rpFile.name,
@@ -1006,8 +1063,10 @@ export default function ImportPage() {
         shinkiFilter: rpShinkiFilter,
       });
       setRpResult(res);
+      draftSaver.unmarkSubmitting();
       fetchJobs();
     } catch (e) {
+      if (isDefiniteSubmitFailure(e)) draftSaver.unmarkSubmitting();
       setRpError(e instanceof Error ? e.message : "取込に失敗しました");
     } finally {
       setRpLoading(false);
@@ -1021,6 +1080,15 @@ export default function ImportPage() {
     setRpError(null);
     setRpDlFilter("marked");
     setRpShinkiFilter("existing");
+  };
+
+  const handleDiscardDraft = () => {
+    draftSaver.discard();
+    handleReset();
+    handleRoReset();
+    handleRpReset();
+    setTemplate("standard");
+    setRestoredDismissed(true);
   };
 
   // ------ Render helpers ------
@@ -1039,6 +1107,21 @@ export default function ImportPage() {
         title="受付帳CSV取込"
         description="受付帳のCSV / Excel(.xlsx) から物件を新規作成し、所有者CSVで所有者を紐づけます。"
       />
+      {pendingNoticeShown && (
+        <div className="mb-4">
+          <DraftImportPendingNotice onDismiss={() => setPendingNoticeShown(false)} />
+        </div>
+      )}
+      {restoreDecision.start && restored && !restoredDismissed && (
+        <div className="mb-4">
+          <DraftRestoredNotice savedAt={restored.savedAt} onDiscard={handleDiscardDraft} />
+        </div>
+      )}
+      {draftSaver.tooLarge && (
+        <div className="mb-4">
+          <DraftTooLargeNotice />
+        </div>
+      )}
 
       {/* 利用者向け操作ガイド: 取込の順番と各CSVの役割を説明 */}
       <div className="mb-6 rounded-lg border border-blue-200 dark:border-blue-400/20 bg-blue-50 dark:bg-blue-500/10 p-4 text-sm">
@@ -2482,4 +2565,10 @@ export default function ImportPage() {
       </div>
     </div>
   );
+}
+
+/** 控えはブラウザで描き直した後だけ読む(F5 でサーバー描画と食い違わないように)。 */
+export default function ImportPage() {
+  const clientReady = useClientReady();
+  return <ImportScreen key={clientReady ? "client" : "server"} draftEnabled={clientReady} />;
 }

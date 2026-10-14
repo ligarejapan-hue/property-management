@@ -66,3 +66,23 @@ describe("謄本PDF取込の配線", () => {
     expect(src).toMatch(/const handleReset = \(\) => \{\s*draftSaver\.discard\(\);/);
   });
 });
+
+describe("取り込み(CSV)の配線", () => {
+  const src = read("src/app/(dashboard)/import/page.tsx");
+  it("F5 でも食い違わない", () => {
+    expectClientReadyGate(src, "ImportScreen");
+    expect(src).toMatch(/draftEnabled \? draftKey\("csv-import"\) : null/);
+  });
+  it("送信中の印が残る控えは書き手に渡さない(印を引き継がず、空で上書きして消す)", () => {
+    expect(src).toMatch(/useDraftAutosave\(draftKeyValue, draftData, isCsvImportDraftEmpty, restoreDecision\.start \? restored : null,/);
+  });
+  it.each(["importCsv(", "importReceptionOwnerCsv(", "importReceptionPropertyCsv("])("%s の直前に印・成功と4xxで外す", (call) => {
+    const at = src.indexOf(`await ${call}`);
+    expect(at).toBeGreaterThan(0);
+    const before = src.slice(Math.max(0, at - 400), at);
+    expect(before).toContain("draftSaver.markSubmitting();");
+    const after = src.slice(at, at + 900);
+    expect(after).toContain("draftSaver.unmarkSubmitting();");
+    expect(after).toMatch(/if \(isDefiniteSubmitFailure\((e|err)\)\) draftSaver\.unmarkSubmitting\(\);/);
+  });
+});

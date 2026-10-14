@@ -127,3 +127,39 @@ describe("謄本PDF取込の控え", () => {
     expect(registryNeedsReselect({ step, uploadTab, fromFile, hasFile })).toBe(expected);
   });
 });
+
+import {
+  compactCsvImportDraftForPending,
+  decideCsvImportRestore,
+  isCsvImportDraftEmpty,
+  parseCsvImportDraft,
+} from "../screens/csv-import";
+
+describe("取り込み(CSV)の控え", () => {
+  const main = {
+    step: 2, fileName: "a.csv", csvText: "住所\n東京", xlsxBase64: null, template: "standard",
+    headers: ["住所"], rows: [["東京"]], columnMapping: { 住所: "address" }, duplicatePreview: null,
+  };
+  const file = { name: "受付帳.csv", csvText: "x" };
+  const d = {
+    rev: 1, main,
+    ro: { receptionFile: file, ownerFile: null, dlFilter: "marked", shinkiFilter: "existing", roPreview: null },
+    rp: null,
+  };
+  it("往復して同じ・形違いは捨てる", () => {
+    expect(parseCsvImportDraft(JSON.parse(JSON.stringify(d)))).toEqual(d);
+    expect(parseCsvImportDraft({ ...d, main: { ...main, step: 4 } })).toBeNull();
+    expect(parseCsvImportDraft({ ...d, ro: { ...d.ro, dlFilter: "x" } })).toBeNull();
+    expect(parseCsvImportDraft({ ...d, rev: 2 })).toBeNull();
+  });
+  it("3つの流れのどれも無ければ空", () => {
+    expect(isCsvImportDraftEmpty(compactCsvImportDraftForPending())).toBe(true);
+    expect(isCsvImportDraftEmpty({ rev: 1, main: null, ro: null, rp: { rpFile: file, rpDlFilter: "marked", rpShinkiFilter: "existing", rpPreview: null } } as never)).toBe(false);
+  });
+  it("送信中の印が残っていたら、中身は戻さず案内だけ出す(§5.1 S4)", () => {
+    const data = parseCsvImportDraft(d)!;
+    expect(decideCsvImportRestore({ v: 1, savedAt: 1, data, pendingSubmit: { at: 1 } })).toEqual({ start: null, showPending: true });
+    expect(decideCsvImportRestore({ v: 1, savedAt: 1, data })).toEqual({ start: data, showPending: false });
+    expect(decideCsvImportRestore(null)).toEqual({ start: null, showPending: false });
+  });
+});
