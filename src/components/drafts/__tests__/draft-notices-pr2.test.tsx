@@ -38,3 +38,12 @@ describe("取り込みの結果が分からない帯(画面に残っていると
     expect(html).not.toContain("画面を離れました");
   });
 });
+
+describe("取り込みの結果が分からない帯: 履歴を読み込み中", () => {
+  it("confirmDisabled のときボタンは押せない", () => {
+    const html = renderToStaticMarkup(createElement(DraftImportPendingNotice, { onDismiss: () => {}, reason: "unknown", confirmDisabled: true }));
+    expect(html).toMatch(/<button[^>]*disabled=""[^>]*>確かめたので続ける<\/button>/);
+    const on = renderToStaticMarkup(createElement(DraftImportPendingNotice, { onDismiss: () => {}, reason: "unknown" }));
+    expect(on).not.toMatch(/<button[^>]*disabled=""/);
+  });
+});

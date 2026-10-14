@@ -87,7 +87,7 @@ describe("取り込み(CSV)の配線", () => {
     expect(src).toMatch(/useDraftAutosave\(draftKeyValue, draftData, isCsvImportDraftEmpty, restored,/);
     expect(src).toMatch(/const csvPendingRef = useRef<CsvPendingState>\(\{ inflight: 0, unknown: restoreDecision\.showPending \}\);/);
     expect(src).toMatch(/const \[importBlocked, setImportBlocked\] = useState\(restoreDecision\.showPending\);/);
-    expect(src).toContain('reason={importBlockReason} onDismiss={() => applyCsvPending("confirm")}');
+    expect(src).toContain('onDismiss={() => applyCsvPending("confirm")}');
   });
   it.each([
     ["importCsv(", "main"],
@@ -171,4 +171,15 @@ describe("取り込み(CSV): やり直した後に届いたファイルの読み
       expect(body).toMatch(/await [^;]+;\s*(?:\/\/[^\n]*\n\s*)*if \(gen !== discardGenRef\.current\) return;/);
     },
   );
+});
+
+describe("取り込み(CSV): 結果が分からないときは履歴を読み直し、読み終わるまで確かめたボタンを押せない(@codex P1)", () => {
+  const src = read("src/app/(dashboard)/import/page.tsx");
+  it("3つの取り込みの失敗のあとで履歴を読み直す", () => {
+    const m = src.match(/applyCsvPending\(isDefiniteSubmitFailure\((e|err)\) \? "definite" : "unknown"\);\s*(?:\/\/[^\n]*\n\s*)?fetchJobs\(\);/g) ?? [];
+    expect(m.length).toBe(3);
+  });
+  it("履歴を読んでいる間は「確かめたので続ける」を押せない", () => {
+    expect(src).toContain('reason={importBlockReason} confirmDisabled={jobsLoading} onDismiss={() => applyCsvPending("confirm")}');
+  });
 });

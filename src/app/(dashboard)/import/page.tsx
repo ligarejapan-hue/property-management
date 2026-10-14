@@ -952,6 +952,8 @@ function ImportScreen({ draftEnabled }: { draftEnabled: boolean }) {
     } catch (err) {
       // ⚠5xx・通信切れは印を残し、履歴で確かめるまで取り込みを止める(取り込まれたか分からない)。
       applyCsvPending(isDefiniteSubmitFailure(err) ? "definite" : "unknown");
+      // 結果が分からないときも履歴を読み直す(古い履歴を見て「無かった」と思わせない)。
+      fetchJobs();
       setError(err instanceof Error ? err.message : "取込に失敗しました");
     } finally {
       setUploading(false);
@@ -1048,6 +1050,8 @@ function ImportScreen({ draftEnabled }: { draftEnabled: boolean }) {
       fetchJobs();
     } catch (e) {
       applyCsvPending(isDefiniteSubmitFailure(e) ? "definite" : "unknown");
+      // 結果が分からないときも履歴を読み直す(古い履歴を見て「無かった」と思わせない)。
+      fetchJobs();
       setRoError(e instanceof Error ? e.message : "取込に失敗しました");
     } finally {
       setRoLoading(false);
@@ -1122,6 +1126,8 @@ function ImportScreen({ draftEnabled }: { draftEnabled: boolean }) {
       fetchJobs();
     } catch (e) {
       applyCsvPending(isDefiniteSubmitFailure(e) ? "definite" : "unknown");
+      // 結果が分からないときも履歴を読み直す(古い履歴を見て「無かった」と思わせない)。
+      fetchJobs();
       setRpError(e instanceof Error ? e.message : "取込に失敗しました");
     } finally {
       setRpLoading(false);
@@ -1165,7 +1171,7 @@ function ImportScreen({ draftEnabled }: { draftEnabled: boolean }) {
       />
       {importBlocked && (
         <div className="mb-4">
-          <DraftImportPendingNotice reason={importBlockReason} onDismiss={() => applyCsvPending("confirm")} />
+          <DraftImportPendingNotice reason={importBlockReason} confirmDisabled={jobsLoading} onDismiss={() => applyCsvPending("confirm")} />
         </div>
       )}
       {restoreDecision.start && restored && !restoredDismissed && !importBusy && (

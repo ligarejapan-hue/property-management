@@ -100,9 +100,12 @@ export function DraftReselectFileNotice({ expectedName, chosenName }: { expected
 export function DraftImportPendingNotice({
   onDismiss,
   reason = "left",
+  confirmDisabled = false,
 }: {
   onDismiss: () => void;
   reason?: "left" | "unknown";
+  /** 履歴を読み直している間は押させない(古い履歴を見て確かめたことにしない)。 */
+  confirmDisabled?: boolean;
 }) {
   return (
     <div role="alert" data-testid="draft-import-pending-notice" className={WARN}>
@@ -112,7 +115,7 @@ export function DraftImportPendingNotice({
       ) : (
         <span>取り込みの結果が分かりませんでした（通信が切れたか、サーバーで問題が起きました）。下の「取り込み履歴」で結果を確かめてから続けてください。</span>
       )}
-      <button type="button" onClick={onDismiss} className={BTN}>
+      <button type="button" onClick={onDismiss} disabled={confirmDisabled} className={`${BTN} disabled:opacity-50`}>
         {reason === "left" ? "確かめたので閉じる" : "確かめたので続ける"}
       </button>
     </div>
