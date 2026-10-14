@@ -833,11 +833,13 @@ sudo systemctl status property-management --no-pager
 
 ```sql
 -- ① どの物件が賃貸中だったかを控える(再び新しい版へ進めたときに戻すため・@codex PR#512 5巡目)。
---    ⚠毎回作り直す(前回の控えが残っていると古い一覧のまま=6巡目)。
+--    ⚠控えは消さずに**足していく**(やり直しても前回の控えが残る=10巡目・今の賃貸中も加わる=6巡目)。
+--    psql は `-v ON_ERROR_STOP=1` で実行する(途中で失敗したら全体を取り消す)。
 BEGIN;
-DROP TABLE IF EXISTS occupancy_rented_backup;
-CREATE TABLE occupancy_rented_backup AS
-  SELECT id, updated_at FROM properties WHERE occupancy_status = 'rented';
+CREATE TABLE IF NOT EXISTS occupancy_rented_backup (id uuid PRIMARY KEY, updated_at timestamp(3));
+INSERT INTO occupancy_rented_backup (id, updated_at)
+  SELECT id, updated_at FROM properties WHERE occupancy_status = 'rented'
+  ON CONFLICT (id) DO UPDATE SET updated_at = EXCLUDED.updated_at;
 -- ② 旧版の「入居中」(occupied)は賃貸中も含む意味だったので、occupied へ戻す。
 UPDATE properties SET occupancy_status = 'occupied' WHERE occupancy_status = 'rented';
 COMMIT;
@@ -848,10 +850,13 @@ COMMIT;
 新しい版をビルドし `prisma migrate deploy` → 下の SQL → 起動。
 
 ```sql
+-- psql は `-v ON_ERROR_STOP=1` で。戻すのと控えを消すのは1つのトランザクション(片方だけ起きない・10巡目)。
+BEGIN;
 UPDATE properties p SET occupancy_status = 'rented'
   FROM occupancy_rented_backup b
   WHERE p.id = b.id AND p.occupancy_status = 'occupied' AND p.updated_at = b.updated_at;
 DROP TABLE occupancy_rented_backup;
+COMMIT;
 ```
 
 (旧版で動いていた間に**一度でも保存された物件**は、`updated_at` が控えと違うので戻さない=人が直した現況を

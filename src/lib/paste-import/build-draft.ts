@@ -49,8 +49,11 @@ function occupancyFor(raw: string): string | null {
   // 借りている人(賃借人・入居者・借主・テナント)が住んでいる=賃貸中(@codex PR#512 7巡目)。
   //   ⚠「入居者なし」「テナント募集中」「賃借人は退去済み」は住んでいない側=賃貸中と読まない(8巡目)。
   const tenantAbsent = has(["なし", "無し", "いない", "おらず", "募集", "退去", "空き", "不在"]);
-  const tenantMarker = !tenantAbsent && has(["賃借人", "借主", "入居者", "テナント", "借家人"]);
-  const rentedMarker = tenantMarker || has(["賃貸中", "賃貸している", "貸している", "賃貸に出している"]);
+  // ⚠「入居者：所有者本人」「入居者はオーナー本人」は本人の居住=借り手の語として数えない(10巡目)。
+  const ownerSelf = has(["所有者本人", "オーナー本人", "本人", "自己居住", "自身"]);
+  const tenantMarker = !tenantAbsent && !ownerSelf && has(["賃借人", "借主", "入居者", "テナント", "借家人"]);
+  const explicitRental = has(["賃貸中", "賃貸している", "貸している", "賃貸に出している"]);
+  const rentedMarker = tenantMarker || explicitRental;
   // ⚠賃貸の打ち消し(「賃貸中ではない」「貸していない」)は賃貸中と読まない=決めない(@codex PR#512)。
   //   ていねいな打ち消し(「賃貸中ではありません」「貸していません」)も同じ(@codex PR#512 2巡目)。
   if (RENTAL_NEGATION.test(s)) return null;
@@ -63,8 +66,10 @@ function occupancyFor(raw: string): string | null {
       has(["空室", "空家", "空き家", "以前", "だった", "退去", "募集", "なし", "無し", "不在"])) {
     return null;
   }
-  // 借りている人が「入居中」なら賃貸中(本人の居住を言う語が無いときだけ)。
-  if (tenantMarker && !has(["自己居住", "自身", "本人", "オーナー"])) return "rented";
+  // 借りている人が「入居中」なら賃貸中(本人の居住を言う語は tenantMarker の時点で外してある)。
+  if (tenantMarker) return "rented";
+  // 本人の居住を言っていて賃貸の語が無ければ居住中(「入居者：所有者本人」)。
+  if (ownerSelf && !explicitRental && !someoneNotLiving) return "occupied";
   // `所有者は居住していない（賃貸中）` = 本人は住まず人に貸している=賃貸中(10/14 から決められる)。
   if (rentedMarker) return occupiedMarker ? null : "rented";
   if (someoneNotLiving) return null;
