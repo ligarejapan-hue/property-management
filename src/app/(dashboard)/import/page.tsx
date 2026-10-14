@@ -650,6 +650,12 @@ function ImportScreen({ draftEnabled }: { draftEnabled: boolean }) {
     draftDataRef.current = draftData;
   }, [draftData]);
 
+  /**
+   * 「最初からやり直す」の世代。やり直した後に届いたファイルの読み込みは使わない
+   * (届いた結果が、消したはずの控えを作り直さないように・@codex P2)。
+   */
+  const discardGenRef = useRef(0);
+
   // 送信中の印は3つの流れで1つ。数えて、全部済んだときだけ外す(@codex P1)。
   // ⚠前回の印を引き継いだときは「分からない」から始める(確かめるまで印を外さない・送れなくする)。
   const csvPendingRef = useRef<CsvPendingState>({ inflight: 0, unknown: restoreDecision.showPending });
@@ -824,6 +830,7 @@ function ImportScreen({ draftEnabled }: { draftEnabled: boolean }) {
 
   // ------ File handling ------
   const processFile = useCallback(async (file: File) => {
+    const gen = discardGenRef.current;
     setFileName(file.name);
     setError(null);
     setResult(null);
@@ -835,6 +842,7 @@ function ImportScreen({ draftEnabled }: { draftEnabled: boolean }) {
           parseFileForPreview(file),
           readFileForImport(file),
         ]);
+        if (gen !== discardGenRef.current) return;
         setCsvText("");
         setXlsxBase64(buf.xlsxBase64 ?? null);
         // 1行目ヘッダーが実質空の列はマッピング候補から除外する
@@ -858,6 +866,7 @@ function ImportScreen({ draftEnabled }: { draftEnabled: boolean }) {
       // 旧実装は UTF-8 固定で読んでおり、Excel 出力 (Shift-JIS / CP932) の
       // 日本語CSVが文字化けしていたため共通デコーダ経由に変更。
       const text = await readCsvFileAsText(file);
+      if (gen !== discardGenRef.current) return;
       setCsvText(text);
       setXlsxBase64(null);
       const { headers: h, rows: r } = parseCsv(text);
@@ -966,6 +975,7 @@ function ImportScreen({ draftEnabled }: { draftEnabled: boolean }) {
 
   // ------ Reception × Owner ------
   const handleRoFile = async (which: "reception" | "owner", file: File | null) => {
+    const gen = discardGenRef.current;
     setRoError(null);
     setRoPreview(null);
     setRoResult(null);
@@ -978,6 +988,7 @@ function ImportScreen({ draftEnabled }: { draftEnabled: boolean }) {
     // 内容(列構成)から判定し、取り違えのみエラーにする。
     try {
       const buf = await readFileForImport(file);
+      if (gen !== discardGenRef.current) return;
       const entry = {
         name: file.name,
         csvText: buf.csvText,
@@ -1055,6 +1066,7 @@ function ImportScreen({ draftEnabled }: { draftEnabled: boolean }) {
 
   // ------ Reception → Property ------
   const handleRpFile = async (file: File | null) => {
+    const gen = discardGenRef.current;
     setRpError(null);
     setRpPreview(null);
     setRpResult(null);
@@ -1062,6 +1074,7 @@ function ImportScreen({ draftEnabled }: { draftEnabled: boolean }) {
     // B-11: ファイル名では拒否しない (種別はプレビュー時に内容から判定)。
     try {
       const buf = await readFileForImport(file);
+      if (gen !== discardGenRef.current) return;
       setRpFile({ name: file.name, csvText: buf.csvText, xlsxBase64: buf.xlsxBase64 });
     } catch (e) {
       setRpError(e instanceof Error ? e.message : "ファイル読込に失敗しました");
@@ -1125,6 +1138,7 @@ function ImportScreen({ draftEnabled }: { draftEnabled: boolean }) {
   };
 
   const handleDiscardDraft = () => {
+    discardGenRef.current += 1;
     draftSaver.discard();
     handleReset();
     handleRoReset();

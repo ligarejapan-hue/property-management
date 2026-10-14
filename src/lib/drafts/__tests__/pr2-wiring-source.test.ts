@@ -155,3 +155,20 @@ describe("読み取り・下見の返事を待つ間も「最初からやり直�
     );
   });
 });
+
+describe("取り込み(CSV): やり直した後に届いたファイルの読み込みは使わない(@codex P2)", () => {
+  const src = read("src/app/(dashboard)/import/page.tsx");
+  it("やり直すと世代を進める", () => {
+    expect(src).toMatch(/const handleDiscardDraft = \(\) => \{\s*discardGenRef\.current \+= 1;/);
+  });
+  it.each(["const processFile = useCallback(async (file: File) => {", "const handleRoFile = async (", "const handleRpFile = async ("])(
+    "%s は読み込みの後に世代を確かめる",
+    (head) => {
+      const at = src.indexOf(head);
+      expect(at).toBeGreaterThan(0);
+      const body = src.slice(at, at + 1600);
+      expect(body).toContain("const gen = discardGenRef.current;");
+      expect(body).toMatch(/await [^;]+;\s*(?:\/\/[^\n]*\n\s*)*if \(gen !== discardGenRef\.current\) return;/);
+    },
+  );
+});
