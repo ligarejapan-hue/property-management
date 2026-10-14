@@ -110,8 +110,49 @@ function isOwnerOrTenantWord(subj: string): boolean {
   return false;
 }
 
-/** 現況の言い換え → OccupancyStatus。分からなければ null（unknown を推測で入れない）。 */
+/**
+ * 現況を決めてよい**決まった書き方**の一覧(許可リスト・@codex PR#512 64巡目)。
+ * ⚠自由な文は言い回しが無限にあり、打ち消し・過去・推測・主語の違いを1つずつ追っても漏れが続いた。
+ *   そこで、下の判定(occupancyJudge)の結果は、値の全体がこの一覧のどれかに**そのまま**合うときだけ採用する。
+ *   合わない文は全部「読み取れない」=警告+原文を備考へ・Excel は人の確認へ(誤って決めるより安全)。
+ */
+const TENANT_NOUN = "(賃借人|入居者|テナント|借主|借り手|借り主|賃借者|店子|借家人)";
+const OWNER_NOUN = "(自身|本人|所有者|オーナー|名義人|売主)";
+const NOW = "(現在|現況)?[：:]?";
+const OCCUPANCY_ALLOWLIST: Record<"vacant" | "occupied" | "rented", RegExp[]> = {
+  vacant: [
+    new RegExp(`^${NOW}(空室|空家|空き家)([（(]即入居可[）)])?$`),
+    new RegExp(`^${OWNER_NOUN}所有[、,]?${NOW}(空室|空家|空き家)$`),
+    /^(誰も(住んでいない|居住していない)|空いている|空室になっている)$/,
+  ],
+  occupied: [
+    new RegExp(`^${NOW}(居住中|自己居住中?)$`),
+    new RegExp(`^${OWNER_NOUN}(が|は)?${NOW}(居住|住んで)(中|している|しています|います|いる)$`),
+    new RegExp(`^(入居者|居住者)(：|:|は)(所有者|オーナー)本人$`),
+    new RegExp(`^${OWNER_NOUN}(・|と)(親族|家族)(が)?(居住中|居住している)$`),
+  ],
+  rented: [
+    new RegExp(`^${NOW}(賃貸中|賃貸している|賃貸で貸している|貸している)$`),
+    new RegExp(`^${OWNER_NOUN}は(居住していない|住んでいない)[（(]賃貸中[）)]$`),
+    new RegExp(
+      `^(本人ではなく|本人以外の|本人所有、|所有者の物件で|所有者はいない。)?${TENANT_NOUN}(本人)?(が|は|も)?${NOW}(入居中|居住中|居住している|入居している|あり|有り|います|いる)$`,
+    ),
+    new RegExp(`^${NOW}(居住中|入居中)[（(：:]${TENANT_NOUN}[）)]?$`),
+    new RegExp(`^${NOW}入居中[（(]賃貸[）)]$`),
+    /^賃貸物件として入居中$/,
+  ],
+};
+
+/** 現況の言い換え → OccupancyStatus。許可リストに合う書き方だけ決める(それ以外は null)。 */
 function occupancyFor(raw: string): string | null {
+  const judged = occupancyJudge(raw);
+  if (judged !== "vacant" && judged !== "occupied" && judged !== "rented") return judged;
+  const s = raw.replace(/[\s　]/g, "");
+  return OCCUPANCY_ALLOWLIST[judged].some((re) => re.test(s)) ? judged : null;
+}
+
+/** 現況の言い換えを判定する(結果は occupancyFor が許可リストで絞る)。 */
+function occupancyJudge(raw: string): string | null {
   const s = raw.replace(/[\s　]/g, "");
   const has = (words: string[]) => words.some((w) => s.includes(w));
   // 打ち消し(「居住していない」)は「居住して」より先に見る(逆に当たるため)。
