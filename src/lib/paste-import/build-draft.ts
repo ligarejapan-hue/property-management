@@ -46,13 +46,17 @@ function occupancyFor(raw: string): string | null {
   const someoneNotLiving = has(["住んでいない", "居住していない"]);
   // ⚠2026-10-14 発注者指示: 「居住中(本人が住んでいる)」と「賃貸中(人に貸している)」を分ける。
   //   タカウル「現在の物件状況：賃貸で貸している」(実物)も賃貸中。
-  const rentedMarker = has(["賃貸中", "賃貸している", "貸している", "賃貸に出している"]);
+  // 借りている人(賃借人・入居者・借主・テナント)が住んでいる=賃貸中(@codex PR#512 7巡目)。
+  const tenantMarker = has(["賃借人", "借主", "入居者", "テナント", "借家人"]);
+  const rentedMarker = tenantMarker || has(["賃貸中", "賃貸している", "貸している", "賃貸に出している"]);
   // ⚠賃貸の打ち消し(「賃貸中ではない」「貸していない」)は賃貸中と読まない=決めない(@codex PR#512)。
   //   ていねいな打ち消し(「賃貸中ではありません」「貸していません」)も同じ(@codex PR#512 2巡目)。
   if (RENTAL_NEGATION.test(s)) return null;
   const occupiedMarker = has(["居住中", "入居中", "自己居住"]);
   // ⚠打ち消しと居住中の印が**両方**あれば決めない(@codex PR#491 2巡目)。
   if (nobodyLiving) return occupiedMarker || rentedMarker ? null : "vacant";
+  // 借りている人が「入居中」なら賃貸中(本人の居住を言う語が無いときだけ)。
+  if (tenantMarker && !has(["自己居住", "自身", "本人", "オーナー"])) return "rented";
   // `所有者は居住していない（賃貸中）` = 本人は住まず人に貸している=賃貸中(10/14 から決められる)。
   if (rentedMarker) return occupiedMarker ? null : "rented";
   if (someoneNotLiving) return null;
