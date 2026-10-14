@@ -39,7 +39,7 @@ function StatusCell({
       <div className="space-y-1">
         <StatusBadge intent="warning">登録されたか分かりません</StatusBadge>
         <p className="text-xs text-amber-800 dark:text-amber-300">
-          送っている途中で画面を離れました。物件一覧で確かめてください。
+          登録の返事を受け取れませんでした（途中で画面を離れたか、通信・サーバーの問題）。物件一覧で確かめてください。
         </p>
         {onReturnUnknown && (
           <button type="button" onClick={onReturnUnknown} className="text-xs text-indigo-600 underline dark:text-indigo-400">

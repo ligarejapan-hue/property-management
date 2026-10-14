@@ -159,8 +159,9 @@ function ExcelLeadImportScreen({ draftEnabled }: { draftEnabled: boolean }) {
           body: JSON.stringify(excelLeadCommitBody(row)),
         });
         result = commitOutcome(res.status, await res.json().catch(() => null));
-      } catch (e) {
-        result = { kind: "failed", message: e instanceof Error ? e.message : "通信に失敗しました" };
+      } catch {
+        // ⚠通信切れは登録されたか分からない(サーバーでは済んでいるかもしれない)。失敗と言い切らない。
+        result = { kind: "unknown" };
       }
       sentResults[key] = result;
       draftSaver.writeNow({ ...draftDataRef.current, results: { ...sentResults }, sendingKey: null });
@@ -197,7 +198,7 @@ function ExcelLeadImportScreen({ draftEnabled }: { draftEnabled: boolean }) {
         title="Excelからまとめて物件化"
         description="査定サイトの反響を書き溜めた顧客管理表（Excel）を読み、物件と所有者をまとめて登録します。似た物件や同じ名前の所有者がいる行は登録せず、「要確認」として残します。"
       />
-      {restored && !restoredDismissed && !running && (
+      {restored && !restoredDismissed && !running && !reading && (
         <DraftRestoredNotice savedAt={restored.savedAt} onDiscard={handleDiscardDraft} />
       )}
       {draftSaver.tooLarge && <DraftTooLargeNotice />}

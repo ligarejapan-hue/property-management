@@ -20,5 +20,5 @@ export type ExcelLeadResult =
   /** 登録直前の見直しで候補が見つかり、登録しなかった(人が確かめる)。 */
   | { kind: "review"; reasons: string[] }
   | { kind: "failed"; message: string }
-  /** 送った直後に画面を離れ、登録されたか分からない(設計書 §5.2)。まとめて登録の対象から外す。 */
+  /** 登録されたか分からない(送った直後に画面を離れた・5xx・通信切れ。設計書 §5.2)。まとめて登録の対象から外す。 */
   | { kind: "unknown" };

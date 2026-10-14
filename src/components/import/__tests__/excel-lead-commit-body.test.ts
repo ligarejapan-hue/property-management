@@ -72,7 +72,13 @@ describe("登録APIの応答の読み分け(@codex PR#456 1巡目 ①・4巡目 
     expect(commitOutcome(409, { error: { code: "DUPLICATE", message: "この案件は登録済みです" } })).toEqual({ kind: "duplicate" });
     expect(commitOutcome(400, { error: { code: "BAD_REQUEST", message: "メールアドレスの形式が正しくありません" } }))
       .toEqual({ kind: "failed", message: "メールアドレスの形式が正しくありません" });
-    expect(commitOutcome(500, null)).toEqual({ kind: "failed", message: "処理に失敗しました（500）" });
+  });
+
+  it("★5xx・成功なのに中身が読めない応答は「登録されたか分からない」(登録済みかもしれない・@codex P1)", () => {
+    expect(commitOutcome(500, null)).toEqual({ kind: "unknown" });
+    expect(commitOutcome(503, { error: { message: "x" } })).toEqual({ kind: "unknown" });
+    expect(commitOutcome(200, null)).toEqual({ kind: "unknown" });
+    expect(commitOutcome(201, {})).toEqual({ kind: "unknown" });
   });
 });
 

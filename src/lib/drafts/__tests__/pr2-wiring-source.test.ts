@@ -43,6 +43,12 @@ describe("Excelまとめ取込の配線", () => {
   it("画面を離れたら次の行を送らない(§5.2)", () => {
     expect(src).toMatch(/useEffect\(\(\) => \(\) => \{\s*stopRef\.current = true;\s*\}, \[\]\);/);
   });
+  it("通信切れは「登録されたか分からない」(失敗と言い切らない・@codex P1)", () => {
+    expect(src).toMatch(/\} catch \{\s*\/\/[^\n]*\n\s*result = \{ kind: "unknown" \};/);
+  });
+  it("読み取り中・登録中は「最初からやり直す」を出さない(@codex P2)", () => {
+    expect(src).toMatch(/restored && !restoredDismissed && !running && !reading && \(/);
+  });
   it("戻したとき送信中だった行は分からない扱い", () => {
     expect(src).toContain("restoreExcelResults(");
   });
