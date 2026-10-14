@@ -8,29 +8,10 @@
 import Link from "next/link";
 import StatusBadge from "@/components/ui/status-badge";
 import { PROPERTY_TYPE_LABELS } from "@/lib/property-types";
-import type { PasteDraft } from "@/lib/paste-import/types";
-import type { LeadRowStatus } from "@/lib/paste-import/lead-sheet";
 
-export interface ExcelLeadRow {
-  sheetName: string;
-  rowNumber: number;
-  text: string;
-  draft: PasteDraft;
-  ownerNote: string;
-  status: LeadRowStatus;
-  reasons: string[];
-  registeredPropertyId: string | null;
-}
-
-/** 登録を試みた結果。 */
-export type ExcelLeadResult =
-  | { kind: "created"; propertyId: string }
-  | { kind: "duplicate" }
-  /** 登録直前の見直しで候補が見つかり、登録しなかった(人が確かめる)。 */
-  | { kind: "review"; reasons: string[] }
-  | { kind: "failed"; message: string }
-  /** 送った直後に画面を離れ、登録されたか分からない(設計書 §5.2)。まとめて登録の対象から外す。 */
-  | { kind: "unknown" };
+// 行と結果の型は src/lib 側(作業中の控えの検査)からも使うので src/lib に置く。
+import type { ExcelLeadResult, ExcelLeadRow } from "@/lib/paste-import/excel-lead-types";
+export type { ExcelLeadResult, ExcelLeadRow } from "@/lib/paste-import/excel-lead-types";
 
 export function excelLeadRowKey(r: Pick<ExcelLeadRow, "sheetName" | "rowNumber">): string {
   return `${r.sheetName}#${r.rowNumber}`;

@@ -21,36 +21,30 @@ import { Button } from "@/components/ui/button";
 import BuildingNameCombobox from "@/components/buildings/building-name-combobox";
 import type { BuildingChoice } from "@/lib/building-link/resolve";
 
-// ---------------------------------------------------------------------------
-// API 契約（POST /api/import/paste のレスポンスの一部）。
-// この部品でしか使わないのでここに置く。page.tsx から re-export して使う。
-// ---------------------------------------------------------------------------
-
-export interface PasteDuplicatesResult {
-  blocked: boolean;
-  blockedByPropertyId: string | null;
-  similarPropertyIds: string[];
-}
-
-export interface SimilarPropertySummary {
-  id: string;
-  address: string | null;
-  lotNumber: string | null;
-}
-
-export type OwnerMatchKind = "current_address" | "registry_address" | "name_only";
-
-export interface OwnerCandidateSummary {
-  id: string;
-  name: string;
-  matchKind: OwnerMatchKind;
-  /** 表示レベルを通した住所（**実際に一致した方**。name_only なら参考として1つ）。 */
-  address: string | null;
-  /** 上の住所がどちらの欄のものか（札と食い違わせないために必ず添える）。 */
-  addressKind: "current" | "registry" | null;
-  /** その所有者に紐づく物件の件数（非個人情報の識別の手がかり）。 */
-  propertyCount: number;
-}
+// API 契約（POST /api/import/paste のレスポンスの一部）と画面の値の型は
+// src/lib/paste-import/review-types.ts に置く(控えの検査など src/lib 側からも使うため)。
+import type {
+  PasteDuplicatesResult,
+  SimilarPropertySummary,
+  OwnerMatchKind,
+  OwnerCandidateSummary,
+  OwnerMode,
+  PropertyFieldKey,
+  PropertyValues,
+  OwnerFieldKey,
+  OwnerValues,
+} from "@/lib/paste-import/review-types";
+export type {
+  PasteDuplicatesResult,
+  SimilarPropertySummary,
+  OwnerMatchKind,
+  OwnerCandidateSummary,
+  OwnerMode,
+  PropertyFieldKey,
+  PropertyValues,
+  OwnerFieldKey,
+  OwnerValues,
+} from "@/lib/paste-import/review-types";
 
 const MATCH_KIND_LABELS: Record<OwnerMatchKind, string> = {
   current_address: "連絡先の住所も一致",
@@ -133,14 +127,6 @@ export function ownerCandidateLabel(c: OwnerCandidateSummary): string {
   parts.push(`管理番号 ${c.id.slice(0, 8)}`);
   return `${c.name}（${parts.join(" / ")}）`;
 }
-
-export type OwnerMode = "link" | "new" | "none";
-
-export type PropertyFieldKey = keyof PasteDraft["property"];
-export type PropertyValues = Record<PropertyFieldKey, string>;
-
-export type OwnerFieldKey = "name" | "nameKana" | "phone" | "email" | "currentAddress";
-export type OwnerValues = Record<OwnerFieldKey, string>;
 
 const OCCUPANCY_OPTIONS: { value: string; label: string }[] = [
   { value: "vacant", label: "空室" },

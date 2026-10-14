@@ -1,6 +1,6 @@
 /** Excelからまとめて物件化の控え(設計書 §2 S2・§5.2)。 */
 import { z } from "zod/v4";
-import type { ExcelLeadResult, ExcelLeadRow } from "@/components/import/excel-lead-table";
+import type { ExcelLeadResult, ExcelLeadRow } from "@/lib/paste-import/excel-lead-types";
 
 /**
  * sendingKey = いま送っている行(結果が来る前に画面を離れたら、戻ったとき「分からない」にする)。

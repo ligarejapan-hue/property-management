@@ -2,7 +2,6 @@
 import { z } from "zod/v4";
 import type { PasteDraft } from "@/lib/paste-import/types";
 import type { BuildingChoice } from "@/lib/building-link/resolve";
-// ⚠型だけ読む(部品の本体は読まない)。
 import type {
   OwnerCandidateSummary,
   OwnerMatchKind,
@@ -11,7 +10,7 @@ import type {
   PasteDuplicatesResult,
   PropertyValues,
   SimilarPropertySummary,
-} from "@/components/import/paste-import-review";
+} from "@/lib/paste-import/review-types";
 import { buildingChoiceSchema } from "./building-choice";
 
 /** 読み取り後の確認画面の状態(サーバーの応答と人が直した値)。 */
