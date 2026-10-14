@@ -832,11 +832,22 @@ sudo systemctl status property-management --no-pager
    enum の値も残すので、適用済みの記録はそのままでよい(再び新しい版へ進めても二重には当たらない)。
 
 ```sql
--- 旧版の「入居中」(occupied)は賃貸中も含む意味だったので、occupied へ戻す。
+-- ① どの物件が賃貸中だったかを控える(再び新しい版へ進めたときに戻すため・@codex PR#512 5巡目)。
+CREATE TABLE IF NOT EXISTS occupancy_rented_backup AS
+  SELECT id FROM properties WHERE occupancy_status = 'rented';
+-- ② 旧版の「入居中」(occupied)は賃貸中も含む意味だったので、occupied へ戻す。
 UPDATE properties SET occupancy_status = 'occupied' WHERE occupancy_status = 'rented';
 ```
 
-再び新しい版へ戻すときは、この行を賃貸中へ直す情報は残らない(必要なら UPDATE の前に対象の物件 id を控える)。
+再び新しい版へ進めたら(反映して起動したあと)、控えから賃貸中に戻し、控えの表を消す:
+
+```sql
+UPDATE properties SET occupancy_status = 'rented'
+  WHERE id IN (SELECT id FROM occupancy_rented_backup) AND occupancy_status = 'occupied';
+DROP TABLE occupancy_rented_backup;
+```
+
+(戻している間に人が現況を直した物件は、`occupancy_status = 'occupied'` の条件で上書きしない。)
 
 ---
 
