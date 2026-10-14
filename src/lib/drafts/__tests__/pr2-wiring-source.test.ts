@@ -94,10 +94,15 @@ describe("取り込み(CSV)の配線", () => {
     expect(before).toContain('applyCsvPending("start");');
     const after = src.slice(at, at + 900);
     // 済んだ流れを外した形を先に書いてから数える(画面を離れた後に済んでも再送できる形で残さない)。
-    expect(after).toContain(`draftSaver.writeNow(csvDraftAfterImport(draftDataRef.current, "${flow}"));\n      applyCsvPending("ok");`);
+    expect(after).toContain(`finishCsvFlow("${flow}");`);
     expect(after).toMatch(/applyCsvPending\(isDefiniteSubmitFailure\((e|err)\) \? "definite" : "unknown"\);/);
     // 印の上げ下げは数えた結果だけで行う(1つの流れが済んでも、他の流れの守りを外さない)。
     expect(after).not.toMatch(/draftSaver\.unmarkSubmitting\(\)/);
+  });
+  it("済んだ流れは共有の控えの形に積み重ねて書く(離れた後に2つ済んでも、先に済んだ流れを書き戻さない・@codex P1)", () => {
+    expect(src).toMatch(
+      /const finishCsvFlow = \(flow: "main" \| "ro" \| "rp"\) => \{\s*draftDataRef\.current = csvDraftAfterImport\(draftDataRef\.current, flow\);\s*draftSaver\.writeNow\(draftDataRef\.current\);\s*applyCsvPending\("ok"\);\s*\};/,
+    );
   });
   it("結果が分からない間は3つの取り込みボタンを押せない", () => {
     expect(src).toMatch(/onClick=\{handleImport\}\s*disabled=\{uploading \|\| importBlocked\}/);

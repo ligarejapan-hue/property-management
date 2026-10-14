@@ -669,6 +669,16 @@ function ImportScreen({ draftEnabled }: { draftEnabled: boolean }) {
     }
     if (e === "confirm") setImportBlocked(false);
   };
+  /**
+   * 1つの流れの取り込みが済んだ。済んだ流れを外した形を書いてから数える。
+   * ⚠共有の形(ref)に積み重ねる: 画面を離れた後に2つ済むと、2つめが離れる前の形から作り直して
+   *   先に済んだ流れを書き戻してしまう(@codex P1)。
+   */
+  const finishCsvFlow = (flow: "main" | "ro" | "rp") => {
+    draftDataRef.current = csvDraftAfterImport(draftDataRef.current, flow);
+    draftSaver.writeNow(draftDataRef.current);
+    applyCsvPending("ok");
+  };
 
 
   // ------ Jobs ------
@@ -926,8 +936,7 @@ function ImportScreen({ draftEnabled }: { draftEnabled: boolean }) {
         xlsxBase64 ?? undefined,
       );
       setResult(json as ImportResult);
-      draftSaver.writeNow(csvDraftAfterImport(draftDataRef.current, "main"));
-      applyCsvPending("ok");
+      finishCsvFlow("main");
       setStep(4);
       fetchJobs();
     } catch (err) {
@@ -1023,8 +1032,7 @@ function ImportScreen({ draftEnabled }: { draftEnabled: boolean }) {
         shinkiFilter,
       });
       setRoResult(res);
-      draftSaver.writeNow(csvDraftAfterImport(draftDataRef.current, "ro"));
-      applyCsvPending("ok");
+      finishCsvFlow("ro");
       fetchJobs();
     } catch (e) {
       applyCsvPending(isDefiniteSubmitFailure(e) ? "definite" : "unknown");
@@ -1096,8 +1104,7 @@ function ImportScreen({ draftEnabled }: { draftEnabled: boolean }) {
         shinkiFilter: rpShinkiFilter,
       });
       setRpResult(res);
-      draftSaver.writeNow(csvDraftAfterImport(draftDataRef.current, "rp"));
-      applyCsvPending("ok");
+      finishCsvFlow("rp");
       fetchJobs();
     } catch (e) {
       applyCsvPending(isDefiniteSubmitFailure(e) ? "definite" : "unknown");
