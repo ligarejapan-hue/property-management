@@ -35,6 +35,10 @@ const field = (value: string | null, sourceLabel: string): DraftField =>
  */
 const RENTAL_NEGATION = /(賃貸|貸)[^。．、，,.]{0,16}?(ない|なく|ません)/;
 
+/** 借り手の語のすぐ後ろ(句読点をはさまず6字以内)に、住んでいる印がある。 */
+const TENANT_PRESENT =
+  /(賃借人|借主|入居者|テナント|借家人)[^、。,，．]{0,6}?(入居中|居住中|住んで|入居して|あり|有り|がいる|はいる|がいます|がおります)/;
+
 /** 現況の言い換え → OccupancyStatus。分からなければ null（unknown を推測で入れない）。 */
 function occupancyFor(raw: string): string | null {
   const s = raw.replace(/[\s　]/g, "");
@@ -59,9 +63,13 @@ function occupancyFor(raw: string): string | null {
     !/(本人|オーナー|所有者|自身)(では|で|じゃ)?(な|無)|本人以外|自身以外/.test(s);
   //   ⚠借り手の語は**住んでいる印**(入居中・居住中・住んでいる・あり・いる)と一緒のときだけ数える
   //   (「入居者未定」「入居者については確認中」は決めない・13巡目)。
-  const tenantPresent = has(["入居中", "居住中", "住んでいる", "住んで", "入居している", "あり", "いる", "有り"]);
+  //   ⚠住んでいる印は**借り手の語のすぐ後ろ**だけを見る。「入居者を探している」「入居者がいるか確認中」の
+  //   ような探している・確かめている言い回しは数えない(14巡目)。
   const tenantMarker =
-    !tenantAbsent && !ownerSelf && tenantPresent && has(["賃借人", "借主", "入居者", "テナント", "借家人"]);
+    !tenantAbsent &&
+    !ownerSelf &&
+    TENANT_PRESENT.test(s) &&
+    !has(["探し", "確認中", "未定", "かどうか", "いるか", "あるか"]);
   const explicitRental = has(["賃貸中", "賃貸している", "貸している", "賃貸に出している"]);
   const rentedMarker = tenantMarker || explicitRental;
   // ⚠賃貸の打ち消し(「賃貸中ではない」「貸していない」)は賃貸中と読まない=決めない(@codex PR#512)。
