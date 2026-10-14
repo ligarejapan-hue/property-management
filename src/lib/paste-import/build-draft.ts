@@ -68,6 +68,24 @@ const TENANT_ABSENT =
 const TENANT_PRESENT =
   /(賃借人|借主|借り手|借り主|賃借者|店子|入居者|テナント|借家人)[^、。,，．]{0,6}?(入居中|居住中|住んで|入居して|居住して|あり|有り|がいる|はいる|もいる|がいます|もいます|がおります|もおります)|(入居中|居住中)[（(：:・\s]{0,2}(賃借人|借主|借り手|借り主|賃借者|店子|入居者|テナント|借家人)/;
 
+/**
+ * 「…が/は 居住・入居・住ん」の主語を見る。主語が無ければ true(書き方の決まった値=従来どおり)。
+ * 主語が本人の語(本人・自身・所有者・オーナー・名義人・売主・私・自分)で終わる、本人と並べている
+ * (「自身・親族」)、または借り手の語なら true。それ以外(管理人・代理人・知人…)は false。
+ * 「所有者によると」「…の話では」のような**伝聞の前置き**は主語から外して、その後ろを主語とみる。
+ */
+function subjectIsOwnerOrTenant(s: string): boolean {
+  const m = /([^、。,，．（()：:]{1,16}?)(が|は)(居住|入居|住ん)/.exec(s);
+  if (!m) return true;
+  const parts = m[1].split(/によると|によれば|の話では|の話だと|いわく|曰く|から聞いた|から聞く|では|から/);
+  const subj = parts[parts.length - 1];
+  if (subj === "") return true;
+  if (/(本人|自身|所有者|オーナー|名義人|売主|私|自分)$/.test(subj)) return true;
+  if (/(本人|自身|所有者|オーナー|名義人|売主)(・|と|や|及び|および)/.test(subj)) return true;
+  if (/(賃借人|借主|借り手|借り主|賃借者|店子|入居者|テナント|借家人)$/.test(subj)) return true;
+  return false;
+}
+
 /** 現況の言い換え → OccupancyStatus。分からなければ null（unknown を推測で入れない）。 */
 function occupancyFor(raw: string): string | null {
   const s = raw.replace(/[\s　]/g, "");
@@ -131,6 +149,9 @@ function occupancyFor(raw: string): string | null {
   const rentedMarker = tenantMarker || explicitRental;
   // ⚠本人の居住と賃貸の語が両方あれば決めない(「本人が居住している、賃貸中」・35巡目)。
   if (ownerSelf && explicitRental) return null;
+  // ⚠住んでいる人(主語)が本人でなければ、本人の居住とは決めない(50・51巡目)。
+  //   「管理人が居住中」「所有者によると管理人が居住中」。言葉を1つずつ並べず、主語で見る。
+  if (!subjectIsOwnerOrTenant(s)) return null;
   // ⚠賃貸の打ち消し(「賃貸中ではない」「貸していない」)は賃貸中と読まない=決めない(@codex PR#512)。
   //   ていねいな打ち消し(「賃貸中ではありません」「貸していません」)も同じ(@codex PR#512 2巡目)。
   if (RENTAL_NEGATION.test(s)) return null;
@@ -203,10 +224,6 @@ function occupancyFor(raw: string): string | null {
   // ⚠「入居中」「居住している」「入居している」だけでは、住んでいるのが本人か借り手か分からない=決めない(38巡目)。
   //   本人の語と結びつくもの(「自身が居住している」タカウル実物)は上の ownerSelf で居住中になっている。
   //   「居住中」「自己居住」は査定の申込で本人の居住を言う決まった書き方なので居住中のまま。
-  //   ⚠「管理人が居住中」のように、本人以外の**誰か**が主語なら居住中にしない(50巡目)。
-  //   言葉を1つずつ並べず、「…が/は 居住・入居・住ん」の主語が本人の語で終わらなければ決めない。
-  const subject = /([^、。,，．（()：:・]{1,10}?)(が|は)(居住|入居|住ん)/.exec(s);
-  if (subject && !/(本人|自身|所有者|オーナー|名義人|売主|ご本人|私|自分)$/.test(subject[1])) return null;
   if (has(["居住中", "自己居住"]) && !OCCUPIED_NEGATION.test(s)) return "occupied";
   if (occupiedMarker) return null;
   if (has(["空室", "空家", "空き家"])) return "vacant";
