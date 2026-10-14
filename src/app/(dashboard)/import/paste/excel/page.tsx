@@ -136,13 +136,16 @@ function ExcelLeadImportScreen({ draftEnabled }: { draftEnabled: boolean }) {
     stopRef.current = false;
     const targets = readyRows;
     setTotal(targets.length);
+    // ⚠控えに書く結果はこの繰り返しの中で持つ(state の反映は次の描画まで待つため、前の行の結果が
+    //   落ちた控えを書かない・設計書 §5.2「1行ずつ送信中→結果を控えに書く」)。
+    const sentResults: Record<string, ExcelLeadResult> = { ...draftDataRef.current.results };
     for (let i = 0; i < targets.length; i++) {
       if (stopRef.current) break;
       const row = targets[i];
       const key = excelLeadRowKey(row);
       // 送る行を控えにすぐ書いてから送る(返事の前に離れても、戻ったとき二重に送らない)。
       setSendingKey(key);
-      draftSaver.writeNow({ ...draftDataRef.current, sendingKey: key });
+      draftSaver.writeNow({ ...draftDataRef.current, results: { ...sentResults }, sendingKey: key });
       let result: ExcelLeadResult;
       try {
         // ⚠重複の確認は**登録APIの中で作成と同じロックの内側**で行う
@@ -159,6 +162,8 @@ function ExcelLeadImportScreen({ draftEnabled }: { draftEnabled: boolean }) {
       } catch (e) {
         result = { kind: "failed", message: e instanceof Error ? e.message : "通信に失敗しました" };
       }
+      sentResults[key] = result;
+      draftSaver.writeNow({ ...draftDataRef.current, results: { ...sentResults }, sendingKey: null });
       setResults((prev) => ({ ...prev, [key]: result }));
       setSendingKey(null);
       setProgress(i + 1);

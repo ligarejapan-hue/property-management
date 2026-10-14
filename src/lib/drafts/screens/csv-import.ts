@@ -108,3 +108,12 @@ export function decideCsvImportRestore(
   if (restored.pendingSubmit) return { start: null, showPending: true };
   return { start: restored.data, showPending: false };
 }
+
+/**
+ * 取り込みが済んだ流れを外した控え(印を外す前に書く)。
+ * ⚠画面を離れた後に返事が来ても書き手は生きているので、印を外すだけだと取り込む前の形
+ *   (段階3の中身など)が「送信中でない控え」として残り、戻ったときもう一度送れてしまう(§5.1 S4)。
+ */
+export function csvDraftAfterImport(d: CsvImportDraft, flow: "main" | "ro" | "rp"): CsvImportDraft {
+  return { ...d, [flow]: null };
+}

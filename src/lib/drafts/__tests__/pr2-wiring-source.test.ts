@@ -34,10 +34,11 @@ describe("Excelまとめ取込の配線", () => {
     expectClientReadyGate(src, "ExcelLeadImportScreen");
     expect(src).toMatch(/draftEnabled \? draftKey\("paste-excel"\) : null/);
   });
-  it("送る行を控えにすぐ書いてから送り、結果が来たら外す", () => {
+  it("送る行を控えにすぐ書いてから送り、結果もすぐ書く(前の行の結果を落とさない・最終点検 Important #2)", () => {
     expect(src).toMatch(
-      /setSendingKey\(key\);\s*draftSaver\.writeNow\(\{ \.\.\.draftDataRef\.current, sendingKey: key \}\);[\s\S]{0,600}fetch\("\/api\/import\/paste\/commit"[\s\S]{0,600}setSendingKey\(null\);/,
+      /setSendingKey\(key\);\s*draftSaver\.writeNow\(\{ \.\.\.draftDataRef\.current, results: \{ \.\.\.sentResults \}, sendingKey: key \}\);[\s\S]{0,800}fetch\("\/api\/import\/paste\/commit"[\s\S]{0,600}sentResults\[key\] = result;\s*draftSaver\.writeNow\(\{ \.\.\.draftDataRef\.current, results: \{ \.\.\.sentResults \}, sendingKey: null \}\);\s*setResults\(\(prev\) => \(\{ \.\.\.prev, \[key\]: result \}\)\);\s*setSendingKey\(null\);/,
     );
+    expect(src).toMatch(/const sentResults: Record<string, ExcelLeadResult> = \{ \.\.\.draftDataRef\.current\.results \};/);
   });
   it("画面を離れたら次の行を送らない(§5.2)", () => {
     expect(src).toMatch(/useEffect\(\(\) => \(\) => \{\s*stopRef\.current = true;\s*\}, \[\]\);/);
@@ -62,6 +63,9 @@ describe("謄本PDF取込の配線", () => {
     expect(src).toMatch(/disabled=\{importing \|\| needsReselect \|\| pendingBlocked\}/);
     expect(src).toContain("<DraftReselectFileNotice");
   });
+  it("送信途中の確認待ちの間は「キャンセル」で印を消させない(最終点検 Minor #1)", () => {
+    expect(src).toMatch(/onClick=\{handleReset\}\s*disabled=\{pendingBlocked\}/);
+  });
   it("キャンセル(最初に戻る)で控えを消す", () => {
     expect(src).toMatch(/const handleReset = \(\) => \{\s*draftSaver\.discard\(\);/);
   });
@@ -83,6 +87,8 @@ describe("取り込み(CSV)の配線", () => {
     expect(before).toContain("draftSaver.markSubmitting();");
     const after = src.slice(at, at + 900);
     expect(after).toContain("draftSaver.unmarkSubmitting();");
+    // 済んだ流れを外した形を先に書いてから印を外す(画面を離れた後に済んでも再送できる形で残さない)。
+    expect(after).toMatch(/draftSaver\.writeNow\(csvDraftAfterImport\(draftDataRef\.current, "(main|ro|rp)"\)\);\s*draftSaver\.unmarkSubmitting\(\);/);
     expect(after).toMatch(/if \(isDefiniteSubmitFailure\((e|err)\)\) draftSaver\.unmarkSubmitting\(\);/);
   });
 });

@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useEffect, useCallback, useMemo } from "react";
+import { useState, useEffect, useCallback, useMemo, useRef } from "react";
 import { PageHeader } from "@/components/ui/page-header";
 import { FilterPanel } from "@/components/ui/filter-panel";
 import { Button } from "@/components/ui/button";
@@ -55,6 +55,7 @@ import { draftKey } from "@/lib/drafts/draft-store";
 import { isDefiniteSubmitFailure } from "@/lib/drafts/submit-outcome";
 import {
   compactCsvImportDraftForPending,
+  csvDraftAfterImport,
   decideCsvImportRestore,
   isCsvImportDraftEmpty,
   parseCsvImportDraft,
@@ -641,6 +642,11 @@ function ImportScreen({ draftEnabled }: { draftEnabled: boolean }) {
   const draftSaver = useDraftAutosave(draftKeyValue, draftData, isCsvImportDraftEmpty, restoreDecision.start ? restored : null, {
     compactForPending: compactCsvImportDraftForPending,
   });
+  // 取り込みが済んだとき、済んだ流れを外した形を書くため最新の控えの形を持っておく(描画中には書かない)。
+  const draftDataRef = useRef(draftData);
+  useEffect(() => {
+    draftDataRef.current = draftData;
+  }, [draftData]);
 
 
   // ------ Jobs ------
@@ -897,6 +903,7 @@ function ImportScreen({ draftEnabled }: { draftEnabled: boolean }) {
         xlsxBase64 ?? undefined,
       );
       setResult(json as ImportResult);
+      draftSaver.writeNow(csvDraftAfterImport(draftDataRef.current, "main"));
       draftSaver.unmarkSubmitting();
       setStep(4);
       fetchJobs();
@@ -992,6 +999,7 @@ function ImportScreen({ draftEnabled }: { draftEnabled: boolean }) {
         shinkiFilter,
       });
       setRoResult(res);
+      draftSaver.writeNow(csvDraftAfterImport(draftDataRef.current, "ro"));
       draftSaver.unmarkSubmitting();
       fetchJobs();
     } catch (e) {
@@ -1063,6 +1071,7 @@ function ImportScreen({ draftEnabled }: { draftEnabled: boolean }) {
         shinkiFilter: rpShinkiFilter,
       });
       setRpResult(res);
+      draftSaver.writeNow(csvDraftAfterImport(draftDataRef.current, "rp"));
       draftSaver.unmarkSubmitting();
       fetchJobs();
     } catch (e) {

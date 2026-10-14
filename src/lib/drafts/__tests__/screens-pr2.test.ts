@@ -130,6 +130,7 @@ describe("謄本PDF取込の控え", () => {
 
 import {
   compactCsvImportDraftForPending,
+  csvDraftAfterImport,
   decideCsvImportRestore,
   isCsvImportDraftEmpty,
   parseCsvImportDraft,
@@ -161,5 +162,23 @@ describe("取り込み(CSV)の控え", () => {
     expect(decideCsvImportRestore({ v: 1, savedAt: 1, data, pendingSubmit: { at: 1 } })).toEqual({ start: null, showPending: true });
     expect(decideCsvImportRestore({ v: 1, savedAt: 1, data })).toEqual({ start: data, showPending: false });
     expect(decideCsvImportRestore(null)).toEqual({ start: null, showPending: false });
+  });
+});
+
+describe("取り込み(CSV)が済んだ後の控え(最終点検 Important #1)", () => {
+  const file = { name: "受付帳.csv", csvText: "x" };
+  const d = {
+    rev: 1 as const,
+    main: {
+      step: 3 as const, fileName: "a.csv", csvText: "住所\n東京", xlsxBase64: null, template: "standard",
+      headers: ["住所"], rows: [["東京"]], columnMapping: {}, duplicatePreview: null,
+    },
+    ro: { receptionFile: file, ownerFile: file, dlFilter: "marked" as const, shinkiFilter: "existing" as const, roPreview: null },
+    rp: { rpFile: file, rpDlFilter: "marked" as const, rpShinkiFilter: "existing" as const, rpPreview: null },
+  };
+  it("取り込んだ流れだけを外し、他の流れは残す(画面を離れた後に済んでも再送できる形で残さない)", () => {
+    expect(csvDraftAfterImport(d, "main")).toEqual({ ...d, main: null });
+    expect(csvDraftAfterImport(d, "ro")).toEqual({ ...d, ro: null });
+    expect(csvDraftAfterImport(d, "rp")).toEqual({ ...d, rp: null });
   });
 });
