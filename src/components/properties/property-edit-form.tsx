@@ -3,7 +3,7 @@
 import { useState, useEffect, useMemo } from "react";
 import { Loader2, X, Save, AlertTriangle } from "lucide-react";
 import { USE_MOCK, fetchUsers, apiErrorCode, codeFromErrorBody } from "@/lib/api-client";
-import { PROPERTY_TYPE_OPTIONS } from "@/lib/property-types";
+import { OCCUPANCY_STATUS_OPTIONS, PROPERTY_TYPE_OPTIONS } from "@/lib/property-types";
 import {
   BUILDING_NAME_MAX_LENGTH,
   supportsBuildingName,
@@ -311,9 +311,7 @@ export function salesFieldsFor(
         { key: "repairReserveFee", label: "修繕積立金(円/月)", type: "number", section: "販売" },
         { key: "occupancyStatus", label: "現況", type: "select", section: "販売", options: [
           { value: "", label: "(未設定)" },
-          { value: "vacant", label: "空室" },
-          { value: "occupied", label: "入居中" },
-          { value: "unknown", label: "不明" },
+          ...OCCUPANCY_STATUS_OPTIONS,
         ] },
         { key: "ownershipShareNote", label: "持分メモ", type: "text", section: "販売" },
         { key: "parking", label: "駐車場", type: "text", section: "販売" },

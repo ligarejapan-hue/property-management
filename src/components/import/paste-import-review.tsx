@@ -16,7 +16,7 @@
 import type { ChangeEvent } from "react";
 import Link from "next/link";
 import type { DraftWarningCode, PasteDraft } from "@/lib/paste-import/types";
-import { PROPERTY_TYPE_OPTIONS } from "@/lib/property-types";
+import { OCCUPANCY_STATUS_OPTIONS, PROPERTY_TYPE_OPTIONS } from "@/lib/property-types";
 import { Button } from "@/components/ui/button";
 import BuildingNameCombobox from "@/components/buildings/building-name-combobox";
 import type { BuildingChoice } from "@/lib/building-link/resolve";
@@ -142,11 +142,7 @@ export type PropertyValues = Record<PropertyFieldKey, string>;
 export type OwnerFieldKey = "name" | "nameKana" | "phone" | "email" | "currentAddress";
 export type OwnerValues = Record<OwnerFieldKey, string>;
 
-const OCCUPANCY_OPTIONS: { value: string; label: string }[] = [
-  { value: "vacant", label: "空室" },
-  { value: "occupied", label: "入居中" },
-  { value: "unknown", label: "不明" },
-];
+const OCCUPANCY_OPTIONS = OCCUPANCY_STATUS_OPTIONS;
 
 /** 欄の並び（設計書のサンプルに合わせた順）。 */
 const PROPERTY_FIELD_LABELS: { key: PropertyFieldKey; label: string }[] = [

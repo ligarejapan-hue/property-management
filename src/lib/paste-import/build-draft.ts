@@ -35,15 +35,18 @@ function occupancyFor(raw: string): string | null {
   //   `所有者は居住していない` は、賃借人や家族が住んでいるかもしれない＝決めない。
   const nobodyLiving = has(["誰も住んでいない", "誰も居住していない", "空いている"]);
   const someoneNotLiving = has(["住んでいない", "居住していない"]);
-  const occupiedMarker = has(["居住中", "入居中", "賃貸中"]);
+  // ⚠2026-10-14 発注者指示: 「居住中(本人が住んでいる)」と「賃貸中(人に貸している)」を分ける。
+  //   タカウル「現在の物件状況：賃貸で貸している」(実物)も賃貸中。
+  const rentedMarker = has(["賃貸中", "賃貸している", "貸している", "賃貸に出している"]);
+  const occupiedMarker = has(["居住中", "入居中", "自己居住"]);
   // ⚠打ち消しと居住中の印が**両方**あれば決めない(@codex PR#491 2巡目)。
-  //   `所有者は居住していない（賃貸中）` は賃貸中＝occupied。どちらとも読めるので
-  //   読み取れない扱い(警告+原文を備考へ・Excel は人の確認へ)にする。
-  if (nobodyLiving) return occupiedMarker ? null : "vacant";
+  if (nobodyLiving) return occupiedMarker || rentedMarker ? null : "vacant";
+  // `所有者は居住していない（賃貸中）` = 本人は住まず人に貸している=賃貸中(10/14 から決められる)。
+  if (rentedMarker) return occupiedMarker ? null : "rented";
   if (someoneNotLiving) return null;
   if (occupiedMarker) return "occupied";
   // タカウル「現在の物件状況：自身が居住している」(実物 2026-10-07)。
-  if (has(["居住している", "入居している", "賃貸している"])) return "occupied";
+  if (has(["居住している", "入居している"])) return "occupied";
   if (has(["空室", "空家", "空き家"])) return "vacant";
   return null;
 }

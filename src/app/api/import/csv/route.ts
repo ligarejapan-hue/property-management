@@ -28,6 +28,8 @@ import {
   CASE_STATUS_VALUES,
   normalizeCaseStatusInput,
   normalizeIntroductionRouteInput,
+  normalizeOccupancyInput,
+  OCCUPANCY_STATUS_VALUES,
 } from "@/lib/property-types";
 import {
   buildDedupeIndex,
@@ -64,7 +66,7 @@ import { assertImportJsonBodySize } from "@/lib/import-body-size";
 const VALID_PROPERTY_TYPES: readonly string[] = PROPERTY_TYPE_VALUES;
 const VALID_REGISTRY_STATUS = ["unconfirmed", "scheduled", "obtained"];
 const VALID_DM_STATUS = ["send", "hold", "no_send"];
-const VALID_OCCUPANCY_STATUS = ["vacant", "occupied", "unknown"];
+const VALID_OCCUPANCY_STATUS: readonly string[] = OCCUPANCY_STATUS_VALUES;
 
 /** Map Japanese target field names to property field names. */
 const JAPANESE_FIELD_MAP: Record<string, string> = {
@@ -404,11 +406,11 @@ export async function POST(request: NextRequest) {
             delete mapped.introductionRoute;
           }
         }
-        if (
-          mapped.occupancyStatus &&
-          !VALID_OCCUPANCY_STATUS.includes(mapped.occupancyStatus)
-        ) {
-          delete mapped.occupancyStatus;
+        // 日本語(空室・居住中・賃貸中・不明)も受ける(2026-10-14)。
+        if (mapped.occupancyStatus) {
+          const occupancy = normalizeOccupancyInput(mapped.occupancyStatus);
+          if (occupancy && VALID_OCCUPANCY_STATUS.includes(occupancy)) mapped.occupancyStatus = occupancy;
+          else delete mapped.occupancyStatus;
         }
         // 郵便番号: 妥当な 7 桁はハイフン無しへ正規化（先頭 0 保持・全角/ハイフン吸収）。
         // 不正値は enum 不正値と同じく drop（raw 保存しない・行自体は失敗にしない）。

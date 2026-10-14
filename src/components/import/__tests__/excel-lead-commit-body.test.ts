@@ -92,7 +92,7 @@ describe("区分以外の種別で消える欄は備考に残す(@codex PR#456 2
     expect(body.property.exclusiveArea).toBeNull();
     expect(body.property.note ?? "").not.toContain("建物面積");
     expect(body.property.note).toContain("間取り: 3LDK");
-    expect(body.property.note).toContain("現況: 入居中");
+    expect(body.property.note).toContain("現況: 居住中");
   });
 
   it("区分マンションは専用の欄にそのまま入る(備考に重ねて書かない)", () => {

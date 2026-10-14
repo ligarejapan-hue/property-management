@@ -7,6 +7,8 @@
 import {
   normalizeCaseStatusInput,
   normalizeIntroductionRouteInput,
+  normalizeOccupancyInput,
+  OCCUPANCY_STATUS_VALUES,
   PROPERTY_TYPE_JP_TO_VALUE,
   PROPERTY_TYPE_VALUES,
 } from "@/lib/property-types";
@@ -20,7 +22,7 @@ import { unwrapCsvTextCell } from "@/lib/csv-encode";
 // CSV 取込(api/import/csv)と同じ決まった値。外れた値は落とす(CSV 取込と同じ)。
 const VALID_REGISTRY_STATUS = ["unconfirmed", "scheduled", "obtained"];
 const VALID_DM_STATUS = ["send", "hold", "no_send"];
-const VALID_OCCUPANCY_STATUS = ["vacant", "occupied", "unknown"];
+const VALID_OCCUPANCY_STATUS: readonly string[] = OCCUPANCY_STATUS_VALUES;
 // 棟郵便番号は棟の欄。物件には入れない(つないだ棟へは buildingPostalCodeFromRow で入れる)。
 const NOT_PROPERTY_FIELDS = new Set(["buildingPostalCode"]);
 
@@ -256,8 +258,9 @@ export function buildPropertyCreateData(
   if (mapped.orientation) createData.orientation = mapped.orientation.trim();
   if (!isNaN(intOf(mapped.managementFee))) createData.managementFee = intOf(mapped.managementFee);
   if (!isNaN(intOf(mapped.repairReserveFee))) createData.repairReserveFee = intOf(mapped.repairReserveFee);
-  if (mapped.occupancyStatus && VALID_OCCUPANCY_STATUS.includes(mapped.occupancyStatus)) {
-    createData.occupancyStatus = mapped.occupancyStatus;
+  const occupancy = normalizeOccupancyInput(mapped.occupancyStatus);
+  if (occupancy && VALID_OCCUPANCY_STATUS.includes(occupancy)) {
+    createData.occupancyStatus = occupancy;
   }
   if (mapped.ownershipShareNote) createData.ownershipShareNote = mapped.ownershipShareNote;
 

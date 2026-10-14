@@ -298,14 +298,37 @@ export const DM_STATUS_LABELS: Record<string, string> = {
 
 export const OCCUPANCY_STATUS_LABELS: Record<string, string> = {
   vacant:   "空室",
-  occupied: "入居中",
+  // ⚠2026-10-14 発注者指示: 「入居中」を「居住中(所有者本人が住んでいる)」と「賃貸中(人に貸している)」に分けた。
+  //   既存の occupied は「居住中」として表示する(値はそのまま)。
+  occupied: "居住中",
+  rented:   "賃貸中",
   unknown:  "不明",
 };
+
+/** 現況の値(OccupancyStatus)。検証・選択肢はここから作る(値の一覧を各所に書かない)。 */
+export const OCCUPANCY_STATUS_VALUES = ["vacant", "occupied", "rented", "unknown"] as const;
+
+/**
+ * CSV などの現況の入力を値へ(日本語の表示名も受ける)。分からなければ null。
+ * ⚠「入居中」は 2026-10-14 までの表示名=これまで occupied(居住中)として扱ってきたので、そのまま occupied に読む。
+ */
+export function normalizeOccupancyInput(raw: string | null | undefined): string | null {
+  const s = (raw ?? "").normalize("NFKC").trim();
+  if (s === "") return null;
+  if ((OCCUPANCY_STATUS_VALUES as readonly string[]).includes(s)) return s;
+  const byLabel: Record<string, string> = { 空室: "vacant", 居住中: "occupied", 入居中: "occupied", 賃貸中: "rented", 不明: "unknown" };
+  return byLabel[s] ?? null;
+}
+
+/** 現況の選択肢(画面のプルダウン用・表示順)。 */
+export const OCCUPANCY_STATUS_OPTIONS: { value: string; label: string }[] = OCCUPANCY_STATUS_VALUES.map(
+  (value) => ({ value, label: OCCUPANCY_STATUS_LABELS[value] }),
+);
 
 /**
  * 現況(OccupancyStatus)を表示ラベルへ変換する。
  * - null / undefined → null
- * - 既知の enum 値 → 日本語ラベル（空室 / 入居中 / 不明）
+ * - 既知の enum 値 → 日本語ラベル（空室 / 居住中 / 賃貸中 / 不明）
  * - 未知の値 → そのまま返す（既に表示用文字列が入っているケース）
  */
 export function localizeOccupancy(status: string | null | undefined): string | null {

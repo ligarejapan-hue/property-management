@@ -28,6 +28,7 @@ export function mapOccupancyStatusToMansionOccupancy(
 ): string | undefined {
   if (status === "vacant") return "空家";
   if (status === "occupied") return "居住中";
+  if (status === "rented") return "賃貸中";
   return localizeOccupancy(status) ?? undefined;
 }
 
@@ -54,6 +55,15 @@ export function mapOccupancyStatusToLandOccupancy(
   status: string | null | undefined,
 ): string | undefined {
   if (status === "vacant" || status === "空室") return "更地";
-  if (status === "occupied" || status === "入居中") return "上物有";
+  // ⚠「入居中」は 2026-10-14 までの表示名(古い済ラベル)。居住中・賃貸中も建物がある=上物有。
+  if (
+    status === "occupied" ||
+    status === "rented" ||
+    status === "入居中" ||
+    status === "居住中" ||
+    status === "賃貸中"
+  ) {
+    return "上物有";
+  }
   return undefined;
 }

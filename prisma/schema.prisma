@@ -43,7 +43,10 @@ enum PropertyType {
 
 enum OccupancyStatus {
   vacant
+  /// 居住中(所有者本人が住んでいる)。2026-10-14 まで「入居中」と表示していた値。
   occupied
+  /// 賃貸中(人に貸している)。2026-10-14 追加。
+  rented
   unknown
 }
 
