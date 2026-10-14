@@ -833,13 +833,19 @@ sudo systemctl status property-management --no-pager
 
 ```sql
 -- ① どの物件が賃貸中だったかを控える(再び新しい版へ進めたときに戻すため・@codex PR#512 5巡目)。
-CREATE TABLE IF NOT EXISTS occupancy_rented_backup AS
+--    ⚠毎回作り直す(前回の控えが残っていると古い一覧のまま=6巡目)。
+BEGIN;
+DROP TABLE IF EXISTS occupancy_rented_backup;
+CREATE TABLE occupancy_rented_backup AS
   SELECT id FROM properties WHERE occupancy_status = 'rented';
 -- ② 旧版の「入居中」(occupied)は賃貸中も含む意味だったので、occupied へ戻す。
 UPDATE properties SET occupancy_status = 'occupied' WHERE occupancy_status = 'rented';
+COMMIT;
 ```
 
-再び新しい版へ進めたら(反映して起動したあと)、控えから賃貸中に戻し、控えの表を消す:
+再び新しい版へ進めるときは、**新しい版を起動する前**に控えから賃貸中に戻し、控えの表を消す
+(起動してからだと、その間に人が直した現況を上書きしうる・6巡目)。順番: 旧版を止める →
+新しい版をビルドし `prisma migrate deploy` → 下の SQL → 起動。
 
 ```sql
 UPDATE properties SET occupancy_status = 'rented'
@@ -847,7 +853,7 @@ UPDATE properties SET occupancy_status = 'rented'
 DROP TABLE occupancy_rented_backup;
 ```
 
-(戻している間に人が現況を直した物件は、`occupancy_status = 'occupied'` の条件で上書きしない。)
+(旧版で動いていた間に人が現況を直した物件は、`occupancy_status = 'occupied'` の条件で上書きしない。)
 
 ---
 
