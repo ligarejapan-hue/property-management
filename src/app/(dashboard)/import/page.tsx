@@ -668,6 +668,8 @@ function ImportScreen({ draftEnabled }: { draftEnabled: boolean }) {
    */
   const [historyStale, setHistoryStale] = useState(restoreDecision.showPending);
   const historyGenRef = useRef(0);
+  /** 履歴の読み込みの番号。最後に始めたもの以外の応答は捨てる(古い履歴で上書きしない)。 */
+  const jobsReqRef = useRef(0);
   // ⚠どれかの取り込み中・結果が分からない間は「最初からやり直す」を出さない(送信中の印を消させない)。
   //   下見の返事を待つ間も出さない(届いた結果が控えを作り直す)。
   const importBusy = uploading || previewLoading || roLoading || rpLoading || importBlocked;
@@ -701,6 +703,7 @@ function ImportScreen({ draftEnabled }: { draftEnabled: boolean }) {
   // 最新値をクロージャに焼き込むため useCallback の deps に含める。
   const fetchJobs = useCallback(async () => {
     const gen = historyGenRef.current;
+    const req = ++jobsReqRef.current;
     setJobsLoading(true);
     try {
       // 日付フィルタは「YYYY-MM-DD」を受け取り、ISO 文字列に変換して渡す。
@@ -721,13 +724,14 @@ function ImportScreen({ draftEnabled }: { draftEnabled: boolean }) {
         page: jobPage,
         limit: jobLimit,
       });
+      if (req !== jobsReqRef.current) return;
       setJobs((json.data ?? []) as ImportJob[]);
       setJobPagination(json.pagination ?? null);
       if (gen === historyGenRef.current) setHistoryStale(false);
     } catch {
       // ignore
     } finally {
-      setJobsLoading(false);
+      if (req === jobsReqRef.current) setJobsLoading(false);
     }
   }, [jobFilters, jobPage, jobLimit]);
 

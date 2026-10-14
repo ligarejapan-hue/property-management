@@ -189,11 +189,20 @@ describe("取り込み(CSV): 履歴の読み直しが成功するまで「確か
   it("結果が分からなくなったら履歴を古い扱いにし、その後に始めた読み込みが成功したときだけ外す", () => {
     expect(src).toMatch(/const \[historyStale, setHistoryStale\] = useState\(restoreDecision\.showPending\);/);
     expect(src).toMatch(/historyGenRef\.current \+= 1;\s*setHistoryStale\(true\);/);
-    expect(src).toMatch(/const gen = historyGenRef\.current;\s*setJobsLoading\(true\);/);
+    expect(src).toMatch(/const gen = historyGenRef\.current;\s*const req = \+\+jobsReqRef\.current;\s*setJobsLoading\(true\);/);
     expect(src).toMatch(/setJobPagination\(json\.pagination \?\? null\);\s*if \(gen === historyGenRef\.current\) setHistoryStale\(false\);/);
   });
   it("帯のボタンは読み込み中・古いままのとき押せず、読めなかったことを伝える", () => {
     expect(src).toContain("confirmDisabled={jobsLoading || historyStale}");
     expect(src).toContain("historyError={historyStale && !jobsLoading}");
+  });
+});
+
+describe("取り込み(CSV): 履歴は最後に始めた読み込みの結果だけを出す(古い応答で上書きしない・@codex P1)", () => {
+  const src = read("src/app/(dashboard)/import/page.tsx");
+  it("読み込みごとに番号を振り、最後のもの以外の応答は捨てる", () => {
+    expect(src).toMatch(/const req = \+\+jobsReqRef\.current;/);
+    expect(src).toMatch(/const json = await fetchImportJobs\(\{[\s\S]*?\}\);\s*if \(req !== jobsReqRef\.current\) return;\s*setJobs\(/);
+    expect(src).toMatch(/if \(req === jobsReqRef\.current\) setJobsLoading\(false\);/);
   });
 });
