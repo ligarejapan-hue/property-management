@@ -92,6 +92,14 @@ function occupancyFor(raw: string): string | null {
   // ⚠賃貸の打ち消し(「賃貸中ではない」「貸していない」)は賃貸中と読まない=決めない(@codex PR#512)。
   //   ていねいな打ち消し(「賃貸中ではありません」「貸していません」)も同じ(@codex PR#512 2巡目)。
   if (RENTAL_NEGATION.test(s)) return null;
+  // ⚠今ではないこと(過去・予定)や、まだ分からないこと(確認中・未定)を言っているなら、
+  //   誰についてでも決めない(20巡目)。「本人が居住していた」「自己居住の予定」「居住しているか確認中」など。
+  if (
+    has(["ていた", "でいた", "だった", "ていました", "でいました", "予定", "以前", "かつて", "元は", "今後", "将来"]) ||
+    has(["確認中", "未定", "かどうか", "いるか", "あるか", "不明"])
+  ) {
+    return null;
+  }
   const occupiedMarker = has(["居住中", "入居中", "自己居住"]) && !OCCUPIED_NEGATION.test(s);
   // ⚠打ち消しと居住中の印が**両方**あれば決めない(@codex PR#491 2巡目)。
   if (nobodyLiving) return occupiedMarker || rentedMarker ? null : "vacant";
