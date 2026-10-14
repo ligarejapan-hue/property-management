@@ -80,6 +80,7 @@ const OCCUPANCY_LABELS = OCCUPANCY_STATUS_LABELS;
 const OCCUPANCY_COLORS: Record<string, string> = {
   vacant: "bg-green-100 text-green-800",
   occupied: "bg-blue-100 text-blue-800",
+  rented: "bg-indigo-100 text-indigo-800",
   unknown: "bg-gray-100 text-gray-600",
 };
 
@@ -780,7 +781,8 @@ function AddUnitModal({
             >
               <option value="unknown">不明</option>
               <option value="vacant">空室</option>
-              <option value="occupied">入居中</option>
+              <option value="occupied">居住中</option>
+              <option value="rented">賃貸中</option>
             </select>
           </div>
           <div>
