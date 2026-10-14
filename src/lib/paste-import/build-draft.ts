@@ -162,6 +162,10 @@ function occupancyFor(raw: string): string | null {
   // `所有者は居住していない（賃貸中）` = 本人は住まず人に貸している=賃貸中(10/14 から決められる)。
   if (rentedMarker) return occupiedMarker ? null : "rented";
   if (someoneNotLiving) return null;
+  // ⚠ここまでで決まらず、借りる側の語(賃借人・テナント等)がどこかにあるなら、居住中とは決めない
+  //   (「現在居住中、入居者は賃借人」のように別の節で借り手と言っている・37巡目)。
+  //   別の節の言い方を1つずつ追わず、居住中と取り違える道だけを閉じる(迷ったら人の確認へ)。
+  if (/(賃借人|借主|借り手|借り主|賃借者|店子|テナント|借家人)/.test(s)) return null;
   if (occupiedMarker) return "occupied";
   // タカウル「現在の物件状況：自身が居住している」(実物 2026-10-07)。
   if (has(["居住している", "入居している"])) return "occupied";
