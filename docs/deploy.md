@@ -815,6 +815,19 @@ sudo systemctl status property-management --no-pager
 > スキーマ変更がない場合はステップ 2 不要。  
 > デプロイ前に `pg_dump` でバックアップを取っておくこと。
 
+### 現況「賃貸中」(`20261014090000_occupancy_rented`)より前へ戻すとき
+
+この migration は enum `OccupancyStatus` に値 `rented`(賃貸中)を足すだけ。PostgreSQL は enum の値を消せないので、
+値そのものは残してよい。ただし**古い版のアプリは `rented` を知らず、その行を読むと失敗し得る**ため、
+旧版を起動する**前**に `rented` の行を古い版が知っている値へ戻す(手順 1 と 5 の間で実行する)。
+
+```sql
+-- 旧版の「入居中」(occupied)は賃貸中も含む意味だったので、occupied へ戻す。
+UPDATE properties SET occupancy_status = 'occupied' WHERE occupancy_status = 'rented';
+```
+
+再び新しい版へ戻すときは、この行を賃貸中へ直す情報は残らない(必要なら UPDATE の前に対象の物件 id を控える)。
+
 ---
 
 ## 9. デプロイ資材テンプレート

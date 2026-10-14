@@ -38,6 +38,10 @@ function occupancyFor(raw: string): string | null {
   // ⚠2026-10-14 発注者指示: 「居住中(本人が住んでいる)」と「賃貸中(人に貸している)」を分ける。
   //   タカウル「現在の物件状況：賃貸で貸している」(実物)も賃貸中。
   const rentedMarker = has(["賃貸中", "賃貸している", "貸している", "賃貸に出している"]);
+  // ⚠賃貸の打ち消し(「賃貸中ではない」「貸していない」)は賃貸中と読まない=決めない(@codex PR#512)。
+  if (has(["賃貸中ではない", "賃貸中でない", "賃貸ではない", "貸していない", "賃貸していない", "賃貸に出していない"])) {
+    return null;
+  }
   const occupiedMarker = has(["居住中", "入居中", "自己居住"]);
   // ⚠打ち消しと居住中の印が**両方**あれば決めない(@codex PR#491 2巡目)。
   if (nobodyLiving) return occupiedMarker || rentedMarker ? null : "vacant";
