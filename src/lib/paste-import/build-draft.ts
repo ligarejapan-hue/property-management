@@ -73,7 +73,9 @@ function occupancyFor(raw: string): string | null {
     !OCCUPIED_NEGATION.test(s) &&
     (has(["自己居住"]) ||
       /(本人|自身|オーナー|所有者)[^、。,，．]{0,8}(居住|住ん|入居)/.test(s) ||
-      /(入居者|居住者)[^、。,，．]{0,6}(本人|オーナー)/.test(s)) &&
+      /(入居者|居住者)[^、。,，．]{0,6}(所有者|オーナー)/.test(s)) &&
+    // ⚠「入居者本人」「賃借人本人」の本人は借り手のこと=所有者の居住ではない(24巡目)。
+    !/(入居者|居住者|賃借人|借主|テナント|借家人)本人/.test(s) &&
     !NOT_OWNER.test(s);
   //   ⚠借り手の語は**住んでいる印**(入居中・居住中・住んでいる・あり・いる)と一緒のときだけ数える
   //   (「入居者未定」「入居者については確認中」は決めない・13巡目)。
@@ -131,6 +133,8 @@ function occupancyFor(raw: string): string | null {
   }
   // 本人の居住を言っていて賃貸の語が無ければ居住中(「入居者：所有者本人」)。
   if (ownerSelf && !explicitRental && !someoneNotLiving) return "occupied";
+  // 「居住者本人が居住中」のように、住んでいる人が所有者か借り手か書かれていなければ決めない(24巡目)。
+  if (/(入居者|居住者|賃借人|借主|テナント|借家人)本人/.test(s) && !explicitRental) return null;
   // `所有者は居住していない（賃貸中）` = 本人は住まず人に貸している=賃貸中(10/14 から決められる)。
   if (rentedMarker) return occupiedMarker ? null : "rented";
   if (someoneNotLiving) return null;
