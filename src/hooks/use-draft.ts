@@ -69,6 +69,11 @@ export function useDraftAutosave<T>(
     close: () => writer?.close(),
     markSubmitting: () => writer?.markSubmitting(),
     unmarkSubmitting: () => writer?.unmarkSubmitting(),
+    /** 今の内容をすぐ書く(送る直前など、間引きを待てないとき)。 */
+    writeNow: (d: T) => {
+      writer?.update(d);
+      writer?.flush();
+    },
   };
 }
 

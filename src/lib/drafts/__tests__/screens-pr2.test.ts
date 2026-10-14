@@ -6,6 +6,11 @@ import {
   pdfReselectReason,
   type PasteScreenDraft,
 } from "../screens/paste";
+import {
+  isPasteExcelDraftEmpty,
+  parsePasteExcelDraft,
+  restoreExcelResults,
+} from "../screens/paste-excel";
 
 const review = {
   draft: { noteFromUnmapped: "", unreadable: [], property: {}, owner: null, externalLinkKey: null },
@@ -50,5 +55,36 @@ describe("貼り付けて物件化の控え", () => {
     expect(pdfReselectReason({ hasReview: true, pdfFileName: "a.pdf", hasPdfFile: true })).toBeNull();
     expect(pdfReselectReason({ hasReview: true, pdfFileName: null, hasPdfFile: false })).toBeNull();
     expect(pdfReselectReason({ hasReview: false, pdfFileName: "a.pdf", hasPdfFile: false })).toBeNull();
+  });
+});
+
+describe("Excelまとめ取込の控え", () => {
+  const row = {
+    sheetName: "HOME4U", rowNumber: 3, text: "お名前：山田", draft: { noteFromUnmapped: "" },
+    ownerNote: "", status: "ready", reasons: [], registeredPropertyId: null,
+  };
+  const d = { rev: 1, fileName: "表.xlsx", rows: [row], results: { "HOME4U#3": { kind: "created", propertyId: "p1" } }, sendingKey: null };
+
+  it("往復して同じ・形違いは捨てる", () => {
+    expect(parsePasteExcelDraft(JSON.parse(JSON.stringify(d)))).toEqual(d);
+    expect(parsePasteExcelDraft({ ...d, rev: 2 })).toBeNull();
+    expect(parsePasteExcelDraft({ ...d, results: { x: { kind: "nope" } } })).toBeNull();
+    expect(parsePasteExcelDraft({ ...d, rows: [{ ...row, status: "x" }] })).toBeNull();
+  });
+  it("行が無ければ空", () => {
+    expect(isPasteExcelDraftEmpty({ rev: 1, fileName: "a.xlsx", rows: [], results: {}, sendingKey: null })).toBe(true);
+    expect(isPasteExcelDraftEmpty(d as never)).toBe(false);
+  });
+
+  // 総当たり: 送信中の行の有無 × その行の結果の有無 × 他の行の結果
+  const cases: Array<[string, Record<string, { kind: string }>, string | null, Record<string, string>]> = [
+    ["送信中なし", { a: { kind: "created" } }, null, { a: "created" }],
+    ["送信中の行は結果なし→unknown", {}, "b", { b: "unknown" }],
+    ["送信中の行に結果が届いていればそのまま", { b: { kind: "failed" } }, "b", { b: "failed" }],
+    ["他の行の結果は残す", { a: { kind: "duplicate" } }, "b", { a: "duplicate", b: "unknown" }],
+  ];
+  it.each(cases)("%s", (_n, results, sending, expected) => {
+    const out = restoreExcelResults(results as never, sending);
+    expect(Object.fromEntries(Object.entries(out).map(([k, v]) => [k, v.kind]))).toEqual(expected);
   });
 });

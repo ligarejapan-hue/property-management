@@ -22,6 +22,9 @@ describe("use-draft の配線", () => {
       /export function useClientReady\(\): boolean \{\s*return useSyncExternalStore\(\s*subscribeNothing,\s*\(\) => true,\s*\(\) => false,?\s*\);/,
     );
   });
+  it("writeNow は間引きを待たずにすぐ書く(送る直前の印)", () => {
+    expect(src).toMatch(/writeNow: \(d: T\) => \{\s*writer\?\.update\(d\);\s*writer\?\.flush\(\);/);
+  });
   it("localStorage・indexedDB を使わない", () => {
     expect(src).not.toMatch(/localStorage|indexedDB/);
   });

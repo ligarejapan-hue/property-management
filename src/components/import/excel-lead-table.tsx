@@ -28,13 +28,23 @@ export type ExcelLeadResult =
   | { kind: "duplicate" }
   /** 登録直前の見直しで候補が見つかり、登録しなかった(人が確かめる)。 */
   | { kind: "review"; reasons: string[] }
-  | { kind: "failed"; message: string };
+  | { kind: "failed"; message: string }
+  /** 送った直後に画面を離れ、登録されたか分からない(設計書 §5.2)。まとめて登録の対象から外す。 */
+  | { kind: "unknown" };
 
 export function excelLeadRowKey(r: Pick<ExcelLeadRow, "sheetName" | "rowNumber">): string {
   return `${r.sheetName}#${r.rowNumber}`;
 }
 
-function StatusCell({ row, result }: { row: ExcelLeadRow; result: ExcelLeadResult | undefined }) {
+function StatusCell({
+  row,
+  result,
+  onReturnUnknown,
+}: {
+  row: ExcelLeadRow;
+  result: ExcelLeadResult | undefined;
+  onReturnUnknown?: () => void;
+}) {
   if (result?.kind === "created") {
     return (
       <Link href={`/properties/${result.propertyId}`} className="text-indigo-600 hover:underline dark:text-indigo-400">
@@ -43,6 +53,21 @@ function StatusCell({ row, result }: { row: ExcelLeadRow; result: ExcelLeadResul
     );
   }
   if (result?.kind === "duplicate") return <StatusBadge intent="neutral">登録済み</StatusBadge>;
+  if (result?.kind === "unknown") {
+    return (
+      <div className="space-y-1">
+        <StatusBadge intent="warning">登録されたか分かりません</StatusBadge>
+        <p className="text-xs text-amber-800 dark:text-amber-300">
+          送っている途中で画面を離れました。物件一覧で確かめてください。
+        </p>
+        {onReturnUnknown && (
+          <button type="button" onClick={onReturnUnknown} className="text-xs text-indigo-600 underline dark:text-indigo-400">
+            確かめたので登録の対象に戻す
+          </button>
+        )}
+      </div>
+    );
+  }
   if (result?.kind === "failed") {
     return (
       <div className="space-y-1">
@@ -106,9 +131,12 @@ function ReviewHelp({ row }: { row: ExcelLeadRow }) {
 export function ExcelLeadTable({
   rows,
   results,
+  onReturnUnknown,
 }: {
   rows: ExcelLeadRow[];
   results: Record<string, ExcelLeadResult>;
+  /** 「登録されたか分からない」行を、人が確かめた後でまとめて登録の対象に戻す。 */
+  onReturnUnknown?: (rowKey: string) => void;
 }) {
   return (
     <div className="overflow-x-auto rounded-lg border border-gray-200 bg-white dark:border-gray-700 dark:bg-gray-800">
@@ -142,7 +170,11 @@ export function ExcelLeadTable({
                   {type ? (PROPERTY_TYPE_LABELS[type] ?? type) : "—"}
                 </td>
                 <td className="px-3 py-2">
-                  <StatusCell row={row} result={result} />
+                  <StatusCell
+                    row={row}
+                    result={result}
+                    onReturnUnknown={onReturnUnknown ? () => onReturnUnknown(key) : undefined}
+                  />
                   {((row.status === "review" && !result) || result?.kind === "review") && (
                     <ReviewHelp row={row} />
                   )}

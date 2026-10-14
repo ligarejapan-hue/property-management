@@ -27,3 +27,22 @@ describe("貼り付けて物件化の配線", () => {
     expect(src).toContain("pdfReselectReason(");
   });
 });
+
+describe("Excelまとめ取込の配線", () => {
+  const src = read("src/app/(dashboard)/import/paste/excel/page.tsx");
+  it("F5 でも食い違わない", () => {
+    expectClientReadyGate(src, "ExcelLeadImportScreen");
+    expect(src).toMatch(/draftEnabled \? draftKey\("paste-excel"\) : null/);
+  });
+  it("送る行を控えにすぐ書いてから送り、結果が来たら外す", () => {
+    expect(src).toMatch(
+      /setSendingKey\(key\);\s*draftSaver\.writeNow\(\{ \.\.\.draftDataRef\.current, sendingKey: key \}\);[\s\S]{0,600}fetch\("\/api\/import\/paste\/commit"[\s\S]{0,600}setSendingKey\(null\);/,
+    );
+  });
+  it("画面を離れたら次の行を送らない(§5.2)", () => {
+    expect(src).toMatch(/useEffect\(\(\) => \(\) => \{\s*stopRef\.current = true;\s*\}, \[\]\);/);
+  });
+  it("戻したとき送信中だった行は分からない扱い", () => {
+    expect(src).toContain("restoreExcelResults(");
+  });
+});
