@@ -64,7 +64,7 @@ describe("謄本PDF取込の配線", () => {
     expect(src).toContain("<DraftReselectFileNotice");
   });
   it("送信途中の確認待ちの間は「キャンセル」で印を消させない(最終点検 Minor #1)", () => {
-    expect(src).toMatch(/onClick=\{handleReset\}\s*disabled=\{pendingBlocked\}/);
+    expect(src).toMatch(/onClick=\{handleReset\}\s*disabled=\{pendingBlocked \|\| importing\}/);
   });
   it("キャンセル(最初に戻る)で控えを消す", () => {
     expect(src).toMatch(/const handleReset = \(\) => \{\s*draftSaver\.discard\(\);/);
@@ -77,8 +77,11 @@ describe("取り込み(CSV)の配線", () => {
     expectClientReadyGate(src, "ImportScreen");
     expect(src).toMatch(/draftEnabled \? draftKey\("csv-import"\) : null/);
   });
-  it("送信中の印が残る控えは書き手に渡さない(印を引き継がず、空で上書きして消す)", () => {
-    expect(src).toMatch(/useDraftAutosave\(draftKeyValue, draftData, isCsvImportDraftEmpty, restoreDecision\.start \? restored : null,/);
+  it("送信中の印が残る控えは、中身は戻さず印だけ引き継ぎ、人が確かめるまで消さない・送れなくする(@codex P1)", () => {
+    expect(src).toMatch(/useDraftAutosave\(draftKeyValue, draftData, isCsvImportDraftEmpty, restored,/);
+    expect(src).toMatch(/const csvPendingRef = useRef<CsvPendingState>\(\{ inflight: 0, unknown: restoreDecision\.showPending \}\);/);
+    expect(src).toMatch(/const \[importBlocked, setImportBlocked\] = useState\(restoreDecision\.showPending\);/);
+    expect(src).toContain('reason={importBlockReason} onDismiss={() => applyCsvPending("confirm")}');
   });
   it.each([
     ["importCsv(", "main"],

@@ -1237,7 +1237,7 @@ function RegistryPdfScreen({ draftEnabled }: { draftEnabled: boolean }) {
             <div className="flex gap-3">
               <button
                 onClick={handleReset}
-                disabled={pendingBlocked}
+                disabled={pendingBlocked || importing}
                 // ⚠送信途中の確認待ちの間は押させない(印を消すのは「確かめたので続ける」だけ・§5.1)。
                 className="rounded-md border border-gray-300 dark:border-gray-700 px-4 py-2 text-sm font-medium text-gray-600 dark:text-gray-300 hover:bg-gray-50 dark:hover:bg-gray-800 transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
               >

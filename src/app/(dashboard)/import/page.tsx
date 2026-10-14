@@ -57,9 +57,9 @@ import {
   compactCsvImportDraftForPending,
   csvDraftAfterImport,
   decideCsvImportRestore,
-  INITIAL_CSV_PENDING,
   nextCsvPending,
   type CsvPendingEvent,
+  type CsvPendingState,
   isCsvImportDraftEmpty,
   parseCsvImportDraft,
   type CsvImportDraft,
@@ -616,7 +616,6 @@ function ImportScreen({ draftEnabled }: { draftEnabled: boolean }) {
   const [rpDlFilter, setRpDlFilter] = useState<"marked" | "unmarked" | "all">(s0?.rp?.rpDlFilter ?? "marked");
   const [rpShinkiFilter, setRpShinkiFilter] = useState<"existing" | "new" | "all">(s0?.rp?.rpShinkiFilter ?? "existing");
 
-  const [pendingNoticeShown, setPendingNoticeShown] = useState(restoreDecision.showPending);
   const [restoredDismissed, setRestoredDismissed] = useState(false);
 
   const draftData = useMemo<CsvImportDraft>(
@@ -640,9 +639,9 @@ function ImportScreen({ draftEnabled }: { draftEnabled: boolean }) {
       receptionFile, ownerFile, dlFilter, shinkiFilter, roPreview, roResult,
       rpFile, rpDlFilter, rpShinkiFilter, rpPreview, rpResult],
   );
-  // ⚠送信中の印が残っていた控えは書き手に渡さない(印を引き継がない)。最初の書き込みで
-  //   空の中身になり、控えは消える(§5.1 S4)。
-  const draftSaver = useDraftAutosave(draftKeyValue, draftData, isCsvImportDraftEmpty, restoreDecision.start ? restored : null, {
+  // ⚠送信中の印が残っていた控えは、中身は戻さず(上の restoreDecision)印だけ引き継ぐ。
+  //   人が履歴で確かめる(帯のボタン)まで印を消さない=離れて戻っても案内が出続ける(§5.1 S4・@codex P1)。
+  const draftSaver = useDraftAutosave(draftKeyValue, draftData, isCsvImportDraftEmpty, restored, {
     compactForPending: compactCsvImportDraftForPending,
   });
   // 取り込みが済んだとき、済んだ流れを外した形を書くため最新の控えの形を持っておく(描画中には書かない)。
@@ -652,9 +651,11 @@ function ImportScreen({ draftEnabled }: { draftEnabled: boolean }) {
   }, [draftData]);
 
   // 送信中の印は3つの流れで1つ。数えて、全部済んだときだけ外す(@codex P1)。
-  const csvPendingRef = useRef(INITIAL_CSV_PENDING);
-  /** 画面に残ったまま結果が分からなくなった。履歴で確かめるまで取り込みを止める。 */
-  const [importBlocked, setImportBlocked] = useState(false);
+  // ⚠前回の印を引き継いだときは「分からない」から始める(確かめるまで印を外さない・送れなくする)。
+  const csvPendingRef = useRef<CsvPendingState>({ inflight: 0, unknown: restoreDecision.showPending });
+  /** 結果が分からない(前回離れた/画面に残ったまま 5xx・通信切れ)。履歴で確かめるまで取り込みを止める。 */
+  const [importBlocked, setImportBlocked] = useState(restoreDecision.showPending);
+  const [importBlockReason, setImportBlockReason] = useState<"left" | "unknown">("left");
   // ⚠どれかの取り込み中・結果が分からない間は「最初からやり直す」を出さない(送信中の印を消させない)。
   const importBusy = uploading || roLoading || rpLoading || importBlocked;
   const applyCsvPending = (e: CsvPendingEvent) => {
@@ -662,7 +663,10 @@ function ImportScreen({ draftEnabled }: { draftEnabled: boolean }) {
     csvPendingRef.current = r.state;
     if (e === "start") draftSaver.markSubmitting();
     if (r.unmark) draftSaver.unmarkSubmitting();
-    if (e === "unknown") setImportBlocked(true);
+    if (e === "unknown") {
+      setImportBlocked(true);
+      setImportBlockReason("unknown");
+    }
     if (e === "confirm") setImportBlocked(false);
   };
 
@@ -1137,14 +1141,9 @@ function ImportScreen({ draftEnabled }: { draftEnabled: boolean }) {
         title="受付帳CSV取込"
         description="受付帳のCSV / Excel(.xlsx) から物件を新規作成し、所有者CSVで所有者を紐づけます。"
       />
-      {pendingNoticeShown && (
-        <div className="mb-4">
-          <DraftImportPendingNotice onDismiss={() => setPendingNoticeShown(false)} />
-        </div>
-      )}
       {importBlocked && (
         <div className="mb-4">
-          <DraftImportPendingNotice reason="unknown" onDismiss={() => applyCsvPending("confirm")} />
+          <DraftImportPendingNotice reason={importBlockReason} onDismiss={() => applyCsvPending("confirm")} />
         </div>
       )}
       {restoreDecision.start && restored && !restoredDismissed && !importBusy && (

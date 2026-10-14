@@ -113,7 +113,7 @@ export function DraftImportPendingNotice({
         <span>取り込みの結果が分かりませんでした（通信が切れたか、サーバーで問題が起きました）。下の「取り込み履歴」で結果を確かめてから続けてください。</span>
       )}
       <button type="button" onClick={onDismiss} className={BTN}>
-        {reason === "left" ? "閉じる" : "確かめたので続ける"}
+        {reason === "left" ? "確かめたので閉じる" : "確かめたので続ける"}
       </button>
     </div>
   );
