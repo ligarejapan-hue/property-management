@@ -819,7 +819,14 @@ sudo systemctl status property-management --no-pager
 
 この migration は enum `OccupancyStatus` に値 `rented`(賃貸中)を足すだけ。PostgreSQL は enum の値を消せないので、
 値そのものは残してよい。ただし**古い版のアプリは `rented` を知らず、その行を読むと失敗し得る**ため、
-旧版を起動する**前**に `rented` の行を古い版が知っている値へ戻す(手順 1 と 5 の間で実行する)。
+旧版を起動する**前**に `rented` の行を古い版が知っている値へ戻す。
+
+⚠**先にアプリを止めてから**変換する(@codex PR#512 2巡目)。動いている新しい版が変換の後に「賃貸中」を
+保存すると、また `rented` の行ができて旧版が読めなくなる。順番:
+
+1. `sudo systemctl stop property-management`(新しい版を止める=書き込みを止める)
+2. 下の SQL を実行する
+3. 上の手順 1〜4(旧版へ戻してビルド)→ 手順 5 で起動(`restart` は停止中でも起動する)
 
 ```sql
 -- 旧版の「入居中」(occupied)は賃貸中も含む意味だったので、occupied へ戻す。

@@ -26,6 +26,13 @@ const EMPTY: DraftField = { value: null, sourceLabel: null };
 const field = (value: string | null, sourceLabel: string): DraftField =>
   value === null ? EMPTY : { value, sourceLabel };
 
+/**
+ * 賃貸の打ち消し(「賃貸中ではない／ではありません／でない」「貸していない／貸していません」
+ * 「賃貸に出していない」など)。空白を除いた文字列に当てる。
+ */
+const RENTAL_NEGATION =
+  /賃貸(中)?(では|で)?(ない|なく|ありません|ございません)|貸して(い)?(ない|なく|ません|おりません)|賃貸(に出)?して(い)?(ない|なく|ません|おりません)|貸し出して(い)?(ない|ません)/;
+
 /** 現況の言い換え → OccupancyStatus。分からなければ null（unknown を推測で入れない）。 */
 function occupancyFor(raw: string): string | null {
   const s = raw.replace(/[\s　]/g, "");
@@ -39,9 +46,8 @@ function occupancyFor(raw: string): string | null {
   //   タカウル「現在の物件状況：賃貸で貸している」(実物)も賃貸中。
   const rentedMarker = has(["賃貸中", "賃貸している", "貸している", "賃貸に出している"]);
   // ⚠賃貸の打ち消し(「賃貸中ではない」「貸していない」)は賃貸中と読まない=決めない(@codex PR#512)。
-  if (has(["賃貸中ではない", "賃貸中でない", "賃貸ではない", "貸していない", "賃貸していない", "賃貸に出していない"])) {
-    return null;
-  }
+  //   ていねいな打ち消し(「賃貸中ではありません」「貸していません」)も同じ(@codex PR#512 2巡目)。
+  if (RENTAL_NEGATION.test(s)) return null;
   const occupiedMarker = has(["居住中", "入居中", "自己居住"]);
   // ⚠打ち消しと居住中の印が**両方**あれば決めない(@codex PR#491 2巡目)。
   if (nobodyLiving) return occupiedMarker || rentedMarker ? null : "vacant";
