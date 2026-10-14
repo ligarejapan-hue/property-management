@@ -57,6 +57,9 @@ import {
   compactCsvImportDraftForPending,
   csvDraftAfterImport,
   decideCsvImportRestore,
+  INITIAL_CSV_PENDING,
+  nextCsvPending,
+  type CsvPendingEvent,
   isCsvImportDraftEmpty,
   parseCsvImportDraft,
   type CsvImportDraft,
@@ -648,6 +651,19 @@ function ImportScreen({ draftEnabled }: { draftEnabled: boolean }) {
     draftDataRef.current = draftData;
   }, [draftData]);
 
+  // 送信中の印は3つの流れで1つ。数えて、全部済んだときだけ外す(@codex P1)。
+  const csvPendingRef = useRef(INITIAL_CSV_PENDING);
+  /** 画面に残ったまま結果が分からなくなった。履歴で確かめるまで取り込みを止める。 */
+  const [importBlocked, setImportBlocked] = useState(false);
+  const applyCsvPending = (e: CsvPendingEvent) => {
+    const r = nextCsvPending(csvPendingRef.current, e);
+    csvPendingRef.current = r.state;
+    if (e === "start") draftSaver.markSubmitting();
+    if (r.unmark) draftSaver.unmarkSubmitting();
+    if (e === "unknown") setImportBlocked(true);
+    if (e === "confirm") setImportBlocked(false);
+  };
+
 
   // ------ Jobs ------
   // jobFilters / jobPage / jobLimit はクライアント State なので
@@ -888,13 +904,14 @@ function ImportScreen({ draftEnabled }: { draftEnabled: boolean }) {
 
   // ------ Import ------
   const handleImport = async () => {
+    if (importBlocked) return;
     if (!csvText.trim() && !xlsxBase64) return;
     setUploading(true);
     setError(null);
     setResult(null);
 
     // 返事が来る前に離れたら、戻ったとき「取り込み履歴で確かめて」と出す(二重取り込みを防ぐ・§5.1)。
-    draftSaver.markSubmitting();
+    applyCsvPending("start");
     try {
       const json = await importCsv(
         fileName || "import.csv",
@@ -904,12 +921,12 @@ function ImportScreen({ draftEnabled }: { draftEnabled: boolean }) {
       );
       setResult(json as ImportResult);
       draftSaver.writeNow(csvDraftAfterImport(draftDataRef.current, "main"));
-      draftSaver.unmarkSubmitting();
+      applyCsvPending("ok");
       setStep(4);
       fetchJobs();
     } catch (err) {
-      // ⚠5xx・通信切れは印を残す(取り込まれたか分からない)。画面に残っていれば履歴で見られる。
-      if (isDefiniteSubmitFailure(err)) draftSaver.unmarkSubmitting();
+      // ⚠5xx・通信切れは印を残し、履歴で確かめるまで取り込みを止める(取り込まれたか分からない)。
+      applyCsvPending(isDefiniteSubmitFailure(err) ? "definite" : "unknown");
       setError(err instanceof Error ? err.message : "取込に失敗しました");
     } finally {
       setUploading(false);
@@ -982,11 +999,12 @@ function ImportScreen({ draftEnabled }: { draftEnabled: boolean }) {
   };
 
   const handleRoImport = async () => {
+    if (importBlocked) return;
     if (!receptionFile || !ownerFile) return;
     if (!window.confirm("一意特定できた行だけを既存物件に反映します。よろしいですか？")) return;
     setRoLoading(true);
     setRoError(null);
-    draftSaver.markSubmitting();
+    applyCsvPending("start");
     try {
       const res = await importReceptionOwnerCsv({
         receptionFileName: receptionFile.name,
@@ -1000,10 +1018,10 @@ function ImportScreen({ draftEnabled }: { draftEnabled: boolean }) {
       });
       setRoResult(res);
       draftSaver.writeNow(csvDraftAfterImport(draftDataRef.current, "ro"));
-      draftSaver.unmarkSubmitting();
+      applyCsvPending("ok");
       fetchJobs();
     } catch (e) {
-      if (isDefiniteSubmitFailure(e)) draftSaver.unmarkSubmitting();
+      applyCsvPending(isDefiniteSubmitFailure(e) ? "definite" : "unknown");
       setRoError(e instanceof Error ? e.message : "取込に失敗しました");
     } finally {
       setRoLoading(false);
@@ -1057,11 +1075,12 @@ function ImportScreen({ draftEnabled }: { draftEnabled: boolean }) {
   };
 
   const handleRpImport = async () => {
+    if (importBlocked) return;
     if (!rpFile) return;
     if (!window.confirm("住所が既存物件と重複しない行を物件として新規作成します。よろしいですか？")) return;
     setRpLoading(true);
     setRpError(null);
-    draftSaver.markSubmitting();
+    applyCsvPending("start");
     try {
       const res = await importReceptionPropertyCsv({
         receptionFileName: rpFile.name,
@@ -1072,10 +1091,10 @@ function ImportScreen({ draftEnabled }: { draftEnabled: boolean }) {
       });
       setRpResult(res);
       draftSaver.writeNow(csvDraftAfterImport(draftDataRef.current, "rp"));
-      draftSaver.unmarkSubmitting();
+      applyCsvPending("ok");
       fetchJobs();
     } catch (e) {
-      if (isDefiniteSubmitFailure(e)) draftSaver.unmarkSubmitting();
+      applyCsvPending(isDefiniteSubmitFailure(e) ? "definite" : "unknown");
       setRpError(e instanceof Error ? e.message : "取込に失敗しました");
     } finally {
       setRpLoading(false);
@@ -1119,6 +1138,11 @@ function ImportScreen({ draftEnabled }: { draftEnabled: boolean }) {
       {pendingNoticeShown && (
         <div className="mb-4">
           <DraftImportPendingNotice onDismiss={() => setPendingNoticeShown(false)} />
+        </div>
+      )}
+      {importBlocked && (
+        <div className="mb-4">
+          <DraftImportPendingNotice reason="unknown" onDismiss={() => applyCsvPending("confirm")} />
         </div>
       )}
       {restoreDecision.start && restored && !restoredDismissed && (
@@ -1661,7 +1685,7 @@ function ImportScreen({ draftEnabled }: { draftEnabled: boolean }) {
             </button>
             <button
               onClick={handleImport}
-              disabled={uploading}
+              disabled={uploading || importBlocked}
               className="flex items-center gap-2 rounded-md bg-indigo-600 px-4 py-2 text-sm font-medium text-white hover:bg-indigo-700 disabled:opacity-50"
             >
               {uploading ? (
@@ -1832,7 +1856,7 @@ function ImportScreen({ draftEnabled }: { draftEnabled: boolean }) {
           </button>
           <button
             onClick={handleRpImport}
-            disabled={!rpPreview || rpPreview.summary.toCreateCount === 0 || rpLoading}
+            disabled={!rpPreview || rpPreview.summary.toCreateCount === 0 || rpLoading || importBlocked}
             // C-2 UI総点検: 0件(取り込む対象なし)でも緑のままで「押せそう」に見えた。無効時はグレーにして非活性を明示。
             className="flex items-center gap-1.5 rounded-md bg-green-600 px-4 py-2 text-sm font-medium text-white hover:bg-green-700 disabled:cursor-not-allowed disabled:bg-gray-200 disabled:text-gray-400 disabled:hover:bg-gray-200 dark:disabled:bg-gray-700 dark:disabled:text-gray-500 dark:disabled:hover:bg-gray-700"
           >
@@ -2043,7 +2067,7 @@ function ImportScreen({ draftEnabled }: { draftEnabled: boolean }) {
           </button>
           <button
             onClick={handleRoImport}
-            disabled={!roPreview || roLoading}
+            disabled={!roPreview || roLoading || importBlocked}
             className="flex items-center gap-2 rounded-md bg-green-600 px-4 py-2 text-sm font-medium text-white hover:bg-green-700 disabled:cursor-not-allowed disabled:bg-gray-300"
           >
             {roLoading ? <Loader2 className="h-4 w-4 animate-spin" /> : <ArrowRight className="h-4 w-4" />}

@@ -28,3 +28,13 @@ describe("取り込み途中の帯", () => {
     expect(html).toContain('role="alert"');
   });
 });
+
+describe("取り込みの結果が分からない帯(画面に残っているとき・@codex P1)", () => {
+  it("履歴で確かめるよう案内し、「確かめたので続ける」で閉じる", () => {
+    const html = renderToStaticMarkup(createElement(DraftImportPendingNotice, { onDismiss: () => {}, reason: "unknown" }));
+    expect(html).toContain("取り込みの結果が分かりませんでした");
+    expect(html).toContain("下の「取り込み履歴」で結果を確かめてから続けてください。");
+    expect(html).toContain("確かめたので続ける");
+    expect(html).not.toContain("画面を離れました");
+  });
+});

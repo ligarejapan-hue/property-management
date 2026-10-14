@@ -132,6 +132,9 @@ import {
   compactCsvImportDraftForPending,
   csvDraftAfterImport,
   decideCsvImportRestore,
+  INITIAL_CSV_PENDING,
+  nextCsvPending,
+  type CsvPendingEvent,
   isCsvImportDraftEmpty,
   parseCsvImportDraft,
 } from "../screens/csv-import";
@@ -180,5 +183,43 @@ describe("取り込み(CSV)が済んだ後の控え(最終点検 Important #1)",
     expect(csvDraftAfterImport(d, "main")).toEqual({ ...d, main: null });
     expect(csvDraftAfterImport(d, "ro")).toEqual({ ...d, ro: null });
     expect(csvDraftAfterImport(d, "rp")).toEqual({ ...d, rp: null });
+  });
+});
+
+describe("取り込み(CSV)の送信中の印の数え方(@codex P1 2件)", () => {
+  const run = (events: CsvPendingEvent[]) =>
+    events.reduce(
+      (acc, e) => {
+        const r = nextCsvPending(acc.state, e);
+        return { state: r.state, unmarks: [...acc.unmarks, r.unmark] };
+      },
+      { state: INITIAL_CSV_PENDING, unmarks: [] as boolean[] },
+    );
+  it("1つ送って済めば印を外す", () => {
+    expect(run(["start", "ok"]).unmarks).toEqual([false, true]);
+    expect(run(["start", "definite"]).unmarks).toEqual([false, true]);
+  });
+  it("2つの流れを同時に送ったら、両方済むまで印を外さない", () => {
+    expect(run(["start", "start", "ok", "ok"]).unmarks).toEqual([false, false, false, true]);
+    expect(run(["start", "start", "definite", "ok"]).unmarks).toEqual([false, false, false, true]);
+  });
+  it("結果が分からない(5xx・通信切れ)ときは、人が確かめるまで印を外さず、送れなくする", () => {
+    const r = run(["start", "unknown"]);
+    expect(r.unmarks).toEqual([false, false]);
+    expect(r.state.unknown).toBe(true);
+    // 別の流れが後から済んでも外さない
+    const r2 = run(["start", "start", "unknown", "ok"]);
+    expect(r2.unmarks).toEqual([false, false, false, false]);
+    expect(r2.state.unknown).toBe(true);
+  });
+  it("確かめたら(続ける)、送っているものが無ければ印を外す。送っている途中なら外さない", () => {
+    expect(run(["start", "unknown", "confirm"]).unmarks).toEqual([false, false, true]);
+    const r = run(["start", "start", "unknown", "confirm"]);
+    expect(r.unmarks).toEqual([false, false, false, false]);
+    expect(r.state).toEqual({ inflight: 1, unknown: false });
+    expect(run(["start", "start", "unknown", "confirm", "ok"]).unmarks.at(-1)).toBe(true);
+  });
+  it("数は0より下がらない", () => {
+    expect(run(["ok"]).state.inflight).toBe(0);
   });
 });

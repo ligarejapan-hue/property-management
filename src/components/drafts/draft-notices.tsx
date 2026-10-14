@@ -93,14 +93,27 @@ export function DraftReselectFileNotice({ expectedName, chosenName }: { expected
   );
 }
 
-/** 取り込み(CSV)の送信中に離れた(設計書 §5.1 S4)。内容は戻さず、履歴で確かめてもらう。 */
-export function DraftImportPendingNotice({ onDismiss }: { onDismiss: () => void }) {
+/**
+ * 取り込み(CSV)の結果が分からない(設計書 §5.1 S4)。内容は戻さず、履歴で確かめてもらう。
+ * reason="left" = 送信中に画面を離れて戻った / "unknown" = 画面に残ったまま 5xx・通信切れになった。
+ */
+export function DraftImportPendingNotice({
+  onDismiss,
+  reason = "left",
+}: {
+  onDismiss: () => void;
+  reason?: "left" | "unknown";
+}) {
   return (
     <div role="alert" data-testid="draft-import-pending-notice" className={WARN}>
       <AlertTriangle className="h-4 w-4 shrink-0" />
-      <span>前回、取り込みの途中で画面を離れました。下の「取り込み履歴」で結果を確かめてください。</span>
+      {reason === "left" ? (
+        <span>前回、取り込みの途中で画面を離れました。下の「取り込み履歴」で結果を確かめてください。</span>
+      ) : (
+        <span>取り込みの結果が分かりませんでした（通信が切れたか、サーバーで問題が起きました）。下の「取り込み履歴」で結果を確かめてから続けてください。</span>
+      )}
       <button type="button" onClick={onDismiss} className={BTN}>
-        閉じる
+        {reason === "left" ? "閉じる" : "確かめたので続ける"}
       </button>
     </div>
   );

@@ -117,3 +117,33 @@ export function decideCsvImportRestore(
 export function csvDraftAfterImport(d: CsvImportDraft, flow: "main" | "ro" | "rp"): CsvImportDraft {
   return { ...d, [flow]: null };
 }
+
+/**
+ * 送信中の印の数え方。3つの流れは1つの控え(印も1つ)を分け合うので、
+ * ⚠1つの流れが済んでも、他の流れが送っている途中なら印を外さない(@codex P1)。
+ * ⚠結果が分からない(5xx・通信切れ)ときは、画面に残っていても人が履歴で確かめるまで外さない。
+ */
+export type CsvPendingEvent = "start" | "ok" | "definite" | "unknown" | "confirm";
+export interface CsvPendingState {
+  /** いま送っている取り込みの数。 */
+  inflight: number;
+  /** 結果が分からないまま、まだ人が確かめていない。 */
+  unknown: boolean;
+}
+export const INITIAL_CSV_PENDING: CsvPendingState = { inflight: 0, unknown: false };
+
+export function nextCsvPending(s: CsvPendingState, e: CsvPendingEvent): { state: CsvPendingState; unmark: boolean } {
+  switch (e) {
+    case "start":
+      return { state: { ...s, inflight: s.inflight + 1 }, unmark: false };
+    case "ok":
+    case "definite": {
+      const inflight = Math.max(0, s.inflight - 1);
+      return { state: { ...s, inflight }, unmark: inflight === 0 && !s.unknown };
+    }
+    case "unknown":
+      return { state: { inflight: Math.max(0, s.inflight - 1), unknown: true }, unmark: false };
+    case "confirm":
+      return { state: { ...s, unknown: false }, unmark: s.inflight === 0 };
+  }
+}

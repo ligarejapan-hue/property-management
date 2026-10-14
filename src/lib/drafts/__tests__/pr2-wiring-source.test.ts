@@ -80,15 +80,28 @@ describe("取り込み(CSV)の配線", () => {
   it("送信中の印が残る控えは書き手に渡さない(印を引き継がず、空で上書きして消す)", () => {
     expect(src).toMatch(/useDraftAutosave\(draftKeyValue, draftData, isCsvImportDraftEmpty, restoreDecision\.start \? restored : null,/);
   });
-  it.each(["importCsv(", "importReceptionOwnerCsv(", "importReceptionPropertyCsv("])("%s の直前に印・成功と4xxで外す", (call) => {
+  it.each([
+    ["importCsv(", "main"],
+    ["importReceptionOwnerCsv(", "ro"],
+    ["importReceptionPropertyCsv(", "rp"],
+  ])("%s: 直前に印・済んだ流れを外してから数えて外す・失敗は 4xx か分からないかで分ける", (call, flow) => {
     const at = src.indexOf(`await ${call}`);
     expect(at).toBeGreaterThan(0);
     const before = src.slice(Math.max(0, at - 400), at);
-    expect(before).toContain("draftSaver.markSubmitting();");
+    expect(before).toContain('applyCsvPending("start");');
     const after = src.slice(at, at + 900);
-    expect(after).toContain("draftSaver.unmarkSubmitting();");
-    // 済んだ流れを外した形を先に書いてから印を外す(画面を離れた後に済んでも再送できる形で残さない)。
-    expect(after).toMatch(/draftSaver\.writeNow\(csvDraftAfterImport\(draftDataRef\.current, "(main|ro|rp)"\)\);\s*draftSaver\.unmarkSubmitting\(\);/);
-    expect(after).toMatch(/if \(isDefiniteSubmitFailure\((e|err)\)\) draftSaver\.unmarkSubmitting\(\);/);
+    // 済んだ流れを外した形を先に書いてから数える(画面を離れた後に済んでも再送できる形で残さない)。
+    expect(after).toContain(`draftSaver.writeNow(csvDraftAfterImport(draftDataRef.current, "${flow}"));\n      applyCsvPending("ok");`);
+    expect(after).toMatch(/applyCsvPending\(isDefiniteSubmitFailure\((e|err)\) \? "definite" : "unknown"\);/);
+    // 印の上げ下げは数えた結果だけで行う(1つの流れが済んでも、他の流れの守りを外さない)。
+    expect(after).not.toMatch(/draftSaver\.unmarkSubmitting\(\)/);
+  });
+  it("結果が分からない間は3つの取り込みボタンを押せない", () => {
+    expect(src).toMatch(/onClick=\{handleImport\}\s*disabled=\{uploading \|\| importBlocked\}/);
+    expect(src).toMatch(/onClick=\{handleRpImport\}\s*disabled=\{[^}]*\|\| importBlocked\}/);
+    expect(src).toMatch(/onClick=\{handleRoImport\}\s*disabled=\{[^}]*\|\| importBlocked\}/);
+    for (const h of ["handleImport", "handleRoImport", "handleRpImport"]) {
+      expect(src).toMatch(new RegExp(`const ${h} = async \\(\\) => \\{\\s*if \\(importBlocked\\) return;`));
+    }
   });
 });
