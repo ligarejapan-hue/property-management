@@ -826,7 +826,10 @@ sudo systemctl status property-management --no-pager
 
 1. `sudo systemctl stop property-management`(新しい版を止める=書き込みを止める)
 2. 下の SQL を実行する
-3. 上の手順 1〜4(旧版へ戻してビルド)→ 手順 5 で起動(`restart` は停止中でも起動する)
+3. 上の手順 1・3・4(旧版へ戻してビルド)→ 手順 5 で起動(`restart` は停止中でも起動する)
+   ⚠**手順 2(`prisma migrate resolve --rolled-back`)はこの migration では行わない**(@codex PR#512 4巡目)。
+   `migrate resolve` は失敗した migration にしか使えず、成功済みのものには誤りを返して手順が止まる。
+   enum の値も残すので、適用済みの記録はそのままでよい(再び新しい版へ進めても二重には当たらない)。
 
 ```sql
 -- 旧版の「入居中」(occupied)は賃貸中も含む意味だったので、occupied へ戻す。
