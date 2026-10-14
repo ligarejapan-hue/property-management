@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest";
-import { isDefiniteSubmitFailure } from "../submit-outcome";
+import { httpError, isDefiniteSubmitFailure } from "../submit-outcome";
 
 const withStatus = (status: number) => Object.assign(new Error("x"), { status });
 
@@ -17,5 +17,17 @@ describe("isDefiniteSubmitFailure(登録されていないと言い切れる失�
     expect(isDefiniteSubmitFailure(new TypeError("Failed to fetch"))).toBe(false);
     expect(isDefiniteSubmitFailure(new Error("Unexpected end of JSON input"))).toBe(false);
     expect(isDefiniteSubmitFailure("x")).toBe(false);
+  });
+});
+
+describe("httpError", () => {
+  it("status を持ち、4xx は登録されていないと言い切れる", () => {
+    const e = httpError("住所を入力してください", 422);
+    expect(e.message).toBe("住所を入力してください");
+    expect(e.status).toBe(422);
+    expect(isDefiniteSubmitFailure(e)).toBe(true);
+  });
+  it("5xx は言い切れない", () => {
+    expect(isDefiniteSubmitFailure(httpError("x", 500))).toBe(false);
   });
 });

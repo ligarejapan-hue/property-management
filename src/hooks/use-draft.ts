@@ -80,3 +80,19 @@ export function useDraftExists(key: string | null): boolean {
     () => false,
   );
 }
+
+const subscribeNothing = () => () => {};
+
+/**
+ * ブラウザで描き直した後なら true(サーバー描画と hydration 中は false)。
+ * ⚠ページ(最初にサーバーで描かれる画面)で控えを読むときは、これが true になってから
+ *   画面本体を作り直す(key を変える)。サーバー描画の結果と食い違わないようにするため。
+ *   クライアント遷移(メニューで移ってきた)では最初から true なので作り直しは起きない。
+ */
+export function useClientReady(): boolean {
+  return useSyncExternalStore(
+    subscribeNothing,
+    () => true,
+    () => false,
+  );
+}

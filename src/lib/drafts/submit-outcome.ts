@@ -8,3 +8,11 @@ export function isDefiniteSubmitFailure(err: unknown): boolean {
   const status = (err as Error & { status?: unknown }).status;
   return typeof status === "number" && status >= 400 && status < 500;
 }
+
+/**
+ * 素の fetch を使う画面で、断られた応答を status つきの Error にする
+ * (isDefiniteSubmitFailure が 4xx を見分けられるように)。
+ */
+export function httpError(message: string, status: number): Error & { status: number } {
+  return Object.assign(new Error(message), { status });
+}

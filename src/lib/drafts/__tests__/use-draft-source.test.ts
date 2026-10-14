@@ -17,6 +17,11 @@ describe("use-draft の配線", () => {
     expect(src).toMatch(/const writer = useMemo\([\s\S]*?\[key, isEmpty, restored, compactForPending\],?\s*\)/);
     expect(src).toMatch(/if \(state\.key !== key\)/);
   });
+  it("useClientReady はサーバー描画・hydration 中は false(useSyncExternalStore の第3引数)", () => {
+    expect(src).toMatch(
+      /export function useClientReady\(\): boolean \{\s*return useSyncExternalStore\(\s*subscribeNothing,\s*\(\) => true,\s*\(\) => false,?\s*\);/,
+    );
+  });
   it("localStorage・indexedDB を使わない", () => {
     expect(src).not.toMatch(/localStorage|indexedDB/);
   });

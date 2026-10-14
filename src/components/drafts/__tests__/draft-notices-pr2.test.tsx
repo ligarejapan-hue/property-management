@@ -1,0 +1,30 @@
+import { describe, it, expect } from "vitest";
+import { renderToStaticMarkup } from "react-dom/server";
+import { createElement } from "react";
+import { DraftImportPendingNotice, DraftReselectFileNotice } from "../draft-notices";
+
+describe("選び直しの帯", () => {
+  it("まだ選んでいないとき: 前回のファイル名を出して選び直しを求める", () => {
+    const html = renderToStaticMarkup(createElement(DraftReselectFileNotice, { expectedName: "謄本.pdf", chosenName: null }));
+    expect(html).toContain("PDF「謄本.pdf」を選び直してください");
+    expect(html).toContain("読み取った結果はそのまま使います");
+    expect(html).toContain('data-testid="draft-reselect-notice"');
+  });
+  it("違う名前を選んだとき: 確かめる一文を出す", () => {
+    const html = renderToStaticMarkup(createElement(DraftReselectFileNotice, { expectedName: "a.pdf", chosenName: "b.pdf" }));
+    expect(html).toContain("前回と違う名前のファイルです（前回: a.pdf）。同じ書類か確かめてください。");
+  });
+  it("同じ名前を選んだとき: 何も出さない", () => {
+    const html = renderToStaticMarkup(createElement(DraftReselectFileNotice, { expectedName: "a.pdf", chosenName: "a.pdf" }));
+    expect(html).toBe("");
+  });
+});
+
+describe("取り込み途中の帯", () => {
+  it("取り込み履歴で確かめるよう案内し、閉じるボタンがある", () => {
+    const html = renderToStaticMarkup(createElement(DraftImportPendingNotice, { onDismiss: () => {} }));
+    expect(html).toContain("前回、取り込みの途中で画面を離れました。下の「取り込み履歴」で結果を確かめてください。");
+    expect(html).toContain("閉じる");
+    expect(html).toContain('role="alert"');
+  });
+});

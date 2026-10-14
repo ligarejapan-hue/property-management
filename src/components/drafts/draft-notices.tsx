@@ -1,5 +1,6 @@
 /** 作業中の入力の控えに関する帯(設計書 §3・§5)。見た目だけ=SSRで試せる。 */
 import { AlertTriangle, History } from "lucide-react";
+import { isSameFileName } from "@/lib/drafts/reselect";
 
 const fmt = new Intl.DateTimeFormat("ja-JP", {
   timeZone: "Asia/Tokyo",
@@ -66,6 +67,41 @@ export function DraftTooLargeNotice({ kind = "file" }: { kind?: "file" | "input"
       <span>
         {kind === "input" ? "入力した内容が大きいため" : "このファイルは大きいため"}、別の画面へ移ると消えます。
       </span>
+    </div>
+  );
+}
+
+/**
+ * 控えから戻した画面で、ファイル本体だけは戻せないので選び直しを求める(設計書 §4.3)。
+ * 選んだ後は、名前が違うときだけ確かめる一文を出す(同じなら何も出さない)。
+ */
+export function DraftReselectFileNotice({ expectedName, chosenName }: { expectedName: string; chosenName: string | null }) {
+  if (chosenName == null) {
+    return (
+      <div role="status" data-testid="draft-reselect-notice" className={WARN}>
+        <AlertTriangle className="h-4 w-4 shrink-0" />
+        <span>PDF「{expectedName}」を選び直してください（登録のときに添付します。読み取った結果はそのまま使います）。</span>
+      </div>
+    );
+  }
+  if (isSameFileName(expectedName, chosenName)) return null;
+  return (
+    <div role="status" data-testid="draft-reselect-notice" className={WARN}>
+      <AlertTriangle className="h-4 w-4 shrink-0" />
+      <span>前回と違う名前のファイルです（前回: {expectedName}）。同じ書類か確かめてください。</span>
+    </div>
+  );
+}
+
+/** 取り込み(CSV)の送信中に離れた(設計書 §5.1 S4)。内容は戻さず、履歴で確かめてもらう。 */
+export function DraftImportPendingNotice({ onDismiss }: { onDismiss: () => void }) {
+  return (
+    <div role="alert" data-testid="draft-import-pending-notice" className={WARN}>
+      <AlertTriangle className="h-4 w-4 shrink-0" />
+      <span>前回、取り込みの途中で画面を離れました。下の「取り込み履歴」で結果を確かめてください。</span>
+      <button type="button" onClick={onDismiss} className={BTN}>
+        閉じる
+      </button>
     </div>
   );
 }
