@@ -96,15 +96,19 @@ function occupancyFor(raw: string): string | null {
   //   ような探している・確かめている言い回しは数えない(14巡目)。
   //   ⚠親族・家族などが住んでいる言い方は借り手と決めない(「親族が入居者として居住中」・23巡目)。
   const familyWord = has([...RELATIVE_WORDS, "第三者", "社宅", "他人"]);
-  const tenantMarker =
+  //   ⚠「テナントではありません」「賃借人ではない」は借り手の印にしない=決めない(29巡目)。
+  if (/(賃借人|借主|入居者|テナント|借家人)(では|で|じゃ)?(な|無|ありません|ございません)/.test(s)) return null;
+  const tenantEvidence =
     !familyWord &&
     !tenantAbsent &&
-    !ownerSelf &&
     TENANT_PRESENT.test(s) &&
     // 打ち消し(「居住してない」)・過去(「居住していた」「入居していた」)は今住んでいる印にしない(19巡目)。
     !OCCUPIED_NEGATION.test(s) &&
     !has(["ていた", "でいた", "だった", "ていました", "でいました"]) &&
     !has(["探し", "確認中", "未定", "かどうか", "いるか", "あるか"]);
+  // ⚠本人の居住と借り手の居住が**両方**言われていれば決めない(「本人が居住中、賃借人も入居中」・29巡目)。
+  if (ownerSelf && tenantEvidence) return null;
+  const tenantMarker = tenantEvidence && !ownerSelf;
   const explicitRental = has(["賃貸中", "賃貸している", "貸している", "賃貸に出している"]);
   const rentedMarker = tenantMarker || explicitRental;
   // ⚠賃貸の打ち消し(「賃貸中ではない」「貸していない」)は賃貸中と読まない=決めない(@codex PR#512)。
