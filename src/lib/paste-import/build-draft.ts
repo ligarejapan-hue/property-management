@@ -80,7 +80,7 @@ function subjectIsOwnerOrTenant(s: string): boolean {
   // 「居住中（管理人）」「入居中：管理人」のように、後ろに添えた人も主語とみる(54巡目)。
   const after = /(居住中|入居中|居住|入居)[（(：:・]([^）)、。,，．]{1,10})/.exec(s);
   if (after && !isOwnerOrTenantWord(after[2])) return false;
-  const m = /([^、。,，．（()：:]{1,16}?)(が|は|も|のみ|だけ)[^、。,，．（()：:]{0,4}?(居住|入居|住ん)/.exec(s);
+  const m = /([^、。,，．（()：:]{1,16}?)(が|は|も|のみ|だけ)[^、。,，．（()：:がはも]{0,12}?(居住|入居|住ん)/.exec(s); // 間の言葉は12字まで・別の主語をまたがない(55巡目)
   if (!m) return true;
   const parts = m[1].split(/によると|によれば|の話では|の話だと|いわく|曰く|から聞いた|から聞く|では|から/);
   const subj = parts[parts.length - 1];
