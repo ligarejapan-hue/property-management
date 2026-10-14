@@ -166,9 +166,11 @@ function occupancyFor(raw: string): string | null {
   //   (「現在居住中、入居者は賃借人」のように別の節で借り手と言っている・37巡目)。
   //   別の節の言い方を1つずつ追わず、居住中と取り違える道だけを閉じる(迷ったら人の確認へ)。
   if (/(賃借人|借主|借り手|借り主|賃借者|店子|テナント|借家人)/.test(s)) return null;
-  if (occupiedMarker) return "occupied";
-  // タカウル「現在の物件状況：自身が居住している」(実物 2026-10-07)。
-  if (has(["居住している", "入居している"])) return "occupied";
+  // ⚠「入居中」「居住している」「入居している」だけでは、住んでいるのが本人か借り手か分からない=決めない(38巡目)。
+  //   本人の語と結びつくもの(「自身が居住している」タカウル実物)は上の ownerSelf で居住中になっている。
+  //   「居住中」「自己居住」は査定の申込で本人の居住を言う決まった書き方なので居住中のまま。
+  if (has(["居住中", "自己居住"]) && !OCCUPIED_NEGATION.test(s)) return "occupied";
+  if (occupiedMarker) return null;
   if (has(["空室", "空家", "空き家"])) return "vacant";
   return null;
 }
