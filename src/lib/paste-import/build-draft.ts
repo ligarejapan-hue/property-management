@@ -35,6 +35,9 @@ const field = (value: string | null, sourceLabel: string): DraftField =>
  */
 const RENTAL_NEGATION = /(賃貸|貸)[^。．、，,.]{0,16}?(ない|なく|ません)/;
 
+/** 「自己居住ではない」「居住中ではありません」など、居住の印の打ち消し(16巡目)。 */
+const OCCUPIED_NEGATION = /(自己居住|居住中|入居中)(では|で|じゃ)?(な|無|ありません|ございません)/;
+
 /** 「本人ではない」「所有者以外」など、住んでいるのが本人でないと言っている(15巡目)。 */
 const NOT_OWNER = /(本人|オーナー|所有者|自身)((では|で|じゃ)?(な|無)|以外)/;
 
@@ -60,6 +63,7 @@ function occupancyFor(raw: string): string | null {
   //   「本人ではなく賃借人が入居中」「本人以外」のような本人の打ち消しは本人の居住と数えない(11巡目)。
   //   ⚠「本人所有」のような**持っている**ことの言及は本人の居住ではない=住んでいる語と結びつくときだけ(13巡目)。
   const ownerSelf =
+    !OCCUPIED_NEGATION.test(s) &&
     (has(["自己居住"]) ||
       /(本人|自身|オーナー|所有者)[^、。,，．]{0,8}(居住|住ん|入居)/.test(s) ||
       /(入居者|居住者)[^、。,，．]{0,6}(本人|オーナー)/.test(s)) &&
@@ -78,7 +82,7 @@ function occupancyFor(raw: string): string | null {
   // ⚠賃貸の打ち消し(「賃貸中ではない」「貸していない」)は賃貸中と読まない=決めない(@codex PR#512)。
   //   ていねいな打ち消し(「賃貸中ではありません」「貸していません」)も同じ(@codex PR#512 2巡目)。
   if (RENTAL_NEGATION.test(s)) return null;
-  const occupiedMarker = has(["居住中", "入居中", "自己居住"]);
+  const occupiedMarker = has(["居住中", "入居中", "自己居住"]) && !OCCUPIED_NEGATION.test(s);
   // ⚠打ち消しと居住中の印が**両方**あれば決めない(@codex PR#491 2巡目)。
   if (nobodyLiving) return occupiedMarker || rentedMarker ? null : "vacant";
   // ⚠住んでいる側の語(賃貸・借り手・本人・居住中)と、空き・退去・以前の語が**両方**あれば決めない
