@@ -79,7 +79,10 @@ function occupancyFor(raw: string): string | null {
   //   (「入居者未定」「入居者については確認中」は決めない・13巡目)。
   //   ⚠住んでいる印は**借り手の語のすぐ後ろ**だけを見る。「入居者を探している」「入居者がいるか確認中」の
   //   ような探している・確かめている言い回しは数えない(14巡目)。
+  //   ⚠親族・家族などが住んでいる言い方は借り手と決めない(「親族が入居者として居住中」・23巡目)。
+  const familyWord = has(["親族", "家族", "第三者", "知人", "親戚", "息子", "娘", "両親", "子供", "子ども", "従業員", "社宅", "他人"]);
   const tenantMarker =
+    !familyWord &&
     !tenantAbsent &&
     !ownerSelf &&
     TENANT_PRESENT.test(s) &&
@@ -122,7 +125,7 @@ function occupancyFor(raw: string): string | null {
   if (
     !explicitRental &&
     !ownerSelf &&
-    has(["親族", "家族", "第三者", "知人", "親戚", "息子", "娘", "両親", "子供", "子ども", "従業員", "社宅", "他人"])
+    familyWord
   ) {
     return null;
   }
