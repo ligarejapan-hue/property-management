@@ -115,6 +115,8 @@ function occupancyFor(raw: string): string | null {
   const explicitRental =
     has(["賃貸中", "賃貸している", "貸している", "賃貸に出している"]) || rentalQualifiesOccupancy;
   const rentedMarker = tenantMarker || explicitRental;
+  // ⚠本人の居住と賃貸の語が両方あれば決めない(「本人が居住している、賃貸中」・35巡目)。
+  if (ownerSelf && explicitRental) return null;
   // ⚠賃貸の打ち消し(「賃貸中ではない」「貸していない」)は賃貸中と読まない=決めない(@codex PR#512)。
   //   ていねいな打ち消し(「賃貸中ではありません」「貸していません」)も同じ(@codex PR#512 2巡目)。
   if (RENTAL_NEGATION.test(s)) return null;
