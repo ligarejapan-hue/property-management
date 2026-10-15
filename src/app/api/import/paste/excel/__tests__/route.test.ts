@@ -46,10 +46,16 @@ vi.mock("@/lib/api-helpers", async () => {
   };
 });
 // ⚠重複の見立ては貼り付けと**同じ関数**を使う(権限・スコープの扱いも同じ)。
+const earlierCalls: { similarPropertyIds: string[]; ownerName: string | null; roomNo: string | null }[] = [];
+let earlierResult: (input: { similarPropertyIds: string[]; ownerName: string | null; roomNo: string | null }) => string | null = () => null;
 vi.mock("@/lib/paste-import-duplicates", () => ({
   lookupPasteDuplicates: vi.fn(async (_s: unknown, _p: unknown, input: { externalLinkKey: string | null }) => {
     lookupCalls.push(input);
     return lookupResult(input);
+  }),
+  findEarlierExcelImport: vi.fn(async (input: { similarPropertyIds: string[]; ownerName: string | null; roomNo: string | null }) => {
+    earlierCalls.push(input);
+    return earlierResult(input);
   }),
 }));
 vi.mock("@/lib/prisma", () => ({ prisma: {} }));
@@ -87,6 +93,8 @@ const row = (over: Partial<Record<string, string>> = {}) =>
 beforeEach(() => {
   mockPerms = FULL_PERMS;
   lookupCalls.length = 0;
+  earlierCalls.length = 0;
+  earlierResult = () => null;
   lookupResult = () => ({
     duplicates: { blocked: false, blockedByPropertyId: null, similarPropertyIds: [] },
     similar: [],
@@ -188,6 +196,37 @@ describe("POST /api/import/paste/excel", () => {
     }))).json();
     expect(body.rows[0]).toMatchObject({ status: "registered", registeredPropertyId: "p-1" });
     expect(body.rows[1]).toMatchObject({ status: "review", reasons: ["同じ名前の所有者がすでにいます"] });
+  });
+
+  it("★前に Excel で入れた本人(同じ住所の物件+同じ氏名)なら、鍵が変わっていても「登録済み」(2026-10-15)", async () => {
+    // Excel のセルを直すと反響番号の無い行の鍵が変わり、自分自身と重なる要確認になっていた。
+    lookupResult = () => ({
+      duplicates: { blocked: false, blockedByPropertyId: null, similarPropertyIds: ["p-old"] },
+      similar: [{ id: "p-old", address: "東京都港区1-1", lotNumber: null }],
+      ownerCandidates: [{ id: "o-old" }],
+      ownerCandidatesTruncated: false,
+    });
+    earlierResult = (input) => (input.similarPropertyIds.includes("p-old") ? "p-old" : null);
+    const body = await (await POST(req({
+      fileName: "a.xlsx",
+      xlsxBase64: xlsxBase64(sheet([row({ 姓名: "山田　太郎", URL: MAIL })])),
+    }))).json();
+    expect(body.rows[0]).toMatchObject({ status: "registered", registeredPropertyId: "p-old", reasons: [] });
+    expect(earlierCalls[0]).toEqual({ similarPropertyIds: ["p-old"], ownerName: "山田　太郎", roomNo: null });
+  });
+
+  it("★前に Excel で入れた本人でなければ、同じ住所でも従来どおり要確認", async () => {
+    lookupResult = () => ({
+      duplicates: { blocked: false, blockedByPropertyId: null, similarPropertyIds: ["p-x"] },
+      similar: [{ id: "p-x", address: "東京都港区1-1", lotNumber: null }],
+      ownerCandidates: [],
+      ownerCandidatesTruncated: false,
+    });
+    const body = await (await POST(req({
+      fileName: "a.xlsx",
+      xlsxBase64: xlsxBase64(sheet([row({ URL: MAIL })])),
+    }))).json();
+    expect(body.rows[0]).toMatchObject({ status: "review", reasons: ["同じ住所の物件がすでにあります"] });
   });
 
   it("★行数が多すぎれば400(1回の取込は1,000行まで)", async () => {

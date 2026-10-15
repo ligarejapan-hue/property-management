@@ -20,7 +20,7 @@ import {
   leadRowStatus,
   type LeadRow,
 } from "@/lib/paste-import/lead-sheet";
-import { lookupPasteDuplicates } from "@/lib/paste-import-duplicates";
+import { lookupPasteDuplicates, findEarlierExcelImport } from "@/lib/paste-import-duplicates";
 import { assertImportJsonBodySize } from "@/lib/import-body-size";
 import {
   detectFileFormat,
@@ -253,8 +253,18 @@ export async function POST(request: NextRequest) {
         ownerName: draft.owner?.name.value ?? null,
         ownerCurrentAddress: draft.owner?.currentAddress.value ?? null,
       });
+      // ⚠前に Excel で入れた本人(同じ住所の物件+Excel取込の同じ氏名の所有者)は
+      //   「登録済み」。取り込んだあとで Excel のセルを直すと鍵が変わり、自分自身と
+      //   重なる要確認になっていた(2026-10-15 本番 66行)。
+      const earlierImportId = dup.duplicates.blocked
+        ? null
+        : await findEarlierExcelImport({
+            similarPropertyIds: dup.similar.map((s) => s.id),
+            ownerName: draft.owner?.name.value ?? null,
+            roomNo: draft.property.roomNo.value,
+          });
       const judged = leadRowStatus(draft, {
-        blocked: dup.duplicates.blocked,
+        blocked: dup.duplicates.blocked || earlierImportId !== null,
         similarCount: dup.similar.length,
         ownerCandidateCount: dup.ownerCandidates.length,
         ownerCandidatesTruncated: dup.ownerCandidatesTruncated,
@@ -273,7 +283,7 @@ export async function POST(request: NextRequest) {
         ownerNote: composeLeadOwnerNote(row, draft),
         status,
         reasons,
-        registeredPropertyId: dup.duplicates.blockedByPropertyId,
+        registeredPropertyId: dup.duplicates.blockedByPropertyId ?? earlierImportId,
       });
     }
 

@@ -24,6 +24,7 @@ import {
 import { buildOwnerDedupKey } from "@/lib/owner-dedup";
 import { addressSearchPrefix, toFullWidth } from "@/lib/paste-import/normalize";
 import { normalizeName } from "@/lib/normalize";
+import { EXCEL_IMPORT_NOTE_PREFIX } from "@/lib/paste-import/lead-sheet";
 
 /**
  * 所有者候補の DB 検索で広めに取る件数。
@@ -166,6 +167,92 @@ function ownerSearchPrefixCandidates(rawName: string, normalizedName: string): s
     variants.add(toFullWidthChar(c));
   }
   return Array.from(variants);
+}
+
+// ---- 所有者の氏名で DB を引く条件(2026-10-15 先頭1文字 → 氏名の全文字) ----
+// ⚠**先頭1文字だけで引くのをやめた**。本番実測(2026-10-15): 所有者は14,850人に増え、
+//   先頭が「小」573・「山」432・「大」424・「中」397・「田」351人。contains で引くと
+//   ほとんどの名前で take(200)に達し、Excel取込144行のうち62行が「同じ名前の所有者が
+//   多く、確認しきれません」で止まった(本当に同名がいたのは1人=別人)。
+//   → 正規化した氏名の**すべての文字**を AND で要求する。空白の位置(「田中　晴美」/
+//   「田中晴美」)には左右されず、ほぼ同名の人だけが返る。正確な判定は従来どおり
+//   JS 側の normalizeName 完全一致(広く取って正確に絞る、の「広く」を狭めただけ)。
+// ⚠1文字ごとに**DB に入りうる別の書き方**も OR で並べる。どれか1つでも漏れると
+//   本人が候補から消えて二重登録へ誘導する(取りこぼしは過剰一致より危険)。
+//   ・全角/半角(英数・カナ)・半角カナの濁点(「ｶﾞ」=2文字)
+//   ・互換漢字と部首(NFKC で通常の漢字になる1文字。登記の外字に混じる)
+// ⚠NFKC で**何文字にも**展開される記号(㈱→(株)・㍿→株式会社)は1文字の言い換えが
+//   作れない。だから法人の言葉と「(株)」のような括弧書きは**どこにあっても**条件から
+//   外す(個人名・会社の実質部分の文字だけで引く)。
+
+/** NFKC で別の 1 文字になる互換文字(互換漢字・部首・丸数字・囲み文字など)→ 元の文字たち(実行時に作る)。 */
+const COMPAT_IDEOGRAPH_SOURCES: ReadonlyMap<string, readonly string[]> = (() => {
+  const map = new Map<string, string[]>();
+  const ranges: [number, number][] = [
+    [0x2100, 0x218f], // 文字様記号・ローマ数字(Ⅲ 等。1文字になるものだけ使う)
+    [0x2460, 0x24ff], // 丸数字・丸英字(① 等)
+    [0x2e80, 0x2fdf], // CJK部首補助・康熙部首
+    [0x3190, 0x33ff], // 漢文の返り点・囲み文字(㊤ 等)
+    [0xf900, 0xfaff], // CJK互換漢字
+    [0x2f800, 0x2fa1f], // CJK互換漢字補助
+  ];
+  for (const [from, to] of ranges) {
+    for (let code = from; code <= to; code++) {
+      const c = String.fromCodePoint(code);
+      const n = c.normalize("NFKC");
+      if (n === c || Array.from(n).length !== 1) continue;
+      const list = map.get(n) ?? [];
+      list.push(c);
+      map.set(n, list);
+    }
+  }
+  return map;
+})();
+
+/** 半角カナの濁点・半濁点(全角カナ1文字が半角では2文字になる)。 */
+const HALF_WIDTH_VOICED_MARKS: Readonly<Record<string, string>> = {
+  "゙": "ﾞ",
+  "゚": "ﾟ",
+};
+
+/** 正規化後の1文字について、DB の生の氏名に入りうる書き方の一覧。 */
+function charSpellings(c: string): string[] {
+  // NFD(「カ」+結合濁点で保存された名前)も拾う。
+  const out = new Set<string>([c, c.normalize("NFD"), toHalfWidthChar(c), toFullWidthChar(c)]);
+  for (const src of COMPAT_IDEOGRAPH_SOURCES.get(c) ?? []) out.add(src);
+  // 「ガ」→「ｶﾞ」(半角では濁点が別の文字)
+  const decomposed = Array.from(c.normalize("NFD"));
+  if (decomposed.length === 2 && HALF_WIDTH_VOICED_MARKS[decomposed[1]]) {
+    const base = toHalfWidthChar(decomposed[0]);
+    if (base !== decomposed[0]) out.add(base + HALF_WIDTH_VOICED_MARKS[decomposed[1]]);
+  }
+  return Array.from(out);
+}
+
+/** 氏名で引く条件に使う文字(法人の言葉と括弧書きを除いた、重複なしの文字)。 */
+function ownerNameSearchChars(normalizedName: string): string[] {
+  let core = normalizedName;
+  for (const word of CORPORATE_NAME_PREFIXES) core = core.split(word).join("");
+  core = core.replace(/\([^()]{1,4}\)/g, "");
+  return Array.from(new Set(Array.from(core).filter((c) => /[\p{L}\p{N}]/u.test(c))));
+}
+
+/**
+ * 所有者を氏名で引く Prisma の条件(アーカイブ済みは含めない)。
+ * 文字が1つも残らない異常値(記号だけ等)は、従来の先頭1文字の条件へ落とす。
+ */
+export function ownerNameSearchWhere(rawName: string, normalizedName: string) {
+  const chars = ownerNameSearchChars(normalizedName);
+  if (chars.length === 0) {
+    return {
+      OR: ownerSearchPrefixCandidates(rawName, normalizedName).map((seed) => ({ name: { contains: seed } })),
+      isArchived: false,
+    };
+  }
+  return {
+    AND: chars.map((c) => ({ OR: charSpellings(c).map((s) => ({ name: { contains: s } })) })),
+    isArchived: false,
+  };
 }
 
 /** 所有者の重複候補として返す1件。氏名/一致の種類のみ(電話・メール・住所そのものは返さない)。 */
@@ -427,15 +514,10 @@ export async function lookupPasteDuplicates(
     SEARCHABLE_LEVELS.has(ownerDisplayConfig.address);
 
   if (ownerSearchAllowed && normalizedOwnerName !== "") {
-    const prefixCandidates = ownerSearchPrefixCandidates(ownerNameRaw, normalizedOwnerName);
     const ownerRows = await prisma.owner.findMany({
-      where: {
-        // ⚠**startsWith ではなく contains**(21巡目 ②)。法人接頭辞を落とした
-        //   実質部分は名前の**途中**に来る(「株式会社田中工務店」の「田」)。
-        //   広く取って、正確な判定は下の normalizeName 完全一致に委ねる構造は不変。
-        OR: prefixCandidates.map((seed) => ({ name: { contains: seed } })),
-        isArchived: false,
-      },
+      // ⚠氏名の**すべての文字**で引く(ownerNameSearchWhere のコメント・2026-10-15)。
+      //   正確な判定は下の normalizeName 完全一致に委ねる構造は不変。
+      where: ownerNameSearchWhere(ownerNameRaw, normalizedOwnerName),
       select: {
         id: true,
         name: true,
@@ -579,10 +661,7 @@ export async function countPasteDuplicatesUnscoped(
   const normalized = normalizeName(rawName);
   if (normalized !== "") {
     const rows = await db.owner.findMany({
-      where: {
-        OR: ownerSearchPrefixCandidates(rawName, normalized).map((seed) => ({ name: { contains: seed } })),
-        isArchived: false,
-      },
+      where: ownerNameSearchWhere(rawName, normalized),
       select: { id: true, name: true },
       take: OWNER_CANDIDATE_FETCH_LIMIT,
     });
@@ -591,4 +670,41 @@ export async function countPasteDuplicatesUnscoped(
   }
 
   return { similarCount, ownerCount, truncated };
+}
+
+// ---------------------------------------------------------------------------
+// 「前に Excel で入れた本人」の見分け(2026-10-15)
+//
+// ⚠Excel の行に反響番号が無いと、登録済みかどうかの鍵は「依頼日・氏名・住所」の
+//   ハッシュになる。取り込んだあとで Excel のそのセルを直すと鍵が変わり、前に入れた
+//   本人なのに「同じ住所の物件がすでにあります/同じ名前の所有者がすでにいます」で
+//   要確認に回っていた(本番 2026-10-15: 144行中66行)。
+//   → 同じ住所の物件に、**Excel取込の備考を持つ同じ氏名の所有者**がついていれば
+//   「登録済み」とみなす。氏名と住所の両方が一致したときだけ(片方では決めない)。
+// ⚠渡す物件 id は lookupPasteDuplicates が返した**この人が開ける物件**だけ。
+//   見えない物件については従来どおり要確認のまま(登録は止まる側に倒れる)。
+// ---------------------------------------------------------------------------
+
+export async function findEarlierExcelImport(input: {
+  similarPropertyIds: string[];
+  ownerName: string | null;
+  /** 部屋番号。同じ建物の別の部屋を同じ人が持っているとき、別の行として扱うため。 */
+  roomNo: string | null;
+}): Promise<string | null> {
+  const normalized = normalizeName(input.ownerName?.trim() ?? "");
+  if (normalized === "" || input.similarPropertyIds.length === 0) return null;
+  const links = await prisma.propertyOwner.findMany({
+    where: {
+      propertyId: { in: input.similarPropertyIds },
+      owner: { isArchived: false, note: { startsWith: EXCEL_IMPORT_NOTE_PREFIX } },
+    },
+    select: { propertyId: true, property: { select: { roomNo: true } }, owner: { select: { name: true } } },
+  });
+  // ⚠部屋番号も揃ったときだけ(住所に部屋番号を書かない表では、同じ建物の
+  //   別の部屋が同じ住所になる。別の部屋を「登録済み」にして入れ損ねない)。
+  const room = normalizeName(input.roomNo ?? "");
+  const hit = links.find(
+    (l) => normalizeName(l.owner.name) === normalized && normalizeName(l.property.roomNo ?? "") === room,
+  );
+  return hit?.propertyId ?? null;
 }

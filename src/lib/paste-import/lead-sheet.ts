@@ -210,6 +210,12 @@ export function withFallbackLinkKey(text: string, draft: PasteDraft, key: string
 }
 
 /**
+ * Excel から入れた所有者の備考の**先頭**。取り込み直しのとき「前に Excel で入れた本人」を
+ * 見分ける目印に使う(paste-import-duplicates.ts の findEarlierExcelImport)。
+ */
+export const EXCEL_IMPORT_NOTE_PREFIX = "Excel取込:";
+
+/**
  * 所有者の備考の中身。取込元の行・管理の列・物件の備考へ入れなかった項目・
  * 見出しの無い行をまとめる(どれも捨てない)。
  */
@@ -217,7 +223,7 @@ export function composeLeadOwnerNote(
   row: Pick<LeadRow, "sheetName" | "rowNumber" | "ownerNoteLines">,
   draft: PasteDraft,
 ): string {
-  const lines = [`Excel取込: ${row.sheetName} ${row.rowNumber}行目`, ...row.ownerNoteLines];
+  const lines = [`${EXCEL_IMPORT_NOTE_PREFIX} ${row.sheetName} ${row.rowNumber}行目`, ...row.ownerNoteLines];
   for (const w of draft.withheldFromNote) lines.push(`${w.label}: ${w.value}`);
   for (const u of draft.unlabeled) lines.push(u);
   return lines.join("\n");
