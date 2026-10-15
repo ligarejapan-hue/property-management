@@ -72,6 +72,24 @@ vi.mock("@/lib/prisma", () => ({
 }));
 
 import { POST } from "../route";
+
+/**
+ * 所有者を氏名で引く条件の中の、すべての contains の文字列。
+ * 2026-10-15 から条件は「氏名の全文字を AND・1文字ごとに書き方を OR」の形
+ * (異常値だけ従来の先頭1文字の OR)なので、形に依らず種を集める。
+ */
+function allNameSeeds(where: unknown): (string | undefined)[] {
+  const out: (string | undefined)[] = [];
+  const walk = (node: unknown) => {
+    if (!node || typeof node !== "object") return;
+    const n = node as { name?: { contains?: string }; OR?: unknown[]; AND?: unknown[] };
+    if (n.name && "contains" in n.name) out.push(n.name.contains);
+    for (const c of n.OR ?? []) walk(c);
+    for (const c of n.AND ?? []) walk(c);
+  };
+  walk(where);
+  return out;
+}
 import { NextRequest } from "next/server";
 
 const NL = "\n";
@@ -788,7 +806,7 @@ describe("氏名の先頭1文字（全体レビュー m-1）", () => {
     };
     // ⚠21巡目 ② で startsWith → contains になった(法人接頭辞を落とした実質部分は
     //   名前の途中に来るため)。種の作り方(コードポイント単位)は変わっていない。
-    const seeds = (args.where?.OR ?? []).map((o) => o.name?.contains);
+    const seeds = allNameSeeds(args.where);
     // slice(0,1) だと壊れた片割れ(長さ1)しか渡らない。
     expect(seeds).toContain("𠮷");
     expect(seeds.every((x) => x !== undefined && Array.from(x).length === 1)).toBe(true);
@@ -1340,7 +1358,7 @@ describe("法人名は接頭辞を落とした実質部分でも絞る（21巡�
       const args = mockOwnerFindMany.mock.calls[0][0] as {
         where?: { OR?: { name?: { contains?: string } }[] };
       };
-      const seeds = (args.where?.OR ?? []).map((o) => o.name?.contains);
+      const seeds = allNameSeeds(args.where);
       expect(seeds).toContain("田");
       // 既存の完全一致は従来どおり見つかる。
       const body = await res.json();
@@ -1365,7 +1383,7 @@ describe("法人名は接頭辞を落とした実質部分でも絞る（21巡�
       const args = mockOwnerFindMany.mock.calls[0][0] as {
         where?: { OR?: { name?: { contains?: string } }[] };
       };
-      const seeds = (args.where?.OR ?? []).map((o) => o.name?.contains);
+      const seeds = allNameSeeds(args.where);
       expect(seeds, name).toContain(expected);
     }
   });
@@ -1379,7 +1397,7 @@ describe("法人名は接頭辞を落とした実質部分でも絞る（21巡�
     const args = mockOwnerFindMany.mock.calls[0][0] as {
       where?: { OR?: { name?: { contains?: string } }[] };
     };
-    const seeds = (args.where?.OR ?? []).map((o) => o.name?.contains);
+    const seeds = allNameSeeds(args.where);
     // 空文字で絞ると全件に当たる。必ず1文字以上。
     expect(seeds.length).toBeGreaterThan(0);
     for (const seed of seeds) {

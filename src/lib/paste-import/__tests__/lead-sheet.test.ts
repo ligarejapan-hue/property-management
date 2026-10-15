@@ -1,5 +1,7 @@
 import { describe, it, expect } from "vitest";
 import {
+  normalizeRequestDate,
+  sameRequestDateLine,
   readLeadSheet,
   composeLeadOwnerNote,
   leadRowStatus,
@@ -237,5 +239,28 @@ describe("leadRowStatus", () => {
       "氏名が読み取れません",
       "物件種別が分かりません",
     ]);
+  });
+});
+
+describe("依頼日の比べ方(2026-10-15 本番: 同じセルが 2024/12/10 → 12/10/24 に変わった)", () => {
+  it("★いろいろな書き方を年-月-日に揃える", () => {
+    expect(normalizeRequestDate("2024/12/10")).toBe("2024-12-10");
+    expect(normalizeRequestDate("2025/2/20")).toBe("2025-02-20");
+    expect(normalizeRequestDate("12/10/24")).toBe("2024-12-10");
+    expect(normalizeRequestDate("2/20/2025")).toBe("2025-02-20");
+    expect(normalizeRequestDate("2025-02-20")).toBe("2025-02-20");
+    expect(normalizeRequestDate("2025年2月20日")).toBe("2025-02-20");
+    expect(normalizeRequestDate("２０２５／２／２０ 10:30")).toBe("2025-02-20");
+    expect(normalizeRequestDate("不明")).toBeNull();
+    expect(normalizeRequestDate("13/40/25")).toBeNull();
+  });
+
+  it("★見出しが同じで日付として同じなら同じ行", () => {
+    expect(sameRequestDateLine("依頼日付: 2024/12/10", "依頼日付: 12/10/24")).toBe(true);
+    expect(sameRequestDateLine("依頼日付: 2024/12/10", "依頼日付: 12/11/24")).toBe(false);
+    expect(sameRequestDateLine("依頼日付: 2024/12/10", "登録日時: 2024/12/10")).toBe(false);
+    expect(sameRequestDateLine("依頼日付: 不明", "依頼日付: 不明")).toBe(true);
+    expect(sameRequestDateLine("依頼日付: ", "依頼日付: ")).toBe(false);
+    expect(sameRequestDateLine("見込度: C", "依頼日付: 2024/12/10")).toBe(false);
   });
 });
