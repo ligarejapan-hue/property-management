@@ -58,4 +58,10 @@ describe("自分のパスワード変更の試行回数(@codex #517 P2)", () => 
     expect(api).toContain('"TOO_MANY_ATTEMPTS"');
     expect(api).toMatch(/passwordHash,\n\s+mustChangePassword: false,[\s\S]*?loginFailedCount: 0,\n\s+lockedUntil: null,/);
   });
+
+  it("画面は API の決まった形({ error: { message } })から案内を読む=ロックの案内が出る", () => {
+    const page = read("src/app/(dashboard)/admin/change-password/page.tsx");
+    expect(page).toContain("data?.error?.message");
+    expect(read("src/lib/api-helpers.ts")).toMatch(/error:\s*\{[\s\S]*?message/);
+  });
 });

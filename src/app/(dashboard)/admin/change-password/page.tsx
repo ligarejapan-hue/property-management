@@ -43,8 +43,9 @@ export default function ChangePasswordPage() {
         body: JSON.stringify(form),
       });
       if (!res.ok) {
-        const data = await res.json().catch(() => ({}));
-        throw new Error(data.message ?? "変更に失敗しました");
+        // handleApiError の形は { error: { message } }(間違い・30分ロック(429)の案内をそのまま出す)。
+        const data = await res.json().catch(() => null);
+        throw new Error(data?.error?.message ?? data?.message ?? `変更に失敗しました (${res.status})`);
       }
       setSuccess(true);
       // Force re-login: destroy session and redirect to /login
