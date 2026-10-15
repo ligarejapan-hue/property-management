@@ -55,8 +55,15 @@ describe("DMの種類「相続（マンション）」の migration(2026-10-15)"
     expect(unitSql).toMatch(/15, 'inheritance_unit', 'inheritance_unit', CURRENT_TIMESTAMP/);
     expect(APPEAL_OPTIONS.map((o) => o.value)).toContain("inheritance_unit");
   });
-  it("同じ auto_key・同じ名前の行があれば入れない", () => {
-    expect(unitSql).toMatch(/WHERE NOT EXISTS[\s\S]*"auto_key" = 'inheritance_unit'[\s\S]*"name" = '相続（マンション）' AND "deleted_at" IS NULL/);
+  it("飛ばすのは auto_key=inheritance_unit の行がすでにあるときだけ(名前の衝突では飛ばさない・@codex P2)", () => {
+    const where = unitSql.slice(unitSql.lastIndexOf("WHERE NOT EXISTS"));
+    expect(where).toMatch(/"auto_key" = 'inheritance_unit'/);
+    expect(where).not.toMatch(/"name"/);
+  });
+  it("同じ名前の種類(削除済みを除く)を手で作ってあれば、名前を「相続（マンション・自動）」にして入れる", () => {
+    expect(unitSql).toMatch(
+      /CASE\s+WHEN EXISTS \(SELECT 1 FROM "dm_scenarios" WHERE "name" = '相続（マンション）' AND "deleted_at" IS NULL\)\s+THEN '相続（マンション・自動）'\s+ELSE '相続（マンション）'\s+END/,
+    );
   });
   it("既存の行を書き換えない(UPDATE/DELETE/DROP/ALTER を含まない)", () => {
     expect(unitSql).not.toMatch(/^\s*(UPDATE|DELETE|DROP|ALTER)\b/im);
