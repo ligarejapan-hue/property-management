@@ -42,7 +42,7 @@ describe("visibleSidebar", () => {
   it("管理者: 全部見える(設定・物件データ編集・システム管理)", () => {
     const labels = sidebarLabels("admin");
     expect(labels).toContain("会社情報（販売図面の差出人）");
-    expect(labels).toContain("売却DM設定");
+    expect(labels).toContain("LPメニュー"); // 売却DM設定などはLPメニューの中(第2回)
     expect(labels).toContain("所有者補正候補");
     expect(labels).toContain("ユーザー管理");
     expect(labels).toContain("添付ファイル検索");

@@ -28,9 +28,9 @@ describe("LP写真の画面: 公開口だけを使い、生HTMLを流し込ま�
     expect(src).toContain("onDrop");
     expect(src).toContain("prepareLpAssetForUpload(");
   });
-  it("サイドバーに管理者向け「LPの写真」がある", () => {
-    const side = readFileSync(path.resolve(process.cwd(), "src/components/layout/sidebar-model.tsx"), "utf8");
-    expect(side).toMatch(/href:\s*"\/admin\/lp-assets"[^}]*minRole:\s*"admin"/);
+  it("管理者向け「LPの写真」はLPメニューの中にある(画面すっきり化 第2回で左メニューから移した)", () => {
+    const lp = readFileSync(path.resolve(process.cwd(), "src/app/(dashboard)/lp/page.tsx"), "utf8");
+    expect(lp).toMatch(/href:\s*"\/admin\/lp-assets"[^}]*minRole:\s*"admin"/);
   });
   it("LP型パネルは枠ごとに『外す』を持ち(ヒーロー・節)、LP型ごとに作り直される", () => {
     const panelSrc = readFileSync(path.resolve(process.cwd(), "src/components/sale-dm/lp-media-panel.tsx"), "utf8");

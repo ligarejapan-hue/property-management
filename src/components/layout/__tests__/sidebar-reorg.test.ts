@@ -189,13 +189,10 @@ describe("DM グループ(新設)", () => {
       "/dm",
       // 売却DMの発送一覧(画面すっきり化 第1回・2026-10-15)は DMメニューの次。
       "/properties/sale-dm",
-      // LPメニュー(2026-10-15 案B)。
+      // LPメニュー(2026-10-15 案B)。売却DM設定・LPの写真・DMの種類は
+      // 画面すっきり化 第2回でLPメニューの中だけに移した(sale-dm-settings-nav-source.test.ts)。
       "/lp",
-      "/admin/sale-dm-settings",
       "/admin/mail-settings",
-      "/admin/lp-assets",
-      // DMの種類(台帳・設計 2026-09-27 §3.6)は「LPの写真」の次。
-      "/admin/dm-scenarios",
       "/admin/orphan-dm-logs",
     ]);
   });
@@ -341,7 +338,7 @@ describe("⚠変えないもの", () => {
     expect(byHref("/import#owner-match")?.minRole).toBe("office_staff");
     expect(byHref("/properties/quality-check")?.minRole).toBe("office_staff");
     expect(byHref("/dm")?.minRole).toBe("office_staff");
-    expect(byHref("/admin/sale-dm-settings")?.minRole).toBe("admin");
+    expect(byHref("/lp")?.minRole).toBe("admin");
     expect(byHref("/admin/orphan-dm-logs")?.minRole).toBe("admin");
   });
 
@@ -358,7 +355,7 @@ describe("⚠変えないもの", () => {
       "/import/registry-pdf",
       "/sales-sheets/new",
       "/admin/company-settings",
-      "/admin/sale-dm-settings",
+      // 売却DM設定(/admin/sale-dm-settings)は第2回でLPメニューの中へ(sale-dm-settings-nav-source.test.ts)。
       "/admin/owners/correction",
       "/admin/display-name-audit",
       "/admin/postal-code-audit",

@@ -32,8 +32,8 @@ describe("DMの種類の画面(設計 §3.6)", () => {
     expect(src).toMatch(/lp:\s*\["lpTone",\s*"lpLength",\s*"lpAppeal",\s*"lpStrength"\]/);
     expect(src).toMatch(/willClear[\s\S]*window\.confirm/);
   });
-  it("サイドバーに「DMの種類」(管理者のみ)", () => {
-    expect(read("src/components/layout/sidebar-model.tsx")).toMatch(/label:\s*"DMの種類",\s*href:\s*"\/admin\/dm-scenarios"[^}]*minRole:\s*"admin"/);
+  it("「DMの種類」(管理者のみ)はLPメニューの中にある(画面すっきり化 第2回で左メニューから移した)", () => {
+    expect(read("src/app/(dashboard)/lp/page.tsx")).toMatch(/href:\s*"\/admin\/dm-scenarios"[^}]*minRole:\s*"admin"/);
   });
   it("物件の欄は選択肢の口だけを使う(中身の口を叩かない)", () => {
     const src = read("src/components/properties/dm-scenario-field.tsx");

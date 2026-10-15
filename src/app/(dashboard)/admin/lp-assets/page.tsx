@@ -4,6 +4,7 @@ import { useEffect, useState } from "react";
 import Link from "next/link";
 import { Loader2, Trash2 } from "lucide-react";
 import { PageHeader } from "@/components/ui/page-header";
+import { BackLink } from "@/components/ui/back-link";
 import { ConfirmDialog } from "@/components/ui/confirm-dialog";
 import { fetchSaleDmLpAssets, deleteSaleDmLpAsset, LP_ASSET_URL, type SaleDmLpAsset } from "@/lib/api-client";
 
@@ -36,6 +37,7 @@ export default function AdminLpAssetsPage() {
 
   return (
     <div>
+      <BackLink href="/lp" to="LPメニュー" className="mb-3" />
       <PageHeader
         title="LPの写真"
         description={<>売却DMのご案内ページ(LP)で使う写真の一覧です。追加は<Link href="/admin/dm-scenarios" className="font-semibold underline underline-offset-2">「DMの種類」</Link>の各種類の「写真と図」から行います。LP型で使われている写真は削除できません。</>}

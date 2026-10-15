@@ -4,6 +4,7 @@ import { useEffect, useState } from "react";
 import Link from "next/link";
 import { Loader2, Plus, Trash2 } from "lucide-react";
 import { PageHeader } from "@/components/ui/page-header";
+import { BackLink } from "@/components/ui/back-link";
 import { Button } from "@/components/ui/button";
 import { ConfirmDialog } from "@/components/ui/confirm-dialog";
 import {
@@ -61,6 +62,7 @@ export default function AdminDmScenariosPage() {
 
   return (
     <div>
+      <BackLink href="/lp" to="LPメニュー" className="mb-3" />
       <PageHeader
         title="DMの種類"
         description={<>売却DMの手紙とご案内ページ(LP)の文面を、種類ごとに1回だけ作って使い回します。物件ごとの種類は物件の画面の「DMの種類」で選べます(<Link href="/properties" className="font-semibold underline underline-offset-2">物件一覧</Link>から物件を開く・空欄なら導入ルートと物件種別から自動で決まります)。</>}
