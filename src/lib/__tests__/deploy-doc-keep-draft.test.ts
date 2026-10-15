@@ -82,6 +82,13 @@ describe("入力の途中をとっておく(2026-10): 資料の文言が画面�
     expect(manualSrc).toContain(tooLarge);
   });
 
+  it("とっておく場所に書けない(failed)ときは知らせが出ないことを書いている", () => {
+    // writeDraft は "failed" を返し得るが、画面が知らせるのは too_large だけ。
+    const storeSrc = readRepoFile("src/lib/drafts/draft-store.ts");
+    expect(storeSrc).toContain('"ok" | "too_large" | "failed"');
+    for (const src of [guideSrc, manualSrc]) expect(src).toContain("知らせが出ないまま残らないことがあります");
+  });
+
   it("タブを複製すると続きも写る(設計書 §5.3)", () => {
     for (const src of [guideSrc, manualSrc]) expect(src).toContain("「タブを複製」");
   });
