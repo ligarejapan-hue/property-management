@@ -14,6 +14,8 @@ const manualSrc = readRepoFile("public/docs/manual.html");
 const noticesSrc = readRepoFile("src/components/drafts/draft-notices.tsx");
 const logoutSrc = readRepoFile("src/lib/notifications/logout.ts");
 const excelTableSrc = readRepoFile("src/components/import/excel-lead-table.tsx");
+const excelPageSrc = readRepoFile("src/app/(dashboard)/import/paste/excel/page.tsx");
+const propertyPageSrc = readRepoFile("src/app/(dashboard)/properties/[id]/page.tsx");
 
 describe("入力の途中をとっておく(2026-10): 資料の文言が画面と同じ", () => {
   it("戻ったときの帯の文言", () => {
@@ -52,6 +54,23 @@ describe("入力の途中をとっておく(2026-10): 資料の文言が画面�
     for (const src of [guideSrc, manualSrc]) {
       expect(src).toContain("12時間");
       expect(src).toContain("ログアウト");
+    }
+  });
+
+  it("物件の編集は、ほかの方が保存すると続きを使えない", () => {
+    const stale = "ほかの方が保存したため、入力途中の内容は使えませんでした。";
+    expect(noticesSrc).toContain(stale);
+    expect(propertyPageSrc).toContain("<DraftStaleNotice");
+    expect(guideSrc).toContain(stale);
+    expect(manualSrc).toContain(stale);
+  });
+
+  it("Excelは全部登録し終えても結果の表が残る(登録の後に控えを消さない)", () => {
+    // 登録し終えた後も結果を控えに書き、消すのは「最初からやり直す」だけ。
+    expect(excelPageSrc).toContain("sendingKey: null");
+    expect(excelPageSrc.match(/draftSaver\.(discard|close)\(/g)).toEqual(["draftSaver.discard("]);
+    for (const src of [guideSrc, manualSrc]) {
+      expect(src).toContain("全部登録し終えても結果の表が残ります");
     }
   });
 
