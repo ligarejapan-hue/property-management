@@ -53,7 +53,7 @@ vi.mock("@/lib/paste-import-duplicates", () => ({
     lookupCalls.push(input);
     return lookupResult(input);
   }),
-  findEarlierExcelImport: vi.fn(async (input: { similarPropertyIds: string[]; ownerName: string | null; roomNo: string | null }) => {
+  findEarlierExcelImport: vi.fn(async (_s: unknown, _p: unknown, input: { similarPropertyIds: string[]; ownerName: string | null; roomNo: string | null }) => {
     earlierCalls.push(input);
     return earlierResult(input);
   }),
@@ -270,7 +270,7 @@ describe("POST /api/import/paste/excel", () => {
     expect(body.rows.map((r: { status: string }) => r.status)).toEqual(["registered", "review"]);
   });
 
-  it("★前に入れた物件が行の数だけあれば、行ごとに別の物件を「登録済み」に当てる", async () => {
+  it("★数が合っても(前に入れた物件2つ・表に2行)どの行がどの物件か言えないので全部要確認(@codex PR#516 3巡目)", async () => {
     lookupResult = () => ({
       duplicates: { blocked: false, blockedByPropertyId: null, similarPropertyIds: ["p-a", "p-b"] },
       similar: [
@@ -286,8 +286,25 @@ describe("POST /api/import/paste/excel", () => {
       fileName: "a.xlsx",
       xlsxBase64: xlsxBase64(sheet([row({ URL: MAIL }), row({ URL: other })])),
     }))).json();
-    expect(body.rows.map((r: { status: string; registeredPropertyId: string }) => [r.status, r.registeredPropertyId]))
-      .toEqual([["registered", "p-a"], ["registered", "p-b"]]);
+    expect(body.rows.map((r: { status: string }) => r.status)).toEqual(["review", "review"]);
+  });
+
+  it("★表に1行でも、前に入れた物件が2つあれば(どちらか言えない)要確認", async () => {
+    lookupResult = () => ({
+      duplicates: { blocked: false, blockedByPropertyId: null, similarPropertyIds: ["p-a", "p-b"] },
+      similar: [
+        { id: "p-a", address: "東京都港区1-1", lotNumber: null },
+        { id: "p-b", address: "東京都港区1-1", lotNumber: null },
+      ],
+      ownerCandidates: [{ id: "o-old" }],
+      ownerCandidatesTruncated: false,
+    });
+    earlierResult = () => ["p-a", "p-b"];
+    const body = await (await POST(req({
+      fileName: "a.xlsx",
+      xlsxBase64: xlsxBase64(sheet([row({ URL: MAIL })])),
+    }))).json();
+    expect(body.rows[0].status).toBe("review");
   });
 
   it("★前に Excel で入れた本人でなければ、同じ住所でも従来どおり要確認", async () => {

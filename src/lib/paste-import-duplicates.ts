@@ -335,6 +335,20 @@ export interface PasteDuplicateLookupResult {
   ownerCandidatesTruncated: boolean;
 }
 
+/**
+ * 所有者を氏名で**検索してよい**ときだけ表示レベルを返す(だめなら null)。
+ * owner:read があり、氏名・住所の表示レベルが検索可能なとき(owners と同じ規則)。
+ * ⚠所有者の氏名で DB を引く口は**すべて**これを通す(検索オラクルを開けない)。
+ */
+async function ownerSearchDisplayConfig(
+  session: { id: string; role: string },
+  perms: PermissionEntry[],
+) {
+  if (!hasPermission(perms, "owner", "read")) return null;
+  const config = await getOwnerDisplayConfig(session.id, perms);
+  return SEARCHABLE_LEVELS.has(config.name) && SEARCHABLE_LEVELS.has(config.address) ? config : null;
+}
+
 export async function lookupPasteDuplicates(
   session: { id: string; role: string },
   perms: PermissionEntry[],
@@ -505,14 +519,8 @@ export async function lookupPasteDuplicates(
   const normalizedOwnerName = normalizeName(ownerNameRaw);
   let ownerCandidates: OwnerCandidate[] = [];
 
-  const canReadOwner = hasPermission(perms, "owner", "read");
-  const ownerDisplayConfig = canReadOwner
-    ? await getOwnerDisplayConfig(session.id, perms)
-    : null;
-  const ownerSearchAllowed =
-    ownerDisplayConfig !== null &&
-    SEARCHABLE_LEVELS.has(ownerDisplayConfig.name) &&
-    SEARCHABLE_LEVELS.has(ownerDisplayConfig.address);
+  const ownerDisplayConfig = await ownerSearchDisplayConfig(session, perms);
+  const ownerSearchAllowed = ownerDisplayConfig !== null;
 
   if (ownerSearchAllowed && normalizedOwnerName !== "") {
     const ownerRows = await prisma.owner.findMany({
@@ -686,14 +694,22 @@ export async function countPasteDuplicatesUnscoped(
 //   見えない物件については従来どおり要確認のまま(登録は止まる側に倒れる)。
 // ---------------------------------------------------------------------------
 
-export async function findEarlierExcelImport(input: {
+export async function findEarlierExcelImport(
+  session: { id: string; role: string },
+  perms: PermissionEntry[],
+  input: {
   similarPropertyIds: string[];
   ownerName: string | null;
   /** 部屋番号。同じ建物の別の部屋を同じ人が持っているとき、別の行として扱うため。 */
   roomNo: string | null;
-}): Promise<string[]> {
+  },
+): Promise<string[]> {
   const normalized = normalizeName(input.ownerName?.trim() ?? "");
   if (normalized === "" || input.similarPropertyIds.length === 0) return [];
+  // ⚠氏名で所有者を照らす口なので、所有者検索と**同じ門**を通す(@codex PR#516 3巡目)。
+  //   通さないと、所有者を検索できない人が氏名を変えて取り込み直すだけで
+  //   「登録済み/要確認」の違いから所有者の有無を言い当てられる。
+  if ((await ownerSearchDisplayConfig(session, perms)) === null) return [];
   const links = await prisma.propertyOwner.findMany({
     where: {
       propertyId: { in: input.similarPropertyIds },

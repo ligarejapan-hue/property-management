@@ -260,7 +260,7 @@ export async function POST(request: NextRequest) {
       //   なっていた(2026-10-15 本番 66行)。決めるのは下で表全体を見てから。
       const earlierImportIds = dup.duplicates.blocked
         ? []
-        : await findEarlierExcelImport({
+        : await findEarlierExcelImport(session, perms, {
             similarPropertyIds: dup.similar.map((s) => s.id),
             ownerName: draft.owner?.name.value ?? null,
             roomNo: draft.property.roomNo.value,
@@ -268,10 +268,12 @@ export async function POST(request: NextRequest) {
       looked.push({ row, text, draft, dup, earlierImportIds });
     }
 
-    // ⚠「前に入れた本人」と言えるのは、表の中の**同じ人・同じ住所の行の数**が、
-    //   前に入れた物件の数を超えないときだけ(@codex PR#516 P1)。同じ住所に同じ人の
-    //   土地が2筆あり1筆だけ入っている表で、2行とも「登録済み」にすると残りの1筆が
-    //   黙って入らない。数が合わなければ全部これまでどおり要確認(人が見て決める)。
+    // ⚠「前に入れた本人」と言えるのは**1対1のときだけ**:表の中で同じ人・同じ住所
+    //   (地番・部屋番号も同じ)の行が**この1行だけ**で、鍵で登録済みの行も無く、
+    //   前に入れた物件も**ちょうど1つ**(@codex PR#516 1〜3巡目)。
+    //   行に安定した識別子が無いので、数が合うだけでは「どの行がどの物件か」を
+    //   言えない(同じ住所に同じ人の土地が複数筆あると、新しい1筆を「登録済み」に
+    //   して黙って入れ損ねる)。それ以外は全部これまでどおり要確認(人が見て決める)。
     const groupKey = (d: PasteDraft): string =>
       [
         normalizeName(d.owner?.name.value ?? ""),
@@ -279,39 +281,16 @@ export async function POST(request: NextRequest) {
         normalizeForCompare(d.property.lotNumber.value),
         normalizeName(d.property.roomNo.value ?? ""),
       ].join("|");
-    // ⚠**鍵で「登録済み」と分かった行も数に入れ、その物件を先に使う**(@codex PR#516 2巡目)。
-    //   同じ人・同じ住所の2行のうち1行だけ鍵が合っていると、もう1行が同じ物件を
-    //   「登録済み」として使い回し、残りの1筆が黙って入らない。
-    type Group = { rows: number; blockedIds: Set<string>; blockedUnknown: number };
-    const groups = new Map<string, Group>();
+    const groupRows = new Map<string, number>();
     for (const l of looked) {
       const k = groupKey(l.draft);
-      const g = groups.get(k) ?? { rows: 0, blockedIds: new Set<string>(), blockedUnknown: 0 };
-      g.rows += 1;
-      if (l.dup.duplicates.blocked) {
-        // 開けない物件は id が返らない。どれかは分からないが1件ぶん使ったとみなす。
-        const id = l.dup.duplicates.blockedByPropertyId;
-        if (id) g.blockedIds.add(id);
-        else g.blockedUnknown += 1;
-      }
-      groups.set(k, g);
+      groupRows.set(k, (groupRows.get(k) ?? 0) + 1);
     }
-    const groupUsed = new Map<string, number>();
 
     const rows = [];
     for (const { row, text, draft, dup, earlierImportIds } of looked) {
-      let earlierImportId: string | null = null;
-      if (earlierImportIds.length > 0) {
-        const k = groupKey(draft);
-        const g = groups.get(k)!;
-        const available = earlierImportIds.filter((id) => !g.blockedIds.has(id));
-        const blockedRows = g.blockedIds.size + g.blockedUnknown;
-        if (g.rows - blockedRows <= available.length - g.blockedUnknown) {
-          const used = groupUsed.get(k) ?? 0;
-          earlierImportId = available[used] ?? null;
-          groupUsed.set(k, used + 1);
-        }
-      }
+      const earlierImportId =
+        earlierImportIds.length === 1 && groupRows.get(groupKey(draft)) === 1 ? earlierImportIds[0] : null;
       const judged = leadRowStatus(draft, {
         blocked: dup.duplicates.blocked || earlierImportId !== null,
         similarCount: dup.similar.length,
