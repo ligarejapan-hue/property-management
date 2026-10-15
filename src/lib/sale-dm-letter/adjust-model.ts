@@ -23,6 +23,7 @@ export const APPEAL_OPTIONS = [
   { value: "inheritance", label: "相続・税" },
   { value: "vacant", label: "空き家・管理負担" },
   { value: "buyer", label: "購入希望者あり" },
+  { value: "inheritance_unit", label: "相続・マンション" },
 ] as const;
 
 export const STRENGTH_OPTIONS = [

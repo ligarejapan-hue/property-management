@@ -1,6 +1,8 @@
 import { describe, it, expect } from "vitest";
 import { readFileSync } from "node:fs";
 import { join } from "node:path";
+import { AUTO_KEY_BY_ROUTE_AND_TYPE } from "@/lib/sale-dm-letter/scenario-resolve";
+import { APPEAL_OPTIONS } from "@/lib/sale-dm-letter/adjust-model";
 
 const sql = readFileSync(
   join(process.cwd(), "prisma/migrations/20260927100000_add_dm_scenarios/migration.sql"),
@@ -35,5 +37,35 @@ describe("DMの種類 migration(設計 §3.1)", () => {
   });
   it("既存の行を書き換えない(UPDATE/DELETE/DROP を含まない)", () => {
     expect(sql).not.toMatch(/^\s*(UPDATE|DELETE|DROP)\b/im);
+  });
+});
+
+describe("DMの種類「相続（マンション）」の migration(2026-10-15)", () => {
+  const unitSql = readFileSync(
+    join(process.cwd(), "prisma/migrations/20261015100000_add_dm_scenario_inheritance_unit/migration.sql"),
+    "utf8",
+  ).replace(/\r\n/g, "\n");
+
+  it("auto_key=inheritance_unit の行を1件だけ入れる(対応表のキーと一致)", () => {
+    expect(unitSql).toMatch(/INSERT INTO "dm_scenarios"[\s\S]*'相続（マンション）'[\s\S]*'inheritance_unit'/);
+    expect(new Set(Object.values(AUTO_KEY_BY_ROUTE_AND_TYPE.reception_csv))).toEqual(new Set(["inheritance_unit"]));
+    expect(unitSql.match(/INSERT INTO/g)).toHaveLength(1);
+  });
+  it("手紙・LPの訴求は inheritance_unit(指示文に空き家の特例を書かない決まりが入る・@codex P2)", () => {
+    expect(unitSql).toMatch(/15, 'inheritance_unit', 'inheritance_unit', CURRENT_TIMESTAMP/);
+    expect(APPEAL_OPTIONS.map((o) => o.value)).toContain("inheritance_unit");
+  });
+  it("飛ばすのは auto_key=inheritance_unit の行がすでにあるときだけ(名前の衝突では飛ばさない・@codex P2)", () => {
+    const where = unitSql.slice(unitSql.lastIndexOf("WHERE NOT EXISTS"));
+    expect(where).toMatch(/"auto_key" = 'inheritance_unit'/);
+    expect(where).not.toMatch(/"name"/);
+  });
+  it("同じ名前の種類(削除済みを除く)を手で作ってあれば、名前を「相続（マンション・自動）」にして入れる", () => {
+    expect(unitSql).toMatch(
+      /CASE\s+WHEN EXISTS \(SELECT 1 FROM "dm_scenarios" WHERE "name" = '相続（マンション）' AND "deleted_at" IS NULL\)\s+THEN '相続（マンション・自動）'\s+ELSE '相続（マンション）'\s+END/,
+    );
+  });
+  it("既存の行を書き換えない(UPDATE/DELETE/DROP/ALTER を含まない)", () => {
+    expect(unitSql).not.toMatch(/^\s*(UPDATE|DELETE|DROP|ALTER)\b/im);
   });
 });

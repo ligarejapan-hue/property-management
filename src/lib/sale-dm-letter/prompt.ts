@@ -15,7 +15,19 @@ export const APPEAL_JA: Record<string, string> = {
   inheritance: "相続・税の観点での早めの検討",
   vacant: "空き家・管理負担の軽減",
   buyer: "この地域で購入を希望する顧客がいること",
+  inheritance_unit: "相続したマンションの早めの検討(空いたままでも管理費・修繕積立金がかかること)",
 };
+
+// 訴求の軸ごとの「必ず守ること」の追加行。相続（マンション）の手紙・LPに、マンションでは使えない特例を
+// 書かせないため(@codex PR#515 P2)。AI直結・外部AI(手紙/LP)の3つの指示文すべてに入れる。
+const APPEAL_RULES: Record<string, readonly string[]> = {
+  inheritance_unit: [
+    "- 「相続した空き家の3,000万円特別控除」(売却益から最大3,000万円を差し引く特例)はマンションの部屋には使えないため、書かない。",
+  ],
+};
+export function appealRuleLines(appeal: string): string[] {
+  return [...(APPEAL_RULES[appeal] ?? [])];
+}
 export const STRENGTH_JA: Record<string, string> = {
   low: "控えめ・押し付けない",
   medium: "標準的な後押し",
@@ -35,6 +47,7 @@ function buildSystem(options: LetterOptions): string {
     // 生成後に差出人 env が変わると本文と差出人欄が食い違うため、本文には書かせない。
     "- 差出人の署名・会社名・連絡先は本文に書かない(末尾の差出人欄は印刷側で付与するため)。自社に触れる場合も「弊社」等にとどめ、社名・電話・住所は本文に含めない。",
     "- 無料査定など、相手の負担なく行動できる導線を1つ入れる。",
+    ...appealRuleLines(options.appeal),
     `文体の方針: トーン=${TONE_JA[options.tone] ?? options.tone} / 長さ=${LENGTH_JA[options.length] ?? options.length} / 訴求の軸=${APPEAL_JA[options.appeal] ?? options.appeal} / 押しの強さ=${STRENGTH_JA[options.strength] ?? options.strength}。`,
     "出力は手紙本文のみ。前置きや説明・マークダウン記法は付けない。",
   ].join("\n");
