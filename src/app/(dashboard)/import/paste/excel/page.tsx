@@ -9,7 +9,7 @@
  * ⚠要確認の行(似た物件・同名の所有者・読めない項目)は登録しない。人が
  *   「貼り付けて物件化」で確かめる。
  */
-import { useCallback, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import Link from "next/link";
 import { PageHeader } from "@/components/ui/page-header";
 import { Button } from "@/components/ui/button";
@@ -26,6 +26,15 @@ import {
   excelLeadCommitBody,
   commitOutcome,
 } from "@/components/import/excel-lead-commit-body";
+import { draftKey } from "@/lib/drafts/draft-store";
+import {
+  isPasteExcelDraftEmpty,
+  parsePasteExcelDraft,
+  restoreExcelResults,
+  type PasteExcelDraft,
+} from "@/lib/drafts/screens/paste-excel";
+import { useClientReady, useDraftAutosave, useRestoredDraft } from "@/hooks/use-draft";
+import { DraftRestoredNotice, DraftTooLargeNotice } from "@/components/drafts/draft-notices";
 
 /** 非2xx応答からエラーメッセージを取り出す(貼り付け画面と同じ姿勢)。 */
 async function readApiErrorMessage(res: Response): Promise<string> {
@@ -46,18 +55,44 @@ function fileToBase64(file: File): Promise<string> {
   });
 }
 
-export default function ExcelLeadImportPage() {
+function ExcelLeadImportScreen({ draftEnabled }: { draftEnabled: boolean }) {
+  // 作業中の控え(設計書 §2 S2)。読み取った行と行ごとの結果を残す。
+  const draftKeyValue = draftEnabled ? draftKey("paste-excel") : null;
+  const restored = useRestoredDraft(draftKeyValue, parsePasteExcelDraft);
   const [file, setFile] = useState<File | null>(null);
+  /** 戻したときのファイル名(ファイル本体は戻せないが、読み取り済みなので不要)。 */
+  const [restoredFileName, setRestoredFileName] = useState<string | null>(restored?.data.fileName ?? null);
   const [reading, setReading] = useState(false);
   const [readError, setReadError] = useState<string | null>(null);
-  const [rows, setRows] = useState<ExcelLeadRow[] | null>(null);
-  const [results, setResults] = useState<Record<string, ExcelLeadResult>>({});
+  const [rows, setRows] = useState<ExcelLeadRow[] | null>(restored ? restored.data.rows : null);
+  const [results, setResults] = useState<Record<string, ExcelLeadResult>>(
+    restored ? restoreExcelResults(restored.data.results, restored.data.sendingKey) : {},
+  );
+  /** いま送っている行。結果が来る前に離れたら、戻ったとき「分からない」になる(§5.2)。 */
+  const [sendingKey, setSendingKey] = useState<string | null>(null);
+  const [restoredDismissed, setRestoredDismissed] = useState(false);
   const [confirming, setConfirming] = useState(false);
   const [running, setRunning] = useState(false);
   const [progress, setProgress] = useState(0);
   const [total, setTotal] = useState(0);
   /** 中止の合図。押された行の登録は終わらせ、次の行から止める。 */
   const stopRef = useRef(false);
+
+  const draftData = useMemo<PasteExcelDraft>(
+    () => ({ rev: 1, fileName: file?.name ?? restoredFileName, rows: rows ?? [], results, sendingKey }),
+    [file, restoredFileName, rows, results, sendingKey],
+  );
+  const draftSaver = useDraftAutosave(draftKeyValue, draftData, isPasteExcelDraftEmpty, restored);
+  // 送る直前に控えへすぐ書くため、最新の控えの形を持っておく(描画中には書かない)。
+  const draftDataRef = useRef(draftData);
+  useEffect(() => {
+    draftDataRef.current = draftData;
+  }, [draftData]);
+
+  // ⚠画面を離れたら、いま送っている行で止める(裏で送り続けない・§5.2)。
+  useEffect(() => () => {
+    stopRef.current = true;
+  }, []);
 
   const readyRows = (rows ?? []).filter(
     (r) => r.status === "ready" && results[excelLeadRowKey(r)] === undefined,
@@ -86,6 +121,7 @@ export default function ExcelLeadImportPage() {
       const data = (await res.json()) as { rows: ExcelLeadRow[] };
       setRows(data.rows);
       setResults({});
+      setRestoredFileName(null);
     } catch (e) {
       setReadError(e instanceof Error ? e.message : "読み取りに失敗しました");
     } finally {
@@ -100,9 +136,16 @@ export default function ExcelLeadImportPage() {
     stopRef.current = false;
     const targets = readyRows;
     setTotal(targets.length);
+    // ⚠控えに書く結果はこの繰り返しの中で持つ(state の反映は次の描画まで待つため、前の行の結果が
+    //   落ちた控えを書かない・設計書 §5.2「1行ずつ送信中→結果を控えに書く」)。
+    const sentResults: Record<string, ExcelLeadResult> = { ...draftDataRef.current.results };
     for (let i = 0; i < targets.length; i++) {
       if (stopRef.current) break;
       const row = targets[i];
+      const key = excelLeadRowKey(row);
+      // 送る行を控えにすぐ書いてから送る(返事の前に離れても、戻ったとき二重に送らない)。
+      setSendingKey(key);
+      draftSaver.writeNow({ ...draftDataRef.current, results: { ...sentResults }, sendingKey: key });
       let result: ExcelLeadResult;
       try {
         // ⚠重複の確認は**登録APIの中で作成と同じロックの内側**で行う
@@ -116,15 +159,35 @@ export default function ExcelLeadImportPage() {
           body: JSON.stringify(excelLeadCommitBody(row)),
         });
         result = commitOutcome(res.status, await res.json().catch(() => null));
-      } catch (e) {
-        result = { kind: "failed", message: e instanceof Error ? e.message : "通信に失敗しました" };
+      } catch {
+        // ⚠通信切れは登録されたか分からない(サーバーでは済んでいるかもしれない)。失敗と言い切らない。
+        result = { kind: "unknown" };
       }
-      const key = excelLeadRowKey(row);
+      sentResults[key] = result;
+      draftSaver.writeNow({ ...draftDataRef.current, results: { ...sentResults }, sendingKey: null });
       setResults((prev) => ({ ...prev, [key]: result }));
+      setSendingKey(null);
       setProgress(i + 1);
     }
     setRunning(false);
-  }, [readyRows]);
+  }, [readyRows, draftSaver]);
+
+  const handleReturnUnknown = (rowKey: string) => {
+    setResults((prev) => {
+      const next = { ...prev };
+      delete next[rowKey];
+      return next;
+    });
+  };
+  const handleDiscardDraft = () => {
+    draftSaver.discard();
+    setFile(null);
+    setRestoredFileName(null);
+    setRows(null);
+    setResults({});
+    setReadError(null);
+    setRestoredDismissed(true);
+  };
 
   return (
     // ⚠画面の最上位に PII 保護の印を付ける(貼り付け画面と同じ)。氏名・電話・
@@ -135,6 +198,10 @@ export default function ExcelLeadImportPage() {
         title="Excelからまとめて物件化"
         description="査定サイトの反響を書き溜めた顧客管理表（Excel）を読み、物件と所有者をまとめて登録します。似た物件や同じ名前の所有者がいる行は登録せず、「要確認」として残します。"
       />
+      {restored && !restoredDismissed && !running && !reading && (
+        <DraftRestoredNotice savedAt={restored.savedAt} onDiscard={handleDiscardDraft} />
+      )}
+      {draftSaver.tooLarge && <DraftTooLargeNotice />}
       <p className="text-sm">
         <Link href="/import/paste" className="text-indigo-600 hover:underline dark:text-indigo-400">
           ← 1件ずつ貼り付けて登録する
@@ -149,15 +216,17 @@ export default function ExcelLeadImportPage() {
           accept=".xlsx"
           disabled={reading || running}
           title="Excel(.xlsx) ファイルをここにドラッグ＆ドロップ"
-          fileName={file?.name ?? null}
+          fileName={file?.name ?? restoredFileName}
           onFiles={(files) => {
             setFile(files[0]);
+            setRestoredFileName(null);
             setRows(null);
             setResults({});
             setReadError(null);
           }}
           onNoneAccepted={() => {
             setFile(null);
+            setRestoredFileName(null);
             setRows(null);
             setResults({});
           }}
@@ -203,7 +272,11 @@ export default function ExcelLeadImportPage() {
             </div>
           </div>
 
-          <ExcelLeadTable rows={rows} results={results} />
+          <ExcelLeadTable
+            rows={rows}
+            results={results}
+            onReturnUnknown={running ? undefined : handleReturnUnknown}
+          />
         </section>
       )}
 
@@ -228,4 +301,10 @@ export default function ExcelLeadImportPage() {
       )}
     </div>
   );
+}
+
+/** 控えはブラウザで描き直した後だけ読む(F5 でサーバー描画と食い違わないように)。 */
+export default function ExcelLeadImportPage() {
+  const clientReady = useClientReady();
+  return <ExcelLeadImportScreen key={clientReady ? "client" : "server"} draftEnabled={clientReady} />;
 }

@@ -17,6 +17,17 @@ describe("use-draft の配線", () => {
     expect(src).toMatch(/const writer = useMemo\([\s\S]*?\[key, isEmpty, restored, compactForPending\],?\s*\)/);
     expect(src).toMatch(/if \(state\.key !== key\)/);
   });
+  it("useClientReady はサーバー描画・hydration 中は false(useSyncExternalStore の第3引数)", () => {
+    expect(src).toMatch(
+      /export function useClientReady\(\): boolean \{\s*return useSyncExternalStore\(\s*subscribeNothing,\s*\(\) => true,\s*\(\) => false,?\s*\);/,
+    );
+  });
+  it("writeNow は間引きを待たずにすぐ書く(送る直前の印)", () => {
+    expect(src).toMatch(/writeNow: \(d: T\) => \{\s*writer\?\.update\(d\);\s*writer\?\.flush\(\);/);
+  });
+  it("画面に出たら(mount の effect)書き手が控えの持ち主になる(離れた画面の書き手に消させない)", () => {
+    expect(src).toMatch(/useEffect\(\(\) => \{\s*if \(!writer\) return;\s*(?:\/\/[^\n]*\n\s*)?writer\.claim\(\);/);
+  });
   it("localStorage・indexedDB を使わない", () => {
     expect(src).not.toMatch(/localStorage|indexedDB/);
   });
