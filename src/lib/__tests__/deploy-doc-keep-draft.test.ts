@@ -86,6 +86,18 @@ describe("入力の途中をとっておく(2026-10): 資料の文言が画面�
     for (const src of [guideSrc, manualSrc]) expect(src).toContain("「タブを複製」");
   });
 
+  it("新規物件登録・物件の編集の小窓は×・キャンセルで閉じると消える", () => {
+    // 閉じる・キャンセルの処理が控えを消す(close)ことと、資料にそう書いてあることを照合する。
+    const newModalSrc = readRepoFile("src/components/properties/new-property-modal.tsx");
+    const editFormSrc = readRepoFile("src/components/properties/property-edit-form.tsx");
+    expect(newModalSrc).toMatch(/draft\.close\(\);\s*onClose\(\);/);
+    expect(editFormSrc).toContain("editDraft.close();");
+    for (const src of [guideSrc, manualSrc]) {
+      expect(src).toContain("×や「キャンセル」で閉じると");
+      expect(src).toContain("小窓が開き直って続きが出ます");
+    }
+  });
+
   it("対象の6画面を両方の資料に書いている", () => {
     for (const name of ["新規物件登録", "物件の編集", "貼り付けて物件化", "謄本PDF取込", "受付帳CSV取込"]) {
       expect(guideSrc).toContain(name);
