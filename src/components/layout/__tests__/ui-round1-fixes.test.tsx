@@ -61,6 +61,13 @@ describe("① 売却DMの発送一覧", () => {
     expect(html).toContain('href="/properties"');
   });
 
+  it("100件より古い発送は「もっと見る」で続きを読む(@codex #517)", () => {
+    const page = read("src/app/(dashboard)/properties/sale-dm/page.tsx");
+    expect(page).toContain("?before=${encodeURIComponent(before)}");
+    expect(page).toContain("もっと見る(古い発送)");
+    expect(page).toContain("setNextBefore(body.nextBefore)");
+  });
+
   it("進み具合の言い方", () => {
     expect(campaignProgressLabel({ recipients: 0, sent: 0 })).toBe("宛先なし");
     expect(campaignProgressLabel({ recipients: 3, sent: 0 })).toBe("未送付");

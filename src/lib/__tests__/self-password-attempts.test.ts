@@ -1,65 +1,52 @@
-import { describe, it, expect, vi } from "vitest";
+import { describe, it, expect } from "vitest";
 import { readFileSync } from "node:fs";
 import { join } from "node:path";
 import {
-  reserveSelfPasswordAttempt,
-  SELF_PASSWORD_LOCK_MS,
-  SELF_PASSWORD_MAX_FAILURES,
-  type AttemptDb,
+  createSelfPasswordLimiter,
+  takeSelfPasswordAttempt,
+  SELF_PASSWORD_MAX_ATTEMPTS,
+  SELF_PASSWORD_WINDOW_MS,
 } from "../self-password-attempts";
 
 const read = (p: string) => readFileSync(join(process.cwd(), p), "utf8").replace(/\r\n/g, "\n");
 
-function fakeDb(rows: number) {
-  const calls: { sql: string; values: unknown[] }[] = [];
-  const db: AttemptDb = {
-    $executeRaw: vi.fn(async (q: TemplateStringsArray, ...values: unknown[]) => {
-      calls.push({ sql: q.join("?"), values });
-      return rows;
-    }),
-  };
-  return { db, calls };
-}
-
 describe("自分のパスワード変更の試行回数(@codex #517 P2)", () => {
-  it("ログインと同じ数え・同じ上限(5回で30分)", () => {
-    const auth = read("src/lib/auth.ts");
-    expect(auth).toContain(`const MAX_LOGIN_FAILURES = ${SELF_PASSWORD_MAX_FAILURES};`);
-    expect(auth).toContain("const LOCK_DURATION_MS = 30 * 60 * 1000;");
-    expect(SELF_PASSWORD_LOCK_MS).toBe(30 * 60 * 1000);
+  it("本人ごとに30分で5回まで・6回目は止まり、30分たてば戻る", () => {
+    expect(SELF_PASSWORD_MAX_ATTEMPTS).toBe(5);
+    expect(SELF_PASSWORD_WINDOW_MS).toBe(30 * 60 * 1000);
+    const l = createSelfPasswordLimiter();
+    const t0 = 1_000_000;
+    for (let i = 0; i < 5; i++) expect(l.hit("u1", t0 + i)).toBe(true);
+    expect(l.hit("u1", t0 + 10)).toBe(false);
+    expect(l.hit("u2", t0 + 10)).toBe(true); // 他の人は巻き込まない
+    expect(l.hit("u1", t0 + 29 * 60_000)).toBe(false);
+    expect(l.hit("u1", t0 + 30 * 60_000 + 5)).toBe(true);
   });
 
-  it("1文で ロック中でないか確認+1回分+5回目ならロック・時刻はJSで1回だけ作る", async () => {
-    const { db, calls } = fakeDb(1);
-    const now = new Date("2026-10-15T07:00:00Z");
-    expect(await reserveSelfPasswordAttempt(db, "u1", now)).toBe(true);
-    expect(calls).toHaveLength(1);
-    const { sql, values } = calls[0];
-    expect(sql).toContain("login_failed_count = login_failed_count + 1");
-    expect(sql).toMatch(/WHEN login_failed_count \+ 1 >= \?\s+THEN \(\?::timestamptz AT TIME ZONE 'UTC'\)/);
-    expect(sql).toContain("locked_until IS NULL OR locked_until <= (?::timestamptz AT TIME ZONE 'UTC')");
-    expect(sql).toContain("id = ?::uuid");
-    expect(sql).toContain("is_active = true");
-    expect(sql).not.toMatch(/now\(\)|clock_timestamp/i);
-    expect(values).toEqual([5, "2026-10-15T07:30:00.000Z", "u1", "2026-10-15T07:00:00.000Z"]);
+  it("大文字のIDでも同じ人として数える", () => {
+    const id = "ABCDEF00-0000-4000-8000-00000000000a";
+    const t0 = 5_000_000;
+    for (let i = 0; i < 5; i++) expect(takeSelfPasswordAttempt(i % 2 ? id : id.toLowerCase(), t0 + i)).toBe(true);
+    expect(takeSelfPasswordAttempt(id, t0 + 10)).toBe(false);
   });
 
-  it("ロック中(更新0行)なら予約できない", async () => {
-    const { db } = fakeDb(0);
-    expect(await reserveSelfPasswordAttempt(db, "u1", new Date())).toBe(false);
-  });
-
-  it("API は照合(bcrypt)の前に予約し、ロック中は429・当たったら数えを戻す", () => {
+  it("⚠ログインのロック(login_failed_count / locked_until)には触らない=本人を締め出さない(@codex 2巡目)", () => {
+    const lib = read("src/lib/self-password-attempts.ts");
     const api = read("src/app/api/me/change-password/route.ts");
-    const reserve = api.indexOf("reserveSelfPasswordAttempt(prisma, session.id, new Date())");
-    const check = api.indexOf("compare(data.currentPassword, user.passwordHash)");
-    expect(reserve).toBeGreaterThan(0);
-    expect(reserve).toBeLessThan(check);
-    expect(api).toContain('"TOO_MANY_ATTEMPTS"');
-    expect(api).toMatch(/passwordHash,\n\s+mustChangePassword: false,[\s\S]*?loginFailedCount: 0,\n\s+lockedUntil: null,/);
+    expect(api).not.toMatch(/loginFailedCount|lockedUntil/);
+    expect(lib).not.toMatch(/prisma|\$executeRaw|UPDATE users/);
   });
 
-  it("画面は API の決まった形({ error: { message } })から案内を読む=ロックの案内が出る", () => {
+  it("API は照合(bcrypt)の前に await を挟まず数え、超えたら429", () => {
+    const api = read("src/app/api/me/change-password/route.ts");
+    const take = api.indexOf("if (!takeSelfPasswordAttempt(session.id))");
+    const check = api.indexOf("compare(data.currentPassword, user.passwordHash)");
+    expect(take).toBeGreaterThan(0);
+    expect(take).toBeLessThan(check);
+    expect(api).toContain('"TOO_MANY_ATTEMPTS"');
+  });
+
+  it("画面は API の決まった形({ error: { message } })から案内を読む=止まった案内が出る", () => {
     const page = read("src/app/(dashboard)/admin/change-password/page.tsx");
     expect(page).toContain("data?.error?.message");
     expect(read("src/lib/api-helpers.ts")).toMatch(/error:\s*\{[\s\S]*?message/);
