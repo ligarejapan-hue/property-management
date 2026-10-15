@@ -21,6 +21,8 @@ import {
   type LeadRow,
 } from "@/lib/paste-import/lead-sheet";
 import { lookupPasteDuplicates, findEarlierExcelImport } from "@/lib/paste-import-duplicates";
+import { normalizeAddressForCompare, normalizeForCompare } from "@/lib/paste-import/find-duplicates";
+import { normalizeName } from "@/lib/normalize";
 import { assertImportJsonBodySize } from "@/lib/import-body-size";
 import {
   detectFileFormat,
@@ -239,9 +241,9 @@ export async function POST(request: NextRequest) {
 
     // ⚠時計を読むのは API 層(境界)だけ(貼り付けと同じ)。
     const maxYear = new Date().getFullYear();
-    const rows = [];
     // ⚠重複の見立ては**1行ずつ順に**。並列にすると行数ぶんの問い合わせが
     //   同時に走り、接続を食い潰す。
+    const looked = [];
     for (const row of leadRows) {
       const first = buildPasteDraft(row.text, { maxYear });
       const text = withFallbackLinkKey(row.text, first, fallbackLinkKey(row, first));
@@ -253,16 +255,49 @@ export async function POST(request: NextRequest) {
         ownerName: draft.owner?.name.value ?? null,
         ownerCurrentAddress: draft.owner?.currentAddress.value ?? null,
       });
-      // ⚠前に Excel で入れた本人(同じ住所の物件+Excel取込の同じ氏名の所有者)は
-      //   「登録済み」。取り込んだあとで Excel のセルを直すと鍵が変わり、自分自身と
-      //   重なる要確認になっていた(2026-10-15 本番 66行)。
-      const earlierImportId = dup.duplicates.blocked
-        ? null
+      // ⚠前に Excel で入れた本人(同じ住所の物件+Excel取込の同じ氏名の所有者)の候補。
+      //   取り込んだあとで Excel のセルを直すと鍵が変わり、自分自身と重なる要確認に
+      //   なっていた(2026-10-15 本番 66行)。決めるのは下で表全体を見てから。
+      const earlierImportIds = dup.duplicates.blocked
+        ? []
         : await findEarlierExcelImport({
             similarPropertyIds: dup.similar.map((s) => s.id),
             ownerName: draft.owner?.name.value ?? null,
             roomNo: draft.property.roomNo.value,
           });
+      looked.push({ row, text, draft, dup, earlierImportIds });
+    }
+
+    // ⚠「前に入れた本人」と言えるのは、表の中の**同じ人・同じ住所の行の数**が、
+    //   前に入れた物件の数を超えないときだけ(@codex PR#516 P1)。同じ住所に同じ人の
+    //   土地が2筆あり1筆だけ入っている表で、2行とも「登録済み」にすると残りの1筆が
+    //   黙って入らない。数が合わなければ全部これまでどおり要確認(人が見て決める)。
+    const groupKey = (d: PasteDraft) =>
+      [
+        normalizeName(d.owner?.name.value ?? ""),
+        normalizeAddressForCompare(d.property.address.value),
+        normalizeForCompare(d.property.lotNumber.value),
+        normalizeName(d.property.roomNo.value ?? ""),
+      ].join("|");
+    const groupSize = new Map<string, number>();
+    for (const l of looked) {
+      if (l.earlierImportIds.length === 0) continue;
+      const k = groupKey(l.draft);
+      groupSize.set(k, (groupSize.get(k) ?? 0) + 1);
+    }
+    const groupUsed = new Map<string, number>();
+
+    const rows = [];
+    for (const { row, text, draft, dup, earlierImportIds } of looked) {
+      let earlierImportId: string | null = null;
+      if (earlierImportIds.length > 0) {
+        const k = groupKey(draft);
+        if ((groupSize.get(k) ?? 0) <= earlierImportIds.length) {
+          const used = groupUsed.get(k) ?? 0;
+          earlierImportId = earlierImportIds[used] ?? null;
+          groupUsed.set(k, used + 1);
+        }
+      }
       const judged = leadRowStatus(draft, {
         blocked: dup.duplicates.blocked || earlierImportId !== null,
         similarCount: dup.similar.length,

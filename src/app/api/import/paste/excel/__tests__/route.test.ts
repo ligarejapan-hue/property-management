@@ -47,7 +47,7 @@ vi.mock("@/lib/api-helpers", async () => {
 });
 // ⚠重複の見立ては貼り付けと**同じ関数**を使う(権限・スコープの扱いも同じ)。
 const earlierCalls: { similarPropertyIds: string[]; ownerName: string | null; roomNo: string | null }[] = [];
-let earlierResult: (input: { similarPropertyIds: string[]; ownerName: string | null; roomNo: string | null }) => string | null = () => null;
+let earlierResult: (input: { similarPropertyIds: string[]; ownerName: string | null; roomNo: string | null }) => string[] = () => [];
 vi.mock("@/lib/paste-import-duplicates", () => ({
   lookupPasteDuplicates: vi.fn(async (_s: unknown, _p: unknown, input: { externalLinkKey: string | null }) => {
     lookupCalls.push(input);
@@ -94,7 +94,7 @@ beforeEach(() => {
   mockPerms = FULL_PERMS;
   lookupCalls.length = 0;
   earlierCalls.length = 0;
-  earlierResult = () => null;
+  earlierResult = () => [];
   lookupResult = () => ({
     duplicates: { blocked: false, blockedByPropertyId: null, similarPropertyIds: [] },
     similar: [],
@@ -206,13 +206,51 @@ describe("POST /api/import/paste/excel", () => {
       ownerCandidates: [{ id: "o-old" }],
       ownerCandidatesTruncated: false,
     });
-    earlierResult = (input) => (input.similarPropertyIds.includes("p-old") ? "p-old" : null);
+    earlierResult = (input) => (input.similarPropertyIds.includes("p-old") ? ["p-old"] : []);
     const body = await (await POST(req({
       fileName: "a.xlsx",
       xlsxBase64: xlsxBase64(sheet([row({ 姓名: "山田　太郎", URL: MAIL })])),
     }))).json();
     expect(body.rows[0]).toMatchObject({ status: "registered", registeredPropertyId: "p-old", reasons: [] });
     expect(earlierCalls[0]).toEqual({ similarPropertyIds: ["p-old"], ownerName: "山田　太郎", roomNo: null });
+  });
+
+  it("★同じ人・同じ住所の行が、前に入れた物件の数より多ければ全部要確認(@codex PR#516 P1)", async () => {
+    // 同じ住所に同じ人の土地が2筆あり、1筆だけ前に入れた。2行とも「登録済み」にすると
+    // 残りの1筆が黙って入らない。
+    lookupResult = () => ({
+      duplicates: { blocked: false, blockedByPropertyId: null, similarPropertyIds: ["p-old"] },
+      similar: [{ id: "p-old", address: "東京都港区1-1", lotNumber: null }],
+      ownerCandidates: [{ id: "o-old" }],
+      ownerCandidatesTruncated: false,
+    });
+    earlierResult = () => ["p-old"];
+    const other = MAIL.replace("H-0001", "H-0009");
+    const body = await (await POST(req({
+      fileName: "a.xlsx",
+      xlsxBase64: xlsxBase64(sheet([row({ URL: MAIL }), row({ URL: other })])),
+    }))).json();
+    expect(body.rows.map((r: { status: string }) => r.status)).toEqual(["review", "review"]);
+  });
+
+  it("★前に入れた物件が行の数だけあれば、行ごとに別の物件を「登録済み」に当てる", async () => {
+    lookupResult = () => ({
+      duplicates: { blocked: false, blockedByPropertyId: null, similarPropertyIds: ["p-a", "p-b"] },
+      similar: [
+        { id: "p-a", address: "東京都港区1-1", lotNumber: null },
+        { id: "p-b", address: "東京都港区1-1", lotNumber: null },
+      ],
+      ownerCandidates: [{ id: "o-old" }],
+      ownerCandidatesTruncated: false,
+    });
+    earlierResult = () => ["p-a", "p-b"];
+    const other = MAIL.replace("H-0001", "H-0009");
+    const body = await (await POST(req({
+      fileName: "a.xlsx",
+      xlsxBase64: xlsxBase64(sheet([row({ URL: MAIL }), row({ URL: other })])),
+    }))).json();
+    expect(body.rows.map((r: { status: string; registeredPropertyId: string }) => [r.status, r.registeredPropertyId]))
+      .toEqual([["registered", "p-a"], ["registered", "p-b"]]);
   });
 
   it("★前に Excel で入れた本人でなければ、同じ住所でも従来どおり要確認", async () => {

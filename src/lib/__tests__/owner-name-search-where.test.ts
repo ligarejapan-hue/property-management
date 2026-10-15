@@ -67,7 +67,12 @@ describe("ownerNameSearchWhere", () => {
 
   it("★丸数字・ローマ数字・囲み文字で保存された名前も落とさない", () => {
     expect(search("第1ビル", ["第①ビル"])).toEqual(["第①ビル"]);
-    expect(search("I商事", ["Ⅰ商事"])).toEqual(["Ⅰ商事"]); // 1文字になるローマ数字だけ(Ⅲ→III は対象外)
+    expect(search("I商事", ["Ⅰ商事"])).toEqual(["Ⅰ商事"]);
+    // 何文字にも展開される記号(@codex PR#516 P2)
+    expect(search("第III商事", ["第Ⅲ商事"])).toEqual(["第Ⅲ商事"]);
+    expect(search("第Ⅲ商事", ["第III商事"])).toEqual(["第III商事"]);
+    expect(search("10番館", ["⑩番館"])).toEqual(["⑩番館"]);
+    expect(search("平成商事", ["㍻商事"])).toEqual(["㍻商事"]);
     expect(search("上田", ["㊤田"])).toEqual(["㊤田"]);
   });
 
@@ -111,7 +116,7 @@ describe("findEarlierExcelImport", () => {
 
   it("★同じ住所の物件に、Excel取込の同じ氏名の所有者がいればその物件を返す", async () => {
     mockLinks.mockResolvedValue([{ propertyId: "p-1", property: { roomNo: null }, owner: { name: "山田太郎" } }]);
-    expect(await findEarlierExcelImport({ similarPropertyIds: ["p-1"], ownerName: "山田　太郎", roomNo: null })).toBe("p-1");
+    expect(await findEarlierExcelImport({ similarPropertyIds: ["p-1"], ownerName: "山田　太郎", roomNo: null })).toEqual(["p-1"]);
     const args = mockLinks.mock.calls[0][0] as {
       where: { propertyId: { in: string[] }; owner: { isArchived: boolean; note: { startsWith: string } } };
     };
@@ -121,19 +126,29 @@ describe("findEarlierExcelImport", () => {
 
   it("★氏名が違えば(同じ住所に別の人を Excel で入れていても)返さない", async () => {
     mockLinks.mockResolvedValue([{ propertyId: "p-1", property: { roomNo: null }, owner: { name: "鈴木花子" } }]);
-    expect(await findEarlierExcelImport({ similarPropertyIds: ["p-1"], ownerName: "山田太郎", roomNo: null })).toBeNull();
+    expect(await findEarlierExcelImport({ similarPropertyIds: ["p-1"], ownerName: "山田太郎", roomNo: null })).toEqual([]);
   });
 
   it("★同じ人でも部屋番号が違えば(同じ建物の別の部屋)返さない・同じなら返す", async () => {
     mockLinks.mockResolvedValue([{ propertyId: "p-1", property: { roomNo: "502" }, owner: { name: "山田太郎" } }]);
-    expect(await findEarlierExcelImport({ similarPropertyIds: ["p-1"], ownerName: "山田太郎", roomNo: "305" })).toBeNull();
-    expect(await findEarlierExcelImport({ similarPropertyIds: ["p-1"], ownerName: "山田太郎", roomNo: null })).toBeNull();
-    expect(await findEarlierExcelImport({ similarPropertyIds: ["p-1"], ownerName: "山田太郎", roomNo: "５０２" })).toBe("p-1");
+    expect(await findEarlierExcelImport({ similarPropertyIds: ["p-1"], ownerName: "山田太郎", roomNo: "305" })).toEqual([]);
+    expect(await findEarlierExcelImport({ similarPropertyIds: ["p-1"], ownerName: "山田太郎", roomNo: null })).toEqual([]);
+    expect(await findEarlierExcelImport({ similarPropertyIds: ["p-1"], ownerName: "山田太郎", roomNo: "５０２" })).toEqual(["p-1"]);
+  });
+
+  it("★同じ人の物件が複数あれば全部返す(何行を登録済みにできるかは呼び出し側が決める)", async () => {
+    mockLinks.mockResolvedValue([
+      { propertyId: "p-2", property: { roomNo: null }, owner: { name: "山田太郎" } },
+      { propertyId: "p-1", property: { roomNo: null }, owner: { name: "山田太郎" } },
+      { propertyId: "p-1", property: { roomNo: null }, owner: { name: "山田太郎" } },
+    ]);
+    expect(await findEarlierExcelImport({ similarPropertyIds: ["p-1", "p-2"], ownerName: "山田太郎", roomNo: null }))
+      .toEqual(["p-1", "p-2"]);
   });
 
   it("同じ住所の物件が無い・氏名が無いときは DB を引かない", async () => {
-    expect(await findEarlierExcelImport({ similarPropertyIds: [], ownerName: "山田太郎", roomNo: null })).toBeNull();
-    expect(await findEarlierExcelImport({ similarPropertyIds: ["p-1"], ownerName: "  ", roomNo: null })).toBeNull();
+    expect(await findEarlierExcelImport({ similarPropertyIds: [], ownerName: "山田太郎", roomNo: null })).toEqual([]);
+    expect(await findEarlierExcelImport({ similarPropertyIds: ["p-1"], ownerName: "  ", roomNo: null })).toEqual([]);
     expect(mockLinks).not.toHaveBeenCalled();
   });
 });

@@ -180,46 +180,47 @@ function ownerSearchPrefixCandidates(rawName: string, normalizedName: string): s
 // ⚠1文字ごとに**DB に入りうる別の書き方**も OR で並べる。どれか1つでも漏れると
 //   本人が候補から消えて二重登録へ誘導する(取りこぼしは過剰一致より危険)。
 //   ・全角/半角(英数・カナ)・半角カナの濁点(「ｶﾞ」=2文字)
-//   ・互換漢字と部首(NFKC で通常の漢字になる1文字。登記の外字に混じる)
-// ⚠NFKC で**何文字にも**展開される記号(㈱→(株)・㍿→株式会社)は1文字の言い換えが
-//   作れない。だから法人の言葉と「(株)」のような括弧書きは**どこにあっても**条件から
-//   外す(個人名・会社の実質部分の文字だけで引く)。
+//   ・NFKC で別の文字に**展開される**1文字(互換漢字・部首・丸数字・囲み文字・
+//     ローマ数字・㈱/㍿ など)。展開先が何文字でも、展開に含まれる各文字の
+//     「元の書き方」として並べる(Ⅲ→III なら「I」の書き方に Ⅲ を足す・@codex PR#516 P2)。
+// ⚠法人の言葉と「(株)」のような括弧書きは**どこにあっても**条件から外す
+//   (表記の揺れが大きい部分。個人名・会社の実質部分の文字だけで引く=条件を緩める側)。
 
-/** NFKC で別の 1 文字になる互換文字(互換漢字・部首・丸数字・囲み文字など)→ 元の文字たち(実行時に作る)。 */
-const COMPAT_IDEOGRAPH_SOURCES: ReadonlyMap<string, readonly string[]> = (() => {
+/**
+ * NFKC で別の文字列になる1文字 → その展開に含まれる各文字から引ける「元の文字」。
+ * 例: 「I」→[Ⅰ, Ⅱ, Ⅲ, …]・「株」→[㈱, ㍿, …]・「神」→[神(互換)]。
+ * ⚠全コードポイントを1回だけ走査して作る(初回の検索時・以後は使い回す)。
+ */
+let nfkcSourcesCache: Map<string, string[]> | null = null;
+function nfkcSources(): Map<string, string[]> {
+  if (nfkcSourcesCache) return nfkcSourcesCache;
   const map = new Map<string, string[]>();
-  const ranges: [number, number][] = [
-    [0x2100, 0x218f], // 文字様記号・ローマ数字(Ⅲ 等。1文字になるものだけ使う)
-    [0x2460, 0x24ff], // 丸数字・丸英字(① 等)
-    [0x2e80, 0x2fdf], // CJK部首補助・康熙部首
-    [0x3190, 0x33ff], // 漢文の返り点・囲み文字(㊤ 等)
-    [0xf900, 0xfaff], // CJK互換漢字
-    [0x2f800, 0x2fa1f], // CJK互換漢字補助
-  ];
-  for (const [from, to] of ranges) {
-    for (let code = from; code <= to; code++) {
-      const c = String.fromCodePoint(code);
-      const n = c.normalize("NFKC");
-      if (n === c || Array.from(n).length !== 1) continue;
-      const list = map.get(n) ?? [];
+  for (let code = 0; code <= 0x2ffff; code++) {
+    if (code >= 0xd800 && code <= 0xdfff) continue; // サロゲートの片割れ
+    const c = String.fromCodePoint(code);
+    const n = c.normalize("NFKC");
+    if (n === c) continue;
+    for (const part of new Set(Array.from(n))) {
+      const list = map.get(part) ?? [];
       list.push(c);
-      map.set(n, list);
+      map.set(part, list);
     }
   }
+  nfkcSourcesCache = map;
   return map;
-})();
+}
 
 /** 半角カナの濁点・半濁点(全角カナ1文字が半角では2文字になる)。 */
 const HALF_WIDTH_VOICED_MARKS: Readonly<Record<string, string>> = {
-  "゙": "ﾞ",
-  "゚": "ﾟ",
+  "\u3099": "\uff9e",
+  "\u309a": "\uff9f",
 };
 
 /** 正規化後の1文字について、DB の生の氏名に入りうる書き方の一覧。 */
 function charSpellings(c: string): string[] {
   // NFD(「カ」+結合濁点で保存された名前)も拾う。
   const out = new Set<string>([c, c.normalize("NFD"), toHalfWidthChar(c), toFullWidthChar(c)]);
-  for (const src of COMPAT_IDEOGRAPH_SOURCES.get(c) ?? []) out.add(src);
+  for (const src of nfkcSources().get(c) ?? []) out.add(src);
   // 「ガ」→「ｶﾞ」(半角では濁点が別の文字)
   const decomposed = Array.from(c.normalize("NFD"));
   if (decomposed.length === 2 && HALF_WIDTH_VOICED_MARKS[decomposed[1]]) {
@@ -680,7 +681,7 @@ export async function countPasteDuplicatesUnscoped(
 //   本人なのに「同じ住所の物件がすでにあります/同じ名前の所有者がすでにいます」で
 //   要確認に回っていた(本番 2026-10-15: 144行中66行)。
 //   → 同じ住所の物件に、**Excel取込の備考を持つ同じ氏名の所有者**がついていれば
-//   「登録済み」とみなす。氏名と住所の両方が一致したときだけ(片方では決めない)。
+//   その物件を返す(「登録済み」にするかは呼び出し側が表全体の行数と比べて決める)。氏名と住所の両方が一致したときだけ(片方では決めない)。
 // ⚠渡す物件 id は lookupPasteDuplicates が返した**この人が開ける物件**だけ。
 //   見えない物件については従来どおり要確認のまま(登録は止まる側に倒れる)。
 // ---------------------------------------------------------------------------
@@ -690,9 +691,9 @@ export async function findEarlierExcelImport(input: {
   ownerName: string | null;
   /** 部屋番号。同じ建物の別の部屋を同じ人が持っているとき、別の行として扱うため。 */
   roomNo: string | null;
-}): Promise<string | null> {
+}): Promise<string[]> {
   const normalized = normalizeName(input.ownerName?.trim() ?? "");
-  if (normalized === "" || input.similarPropertyIds.length === 0) return null;
+  if (normalized === "" || input.similarPropertyIds.length === 0) return [];
   const links = await prisma.propertyOwner.findMany({
     where: {
       propertyId: { in: input.similarPropertyIds },
@@ -703,8 +704,10 @@ export async function findEarlierExcelImport(input: {
   // ⚠部屋番号も揃ったときだけ(住所に部屋番号を書かない表では、同じ建物の
   //   別の部屋が同じ住所になる。別の部屋を「登録済み」にして入れ損ねない)。
   const room = normalizeName(input.roomNo ?? "");
-  const hit = links.find(
-    (l) => normalizeName(l.owner.name) === normalized && normalizeName(l.property.roomNo ?? "") === room,
-  );
-  return hit?.propertyId ?? null;
+  // ⚠1物件ずつ(同じ物件に同じ人が2回ついていても1件)。何行ぶんを「登録済み」に
+  //   できるかは呼び出し側が表全体の行数と比べて決める(@codex PR#516 P1)。
+  const ids = links
+    .filter((l) => normalizeName(l.owner.name) === normalized && normalizeName(l.property.roomNo ?? "") === room)
+    .map((l) => l.propertyId);
+  return Array.from(new Set(ids)).sort();
 }
