@@ -17,18 +17,18 @@ import ActionBar from "@/components/properties/action-bar";
  * ⚠同種の混乱は過去にも報告があり(B-10 UI総点検)、そのときは見出しを足しただけで、足りなかった。
  * ⇒ DMは**3状態の切替**にして現在値を選択として示し、他の操作は**動詞**にする。
  */
+// 画面すっきり化 第3回(2026-10-16): 実行は usePropertyAction へ切り出し、ActionBar は結果を受け取って描くだけ。
+const idleAction = { loading: null, message: null, error: null, run: async () => {} };
 const base: {
-  propertyId: string;
-  registryStatus: string;
   dmStatus: string;
   investigationConfirmedAt: string | null;
-  onActionComplete: () => void;
+  assignedToMe: boolean;
+  action: typeof idleAction;
 } = {
-  propertyId: "p1",
-  registryStatus: "unconfirmed",
   dmStatus: "send",
   investigationConfirmedAt: null,
-  onActionComplete: () => {},
+  assignedToMe: false,
+  action: idleAction,
 };
 
 const render = (over: Partial<typeof base> = {}) =>
@@ -74,11 +74,8 @@ describe("DMの判断は3状態の切替で示す", () => {
 });
 
 describe("状態を変える操作は動詞で書く", () => {
-  it("調査・登記・担当は動詞表記", () => {
-    const html = render();
-    expect(html).toContain("調査を確認する");
-    expect(html).toContain("登記取得済にする");
-    expect(html).toContain("自分を担当にする");
+  it("担当は動詞表記", () => {
+    expect(render()).toContain("自分を担当にする");
   });
 
   it("⚠状態と紛れないよう、DM以外の操作は選択の印を持たない", () => {
@@ -87,16 +84,40 @@ describe("状態を変える操作は動詞で書く", () => {
     const total = html.split("aria-pressed=").length - 1;
     expect(total).toBe(3);
   });
+});
 
-  it("済んでいる操作は出さない(従来どおり)", () => {
-    const done = render({
-      registryStatus: "obtained",
-      investigationConfirmedAt: "2026-08-01T00:00:00.000Z",
-    });
-    expect(done).not.toContain("調査を確認する");
-    expect(done).not.toContain("登記取得済にする");
-    // DMの切替と担当は残る。
-    expect(done).toContain("送付可");
-    expect(done).toContain("自分を担当にする");
+describe("画面すっきり化 第3回(発注者決定 2026-10-16)", () => {
+  it("すでに自分が担当なら「自分を担当にする」を出さない", () => {
+    expect(render({ assignedToMe: true })).not.toContain("自分を担当にする");
+    expect(render({ assignedToMe: false })).toContain("自分を担当にする");
+  });
+
+  it("調査の確認は、未確認の帯の中の「確認した」1つだけ(別のボタンは並べない)", () => {
+    const html = render({ investigationConfirmedAt: null });
+    expect(html).toContain("調査情報が未確認です。最新の情報を取得してください。");
+    expect(html).toContain("確認した");
+    expect(html).toContain('aria-label="調査を確認する"');
+    // 帯とボタンが同じ枠の中にある(ボタンが帯より前の別の行に出ない)。
+    const band = html.indexOf("調査情報が未確認です");
+    expect(html.indexOf("確認した")).toBeGreaterThan(band);
+  });
+
+  it("確認済みなら帯もボタンも出ない", () => {
+    const html = render({ investigationConfirmedAt: "2026-08-01T00:00:00.000Z" });
+    expect(html).not.toContain("調査情報が未確認です");
+    expect(html).not.toContain("確認した");
+    // DMの切替は残る。
+    expect(html).toContain("送付可");
+  });
+
+  it("「登記取得済にする」は ActionBar に出さない(「その他 ▾」へ移した)", () => {
+    expect(render()).not.toContain("登記取得済にする");
+  });
+
+  it("どこから押しても結果の文言は ActionBar の下に出る", () => {
+    const html = render({ action: { ...idleAction, message: "登記取得済みに設定しました" } as never });
+    expect(html).toContain("登記取得済みに設定しました");
+    const err = render({ action: { ...idleAction, error: "失敗しました" } as never });
+    expect(err).toContain("失敗しました");
   });
 });

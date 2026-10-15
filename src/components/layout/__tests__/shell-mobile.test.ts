@@ -132,7 +132,8 @@ describe("ボタン行 — ボタン内で文字が折れない", () => {
   });
   it("物件詳細の各ボタンは whitespace-nowrap", () => {
     const count = (propertyDetail.match(/whitespace-nowrap/g) ?? []).length;
-    expect(count).toBeGreaterThanOrEqual(4); // パンくず + DM履歴 + 編集 + 削除
+    expect(count).toBeGreaterThanOrEqual(2); // パンくず + 編集(DM履歴・削除は「その他 ▾」=部品側で nowrap)
+    expect(read("..", "..", "ui", "menu-button.tsx")).toMatch(/whitespace-nowrap/);
   });
   it("物件一覧のアクション行は flex-wrap + 各ボタン nowrap", () => {
     expect(propertiesList).toContain('className="mb-4 flex flex-wrap justify-end gap-2"');

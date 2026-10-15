@@ -40,11 +40,11 @@ describe("properties page: CSV出力ボタンの権限制御 (P2)", () => {
   });
 
   it("CSV出力ボタンは canExportCsv のときだけレンダリングされる（条件付き表示）", () => {
-    // {canExportCsv && ( ... CSV出力 ... )} の形で囲われている
+    // 画面すっきり化 第3回(2026-10-16): 「出力 ▾」の項目として ...(canExportCsv ? [CSV出力] : []) の形で出し分け、
+    // 列を選ぶ小窓も {canExportCsv && ( ... )} で囲う。
     expect(pageSrc).toMatch(/canExportCsv\s*&&\s*\(/);
-    // ボタン文言「CSV出力」が canExportCsv ブロックより後に存在する
-    const guardIdx = pageSrc.indexOf("canExportCsv &&");
-    const buttonIdx = pageSrc.indexOf("CSV出力");
+    const guardIdx = pageSrc.indexOf("...(canExportCsv");
+    const buttonIdx = pageSrc.indexOf('label: "CSV出力"');
     expect(guardIdx).toBeGreaterThan(-1);
     expect(buttonIdx).toBeGreaterThan(guardIdx);
   });

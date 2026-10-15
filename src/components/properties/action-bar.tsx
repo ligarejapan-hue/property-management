@@ -2,30 +2,55 @@
 
 import { useState } from "react";
 import {
+  AlertTriangle,
   CheckCircle2,
   Send,
   Ban,
   Pause,
-  FileCheck,
   UserCheck,
   Loader2,
 } from "lucide-react";
 import { executePropertyAction } from "@/lib/api-client";
 
-interface ActionBarProps {
-  propertyId: string;
-  registryStatus: string;
-  dmStatus: string;
-  investigationConfirmedAt: string | null;
-  onActionComplete: () => void;
+/**
+ * 物件の状態を変える操作(POST /api/properties/[id]/actions)の実行と結果の表示。
+ *
+ * 画面すっきり化 第3回(発注者決定 2026-10-16): 「登記取得済にする」は物件の画面の
+ * 「その他 ▾」へ移したため、実行は ActionBar の外(メニュー)からも呼ぶ。結果の文言は
+ * どこから押しても ActionBar の下に出す(同じ場所に出す=見落とさない)。
+ */
+export function usePropertyAction(propertyId: string, onActionComplete: () => void) {
+  const [loading, setLoading] = useState<string | null>(null);
+  const [message, setMessage] = useState<string | null>(null);
+  const [error, setError] = useState<string | null>(null);
+
+  const run = async (actionKey: string) => {
+    setLoading(actionKey);
+    setMessage(null);
+    setError(null);
+
+    try {
+      const json = await executePropertyAction(propertyId, actionKey) as { message: string };
+      setMessage(json.message);
+      onActionComplete();
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "アクションに失敗しました");
+    } finally {
+      setLoading(null);
+    }
+  };
+
+  return { loading, message, error, run };
 }
 
-interface ActionConfig {
-  key: string;
-  label: string;
-  icon: typeof CheckCircle2;
-  color: string;
-  condition?: (props: ActionBarProps) => boolean;
+export type PropertyActionState = ReturnType<typeof usePropertyAction>;
+
+interface ActionBarProps {
+  dmStatus: string;
+  investigationConfirmedAt: string | null;
+  /** いまの担当者が自分か。自分ならすでに担当なので「自分を担当にする」を出さない。 */
+  assignedToMe: boolean;
+  action: PropertyActionState;
 }
 
 /**
@@ -46,59 +71,10 @@ const DM_CHOICES = [
   { key: "set_dm_hold", value: "hold", label: "未判断", selectedColor: "bg-amber-600" },
 ] as const;
 
-/**
- * 状態を変える操作。⚠**動詞で書く**(「登記取得済」だと現在の状態に見えるため)。
- * 済んでいる操作は出さない(押しても意味がないため)。
- */
-const ACTIONS: ActionConfig[] = [
-  {
-    key: "confirm_investigation",
-    label: "調査を確認する",
-    icon: CheckCircle2,
-    color: "bg-green-600 hover:bg-green-700",
-    condition: (p) => !p.investigationConfirmedAt,
-  },
-  {
-    key: "mark_registry_obtained",
-    label: "登記取得済にする",
-    icon: FileCheck,
-    color: "bg-indigo-600 hover:bg-indigo-700",
-    condition: (p) => p.registryStatus !== "obtained",
-  },
-  {
-    key: "assign_to_me",
-    label: "自分を担当にする",
-    icon: UserCheck,
-    color: "bg-gray-600 hover:bg-gray-700",
-  },
-];
-
 const DM_ICONS = { send: Send, no_send: Ban, hold: Pause } as const;
 
 export default function ActionBar(props: ActionBarProps) {
-  const [loading, setLoading] = useState<string | null>(null);
-  const [message, setMessage] = useState<string | null>(null);
-  const [error, setError] = useState<string | null>(null);
-
-  const handleAction = async (actionKey: string) => {
-    setLoading(actionKey);
-    setMessage(null);
-    setError(null);
-
-    try {
-      const json = await executePropertyAction(props.propertyId, actionKey) as { message: string };
-      setMessage(json.message);
-      props.onActionComplete();
-    } catch (err) {
-      setError(err instanceof Error ? err.message : "アクションに失敗しました");
-    } finally {
-      setLoading(null);
-    }
-  };
-
-  const availableActions = ACTIONS.filter(
-    (a) => !a.condition || a.condition(props),
-  );
+  const { loading, message, error, run: handleAction } = props.action;
 
   return (
     <div className="mb-4">
@@ -148,28 +124,50 @@ export default function ActionBar(props: ActionBarProps) {
         </div>
       </div>
 
-      <div className="flex flex-wrap gap-2">
-        {availableActions.map((action) => {
-          const Icon = action.icon;
-          const isLoading = loading === action.key;
-          return (
-            <button
-              key={action.key}
-              type="button"
-              onClick={() => handleAction(action.key)}
-              disabled={loading !== null}
-              className={`flex items-center gap-1.5 rounded-md px-3 py-1.5 text-xs font-medium text-white disabled:opacity-50 ${action.color}`}
-            >
-              {isLoading ? (
-                <Loader2 className="h-3.5 w-3.5 animate-spin" />
-              ) : (
-                <Icon className="h-3.5 w-3.5" />
-              )}
-              {action.label}
-            </button>
-          );
-        })}
-      </div>
+      {/* ⚠状態を変える操作は**動詞で書く**(「登記取得済」だと現在の状態に見えるため)。
+          「自分を担当にする」は、すでに自分が担当なら出さない(押しても何も変わらないため)。 */}
+      {!props.assignedToMe && (
+        <div className="flex flex-wrap gap-2">
+          <button
+            type="button"
+            onClick={() => handleAction("assign_to_me")}
+            disabled={loading !== null}
+            className="flex items-center gap-1.5 rounded-md bg-gray-600 px-3 py-1.5 text-xs font-medium text-white hover:bg-gray-700 disabled:opacity-50"
+          >
+            {loading === "assign_to_me" ? (
+              <Loader2 className="h-3.5 w-3.5 animate-spin" />
+            ) : (
+              <UserCheck className="h-3.5 w-3.5" />
+            )}
+            自分を担当にする
+          </button>
+        </div>
+      )}
+
+      {/* 調査が未確認の帯。確かめたら帯の中の「確認した」で消す(画面すっきり化 第3回で
+          別にあった「調査を確認する」ボタンをこの帯へまとめた)。 */}
+      {!props.investigationConfirmedAt && (
+        <div className="mt-3 flex flex-wrap items-center gap-2 rounded-md border border-amber-200 bg-amber-50 px-4 py-2 dark:border-amber-800 dark:bg-amber-950/40">
+          <AlertTriangle className="h-4 w-4 text-amber-600 dark:text-amber-400" />
+          <span className="text-sm text-amber-800 dark:text-amber-300">
+            調査情報が未確認です。最新の情報を取得してください。
+          </span>
+          <button
+            type="button"
+            onClick={() => handleAction("confirm_investigation")}
+            disabled={loading !== null}
+            aria-label="調査を確認する"
+            className="ml-auto flex items-center gap-1.5 rounded-md bg-green-600 px-3 py-1 text-xs font-medium text-white hover:bg-green-700 disabled:opacity-50"
+          >
+            {loading === "confirm_investigation" ? (
+              <Loader2 className="h-3.5 w-3.5 animate-spin" />
+            ) : (
+              <CheckCircle2 className="h-3.5 w-3.5" />
+            )}
+            確認した
+          </button>
+        </div>
+      )}
 
       {message && (
         <p className="mt-2 text-xs text-green-600 dark:text-green-400">{message}</p>
