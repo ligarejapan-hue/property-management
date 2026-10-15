@@ -6,7 +6,7 @@ import { SearchField } from "@/components/ui/search-field";
 import { Button } from "@/components/ui/button";
 import { PageHeader } from "@/components/ui/page-header";
 import Link from "next/link";
-import { Loader2, Search, RotateCcw } from "lucide-react";
+import { Loader2, Search, RotateCcw, Trash2 } from "lucide-react";
 import { formatJaDateTime } from "@/lib/format-datetime";
 import {
   isAutoFetchedRegistry,
@@ -168,6 +168,16 @@ export default function AttachmentSearchPage() {
       <PageHeader
         title="添付ファイル検索"
         description="添付のメタデータ（ファイル名・種別・対象・登録日時）のみを横断検索します。ファイル本体のダウンロードはこの画面では提供しません。"
+        // ゴミ箱への入口(画面すっきり化 第1回・2026-10-15)。それまではどこからも行けなかった。
+        actions={
+          <Link
+            href="/admin/attachments/trash"
+            className="inline-flex items-center gap-1.5 rounded-md border border-gray-300 bg-white px-3 py-1.5 text-sm font-medium text-gray-700 hover:bg-gray-50 dark:border-gray-700 dark:bg-gray-900 dark:text-gray-200 dark:hover:bg-gray-800"
+          >
+            <Trash2 className="h-4 w-4" />
+            ゴミ箱（削除した添付）
+          </Link>
+        }
       />
 
       {error && (

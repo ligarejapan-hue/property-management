@@ -19,7 +19,7 @@ const helpSections: HelpSection[] = [
   {
     title: "現地登録の使い方",
     description: (
-      <>現地調査時に物件情報を登録する際は、<RoleLink href="/properties" minRole="office_staff">物件一覧画面</RoleLink>から「新規登録」ボタンを押し、住所・地番・種別などの基本情報を入力してください。写真の添付や位置情報の記録も可能です。（Phase 2以降で実装予定）</>
+      <>現地では<RoleLink href="/field-survey/map" minRole="field_staff">「現地調査マップ」画面</RoleLink>の「撮って登録」で、写真と位置をその場で記録します。記録した候補は<RoleLink href="/field-survey/candidates" minRole="field_staff">「物件化の完成待ち」画面</RoleLink>に並び、足りない項目を埋めると物件になります。事務所で登録するときは<RoleLink href="/properties" minRole="office_staff">物件一覧画面</RoleLink>の「新規物件登録」から、住所・地番・種別などを入力します。</>
     ),
   },
   {
@@ -35,25 +35,26 @@ const helpSections: HelpSection[] = [
   {
     title: "CSV出力ルール",
     description: (
-      <>CSV出力は<RoleLink href="/properties" minRole="office_staff">物件一覧画面</RoleLink>の「エクスポート」ボタンから実行できます。出力されるデータは、ログインユーザーの権限レベルに応じてフィルタリングされます。個人情報を含むフィールドは権限に基づいてマスク処理されます。（Phase 2以降で実装予定）</>
+      <>CSV出力は<RoleLink href="/properties" minRole="office_staff">物件一覧画面</RoleLink>の「CSV出力」ボタンから、出力する列を選んで実行します。出力されるデータは、ログインユーザーの権限に応じて絞り込まれ、個人情報を含む項目は権限に応じて伏せられます。</>
     ),
   },
   {
     title: "取込手順",
     description: (
-      <>外部データの取り込みは、CSV形式のファイルをアップロードすることで実施します。テンプレートファイルをダウンロードし、必要なデータを入力の上アップロードしてください。重複データの検出と既存データとのマージ処理が自動的に行われます。（Phase 2以降で実装予定）<RoleLink href="/import/paste" minRole="office_staff">「貼り付けて物件化」画面</RoleLink>では、メールやPDF、コピーしたウェブページの文章をそのまま貼り付けるだけで、読み取れた項目を自動で入力欄に埋めてくれます。登録前に内容を確認できます。</>
+      <>外部の一覧や書類からまとめて登録するときは、左のメニューの「物件データ取り込み」を使います。受付帳のCSVは<RoleLink href="/import" minRole="office_staff">「受付帳CSV取込」画面</RoleLink>、謄本のPDFは<RoleLink href="/import/registry-pdf" minRole="office_staff">「謄本PDF取込」画面</RoleLink>から取り込みます。<RoleLink href="/import/paste" minRole="office_staff">「貼り付けて物件化」画面</RoleLink>では、メールやPDF、コピーしたウェブページの文章をそのまま貼り付けるだけで、読み取れた項目を自動で入力欄に埋めてくれます。登録前に内容を確認できます。</>
     ),
   },
   {
     title: "権限とセキュリティ",
     description: (
-      <>本システムでは4つの権限レベル（管理者・マネージャー・オペレーター・閲覧者）を設定できます。各権限レベルに応じて、閲覧可能な情報や実行可能な操作が異なります。管理者は<RoleLink href="/admin/users" minRole="admin">「ユーザー管理」画面</RoleLink>から権限の割り当てや変更を行えます。すべての操作は監査ログに記録されます。</>
+      <>利用者の役割は「管理者」「事務担当」「現地担当」の3つで、右上に自分の役割が表示されます。役割に加えて、利用者ごとの権限（どの情報を見られるか・編集できるか）で、見える情報やできる操作が決まります。管理者は<RoleLink href="/admin/users" minRole="admin">「ユーザー管理」画面</RoleLink>から役割や権限の割り当て・変更を行えます。主な操作は<RoleLink href="/admin/audit-logs" minRole="admin">「監査ログ」画面</RoleLink>に記録されます。</>
     ),
   },
   {
     title: "よくある質問 (FAQ)",
-    description:
-      "Q: パスワードを忘れた場合は？ → 管理者に連絡してリセットを依頼してください。Q: 物件情報が表示されない場合は？ → 検索フィルターをリセットするか、アクセス権限を確認してください。Q: エラーが発生した場合は？ → 画面のスクリーンショットとともに管理者に報告してください。",
+    description: (
+      <>Q: パスワードを変えたい場合は？ → 右上の鍵のボタンから<RoleLink href="/admin/change-password" minRole="field_staff">「パスワード変更」画面</RoleLink>を開いて変更できます。Q: パスワードを忘れた場合は？ → 管理者に連絡してリセットを依頼してください。Q: 物件情報が表示されない場合は？ → 検索フィルターをリセットするか、アクセス権限を確認してください。Q: エラーが発生した場合は？ → 画面のスクリーンショットとともに管理者に報告してください。</>
+    ),
   },
 ];
 

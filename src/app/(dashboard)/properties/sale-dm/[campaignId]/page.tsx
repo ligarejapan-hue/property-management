@@ -26,6 +26,7 @@ import { SaleDmStepGuide } from "@/components/sale-dm/step-guide";
 import { computeSaleDmGuideStep } from "@/lib/sale-dm-letter/step-guide";
 import { isScenarioCampaignView, scenarioCampaignNotices } from "@/lib/sale-dm-letter/scenario-campaign-ui";
 import { useEditScreenToken } from "@/hooks/use-edit-screen-token";
+import { BackLink } from "@/components/ui/back-link";
 
 export default function SaleDmWorkspacePage() {
   const params = useParams<{ campaignId: string }>();
@@ -239,6 +240,8 @@ export default function SaleDmWorkspacePage() {
 
   return (
     <div className="space-y-4">
+      {/* 発送一覧へ戻る(画面すっきり化 第1回・2026-10-15)。 */}
+      <BackLink href="/properties/sale-dm" to="売却DMの発送一覧" />
       <div className="flex items-center justify-between">
         <h2 className="text-2xl font-bold text-gray-800">{campaign.name}</h2>
         <span className="text-sm text-gray-500">{campaign.recipients.length} 通</span>

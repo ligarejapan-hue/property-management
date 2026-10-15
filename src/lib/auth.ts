@@ -2,6 +2,7 @@ import NextAuth from "next-auth";
 import Credentials from "next-auth/providers/credentials";
 import { compare, hashSync, getRounds } from "bcryptjs";
 import prisma from "@/lib/prisma";
+import { passwordFingerprint, tokenMatchesPassword } from "@/lib/password-fingerprint";
 
 const MAX_LOGIN_FAILURES = 5;
 const LOCK_DURATION_MS = 30 * 60 * 1000; // 30 minutes
@@ -146,6 +147,14 @@ export const { handlers, auth, signIn, signOut } = NextAuth({
         // 初回ログイン: authorize() で有効性は確認済み。
         token.id = user.id;
         token.role = (user as unknown as { role: string }).role;
+        // パスワードの指紋(変えたら他のブラウザのログインも切る・@codex #517 P1)。
+        // authorize() の焼き直し(rehash-on-login)後の値を読むため、ここで読み直す。
+        const fresh = await prisma.user.findUnique({
+          where: { id: user.id as string },
+          select: { passwordHash: true },
+        });
+        if (!fresh) return null;
+        token.pwv = passwordFingerprint(fresh.passwordHash);
         return token;
       }
       // 既存トークンの検証/回転(スライド延長・キープアライブ含む)時は、DB でユーザーの
@@ -153,11 +162,11 @@ export const { handlers, auth, signIn, signOut } = NextAuth({
       // セッションを保ち続けるのを防ぐ(@codex #290 R7 P1)。
       // next-auth v5 では jwt が null を返すと cookie がクリアされ、セッションが失効する。
       if (token.id) {
-        let dbUser: { isActive: boolean; role: string } | null;
+        let dbUser: { isActive: boolean; role: string; passwordHash: string } | null;
         try {
           dbUser = await prisma.user.findUnique({
             where: { id: token.id as string },
-            select: { isActive: true, role: true },
+            select: { isActive: true, role: true, passwordHash: true },
           });
         } catch {
           // DB 一時障害で有効ユーザーを失効させない(fail-open)。next-auth v5 は jwt が
@@ -168,6 +177,10 @@ export const { handlers, auth, signIn, signOut } = NextAuth({
         // クエリ成功時のみ確定的に判定する(null=削除済み・isActive=false=無効化)。
         if (!dbUser || !dbUser.isActive) {
           return null; // 無効化/削除 → セッション失効(cookie クリア)
+        }
+        // パスワードが変わった(またはこの仕組みより前のトークン)→ 失効(@codex #517 P1)。
+        if (!tokenMatchesPassword(token.pwv, dbUser.passwordHash)) {
+          return null;
         }
         token.role = dbUser.role; // ロール変更(降格/昇格)を即反映
       }

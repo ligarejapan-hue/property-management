@@ -187,7 +187,9 @@ describe("DM グループ(新設)", () => {
   it("入口ページを先頭に、送る流れの順で並ぶ", () => {
     expect(group("dm")?.items.map((i) => i.href)).toEqual([
       "/dm",
-      // LPメニュー(2026-10-15 案B)は DMメニューの次。
+      // 売却DMの発送一覧(画面すっきり化 第1回・2026-10-15)は DMメニューの次。
+      "/properties/sale-dm",
+      // LPメニュー(2026-10-15 案B)。
       "/lp",
       "/admin/sale-dm-settings",
       "/admin/mail-settings",
@@ -429,9 +431,9 @@ describe("LPメニュー(発注者決定 2026-10-15 案B)", () => {
 
   it("DM・LP関係の中に管理者向けで置く(LPの道具はどれも管理者用)", () => {
     expect(byHref("/lp")).toMatchObject({ label: "LPメニュー", minRole: "admin" });
-    // 事務担当には出さない=DM・LP関係はDMメニュー1つ(見出しがそのままリンク)。
+    // 事務担当には出さない=DM・LP関係はDMメニューと発送一覧だけ。
     const dm = visibleSidebar("office_staff").find((g) => g.key === "dm");
-    expect(dm?.items.map((i) => i.href)).toEqual(["/dm"]);
+    expect(dm?.items.map((i) => i.href)).toEqual(["/dm", "/properties/sale-dm"]);
   });
 
   it("LPの道具3つと申込の一覧へ、用意する順に案内する", () => {

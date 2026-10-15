@@ -2,15 +2,9 @@ import { NextRequest } from "next/server";
 import { z } from "zod";
 import { compare, hashSync } from "bcryptjs";
 import prisma from "@/lib/prisma";
-import {
-  getApiSession,
-  getUserPermissions,
-  ApiError,
-  handleApiError,
-  apiResponse,
-} from "@/lib/api-helpers";
+import { getApiSession, ApiError, handleApiError, apiResponse } from "@/lib/api-helpers";
 import { writeAuditLog } from "@/lib/audit";
-import { hasPermission } from "@/lib/permissions";
+import { takeSelfPasswordAttempt } from "@/lib/self-password-attempts";
 
 const changePasswordSchema = z
   .object({
@@ -34,13 +28,10 @@ const changePasswordSchema = z
 
 export async function POST(request: NextRequest) {
   try {
+    // 自分のパスワードは全員が変えられる(発注者決定 2026-10-15・以前は管理者だけ)。
+    // 変えられるのは本人(session.id)の分だけで、今のパスワードの照合が必須。
+    // 他人のパスワードの変更は管理者用の別 API(利用者管理の書き込み権限)のまま。
     const session = await getApiSession();
-    const perms = await getUserPermissions(session.id);
-
-    // Admin-only per requirement
-    if (!hasPermission(perms, "user_management", "write")) {
-      throw new ApiError(403, "権限がありません", "FORBIDDEN");
-    }
 
     const body = await request.json();
     const data = changePasswordSchema.parse(body);
@@ -52,6 +43,15 @@ export async function POST(request: NextRequest) {
 
     if (!user || !user.isActive) {
       throw new ApiError(404, "ユーザーが見つかりません", "NOT_FOUND");
+    }
+
+    // 照合の前に1回分を数える(本人ごとに30分で5回まで・ログインのロックとは別の数え)。
+    if (!takeSelfPasswordAttempt(session.id)) {
+      throw new ApiError(
+        429,
+        "試した回数が多いため、しばらく変更できません。30分ほどおいてからお試しください",
+        "TOO_MANY_ATTEMPTS",
+      );
     }
 
     const ok = await compare(data.currentPassword, user.passwordHash);
