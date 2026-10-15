@@ -198,8 +198,8 @@ describe("走査: 作成画面", () => {
       expect(src).toMatch(/isAdmin\s*&&\s*fixLink\s*&&/);
       expect(src).not.toMatch(/href="\/admin\/dm-scenarios"/);
     }
-    const sidebar = read("src/components/layout/sidebar-model.tsx");
-    expect(sidebar).toContain('href: "/admin/dm-scenarios"');
+    // 入口はLPメニューの中(画面すっきり化 第2回で左メニューから移した)。
+    expect(read("src/app/(dashboard)/lp/page.tsx")).toContain('href: "/admin/dm-scenarios"');
   });
   it("物件一覧は確認ダイアログ(window.confirm)ではなく作成画面を開く・defaultScenarioId を送る", () => {
     const src = read(PROPERTIES_PAGE);

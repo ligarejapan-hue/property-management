@@ -24,11 +24,9 @@ import {
   Newspaper,
   Mail,
   MailX,
-  Image as ImageIcon,
   Inbox,
   ListChecks,
   Globe,
-  Tags,
 } from "lucide-react";
 import { canSee, type AppRole } from "@/lib/nav/roles";
 
@@ -146,14 +144,12 @@ export const SIDEBAR_GROUPS: NavGroup[] = [
       { label: "売却DMの発送一覧", href: "/properties/sale-dm", icon: ic(ListChecks), minRole: "office_staff" },
       // LPの入口ページ(発注者決定 2026-10-15 案B)。LPの道具(売却DM設定・LPの写真・DMの種類)は
       // どれも管理者用なので、入口も管理者にだけ出す。
+      // ⚠画面すっきり化 第2回(発注者決定 2026-10-15): LPの道具3つは左メニューから外し、
+      //   LPメニューの中だけに置く(画面と URL はそのまま)。その3画面にいる間はLPメニューが光る(LP_TOOL_PATHS)。
       { label: "LPメニュー", href: "/lp", icon: ic(Globe), minRole: "admin" },
       // ⚠「査定の申込」は反響受付へ移した(発注者決定 2026-10-15)。
-      { label: "売却DM設定", href: "/admin/sale-dm-settings", icon: ic(Mail), minRole: "admin" },
       // 査定申込の通知メールを送る Xserver メールボックスの設定(2026-09 新設)。
       { label: "メール送信設定", href: "/admin/mail-settings", icon: ic(Mail), minRole: "admin" },
-      { label: "LPの写真", href: "/admin/lp-assets", icon: ic(ImageIcon), minRole: "admin" },
-      // DMの種類(台帳・設計 2026-09-27 §3.6)。手紙とLPの文面を種類ごとに1回だけ作って使い回す。
-      { label: "DMの種類", href: "/admin/dm-scenarios", icon: ic(Tags), minRole: "admin" },
       // ⚠「データ品質」から移動(DM の道具がそこに紛れていた)。
       { label: "送付記録の訂正", href: "/admin/orphan-dm-logs", icon: ic(MailX), minRole: "admin" },
     ],
@@ -259,6 +255,8 @@ export function visibleSidebar(userRole: string): NavGroup[] {
  */
 const PROPERTIES_NON_LIST = ["/properties/quality-check", "/properties/sale-dm"];
 const SALE_DM_INQUIRIES = "/properties/sale-dm/inquiries";
+/** 左メニューには出さず、LPメニュー(/lp)の中にだけ入口がある画面(画面すっきり化 第2回)。 */
+export const LP_TOOL_PATHS = ["/admin/sale-dm-settings", "/admin/lp-assets", "/admin/dm-scenarios"];
 
 /** 同じページの中の場所を指す項目(`/import#owner-match` など)の一覧。 */
 const ANCHOR_HREFS = SIDEBAR_GROUPS.flatMap((g) => g.items)
@@ -295,6 +293,10 @@ export function isNavItemActive(
     return currentPath === href || currentPath.startsWith("/properties/");
   }
   if (href === "/import") return currentPath === "/import";
+  // LPメニューは、その中にだけ入口がある3画面でも光る(=DM・LP関係の見出しも自動で開く)。
+  if (href === "/lp" && LP_TOOL_PATHS.some((p) => currentPath === p || currentPath.startsWith(p + "/"))) {
+    return true;
+  }
   // 発送一覧は、一覧と各発送の画面で光る。同じ道の下にある「査定の申込」では光らせない(2つ同時に光らせない)。
   if (href === "/properties/sale-dm") {
     if (currentPath === SALE_DM_INQUIRIES || currentPath.startsWith(SALE_DM_INQUIRIES + "/")) return false;

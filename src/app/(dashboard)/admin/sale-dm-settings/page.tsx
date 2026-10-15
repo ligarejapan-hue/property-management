@@ -2,6 +2,7 @@
 
 import { useEffect, useState } from "react";
 import { PageHeader } from "@/components/ui/page-header";
+import { BackLink } from "@/components/ui/back-link";
 import { Loader2, Save, ShieldCheck, ShieldAlert } from "lucide-react";
 import {
   isSaleDmPrintReady,
@@ -93,6 +94,7 @@ export default function SaleDmSettingsPage() {
 
   return (
     <div className="mx-auto max-w-2xl space-y-5 p-4 sm:p-6">
+      <BackLink href="/lp" to="LPメニュー" />
       <PageHeader
         title="売却DM設定"
         description="売却DMの追跡用URL・既定LP URL・差出人を設定します。手紙の文面はお手元のブラウザのAIで作り、貼り付ける方式です(このシステム側にAIの契約や設定は不要です)。"
