@@ -13,6 +13,7 @@ const guideSrc = readRepoFile("public/docs/guide.html");
 const manualSrc = readRepoFile("public/docs/manual.html");
 const noticesSrc = readRepoFile("src/components/drafts/draft-notices.tsx");
 const logoutSrc = readRepoFile("src/lib/notifications/logout.ts");
+const excelTableSrc = readRepoFile("src/components/import/excel-lead-table.tsx");
 
 describe("入力の途中をとっておく(2026-10): 資料の文言が画面と同じ", () => {
   it("戻ったときの帯の文言", () => {
@@ -29,6 +30,20 @@ describe("入力の途中をとっておく(2026-10): 資料の文言が画面�
     expect(noticesSrc).toContain(csv);
     expect(manualSrc).toContain(paste);
     expect(manualSrc).toContain(csv);
+    for (const label of ["確かめたので続ける", "確かめたので閉じる"]) {
+      expect(noticesSrc).toContain(label);
+      expect(manualSrc).toContain(label);
+    }
+  });
+
+  it("Excelは送っていた行だけ「分からない」になり、確かめて対象に戻す", () => {
+    const badge = "登録されたか分かりません";
+    const back = "確かめたので登録の対象に戻す";
+    expect(excelTableSrc).toContain(badge);
+    expect(excelTableSrc).toContain(back);
+    expect(manualSrc).toContain(badge);
+    expect(manualSrc).toContain(back);
+    expect(guideSrc).toContain(badge);
   });
 
   it("消える条件(12時間・ログアウト)が実装と同じ", () => {
