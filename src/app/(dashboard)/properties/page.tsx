@@ -1168,7 +1168,11 @@ function PropertiesPageInner() {
         )}
         <button
           type="button"
-          onClick={() => setShowNewModal(true)}
+          onClick={() => {
+            // 手で開いたら、この画面の自動の開き直しは済んだことにする(×で控えを残して閉じた直後に開き直さない・@codex P2)。
+            setNewDraftAutoOpened(true);
+            setShowNewModal(true);
+          }}
           className="inline-flex items-center gap-2 whitespace-nowrap rounded-md bg-indigo-600 px-4 py-2 text-sm font-medium text-white hover:bg-indigo-700"
         >
           <Plus className="h-4 w-4" />
@@ -1177,7 +1181,13 @@ function PropertiesPageInner() {
       </div>
 
       {showNewModal && (
-        <NewPropertyModal draftScreen="new-property:properties" onClose={() => setShowNewModal(false)} />
+        <NewPropertyModal
+          draftScreen="new-property:properties"
+          onClose={() => {
+            setNewDraftAutoOpened(true);
+            setShowNewModal(false);
+          }}
+        />
       )}
 
       <DmBatchConfirmModal open={dmConfirmOpen} onClose={() => setDmConfirmOpen(false)} />

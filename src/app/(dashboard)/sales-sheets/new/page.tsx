@@ -184,7 +184,11 @@ export default function SalesSheetNewEntryPage() {
         total={total}
         onPageChange={setPage}
         onSelect={handleSelect}
-        onOpenRegister={() => setShowRegister(true)}
+        onOpenRegister={() => {
+          // 手で開いたら、この画面の自動の開き直しは済んだことにする(×で控えを残して閉じた直後に開き直さない・@codex P2)。
+          setRegisterDraftAutoOpened(true);
+          setShowRegister(true);
+        }}
       />
 
       {selected && (
@@ -200,7 +204,10 @@ export default function SalesSheetNewEntryPage() {
       {showRegister && (
         <NewPropertyModal
           draftScreen="new-property:sales-sheet"
-          onClose={() => setShowRegister(false)}
+          onClose={() => {
+            setRegisterDraftAutoOpened(true);
+            setShowRegister(false);
+          }}
           typeFilter={[...SALES_SHEET_REGISTRABLE_PROPERTY_TYPES]}
           onCreated={handleCreated}
         />

@@ -52,8 +52,24 @@ describe("新規物件登録の小窓を開き直す", () => {
     // 控えが現れたら開く(開いた状態を保つ)。控えが消えても閉じない=「最初からやり直す」で閉じない。
     // 画面に来るたびに1回だけ開く(送信途中の控えを残して閉じたとき、すぐ開き直さない)。
     expect(src).toMatch(/if \(newPropertyDraftExists && canWriteProperty && !newDraftAutoOpened\) \{\n\s*setNewDraftAutoOpened\(true\);\n\s*setShowNewModal\(true\);\n\s*\}/);
-    expect(src).toMatch(/\{showNewModal && \(\n\s*<NewPropertyModal draftScreen="new-property:properties"/);
+    expect(src).toMatch(/\{showNewModal && \(\n\s*<NewPropertyModal\n\s*draftScreen="new-property:properties"/);
     expect(src).not.toMatch(/showNewModal \|\| newPropertyDraftExists/);
+  });
+  it("物件一覧: 手で開いた・閉じたら自動の開き直しは済み(×で控えを残して閉じた直後に開き直さない・@codex P2)", () => {
+    const src = read("src/app/(dashboard)/properties/page.tsx");
+    // 手で開く: 先に済みにしてから開く。
+    expect(src).toMatch(/onClick=\{\(\) => \{\n(?:\s*\/\/.*\n)*\s*setNewDraftAutoOpened\(true\);\n\s*setShowNewModal\(true\);\n\s*\}\}/);
+    // 閉じる(×=控えを残す): 閉じると同時に済みにする=unmount で書いた控えで開き直さない。
+    expect(src).toMatch(/onClose=\{\(\) => \{\n\s*setNewDraftAutoOpened\(true\);\n\s*setShowNewModal\(false\);\n\s*\}\}/);
+    expect(src).not.toMatch(/onClose=\{\(\) => setShowNewModal\(false\)\}/);
+    expect(src).not.toMatch(/onClick=\{\(\) => setShowNewModal\(true\)\}/);
+  });
+  it("販売図面の新規作成: 手で開いた・閉じたら自動の開き直しは済み(@codex P2)", () => {
+    const src = read("src/app/(dashboard)/sales-sheets/new/page.tsx");
+    expect(src).toMatch(/onOpenRegister=\{\(\) => \{\n(?:\s*\/\/.*\n)*\s*setRegisterDraftAutoOpened\(true\);\n\s*setShowRegister\(true\);\n\s*\}\}/);
+    expect(src).toMatch(/onClose=\{\(\) => \{\n\s*setRegisterDraftAutoOpened\(true\);\n\s*setShowRegister\(false\);\n\s*\}\}/);
+    expect(src).not.toMatch(/onClose=\{\(\) => setShowRegister\(false\)\}/);
+    expect(src).not.toMatch(/onOpenRegister=\{\(\) => setShowRegister\(true\)\}/);
   });
   it("販売図面の新規作成: 控えがあれば開く", () => {
     const src = read("src/app/(dashboard)/sales-sheets/new/page.tsx");
