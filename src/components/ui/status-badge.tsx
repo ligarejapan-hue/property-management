@@ -79,15 +79,7 @@ export const DM_STATUS_INTENT: Record<string, BadgeIntent> = {
   hold: "neutral",
 };
 
-/** 認可ロール(ADMIN/MANAGER/...)→ intent(header) */
-export const ROLE_INTENT: Record<string, BadgeIntent> = {
-  ADMIN: "violet",
-  MANAGER: "sky",
-  OPERATOR: "neutral",
-  VIEWER: "neutral",
-};
-
-/** ユーザー管理画面のロールキー(admin/office_staff/field_staff)→ intent */
+/** ロールキー(admin/office_staff/field_staff)→ intent(ユーザー管理・右上の役職の札) */
 export const USER_ROLE_INTENT: Record<string, BadgeIntent> = {
   admin: "violet",
   office_staff: "sky",

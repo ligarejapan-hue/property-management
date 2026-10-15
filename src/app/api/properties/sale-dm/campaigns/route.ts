@@ -28,6 +28,8 @@ import {
 import { resolveScenario } from "@/lib/sale-dm-letter/scenario-resolve";
 import { isPropertyScopedRole, canAccessPropertyRecord } from "@/lib/property-access";
 import { randomBytes } from "crypto";
+import { requireSaleDmAccess } from "@/lib/sale-dm-letter/route-guard";
+import { listOwnCampaigns, type CampaignListDb } from "@/lib/sale-dm-letter/campaign-list";
 
 // 冪等再返却でも作成時と同じ件数(excludedTerminal 等)を返すための結果メタの取り出し。
 // 応答が届かず client が同キーで再試行したとき {campaignId} だけ返すと「◯件除外しました」の
@@ -47,6 +49,19 @@ const idempotentPayload = (id: string, snapshot: unknown): Record<string, unknow
       : {}),
   };
 };
+
+// 自分が作った発送の一覧(画面すっきり化 第1回・2026-10-15)。作った発送をあとで開き直す入口。
+// 門は個別の画面(GET campaigns/[id])と同じ requireSaleDmAccess、範囲は作成者本人のみ。
+// 返すのは名前・状態・日時・件数だけ(宛先PIIは載せない)=閲覧の監査は個別の画面を開いたときに付く。
+export async function GET() {
+  try {
+    const { session } = await requireSaleDmAccess();
+    const campaigns = await listOwnCampaigns(prisma as unknown as CampaignListDb, session);
+    return NextResponse.json({ campaigns }, { headers: { "Cache-Control": "no-store" } });
+  } catch (e) {
+    return handleApiError(e);
+  }
+}
 
 export async function POST(request: NextRequest) {
   try {

@@ -26,6 +26,7 @@ import {
   MailX,
   Image as ImageIcon,
   Inbox,
+  ListChecks,
   Globe,
   Tags,
 } from "lucide-react";
@@ -140,6 +141,9 @@ export const SIDEBAR_GROUPS: NavGroup[] = [
       // 入口ページ(案B)。宛名CSVや売却DMの作成は従来どおり物件一覧にあり、
       // ここはそこへの分かりやすい入口を足すもの。
       { label: "DMメニュー", href: "/dm", icon: ic(Mail), minRole: "office_staff" },
+      // 作った売却DMの発送をあとで開き直す入口(画面すっきり化 第1回・2026-10-15)。
+      // それまでは作成直後の画面遷移でしか発送の画面に行けなかった。
+      { label: "売却DMの発送一覧", href: "/properties/sale-dm", icon: ic(ListChecks), minRole: "office_staff" },
       // LPの入口ページ(発注者決定 2026-10-15 案B)。LPの道具(売却DM設定・LPの写真・DMの種類)は
       // どれも管理者用なので、入口も管理者にだけ出す。
       { label: "LPメニュー", href: "/lp", icon: ic(Globe), minRole: "admin" },
@@ -254,6 +258,7 @@ export function visibleSidebar(userRole: string): NavGroup[] {
  * これらでは物件一覧を現在地ハイライトしない(C-5 UI総点検: 品質チェックで物件一覧が光る現在地ズレ)。
  */
 const PROPERTIES_NON_LIST = ["/properties/quality-check", "/properties/sale-dm"];
+const SALE_DM_INQUIRIES = "/properties/sale-dm/inquiries";
 
 /** 同じページの中の場所を指す項目(`/import#owner-match` など)の一覧。 */
 const ANCHOR_HREFS = SIDEBAR_GROUPS.flatMap((g) => g.items)
@@ -290,5 +295,10 @@ export function isNavItemActive(
     return currentPath === href || currentPath.startsWith("/properties/");
   }
   if (href === "/import") return currentPath === "/import";
+  // 発送一覧は、一覧と各発送の画面で光る。同じ道の下にある「査定の申込」では光らせない(2つ同時に光らせない)。
+  if (href === "/properties/sale-dm") {
+    if (currentPath === SALE_DM_INQUIRIES || currentPath.startsWith(SALE_DM_INQUIRIES + "/")) return false;
+    return currentPath === href || currentPath.startsWith(href + "/");
+  }
   return currentPath === href || currentPath.startsWith(href + "/");
 }

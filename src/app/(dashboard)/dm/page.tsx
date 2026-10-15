@@ -147,7 +147,10 @@ export default function DmMenuPage() {
         })}
       </ol>
 
-      <p className="mt-6 text-xs text-gray-500 dark:text-gray-400">
+      <p className="mt-6 text-sm text-gray-700 dark:text-gray-300">
+        作った売却DMの発送は、<Link href="/properties/sale-dm" className="font-semibold underline underline-offset-2">売却DMの発送一覧</Link>からいつでも開き直せます。
+      </p>
+      <p className="mt-2 text-xs text-gray-500 dark:text-gray-400">
         送付済みの履歴は、各物件のページの「DM送付履歴」で確認できます(<Link href="/properties" className="font-semibold underline underline-offset-2">物件一覧</Link>から物件を開く)。
       </p>
     </div>

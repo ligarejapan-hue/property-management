@@ -1,7 +1,9 @@
 "use client";
 
-import { LogOut } from "lucide-react";
-import StatusBadge, { ROLE_INTENT } from "@/components/ui/status-badge";
+import Link from "next/link";
+import { KeyRound, LogOut } from "lucide-react";
+import StatusBadge, { USER_ROLE_INTENT, type BadgeIntent } from "@/components/ui/status-badge";
+import { ROLE_LABELS } from "@/lib/role-labels";
 import { ThemeToggle } from "@/components/theme/theme-toggle";
 import { HeaderBell } from "@/components/notifications/header-bell";
 
@@ -11,17 +13,23 @@ interface HeaderProps {
   onLogout: () => void;
 }
 
-const roleLabels: Record<string, string> = {
-  ADMIN: "管理者",
-  MANAGER: "マネージャー",
-  OPERATOR: "オペレーター",
-  VIEWER: "閲覧者",
-};
+/**
+ * 右上の役職の札(画面すっきり化 第1回・2026-10-15)。
+ * ⚠セッションの role は admin/office_staff/field_staff。以前は旧ロール(ADMIN/MANAGER…)の表で
+ *   引いていたため一致せず、英字のまま出ていた。ユーザー管理と同じ表(ROLE_LABELS)で引く。
+ *   大文字小文字は無視(roles.ts の roleLevel と同じ扱い)。知らない値は英字を出さず「利用者」。
+ */
+export function headerRoleBadge(role: string): { label: string; intent: BadgeIntent } {
+  const key = (role ?? "").toLowerCase();
+  return {
+    label: ROLE_LABELS[key] ?? "利用者",
+    intent: USER_ROLE_INTENT[key] ?? "neutral",
+  };
+}
 
 export default function Header({ userName, userRole, onLogout }: HeaderProps) {
   // v2: ロールは状態色(赤=エラー等)と衝突しない専用色(violet/sky/neutral)
-  const roleIntent = ROLE_INTENT[userRole] ?? "neutral";
-  const roleLabel = roleLabels[userRole] ?? userRole;
+  const { label: roleLabel, intent: roleIntent } = headerRoleBadge(userRole);
 
   return (
     <header className="flex h-14 shrink-0 items-center justify-between gap-2 border-b border-gray-200 dark:border-gray-800 bg-white dark:bg-gray-900 px-4 lg:px-6">
@@ -42,6 +50,16 @@ export default function Header({ userName, userRole, onLogout }: HeaderProps) {
           <span className="hidden md:inline text-sm text-gray-700 dark:text-gray-300">{userName}</span>
           <StatusBadge intent={roleIntent}>{roleLabel}</StatusBadge>
         </div>
+        {/* パスワード変更(画面すっきり化 第1回・2026-10-15)。それまでは管理者のメニューにしか無かった。
+            API(/api/me/change-password)も同日から本人の分だけ全員が使える(今のパスワードの照合は必須)。 */}
+        <Link
+          href="/admin/change-password"
+          className="flex items-center gap-1.5 rounded-md px-2 py-1.5 text-sm text-gray-600 dark:text-gray-300 transition-colors hover:bg-gray-100 dark:hover:bg-gray-800 hover:text-gray-900 dark:hover:text-gray-100"
+          title="パスワード変更"
+          aria-label="パスワード変更"
+        >
+          <KeyRound className="h-4 w-4" />
+        </Link>
         <button
           onClick={onLogout}
           className="flex items-center gap-1.5 rounded-md px-3 py-1.5 text-sm text-gray-600 dark:text-gray-300 transition-colors hover:bg-gray-100 dark:hover:bg-gray-800 hover:text-gray-900 dark:hover:text-gray-100"
