@@ -10,7 +10,7 @@
  * この画面自体は状態(state)を持つだけの薄い入れ物。表示は
  * `PasteImportReview`（表示専用部品）に委ねる。
  */
-import { useCallback, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useRouter } from "next/navigation";
 import Link from "next/link";
 import { PageHeader } from "@/components/ui/page-header";
@@ -42,6 +42,22 @@ import { stashBuildingLinkNotice } from "@/lib/building-link/notice";
 import { areaChanged } from "@/lib/building-link/combobox-model";
 // ⚠apply.ts は prisma を読むサーバー側のファイル。型だけを読む。
 import type { BuildingLinkOutcome } from "@/lib/building-link/apply";
+import { draftKey } from "@/lib/drafts/draft-store";
+import { httpError, isDefiniteSubmitFailure } from "@/lib/drafts/submit-outcome";
+import {
+  compactPasteDraftForPending,
+  isPasteDraftEmpty,
+  parsePasteDraft,
+  pdfReselectReason,
+  type PasteScreenDraft,
+} from "@/lib/drafts/screens/paste";
+import { useClientReady, useDraftAutosave, useRestoredDraft } from "@/hooks/use-draft";
+import {
+  DraftPendingNotice,
+  DraftReselectFileNotice,
+  DraftRestoredNotice,
+  DraftTooLargeNotice,
+} from "@/components/drafts/draft-notices";
 
 interface PasteApiResponse {
   draft: PasteDraft;
@@ -79,32 +95,36 @@ async function readApiErrorMessage(res: Response): Promise<string> {
   return body?.error?.message ?? `処理に失敗しました（${res.status}）`;
 }
 
-export default function PasteImportPage() {
+function PasteImportScreen({ draftEnabled }: { draftEnabled: boolean }) {
   const router = useRouter();
+  // 作業中の控え。別のメニューへ移って戻っても続きから(設計書 2026-10-13 §2 S1)。
+  const draftKeyValue = draftEnabled ? draftKey("paste") : null;
+  const restored = useRestoredDraft(draftKeyValue, parsePasteDraft);
+  const r0 = restored?.data.review ?? null;
 
   // ---- 入力(貼り付け or PDF) ----
-  const [rawText, setRawText] = useState("");
+  const [rawText, setRawText] = useState(restored?.data.rawText ?? "");
   const [pdfFile, setPdfFile] = useState<File | null>(null);
   const [reading, setReading] = useState(false);
   const [readError, setReadError] = useState<string | null>(null);
 
   // ---- 読み取り結果(下書き) ----
-  const [draft, setDraft] = useState<PasteDraft | null>(null);
-  const [duplicates, setDuplicates] = useState<PasteDuplicatesResult | null>(null);
-  const [similar, setSimilar] = useState<SimilarPropertySummary[]>([]);
-  const [ownerCandidates, setOwnerCandidates] = useState<OwnerCandidateSummary[]>([]);
-  const [ownerCandidatesTruncated, setOwnerCandidatesTruncated] = useState(false);
+  const [draft, setDraft] = useState<PasteDraft | null>(r0?.draft ?? null);
+  const [duplicates, setDuplicates] = useState<PasteDuplicatesResult | null>(r0?.duplicates ?? null);
+  const [similar, setSimilar] = useState<SimilarPropertySummary[]>(r0?.similar ?? []);
+  const [ownerCandidates, setOwnerCandidates] = useState<OwnerCandidateSummary[]>(r0?.ownerCandidates ?? []);
+  const [ownerCandidatesTruncated, setOwnerCandidatesTruncated] = useState(r0?.ownerCandidatesTruncated ?? false);
   /** 確認画面の左側に出す原文。PDF はサーバーが取り出した本文を使う。 */
-  const [extractedText, setExtractedText] = useState<string | null>(null);
+  const [extractedText, setExtractedText] = useState<string | null>(r0?.extractedText ?? null);
 
   // ---- 人が直した最終値 ----
-  const [propertyValues, setPropertyValues] = useState<PropertyValues | null>(null);
-  const [ownerValues, setOwnerValues] = useState<OwnerValues | null>(null);
-  const [note, setNote] = useState("");
+  const [propertyValues, setPropertyValues] = useState<PropertyValues | null>(r0?.propertyValues ?? null);
+  const [ownerValues, setOwnerValues] = useState<OwnerValues | null>(r0?.ownerValues ?? null);
+  const [note, setNote] = useState(r0?.note ?? "");
   /** 査定ナンバー等の外部キー。⚠人が確認・修正できる欄として持つ(設計書 §5.4)。 */
-  const [externalLinkKey, setExternalLinkKey] = useState("");
+  const [externalLinkKey, setExternalLinkKey] = useState(r0?.externalLinkKey ?? "");
   const [recheckError, setRecheckError] = useState<string | null>(null);
-  const [ownerMode, setOwnerMode] = useState<OwnerMode>("none");
+  const [ownerMode, setOwnerMode] = useState<OwnerMode>(r0?.ownerMode ?? "none");
   /**
    * 選んだ所有者と、**選んだ瞬間の一致の種類**。
    *
@@ -117,14 +137,54 @@ export default function PasteImportPage() {
    */
   const [linkedOwner, setLinkedOwner] = useState<
     { id: string; matchKindAtSelection: OwnerMatchKind } | null
-  >(null);
+  >(r0?.linkedOwner ?? null);
   const linkedOwnerId = linkedOwner?.id ?? null;
 
   // ---- 登録 ----
   const [registering, setRegistering] = useState(false);
   const [registerError, setRegisterError] = useState<string | null>(null);
   // 建物名から棟へつなぐ選び方(区分マンションのときだけ送る)。
-  const [buildingChoice, setBuildingChoice] = useState<BuildingChoice>(AUTO_CHOICE);
+  const [buildingChoice, setBuildingChoice] = useState<BuildingChoice>(r0?.buildingChoice ?? AUTO_CHOICE);
+
+  /** 戻した確認画面が PDF から作ったもののとき、そのファイル名(選び直すまで登録できない)。 */
+  const [reselectName, setReselectName] = useState<string | null>(r0 ? (restored?.data.pdfFileName ?? null) : null);
+  // 前回、登録の返事が来る前に離れた=登録されたか分からない。確かめるまで見るだけにする(§5.1)。
+  const [pendingBlocked, setPendingBlocked] = useState(restored?.pendingSubmit != null);
+  const [restoredDismissed, setRestoredDismissed] = useState(false);
+
+  const draftData = useMemo<PasteScreenDraft>(
+    () => ({
+      rev: 1,
+      rawText,
+      // ⚠選び直しで違う名前のPDFを選んでも、控えには読み取った元のPDFの名前を残す(読み直すまで)。
+      //   選んだ名前を残すと、次に戻ったとき見直しの中身と違う書類を案内してしまう(@codex P1)。
+      pdfFileName: draft ? (reselectName ?? pdfFile?.name ?? null) : null,
+      review:
+        draft && propertyValues && ownerValues
+          ? {
+              draft, duplicates, similar, ownerCandidates, ownerCandidatesTruncated, extractedText,
+              propertyValues, ownerValues, note, externalLinkKey, ownerMode, linkedOwner, buildingChoice,
+            }
+          : null,
+    }),
+    [
+      rawText, pdfFile, reselectName, draft, duplicates, similar, ownerCandidates, ownerCandidatesTruncated,
+      extractedText, propertyValues, ownerValues, note, externalLinkKey, ownerMode, linkedOwner, buildingChoice,
+    ],
+  );
+  const draftSaver = useDraftAutosave(draftKeyValue, draftData, isPasteDraftEmpty, restored, {
+    compactForPending: compactPasteDraftForPending,
+  });
+  // 画面に出ているか。⚠登録の直前の見直しの間に画面を離れたら、その登録は送らない
+  //   (戻った画面にも同じ内容があり、二重に登録できてしまう・@codex P1)。
+  const mountedRef = useRef(false);
+  useEffect(() => {
+    mountedRef.current = true;
+    return () => {
+      mountedRef.current = false;
+    };
+  }, []);
+  const reselectReason = pdfReselectReason({ hasReview: draft !== null, pdfFileName: reselectName, hasPdfFile: pdfFile !== null });
 
   const handleRead = useCallback(async () => {
     setReading(true);
@@ -163,6 +223,7 @@ export default function PasteImportPage() {
       setLinkedOwner(null);
       setRegisterError(null);
       setBuildingChoice(AUTO_CHOICE);
+      setReselectName(null);
     } catch (e) {
       setReadError(e instanceof Error ? e.message : "読み取りに失敗しました");
     } finally {
@@ -263,6 +324,7 @@ export default function PasteImportPage() {
 
   const handleRegister = useCallback(async () => {
     if (!draft || !propertyValues || !ownerValues) return;
+    if (reselectReason || pendingBlocked) return;
     if (propertyValues.address.trim() === "") {
       setRegisterError("住所を入力してください");
       return;
@@ -299,6 +361,7 @@ export default function PasteImportPage() {
       const ownerKey = (c: OwnerCandidateSummary) => `${c.id}:${c.matchKind}`;
       const beforeOwners = ownerCandidates.map(ownerKey).sort().join(",");
       const latest = await recheckDuplicates();
+      if (!mountedRef.current) return;
 
       // ⚠**確認できなかったときに通してはいけない**(確認しないより悪い＝
       //   確認したつもりになる)。やり直せるようにして止める。
@@ -403,6 +466,8 @@ export default function PasteImportPage() {
         buildingChoice: propertyValues.propertyType === "apartment_unit" ? buildingChoice : undefined,
       };
 
+      // 返事が来る前に離れたら、戻ったとき「登録されたか確かめて」と出す(二重登録を防ぐ・§5.1)。
+      draftSaver.markSubmitting();
       let res: Response;
       if (pdfFile) {
         // 取込元の PDF をそのまま物件の添付として残す。
@@ -417,11 +482,20 @@ export default function PasteImportPage() {
           body: JSON.stringify(body),
         });
       }
-      if (!res.ok) throw new Error(await readApiErrorMessage(res));
+      if (!res.ok) throw httpError(await readApiErrorMessage(res), res.status);
+      // ⚠成功なのに物件の番号が無い返事は、登録されたか分からない(印を消さずに止める)。
+      //   status を付けない Error=4xx ではない扱いで、下の catch が確認待ちにする。
       const result = (await res.json()) as CommitApiResponse;
+      if (typeof result?.propertyId !== "string" || result.propertyId === "") {
+        throw new Error("登録の返事を読み取れませんでした。物件一覧で登録されたか確かめてください。");
+      }
       stashBuildingLinkNotice(result.propertyId, result.buildingLink);
+      draftSaver.close();
       router.push(`/properties/${result.propertyId}`);
     } catch (e) {
+      // ⚠markSubmitting の前(見直しの段階)で止まったときは印が無いので何も起きない。
+      if (isDefiniteSubmitFailure(e)) draftSaver.unmarkSubmitting();
+      else setPendingBlocked(true);
       setRegisterError(e instanceof Error ? e.message : "登録に失敗しました");
     } finally {
       setRegistering(false);
@@ -429,7 +503,31 @@ export default function PasteImportPage() {
   }, [
     draft, propertyValues, ownerValues, note, ownerMode, linkedOwnerId, pdfFile, router,
     externalLinkKey, recheckDuplicates, similar, ownerCandidates, linkedOwner, buildingChoice,
+    reselectReason, pendingBlocked, draftSaver,
   ]);
+
+  const handleDiscardDraft = () => {
+    draftSaver.discard();
+    setRawText("");
+    setPdfFile(null);
+    setReselectName(null);
+    setDraft(null);
+    setDuplicates(null);
+    setSimilar([]);
+    setOwnerCandidates([]);
+    setOwnerCandidatesTruncated(false);
+    setExtractedText(null);
+    setPropertyValues(null);
+    setOwnerValues(null);
+    setNote("");
+    setExternalLinkKey("");
+    setOwnerMode("none");
+    setLinkedOwner(null);
+    setRecheckError(null);
+    setRegisterError(null);
+    setBuildingChoice(AUTO_CHOICE);
+    setRestoredDismissed(true);
+  };
 
   return (
     // ⚠**画面の最上位**に PII 保護の印を付ける(@codex PR#414 3巡目)。
@@ -445,6 +543,18 @@ export default function PasteImportPage() {
         title="貼り付けて物件化"
         description="反響メール・査定依頼フォームの内容をコピーして貼り付ける（または PDF をアップロードする）と、住所や所有者を読み取って下書きを作ります。内容を確認してから登録してください。"
       />
+      {pendingBlocked ? (
+        <DraftPendingNotice
+          onConfirm={() => {
+            draftSaver.unmarkSubmitting();
+            setPendingBlocked(false);
+          }}
+        />
+      ) : (
+        // ⚠登録中は出さない(「最初からやり直す」で送信中の印を消させない)。読み取り中も出さない(届いた結果が控えを作り直す)。
+        restored && !restoredDismissed && !registering && !reading && <DraftRestoredNotice savedAt={restored.savedAt} onDiscard={handleDiscardDraft} />
+      )}
+      {draftSaver.tooLarge && <DraftTooLargeNotice kind="input" />}
 
       {!draft && (
         <p className="text-sm">
@@ -534,11 +644,28 @@ export default function PasteImportPage() {
                 setOwnerValues(null);
                 setRegisterError(null);
                 setBuildingChoice(AUTO_CHOICE);
+                setReselectName(null);
               }}
             >
               ← 貼り直す
             </Button>
           </div>
+
+          {reselectName && (
+            <div className="space-y-2">
+              <DraftReselectFileNotice expectedName={reselectName} chosenName={pdfFile?.name ?? null} />
+              <FileDropZone
+                accept="application/pdf,.pdf"
+                disabled={registering}
+                icon={FileText}
+                title="PDFファイルをここにドラッグ＆ドロップ"
+                fileName={pdfFile?.name ?? null}
+                // ⚠読み取りはし直さない(結果はそのまま・設計書 §4.3)。
+                onFiles={(files) => setPdfFile(files[0])}
+                onNoneAccepted={() => setPdfFile(null)}
+              />
+            </div>
+          )}
 
           <PasteImportReview
             draft={draft}
@@ -566,6 +693,8 @@ export default function PasteImportPage() {
             onRegister={handleRegister}
             registering={registering}
             registerError={registerError}
+            registerBlockedReason={pendingBlocked ? "前回の登録が済んだか確かめてください" : reselectReason}
+            readOnly={pendingBlocked}
             buildingChoice={buildingChoice}
             onBuildingChoiceChange={setBuildingChoice}
           />
@@ -573,4 +702,13 @@ export default function PasteImportPage() {
       )}
     </div>
   );
+}
+
+/**
+ * 控えはブラウザで描き直した後だけ読む(F5 でサーバー描画と食い違わないように)。
+ * クライアント遷移では最初から "client" なので作り直しは起きない。
+ */
+export default function PasteImportPage() {
+  const clientReady = useClientReady();
+  return <PasteImportScreen key={clientReady ? "client" : "server"} draftEnabled={clientReady} />;
 }

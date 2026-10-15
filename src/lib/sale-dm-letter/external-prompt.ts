@@ -11,7 +11,7 @@
  * （同じ表を2か所に書かない）。
  */
 import { sha256Hex } from "@/lib/dm-batch/csv";
-import { APPEAL_JA, LENGTH_JA, STRENGTH_JA, TONE_JA } from "./prompt";
+import { APPEAL_JA, LENGTH_JA, STRENGTH_JA, TONE_JA, appealRuleLines } from "./prompt";
 import { LETTER_TAGS } from "./tags";
 
 export interface ExternalPromptOptions {
@@ -47,6 +47,7 @@ export function buildExternalPrompt(options: ExternalPromptOptions, extra: { ill
     "- **署名・社名・連絡先は本文に書かない**（差出人欄は印刷時にシステムが付けます）。自社に触れる場合も「弊社」等にとどめる。",
     "- 無料査定など、相手の負担なく行動できる導線を一つ入れる。",
     "- 出力は手紙の本文のみ。前置きや説明、マークダウン記法は付けない。",
+    ...appealRuleLines(options.appeal),
     ...(extra.illustrationMarker ? [ILLUSTRATION_PROMPT_LINE] : []),
     "",
     "【場所や種別に触れたいとき】",
@@ -111,6 +112,7 @@ export function buildLpExternalPrompt(options: ExternalPromptOptions): string {
     "- **宛名は書かない**。",
     "- 無料査定の申し込みを促す一文は入れてよいが、**ボタンの文言は書かない**（システムが付けます）。",
     "- 出力は上の4つの見出しと中身だけ。前置きや説明、マークダウン記法（# や ** など）は付けない。",
+    ...appealRuleLines(options.appeal),
     "",
     "【場所や種別に触れたいとき】",
     "この文章は複数の宛先で共通して使います。特定の物件の情報は書かず、次の記号をそのまま書いてください。",

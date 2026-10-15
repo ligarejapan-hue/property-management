@@ -410,7 +410,7 @@ export async function POST(request: NextRequest) {
           }
           const scenarioByProperty = new Map<string, string>();
           for (const p of fresh) {
-            const r = resolveScenario({ propertyScenarioId: p.dmScenarioId, introductionRoute: p.introductionRoute, defaultScenarioId, scenarios: rows });
+            const r = resolveScenario({ propertyScenarioId: p.dmScenarioId, introductionRoute: p.introductionRoute, propertyType: p.propertyType, defaultScenarioId, scenarios: rows });
             if (!r.ok) {
               throw new ApiError(409, "物件のDMの種類を確かめてください(使えない種類が指定されています)", "PROPERTY_SCENARIO_MISSING");
             }

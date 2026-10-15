@@ -34,6 +34,62 @@ export interface LeadRow {
    * (メモや進み具合を書き足した表を取り込み直しても同じ鍵になり、二重登録しない)。
    */
   keySeed: string;
+  /**
+   * 所有者の備考に入る**依頼日の行**(例「依頼日付: 2025/07/22」)。無ければ null。
+   * 前に Excel で入れた本人かを確かめる手がかり(paste-import-duplicates.ts の
+   * findEarlierExcelImport)。同じ人・同じ住所でも依頼日が違えば別の申込とみなす。
+   */
+  requestDateNoteLine: string | null;
+}
+
+/**
+ * 依頼日の文字を「年-月-日」に揃える(読めなければ null)。
+ * ⚠**同じセルでも Excel の表示形式で文字が変わる**(本番 2026-10-15: 10/13 の取込では
+ *   「2024/12/10」、同じ表の今の版では「12/10/24」)。文字のまま比べると同じ申込を
+ *   別物と見る。対応する形: 2024/12/10・2024-12-10・2024年12月10日・12/10/24・
+ *   12/10/2024(月/日/年=Excel の既定の短い日付)。時刻が後ろに付いていても日付だけ見る。
+ */
+export function normalizeRequestDate(raw: string): string | null {
+  const s = raw.normalize("NFKC").trim();
+  const pad = (n: number) => String(n).padStart(2, "0");
+  const ok = (y: number, m: number, d: number) =>
+    m >= 1 && m <= 12 && d >= 1 && d <= 31 ? `${y}-${pad(m)}-${pad(d)}` : null;
+  let m = s.match(/^(\d{4})[/\-年](\d{1,2})[/\-月](\d{1,2})日?(?:\s|$)/);
+  if (m) return ok(Number(m[1]), Number(m[2]), Number(m[3]));
+  m = s.match(/^(\d{1,2})\/(\d{1,2})\/(\d{2}|\d{4})(?:\s|$)/);
+  if (m) {
+    const y = m[3].length === 2 ? 2000 + Number(m[3]) : Number(m[3]);
+    return ok(y, Number(m[1]), Number(m[2]));
+  }
+  return null;
+}
+
+/**
+ * 備考の2つの依頼日の行(「依頼日付: …」)が同じ申込の日か。
+ * 見出しが同じで、日付として同じ(読めないときは文字が同じ)ときだけ true。
+ */
+export function sameRequestDateLine(a: string, b: string): boolean {
+  const split = (l: string) => {
+    const i = l.indexOf(":");
+    return i === -1 ? null : { key: norm(l.slice(0, i)), value: l.slice(i + 1).trim() };
+  };
+  const x = split(a);
+  const y = split(b);
+  if (!x || !y || x.key !== y.key || x.value === "" || y.value === "") return false;
+  const dx = normalizeRequestDate(x.value);
+  const dy = normalizeRequestDate(y.value);
+  return dx !== null && dy !== null ? dx === dy : x.value === y.value;
+}
+
+/** 備考の行のうち、依頼日(登録日時)の行。 */
+function requestDateLine(ownerNoteLines: readonly string[]): string | null {
+  return (
+    ownerNoteLines.find((l) => {
+      const i = l.indexOf(":");
+      const key = i === -1 ? "" : norm(l.slice(0, i));
+      return key === norm(FORM.date) || key === norm(COLUMN_DATE);
+    }) ?? null
+  );
 }
 
 export interface LeadSheetResult {
@@ -134,6 +190,7 @@ function formRow(header: readonly string[], cells: readonly string[]): Omit<Lead
     text: lines.join("\n"),
     ownerNoteLines,
     keySeed: [at(FORM.date), name, address].join("|"),
+    requestDateNoteLine: requestDateLine(ownerNoteLines),
   };
 }
 
@@ -164,7 +221,12 @@ function columnsRow(header: readonly string[], cells: readonly string[]): Omit<L
 
   const address = `${addrHead}${addrTail}`;
   if (address !== "") lines.push(`物件所在地：${address}`);
-  return { text: lines.join("\n"), ownerNoteLines, keySeed: [date, name, address].join("|") };
+  return {
+    text: lines.join("\n"),
+    ownerNoteLines,
+    keySeed: [date, name, address].join("|"),
+    requestDateNoteLine: requestDateLine(ownerNoteLines),
+  };
 }
 
 /**
@@ -210,6 +272,12 @@ export function withFallbackLinkKey(text: string, draft: PasteDraft, key: string
 }
 
 /**
+ * Excel から入れた所有者の備考の**先頭**。取り込み直しのとき「前に Excel で入れた本人」を
+ * 見分ける目印に使う(paste-import-duplicates.ts の findEarlierExcelImport)。
+ */
+export const EXCEL_IMPORT_NOTE_PREFIX = "Excel取込:";
+
+/**
  * 所有者の備考の中身。取込元の行・管理の列・物件の備考へ入れなかった項目・
  * 見出しの無い行をまとめる(どれも捨てない)。
  */
@@ -217,7 +285,7 @@ export function composeLeadOwnerNote(
   row: Pick<LeadRow, "sheetName" | "rowNumber" | "ownerNoteLines">,
   draft: PasteDraft,
 ): string {
-  const lines = [`Excel取込: ${row.sheetName} ${row.rowNumber}行目`, ...row.ownerNoteLines];
+  const lines = [`${EXCEL_IMPORT_NOTE_PREFIX} ${row.sheetName} ${row.rowNumber}行目`, ...row.ownerNoteLines];
   for (const w of draft.withheldFromNote) lines.push(`${w.label}: ${w.value}`);
   for (const u of draft.unlabeled) lines.push(u);
   return lines.join("\n");

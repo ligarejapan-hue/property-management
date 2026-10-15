@@ -1109,7 +1109,7 @@ describe("貼り付け画面: 棟の選び方を送り、知らせを預ける(�
     expect(page).toMatch(/buildingChoice: propertyValues\.propertyType === "apartment_unit" \? buildingChoice : undefined/);
   });
   it("★登録できたら遷移の前に知らせを預ける", () => {
-    expect(page).toMatch(/stashBuildingLinkNotice\(result\.propertyId, result\.buildingLink\);\n\s*router\.push/);
+    expect(page).toMatch(/stashBuildingLinkNotice\(result\.propertyId, result\.buildingLink\);\n\s*(?:draftSaver\.close\(\);\n\s*)?router\.push/);
   });
   it("★住所の町丁目が変わったら選んだ棟を外す(@codex R4)", () => {
     expect(page).toMatch(
@@ -1118,5 +1118,24 @@ describe("貼り付け画面: 棟の選び方を送り、知らせを預ける(�
   });
   it("確認画面へ選び方の受け口を渡す", () => {
     expect(page).toMatch(/onBuildingChoiceChange=\{setBuildingChoice\}/);
+  });
+});
+
+describe("控えから戻したときの登録の止め", () => {
+  const base = { draft, rawText: "x", ownerMode: "none" as const, onRegister: () => {} };
+  it("止める理由が無ければ登録ボタンは押せる(下の試験が空洞でない確認)", () => {
+    expect(registerButtonDisabled(renderToStaticMarkup(createElement(PasteImportReview, base)))).toBe(false);
+  });
+  it("registerBlockedReason があると登録ボタンが押せず、理由が title だけでなく文字で出る", () => {
+    const out = renderToStaticMarkup(
+      createElement(PasteImportReview, { ...base, registerBlockedReason: "PDF「a.pdf」を選び直してください" }),
+    );
+    expect(registerButtonDisabled(out)).toBe(true);
+    expect(out).toContain(">PDF「a.pdf」を選び直してください<");
+  });
+  it("readOnly のときは欄が触れない", () => {
+    const out = renderToStaticMarkup(createElement(PasteImportReview, { ...base, readOnly: true }));
+    expect(out).toMatch(/<input[^>]*disabled=""/);
+    expect(renderToStaticMarkup(createElement(PasteImportReview, base))).not.toMatch(/<input[^>]*disabled=""/);
   });
 });

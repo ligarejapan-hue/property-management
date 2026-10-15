@@ -50,6 +50,7 @@ import {
   MAX_IMPORT_JSON_BODY_BYTES_PAIRED,
 } from "@/lib/import-body-size";
 import { resolveAddressPairBackfill } from "@/lib/owner-address-backfill";
+import { failUnfinishedImportJob, startImportJob } from "@/lib/import-job-start";
 
 // 受付帳CSV × 所有者CSV × 既存物件 の本実行。
 // - 一意特定できた行だけ反映。それ以外は needs_review で記録。
@@ -72,6 +73,7 @@ function nullIfBlank(v: string | null | undefined): string | null {
 }
 
 export async function POST(request: NextRequest) {
+  let startedJobId: string | null = null;
   try {
     const session = await getApiSession();
     const perms = await getUserPermissions(session.id);
@@ -126,6 +128,14 @@ export async function POST(request: NextRequest) {
         "VALIDATION_ERROR",
       );
     }
+    // ⚠受け取った直後に取り込みの記録(処理中)を作る(通信が切れた画面が履歴ですぐ確かめられるように・@codex P1)。
+    // ImportJob（既存の jobType enum を流用。reception_owner は owner_csv 扱い）
+    const job = await startImportJob({
+      jobType: "owner_csv",
+      fileName: `${receptionFileName} + ${ownerFileName}`,
+      executedBy: session.id,
+    });
+    startedJobId = job.id;
 
     // パース（csv / xlsx 共通）
     let receptionParsed: ReturnType<typeof parseSheet>;
@@ -217,17 +227,6 @@ export async function POST(request: NextRequest) {
     const combined = buildCombinedMatches(receptionRows, ownerRows, candidates);
     const summary = summarizeMatches(receptionRows, ownerRows.length, combined);
 
-    // ImportJob（既存の jobType enum を流用。reception_owner は owner_csv 扱い）
-    const job = await prisma.importJob.create({
-      data: {
-        jobType: "owner_csv",
-        fileName: `${receptionFileName ?? "reception.csv"} + ${ownerFileName ?? "owner.csv"}`,
-        status: "processing",
-        totalRows: receptionRows.length,
-        executedBy: session.id,
-        startedAt: new Date(),
-      },
-    });
 
     let successCount = 0;
     let needsReviewCount = 0;
@@ -452,6 +451,7 @@ export async function POST(request: NextRequest) {
       where: { id: job.id },
       data: {
         status: errorCount > 0 ? "failed" : "completed",
+        totalRows: receptionRows.length,
         successCount,
         errorCount: errorCount + needsReviewCount,
         completedAt: new Date(),
@@ -494,6 +494,7 @@ export async function POST(request: NextRequest) {
       201,
     );
   } catch (error) {
+    if (startedJobId) await failUnfinishedImportJob(startedJobId);
     return handleApiError(error);
   }
 }

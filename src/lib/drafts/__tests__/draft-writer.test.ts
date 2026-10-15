@@ -115,3 +115,52 @@ describe("createDraftWriter", () => {
     expect(stored()?.data).toEqual({ name: "restored" });
   });
 });
+
+describe("画面に出ている書き手だけが控えを変える(離れた画面の書き手が遅れて届いた返事で消さない・@codex P1)", () => {
+  // ⚠鍵ごとの持ち主はモジュールに残るので、この describe では試験ごとに別の鍵を使う。
+  let n = 0;
+  const freshKey = () => draftKey(`paste`) + `:owner-test-${++n}`;
+  const read = (k: string) => {
+    const raw = s.getItem(k);
+    return raw ? JSON.parse(raw) : null;
+  };
+  it("新しい画面が持ち主になった後、古い書き手の close・discard・unmark・書き込みは何もしない", () => {
+    const k = freshKey();
+    const old = createDraftWriter<D>({ key: k, isEmpty, now: () => 1 });
+    old.claim();
+    old.update({ name: "前の作業" });
+    old.markSubmitting();
+    // 画面を離れた→戻ってきた画面の書き手が持ち主になり、新しい作業を送り始めた
+    const cur = createDraftWriter<D>({ key: k, isEmpty, now: () => 2, initialPendingAt: 1 });
+    cur.claim();
+    cur.update({ name: "新しい作業" });
+    cur.markSubmitting();
+    const before = read(k);
+    expect(before.data).toEqual({ name: "新しい作業" });
+    expect(before.pendingSubmit).toBeDefined();
+    // 前の作業の返事が遅れて届く
+    old.close();
+    old.discard();
+    old.unmarkSubmitting();
+    old.update({ name: "前の作業" });
+    old.flush();
+    vi.advanceTimersByTime(DRAFT_WRITE_DELAY_MS);
+    expect(read(k)).toEqual(before);
+  });
+  it("持ち主がいない鍵(claim を使わない書き手)は今までどおり書ける", () => {
+    const k = freshKey();
+    const w = createDraftWriter<D>({ key: k, isEmpty });
+    w.update({ name: "a" });
+    w.flush();
+    expect(read(k)?.data).toEqual({ name: "a" });
+  });
+  it("持ち主の書き手は自分の控えを消せる", () => {
+    const k = freshKey();
+    const w = createDraftWriter<D>({ key: k, isEmpty });
+    w.claim();
+    w.update({ name: "a" });
+    w.flush();
+    w.close();
+    expect(read(k)).toBeNull();
+  });
+});

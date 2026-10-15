@@ -114,7 +114,7 @@ export async function DELETE(_req: Request, { params }: Ctx) {
       await lockScenarioForUpdate(tx, id);
       const cur = await tx.dmScenario.findUniqueOrThrow({ where: { id }, select: { autoKey: true } });
       if (cur.autoKey) {
-        throw new ApiError(409, "相続・空き家は消せません。止めるときは「使わない」にしてください", "SCENARIO_RESERVED");
+        throw new ApiError(409, "自動で選ばれる種類(相続・相続（マンション）・空き家)は消せません。止めるときは「使わない」にしてください", "SCENARIO_RESERVED");
       }
       const [p, c, v, l] = await Promise.all([
         tx.property.count({ where: { dmScenarioId: id } }),

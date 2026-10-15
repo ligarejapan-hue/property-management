@@ -12,7 +12,7 @@ export const saleDmOptionsSchema = z.object({
   designTemplate: z.enum(["formal", "soft", "impact"]),
   tone: z.enum(["formal", "standard", "soft"]),
   length: z.enum(["short", "medium", "long"]),
-  appeal: z.enum(["price", "inheritance", "vacant", "buyer"]),
+  appeal: z.enum(["price", "inheritance", "vacant", "buyer", "inheritance_unit"]),
   strength: z.enum(["low", "medium", "high"]),
   // 差出人は env 既定(SALE_DM_SENDER_NAME/CONTACT)を route が補完するため任意。
   // 指定された場合のみ 1 文字以上を要求(空文字は不可)。
@@ -117,7 +117,7 @@ export type SaleDmAssign = z.infer<typeof saleDmAssignSchema>;
 export const saleDmLpVariantOptionsSchema = z.object({
   tone: z.enum(["formal", "standard", "soft"]),
   length: z.enum(["short", "medium", "long"]),
-  appeal: z.enum(["price", "inheritance", "vacant", "buyer"]),
+  appeal: z.enum(["price", "inheritance", "vacant", "buyer", "inheritance_unit"]),
   strength: z.enum(["low", "medium", "high"]),
 });
 export type SaleDmLpVariantOptions = z.infer<typeof saleDmLpVariantOptionsSchema>;

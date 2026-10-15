@@ -20,6 +20,7 @@ import {
 } from "@/lib/reception-owner-match";
 import { normalizeAddress } from "@/lib/normalize";
 import { assertImportJsonBodySize } from "@/lib/import-body-size";
+import { failUnfinishedImportJob, startImportJob } from "@/lib/import-job-start";
 
 // 受付帳CSVから物件を新規作成する取込実行。
 // - フィルタ後のアクティブ行のうち、住所あり・住所未重複の行だけ Property を作成。
@@ -45,6 +46,7 @@ function toPositionalRows(
 }
 
 export async function POST(request: NextRequest) {
+  let startedJobId: string | null = null;
   try {
     const session = await getApiSession();
     const perms = await getUserPermissions(session.id);
@@ -88,6 +90,9 @@ export async function POST(request: NextRequest) {
         "VALIDATION_ERROR",
       );
     }
+    // ⚠受け取った直後に取り込みの記録(処理中)を作る(通信が切れた画面が履歴ですぐ確かめられるように・@codex P1)。
+    const job = await startImportJob({ jobType: "property_csv", fileName: receptionFileName, executedBy: session.id });
+    startedJobId = job.id;
 
     let receptionParsed: ReturnType<typeof parseSheet>;
     try {
@@ -138,17 +143,6 @@ export async function POST(request: NextRequest) {
     }
 
     const activeRows = allRows.filter((r) => !r.excluded);
-
-    const job = await prisma.importJob.create({
-      data: {
-        jobType: "property_csv",
-        fileName: receptionFileName,
-        status: "processing",
-        totalRows: activeRows.length,
-        executedBy: session.id,
-        startedAt: new Date(),
-      },
-    });
 
     let successCount = 0;
     let needsReviewCount = 0;
@@ -297,6 +291,7 @@ export async function POST(request: NextRequest) {
       where: { id: job.id },
       data: {
         status: errorCount > 0 ? "failed" : "completed",
+        totalRows: activeRows.length,
         successCount,
         errorCount: errorCount + needsReviewCount,
         completedAt: new Date(),
@@ -326,6 +321,7 @@ export async function POST(request: NextRequest) {
       201,
     );
   } catch (error) {
+    if (startedJobId) await failUnfinishedImportJob(startedJobId);
     return handleApiError(error);
   }
 }
