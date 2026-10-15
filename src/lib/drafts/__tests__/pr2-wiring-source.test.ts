@@ -247,7 +247,7 @@ describe("成功でも結果の形が欠けた返事は「分からない」扱�
   });
   it("謄本: 控えを消す前に形を確かめる", () => {
     const src = read("src/app/(dashboard)/import/registry-pdf/page.tsx");
-    expect(src).toMatch(/!hasImportResultShape\(json, \{ objects: \["parsed"\] \}\) \|\|\s*!hasFieldShape\(\(json as \{ parsed: unknown \}\)\.parsed, \{ numbers: \["confidence"\], arrays: \["owners", "warnings"\] \}\)\s*\) \{\s*throw new Error\([^)]*\);\s*\}\s*\/\/[^\n]*\n\s*draftSaver\.discard\(\);/);
+    expect(src).toMatch(/if \(!isRegistryImportResult\(json\)\) \{\s*throw new Error\([^)]*\);\s*\}\s*\/\/[^\n]*\n\s*draftSaver\.discard\(\);/);
   });
 });
 
@@ -264,5 +264,12 @@ describe("取り込み(CSV): 結果が分からないときは待ってから読
   });
   it("待っている間は「確かめた」を押させない", () => {
     expect(src).toContain("confirmDisabled={historySettling || jobsLoading || historyStale}");
+  });
+});
+
+describe("貼り付けて物件化: 選び直しで違う名前のPDFを選んでも、控えには元のPDFの名前を残す(@codex P1)", () => {
+  it("読み直すまで reselectName を優先する", () => {
+    const src = read("src/app/(dashboard)/import/paste/page.tsx");
+    expect(src).toContain("pdfFileName: draft ? (reselectName ?? pdfFile?.name ?? null) : null,");
   });
 });

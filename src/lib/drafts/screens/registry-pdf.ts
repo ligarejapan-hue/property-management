@@ -65,3 +65,31 @@ export function compactRegistryPdfDraftForPending(): RegistryPdfDraft {
 export function registryNeedsReselect(d: { step: string; uploadTab: "file" | "text"; fromFile: boolean; hasFile: boolean }): boolean {
   return d.step !== "upload" && d.uploadTab === "file" && d.fromFile && !d.hasFile;
 }
+
+const strOrNull = z.string().nullable();
+/** 取り込みの成功の返事のうち、結果の画面が描く欄(欠けたり形が違えば画面が落ちる)。 */
+const registryImportResultSchema = z.object({
+  jobId: z.string().min(1),
+  action: z.string(),
+  propertyId: z.string().nullable(),
+  parsed: z.object({
+    realEstateNumber: strOrNull,
+    address: strOrNull,
+    lotNumber: strOrNull,
+    buildingNumber: strOrNull,
+    landCategory: strOrNull,
+    area: strOrNull,
+    owners: z.array(z.object({ name: z.string(), address: strOrNull, share: strOrNull })),
+    confidence: z.number(),
+    warnings: z.array(z.string()),
+  }),
+  warning: z.string().optional(),
+});
+
+/**
+ * 謄本の取り込みの成功の返事が、結果として読める形か(@codex P2)。
+ * ⚠形が違えば、取り込まれたか分からない扱い=控えと送信中の印を消さずに止める。
+ */
+export function isRegistryImportResult(v: unknown): boolean {
+  return registryImportResultSchema.safeParse(v).success;
+}

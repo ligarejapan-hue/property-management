@@ -246,3 +246,27 @@ describe("取り込み履歴を「確かめた」根拠にしてよいか(@codex
     expect(HISTORY_SETTLE_MS).toBe(60_000);
   });
 });
+
+import { isRegistryImportResult } from "../screens/registry-pdf";
+
+describe("謄本の取り込みの成功の返事の形(@codex P2: 結果の画面が描くものを全部確かめる)", () => {
+  const parsed = {
+    realEstateNumber: null, address: "東京都", lotNumber: "1-2", buildingNumber: null, landCategory: null, area: null,
+    owners: [{ name: "山田", address: null, share: null }], confidence: 0.9, warnings: ["注意"],
+  };
+  const ok = { jobId: "ij-1", action: "created", propertyId: "p1", parsed };
+  it("そろっていれば結果として扱う(物件番号なし・警告ありも)", () => {
+    expect(isRegistryImportResult(ok)).toBe(true);
+    expect(isRegistryImportResult({ ...ok, propertyId: null, warning: "PDF本体は保存しませんでした" })).toBe(true);
+  });
+  it("入れ子の中身の形が違えば分からない扱い", () => {
+    expect(isRegistryImportResult({ ...ok, parsed: {} })).toBe(false);
+    expect(isRegistryImportResult({ ...ok, parsed: { ...parsed, warnings: [{}] } })).toBe(false);
+    expect(isRegistryImportResult({ ...ok, parsed: { ...parsed, owners: [{}] } })).toBe(false);
+    expect(isRegistryImportResult({ ...ok, parsed: { ...parsed, address: {} } })).toBe(false);
+    expect(isRegistryImportResult({ ...ok, action: {} })).toBe(false);
+    expect(isRegistryImportResult({ ...ok, jobId: "" })).toBe(false);
+    expect(isRegistryImportResult({ ...ok, warning: {} })).toBe(false);
+    expect(isRegistryImportResult({})).toBe(false);
+  });
+});

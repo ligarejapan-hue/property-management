@@ -29,9 +29,10 @@ import {
 import ImportSwitcher from "@/components/import/import-switcher";
 import FileDropZone from "@/components/ui/file-drop-zone";
 import { draftKey } from "@/lib/drafts/draft-store";
-import { hasFieldShape, hasImportResultShape, isDefiniteSubmitFailure } from "@/lib/drafts/submit-outcome";
+import { isDefiniteSubmitFailure } from "@/lib/drafts/submit-outcome";
 import {
   compactRegistryPdfDraftForPending,
+  isRegistryImportResult,
   isRegistryPdfDraftEmpty,
   parseRegistryPdfDraft,
   registryNeedsReselect,
@@ -574,11 +575,8 @@ function RegistryPdfScreen({ draftEnabled }: { draftEnabled: boolean }) {
         );
       }
       // ⚠成功でも結果の形が欠けた返事は、登録されたか分からない(控えと印を消さずに止める・@codex P2)。
-      //   結果の画面が読む入れ子(所有者・警告の配列・確からしさ)まで確かめる(@codex P2)。
-      if (
-        !hasImportResultShape(json, { objects: ["parsed"] }) ||
-        !hasFieldShape((json as { parsed: unknown }).parsed, { numbers: ["confidence"], arrays: ["owners", "warnings"] })
-      ) {
+      //   結果の画面が描くもの(所有者・警告の中身まで)を全部確かめる(@codex P2)。
+      if (!isRegistryImportResult(json)) {
         throw new Error("取り込みの返事を読み取れませんでした。取り込まれたか物件の画面で確かめてから続けてください。");
       }
       // ⚠close ではなく discard: 「続けて取り込む」で次の謄本へ進んだとき、また控えられるように。

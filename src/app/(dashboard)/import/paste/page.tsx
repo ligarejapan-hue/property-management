@@ -156,7 +156,9 @@ function PasteImportScreen({ draftEnabled }: { draftEnabled: boolean }) {
     () => ({
       rev: 1,
       rawText,
-      pdfFileName: draft ? (pdfFile?.name ?? reselectName) : null,
+      // ⚠選び直しで違う名前のPDFを選んでも、控えには読み取った元のPDFの名前を残す(読み直すまで)。
+      //   選んだ名前を残すと、次に戻ったとき見直しの中身と違う書類を案内してしまう(@codex P1)。
+      pdfFileName: draft ? (reselectName ?? pdfFile?.name ?? null) : null,
       review:
         draft && propertyValues && ownerValues
           ? {
