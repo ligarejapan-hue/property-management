@@ -26,6 +26,7 @@ import {
   MailX,
   Image as ImageIcon,
   Inbox,
+  Globe,
   Tags,
 } from "lucide-react";
 import { canSee, type AppRole } from "@/lib/nav/roles";
@@ -139,6 +140,9 @@ export const SIDEBAR_GROUPS: NavGroup[] = [
       // 入口ページ(案B)。宛名CSVや売却DMの作成は従来どおり物件一覧にあり、
       // ここはそこへの分かりやすい入口を足すもの。
       { label: "DMメニュー", href: "/dm", icon: ic(Mail), minRole: "office_staff" },
+      // LPの入口ページ(発注者決定 2026-10-15 案B)。LPの道具(売却DM設定・LPの写真・DMの種類)は
+      // どれも管理者用なので、入口も管理者にだけ出す。
+      { label: "LPメニュー", href: "/lp", icon: ic(Globe), minRole: "admin" },
       // ⚠「査定の申込」は反響受付へ移した(発注者決定 2026-10-15)。
       { label: "売却DM設定", href: "/admin/sale-dm-settings", icon: ic(Mail), minRole: "admin" },
       // 査定申込の通知メールを送る Xserver メールボックスの設定(2026-09 新設)。

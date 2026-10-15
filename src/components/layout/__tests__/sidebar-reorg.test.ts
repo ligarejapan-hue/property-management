@@ -187,6 +187,8 @@ describe("DM グループ(新設)", () => {
   it("入口ページを先頭に、送る流れの順で並ぶ", () => {
     expect(group("dm")?.items.map((i) => i.href)).toEqual([
       "/dm",
+      // LPメニュー(2026-10-15 案B)は DMメニューの次。
+      "/lp",
       "/admin/sale-dm-settings",
       "/admin/mail-settings",
       "/admin/lp-assets",
@@ -419,5 +421,38 @@ describe("左メニューの柱(発注者決定 2026-10-15)", () => {
     );
     expect(SIDEBAR).toContain("groups[i - 1].pillar && !g.pillar && g.label");
     expect(SIDEBAR).toContain("<hr ");
+  });
+});
+
+describe("LPメニュー(発注者決定 2026-10-15 案B)", () => {
+  const LP_PAGE = readFileSync(join(process.cwd(), "src/app/(dashboard)/lp/page.tsx"), "utf8");
+
+  it("DM・LP関係の中に管理者向けで置く(LPの道具はどれも管理者用)", () => {
+    expect(byHref("/lp")).toMatchObject({ label: "LPメニュー", minRole: "admin" });
+    // 事務担当には出さない=DM・LP関係はDMメニュー1つ(見出しがそのままリンク)。
+    const dm = visibleSidebar("office_staff").find((g) => g.key === "dm");
+    expect(dm?.items.map((i) => i.href)).toEqual(["/dm"]);
+  });
+
+  it("LPの道具3つと申込の一覧へ、用意する順に案内する", () => {
+    const order = [
+      "/admin/sale-dm-settings",
+      "/admin/lp-assets",
+      "/admin/dm-scenarios",
+      "/properties/sale-dm/inquiries",
+    ].map((h) => LP_PAGE.indexOf(`href: "${h}"`));
+    for (const at of order) expect(at).toBeGreaterThan(-1);
+    expect([...order].sort((a, b) => a - b)).toEqual(order);
+    expect(LP_PAGE).toContain('title="LPメニュー"');
+  });
+
+  it("押せそうに見えて開けないリンクは出さない(DMメニューと同じ)", () => {
+    expect(LP_PAGE).toContain("canSee(userRole, s.minRole)");
+    expect(LP_PAGE).toContain('data-testid="lp-menu-step-unavailable"');
+  });
+
+  it("⚠/lp は公開の口(/lp-assets/)に巻き込まれない=ログイン必須", async () => {
+    const { isPublicPath } = await import("@/proxy");
+    expect(isPublicPath("/lp")).toBe(false);
   });
 });
