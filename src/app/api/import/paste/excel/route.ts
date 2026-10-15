@@ -264,6 +264,7 @@ export async function POST(request: NextRequest) {
             similarPropertyIds: dup.similar.map((s) => s.id),
             ownerName: draft.owner?.name.value ?? null,
             roomNo: draft.property.roomNo.value,
+            requestDateNoteLine: row.requestDateNoteLine,
           });
       looked.push({ row, text, draft, dup, earlierImportIds });
     }

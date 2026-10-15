@@ -24,7 +24,7 @@ import {
 import { buildOwnerDedupKey } from "@/lib/owner-dedup";
 import { addressSearchPrefix, toFullWidth } from "@/lib/paste-import/normalize";
 import { normalizeName } from "@/lib/normalize";
-import { EXCEL_IMPORT_NOTE_PREFIX } from "@/lib/paste-import/lead-sheet";
+import { EXCEL_IMPORT_NOTE_PREFIX, sameRequestDateLine } from "@/lib/paste-import/lead-sheet";
 
 /**
  * 所有者候補の DB 検索で広めに取る件数。
@@ -715,10 +715,19 @@ export async function findEarlierExcelImport(
   ownerName: string | null;
   /** 部屋番号。同じ建物の別の部屋を同じ人が持っているとき、別の行として扱うため。 */
   roomNo: string | null;
+  /**
+   * この行の所有者の備考に入る依頼日の行(「依頼日付: 2025/07/22」)。
+   * ⚠前に入れた所有者の備考に**同じ日の行**があるときだけ同じ申込とみなす
+   *   (日付として比べる=Excel の表示形式で「2024/12/10」「12/10/24」と変わっても同じ)
+   *   (@codex PR#516 5巡目)。氏名・住所・部屋番号が同じでも、別の日の申込は
+   *   別の物件かもしれない。無ければ照らさない(要確認のまま)。
+   */
+  requestDateNoteLine: string | null;
   },
 ): Promise<string[]> {
   const normalized = normalizeName(input.ownerName?.trim() ?? "");
-  if (normalized === "" || input.similarPropertyIds.length === 0) return [];
+  const dateLine = input.requestDateNoteLine?.trim() ?? "";
+  if (normalized === "" || dateLine === "" || input.similarPropertyIds.length === 0) return [];
   // ⚠氏名で所有者を照らす口なので、所有者検索と**同じ門**を通す(@codex PR#516 3巡目)。
   //   通さないと、所有者を検索できない人が氏名を変えて取り込み直すだけで
   //   「登録済み/要確認」の違いから所有者の有無を言い当てられる。
@@ -728,7 +737,11 @@ export async function findEarlierExcelImport(
       propertyId: { in: input.similarPropertyIds },
       owner: { isArchived: false, note: { startsWith: EXCEL_IMPORT_NOTE_PREFIX } },
     },
-    select: { propertyId: true, property: { select: { roomNo: true } }, owner: { select: { name: true } } },
+    select: {
+      propertyId: true,
+      property: { select: { roomNo: true } },
+      owner: { select: { name: true, note: true } },
+    },
   });
   // ⚠部屋番号も揃ったときだけ(住所に部屋番号を書かない表では、同じ建物の
   //   別の部屋が同じ住所になる。別の部屋を「登録済み」にして入れ損ねない)。
@@ -736,7 +749,12 @@ export async function findEarlierExcelImport(
   // ⚠1物件ずつ(同じ物件に同じ人が2回ついていても1件)。何行ぶんを「登録済み」に
   //   できるかは呼び出し側が表全体の行数と比べて決める(@codex PR#516 P1)。
   const ids = links
-    .filter((l) => normalizeName(l.owner.name) === normalized && normalizeName(l.property.roomNo ?? "") === room)
+    .filter(
+      (l) =>
+        normalizeName(l.owner.name) === normalized &&
+        normalizeName(l.property.roomNo ?? "") === room &&
+        (l.owner.note ?? "").split("\n").some((line) => sameRequestDateLine(line.trim(), dateLine)),
+    )
     .map((l) => l.propertyId);
   return Array.from(new Set(ids)).sort();
 }

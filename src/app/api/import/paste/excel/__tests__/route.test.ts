@@ -46,14 +46,14 @@ vi.mock("@/lib/api-helpers", async () => {
   };
 });
 // ⚠重複の見立ては貼り付けと**同じ関数**を使う(権限・スコープの扱いも同じ)。
-const earlierCalls: { similarPropertyIds: string[]; ownerName: string | null; roomNo: string | null }[] = [];
-let earlierResult: (input: { similarPropertyIds: string[]; ownerName: string | null; roomNo: string | null }) => string[] = () => [];
+const earlierCalls: { similarPropertyIds: string[]; ownerName: string | null; roomNo: string | null; requestDateNoteLine: string | null }[] = [];
+let earlierResult: (input: { similarPropertyIds: string[]; ownerName: string | null; roomNo: string | null; requestDateNoteLine: string | null }) => string[] = () => [];
 vi.mock("@/lib/paste-import-duplicates", () => ({
   lookupPasteDuplicates: vi.fn(async (_s: unknown, _p: unknown, input: { externalLinkKey: string | null }) => {
     lookupCalls.push(input);
     return lookupResult(input);
   }),
-  findEarlierExcelImport: vi.fn(async (_s: unknown, _p: unknown, input: { similarPropertyIds: string[]; ownerName: string | null; roomNo: string | null }) => {
+  findEarlierExcelImport: vi.fn(async (_s: unknown, _p: unknown, input: { similarPropertyIds: string[]; ownerName: string | null; roomNo: string | null; requestDateNoteLine: string | null }) => {
     earlierCalls.push(input);
     return earlierResult(input);
   }),
@@ -212,7 +212,21 @@ describe("POST /api/import/paste/excel", () => {
       xlsxBase64: xlsxBase64(sheet([row({ 姓名: "山田　太郎", URL: MAIL })])),
     }))).json();
     expect(body.rows[0]).toMatchObject({ status: "registered", registeredPropertyId: "p-old", reasons: [] });
-    expect(earlierCalls[0]).toEqual({ similarPropertyIds: ["p-old"], ownerName: "山田　太郎", roomNo: null });
+    expect(earlierCalls[0]).toEqual({ similarPropertyIds: ["p-old"], ownerName: "山田　太郎", roomNo: null, requestDateNoteLine: null });
+  });
+
+  it("★依頼日の列の値を「依頼日付: …」の行として渡す(前に入れた所有者の備考と同じ形)", async () => {
+    lookupResult = () => ({
+      duplicates: { blocked: false, blockedByPropertyId: null, similarPropertyIds: ["p-old"] },
+      similar: [{ id: "p-old", address: "東京都港区1-1", lotNumber: null }],
+      ownerCandidates: [],
+      ownerCandidatesTruncated: false,
+    });
+    await POST(req({
+      fileName: "a.xlsx",
+      xlsxBase64: xlsxBase64(sheet([row({ 依頼日付: "2025/07/22", URL: MAIL })])),
+    }));
+    expect(earlierCalls.at(-1)?.requestDateNoteLine).toBe("依頼日付: 2025/07/22");
   });
 
   it("★同じ人・同じ住所の行が、前に入れた物件の数より多ければ全部要確認(@codex PR#516 P1)", async () => {
