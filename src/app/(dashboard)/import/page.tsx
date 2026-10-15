@@ -52,7 +52,7 @@ import { filterNonBlankHeaders } from "@/lib/csv-parser";
 import ImportSwitcher from "@/components/import/import-switcher";
 import FileDropZone from "@/components/ui/file-drop-zone";
 import { draftKey } from "@/lib/drafts/draft-store";
-import { isDefiniteSubmitFailure } from "@/lib/drafts/submit-outcome";
+import { hasImportResultShape, isDefiniteSubmitFailure } from "@/lib/drafts/submit-outcome";
 import {
   compactCsvImportDraftForPending,
   csvDraftAfterImport,
@@ -128,6 +128,18 @@ interface ImportResult {
 }
 
 type Step = 1 | 2 | 3 | 4;
+
+/** 成功の返事として読むのに要る欄(欠けていたら取り込まれたか分からない扱い・@codex P2)。 */
+const IMPORT_RESULT_SHAPE = {
+  numbers: ["totalRows", "successCount", "errorCount", "needsReviewCount"],
+  arrays: ["parseErrors"],
+} as const;
+const RO_RESULT_SHAPE = {
+  numbers: ["successCount", "needsReviewCount", "errorCount", "propertyUpdatedCount", "ownerCreatedCount", "ownerLinkedCount"],
+  objects: ["summary"],
+} as const;
+const RP_RESULT_SHAPE = { numbers: ["successCount", "needsReviewCount", "errorCount"] } as const;
+const UNREADABLE_IMPORT_RESULT = "取り込みの返事を読み取れませんでした。下の取り込み履歴で取り込まれたか確かめてください。";
 
 // ---------------------------------------------------------------------------
 // Constants
@@ -970,6 +982,8 @@ function ImportScreen({ draftEnabled }: { draftEnabled: boolean }) {
         columnMapping,
         xlsxBase64 ?? undefined,
       );
+      // ⚠成功でも結果の形が欠けた返事は、取り込まれたか分からない(印を残して止める・@codex P2)。
+      if (!hasImportResultShape(json, IMPORT_RESULT_SHAPE)) throw new Error(UNREADABLE_IMPORT_RESULT);
       setResult(json as ImportResult);
       finishCsvFlow("main");
       setStep(4);
@@ -1070,6 +1084,7 @@ function ImportScreen({ draftEnabled }: { draftEnabled: boolean }) {
         dlFilter,
         shinkiFilter,
       });
+      if (!hasImportResultShape(res, RO_RESULT_SHAPE)) throw new Error(UNREADABLE_IMPORT_RESULT);
       setRoResult(res);
       finishCsvFlow("ro");
       fetchJobs();
@@ -1146,6 +1161,7 @@ function ImportScreen({ draftEnabled }: { draftEnabled: boolean }) {
         dlFilter: rpDlFilter,
         shinkiFilter: rpShinkiFilter,
       });
+      if (!hasImportResultShape(res, RP_RESULT_SHAPE)) throw new Error(UNREADABLE_IMPORT_RESULT);
       setRpResult(res);
       finishCsvFlow("rp");
       fetchJobs();

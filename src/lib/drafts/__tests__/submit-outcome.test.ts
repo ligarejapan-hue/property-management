@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest";
-import { httpError, isDefiniteSubmitFailure } from "../submit-outcome";
+import { hasImportResultShape, httpError, isDefiniteSubmitFailure } from "../submit-outcome";
 
 const withStatus = (status: number) => Object.assign(new Error("x"), { status });
 
@@ -29,5 +29,29 @@ describe("httpError", () => {
   });
   it("5xx は言い切れない", () => {
     expect(isDefiniteSubmitFailure(httpError("x", 500))).toBe(false);
+  });
+});
+
+describe("hasImportResultShape(成功の返事が取り込みの結果の形か・@codex P2)", () => {
+  const shape = { numbers: ["successCount", "errorCount"], arrays: ["parseErrors"], objects: ["summary"] } as const;
+  const ok = { jobId: "ij-1", successCount: 1, errorCount: 0, parseErrors: [], summary: {} };
+  it("取り込みの番号と決まった欄がそろっていれば結果として扱う", () => {
+    expect(hasImportResultShape(ok, shape)).toBe(true);
+    expect(hasImportResultShape({ jobId: "ij-1" }, {})).toBe(true);
+  });
+  it("空の返事・番号なし・空の番号は分からない扱い", () => {
+    expect(hasImportResultShape({}, shape)).toBe(false);
+    expect(hasImportResultShape(null, {})).toBe(false);
+    expect(hasImportResultShape(undefined, {})).toBe(false);
+    expect(hasImportResultShape("ok", {})).toBe(false);
+    expect(hasImportResultShape({ ...ok, jobId: "" }, shape)).toBe(false);
+    expect(hasImportResultShape({ ...ok, jobId: 1 }, shape)).toBe(false);
+  });
+  it("数の欄が数でない・配列が配列でない・まとまりが無いときも分からない扱い", () => {
+    expect(hasImportResultShape({ ...ok, successCount: "1" }, shape)).toBe(false);
+    expect(hasImportResultShape({ ...ok, errorCount: undefined }, shape)).toBe(false);
+    expect(hasImportResultShape({ ...ok, parseErrors: null }, shape)).toBe(false);
+    expect(hasImportResultShape({ ...ok, summary: null }, shape)).toBe(false);
+    expect(hasImportResultShape({ ...ok, summary: [] }, shape)).toBe(false);
   });
 });

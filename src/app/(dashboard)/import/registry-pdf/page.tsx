@@ -29,7 +29,7 @@ import {
 import ImportSwitcher from "@/components/import/import-switcher";
 import FileDropZone from "@/components/ui/file-drop-zone";
 import { draftKey } from "@/lib/drafts/draft-store";
-import { isDefiniteSubmitFailure } from "@/lib/drafts/submit-outcome";
+import { hasImportResultShape, isDefiniteSubmitFailure } from "@/lib/drafts/submit-outcome";
 import {
   compactRegistryPdfDraftForPending,
   isRegistryPdfDraftEmpty,
@@ -572,6 +572,10 @@ function RegistryPdfScreen({ draftEnabled }: { draftEnabled: boolean }) {
           fileName ?? "registry-paste.txt",
           edited,
         );
+      }
+      // ⚠成功でも結果の形が欠けた返事は、登録されたか分からない(控えと印を消さずに止める・@codex P2)。
+      if (!hasImportResultShape(json, { objects: ["parsed"] })) {
+        throw new Error("取り込みの返事を読み取れませんでした。取り込まれたか物件の画面で確かめてから続けてください。");
       }
       // ⚠close ではなく discard: 「続けて取り込む」で次の謄本へ進んだとき、また控えられるように。
       draftSaver.discard();

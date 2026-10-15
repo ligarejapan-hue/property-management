@@ -16,3 +16,21 @@ export function isDefiniteSubmitFailure(err: unknown): boolean {
 export function httpError(message: string, status: number): Error & { status: number } {
   return Object.assign(new Error(message), { status });
 }
+
+/**
+ * 取り込みの成功の返事が、結果として読める形か(@codex P2)。
+ * 2xx でも中身が欠けていれば(配置の途中・壊れた返事)、取り込まれたか分からない扱いにする
+ * =控えと送信中の印を消さずに止め、戻ったとき確かめてもらう。
+ */
+export function hasImportResultShape(
+  value: unknown,
+  shape: { numbers?: readonly string[]; arrays?: readonly string[]; objects?: readonly string[] },
+): boolean {
+  if (typeof value !== "object" || value === null) return false;
+  const v = value as Record<string, unknown>;
+  if (typeof v.jobId !== "string" || v.jobId === "") return false;
+  if (shape.numbers?.some((k) => typeof v[k] !== "number")) return false;
+  if (shape.arrays?.some((k) => !Array.isArray(v[k]))) return false;
+  if (shape.objects?.some((k) => typeof v[k] !== "object" || v[k] === null || Array.isArray(v[k]))) return false;
+  return true;
+}

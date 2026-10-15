@@ -237,3 +237,16 @@ describe("貼り付けて物件化: 見直しの間に画面を離れたら登�
     expect(src).toMatch(/const latest = await recheckDuplicates\(\);\s*(?:\/\/[^\n]*\n\s*)*if \(!mountedRef\.current\) return;/);
   });
 });
+
+describe("成功でも結果の形が欠けた返事は「分からない」扱い(@codex P2・CSV 3つの流れ+謄本)", () => {
+  it("取り込み(CSV): 3つの流れとも、流れを済ませる前に形を確かめる", () => {
+    const src = read("src/app/(dashboard)/import/page.tsx");
+    expect(src).toMatch(/if \(!hasImportResultShape\(json, IMPORT_RESULT_SHAPE\)\) throw new Error\(UNREADABLE_IMPORT_RESULT\);\s*setResult\(json as ImportResult\);\s*finishCsvFlow\("main"\);/);
+    expect(src).toMatch(/if \(!hasImportResultShape\(res, RO_RESULT_SHAPE\)\) throw new Error\(UNREADABLE_IMPORT_RESULT\);\s*setRoResult\(res\);\s*finishCsvFlow\("ro"\);/);
+    expect(src).toMatch(/if \(!hasImportResultShape\(res, RP_RESULT_SHAPE\)\) throw new Error\(UNREADABLE_IMPORT_RESULT\);\s*setRpResult\(res\);\s*finishCsvFlow\("rp"\);/);
+  });
+  it("謄本: 控えを消す前に形を確かめる", () => {
+    const src = read("src/app/(dashboard)/import/registry-pdf/page.tsx");
+    expect(src).toMatch(/if \(!hasImportResultShape\(json, \{ objects: \["parsed"\] \}\)\) \{\s*throw new Error\([^)]*\);\s*\}\s*\/\/[^\n]*\n\s*draftSaver\.discard\(\);/);
+  });
+});
