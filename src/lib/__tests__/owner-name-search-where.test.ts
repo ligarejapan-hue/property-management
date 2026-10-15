@@ -107,6 +107,16 @@ describe("ownerNameSearchWhere", () => {
     }
   });
 
+  it("★とても長い名前でも、条件は上限(8文字ぶん)で止まる・本人は落とさない(@codex PR#516 4巡目)", () => {
+    const long = "山田太郎" + "あいうえおかきくけこさしすせそ".repeat(2000) + "1234567890ABCDEFG";
+    const where = ownerNameSearchWhere(long, normalizeName(long)) as { AND?: { OR: unknown[] }[] };
+    expect(where.AND?.length).toBe(8);
+    const params = (where.AND ?? []).reduce((n, a) => n + a.OR.length, 0);
+    expect(params).toBeLessThan(100);
+    // 漢字(書き方が少ない)を優先して使う
+    expect(search(long, [long, "山田花子"])).toEqual([long]);
+  });
+
   it("文字が残らない異常値(法人の言葉だけ)は、空の条件を作らず先頭1文字で引く", () => {
     const where = ownerNameSearchWhere("株式会社", normalizeName("株式会社")) as {
       OR?: { name: { contains: string } }[];

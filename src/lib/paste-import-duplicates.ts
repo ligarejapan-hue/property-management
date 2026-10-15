@@ -242,8 +242,21 @@ function ownerNameSearchChars(normalizedName: string): string[] {
  * 所有者を氏名で引く Prisma の条件(アーカイブ済みは含めない)。
  * 文字が1つも残らない異常値(記号だけ等)は、従来の先頭1文字の条件へ落とす。
  */
+/**
+ * 条件に使う文字の上限(@codex PR#516 4巡目)。氏名の長さには上限が無い(貼り付けは
+ * 本文20万字まで)ので、全文字を使うと1つの欄から何万個もの SQL パラメータができる。
+ * 文字を減らすのは条件を**緩める**側(取りこぼしは増えない)。8文字あれば、実データ
+ * (所有者14,850人)で候補は十分に絞れる(本番実測: 氏名の全文字で最大17件)。
+ */
+const OWNER_NAME_SEARCH_MAX_CHARS = 8;
+
 export function ownerNameSearchWhere(rawName: string, normalizedName: string) {
-  const chars = ownerNameSearchChars(normalizedName);
+  // ⚠書き方の少ない文字(漢字など)を優先して上限まで選ぶ。書き方の多い数字・英字
+  //   (「1」は ①⑪⒈… など80通り超)ばかりで条件を膨らませない。
+  const chars = ownerNameSearchChars(normalizedName)
+    .map((c, i) => ({ c, i, spellings: charSpellings(c) }))
+    .sort((a, b) => a.spellings.length - b.spellings.length || a.i - b.i)
+    .slice(0, OWNER_NAME_SEARCH_MAX_CHARS);
   if (chars.length === 0) {
     return {
       OR: ownerSearchPrefixCandidates(rawName, normalizedName).map((seed) => ({ name: { contains: seed } })),
@@ -251,7 +264,7 @@ export function ownerNameSearchWhere(rawName: string, normalizedName: string) {
     };
   }
   return {
-    AND: chars.map((c) => ({ OR: charSpellings(c).map((s) => ({ name: { contains: s } })) })),
+    AND: chars.map(({ spellings }) => ({ OR: spellings.map((s) => ({ name: { contains: s } })) })),
     isArchived: false,
   };
 }
