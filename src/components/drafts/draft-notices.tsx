@@ -102,6 +102,7 @@ export function DraftImportPendingNotice({
   reason = "left",
   confirmDisabled = false,
   historyError = false,
+  settling = false,
 }: {
   onDismiss: () => void;
   reason?: "left" | "unknown";
@@ -109,6 +110,8 @@ export function DraftImportPendingNotice({
   confirmDisabled?: boolean;
   /** 履歴を読み込めなかった(読み込み直すまで確かめられない)。 */
   historyError?: boolean;
+  /** サーバーの処理が終わるのを待っている(待ち終わると履歴を自動で読み直す)。 */
+  settling?: boolean;
 }) {
   return (
     <div role="alert" data-testid="draft-import-pending-notice" className={WARN}>
@@ -117,6 +120,9 @@ export function DraftImportPendingNotice({
         <span>前回、取り込みの途中で画面を離れました。下の「取り込み履歴」で結果を確かめてください。</span>
       ) : (
         <span>取り込みの結果が分かりませんでした（通信が切れたか、サーバーで問題が起きました）。下の「取り込み履歴」で結果を確かめてから続けてください。</span>
+      )}
+      {settling && (
+        <span>サーバーの処理が終わるのを待っています（約1分）。そのあと取り込み履歴を自動で読み直します。</span>
       )}
       {historyError && (
         <span>取り込み履歴を読み込めませんでした。下の取り込み履歴を読み込み直してから続けてください。</span>

@@ -54,8 +54,11 @@ import FileDropZone from "@/components/ui/file-drop-zone";
 import { draftKey } from "@/lib/drafts/draft-store";
 import { hasImportResultShape, isDefiniteSubmitFailure } from "@/lib/drafts/submit-outcome";
 import {
+  canTrustJobHistory,
   compactCsvImportDraftForPending,
   csvDraftAfterImport,
+  HISTORY_SETTLE_MS,
+  initialHistoryReadyAt,
   decideCsvImportRestore,
   nextCsvPending,
   type CsvPendingEvent,
@@ -687,6 +690,13 @@ function ImportScreen({ draftEnabled }: { draftEnabled: boolean }) {
    */
   const [historyStale, setHistoryStale] = useState(restoreDecision.showPending);
   const historyGenRef = useRef(0);
+  /**
+   * この時刻より後に始めた履歴の読み込みだけを根拠にする(サーバーがジョブを作り終える前の履歴で
+   *   確かめさせない・@codex P1)。待っている間は「確かめた」を押させない。
+   */
+  const historyReadyAtRef = useRef(initialHistoryReadyAt(restored));
+  const [historySettling, setHistorySettling] = useState(() => historyReadyAtRef.current > Date.now());
+  const [historySettleKey, setHistorySettleKey] = useState(0);
   /** 履歴の読み込みの番号。最後に始めたもの以外の応答は捨てる(古い履歴で上書きしない)。 */
   const jobsReqRef = useRef(0);
   // ⚠どれかの取り込み中・結果が分からない間は「最初からやり直す」を出さない(送信中の印を消させない)。
@@ -700,6 +710,9 @@ function ImportScreen({ draftEnabled }: { draftEnabled: boolean }) {
     if (e === "unknown") {
       // 履歴を古い扱いにし、今回の取り込みが必ず見えるよう絞り込みを外して1ページ目へ戻す(@codex P1)。
       historyGenRef.current += 1;
+      historyReadyAtRef.current = Date.now() + HISTORY_SETTLE_MS;
+      setHistorySettling(true);
+      setHistorySettleKey((k) => k + 1);
       setHistoryStale(true);
       setJobFilters(DEFAULT_JOB_FILTERS);
       setJobPage(1);
@@ -725,6 +738,7 @@ function ImportScreen({ draftEnabled }: { draftEnabled: boolean }) {
   // 最新値をクロージャに焼き込むため useCallback の deps に含める。
   const fetchJobs = useCallback(async () => {
     const gen = historyGenRef.current;
+    const startedAt = Date.now();
     const req = ++jobsReqRef.current;
     setJobsLoading(true);
     try {
@@ -750,7 +764,16 @@ function ImportScreen({ draftEnabled }: { draftEnabled: boolean }) {
       setJobs((json.data ?? []) as ImportJob[]);
       setJobPagination(json.pagination ?? null);
       // ⚠絞り込みや2ページ目以降では今回の取り込みが見えないことがある=外さない。
-      if (gen === historyGenRef.current && isDefaultJobView(jobFilters, jobPage)) setHistoryStale(false);
+      if (
+        canTrustJobHistory({
+          sameGen: gen === historyGenRef.current,
+          defaultView: isDefaultJobView(jobFilters, jobPage),
+          startedAt,
+          readyAt: historyReadyAtRef.current,
+        })
+      ) {
+        setHistoryStale(false);
+      }
     } catch {
       // ignore
     } finally {
@@ -761,6 +784,20 @@ function ImportScreen({ draftEnabled }: { draftEnabled: boolean }) {
   useEffect(() => {
     fetchJobs();
   }, [fetchJobs]);
+
+  // 待ち時間が過ぎたら履歴を自動で読み直す(その読み込みが確かめる根拠になる)。
+  const fetchJobsRef = useRef(fetchJobs);
+  useEffect(() => {
+    fetchJobsRef.current = fetchJobs;
+  }, [fetchJobs]);
+  useEffect(() => {
+    if (!historySettling) return;
+    const t = setTimeout(() => {
+      setHistorySettling(false);
+      fetchJobsRef.current();
+    }, Math.max(0, historyReadyAtRef.current - Date.now()) + 50);
+    return () => clearTimeout(t);
+  }, [historySettling, historySettleKey]);
 
   // 異常ジョブの取得。履歴一覧と独立してマウント時に1度引く。
   // マーク失敗操作後にも再取得するため useCallback にしておく。
@@ -1212,7 +1249,7 @@ function ImportScreen({ draftEnabled }: { draftEnabled: boolean }) {
       />
       {importBlocked && (
         <div className="mb-4">
-          <DraftImportPendingNotice reason={importBlockReason} confirmDisabled={jobsLoading || historyStale} historyError={historyStale && !jobsLoading} onDismiss={() => applyCsvPending("confirm")} />
+          <DraftImportPendingNotice reason={importBlockReason} settling={historySettling} confirmDisabled={historySettling || jobsLoading || historyStale} historyError={historyStale && !jobsLoading && !historySettling} onDismiss={() => applyCsvPending("confirm")} />
         </div>
       )}
       {restoreDecision.start && restored && !restoredDismissed && !importBusy && (

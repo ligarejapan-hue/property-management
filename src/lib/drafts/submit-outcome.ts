@@ -22,13 +22,18 @@ export function httpError(message: string, status: number): Error & { status: nu
  * 2xx でも中身が欠けていれば(配置の途中・壊れた返事)、取り込まれたか分からない扱いにする
  * =控えと送信中の印を消さずに止め、戻ったとき確かめてもらう。
  */
-export function hasImportResultShape(
-  value: unknown,
-  shape: { numbers?: readonly string[]; arrays?: readonly string[]; objects?: readonly string[] },
-): boolean {
-  if (typeof value !== "object" || value === null) return false;
+export function hasImportResultShape(value: unknown, shape: FieldShape): boolean {
+  if (!hasFieldShape(value, shape)) return false;
+  const jobId = (value as Record<string, unknown>).jobId;
+  return typeof jobId === "string" && jobId !== "";
+}
+
+type FieldShape = { numbers?: readonly string[]; arrays?: readonly string[]; objects?: readonly string[] };
+
+/** まとまりが決まった欄(数・配列・まとまり)を持つか。返事の入れ子の中身を確かめるのに使う。 */
+export function hasFieldShape(value: unknown, shape: FieldShape): boolean {
+  if (typeof value !== "object" || value === null || Array.isArray(value)) return false;
   const v = value as Record<string, unknown>;
-  if (typeof v.jobId !== "string" || v.jobId === "") return false;
   if (shape.numbers?.some((k) => typeof v[k] !== "number")) return false;
   if (shape.arrays?.some((k) => !Array.isArray(v[k]))) return false;
   if (shape.objects?.some((k) => typeof v[k] !== "object" || v[k] === null || Array.isArray(v[k]))) return false;

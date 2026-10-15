@@ -180,7 +180,7 @@ describe("取り込み(CSV): 結果が分からないときは履歴を読み直
     expect(m.length).toBe(3);
   });
   it("履歴を読んでいる間は「確かめたので続ける」を押せない", () => {
-    expect(src).toContain('reason={importBlockReason} confirmDisabled={jobsLoading || historyStale} historyError={historyStale && !jobsLoading} onDismiss={() => applyCsvPending("confirm")}');
+    expect(src).toContain('reason={importBlockReason} settling={historySettling} confirmDisabled={historySettling || jobsLoading || historyStale} historyError={historyStale && !jobsLoading && !historySettling} onDismiss={() => applyCsvPending("confirm")}');
   });
 });
 
@@ -188,13 +188,13 @@ describe("取り込み(CSV): 履歴の読み直しが成功するまで「確か
   const src = read("src/app/(dashboard)/import/page.tsx");
   it("結果が分からなくなったら履歴を古い扱いにし、その後に始めた読み込みが成功したときだけ外す", () => {
     expect(src).toMatch(/const \[historyStale, setHistoryStale\] = useState\(restoreDecision\.showPending\);/);
-    expect(src).toMatch(/historyGenRef\.current \+= 1;\s*setHistoryStale\(true\);/);
-    expect(src).toMatch(/const gen = historyGenRef\.current;\s*const req = \+\+jobsReqRef\.current;\s*setJobsLoading\(true\);/);
-    expect(src).toMatch(/setJobPagination\(json\.pagination \?\? null\);\s*(?:\/\/[^\n]*\n\s*)?if \(gen === historyGenRef\.current && isDefaultJobView\(jobFilters, jobPage\)\) setHistoryStale\(false\);/);
+    expect(src).toMatch(/historyGenRef\.current \+= 1;[\s\S]{0,200}setHistoryStale\(true\);/);
+    expect(src).toMatch(/const gen = historyGenRef\.current;\s*const startedAt = Date\.now\(\);\s*const req = \+\+jobsReqRef\.current;\s*setJobsLoading\(true\);/);
+    expect(src).toMatch(/setJobPagination\(json\.pagination \?\? null\);\s*(?:\/\/[^\n]*\n\s*)?if \(\s*canTrustJobHistory\(\{\s*sameGen: gen === historyGenRef\.current,\s*defaultView: isDefaultJobView\(jobFilters, jobPage\),[\s\S]{0,120}\}\)\s*\) \{\s*setHistoryStale\(false\);/);
   });
   it("帯のボタンは読み込み中・古いままのとき押せず、読めなかったことを伝える", () => {
-    expect(src).toContain("confirmDisabled={jobsLoading || historyStale}");
-    expect(src).toContain("historyError={historyStale && !jobsLoading}");
+    expect(src).toContain("confirmDisabled={historySettling || jobsLoading || historyStale}");
+    expect(src).toContain("historyError={historyStale && !jobsLoading && !historySettling}");
   });
 });
 
@@ -214,7 +214,7 @@ describe("取り込み(CSV): 確かめる履歴は絞り込みなしの1ペー�
   });
   it("古い扱いを外すのは、絞り込みなしの1ページ目を読めたときだけ", () => {
     expect(src).toMatch(
-      /if \(gen === historyGenRef\.current && isDefaultJobView\(jobFilters, jobPage\)\) setHistoryStale\(false\);/,
+      /sameGen: gen === historyGenRef\.current,\s*defaultView: isDefaultJobView\(jobFilters, jobPage\),/,
     );
   });
 });
@@ -247,6 +247,22 @@ describe("成功でも結果の形が欠けた返事は「分からない」扱�
   });
   it("謄本: 控えを消す前に形を確かめる", () => {
     const src = read("src/app/(dashboard)/import/registry-pdf/page.tsx");
-    expect(src).toMatch(/if \(!hasImportResultShape\(json, \{ objects: \["parsed"\] \}\)\) \{\s*throw new Error\([^)]*\);\s*\}\s*\/\/[^\n]*\n\s*draftSaver\.discard\(\);/);
+    expect(src).toMatch(/!hasImportResultShape\(json, \{ objects: \["parsed"\] \}\) \|\|\s*!hasFieldShape\(\(json as \{ parsed: unknown \}\)\.parsed, \{ numbers: \["confidence"\], arrays: \["owners", "warnings"\] \}\)\s*\) \{\s*throw new Error\([^)]*\);\s*\}\s*\/\/[^\n]*\n\s*draftSaver\.discard\(\);/);
+  });
+});
+
+describe("取り込み(CSV): 結果が分からないときは待ってから読み直した履歴だけで確かめる(@codex P1)", () => {
+  const src = read("src/app/(dashboard)/import/page.tsx");
+  it("分からなくなった時刻から待つ・前回離れたときは印の時刻から待つ", () => {
+    expect(src).toContain("useRef(initialHistoryReadyAt(restored))");
+    expect(src).toMatch(/historyReadyAtRef\.current = Date\.now\(\) \+ HISTORY_SETTLE_MS;\s*setHistorySettling\(true\);/);
+  });
+  it("履歴の読み込みは始めた時刻で判定し、待ち終わったら自動で読み直す", () => {
+    expect(src).toMatch(/const startedAt = Date\.now\(\);/);
+    expect(src).toMatch(/canTrustJobHistory\(\{[\s\S]{0,200}startedAt,\s*readyAt: historyReadyAtRef\.current,/);
+    expect(src).toMatch(/setHistorySettling\(false\);\s*fetchJobsRef\.current\(\);/);
+  });
+  it("待っている間は「確かめた」を押させない", () => {
+    expect(src).toContain("confirmDisabled={historySettling || jobsLoading || historyStale}");
   });
 });

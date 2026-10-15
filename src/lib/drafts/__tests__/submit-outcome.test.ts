@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest";
-import { hasImportResultShape, httpError, isDefiniteSubmitFailure } from "../submit-outcome";
+import { hasFieldShape, hasImportResultShape, httpError, isDefiniteSubmitFailure } from "../submit-outcome";
 
 const withStatus = (status: number) => Object.assign(new Error("x"), { status });
 
@@ -53,5 +53,18 @@ describe("hasImportResultShape(成功の返事が取り込みの結果の形か�
     expect(hasImportResultShape({ ...ok, parseErrors: null }, shape)).toBe(false);
     expect(hasImportResultShape({ ...ok, summary: null }, shape)).toBe(false);
     expect(hasImportResultShape({ ...ok, summary: [] }, shape)).toBe(false);
+  });
+});
+
+describe("hasFieldShape(入れ子の中身・@codex P2)", () => {
+  const shape = { numbers: ["confidence"], arrays: ["owners", "warnings"] } as const;
+  it("決まった欄がそろえば true(番号は問わない)", () => {
+    expect(hasFieldShape({ confidence: 0.9, owners: [], warnings: [] }, shape)).toBe(true);
+  });
+  it("空のまとまり・配列・null は false", () => {
+    expect(hasFieldShape({}, shape)).toBe(false);
+    expect(hasFieldShape([], {})).toBe(false);
+    expect(hasFieldShape(null, {})).toBe(false);
+    expect(hasFieldShape({ confidence: 0.9, owners: [], warnings: null }, shape)).toBe(false);
   });
 });

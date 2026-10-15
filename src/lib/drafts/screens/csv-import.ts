@@ -147,3 +147,27 @@ export function nextCsvPending(s: CsvPendingState, e: CsvPendingEvent): { state:
       return { state: { ...s, unknown: false }, unmark: s.inflight === 0 };
   }
 }
+
+/**
+ * 結果が分からなくなってから、取り込み履歴を「確かめた」根拠にできるまでの待ち時間。
+ * ⚠サーバーは届いた表を読み終えてから取り込みのジョブを作る(大きい表ほど遅い)。通信が切れた直後に
+ *   読んだ履歴には、まだ今回の分が出ていないことがある=待ってから読み直したものだけを使う(@codex P1)。
+ */
+export const HISTORY_SETTLE_MS = 60_000;
+
+/** 前回離れて印が残っていたときは、印を付けた時刻から待つ。 */
+export function initialHistoryReadyAt(restored: StoredDraft<CsvImportDraft> | null): number {
+  return restored?.pendingSubmit ? restored.pendingSubmit.at + HISTORY_SETTLE_MS : 0;
+}
+
+/** その履歴の読み込みを、結果が分からない取り込みを「確かめた」根拠にしてよいか。 */
+export function canTrustJobHistory(p: {
+  /** 結果が分からなくなった後(最新の世代)に始めた読み込みか。 */
+  sameGen: boolean;
+  /** 絞り込みなしの1ページ目か(今回の取り込みが必ず見える)。 */
+  defaultView: boolean;
+  startedAt: number;
+  readyAt: number;
+}): boolean {
+  return p.sameGen && p.defaultView && p.startedAt >= p.readyAt;
+}

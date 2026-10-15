@@ -223,3 +223,26 @@ describe("取り込み(CSV)の送信中の印の数え方(@codex P1 2件)", () =
     expect(run(["ok"]).state.inflight).toBe(0);
   });
 });
+
+import { canTrustJobHistory, HISTORY_SETTLE_MS, initialHistoryReadyAt } from "../screens/csv-import";
+
+describe("取り込み履歴を「確かめた」根拠にしてよいか(@codex P1: サーバーがまだジョブを作る前の履歴で確かめさせない)", () => {
+  const base = { sameGen: true, defaultView: true, startedAt: 10_000, readyAt: 10_000 };
+  it("落ち着く時刻の後に始めた・絞り込みなしの1ページ目・最新の世代なら使える", () => {
+    expect(canTrustJobHistory(base)).toBe(true);
+    expect(canTrustJobHistory({ ...base, startedAt: 70_000 })).toBe(true);
+  });
+  it("落ち着く前に始めた読み込みは使わない(サーバーが表を読み終える前かもしれない)", () => {
+    expect(canTrustJobHistory({ ...base, startedAt: 9_999 })).toBe(false);
+  });
+  it("古い世代・絞り込みありは使わない", () => {
+    expect(canTrustJobHistory({ ...base, sameGen: false })).toBe(false);
+    expect(canTrustJobHistory({ ...base, defaultView: false })).toBe(false);
+  });
+  it("前回離れたときは、印を付けた時刻から待つ・印が無ければ待たない", () => {
+    expect(initialHistoryReadyAt({ v: 1, savedAt: 1, data: {} as never, pendingSubmit: { at: 5_000 } })).toBe(5_000 + HISTORY_SETTLE_MS);
+    expect(initialHistoryReadyAt({ v: 1, savedAt: 1, data: {} as never })).toBe(0);
+    expect(initialHistoryReadyAt(null)).toBe(0);
+    expect(HISTORY_SETTLE_MS).toBe(60_000);
+  });
+});
