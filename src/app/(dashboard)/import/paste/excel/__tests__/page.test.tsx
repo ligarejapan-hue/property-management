@@ -120,3 +120,15 @@ describe("ExcelLeadTable", () => {
     expect(html).toContain("メールアドレスの形式が正しくありません");
   });
 });
+
+describe("登録されたか分からない行", () => {
+  it("登録されたか分からない行: 理由と「登録の対象に戻す」ボタンが出る", () => {
+    const row = mk({});
+    const html = renderToStaticMarkup(
+      createElement(ExcelLeadTable, { rows: [row], results: { [`${row.sheetName}#${row.rowNumber}`]: { kind: "unknown" } }, onReturnUnknown: () => {} }),
+    );
+    expect(html).toContain("登録されたか分かりません");
+    expect(html).toContain("物件一覧で確かめてください");
+    expect(html).toContain("確かめたので登録の対象に戻す");
+  });
+});

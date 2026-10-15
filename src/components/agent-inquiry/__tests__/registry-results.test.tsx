@@ -29,7 +29,7 @@ describe("国交省の一覧から来た候補", () => {
 
   it("受付の窓だけが一覧の候補を頼む(名簿の画面は頼まない=名簿は関わった業者だけ)", () => {
     expect(read("src/components/agent-inquiry/agent-picker.tsx")).toContain("searchDeskAgents(query, { registry: true })");
-    expect(read("src/app/(dashboard)/agents/page.tsx")).not.toContain("registry: true");
+    expect(read("src/app/(desk)/agents/page.tsx")).not.toContain("registry: true");
   });
 
   it("候補を押すと名簿へ写してから、今までどおり選んだ状態にする", () => {

@@ -1,6 +1,7 @@
 "use client";
 
 import { useEffect, useState } from "react";
+import Link from "next/link";
 import { usePathname } from "next/navigation";
 import { useSession } from "next-auth/react";
 import { USE_MOCK } from "@/lib/api-client";
@@ -10,6 +11,20 @@ type ShellStatus = "loading" | "authenticated" | "unauthenticated";
 
 /** 画面(page)が読み込んだ未対応件数を枠へ渡すイベント名(枠は自分では取得しない)。 */
 export const DESK_OPEN_COUNT_EVENT = "pm-agent-desk-open-count";
+
+/**
+ * 窓の中のタブ(発注者決定 2026-10-15)。業者の名簿はメインの左メニューから外し、ここから開く。
+ * ⚠名簿の URL は /agents のまま(既存のリンク・ブックマークを切らない)。
+ */
+export const DESK_TABS = [
+  { href: "/inquiry-desk", label: "反響の受付" },
+  { href: "/agents", label: "業者の名簿" },
+] as const;
+
+/** いま見ている画面がどのタブか(名簿は業者1件の画面 /agents/<id> も含む)。 */
+export function activeDeskTab(pathname: string): string {
+  return pathname === "/agents" || pathname.startsWith("/agents/") ? "/agents" : "/inquiry-desk";
+}
 
 /** 見た目だけ(テスト用に切り出し)。読み込み中/セッション切れの扱いはメイン画面の枠と同じ。 */
 export function DeskShellView({
@@ -54,7 +69,21 @@ export function DeskShellView({
   return (
     <div className="min-h-screen bg-gray-50 text-gray-900 dark:bg-gray-950 dark:text-gray-100">
       <header className="sticky top-0 z-20 flex items-center justify-between bg-teal-700 px-4 py-2 text-white">
-        <h1 className="text-base font-bold">反響の受付</h1>
+        <nav aria-label="受付の窓" className="flex items-center gap-1">
+          {DESK_TABS.map((t) => {
+            const on = activeDeskTab(pathname) === t.href;
+            return (
+              <Link
+                key={t.href}
+                href={t.href}
+                aria-current={on ? "page" : undefined}
+                className={`rounded-md px-3 py-1 text-sm font-bold ${on ? "bg-white text-teal-800" : "text-white/85 hover:bg-white/15"}`}
+              >
+                {t.label}
+              </Link>
+            );
+          })}
+        </nav>
         <p className="text-xs">
           {userName}
           {openCount != null && <span className="ml-2 rounded bg-white/20 px-2 py-0.5">未対応 {openCount}件</span>}

@@ -139,7 +139,9 @@ export type CommitOutcome =
   | { kind: "created"; propertyId: string }
   | { kind: "duplicate" }
   | { kind: "review"; reasons: string[] }
-  | { kind: "failed"; message: string };
+  | { kind: "failed"; message: string }
+  /** 5xx・成功なのに中身が読めない=登録されたか分からない(登録済みかもしれない)。 */
+  | { kind: "unknown" };
 
 export function commitOutcome(
   status: number,
@@ -154,5 +156,8 @@ export function commitOutcome(
     return { kind: "review", reasons: message.split("／").filter((r) => r !== "") };
   }
   if (status === 409 && code === "DUPLICATE") return { kind: "duplicate" };
+  // ⚠「登録できなかった」と言い切れるのは 4xx だけ。5xx や成功なのに中身が読めない応答は、
+  //   サーバーで登録が済んでいるかもしれない=分からない扱い(手で登録し直して二重にしない・@codex P1)。
+  if (status < 400 || status >= 500) return { kind: "unknown" };
   return { kind: "failed", message };
 }

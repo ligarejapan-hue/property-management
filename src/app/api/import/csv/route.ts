@@ -61,6 +61,7 @@ import {
   buildErrorRawDataExtras,
 } from "@/lib/import-error-display";
 import { unwrapCsvTextCell } from "@/lib/csv-encode";
+import { failUnfinishedImportJob, startImportJob } from "@/lib/import-job-start";
 import { assertImportJsonBodySize } from "@/lib/import-body-size";
 
 const VALID_PROPERTY_TYPES: readonly string[] = PROPERTY_TYPE_VALUES;
@@ -151,6 +152,7 @@ async function applyBuildingPostalCode(
 // For simplicity in Phase 3, accepts JSON { fileName, csvText }.
 
 export async function POST(request: NextRequest) {
+  let startedJobId: string | null = null;
   try {
     const session = await getApiSession();
     const perms = await getUserPermissions(session.id);
@@ -179,6 +181,9 @@ export async function POST(request: NextRequest) {
     if (!csvText && !xlsxBase64) {
       throw new ApiError(422, "csvText または xlsxBase64 は必須です", "VALIDATION_ERROR");
     }
+    // ⚠受け取った直後に取り込みの記録(処理中)を作る(通信が切れた画面が履歴ですぐ確かめられるように・@codex P1)。
+    const job = await startImportJob({ jobType: "property_csv", fileName, executedBy: session.id });
+    startedJobId = job.id;
 
     // XLSX 取込時、郵便番号系の列だけ整形済みテキスト（.w）で読むためのヘッダ集合。
     // 固定トークン（郵便番号/postalCode/postal_code・棟郵便番号/buildingPostalCode/
@@ -257,17 +262,6 @@ export async function POST(request: NextRequest) {
       );
     }
 
-    // Create import job
-    const job = await prisma.importJob.create({
-      data: {
-        jobType: "property_csv",
-        fileName: fileName ?? "import.csv",
-        status: "processing",
-        totalRows: rows.length,
-        executedBy: session.id,
-        startedAt: new Date(),
-      },
-    });
 
     let successCount = 0;
     let updateCount = 0;
@@ -896,6 +890,7 @@ export async function POST(request: NextRequest) {
       where: { id: job.id },
       data: {
         status: errorCount > 0 ? "failed" : "completed",
+        totalRows: rows.length,
         successCount,
         errorCount: errorCount + needsReviewCount,
         completedAt: new Date(),
@@ -930,6 +925,7 @@ export async function POST(request: NextRequest) {
       201,
     );
   } catch (error) {
+    if (startedJobId) await failUnfinishedImportJob(startedJobId);
     return handleApiError(error);
   }
 }

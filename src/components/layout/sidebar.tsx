@@ -53,8 +53,12 @@ export default function Sidebar({ userRole, currentPath }: SidebarProps) {
         : "text-gray-700 hover:bg-gray-100 hover:text-gray-900 dark:text-gray-300 dark:hover:bg-gray-800 dark:hover:text-gray-100"
     }`;
 
-  const renderLeaf = (item: NavLeaf) =>
-    item.external ? (
+  // 中身が1つだけの柱は、見出しそのものをその画面へのリンクにする(開いても1行増えるだけのため)。
+  // 文字と絵は柱のものを使う。
+  const renderLeaf = (item: NavLeaf, as?: { label: string; icon?: React.ReactNode }) => {
+    const icon = as?.icon ?? item.icon;
+    const label = as?.label ?? item.label;
+    return item.external ? (
       <a
         key={item.href}
         href={item.href}
@@ -65,8 +69,8 @@ export default function Sidebar({ userRole, currentPath }: SidebarProps) {
         className={linkClasses(item.href)}
         onClick={() => setMobileOpen(false)}
       >
-        {item.icon}
-        {item.label}
+        {icon}
+        {label}
       </a>
     ) : (
       <Link
@@ -75,13 +79,52 @@ export default function Sidebar({ userRole, currentPath }: SidebarProps) {
         className={linkClasses(item.href)}
         onClick={() => handleNavClick(item.href)}
       >
-        {item.icon}
-        {item.label}
+        {icon}
+        {label}
       </Link>
     );
+  };
 
   const renderGroup = (g: NavGroup) => {
-    if (!g.label) return <div key={g.key}>{g.items.map(renderLeaf)}</div>;
+    if (!g.label) return <div key={g.key}>{g.items.map((i) => renderLeaf(i))}</div>;
+    if (g.pillar) {
+      // 左メニューの柱(発注者決定 2026-10-15)。普段は見出しだけを並べ、押すと中が開く。
+      if (g.items.length === 1) {
+        return <div key={g.key}>{renderLeaf(g.items[0], { label: g.label, icon: g.icon })}</div>;
+      }
+      const open = isOpen(g);
+      const here = g.items.some((i) => isActive(i.href));
+      return (
+        <div key={g.key}>
+          <button
+            type="button"
+            onClick={() => setOpenMap((m) => ({ ...m, [g.key]: !open }))}
+            aria-expanded={open}
+            className={`flex w-full items-center gap-3 rounded-md px-3 py-2 text-sm font-medium transition-colors ${
+              // 閉じていても、いまいる画面がこの中にあることは色で分かるようにする。
+              here && !open
+                ? "text-indigo-700 dark:text-indigo-300"
+                : "text-gray-700 hover:bg-gray-100 hover:text-gray-900 dark:text-gray-300 dark:hover:bg-gray-800 dark:hover:text-gray-100"
+            }`}
+          >
+            {g.icon}
+            <span className="flex-1 text-left">{g.label}</span>
+            {open ? <ChevronDown className="h-4 w-4 text-gray-400" /> : <ChevronRight className="h-4 w-4 text-gray-400" />}
+          </button>
+          {open && (
+            <div className="mb-1 ml-4 border-l border-gray-200 pl-2 dark:border-gray-700">
+              {/* 一言説明は開いたときだけ出す(閉じた並びは見出しだけにして短く保つ)。 */}
+              {g.description && (
+                <p className="px-3 pt-1 pb-0.5 text-[11px] leading-snug text-gray-400 dark:text-gray-500">
+                  {g.description}
+                </p>
+              )}
+              {g.items.map((i) => renderLeaf(i))}
+            </div>
+          )}
+        </div>
+      );
+    }
     if (g.collapsible) {
       const open = isOpen(g);
       return (
@@ -104,7 +147,7 @@ export default function Sidebar({ userRole, currentPath }: SidebarProps) {
               </p>
             )}
           </div>
-          {open && g.items.map(renderLeaf)}
+          {open && g.items.map((i) => renderLeaf(i))}
         </div>
       );
     }
@@ -120,12 +163,26 @@ export default function Sidebar({ userRole, currentPath }: SidebarProps) {
             </p>
           )}
         </div>
-        {g.items.map(renderLeaf)}
+        {g.items.map((i) => renderLeaf(i))}
       </div>
     );
   };
 
-  const navContent = <nav className="flex flex-col gap-1 p-4">{groups.map(renderGroup)}</nav>;
+  // 柱の並びと「今まで通り」のグループ(物件データ編集・システム管理・資料)の間に区切り線を引く。
+  const navContent = (
+    <nav className="flex flex-col gap-1 p-4">
+      {groups.map((g, i) =>
+        i > 0 && groups[i - 1].pillar && !g.pillar && g.label ? (
+          <div key={`${g.key}-sep`}>
+            <hr className="my-3 border-gray-200 dark:border-gray-700" />
+            {renderGroup(g)}
+          </div>
+        ) : (
+          renderGroup(g)
+        ),
+      )}
+    </nav>
+  );
 
   return (
     <>

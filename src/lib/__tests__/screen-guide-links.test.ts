@@ -61,6 +61,6 @@ describe("説明文の中の画面へのリンク", () => {
   });
 
   it("業者一覧: 検索で見つからないとき「しまった業者」の一覧へ切り替えられる", () => {
-    expect(read("app/(dashboard)/agents/page.tsx")).toContain('onClick={() => { setQuery(""); setFilter("archived"); }}');
+    expect(read("app/(desk)/agents/page.tsx")).toContain('onClick={() => { setQuery(""); setFilter("archived"); }}');
   });
 });

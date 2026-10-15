@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useEffect, useCallback, useMemo } from "react";
+import { useState, useEffect, useCallback, useMemo, useRef } from "react";
 import { PageHeader } from "@/components/ui/page-header";
 import { FilterPanel } from "@/components/ui/filter-panel";
 import { Button } from "@/components/ui/button";
@@ -51,6 +51,24 @@ import { readCsvFileAsText } from "@/lib/csv-decode";
 import { filterNonBlankHeaders } from "@/lib/csv-parser";
 import ImportSwitcher from "@/components/import/import-switcher";
 import FileDropZone from "@/components/ui/file-drop-zone";
+import { draftKey } from "@/lib/drafts/draft-store";
+import { hasImportResultShape, isDefiniteSubmitFailure } from "@/lib/drafts/submit-outcome";
+import {
+  canTrustJobHistory,
+  compactCsvImportDraftForPending,
+  csvDraftAfterImport,
+  HISTORY_SETTLE_MS,
+  initialHistoryReadyAt,
+  decideCsvImportRestore,
+  nextCsvPending,
+  type CsvPendingEvent,
+  type CsvPendingState,
+  isCsvImportDraftEmpty,
+  parseCsvImportDraft,
+  type CsvImportDraft,
+} from "@/lib/drafts/screens/csv-import";
+import { useClientReady, useDraftAutosave, useRestoredDraft } from "@/hooks/use-draft";
+import { DraftImportPendingNotice, DraftRestoredNotice, DraftTooLargeNotice } from "@/components/drafts/draft-notices";
 import {
   IMPORT_TYPE_FILTER_OPTIONS,
   getImportTypeLabel,
@@ -93,6 +111,13 @@ interface ImportJobFilters {
   to: string; // YYYY-MM-DD
 }
 
+const DEFAULT_JOB_FILTERS: ImportJobFilters = { jobType: "", executedBy: "", from: "", to: "" };
+
+/** 絞り込みなしの1ページ目か(取り込んだばかりの履歴が必ず見える表示)。 */
+function isDefaultJobView(f: ImportJobFilters, page: number): boolean {
+  return page === 1 && f.jobType === "" && f.executedBy === "" && f.from === "" && f.to === "";
+}
+
 const JOB_TYPE_OPTIONS = IMPORT_TYPE_FILTER_OPTIONS;
 
 interface ImportResult {
@@ -106,6 +131,18 @@ interface ImportResult {
 }
 
 type Step = 1 | 2 | 3 | 4;
+
+/** 成功の返事として読むのに要る欄(欠けていたら取り込まれたか分からない扱い・@codex P2)。 */
+const IMPORT_RESULT_SHAPE = {
+  numbers: ["totalRows", "successCount", "errorCount", "needsReviewCount"],
+  arrays: ["parseErrors"],
+} as const;
+const RO_RESULT_SHAPE = {
+  numbers: ["successCount", "needsReviewCount", "errorCount", "propertyUpdatedCount", "ownerCreatedCount", "ownerLinkedCount"],
+  objects: ["summary"],
+} as const;
+const RP_RESULT_SHAPE = { numbers: ["successCount", "needsReviewCount", "errorCount"] } as const;
+const UNREADABLE_IMPORT_RESULT = "取り込みの返事を読み取れませんでした。下の取り込み履歴で取り込まれたか確かめてください。";
 
 // ---------------------------------------------------------------------------
 // Constants
@@ -485,25 +522,32 @@ function ReviewActionHint({
   }
 }
 
-export default function ImportPage() {
+function ImportScreen({ draftEnabled }: { draftEnabled: boolean }) {
+  // 作業中の控え(設計書 §2 S4)。3つの流れをまとめて1つの鍵に置く。
+  const draftKeyValue = draftEnabled ? draftKey("csv-import") : null;
+  const restored = useRestoredDraft(draftKeyValue, parseCsvImportDraft);
+  // ⚠この画面は useState の初期化で1回だけ決める(描き直しで変わらない)。
+  const [restoreDecision] = useState(() => decideCsvImportRestore(restored));
+  const s0 = restoreDecision.start;
+
   // Step state
-  const [step, setStep] = useState<Step>(1);
+  const [step, setStep] = useState<Step>(s0?.main?.step ?? 1);
 
   // File state
-  const [csvText, setCsvText] = useState("");
-  const [xlsxBase64, setXlsxBase64] = useState<string | null>(null);
-  const [fileName, setFileName] = useState("");
+  const [csvText, setCsvText] = useState(s0?.main?.csvText ?? "");
+  const [xlsxBase64, setXlsxBase64] = useState<string | null>(s0?.main?.xlsxBase64 ?? null);
+  const [fileName, setFileName] = useState(s0?.main?.fileName ?? "");
 
   // Template
-  const [template, setTemplate] = useState<string>("standard");
+  const [template, setTemplate] = useState<string>(s0?.main?.template ?? "standard");
 
   // Parsed CSV
-  const [headers, setHeaders] = useState<string[]>([]);
-  const [rows, setRows] = useState<string[][]>([]);
+  const [headers, setHeaders] = useState<string[]>(s0?.main?.headers ?? []);
+  const [rows, setRows] = useState<string[][]>(s0?.main?.rows ?? []);
 
   // Column mapping
   const [columnMapping, setColumnMapping] = useState<Record<string, string>>(
-    {}
+    s0?.main?.columnMapping ?? {}
   );
 
   // Import state
@@ -523,7 +567,7 @@ export default function ImportPage() {
     fileType?: "reception" | "owner" | "ambiguous" | "unknown";
     fileTypeLabel?: string | null;
     fileTypeError?: string | null;
-  } | null>(null);
+  } | null>((s0?.main?.duplicatePreview as never) ?? null);
   const [previewLoading, setPreviewLoading] = useState(false);
 
   // Job history
@@ -567,38 +611,135 @@ export default function ImportPage() {
     name: string;
     csvText?: string;
     xlsxBase64?: string;
-  } | null>(null);
+  } | null>(s0?.ro?.receptionFile ?? null);
   const [ownerFile, setOwnerFile] = useState<{
     name: string;
     csvText?: string;
     xlsxBase64?: string;
-  } | null>(null);
-  const [roPreview, setRoPreview] = useState<ReceptionOwnerPreviewResponse | null>(null);
+  } | null>(s0?.ro?.ownerFile ?? null);
+  const [roPreview, setRoPreview] = useState<ReceptionOwnerPreviewResponse | null>((s0?.ro?.roPreview as never) ?? null);
   const [roResult, setRoResult] = useState<ReceptionOwnerImportResponse | null>(null);
   const [roLoading, setRoLoading] = useState(false);
   const [roError, setRoError] = useState<string | null>(null);
   // 取込条件: 既定は「DLに〇がついている物件のみ」かつ「既存のみ」
-  const [dlFilter, setDlFilter] = useState<"marked" | "unmarked" | "all">("marked");
-  const [shinkiFilter, setShinkiFilter] = useState<"existing" | "new" | "all">("existing");
+  const [dlFilter, setDlFilter] = useState<"marked" | "unmarked" | "all">(s0?.ro?.dlFilter ?? "marked");
+  const [shinkiFilter, setShinkiFilter] = useState<"existing" | "new" | "all">(s0?.ro?.shinkiFilter ?? "existing");
 
   // Reception → Property (1-file) state
   const [rpFile, setRpFile] = useState<{
     name: string;
     csvText?: string;
     xlsxBase64?: string;
-  } | null>(null);
-  const [rpPreview, setRpPreview] = useState<ReceptionPropertyPreviewResponse | null>(null);
+  } | null>(s0?.rp?.rpFile ?? null);
+  const [rpPreview, setRpPreview] = useState<ReceptionPropertyPreviewResponse | null>((s0?.rp?.rpPreview as never) ?? null);
   const [rpResult, setRpResult] = useState<ReceptionPropertyImportResponse | null>(null);
   const [rpLoading, setRpLoading] = useState(false);
   const [rpError, setRpError] = useState<string | null>(null);
-  const [rpDlFilter, setRpDlFilter] = useState<"marked" | "unmarked" | "all">("marked");
-  const [rpShinkiFilter, setRpShinkiFilter] = useState<"existing" | "new" | "all">("existing");
+  const [rpDlFilter, setRpDlFilter] = useState<"marked" | "unmarked" | "all">(s0?.rp?.rpDlFilter ?? "marked");
+  const [rpShinkiFilter, setRpShinkiFilter] = useState<"existing" | "new" | "all">(s0?.rp?.rpShinkiFilter ?? "existing");
+
+  const [restoredDismissed, setRestoredDismissed] = useState(false);
+
+  const draftData = useMemo<CsvImportDraft>(
+    () => ({
+      rev: 1,
+      main:
+        step === 2 || step === 3
+          ? { step, fileName, csvText, xlsxBase64, template, headers, rows, columnMapping, duplicatePreview }
+          : null,
+      // 結果が出たら(取り込み済み)その流れは控えない。
+      ro:
+        (receptionFile || ownerFile) && !roResult
+          ? { receptionFile, ownerFile, dlFilter, shinkiFilter, roPreview: roPreview as Record<string, unknown> | null }
+          : null,
+      rp:
+        rpFile && !rpResult
+          ? { rpFile, rpDlFilter, rpShinkiFilter, rpPreview: rpPreview as Record<string, unknown> | null }
+          : null,
+    }),
+    [step, fileName, csvText, xlsxBase64, template, headers, rows, columnMapping, duplicatePreview,
+      receptionFile, ownerFile, dlFilter, shinkiFilter, roPreview, roResult,
+      rpFile, rpDlFilter, rpShinkiFilter, rpPreview, rpResult],
+  );
+  // ⚠送信中の印が残っていた控えは、中身は戻さず(上の restoreDecision)印だけ引き継ぐ。
+  //   人が履歴で確かめる(帯のボタン)まで印を消さない=離れて戻っても案内が出続ける(§5.1 S4・@codex P1)。
+  const draftSaver = useDraftAutosave(draftKeyValue, draftData, isCsvImportDraftEmpty, restored, {
+    compactForPending: compactCsvImportDraftForPending,
+  });
+  // 取り込みが済んだとき、済んだ流れを外した形を書くため最新の控えの形を持っておく(描画中には書かない)。
+  const draftDataRef = useRef(draftData);
+  useEffect(() => {
+    draftDataRef.current = draftData;
+  }, [draftData]);
+
+  /**
+   * 「最初からやり直す」の世代。やり直した後に届いたファイルの読み込みは使わない
+   * (届いた結果が、消したはずの控えを作り直さないように・@codex P2)。
+   */
+  const discardGenRef = useRef(0);
+
+  // 送信中の印は3つの流れで1つ。数えて、全部済んだときだけ外す(@codex P1)。
+  // ⚠前回の印を引き継いだときは「分からない」から始める(確かめるまで印を外さない・送れなくする)。
+  const csvPendingRef = useRef<CsvPendingState>({ inflight: 0, unknown: restoreDecision.showPending });
+  /** 結果が分からない(前回離れた/画面に残ったまま 5xx・通信切れ)。履歴で確かめるまで取り込みを止める。 */
+  const [importBlocked, setImportBlocked] = useState(restoreDecision.showPending);
+  const [importBlockReason, setImportBlockReason] = useState<"left" | "unknown">("left");
+  /**
+   * 下の取り込み履歴が、結果が分からなくなる前のままか。⚠古い履歴を見て「無かった」と
+   *   確かめたことにさせない: 分からなくなった後に始めた読み込みが成功するまで true(@codex P1)。
+   */
+  const [historyStale, setHistoryStale] = useState(restoreDecision.showPending);
+  const historyGenRef = useRef(0);
+  /**
+   * この時刻より後に始めた履歴の読み込みだけを根拠にする(サーバーがジョブを作り終える前の履歴で
+   *   確かめさせない・@codex P1)。待っている間は「確かめた」を押させない。
+   */
+  const historyReadyAtRef = useRef(initialHistoryReadyAt(restored));
+  const [historySettling, setHistorySettling] = useState(() => historyReadyAtRef.current > Date.now());
+  const [historySettleKey, setHistorySettleKey] = useState(0);
+  /** 履歴の読み込みの番号。最後に始めたもの以外の応答は捨てる(古い履歴で上書きしない)。 */
+  const jobsReqRef = useRef(0);
+  // ⚠どれかの取り込み中・結果が分からない間は「最初からやり直す」を出さない(送信中の印を消させない)。
+  //   下見の返事を待つ間も出さない(届いた結果が控えを作り直す)。
+  const importBusy = uploading || previewLoading || roLoading || rpLoading || importBlocked;
+  const applyCsvPending = (e: CsvPendingEvent) => {
+    const r = nextCsvPending(csvPendingRef.current, e);
+    csvPendingRef.current = r.state;
+    if (e === "start") draftSaver.markSubmitting();
+    if (r.unmark) draftSaver.unmarkSubmitting();
+    if (e === "unknown") {
+      // 履歴を古い扱いにし、今回の取り込みが必ず見えるよう絞り込みを外して1ページ目へ戻す(@codex P1)。
+      historyGenRef.current += 1;
+      historyReadyAtRef.current = Date.now() + HISTORY_SETTLE_MS;
+      setHistorySettling(true);
+      setHistorySettleKey((k) => k + 1);
+      setHistoryStale(true);
+      setJobFilters(DEFAULT_JOB_FILTERS);
+      setJobPage(1);
+      setImportBlocked(true);
+      setImportBlockReason("unknown");
+    }
+    if (e === "confirm") setImportBlocked(false);
+  };
+  /**
+   * 1つの流れの取り込みが済んだ。済んだ流れを外した形を書いてから数える。
+   * ⚠共有の形(ref)に積み重ねる: 画面を離れた後に2つ済むと、2つめが離れる前の形から作り直して
+   *   先に済んだ流れを書き戻してしまう(@codex P1)。
+   */
+  const finishCsvFlow = (flow: "main" | "ro" | "rp") => {
+    draftDataRef.current = csvDraftAfterImport(draftDataRef.current, flow);
+    draftSaver.writeNow(draftDataRef.current);
+    applyCsvPending("ok");
+  };
 
 
   // ------ Jobs ------
   // jobFilters / jobPage / jobLimit はクライアント State なので
   // 最新値をクロージャに焼き込むため useCallback の deps に含める。
   const fetchJobs = useCallback(async () => {
+    const gen = historyGenRef.current;
+    const startedAt = Date.now();
+    const req = ++jobsReqRef.current;
     setJobsLoading(true);
     try {
       // 日付フィルタは「YYYY-MM-DD」を受け取り、ISO 文字列に変換して渡す。
@@ -619,18 +760,44 @@ export default function ImportPage() {
         page: jobPage,
         limit: jobLimit,
       });
+      if (req !== jobsReqRef.current) return;
       setJobs((json.data ?? []) as ImportJob[]);
       setJobPagination(json.pagination ?? null);
+      // ⚠絞り込みや2ページ目以降では今回の取り込みが見えないことがある=外さない。
+      if (
+        canTrustJobHistory({
+          sameGen: gen === historyGenRef.current,
+          defaultView: isDefaultJobView(jobFilters, jobPage),
+          startedAt,
+          readyAt: historyReadyAtRef.current,
+        })
+      ) {
+        setHistoryStale(false);
+      }
     } catch {
       // ignore
     } finally {
-      setJobsLoading(false);
+      if (req === jobsReqRef.current) setJobsLoading(false);
     }
   }, [jobFilters, jobPage, jobLimit]);
 
   useEffect(() => {
     fetchJobs();
   }, [fetchJobs]);
+
+  // 待ち時間が過ぎたら履歴を自動で読み直す(その読み込みが確かめる根拠になる)。
+  const fetchJobsRef = useRef(fetchJobs);
+  useEffect(() => {
+    fetchJobsRef.current = fetchJobs;
+  }, [fetchJobs]);
+  useEffect(() => {
+    if (!historySettling) return;
+    const t = setTimeout(() => {
+      setHistorySettling(false);
+      fetchJobsRef.current();
+    }, Math.max(0, historyReadyAtRef.current - Date.now()) + 50);
+    return () => clearTimeout(t);
+  }, [historySettling, historySettleKey]);
 
   // 異常ジョブの取得。履歴一覧と独立してマウント時に1度引く。
   // マーク失敗操作後にも再取得するため useCallback にしておく。
@@ -737,6 +904,7 @@ export default function ImportPage() {
 
   // ------ File handling ------
   const processFile = useCallback(async (file: File) => {
+    const gen = discardGenRef.current;
     setFileName(file.name);
     setError(null);
     setResult(null);
@@ -748,6 +916,7 @@ export default function ImportPage() {
           parseFileForPreview(file),
           readFileForImport(file),
         ]);
+        if (gen !== discardGenRef.current) return;
         setCsvText("");
         setXlsxBase64(buf.xlsxBase64 ?? null);
         // 1行目ヘッダーが実質空の列はマッピング候補から除外する
@@ -771,6 +940,7 @@ export default function ImportPage() {
       // 旧実装は UTF-8 固定で読んでおり、Excel 出力 (Shift-JIS / CP932) の
       // 日本語CSVが文字化けしていたため共通デコーダ経由に変更。
       const text = await readCsvFileAsText(file);
+      if (gen !== discardGenRef.current) return;
       setCsvText(text);
       setXlsxBase64(null);
       const { headers: h, rows: r } = parseCsv(text);
@@ -834,11 +1004,14 @@ export default function ImportPage() {
 
   // ------ Import ------
   const handleImport = async () => {
+    if (importBlocked) return;
     if (!csvText.trim() && !xlsxBase64) return;
     setUploading(true);
     setError(null);
     setResult(null);
 
+    // 返事が来る前に離れたら、戻ったとき「取り込み履歴で確かめて」と出す(二重取り込みを防ぐ・§5.1)。
+    applyCsvPending("start");
     try {
       const json = await importCsv(
         fileName || "import.csv",
@@ -846,10 +1019,17 @@ export default function ImportPage() {
         columnMapping,
         xlsxBase64 ?? undefined,
       );
+      // ⚠成功でも結果の形が欠けた返事は、取り込まれたか分からない(印を残して止める・@codex P2)。
+      if (!hasImportResultShape(json, IMPORT_RESULT_SHAPE)) throw new Error(UNREADABLE_IMPORT_RESULT);
       setResult(json as ImportResult);
+      finishCsvFlow("main");
       setStep(4);
       fetchJobs();
     } catch (err) {
+      // ⚠5xx・通信切れは印を残し、履歴で確かめるまで取り込みを止める(取り込まれたか分からない)。
+      applyCsvPending(isDefiniteSubmitFailure(err) ? "definite" : "unknown");
+      // 結果が分からないときも履歴を読み直す(古い履歴を見て「無かった」と思わせない)。
+      fetchJobs();
       setError(err instanceof Error ? err.message : "取込に失敗しました");
     } finally {
       setUploading(false);
@@ -873,6 +1053,7 @@ export default function ImportPage() {
 
   // ------ Reception × Owner ------
   const handleRoFile = async (which: "reception" | "owner", file: File | null) => {
+    const gen = discardGenRef.current;
     setRoError(null);
     setRoPreview(null);
     setRoResult(null);
@@ -885,6 +1066,7 @@ export default function ImportPage() {
     // 内容(列構成)から判定し、取り違えのみエラーにする。
     try {
       const buf = await readFileForImport(file);
+      if (gen !== discardGenRef.current) return;
       const entry = {
         name: file.name,
         csvText: buf.csvText,
@@ -922,10 +1104,12 @@ export default function ImportPage() {
   };
 
   const handleRoImport = async () => {
+    if (importBlocked) return;
     if (!receptionFile || !ownerFile) return;
     if (!window.confirm("一意特定できた行だけを既存物件に反映します。よろしいですか？")) return;
     setRoLoading(true);
     setRoError(null);
+    applyCsvPending("start");
     try {
       const res = await importReceptionOwnerCsv({
         receptionFileName: receptionFile.name,
@@ -937,9 +1121,14 @@ export default function ImportPage() {
         dlFilter,
         shinkiFilter,
       });
+      if (!hasImportResultShape(res, RO_RESULT_SHAPE)) throw new Error(UNREADABLE_IMPORT_RESULT);
       setRoResult(res);
+      finishCsvFlow("ro");
       fetchJobs();
     } catch (e) {
+      applyCsvPending(isDefiniteSubmitFailure(e) ? "definite" : "unknown");
+      // 結果が分からないときも履歴を読み直す(古い履歴を見て「無かった」と思わせない)。
+      fetchJobs();
       setRoError(e instanceof Error ? e.message : "取込に失敗しました");
     } finally {
       setRoLoading(false);
@@ -958,6 +1147,7 @@ export default function ImportPage() {
 
   // ------ Reception → Property ------
   const handleRpFile = async (file: File | null) => {
+    const gen = discardGenRef.current;
     setRpError(null);
     setRpPreview(null);
     setRpResult(null);
@@ -965,6 +1155,7 @@ export default function ImportPage() {
     // B-11: ファイル名では拒否しない (種別はプレビュー時に内容から判定)。
     try {
       const buf = await readFileForImport(file);
+      if (gen !== discardGenRef.current) return;
       setRpFile({ name: file.name, csvText: buf.csvText, xlsxBase64: buf.xlsxBase64 });
     } catch (e) {
       setRpError(e instanceof Error ? e.message : "ファイル読込に失敗しました");
@@ -993,10 +1184,12 @@ export default function ImportPage() {
   };
 
   const handleRpImport = async () => {
+    if (importBlocked) return;
     if (!rpFile) return;
     if (!window.confirm("住所が既存物件と重複しない行を物件として新規作成します。よろしいですか？")) return;
     setRpLoading(true);
     setRpError(null);
+    applyCsvPending("start");
     try {
       const res = await importReceptionPropertyCsv({
         receptionFileName: rpFile.name,
@@ -1005,9 +1198,14 @@ export default function ImportPage() {
         dlFilter: rpDlFilter,
         shinkiFilter: rpShinkiFilter,
       });
+      if (!hasImportResultShape(res, RP_RESULT_SHAPE)) throw new Error(UNREADABLE_IMPORT_RESULT);
       setRpResult(res);
+      finishCsvFlow("rp");
       fetchJobs();
     } catch (e) {
+      applyCsvPending(isDefiniteSubmitFailure(e) ? "definite" : "unknown");
+      // 結果が分からないときも履歴を読み直す(古い履歴を見て「無かった」と思わせない)。
+      fetchJobs();
       setRpError(e instanceof Error ? e.message : "取込に失敗しました");
     } finally {
       setRpLoading(false);
@@ -1021,6 +1219,16 @@ export default function ImportPage() {
     setRpError(null);
     setRpDlFilter("marked");
     setRpShinkiFilter("existing");
+  };
+
+  const handleDiscardDraft = () => {
+    discardGenRef.current += 1;
+    draftSaver.discard();
+    handleReset();
+    handleRoReset();
+    handleRpReset();
+    setTemplate("standard");
+    setRestoredDismissed(true);
   };
 
   // ------ Render helpers ------
@@ -1039,6 +1247,21 @@ export default function ImportPage() {
         title="受付帳CSV取込"
         description="受付帳のCSV / Excel(.xlsx) から物件を新規作成し、所有者CSVで所有者を紐づけます。"
       />
+      {importBlocked && (
+        <div className="mb-4">
+          <DraftImportPendingNotice reason={importBlockReason} settling={historySettling} confirmDisabled={historySettling || jobsLoading || historyStale} historyError={historyStale && !jobsLoading && !historySettling} onDismiss={() => applyCsvPending("confirm")} />
+        </div>
+      )}
+      {restoreDecision.start && restored && !restoredDismissed && !importBusy && (
+        <div className="mb-4">
+          <DraftRestoredNotice savedAt={restored.savedAt} onDiscard={handleDiscardDraft} />
+        </div>
+      )}
+      {draftSaver.tooLarge && (
+        <div className="mb-4">
+          <DraftTooLargeNotice />
+        </div>
+      )}
 
       {/* 利用者向け操作ガイド: 取込の順番と各CSVの役割を説明 */}
       <div className="mb-6 rounded-lg border border-blue-200 dark:border-blue-400/20 bg-blue-50 dark:bg-blue-500/10 p-4 text-sm">
@@ -1569,7 +1792,7 @@ export default function ImportPage() {
             </button>
             <button
               onClick={handleImport}
-              disabled={uploading}
+              disabled={uploading || importBlocked}
               className="flex items-center gap-2 rounded-md bg-indigo-600 px-4 py-2 text-sm font-medium text-white hover:bg-indigo-700 disabled:opacity-50"
             >
               {uploading ? (
@@ -1740,7 +1963,7 @@ export default function ImportPage() {
           </button>
           <button
             onClick={handleRpImport}
-            disabled={!rpPreview || rpPreview.summary.toCreateCount === 0 || rpLoading}
+            disabled={!rpPreview || rpPreview.summary.toCreateCount === 0 || rpLoading || importBlocked}
             // C-2 UI総点検: 0件(取り込む対象なし)でも緑のままで「押せそう」に見えた。無効時はグレーにして非活性を明示。
             className="flex items-center gap-1.5 rounded-md bg-green-600 px-4 py-2 text-sm font-medium text-white hover:bg-green-700 disabled:cursor-not-allowed disabled:bg-gray-200 disabled:text-gray-400 disabled:hover:bg-gray-200 dark:disabled:bg-gray-700 dark:disabled:text-gray-500 dark:disabled:hover:bg-gray-700"
           >
@@ -1951,7 +2174,7 @@ export default function ImportPage() {
           </button>
           <button
             onClick={handleRoImport}
-            disabled={!roPreview || roLoading}
+            disabled={!roPreview || roLoading || importBlocked}
             className="flex items-center gap-2 rounded-md bg-green-600 px-4 py-2 text-sm font-medium text-white hover:bg-green-700 disabled:cursor-not-allowed disabled:bg-gray-300"
           >
             {roLoading ? <Loader2 className="h-4 w-4 animate-spin" /> : <ArrowRight className="h-4 w-4" />}
@@ -2482,4 +2705,10 @@ export default function ImportPage() {
       </div>
     </div>
   );
+}
+
+/** 控えはブラウザで描き直した後だけ読む(F5 でサーバー描画と食い違わないように)。 */
+export default function ImportPage() {
+  const clientReady = useClientReady();
+  return <ImportScreen key={clientReady ? "client" : "server"} draftEnabled={clientReady} />;
 }

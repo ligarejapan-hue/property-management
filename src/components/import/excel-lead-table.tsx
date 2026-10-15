@@ -8,33 +8,24 @@
 import Link from "next/link";
 import StatusBadge from "@/components/ui/status-badge";
 import { PROPERTY_TYPE_LABELS } from "@/lib/property-types";
-import type { PasteDraft } from "@/lib/paste-import/types";
-import type { LeadRowStatus } from "@/lib/paste-import/lead-sheet";
 
-export interface ExcelLeadRow {
-  sheetName: string;
-  rowNumber: number;
-  text: string;
-  draft: PasteDraft;
-  ownerNote: string;
-  status: LeadRowStatus;
-  reasons: string[];
-  registeredPropertyId: string | null;
-}
-
-/** 登録を試みた結果。 */
-export type ExcelLeadResult =
-  | { kind: "created"; propertyId: string }
-  | { kind: "duplicate" }
-  /** 登録直前の見直しで候補が見つかり、登録しなかった(人が確かめる)。 */
-  | { kind: "review"; reasons: string[] }
-  | { kind: "failed"; message: string };
+// 行と結果の型は src/lib 側(作業中の控えの検査)からも使うので src/lib に置く。
+import type { ExcelLeadResult, ExcelLeadRow } from "@/lib/paste-import/excel-lead-types";
+export type { ExcelLeadResult, ExcelLeadRow } from "@/lib/paste-import/excel-lead-types";
 
 export function excelLeadRowKey(r: Pick<ExcelLeadRow, "sheetName" | "rowNumber">): string {
   return `${r.sheetName}#${r.rowNumber}`;
 }
 
-function StatusCell({ row, result }: { row: ExcelLeadRow; result: ExcelLeadResult | undefined }) {
+function StatusCell({
+  row,
+  result,
+  onReturnUnknown,
+}: {
+  row: ExcelLeadRow;
+  result: ExcelLeadResult | undefined;
+  onReturnUnknown?: () => void;
+}) {
   if (result?.kind === "created") {
     return (
       <Link href={`/properties/${result.propertyId}`} className="text-indigo-600 hover:underline dark:text-indigo-400">
@@ -43,6 +34,21 @@ function StatusCell({ row, result }: { row: ExcelLeadRow; result: ExcelLeadResul
     );
   }
   if (result?.kind === "duplicate") return <StatusBadge intent="neutral">登録済み</StatusBadge>;
+  if (result?.kind === "unknown") {
+    return (
+      <div className="space-y-1">
+        <StatusBadge intent="warning">登録されたか分かりません</StatusBadge>
+        <p className="text-xs text-amber-800 dark:text-amber-300">
+          登録の返事を受け取れませんでした（途中で画面を離れたか、通信・サーバーの問題）。物件一覧で確かめてください。
+        </p>
+        {onReturnUnknown && (
+          <button type="button" onClick={onReturnUnknown} className="text-xs text-indigo-600 underline dark:text-indigo-400">
+            確かめたので登録の対象に戻す
+          </button>
+        )}
+      </div>
+    );
+  }
   if (result?.kind === "failed") {
     return (
       <div className="space-y-1">
@@ -106,9 +112,12 @@ function ReviewHelp({ row }: { row: ExcelLeadRow }) {
 export function ExcelLeadTable({
   rows,
   results,
+  onReturnUnknown,
 }: {
   rows: ExcelLeadRow[];
   results: Record<string, ExcelLeadResult>;
+  /** 「登録されたか分からない」行を、人が確かめた後でまとめて登録の対象に戻す。 */
+  onReturnUnknown?: (rowKey: string) => void;
 }) {
   return (
     <div className="overflow-x-auto rounded-lg border border-gray-200 bg-white dark:border-gray-700 dark:bg-gray-800">
@@ -142,7 +151,11 @@ export function ExcelLeadTable({
                   {type ? (PROPERTY_TYPE_LABELS[type] ?? type) : "—"}
                 </td>
                 <td className="px-3 py-2">
-                  <StatusCell row={row} result={result} />
+                  <StatusCell
+                    row={row}
+                    result={result}
+                    onReturnUnknown={onReturnUnknown ? () => onReturnUnknown(key) : undefined}
+                  />
                   {((row.status === "review" && !result) || result?.kind === "review") && (
                     <ReviewHelp row={row} />
                   )}

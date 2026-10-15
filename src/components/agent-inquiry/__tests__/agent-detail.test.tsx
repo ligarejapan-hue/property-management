@@ -73,7 +73,7 @@ describe("保存の失敗の文言", () => {
 });
 
 describe("詳細の画面", () => {
-  const page = () => read("src/app/(dashboard)/agents/[id]/page.tsx");
+  const page = () => read("src/app/(desk)/agents/[id]/page.tsx");
   it("業者ごとに作り直す(前の業者の打ちかけを持ち越さない)", () => {
     expect(page()).toMatch(/<AgentDetailBody key=\{id\} id=\{id\} \/>/);
   });

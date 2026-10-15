@@ -15,13 +15,13 @@ Task 7 が直した「謄本取込が所有者の法人番号を版番号を進�
 
 | # | ファイル:行 | 書く項目(編集画面で変えられるもの) | 修正内容 | 追加した振る舞いテスト |
 |---|---|---|---|---|
-| 1 | `src/app/api/import/csv/route.ts:617`(2026-10-05 重複更新を棟のつなぎと同じトランザクションへ移して 588→611→import 追加で612→棟郵便番号の書き先・取込の目印で615→2026-10-06 変更ログを同じ tx で書く import 追加で616→2026-10-07 取込行の確定用の import 追加で617) | `finalUpdateData`(UPDATABLE_PROPERTY_FIELDS: address/postalCode/lotNumber/buildingNumber/note/…)。棟だけつなぐ行は空の data+version で進め、続けて同じトランザクションで applyBuildingLink | `data` に `version: { increment: 1 }` を追加 | `src/lib/__tests__/properties-csv-import-postal-code.test.ts`「13. update時にversionを進める」 |
+| 1 | `src/app/api/import/csv/route.ts:613`(2026-10-05 重複更新を棟のつなぎと同じトランザクションへ移して 588→611→import 追加で612→棟郵便番号の書き先・取込の目印で615→2026-10-06 変更ログを同じ tx で書く import 追加で616→2026-10-07 取込行の確定用の import 追加で617→2026-10-15 取り込みの記録を受け取った直後に作るよう移して613) | `finalUpdateData`(UPDATABLE_PROPERTY_FIELDS: address/postalCode/lotNumber/buildingNumber/note/…)。棟だけつなぐ行は空の data+version で進め、続けて同じトランザクションで applyBuildingLink | `data` に `version: { increment: 1 }` を追加 | `src/lib/__tests__/properties-csv-import-postal-code.test.ts`「13. update時にversionを進める」 |
 | 2 | `src/app/api/import/jobs/[jobId]/rollback/route.ts:559`(2026-09-21 main合流で行番号ずれ・旧:461→493→外部レビュー対応で502→2026-09-28 業者からの反響の除外で525→2026-10-05 取込が作った空の棟の後始末で536→棟の復元で559) | `restoreData`(RESTORABLE_PROPERTY_FIELDS = UPDATABLE_PROPERTY_FIELDS ∩ PROPERTY_TRACKED_FIELDS、2026-10-05 から CSV 重複更新がつないだ buildingId/buildingName も組で) | `data` に `version: { increment: 1 }` を追加 | `src/lib/__tests__/import-rollback-restore-version.test.ts`(新規) |
 | 3 | `src/app/api/import/jobs/[jobId]/rows/[rowId]/manual-link-reception-owner/route.ts:344` | `propertyUpdates`(lotNumber/buildingNumber。roomNoは対象外だが同じ更新に同居) | `data` に `version: { increment: 1 }` を追加 | `src/lib/__tests__/manual-link-archive-filter.test.ts`「物件の空欄補完は version を進める」 |
-| 4 | `src/app/api/import/reception-owner/route.ts:354` | `updates`(lotNumber/buildingNumber/roomNo。同上) | `data` に `version: { increment: 1 }` を追加 | `src/lib/__tests__/reception-owner-archive-race.test.ts`「物件の空欄補完(lotNumber)は…」 |
-| 5 | `src/app/api/import/reception-owner/route.ts:405` | `dmStatus`(hold→send昇格。PropertyEditForm「DM判断」で編集可能) | `data` に `version: { increment: 1 }` を追加 | 同上「DM○による dmStatus: hold→send の昇格は…」 |
-| 6 | `src/app/api/import/reception-owner/route.ts:686` | `corporateNumber`(所有者編集カードの法人番号入力欄=`properties/[id]/page.tsx:1590`) | `data` に `version: { increment: 1 }` を追加 | `src/lib/__tests__/owner-corporate-import-integration.test.ts`「(Task 9) reuse パスの空欄埋めは…」(source-assertion。理由は本文末尾) |
-| 7 | `src/app/api/import/reception-owner/route.ts:698` | `corporateNumber`/`companyRegistryNumber`(分断型復元。同上の入力欄) | `data` に `version: { increment: 1 }` を追加 | `src/lib/__tests__/corporate-import-guard-integration.test.ts`「(Task 9) 分断型復元の空欄埋めは…」(source-assertion) |
+| 4 | `src/app/api/import/reception-owner/route.ts:353` | `updates`(lotNumber/buildingNumber/roomNo。同上) | `data` に `version: { increment: 1 }` を追加 | `src/lib/__tests__/reception-owner-archive-race.test.ts`「物件の空欄補完(lotNumber)は…」 |
+| 5 | `src/app/api/import/reception-owner/route.ts:404` | `dmStatus`(hold→send昇格。PropertyEditForm「DM判断」で編集可能) | `data` に `version: { increment: 1 }` を追加 | 同上「DM○による dmStatus: hold→send の昇格は…」 |
+| 6 | `src/app/api/import/reception-owner/route.ts:687` | `corporateNumber`(所有者編集カードの法人番号入力欄=`properties/[id]/page.tsx:1590`) | `data` に `version: { increment: 1 }` を追加 | `src/lib/__tests__/owner-corporate-import-integration.test.ts`「(Task 9) reuse パスの空欄埋めは…」(source-assertion。理由は本文末尾) |
+| 7 | `src/app/api/import/reception-owner/route.ts:699` | `corporateNumber`/`companyRegistryNumber`(分断型復元。同上の入力欄) | `data` に `version: { increment: 1 }` を追加 | `src/lib/__tests__/corporate-import-guard-integration.test.ts`「(Task 9) 分断型復元の空欄埋めは…」(source-assertion) |
 | 8 | `src/app/api/properties/sale-dm/drafts/[id]/outcome/route.ts:244` | `dmStatus`(no_send昇格。PropertyEditForm「DM判断」) | `data` に `version: { increment: 1 }` を追加 | `src/lib/__tests__/sale-dm-outcome-route.test.ts`「(Task 9) returned_undeliverable の物件連動は…」 |
 | 9 | `src/app/api/properties/[id]/clear-dm-undeliverable/route.ts:64` | `dmStatus`(`restoreDmStatus` 指定時のみ。同上) | `restoreDmStatus` 指定時のみ `data.version = { increment: 1 }` を追加(dmUndeliverableAtのみのクリアは対象外のまま) | `src/lib/__tests__/sale-dm-clear-undeliverable-route.test.ts`「(Task 9) restoreDmStatus 指定時は…」 |
 | 10 | `src/app/api/properties/[id]/dm-logs/[logId]/reaction/route.ts:276` | `dmStatus`(no_send昇格。同上) | `data` に `version: { increment: 1 }` を追加 | `src/lib/__tests__/dm-reaction-patch-route.test.ts`「(Task 9) undeliverable 連動は…」 |
@@ -42,7 +42,7 @@ Task 7 が直した「謄本取込が所有者の法人番号を版番号を進�
 | `src/app/api/import/jobs/[jobId]/rows/[rowId]/manual-link-reception-owner/route.ts:262` | `owner.updatedAt` のみ | 同上(所有者行ロックtouch) |
 | `src/app/api/import/jobs/[jobId]/rows/[rowId]/route.ts:209` | `owner.updatedAt` のみ | 同上 |
 | `src/app/api/import/paste/commit/route.ts:407` | `owner.updatedAt` のみ | 同上(既存所有者へのリンク可否確認のための行ロックtouch) |
-| `src/app/api/import/reception-owner/route.ts:589` | `owner.updatedAt` のみ | 同上 |
+| `src/app/api/import/reception-owner/route.ts:590` | `owner.updatedAt` のみ | 同上 |
 | `src/app/api/owners/[id]/memos/route.ts:241` | (コード本体ではない) | **正規表現の誤検出**。`owner.updateMany({ where: { id, isArchived: false } })` という文字列は、実際の呼び出しの使い方を説明する**コードコメント**であり、実行されるコードではない(実際の呼び出しは同ファイル252行目) |
 | `src/app/api/owners/[id]/memos/route.ts:252` | `owner.updatedAt` のみ | メモ作成時の行ロックtouch(archive/mergeとの直列化用)。owner本体のフィールドは一切書かない |
 | `src/app/api/properties/[id]/dm-logs/[logId]/reaction/route.ts:303` | `property.dmUndeliverableAt = null` のみ | 残数ゼロによる自動解除。`dmUndeliverableAt` は `updatePropertySchema` にも `property-edit-form.tsx` の FORM_FIELDS にも存在せず、編集画面から書けない(dmStatus自体は据え置きで触らない) |
@@ -75,7 +75,7 @@ Task 7 が直した「謄本取込が所有者の法人番号を版番号を進�
 | `src/app/api/admin/owners/correction/mislink/route.ts:545` | `property.version` のみ |
 | `src/app/api/import/jobs/[jobId]/rows/[rowId]/manual-link-reception-owner/route.ts:302` | `owner` の住所ペア空欄補完 |
 | `src/app/api/import/jobs/[jobId]/rows/[rowId]/route.ts:243` | `owner` の住所ペア空欄補完 |
-| `src/app/api/import/reception-owner/route.ts:629` | `owner` の住所ペア空欄補完 |
+| `src/app/api/import/reception-owner/route.ts:630` | `owner` の住所ペア空欄補完 |
 | `src/app/api/owners/[id]/corporate-apply/route.ts:368` | `owner` の法人番号適用フィールド(編集画面本体の保存窓口) |
 | `src/app/api/owners/[id]/corporate-cleanup/route.ts:248` | `owner.name`/`address`/`note`/`corporateNumber` |
 | `src/app/api/owners/[id]/route.ts:213` | `owner` の編集画面フィールド一式(編集画面本体の保存窓口) |
