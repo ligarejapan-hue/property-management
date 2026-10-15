@@ -20,10 +20,9 @@ describe("受付の窓への入口", () => {
     const src = readFileSync(join(process.cwd(), "src/components/layout/sidebar.tsx"), "utf8");
     expect(src).toMatch(/rel=\{item\.windowName \? undefined : "noopener noreferrer"\}/);
   });
-  it("業者の名簿もログイン必須・全員に見える・メイン画面の中で開く(別窓にしない)", () => {
+  it("業者の名簿もログイン必須。メニューには出さず、受付の窓の中のタブから開く(発注者決定 2026-10-15)", () => {
     expect(isPublicPath("/agents")).toBe(false);
     const item = SIDEBAR_GROUPS.flatMap((g) => g.items).find((i) => i.href === "/agents");
-    expect(item).toMatchObject({ label: "業者の名簿", minRole: "field_staff" });
-    expect(item?.external).toBeUndefined();
+    expect(item).toBeUndefined();
   });
 });

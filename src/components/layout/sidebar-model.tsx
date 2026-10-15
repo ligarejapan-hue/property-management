@@ -27,7 +27,6 @@ import {
   Image as ImageIcon,
   Inbox,
   Tags,
-  BookUser,
 } from "lucide-react";
 import { canSee, type AppRole } from "@/lib/nav/roles";
 
@@ -53,6 +52,14 @@ export interface NavGroup {
    */
   description?: string;
   collapsible?: boolean;
+  /**
+   * 左メニューの柱(発注者決定 2026-10-15)。見出しを普通の項目と同じ大きさで出し、
+   * 押すと中が開く。中が1つだけのときは見出しそのものがその画面へのリンクになる。
+   * 柱でないグループ(物件データ編集・システム管理・資料)は区切り線の下に今まで通り出す。
+   */
+  pillar?: boolean;
+  /** 柱の見出しに出す絵(pillar のときだけ使う)。 */
+  icon?: React.ReactNode;
   items: NavLeaf[];
 }
 
@@ -65,6 +72,14 @@ export const SIDEBAR_GROUPS: NavGroup[] = [
     label: null,
     items: [
       { label: "ホーム", href: "/home", icon: ic(Home), minRole: "field_staff" },
+    ],
+  },
+  {
+    key: "inquiry",
+    label: "反響受付",
+    pillar: true,
+    icon: ic(PhoneIncoming),
+    items: [
       // 業者からの反響の受付(設計 2026-09-28 §2.1)=メイン画面と分けて別窓で開きっぱなしにする。
       // 全員が使う(方針10)。同じ名前の窓があればそこに開く(何枚も増やさない)。
       {
@@ -75,13 +90,24 @@ export const SIDEBAR_GROUPS: NavGroup[] = [
         external: true,
         windowName: "pm-inquiry-desk",
       },
-      // 業者の名簿(設計 2026-09-28 §2.3)。反響の受付と同じく全員が使う。こちらはメイン画面の中で開く。
-      { label: "業者の名簿", href: "/agents", icon: ic(BookUser), minRole: "field_staff" },
+      // ⚠業者の名簿(/agents)はメニューに出さない=反響の受付の窓の中のタブから開く
+      //   (発注者決定 2026-10-15)。
+      // 公開LPから届いた査定の申込の横断一覧(発注者判断 2026-09-18: キャンペーン作成者に
+      // 限らず、売却DMを使える人は誰でも見て対応できる)。通知メールのリンク先。
+      // ⚠「DM」から反響受付へ移した(発注者決定 2026-10-15: お客さまからの問い合わせとして一緒に)。
+      // ⚠minRole は field_staff(whole-branch review Minor #4): 通知メールは自分が作成/担当
+      // する物件の申込について field_staff にも届く(inquiry-notify.ts resolveRecipients)が、
+      // その担当者はメールのリンクからしかこの画面に到達できなかった(サイドバーに出ない=
+      // 一覧から他の申込へ気付けない)。認可自体は route 側(field_staff は担当範囲のみ)の
+      // ままなので、メニューに出すだけでは見える範囲は広がらない。
+      { label: "査定の申込", href: "/properties/sale-dm/inquiries", icon: ic(Inbox), minRole: "field_staff" },
     ],
   },
   {
     key: "prop",
     label: "物件",
+    pillar: true,
+    icon: ic(Building2),
     items: [
       { label: "物件一覧", href: "/properties", icon: ic(Building2), minRole: "office_staff" },
       { label: "マンション棟", href: "/buildings", icon: ic(Building), minRole: "office_staff" },
@@ -95,6 +121,8 @@ export const SIDEBAR_GROUPS: NavGroup[] = [
   {
     key: "field",
     label: "現地調査",
+    pillar: true,
+    icon: ic(MapIcon),
     items: [
       { label: "現地調査マップ", href: "/field-survey/map", icon: ic(MapIcon), minRole: "field_staff" },
       { label: "巡回履歴", href: "/field-survey/sessions", icon: ic(History), minRole: "field_staff" },
@@ -102,9 +130,32 @@ export const SIDEBAR_GROUPS: NavGroup[] = [
     ],
   },
   {
+    key: "dm",
+    label: "DM・LP関係",
+    description: "宛名の出力・お手紙とLPの作成・記録の訂正",
+    pillar: true,
+    icon: ic(Mail),
+    items: [
+      // 入口ページ(案B)。宛名CSVや売却DMの作成は従来どおり物件一覧にあり、
+      // ここはそこへの分かりやすい入口を足すもの。
+      { label: "DMメニュー", href: "/dm", icon: ic(Mail), minRole: "office_staff" },
+      // ⚠「査定の申込」は反響受付へ移した(発注者決定 2026-10-15)。
+      { label: "売却DM設定", href: "/admin/sale-dm-settings", icon: ic(Mail), minRole: "admin" },
+      // 査定申込の通知メールを送る Xserver メールボックスの設定(2026-09 新設)。
+      { label: "メール送信設定", href: "/admin/mail-settings", icon: ic(Mail), minRole: "admin" },
+      { label: "LPの写真", href: "/admin/lp-assets", icon: ic(ImageIcon), minRole: "admin" },
+      // DMの種類(台帳・設計 2026-09-27 §3.6)。手紙とLPの文面を種類ごとに1回だけ作って使い回す。
+      { label: "DMの種類", href: "/admin/dm-scenarios", icon: ic(Tags), minRole: "admin" },
+      // ⚠「データ品質」から移動(DM の道具がそこに紛れていた)。
+      { label: "送付記録の訂正", href: "/admin/orphan-dm-logs", icon: ic(MailX), minRole: "admin" },
+    ],
+  },
+  {
     key: "imp",
     label: "物件データ取り込み",
     description: "外部の一覧・書類からまとめて登録",
+    pillar: true,
+    icon: ic(Upload),
     items: [
       { label: "受付帳CSV取込", href: "/import", icon: ic(Upload), minRole: "office_staff" },
       { label: "謄本PDF取込", href: "/import/registry-pdf", icon: ic(FileText), minRole: "office_staff" },
@@ -127,35 +178,11 @@ export const SIDEBAR_GROUPS: NavGroup[] = [
     ],
   },
   {
-    key: "dm",
-    label: "DM",
-    description: "宛名の出力・お手紙の作成・記録の訂正",
-    items: [
-      // 入口ページ(案B)。宛名CSVや売却DMの作成は従来どおり物件一覧にあり、
-      // ここはそこへの分かりやすい入口を足すもの。
-      { label: "DMメニュー", href: "/dm", icon: ic(Mail), minRole: "office_staff" },
-      // 公開LPから届いた査定申込の横断一覧(発注者判断 2026-09-18: キャンペーン作成者に
-      // 限らず、売却DMを使える人は誰でも見て対応できる)。通知メールのリンク先。
-      // ⚠minRole は field_staff(whole-branch review Minor #4): 通知メールは自分が作成/担当
-      // する物件の申込について field_staff にも届く(inquiry-notify.ts resolveRecipients)が、
-      // その担当者はメールのリンクからしかこの画面に到達できなかった(サイドバーに出ない=
-      // 一覧から他の申込へ気付けない)。認可自体は route 側(field_staff は担当範囲のみ)の
-      // ままなので、メニューに出すだけでは見える範囲は広がらない。
-      { label: "査定の申込", href: "/properties/sale-dm/inquiries", icon: ic(Inbox), minRole: "field_staff" },
-      { label: "売却DM設定", href: "/admin/sale-dm-settings", icon: ic(Mail), minRole: "admin" },
-      // 査定申込の通知メールを送る Xserver メールボックスの設定(2026-09 新設)。
-      { label: "メール送信設定", href: "/admin/mail-settings", icon: ic(Mail), minRole: "admin" },
-      { label: "LPの写真", href: "/admin/lp-assets", icon: ic(ImageIcon), minRole: "admin" },
-      // DMの種類(台帳・設計 2026-09-27 §3.6)。手紙とLPの文面を種類ごとに1回だけ作って使い回す。
-      { label: "DMの種類", href: "/admin/dm-scenarios", icon: ic(Tags), minRole: "admin" },
-      // ⚠「データ品質」から移動(DM の道具がそこに紛れていた)。
-      { label: "送付記録の訂正", href: "/admin/orphan-dm-logs", icon: ic(MailX), minRole: "admin" },
-    ],
-  },
-  {
     key: "sheet",
     label: "販売図面",
     description: "売り出しの1枚チラシ",
+    pillar: true,
+    icon: ic(Newspaper),
     items: [
       { label: "販売図面を作成", href: "/sales-sheets/new", icon: ic(Newspaper), minRole: "office_staff" },
       // ⚠会社情報(販売図面の差出人)は「システム管理」へ移した(発注者指示 2026-08-25:
@@ -175,7 +202,7 @@ export const SIDEBAR_GROUPS: NavGroup[] = [
       { label: "テキスト衛生監査", href: "/admin/owners/text-hygiene", icon: ic(ScanText), minRole: "admin" },
       { label: "氏名・連絡先チェック", href: "/admin/owners/quality-audit", icon: ic(ClipboardCheck), minRole: "admin" },
       // ⚠物件削除で孤児化した送付記録の訂正・取消(PR-B・設計§2.4)は
-      //   「DM」グループへ移した(DM の道具がここに紛れていたため)。
+      //   「DM・LP関係」グループへ移した(DM の道具がここに紛れていたため)。
     ],
   },
   {
