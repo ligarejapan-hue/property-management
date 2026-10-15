@@ -20,7 +20,7 @@ export default function DmScenarioField({
   canWrite,
   editLockHeld,
 }: {
-  property: { id: string; version: number; dmScenarioId: string | null; introductionRoute: string | null };
+  property: { id: string; version: number; dmScenarioId: string | null; introductionRoute: string | null; propertyType: string | null };
   onRefresh: () => void;
   canWrite: boolean;
   /** 見ている側。物件が他の人の鍵ならプルダウンを止める。 */

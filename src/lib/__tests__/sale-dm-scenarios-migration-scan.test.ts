@@ -1,6 +1,7 @@
 import { describe, it, expect } from "vitest";
 import { readFileSync } from "node:fs";
 import { join } from "node:path";
+import { AUTO_KEY_BY_ROUTE_AND_TYPE } from "@/lib/sale-dm-letter/scenario-resolve";
 
 const sql = readFileSync(
   join(process.cwd(), "prisma/migrations/20260927100000_add_dm_scenarios/migration.sql"),
@@ -35,5 +36,24 @@ describe("DMの種類 migration(設計 §3.1)", () => {
   });
   it("既存の行を書き換えない(UPDATE/DELETE/DROP を含まない)", () => {
     expect(sql).not.toMatch(/^\s*(UPDATE|DELETE|DROP)\b/im);
+  });
+});
+
+describe("DMの種類「相続（マンション）」の migration(2026-10-15)", () => {
+  const unitSql = readFileSync(
+    join(process.cwd(), "prisma/migrations/20261015100000_add_dm_scenario_inheritance_unit/migration.sql"),
+    "utf8",
+  ).replace(/\r\n/g, "\n");
+
+  it("auto_key=inheritance_unit の行を1件だけ入れる(対応表のキーと一致)", () => {
+    expect(unitSql).toMatch(/INSERT INTO "dm_scenarios"[\s\S]*'相続（マンション）'[\s\S]*'inheritance_unit'/);
+    expect(new Set(Object.values(AUTO_KEY_BY_ROUTE_AND_TYPE.reception_csv))).toEqual(new Set(["inheritance_unit"]));
+    expect(unitSql.match(/INSERT INTO/g)).toHaveLength(1);
+  });
+  it("同じ auto_key・同じ名前の行があれば入れない", () => {
+    expect(unitSql).toMatch(/WHERE NOT EXISTS[\s\S]*"auto_key" = 'inheritance_unit'[\s\S]*"name" = '相続（マンション）' AND "deleted_at" IS NULL/);
+  });
+  it("既存の行を書き換えない(UPDATE/DELETE/DROP/ALTER を含まない)", () => {
+    expect(unitSql).not.toMatch(/^\s*(UPDATE|DELETE|DROP|ALTER)\b/im);
   });
 });

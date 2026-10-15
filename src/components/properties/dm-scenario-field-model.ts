@@ -30,11 +30,11 @@ export const DM_SCENARIO_AUTO_FALLBACK_LABEL = "自動(発送のときに選ぶ�
  * 選択肢は「使う」の種類だけ(options の口がそう返す)なので、ScenarioRow へは active=true で写す。
  */
 export function dmScenarioFieldView(
-  property: { dmScenarioId: string | null; introductionRoute: string | null },
+  property: { dmScenarioId: string | null; introductionRoute: string | null; propertyType: string | null },
   options: SaleDmScenarioOption[],
 ): { label: string; autoLabel: string; unavailable: boolean } {
   const scenarios: ScenarioRow[] = options.map((o) => ({ id: o.id, name: o.name, autoKey: o.autoKey, active: true, deletedAt: null }));
-  const auto = resolveScenario({ propertyScenarioId: null, introductionRoute: property.introductionRoute, defaultScenarioId: null, scenarios });
+  const auto = resolveScenario({ propertyScenarioId: null, introductionRoute: property.introductionRoute, propertyType: property.propertyType, defaultScenarioId: null, scenarios });
   const autoName = auto.ok && auto.via === "auto" ? scenarios.find((s) => s.id === auto.scenarioId)?.name : undefined;
   const autoLabel = autoName ? `自動: ${autoName}` : DM_SCENARIO_AUTO_FALLBACK_LABEL;
 
