@@ -74,6 +74,18 @@ describe("入力の途中をとっておく(2026-10): 資料の文言が画面�
     }
   });
 
+  it("大きすぎてとっておけないときの知らせを書いている", () => {
+    const tooLarge = "このファイルは大きいため、別の画面へ移ると消えます";
+    expect(noticesSrc).toContain("このファイルは大きいため");
+    expect(noticesSrc).toContain("、別の画面へ移ると消えます");
+    expect(guideSrc).toContain(tooLarge);
+    expect(manualSrc).toContain(tooLarge);
+  });
+
+  it("タブを複製すると続きも写る(設計書 §5.3)", () => {
+    for (const src of [guideSrc, manualSrc]) expect(src).toContain("「タブを複製」");
+  });
+
   it("対象の6画面を両方の資料に書いている", () => {
     for (const name of ["新規物件登録", "物件の編集", "貼り付けて物件化", "謄本PDF取込", "受付帳CSV取込"]) {
       expect(guideSrc).toContain(name);
