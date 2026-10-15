@@ -272,18 +272,29 @@ export async function POST(request: NextRequest) {
     //   前に入れた物件の数を超えないときだけ(@codex PR#516 P1)。同じ住所に同じ人の
     //   土地が2筆あり1筆だけ入っている表で、2行とも「登録済み」にすると残りの1筆が
     //   黙って入らない。数が合わなければ全部これまでどおり要確認(人が見て決める)。
-    const groupKey = (d: PasteDraft) =>
+    const groupKey = (d: PasteDraft): string =>
       [
         normalizeName(d.owner?.name.value ?? ""),
         normalizeAddressForCompare(d.property.address.value),
         normalizeForCompare(d.property.lotNumber.value),
         normalizeName(d.property.roomNo.value ?? ""),
       ].join("|");
-    const groupSize = new Map<string, number>();
+    // ⚠**鍵で「登録済み」と分かった行も数に入れ、その物件を先に使う**(@codex PR#516 2巡目)。
+    //   同じ人・同じ住所の2行のうち1行だけ鍵が合っていると、もう1行が同じ物件を
+    //   「登録済み」として使い回し、残りの1筆が黙って入らない。
+    type Group = { rows: number; blockedIds: Set<string>; blockedUnknown: number };
+    const groups = new Map<string, Group>();
     for (const l of looked) {
-      if (l.earlierImportIds.length === 0) continue;
       const k = groupKey(l.draft);
-      groupSize.set(k, (groupSize.get(k) ?? 0) + 1);
+      const g = groups.get(k) ?? { rows: 0, blockedIds: new Set<string>(), blockedUnknown: 0 };
+      g.rows += 1;
+      if (l.dup.duplicates.blocked) {
+        // 開けない物件は id が返らない。どれかは分からないが1件ぶん使ったとみなす。
+        const id = l.dup.duplicates.blockedByPropertyId;
+        if (id) g.blockedIds.add(id);
+        else g.blockedUnknown += 1;
+      }
+      groups.set(k, g);
     }
     const groupUsed = new Map<string, number>();
 
@@ -292,9 +303,12 @@ export async function POST(request: NextRequest) {
       let earlierImportId: string | null = null;
       if (earlierImportIds.length > 0) {
         const k = groupKey(draft);
-        if ((groupSize.get(k) ?? 0) <= earlierImportIds.length) {
+        const g = groups.get(k)!;
+        const available = earlierImportIds.filter((id) => !g.blockedIds.has(id));
+        const blockedRows = g.blockedIds.size + g.blockedUnknown;
+        if (g.rows - blockedRows <= available.length - g.blockedUnknown) {
           const used = groupUsed.get(k) ?? 0;
-          earlierImportId = earlierImportIds[used] ?? null;
+          earlierImportId = available[used] ?? null;
           groupUsed.set(k, used + 1);
         }
       }

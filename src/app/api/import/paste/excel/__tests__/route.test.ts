@@ -233,6 +233,43 @@ describe("POST /api/import/paste/excel", () => {
     expect(body.rows.map((r: { status: string }) => r.status)).toEqual(["review", "review"]);
   });
 
+  it("★同じ人・同じ住所で、1行は鍵が合って登録済み・もう1行は鍵が変わった→その1行は要確認(@codex PR#516 2巡目)", async () => {
+    // 前に入れた物件は1つだけ。鍵の合う行がそれを使うので、もう1行に当てる物件は無い。
+    lookupResult = (input) => ({
+      duplicates: {
+        blocked: input.externalLinkKey === "H-0001",
+        blockedByPropertyId: input.externalLinkKey === "H-0001" ? "p-old" : null,
+        similarPropertyIds: ["p-old"],
+      },
+      similar: [{ id: "p-old", address: "東京都港区1-1", lotNumber: null }],
+      ownerCandidates: [{ id: "o-old" }],
+      ownerCandidatesTruncated: false,
+    });
+    earlierResult = () => ["p-old"];
+    const other = MAIL.replace("H-0001", "H-0009");
+    const body = await (await POST(req({
+      fileName: "a.xlsx",
+      xlsxBase64: xlsxBase64(sheet([row({ URL: MAIL }), row({ URL: other })])),
+    }))).json();
+    expect(body.rows.map((r: { status: string }) => r.status)).toEqual(["registered", "review"]);
+  });
+
+  it("★鍵で登録済みの行が開けない物件(id なし)でも、1件ぶん使ったとみなす", async () => {
+    lookupResult = (input) => ({
+      duplicates: { blocked: input.externalLinkKey === "H-0001", blockedByPropertyId: null, similarPropertyIds: ["p-old"] },
+      similar: [{ id: "p-old", address: "東京都港区1-1", lotNumber: null }],
+      ownerCandidates: [{ id: "o-old" }],
+      ownerCandidatesTruncated: false,
+    });
+    earlierResult = () => ["p-old"];
+    const other = MAIL.replace("H-0001", "H-0009");
+    const body = await (await POST(req({
+      fileName: "a.xlsx",
+      xlsxBase64: xlsxBase64(sheet([row({ URL: MAIL }), row({ URL: other })])),
+    }))).json();
+    expect(body.rows.map((r: { status: string }) => r.status)).toEqual(["registered", "review"]);
+  });
+
   it("★前に入れた物件が行の数だけあれば、行ごとに別の物件を「登録済み」に当てる", async () => {
     lookupResult = () => ({
       duplicates: { blocked: false, blockedByPropertyId: null, similarPropertyIds: ["p-a", "p-b"] },
