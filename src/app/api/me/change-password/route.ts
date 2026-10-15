@@ -4,6 +4,7 @@ import { compare, hashSync } from "bcryptjs";
 import prisma from "@/lib/prisma";
 import { getApiSession, ApiError, handleApiError, apiResponse } from "@/lib/api-helpers";
 import { writeAuditLog } from "@/lib/audit";
+import { reserveSelfPasswordAttempt } from "@/lib/self-password-attempts";
 
 const changePasswordSchema = z
   .object({
@@ -44,6 +45,15 @@ export async function POST(request: NextRequest) {
       throw new ApiError(404, "ユーザーが見つかりません", "NOT_FOUND");
     }
 
+    // 照合の前に1回分を予約する(ログインと同じ「5回で30分ロック」の数え・同時要求でも超えない)。
+    if (!(await reserveSelfPasswordAttempt(prisma, session.id, new Date()))) {
+      throw new ApiError(
+        429,
+        "間違いが続いたため、しばらく変更できません。30分ほどおいてからお試しください",
+        "TOO_MANY_ATTEMPTS",
+      );
+    }
+
     const ok = await compare(data.currentPassword, user.passwordHash);
     if (!ok) {
       throw new ApiError(
@@ -60,6 +70,9 @@ export async function POST(request: NextRequest) {
       data: {
         passwordHash,
         mustChangePassword: false,
+        // 当たったら予約分も含めて数えを戻す(ログイン成功時と同じ)。
+        loginFailedCount: 0,
+        lockedUntil: null,
       },
     });
 
