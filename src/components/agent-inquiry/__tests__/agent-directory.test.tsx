@@ -42,7 +42,7 @@ describe("業者の名簿の一覧(設計 §2.3)", () => {
 });
 
 describe("名簿の画面", () => {
-  const page = () => read("src/app/(dashboard)/agents/page.tsx");
+  const page = () => read("src/app/(desk)/agents/page.tsx");
   it("題名はメニューの名前と同じ(素の文字列)", () => {
     expect(page()).toContain('<PageHeader title="業者の名簿"');
   });
@@ -75,7 +75,7 @@ describe("名簿の画面", () => {
 
 describe("もっと見るの読み込み中", () => {
   it("もっと見るは読み込み中に押せず「読み込み中…」(名簿の一覧・詳細)", () => {
-    for (const f of ["src/app/(dashboard)/agents/page.tsx", "src/app/(dashboard)/agents/[id]/page.tsx"]) {
+    for (const f of ["src/app/(desk)/agents/page.tsx", "src/app/(desk)/agents/[id]/page.tsx"]) {
       const s = read(f);
       expect(s, f).toMatch(/disabled=\{loadingMore\}/);
       expect(s, f).toContain('{loadingMore ? "読み込み中…" : "もっと見る"}');

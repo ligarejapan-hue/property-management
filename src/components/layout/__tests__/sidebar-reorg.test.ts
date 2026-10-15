@@ -25,12 +25,15 @@ const group = (key: string) => SIDEBAR_GROUPS.find((g) => g.key === key);
 
 describe("確定した並び(仕事の流れ順)", () => {
   it("グループの順序と数", () => {
+    // 2026-10-15 発注者決定: ホーム/反響受付/物件/現地調査/DM・LP関係/物件データ取り込み/販売図面、
+    // そこから下は今まで通り。
     expect(SIDEBAR_GROUPS.map((g) => g.key)).toEqual([
       "home",
+      "inquiry",
       "prop",
       "field",
-      "imp",
       "dm",
+      "imp",
       "sheet",
       "dq",
       "admin",
@@ -45,7 +48,8 @@ describe("確定した名前", () => {
     expect(group("dq")?.label).toBe("物件データ編集");
     // R3 = そのまま(発注者指示)。
     expect(group("admin")?.label).toBe("システム管理");
-    expect(group("dm")?.label).toBe("DM");
+    expect(group("dm")?.label).toBe("DM・LP関係");
+    expect(group("inquiry")?.label).toBe("反響受付");
   });
 
   it("項目名(R4・R5・2画面の呼び名)", () => {
@@ -75,6 +79,7 @@ describe("確定した名前", () => {
       "添付検索",
       "品質チェック",
       "会社情報",
+      "DM",
     ]) {
       expect(labels, gone).not.toContain(gone);
     }
@@ -87,6 +92,7 @@ describe("グループの一言説明", () => {
     expect(group("prop")?.description).toBeUndefined();
     expect(group("field")?.description).toBeUndefined();
     expect(group("home")?.description).toBeUndefined();
+    expect(group("inquiry")?.description).toBeUndefined();
     expect(group("doc")?.description).toBeUndefined();
     // 残りは付ける(とくに「システム管理」は名前が分かりにくいという指摘の当事者)。
     for (const key of ["imp", "dm", "sheet", "dq", "admin"]) {
@@ -102,8 +108,9 @@ describe("説明文が実際に画面へ出る(定義しただけで終わらせ
   ).replace(new RegExp("\\r\\n", "g"), "\n");
 
   it("折りたたみ・通常の両方のグループで描画される", () => {
+    // 柱(開いたときだけ)・折りたたみ・通常の3か所。
     const hits = SIDEBAR.match(/\{g\.description && \(/g) ?? [];
-    expect(hits.length).toBe(2);
+    expect(hits.length).toBe(3);
   });
 
   it("開閉ボタンの中には入れない(押す的を小さくしない)", () => {
@@ -180,7 +187,8 @@ describe("DM グループ(新設)", () => {
   it("入口ページを先頭に、送る流れの順で並ぶ", () => {
     expect(group("dm")?.items.map((i) => i.href)).toEqual([
       "/dm",
-      "/properties/sale-dm/inquiries",
+      // LPメニュー(2026-10-15 案B)は DMメニューの次。
+      "/lp",
       "/admin/sale-dm-settings",
       "/admin/mail-settings",
       "/admin/lp-assets",
@@ -192,7 +200,9 @@ describe("DM グループ(新設)", () => {
 });
 
 describe("「査定の申込」画面への入口(発注者判断 2026-09-18・fix wave で minRole を field_staff に修正)", () => {
-  it("DMメニューの直後に field_staff で置く(通知メールは field_staff にも届くため・whole-branch review Minor #4)", () => {
+  it("反響受付に field_staff で置く(通知メールは field_staff にも届くため・whole-branch review Minor #4)", () => {
+    // 2026-10-15 発注者決定: DM から反響受付へ移す。
+    expect(group("inquiry")?.items.map((i) => i.href)).toEqual(["/inquiry-desk", "/properties/sale-dm/inquiries"]);
     expect(byHref("/properties/sale-dm/inquiries")?.label).toBe("査定の申込");
     expect(byHref("/properties/sale-dm/inquiries")?.minRole).toBe("field_staff");
   });
@@ -306,17 +316,16 @@ describe("⚠変えないもの", () => {
   it("スマホの現場スタッフに出るメニューは、「査定の申込」が1件増える以外は従来どおり(fix wave Minor #4)", () => {
     // 現地調査3項目 + 資料3項目 + ホーム + 査定の申込(通知メールのリンク先を自分でも開けるように)
     // + 反響の受付(業者からの電話は誰が取るか分からない=全員が使う・2026-09-28 設計 方針10)。
-    // + 業者の名簿(反響の受付と同じく全員が使う・2026-09-30)。
+    // 業者の名簿は受付の窓の中のタブへ移した(2026-10-15)。査定の申込は反響受付へ(2026-10-15)。
     const staff = visibleSidebar("field_staff");
-    expect(staff.map((g) => g.key)).toEqual(["home", "field", "dm", "doc"]);
+    expect(staff.map((g) => g.key)).toEqual(["home", "inquiry", "field", "doc"]);
     expect(staff.flatMap((g) => g.items).map((i) => i.href)).toEqual([
       "/home",
       "/inquiry-desk",
-      "/agents",
+      "/properties/sale-dm/inquiries",
       "/field-survey/map",
       "/field-survey/sessions",
       "/field-survey/candidates",
-      "/properties/sale-dm/inquiries",
       "/docs/guide.html",
       "/docs/manual.html",
       "/help",
@@ -369,5 +378,81 @@ describe("⚠変えないもの", () => {
   it("重複した項目が無い(同じ画面を2か所に置かない)", () => {
     const hrefs = allItems.map((i) => i.href);
     expect(new Set(hrefs).size).toBe(hrefs.length);
+  });
+});
+
+describe("左メニューの柱(発注者決定 2026-10-15)", () => {
+  it("7つの柱は見出しを押すと開く。そこから下は今まで通り", () => {
+    expect(SIDEBAR_GROUPS.filter((g) => g.pillar).map((g) => g.key)).toEqual([
+      "inquiry",
+      "prop",
+      "field",
+      "dm",
+      "imp",
+      "sheet",
+    ]);
+    for (const key of ["dq", "admin", "doc"]) {
+      expect(group(key)?.pillar, key).toBeFalsy();
+    }
+    // 柱には見出しの絵がある。
+    for (const g of SIDEBAR_GROUPS.filter((x) => x.pillar)) {
+      expect(g.icon, g.key).toBeTruthy();
+    }
+  });
+
+  it("業者の名簿はメニューに出さない(反響の受付の窓の中のタブから開く)", () => {
+    expect(byHref("/agents")).toBeUndefined();
+    const DESK = readFileSync(
+      join(process.cwd(), "src/components/agent-inquiry/desk-shell.tsx"),
+      "utf8",
+    );
+    expect(DESK).toContain('{ href: "/agents", label: "業者の名簿" }');
+  });
+
+  it("現地担当にも反響受付の2つ(受付の窓・査定の申込)が見える", () => {
+    const inquiry = visibleSidebar("field_staff").find((g) => g.key === "inquiry");
+    expect(inquiry?.items.map((i) => i.label)).toEqual(["反響の受付", "査定の申込"]);
+  });
+
+  it("柱と今まで通りのグループの間に区切り線を引く", () => {
+    const SIDEBAR = readFileSync(
+      join(process.cwd(), "src/components/layout/sidebar.tsx"),
+      "utf8",
+    );
+    expect(SIDEBAR).toContain("groups[i - 1].pillar && !g.pillar && g.label");
+    expect(SIDEBAR).toContain("<hr ");
+  });
+});
+
+describe("LPメニュー(発注者決定 2026-10-15 案B)", () => {
+  const LP_PAGE = readFileSync(join(process.cwd(), "src/app/(dashboard)/lp/page.tsx"), "utf8");
+
+  it("DM・LP関係の中に管理者向けで置く(LPの道具はどれも管理者用)", () => {
+    expect(byHref("/lp")).toMatchObject({ label: "LPメニュー", minRole: "admin" });
+    // 事務担当には出さない=DM・LP関係はDMメニュー1つ(見出しがそのままリンク)。
+    const dm = visibleSidebar("office_staff").find((g) => g.key === "dm");
+    expect(dm?.items.map((i) => i.href)).toEqual(["/dm"]);
+  });
+
+  it("LPの道具3つと申込の一覧へ、用意する順に案内する", () => {
+    const order = [
+      "/admin/sale-dm-settings",
+      "/admin/lp-assets",
+      "/admin/dm-scenarios",
+      "/properties/sale-dm/inquiries",
+    ].map((h) => LP_PAGE.indexOf(`href: "${h}"`));
+    for (const at of order) expect(at).toBeGreaterThan(-1);
+    expect([...order].sort((a, b) => a - b)).toEqual(order);
+    expect(LP_PAGE).toContain('title="LPメニュー"');
+  });
+
+  it("押せそうに見えて開けないリンクは出さない(DMメニューと同じ)", () => {
+    expect(LP_PAGE).toContain("canSee(userRole, s.minRole)");
+    expect(LP_PAGE).toContain('data-testid="lp-menu-step-unavailable"');
+  });
+
+  it("⚠/lp は公開の口(/lp-assets/)に巻き込まれない=ログイン必須", async () => {
+    const { isPublicPath } = await import("@/proxy");
+    expect(isPublicPath("/lp")).toBe(false);
   });
 });
