@@ -699,7 +699,13 @@ export default function PropertyEditForm({
     }
   };
 
-  /** 閉じる・キャンセルの共通後始末。作業中の入力の控えを消し、鍵を返す。 */
+  /** ×: 控えを残して閉じ、鍵を返す(次に開くと続きが出る・2026-10-15 発注者判断)。 */
+  const handleCloseKeepDraft = () => {
+    void lock.release();
+    onClose();
+  };
+
+  /** キャンセル: 作業中の入力の控えを消し、鍵を返す。 */
   const handleClose = () => {
     editDraft.close();
     void lock.release();
@@ -724,7 +730,10 @@ export default function PropertyEditForm({
         <div className="flex items-center justify-between border-b border-gray-200 dark:border-gray-800 px-6 py-4">
           <h3 className="text-lg font-bold text-gray-800 dark:text-gray-100">物件情報を編集</h3>
           <button
-            onClick={handleClose}
+            type="button"
+            onClick={handleCloseKeepDraft}
+            aria-label="閉じる（入力は残します）"
+            title="閉じる（入力は残します）"
             className="rounded p-1 text-gray-400 dark:text-gray-500 hover:text-gray-600 dark:hover:text-gray-300"
           >
             <X className="h-5 w-5" />

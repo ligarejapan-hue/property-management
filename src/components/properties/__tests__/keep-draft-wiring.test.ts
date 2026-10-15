@@ -22,10 +22,15 @@ describe("新規物件登録の小窓: 作業中の入力を消さない", () =>
     expect(src).toMatch(/catch \(err\) \{\n(?:\s*\/\/.*\n)*\s*if \(isDefiniteSubmitFailure\(err\)\) draft\.unmarkSubmitting\(\);\n\s*else setPendingBlocked\(true\);/);
     expect(src).not.toMatch(/catch \(err\) \{\n\s*draft\.unmarkSubmitting\(\);/);
   });
-  it("キャンセル・×は控えを消して閉じる", () => {
+  it("×は控えを残して閉じる(2026-10-15 発注者判断)", () => {
+    expect(src).toMatch(/const handleCloseKeepDraft = \(\) => \{\n\s*onClose\(\);\n\s*\};/);
+    expect((src.match(/onClick=\{handleCloseKeepDraft\}/g) ?? []).length).toBe(1);
+    expect(src).toMatch(/onClick=\{handleCloseKeepDraft\}[\s\S]{0,600}<X className/);
+  });
+  it("キャンセルは控えを消して閉じる", () => {
     // ⚠送信途中の帯が出ている間は控え(印)を残して閉じる=一覧で確かめに行ける(@codex P1)。
     expect(src).toMatch(/const handleCancel = \(\) => \{\n(?:\s*\/\/.*\n)*\s*if \(pendingBlocked\) \{\n\s*onClose\(\);\n\s*return;\n\s*\}\n\s*draft\.close\(\);\n\s*onClose\(\);/);
-    expect((src.match(/onClick=\{handleCancel\}/g) ?? []).length).toBe(2);
+    expect((src.match(/onClick=\{handleCancel\}/g) ?? []).length).toBe(1);
     expect(src).not.toMatch(/onClick=\{onClose\}/);
   });
   it("帯: 続き・送信途中", () => {
@@ -77,8 +82,14 @@ describe("物件の編集の小窓: 作業中の入力を消さない", () => {
   it("お試し(モック)の保存でも控えを消してから onSaved", () => {
     expect(src).toMatch(/if \(USE_MOCK\) \{[\s\S]*?editDraft\.close\(\);\n\s*void lock\.release\(\);\n\s*onSaved\(\);\n\s*return;/);
   });
-  it("閉じる・キャンセルで控えを消す", () => {
+  it("キャンセルで控えを消す", () => {
     expect(src).toMatch(/const handleClose = \(\) => \{\n\s*editDraft\.close\(\);\n\s*void lock\.release\(\);\n\s*onClose\(\);/);
+    expect((src.match(/onClick=\{handleClose\}/g) ?? []).length).toBe(1);
+  });
+  it("×は控えを残して閉じ、鍵は返す(2026-10-15 発注者判断)", () => {
+    expect(src).toMatch(/const handleCloseKeepDraft = \(\) => \{\n\s*void lock\.release\(\);\n\s*onClose\(\);\n\s*\};/);
+    expect((src.match(/onClick=\{handleCloseKeepDraft\}/g) ?? []).length).toBe(1);
+    expect(src).toMatch(/onClick=\{handleCloseKeepDraft\}[\s\S]{0,600}<X className/);
   });
   it("帯", () => {
     expect(src).toMatch(/<DraftRestoredNotice/);

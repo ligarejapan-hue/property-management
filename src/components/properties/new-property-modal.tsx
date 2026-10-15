@@ -105,7 +105,13 @@ export default function NewPropertyModal({ onClose, typeFilter, onCreated, draft
     compactForPending: compactNewPropertyDraftForPending,
   });
 
-  // キャンセル・×: 控えを消して閉じる(閉じた後の unmount で書き戻さない)。
+  // ×: 控えを残して閉じる(閉じた後の unmount で書く=次に開くと続きが出る・2026-10-15 発注者判断)。
+  // いらない入力は「キャンセル」か、開き直したときの「最初からやり直す」で消す。
+  const handleCloseKeepDraft = () => {
+    onClose();
+  };
+
+  // キャンセル: 控えを消して閉じる(閉じた後の unmount で書き戻さない)。
   // ⚠送信途中の帯が出ている間は、控え(送信中の印)を残して閉じる。一覧で確かめに行くために
   //   閉じるので、ここで印を消すと次に開いたとき帯が出ず、同じ物件をもう一度登録できてしまう
   //   (@codex P1)。印を外すのは「確かめたので続ける」だけ。
@@ -204,8 +210,11 @@ export default function NewPropertyModal({ onClose, typeFilter, onCreated, draft
         <div className="flex items-center justify-between border-b border-gray-200 dark:border-gray-800 px-6 py-4">
           <h2 className="text-base font-semibold text-gray-800 dark:text-gray-100">新規物件登録</h2>
           <button
-            onClick={handleCancel}
+            type="button"
+            onClick={handleCloseKeepDraft}
             disabled={submitting}
+            aria-label="閉じる（入力は残します）"
+            title="閉じる（入力は残します）"
             className="rounded-md p-1 text-gray-400 dark:text-gray-500 hover:bg-gray-100 dark:hover:bg-gray-800 hover:text-gray-600 dark:hover:text-gray-300 disabled:opacity-50"
           >
             <X className="h-5 w-5" />

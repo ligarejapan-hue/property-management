@@ -93,15 +93,19 @@ describe("入力の途中をとっておく(2026-10): 資料の文言が画面�
     for (const src of [guideSrc, manualSrc]) expect(src).toContain("「タブを複製」");
   });
 
-  it("新規物件登録・物件の編集の小窓は×・キャンセルで閉じると消える", () => {
-    // 閉じる・キャンセルの処理が控えを消す(close)ことと、資料にそう書いてあることを照合する。
+  it("新規物件登録・物件の編集の小窓は×で閉じると残り、キャンセルで閉じると消える(2026-10-15 発注者判断)", () => {
+    // ×=控えを残す(close を呼ばない)/キャンセル=控えを消す(close)ことと、資料にそう書いてあることを照合する。
     const newModalSrc = readRepoFile("src/components/properties/new-property-modal.tsx");
     const editFormSrc = readRepoFile("src/components/properties/property-edit-form.tsx");
+    expect(newModalSrc).toMatch(/const handleCloseKeepDraft = \(\) => \{\n\s*onClose\(\);\n\s*\};/);
     expect(newModalSrc).toMatch(/draft\.close\(\);\s*onClose\(\);/);
+    expect(editFormSrc).toMatch(/const handleCloseKeepDraft = \(\) => \{\n\s*void lock\.release\(\);\n\s*onClose\(\);\n\s*\};/);
     expect(editFormSrc).toContain("editDraft.close();");
     for (const src of [guideSrc, manualSrc]) {
-      expect(src).toContain("×や「キャンセル」で閉じると");
+      expect(src).toContain("「×」で閉じると入力は残り");
+      expect(src).toContain("「キャンセル」で閉じると入力は消えます");
       expect(src).toContain("小窓が開き直って続きが出ます");
+      expect(src).not.toContain("×や「キャンセル」で閉じると");
     }
   });
 
