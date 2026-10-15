@@ -5,8 +5,8 @@ describe("選択肢定数", () => {
   it("デザインは formal/soft/impact の3種", () => {
     expect(DESIGN_OPTIONS.map((o) => o.value)).toEqual(["formal", "soft", "impact"]);
   });
-  it("訴求軸は price/inheritance/vacant/buyer の4種", () => {
-    expect(APPEAL_OPTIONS.map((o) => o.value)).toEqual(["price", "inheritance", "vacant", "buyer"]);
+  it("訴求軸は price/inheritance/vacant/buyer/inheritance_unit の5種", () => {
+    expect(APPEAL_OPTIONS.map((o) => o.value)).toEqual(["price", "inheritance", "vacant", "buyer", "inheritance_unit"]);
   });
 });
 

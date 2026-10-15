@@ -11,7 +11,7 @@ export interface LetterOptions {
   designTemplate: string; // "formal" | "soft" | "impact"(P2 で使用・P1 は保持)
   tone: string;           // "formal" | "standard" | "soft"
   length: string;         // "short" | "medium" | "long"
-  appeal: string;         // "price" | "inheritance" | "vacant" | "buyer"
+  appeal: string;         // "price" | "inheritance" | "vacant" | "buyer" | "inheritance_unit"
   strength: string;       // "low" | "medium" | "high"
   senderName: string;
   senderContact: string;
