@@ -273,3 +273,15 @@ describe("貼り付けて物件化: 選び直しで違う名前のPDFを選ん�
     expect(src).toContain("pdfFileName: draft ? (reselectName ?? pdfFile?.name ?? null) : null,");
   });
 });
+
+describe("謄本: 選び直しの枠は選んだ後も残し、選んだファイルの名前で添付する(@codex P2)", () => {
+  const src = read("src/app/(dashboard)/import/registry-pdf/page.tsx");
+  it("枠は needsReselect で消さない・取り込み中は押せない・選んだ名前を出す", () => {
+    expect(src).not.toMatch(/\{needsReselect && \(\s*<FileDropZone/);
+    expect(src).toMatch(/<DraftReselectFileNotice[^>]*\/>\s*\{\/\*[^*]*\*\/\}\s*<FileDropZone\s*accept=".pdf"\s*disabled=\{importing\}[\s\S]{0,200}fileName=\{selectedFile\?\.name \?\? null\}/);
+  });
+  it("添付の名前は選んだファイルの名前", () => {
+    expect(src).not.toContain("fileName ?? selectedFile.name");
+    expect(src).toMatch(/importRegistryPdfFile\(\s*selectedFile,\s*propId,\s*(?:\/\/[^\n]*\n\s*)?selectedFile\.name,/);
+  });
+});

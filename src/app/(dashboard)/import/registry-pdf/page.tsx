@@ -562,7 +562,8 @@ function RegistryPdfScreen({ draftEnabled }: { draftEnabled: boolean }) {
         json = await importRegistryPdfFile(
           selectedFile,
           propId,
-          fileName ?? selectedFile.name,
+          // ⚠選び直したファイルは、そのファイルの名前で添付する(前回の名前で別の書類を付けない・@codex P2)。
+          selectedFile.name,
           edited,
         );
       } else {
@@ -672,17 +673,17 @@ function RegistryPdfScreen({ draftEnabled }: { draftEnabled: boolean }) {
       {reselectExpected && (step === "extract" || step === "confirm") ? (
         <div className="mb-4 space-y-2">
           <DraftReselectFileNotice expectedName={reselectExpected} chosenName={selectedFile?.name ?? null} />
-          {needsReselect && (
-            <FileDropZone
-              accept=".pdf"
-              icon={FileText}
-              title="PDFファイルをここにドラッグ＆ドロップ"
-              fileName={null}
-              // ⚠読み取りはし直さない(結果はそのまま・設計書 §4.3)。名前は前回のものを残す。
-              onFiles={(files) => setSelectedFile(files[0])}
-              onNoneAccepted={() => setSelectedFile(null)}
-            />
-          )}
+          {/* ⚠選んだ後も枠を残す: 違うPDFを選んだとき選び直せるように(@codex P2)。 */}
+          <FileDropZone
+            accept=".pdf"
+            disabled={importing}
+            icon={FileText}
+            title="PDFファイルをここにドラッグ＆ドロップ"
+            fileName={selectedFile?.name ?? null}
+            // ⚠読み取りはし直さない(結果はそのまま・設計書 §4.3)。控えの名前は前回のものを残す。
+            onFiles={(files) => setSelectedFile(files[0])}
+            onNoneAccepted={() => setSelectedFile(null)}
+          />
         </div>
       ) : null}
 
