@@ -68,7 +68,7 @@ import {
   type CsvImportDraft,
 } from "@/lib/drafts/screens/csv-import";
 import { useClientReady, useDraftAutosave, useRestoredDraft } from "@/hooks/use-draft";
-import { DraftImportPendingNotice, DraftRestoredNotice, DraftTooLargeNotice } from "@/components/drafts/draft-notices";
+import { DraftImportPendingNotice, DraftRestoredNotice, DraftTooLargeNotice, IMPORT_HISTORY_ID } from "@/components/drafts/draft-notices";
 import {
   IMPORT_TYPE_FILTER_OPTIONS,
   getImportTypeLabel,
@@ -781,9 +781,12 @@ function ImportScreen({ draftEnabled }: { draftEnabled: boolean }) {
     }
   }, [jobFilters, jobPage, jobLimit]);
 
+  // ⚠再読み込み(F5)では、控えを読む前の仮の画面がいったん作られて作り直される(下の ImportPage)。
+  //   仮の画面では取りに行かない(初回の取得が2回走らないように)。
   useEffect(() => {
+    if (!draftEnabled) return;
     fetchJobs();
-  }, [fetchJobs]);
+  }, [fetchJobs, draftEnabled]);
 
   // 待ち時間が過ぎたら履歴を自動で読み直す(その読み込みが確かめる根拠になる)。
   const fetchJobsRef = useRef(fetchJobs);
@@ -816,8 +819,9 @@ function ImportScreen({ draftEnabled }: { draftEnabled: boolean }) {
   }, []);
 
   useEffect(() => {
+    if (!draftEnabled) return;
     fetchStuck();
-  }, [fetchStuck]);
+  }, [fetchStuck, draftEnabled]);
 
   // 異常ジョブを「失敗にする」操作。確認ダイアログ → API 呼び出し →
   // 異常ジョブ一覧と履歴一覧の両方を refetch（履歴側に failed として反映する）。
@@ -866,6 +870,7 @@ function ImportScreen({ draftEnabled }: { draftEnabled: boolean }) {
   // 実行者」も絞り込み対象として選べるようになる。
   // フェッチは初回マウント時のみ（ユーザーマスタは滅多に変わらないため）。
   useEffect(() => {
+    if (!draftEnabled) return;
     let cancelled = false;
     (async () => {
       try {
@@ -885,7 +890,7 @@ function ImportScreen({ draftEnabled }: { draftEnabled: boolean }) {
     return () => {
       cancelled = true;
     };
-  }, []);
+  }, [draftEnabled]);
 
   // dropdown 表示用。name が空なら短縮 id をフォールバックに表示する。
   const executorOptions = useMemo(
@@ -1036,8 +1041,42 @@ function ImportScreen({ draftEnabled }: { draftEnabled: boolean }) {
     }
   };
 
+  // ------ Duplicate preview ------
+  /** 下見の読み込みの番号。最後に始めたもの以外の応答は捨てる(戻る→プレビューへの連打で古い下見を出さない)。 */
+  const previewReqRef = useRef(0);
+  const runDuplicatePreview = async () => {
+    const req = ++previewReqRef.current;
+    setStep(3);
+    setPreviewLoading(true);
+    setDuplicatePreview(null);
+    try {
+      const res = await previewCsvDuplicates(
+        csvText || null,
+        columnMapping,
+        fileName,
+        xlsxBase64 ?? undefined,
+      );
+      if (req !== previewReqRef.current) return;
+      setDuplicatePreview(res as typeof duplicatePreview);
+    } catch {
+      // preview is best-effort
+    } finally {
+      if (req === previewReqRef.current) setPreviewLoading(false);
+    }
+  };
+  // ⚠下見の返事を待つ間に別の画面へ移ると、控えには「段階3・下見なし」が残る。
+  //   戻ったときは下見を取り直す(下見なしのまま「取り込む」を押させない)。控えた下見があれば取り直さない。
+  const previewResumedRef = useRef(false);
+  useEffect(() => {
+    if (!draftEnabled || previewResumedRef.current) return;
+    previewResumedRef.current = true;
+    if (s0?.main?.step === 3 && !s0.main.duplicatePreview) void runDuplicatePreview();
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- 戻った直後に1回だけ(控えから戻した値で取る)
+  }, [draftEnabled]);
+
   // ------ Reset ------
   const handleReset = () => {
+    previewReqRef.current += 1;
     setStep(1);
     setCsvText("");
     setXlsxBase64(null);
@@ -1509,24 +1548,7 @@ function ImportScreen({ draftEnabled }: { draftEnabled: boolean }) {
               戻る
             </button>
             <button
-              onClick={async () => {
-                setStep(3);
-                setPreviewLoading(true);
-                setDuplicatePreview(null);
-                try {
-                  const res = await previewCsvDuplicates(
-                    csvText || null,
-                    columnMapping,
-                    fileName,
-                    xlsxBase64 ?? undefined,
-                  );
-                  setDuplicatePreview(res as typeof duplicatePreview);
-                } catch {
-                  // preview is best-effort
-                } finally {
-                  setPreviewLoading(false);
-                }
-              }}
+              onClick={runDuplicatePreview}
               className="flex items-center gap-2 rounded-md bg-indigo-600 px-4 py-2 text-sm font-medium text-white hover:bg-indigo-700"
             >
               <Eye className="h-4 w-4" />
@@ -2436,7 +2458,7 @@ function ImportScreen({ draftEnabled }: { draftEnabled: boolean }) {
       )}
 
       {/* ============ Job History ============ */}
-      <div className="rounded-lg border border-gray-200 dark:border-gray-800 bg-white dark:bg-gray-900 p-6">
+      <div id={IMPORT_HISTORY_ID} className="scroll-mt-4 rounded-lg border border-gray-200 dark:border-gray-800 bg-white dark:bg-gray-900 p-6">
         <div className="mb-4 flex items-center justify-between">
           <h3 className="text-lg font-semibold text-gray-700 dark:text-gray-200">取込履歴</h3>
           <button

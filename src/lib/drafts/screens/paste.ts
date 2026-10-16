@@ -32,6 +32,7 @@ export interface PasteReviewDraft {
 
 /**
  * rev = 控えの形の版。PasteDraft など中身の型を変えたら上げる(古い控えを捨てるため)。
+ *   上げ忘れは __tests__/draft-shape-lock.test.ts(型の指紋)で落ちる。
  * pdfFileName = 確認画面を PDF から作ったときのファイル名(登録で添付するので選び直しが要る)。
  */
 export interface PasteScreenDraft {

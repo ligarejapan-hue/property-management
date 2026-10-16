@@ -285,3 +285,30 @@ describe("謄本: 選び直しの枠は選んだ後も残し、選んだファ�
     expect(src).toMatch(/importRegistryPdfFile\(\s*selectedFile,\s*propId,\s*(?:\/\/[^\n]*\n\s*)?selectedFile\.name,/);
   });
 });
+
+describe("取り込み(CSV): F5 の仮の画面では取りに行かない(初回の取得が2回走らない)", () => {
+  const src = read("src/app/(dashboard)/import/page.tsx");
+  it("履歴・異常ジョブ・実行者の一覧は draftEnabled のときだけ取りに行く", () => {
+    expect(src).toMatch(/useEffect\(\(\) => \{\s*if \(!draftEnabled\) return;\s*fetchJobs\(\);\s*\}, \[fetchJobs, draftEnabled\]\);/);
+    expect(src).toMatch(/useEffect\(\(\) => \{\s*if \(!draftEnabled\) return;\s*fetchStuck\(\);\s*\}, \[fetchStuck, draftEnabled\]\);/);
+    expect(src).toMatch(/useEffect\(\(\) => \{\s*if \(!draftEnabled\) return;\s*let cancelled = false;[\s\S]{0,200}await fetchUsers\(\)[\s\S]{0,900}\}, \[draftEnabled\]\);/);
+  });
+});
+
+describe("取り込み(CSV): 下見の読み込み中に離れて戻ったら下見を取り直す", () => {
+  const src = read("src/app/(dashboard)/import/page.tsx");
+  it("段階3・下見なしの控えから戻ったときだけ、1回取り直す", () => {
+    expect(src).toMatch(/if \(!draftEnabled \|\| previewResumedRef\.current\) return;\s*previewResumedRef\.current = true;\s*if \(s0\?\.main\?\.step === 3 && !s0\.main\.duplicatePreview\) void runDuplicatePreview\(\);/);
+    expect(src).toContain("onClick={runDuplicatePreview}");
+  });
+  it("最後に始めた下見の応答だけを使う・やり直しで捨てる", () => {
+    expect(src).toMatch(/const req = \+\+previewReqRef\.current;[\s\S]{0,400}if \(req !== previewReqRef\.current\) return;\s*setDuplicatePreview\(/);
+    expect(src).toMatch(/const handleReset = \(\) => \{\s*previewReqRef\.current \+= 1;/);
+  });
+});
+
+describe("取り込み(CSV): 帯から取込履歴へ飛べる", () => {
+  it("履歴の枠に id がある", () => {
+    expect(read("src/app/(dashboard)/import/page.tsx")).toMatch(/\{\/\* =+ Job History =+ \*\/\}\s*<div id=\{IMPORT_HISTORY_ID\}/);
+  });
+});
