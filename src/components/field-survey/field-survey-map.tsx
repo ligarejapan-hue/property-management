@@ -696,7 +696,8 @@ export default function FieldSurveyMap({
   useEffect(() => {
     createCandidateOpenRef.current = !!createCandidate;
   }, [createCandidate]);
-  // モバイルの表示切替パネル開閉 (ControlPanel から持ち上げ)。展開中は
+  // 表示切替パネル開閉 (ControlPanel から持ち上げ)。PC もスマホも閉じて
+  // 始まる (第4回 F: PC で地図とパネルに巡回ボタンが2組出ていた)。展開中は
   // FAB / banner がパネル下部を覆ってタップを遮るため描画を止める。
   const [panelOpen, setPanelOpen] = useState(false);
   // 地図上の「巡回を開始」ボタン → TripControls の開始確認 modal を開く
@@ -718,6 +719,12 @@ export default function FieldSurveyMap({
   // 「巡回を開始」ボタン経由の開始かどうか。開始成功時にパネルを自動で
   // 畳んで撮影 FAB へ直行できるようにする (パネル手動操作でリセット)。
   const quickStartRef = useRef(false);
+  // 巡回の失敗・「破棄して終了」はパネルの中にしか出ない。パネルは閉じて
+  // 始まるので、出たら開く (第4回 F)。
+  const openPanelForTrip = useCallback(() => {
+    quickStartRef.current = false;
+    setPanelOpen(true);
+  }, []);
   // Phase 1-H: pin 作成済みだが写真アップロードだけ失敗した状態。modal を閉じず
   // 「写真だけ再試行 / 写真なしで完了」に誘導し、pin を作り直させない。
   const [photoUploadFailed, setPhotoUploadFailed] = useState(false);
@@ -1404,6 +1411,7 @@ export default function FieldSurveyMap({
           recorder={recorder}
           hasActiveSession={!!activeSession}
           showOthersLegendHint={canSeeOtherPins}
+          onTripNeedsAttention={openPanelForTrip}
         />
 
         {/* 現在地へ移動 (地図左下・常設)。巡回の有無によらず出す = 街歩き中に
@@ -1419,7 +1427,7 @@ export default function FieldSurveyMap({
         {/* カメラファースト: 巡回中は「撮って登録」ボタンを地図下部に常設。
             表示切替パネルを開かなくても撮影→ピン登録へ直行できる。
             モバイルでパネル展開中 (panelOpen) はパネル下部を覆いタップを
-            遮るため FAB / banner を描画しない (md+ はトグル自体が無い)。 */}
+            遮るため FAB / banner を描画しない (PC も同じ・第4回 F)。 */}
         {/* 巡回中は「撮って登録」を主に、「写真なしでピン」を隣に置く
             (発注者要望 2026-08-17。行レイアウトで中央寄せ=巡回外と同じ作り)。 */}
         {/* 第2弾 C3: 終了は開始と同じく地図上から(パネルの奥に沈めない)。
@@ -1597,7 +1605,9 @@ export default function FieldSurveyMap({
               data-testid="trip-quick-start"
               onClick={() => {
                 quickStartRef.current = true;
-                setPanelOpen(true);
+                // 第4回 F: パネルは開かない(確認は portal で出る)。開くと地図のボタンが隠れ、
+                // 確認を「やめる」で閉じたあとに開始ボタンが見えなくなる。失敗は
+                // onNeedsAttention でパネルが開いて理由が出る。
                 startTripRef.current?.();
               }}
               className={
@@ -1811,6 +1821,7 @@ function ControlPanel({
   recorder,
   hasActiveSession,
   showOthersLegendHint,
+  onTripNeedsAttention,
 }: {
   layers: Record<Layer, boolean>;
   onToggle: (key: Layer) => void;
@@ -1838,8 +1849,9 @@ function ControlPanel({
   /** 点が足りず線にできなかった本数。量の断りとは別の文で出す (@codex #334 P2)。 */
   tracksUnrenderableTrips: number;
   /**
-   * モバイルでは初期折りたたみ: 常時展開だと地図の「地図/航空写真」ボタンに
-   * パネルが覆い被さる(実機で確認)。md 以上は従来どおり常時展開。
+   * 初期折りたたみ: 常時展開だと地図の「地図/航空写真」ボタンに
+   * パネルが覆い被さる(実機で確認)。第4回 F で PC も閉じて始まるようにした
+   * (PC は常時展開で、地図の上とパネルの中に巡回ボタンが2組出ていた)。
    * 開閉 state は親 (FieldSurveyMap) 管理: 展開中はカメラ FAB / banner の
    * 描画を止めてパネル下部のタップを遮らないようにするため。
    */
@@ -1865,6 +1877,8 @@ function ControlPanel({
   hasActiveSession: boolean;
   /** 凡例に「白いふちどり = 他の担当者」を出すか (read_all/manage 保持者のみ)。 */
   showOthersLegendHint: boolean;
+  /** 巡回の失敗・破棄して終了が出たらパネルを開く (第4回 F)。 */
+  onTripNeedsAttention: () => void;
 }) {
   // パネルは地図エリア(flex-1 overflow-hidden)に絶対配置されるため、内容が地図高より
   // 高いと下部が切れる(スマホで発生)。上限を viewport 固定値で見積もるとバナー
@@ -1878,14 +1892,14 @@ function ControlPanel({
         type="button"
         onClick={onTogglePanelOpen}
         aria-expanded={panelOpen}
-        className="pointer-events-auto flex shrink-0 items-center gap-1 whitespace-nowrap rounded-md border border-gray-200 bg-white px-3 py-2 text-sm text-gray-700 shadow dark:border-gray-800 dark:bg-gray-900 dark:text-gray-200 md:hidden"
+        className="pointer-events-auto flex shrink-0 items-center gap-1 whitespace-nowrap rounded-md border border-gray-200 bg-white px-3 py-2 text-sm text-gray-700 shadow dark:border-gray-800 dark:bg-gray-900 dark:text-gray-200"
       >
         {/* ラベルは短く保つ。長くなると左上の地図/航空写真ボタンに重なり
             タップを奪う (過去に実機で発生した既知ホットスポット)。 */}
         表示切替{hasActiveSession ? "・巡回中" : ""} {panelOpen ? "▴" : "▾"}
       </button>
       <div
-        className={`${panelOpen ? "mt-2 block" : "hidden"} pointer-events-auto min-h-0 w-56 overflow-y-auto overscroll-contain rounded-md border border-gray-200 bg-white p-3 text-sm shadow dark:border-gray-800 dark:bg-gray-900 md:mt-0 md:block`}
+        className={`${panelOpen ? "mt-2 block" : "hidden"} pointer-events-auto min-h-0 w-56 overflow-y-auto overscroll-contain rounded-md border border-gray-200 bg-white p-3 text-sm shadow dark:border-gray-800 dark:bg-gray-900`}
       >
       {/* 第2弾 C3: 巡回操作(開始/終了/位置記録/現在地)を最上部へ。終了が
           凡例やチェックの下に沈み、終業時に毎回スクロールしていた。 */}
@@ -1901,6 +1915,7 @@ function ControlPanel({
         onEndFailedRestoreRecorder={onEndFailedRestoreRecorder}
         onBlockRecorderForEnd={onBlockRecorderForEnd}
         unsentLocationCount={recorder.bufferedCount}
+        onNeedsAttention={onTripNeedsAttention}
       />
 
       {/* Phase 1-F-2: 位置記録 UI。active session がある時のみ表示。

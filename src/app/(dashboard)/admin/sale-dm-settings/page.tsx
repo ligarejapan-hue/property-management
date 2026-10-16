@@ -1,6 +1,7 @@
 "use client";
 
 import { useEffect, useState } from "react";
+import Link from "next/link";
 import { PageHeader } from "@/components/ui/page-header";
 import { BackLink } from "@/components/ui/back-link";
 import { Loader2, Save, ShieldCheck, ShieldAlert } from "lucide-react";
@@ -114,8 +115,15 @@ export default function SaleDmSettingsPage() {
       )}
 
       <div className="space-y-4">
-        <Field label="追跡用URL(このシステムの絶対URL)">
+        <Field label="追跡用URL(お客さまがQRで開く公開ページのアドレス)">
           <input value={trackingBaseUrl} onChange={(e) => setTrackingBaseUrl(e.target.value)} placeholder="例: https://app.example.com" maxLength={2000} className="w-full rounded-md border border-gray-300 px-2 py-1.5 text-sm dark:border-gray-700 dark:bg-gray-900 dark:text-gray-100" />
+          {/* 第4回 E: メール送信設定の「アプリのURL」と同じ欄に見えて二重入力と思われやすい。別物なのでまとめない
+              (本番はこちら=公開ページ・あちら=社内から開くこのシステムで、住所が違う)。 */}
+          <p data-testid="sale-dm-tracking-url-note" className="mt-1 text-xs text-gray-500 dark:text-gray-400">
+            お手紙のQRを読んだお客さまが開く、外から見える住所です。社内の人が通知メールから開く住所は別の欄です(
+            <Link href="/admin/mail-settings" className="font-semibold underline underline-offset-2">メール送信設定</Link>
+            の「アプリのURL」)。
+          </p>
         </Field>
         <Field label="既定LP URL(QRの遷移先・型ごとLP未設定時のフォールバック)">
           <input value={lpUrl} onChange={(e) => setLpUrl(e.target.value)} placeholder="例: https://lp.example.com" maxLength={2000} className="w-full rounded-md border border-gray-300 px-2 py-1.5 text-sm dark:border-gray-700 dark:bg-gray-900 dark:text-gray-100" />

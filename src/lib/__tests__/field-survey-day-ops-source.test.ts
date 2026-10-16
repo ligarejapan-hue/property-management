@@ -34,13 +34,14 @@ describe("1. 巡回開始の短縮 (地図直置きボタン)", () => {
     expect(MAP_SRC).toMatch(/巡回を開始/);
   });
 
-  it("押下でパネルを開き、TripControls の開始確認 modal を直接出す", () => {
+  // 第4回 F: パネルは開かない(開くと地図のボタンが隠れ、確認を「やめる」で閉じたあと開始ボタンが見えなくなる)。
+  it("押下でパネルは開かず、TripControls の開始確認 modal を直接出す", () => {
     const btn = MAP_SRC.match(
       /\{!activeSession && !panelOpen &&[\s\S]{0,2600}?<\/button>/,
     );
     expect(btn).not.toBeNull();
     const m = btn?.[0] ?? "";
-    expect(m).toMatch(/setPanelOpen\(true\)/);
+    expect(m).not.toMatch(/setPanelOpen\(true\)/);
     expect(m).toMatch(/startTripRef\.current\?\.\(\)/);
     expect(m).toMatch(/quickStartRef\.current = true/);
   });

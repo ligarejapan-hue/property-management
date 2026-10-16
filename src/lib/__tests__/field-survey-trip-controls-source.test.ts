@@ -94,11 +94,12 @@ describe("trip-controls.tsx — Phase 1-F-1 scope (no geolocation, no persistenc
     expect(TRIP_SRC).not.toMatch(/console\.\w+\(JSON\.stringify\(/);
   });
 
-  it("巡回開始 / 終了ボタン / 注意文言 modal が存在する", () => {
+  it("開始 / 終了の案内 / 注意文言 modal が存在する", () => {
     expect(TRIP_SRC).toMatch(/巡回開始/);
     expect(TRIP_SRC).toMatch(/巡回終了/);
-    expect(TRIP_SRC).toMatch(/trip-start-button/);
-    expect(TRIP_SRC).toMatch(/trip-end-button/);
+    // 第4回 F: 開始/終了ボタンは地図の上の1組だけ (パネルには置かない)。
+    expect(TRIP_SRC).not.toMatch(/trip-start-button/);
+    expect(TRIP_SRC).not.toMatch(/trip-end-button/);
     expect(TRIP_SRC).toMatch(/trip-confirm-start-modal/);
     expect(TRIP_SRC).toMatch(/trip-confirm-end-modal/);
   });
@@ -316,5 +317,16 @@ describe("page.tsx — currentUserId を server side で確定して渡す", () 
     expect(PAGE_SRC).toMatch(/let\s+currentUserId/);
     expect(PAGE_SRC).toMatch(/canRead\s*&&\s*currentUserId/);
     expect(PAGE_SRC).toMatch(/if\s*\(canRead\)\s*currentUserId\s*=\s*session\.id/);
+  });
+});
+
+describe("第4回 F — 失敗と「破棄して終了」はパネルを開かせる", () => {
+  it("error か endBlockedByBuffer が立ったら onNeedsAttention を呼ぶ", () => {
+    expect(TRIP_SRC).toMatch(/const needsAttention = !!error \|\| endBlockedByBuffer;/);
+    expect(TRIP_SRC).toMatch(/if \(needsAttention\) onNeedsAttention\?\.\(\);/);
+  });
+  it("パネルの状態表示は地図の上のボタンへ案内する", () => {
+    expect(TRIP_SRC).toContain("開始は地図の下の「巡回を開始」から");
+    expect(TRIP_SRC).toContain("終了は地図の左下の「巡回終了」から");
   });
 });

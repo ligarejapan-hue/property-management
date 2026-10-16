@@ -164,7 +164,8 @@ export const SIDEBAR_GROUPS: NavGroup[] = [
       { label: "受付帳CSV取込", href: "/import", icon: ic(Upload), minRole: "office_staff" },
       { label: "謄本PDF取込", href: "/import/registry-pdf", icon: ic(FileText), minRole: "office_staff" },
       // ⚠取込画面の中のタブからしか行けなかった。
-      { label: "登記DM取込", href: "/import/registry-dm", icon: ic(Mail), minRole: "office_staff" },
+      // 第4回 D(2026-10-16): 受付帳・所有者の取込は「受付帳CSV取込」へまとめ、PDFの一括添付だけが残った(URLは据え置き)。
+      { label: "取得済みPDFを一括添付", href: "/import/registry-dm", icon: ic(Mail), minRole: "office_staff" },
       // ⚠**アプリ内のリンクがゼロ**で、URL を直に打つしか到達手段が無かった
       //   (2026-08-16 に発見・08-24 の再実測でも同じ)。
       // ⚠行き先は取込画面の**該当セクション**(@codex #411 R1 P2)。/import/owners は

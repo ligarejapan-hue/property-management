@@ -53,25 +53,16 @@ describe("trip-controls.tsx dark: 配色 (field-survey phase)", () => {
     expect(src).toContain("dark:border-amber-500/40");
   });
 
-  // --- blue accent 巡回開始ボタン（inactive/accent 分岐） ---
-  it("巡回開始ボタン (bg-blue-50) に dark:bg-blue-500/20 がある", () => {
-    expect(src).toContain("dark:bg-blue-500/20");
+  // --- red accent 「破棄して終了」ボタン ---
+  // 第4回 F: パネルの開始/終了ボタンは地図の上の1組へ寄せたため、
+  // 赤の配色は「破棄して終了」で確認する。
+  it("破棄して終了 (bg-red-50) に dark:bg-red-500/10 がある", () => {
+    expect(src).toContain("dark:bg-red-500/10");
   });
-  it("巡回開始ボタン (text-blue-700) に dark:text-blue-300 がある", () => {
-    expect(src).toContain("dark:text-blue-300");
-  });
-  it("巡回開始ボタン (border-blue-300) に dark:border-blue-500/40 がある", () => {
-    expect(src).toContain("dark:border-blue-500/40");
-  });
-
-  // --- red accent 巡回終了ボタン ---
-  it("巡回終了ボタン (bg-red-50) に dark:bg-red-500/20 がある", () => {
-    expect(src).toContain("dark:bg-red-500/20");
-  });
-  it("巡回終了ボタン (text-red-700) に dark:text-red-300 がある", () => {
+  it("破棄して終了 (text-red-700) に dark:text-red-300 がある", () => {
     expect(src).toContain("dark:text-red-300");
   });
-  it("巡回終了ボタン (border-red-300) に dark:border-red-500/40 がある", () => {
+  it("破棄して終了 (border-red-300) に dark:border-red-500/40 がある", () => {
     expect(src).toContain("dark:border-red-500/40");
   });
 
@@ -102,12 +93,6 @@ describe("trip-controls.tsx dark: 配色 (field-survey phase)", () => {
   });
   it("ライトモード hover:bg-gray-50 は残っている", () => {
     expect(src).toContain("hover:bg-gray-50");
-  });
-  it("ライトモード bg-blue-50 は残っている (IdleView/現在地ボタン)", () => {
-    expect(src).toContain("bg-blue-50");
-  });
-  it("ライトモード text-blue-700 は残っている", () => {
-    expect(src).toContain("text-blue-700");
   });
   // 2026-07-29: 初回だけ出す位置記録の同意ブロック (開始確認 modal 内)
   it("初回同意ブロックの面に dark:bg-gray-800/40 がある (bg-gray-50 対応)", () => {

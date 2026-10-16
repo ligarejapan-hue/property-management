@@ -6,38 +6,27 @@ import { FilterPanel } from "@/components/ui/filter-panel";
 import { Button } from "@/components/ui/button";
 import { formatJaDateTime } from "@/lib/format-datetime";
 import {
-  Upload,
-  FileText,
   Loader2,
   CheckCircle2,
   XCircle,
   AlertTriangle,
   RefreshCw,
-  ChevronRight,
-  GripVertical,
   Eye,
   ArrowRight,
-  Check,
-  ChevronDown,
   FileUp,
-  Table2,
-  ClipboardCheck,
   DownloadCloud,
 } from "lucide-react";
 import { Pagination } from "@/components/ui/pagination";
 import Link from "next/link";
 import {
-  importCsv,
   fetchImportJobs,
   fetchUsers,
   fetchStuckImportJobs,
   markImportJobFailed,
-  previewCsvDuplicates,
   previewReceptionOwnerCsv,
   importReceptionOwnerCsv,
   previewReceptionPropertyCsv,
   importReceptionPropertyCsv,
-  parseFileForPreview,
   readFileForImport,
   type ReceptionOwnerPreviewResponse,
   type ReceptionOwnerImportResponse,
@@ -45,10 +34,6 @@ import {
   type ReceptionPropertyImportResponse,
   type StuckImportJob,
 } from "@/lib/api-client";
-import { badgeIntentClass } from "@/components/ui/status-badge";
-import { detectImportFileType } from "@/lib/import-file-type";
-import { readCsvFileAsText } from "@/lib/csv-decode";
-import { filterNonBlankHeaders } from "@/lib/csv-parser";
 import ImportSwitcher from "@/components/import/import-switcher";
 import FileDropZone from "@/components/ui/file-drop-zone";
 import { draftKey } from "@/lib/drafts/draft-store";
@@ -65,6 +50,7 @@ import {
   type CsvPendingState,
   isCsvImportDraftEmpty,
   parseCsvImportDraft,
+  unifyReceptionDraft,
   type CsvImportDraft,
 } from "@/lib/drafts/screens/csv-import";
 import { useClientReady, useDraftAutosave, useRestoredDraft } from "@/hooks/use-draft";
@@ -120,23 +106,7 @@ function isDefaultJobView(f: ImportJobFilters, page: number): boolean {
 
 const JOB_TYPE_OPTIONS = IMPORT_TYPE_FILTER_OPTIONS;
 
-interface ImportResult {
-  jobId: string;
-  totalRows: number;
-  successCount: number;
-  updateCount?: number;
-  errorCount: number;
-  needsReviewCount: number;
-  parseErrors: Array<{ row: number; message: string }>;
-}
-
-type Step = 1 | 2 | 3 | 4;
-
 /** 成功の返事として読むのに要る欄(欠けていたら取り込まれたか分からない扱い・@codex P2)。 */
-const IMPORT_RESULT_SHAPE = {
-  numbers: ["totalRows", "successCount", "errorCount", "needsReviewCount"],
-  arrays: ["parseErrors"],
-} as const;
 const RO_RESULT_SHAPE = {
   numbers: ["successCount", "needsReviewCount", "errorCount", "propertyUpdatedCount", "ownerCreatedCount", "ownerLinkedCount"],
   objects: ["summary"],
@@ -148,148 +118,6 @@ const UNREADABLE_IMPORT_RESULT = "取り込みの返事を読み取れません�
 // Constants
 // ---------------------------------------------------------------------------
 
-const TARGET_FIELDS = [
-  "住所",
-  "郵便番号",
-  "棟郵便番号",
-  "地番",
-  "家屋番号",
-  "不動産番号",
-  "種別",
-  "登記状況",
-  "DM判断",
-  "案件ステータス",
-  "導入ルート",
-  "用途地域",
-  "路線価",
-  "緯度",
-  "経度",
-  "備考",
-  "リンクキー",
-] as const;
-
-type TargetField = (typeof TARGET_FIELDS)[number];
-
-// 表示専用ラベル: サーバへ送る値 (TARGET_FIELDS) は変えず、UI でだけ
-// 「住所」が物件住所であることを明示。必須項目は「(必須)」を付与。
-// 値変更するとサーバ側 JAPANESE_FIELD_MAP と整合しなくなるため値は変えない。
-const TARGET_FIELD_LABELS: Record<TargetField, string> = {
-  "住所": "物件住所 (必須)",
-  "郵便番号": "郵便番号",
-  "棟郵便番号": "棟郵便番号 (区分マンション)",
-  "地番": "地番",
-  "家屋番号": "家屋番号",
-  "不動産番号": "不動産番号",
-  "種別": "種別",
-  "登記状況": "登記状況",
-  "DM判断": "DM判断",
-  "案件ステータス": "案件ステータス",
-  "導入ルート": "導入ルート",
-  "用途地域": "用途地域",
-  "路線価": "路線価",
-  "緯度": "緯度",
-  "経度": "経度",
-  "備考": "物件メモ",
-  "リンクキー": "リンクキー (所有者と紐付け)",
-};
-
-const TEMPLATES: Record<
-  string,
-  { label: string; columns: string[] }
-> = {
-  standard: {
-    label: "標準受付帳CSV",
-    columns: [
-      "住所(必須)",
-      "郵便番号",
-      "地番",
-      "家屋番号",
-      "不動産番号",
-      "種別",
-      "登記状況",
-      "DM判断",
-      "案件ステータス",
-      "用途地域",
-      "路線価",
-      "緯度",
-      "経度",
-      "備考",
-    ],
-  },
-  homukyoku: {
-    label: "法務局形式",
-    columns: [
-      "所在地",
-      "地番",
-      "家屋番号",
-      "不動産番号",
-      "地目",
-      "地積",
-      "登記年月日",
-      "権利者",
-    ],
-  },
-  gyosha: {
-    label: "不動産業者形式",
-    columns: [
-      "物件名",
-      "所在地",
-      "価格",
-      "面積",
-      "築年数",
-      "構造",
-      "用途地域",
-      "備考",
-    ],
-  },
-};
-
-/** Auto-mapping from common header names to target fields. */
-const AUTO_MAP: Record<string, TargetField> = {
-  "住所": "住所",
-  "所在地": "住所",
-  "物件住所": "住所",
-  "address": "住所",
-  "郵便番号": "郵便番号",
-  "postalCode": "郵便番号",
-  "postal_code": "郵便番号",
-  "棟郵便番号": "棟郵便番号",
-  "buildingPostalCode": "棟郵便番号",
-  "building_postal_code": "棟郵便番号",
-  "地番": "地番",
-  "家屋番号": "家屋番号",
-  "不動産番号": "不動産番号",
-  "種別": "種別",
-  "地目": "種別",
-  "登記状況": "登記状況",
-  "DM判断": "DM判断",
-  "dm判断": "DM判断",
-  "案件ステータス": "案件ステータス",
-  "ステータス": "案件ステータス",
-  "導入ルート": "導入ルート",
-  "流入経路": "導入ルート",
-  "獲得経路": "導入ルート",
-  "introductionRoute": "導入ルート",
-  "introduction_route": "導入ルート",
-  "acquisitionRoute": "導入ルート",
-  "acquisition_route": "導入ルート",
-  "leadSource": "導入ルート",
-  "lead_source": "導入ルート",
-  "用途地域": "用途地域",
-  "路線価": "路線価",
-  "緯度": "緯度",
-  "lat": "緯度",
-  "経度": "経度",
-  "lng": "経度",
-  "lon": "経度",
-  "備考": "備考",
-  "メモ": "備考",
-  "リンクキー": "リンクキー",
-  "外部キー": "リンクキー",
-  "link_key": "リンクキー",
-  "externalLinkKey": "リンクキー",
-};
-
 const STATUS_CONFIG: Record<
   string,
   { label: string; icon: typeof CheckCircle2; color: string }
@@ -299,88 +127,6 @@ const STATUS_CONFIG: Record<
   processing: { label: "処理中", icon: Loader2, color: "text-blue-600 dark:text-blue-400" },
   pending: { label: "待機中", icon: AlertTriangle, color: "text-amber-600 dark:text-amber-400" },
 };
-
-const STEP_META: Record<Step, { label: string; icon: typeof Upload }> = {
-  1: { label: "ファイル選択", icon: FileUp },
-  2: { label: "カラム対応", icon: Table2 },
-  3: { label: "プレビュー", icon: ClipboardCheck },
-  4: { label: "取込結果", icon: DownloadCloud },
-};
-
-// ---------------------------------------------------------------------------
-// CSV Parsing (client-side, handles quoted fields)
-// ---------------------------------------------------------------------------
-
-function parseCsvLine(line: string): string[] {
-  const fields: string[] = [];
-  let current = "";
-  let inQuote = false;
-  for (let i = 0; i < line.length; i++) {
-    const ch = line[i];
-    if (inQuote) {
-      if (ch === '"') {
-        if (i + 1 < line.length && line[i + 1] === '"') {
-          current += '"';
-          i++;
-        } else {
-          inQuote = false;
-        }
-      } else {
-        current += ch;
-      }
-    } else {
-      if (ch === '"') {
-        inQuote = true;
-      } else if (ch === "," || ch === "\t") {
-        fields.push(current.trim());
-        current = "";
-      } else {
-        current += ch;
-      }
-    }
-  }
-  fields.push(current.trim());
-  return fields;
-}
-
-function parseCsv(text: string): { headers: string[]; rows: string[][] } {
-  const lines = text
-    .replace(/\r\n/g, "\n")
-    .replace(/\r/g, "\n")
-    .split("\n")
-    .filter((l) => l.trim() !== "");
-  if (lines.length === 0) return { headers: [], rows: [] };
-  const headers = parseCsvLine(lines[0]);
-  const rows = lines.slice(1).map(parseCsvLine);
-  return { headers, rows };
-}
-
-// ---------------------------------------------------------------------------
-// Validation helpers
-// ---------------------------------------------------------------------------
-
-type RowStatus = "valid" | "warning" | "error";
-
-function validateRow(
-  row: string[],
-  headers: string[],
-  mapping: Record<string, string>
-): { status: RowStatus; message: string } {
-  // Find which column index maps to 住所
-  const addressIdx = headers.findIndex((h) => mapping[h] === "住所");
-  if (addressIdx === -1) {
-    return { status: "warning", message: "住所カラム未設定" };
-  }
-  const addressVal = row[addressIdx] ?? "";
-  if (!addressVal.trim()) {
-    return { status: "error", message: "住所が空です" };
-  }
-  // Check for unusually short address
-  if (addressVal.length < 3) {
-    return { status: "warning", message: "住所が短すぎる可能性" };
-  }
-  return { status: "valid", message: "" };
-}
 
 // ---------------------------------------------------------------------------
 // Component
@@ -528,47 +274,8 @@ function ImportScreen({ draftEnabled }: { draftEnabled: boolean }) {
   const restored = useRestoredDraft(draftKeyValue, parseCsvImportDraft);
   // ⚠この画面は useState の初期化で1回だけ決める(描き直しで変わらない)。
   const [restoreDecision] = useState(() => decideCsvImportRestore(restored));
-  const s0 = restoreDecision.start;
-
-  // Step state
-  const [step, setStep] = useState<Step>(s0?.main?.step ?? 1);
-
-  // File state
-  const [csvText, setCsvText] = useState(s0?.main?.csvText ?? "");
-  const [xlsxBase64, setXlsxBase64] = useState<string | null>(s0?.main?.xlsxBase64 ?? null);
-  const [fileName, setFileName] = useState(s0?.main?.fileName ?? "");
-
-  // Template
-  const [template, setTemplate] = useState<string>(s0?.main?.template ?? "standard");
-
-  // Parsed CSV
-  const [headers, setHeaders] = useState<string[]>(s0?.main?.headers ?? []);
-  const [rows, setRows] = useState<string[][]>(s0?.main?.rows ?? []);
-
-  // Column mapping
-  const [columnMapping, setColumnMapping] = useState<Record<string, string>>(
-    s0?.main?.columnMapping ?? {}
-  );
-
-  // Import state
-  const [uploading, setUploading] = useState(false);
-  const [result, setResult] = useState<ImportResult | null>(null);
-  const [error, setError] = useState<string | null>(null);
-
-  // Duplicate preview
-  const [duplicatePreview, setDuplicatePreview] = useState<{
-    totalRows: number;
-    validRows: number;
-    errorRows: number;
-    duplicateCount: number;
-    duplicates: Array<{ rowNumber: number; address: string; matchedAddress: string; matchReason: string }>;
-    updateCount?: number;
-    updates?: Array<{ rowNumber: number; address: string; matchedAddress: string; matchReason: string }>;
-    fileType?: "reception" | "owner" | "ambiguous" | "unknown";
-    fileTypeLabel?: string | null;
-    fileTypeError?: string | null;
-  } | null>((s0?.main?.duplicatePreview as never) ?? null);
-  const [previewLoading, setPreviewLoading] = useState(false);
+  // 第4回 D: 受付帳は1回だけ入れる=①と②の控えを1つのファイル・1組の条件にそろえて戻す。
+  const s0 = unifyReceptionDraft(restoreDecision.start);
 
   // Job history
   const [jobs, setJobs] = useState<ImportJob[]>([]);
@@ -622,31 +329,32 @@ function ImportScreen({ draftEnabled }: { draftEnabled: boolean }) {
   const [roLoading, setRoLoading] = useState(false);
   const [roError, setRoError] = useState<string | null>(null);
   // 取込条件: 既定は「DLに〇がついている物件のみ」かつ「既存のみ」
-  const [dlFilter, setDlFilter] = useState<"marked" | "unmarked" | "all">(s0?.ro?.dlFilter ?? "marked");
-  const [shinkiFilter, setShinkiFilter] = useState<"existing" | "new" | "all">(s0?.ro?.shinkiFilter ?? "existing");
+  const [dlFilter, setDlFilter] = useState<"marked" | "unmarked" | "all">(s0?.ro?.dlFilter ?? s0?.rp?.rpDlFilter ?? "marked");
+  const [shinkiFilter, setShinkiFilter] = useState<"existing" | "new" | "all">(s0?.ro?.shinkiFilter ?? s0?.rp?.rpShinkiFilter ?? "existing");
 
   // Reception → Property (1-file) state
   const [rpFile, setRpFile] = useState<{
     name: string;
     csvText?: string;
     xlsxBase64?: string;
+    // ⚠②の控え(ro.receptionFile)からは作り直さない。①が済むと①の控えは外れる(csvDraftAfterImport)ので、
+    //   ここで②の受付帳を①へ戻すと、戻ったときに①がもう一度押せる形になり二重の取り込みへ誘う(@codex #523 P2)。
+    //   ②の受付帳は共通の欄の表示(rpFile ?? receptionFile)と②だけで使う。
   } | null>(s0?.rp?.rpFile ?? null);
   const [rpPreview, setRpPreview] = useState<ReceptionPropertyPreviewResponse | null>((s0?.rp?.rpPreview as never) ?? null);
   const [rpResult, setRpResult] = useState<ReceptionPropertyImportResponse | null>(null);
   const [rpLoading, setRpLoading] = useState(false);
   const [rpError, setRpError] = useState<string | null>(null);
-  const [rpDlFilter, setRpDlFilter] = useState<"marked" | "unmarked" | "all">(s0?.rp?.rpDlFilter ?? "marked");
-  const [rpShinkiFilter, setRpShinkiFilter] = useState<"existing" | "new" | "all">(s0?.rp?.rpShinkiFilter ?? "existing");
+  const [rpDlFilter, setRpDlFilter] = useState<"marked" | "unmarked" | "all">(s0?.rp?.rpDlFilter ?? s0?.ro?.dlFilter ?? "marked");
+  const [rpShinkiFilter, setRpShinkiFilter] = useState<"existing" | "new" | "all">(s0?.rp?.rpShinkiFilter ?? s0?.ro?.shinkiFilter ?? "existing");
 
   const [restoredDismissed, setRestoredDismissed] = useState(false);
 
   const draftData = useMemo<CsvImportDraft>(
     () => ({
       rev: 1,
-      main:
-        step === 2 || step === 3
-          ? { step, fileName, csvText, xlsxBase64, template, headers, rows, columnMapping, duplicatePreview }
-          : null,
+      // 画面に出ない古い取り込み手順(main)は第4回 D で外した。古い控えの main は読めるが戻さない。
+      main: null,
       // 結果が出たら(取り込み済み)その流れは控えない。
       ro:
         (receptionFile || ownerFile) && !roResult
@@ -657,8 +365,7 @@ function ImportScreen({ draftEnabled }: { draftEnabled: boolean }) {
           ? { rpFile, rpDlFilter, rpShinkiFilter, rpPreview: rpPreview as Record<string, unknown> | null }
           : null,
     }),
-    [step, fileName, csvText, xlsxBase64, template, headers, rows, columnMapping, duplicatePreview,
-      receptionFile, ownerFile, dlFilter, shinkiFilter, roPreview, roResult,
+    [receptionFile, ownerFile, dlFilter, shinkiFilter, roPreview, roResult,
       rpFile, rpDlFilter, rpShinkiFilter, rpPreview, rpResult],
   );
   // ⚠送信中の印が残っていた控えは、中身は戻さず(上の restoreDecision)印だけ引き継ぐ。
@@ -701,7 +408,7 @@ function ImportScreen({ draftEnabled }: { draftEnabled: boolean }) {
   const jobsReqRef = useRef(0);
   // ⚠どれかの取り込み中・結果が分からない間は「最初からやり直す」を出さない(送信中の印を消させない)。
   //   下見の返事を待つ間も出さない(届いた結果が控えを作り直す)。
-  const importBusy = uploading || previewLoading || roLoading || rpLoading || importBlocked;
+  const importBusy = roLoading || rpLoading || importBlocked;
   const applyCsvPending = (e: CsvPendingEvent) => {
     const r = nextCsvPending(csvPendingRef.current, e);
     csvPendingRef.current = r.state;
@@ -907,198 +614,15 @@ function ImportScreen({ draftEnabled }: { draftEnabled: boolean }) {
     setJobPage(1);
   };
 
-  // ------ File handling ------
-  const processFile = useCallback(async (file: File) => {
-    const gen = discardGenRef.current;
-    setFileName(file.name);
-    setError(null);
-    setResult(null);
-    const isXlsx = file.name.toLowerCase().endsWith(".xlsx");
-    try {
-      if (isXlsx) {
-        // xlsx: headers + rows(Record) + base64 を取得
-        const [{ headers: h, rows: r }, buf] = await Promise.all([
-          parseFileForPreview(file),
-          readFileForImport(file),
-        ]);
-        if (gen !== discardGenRef.current) return;
-        setCsvText("");
-        setXlsxBase64(buf.xlsxBase64 ?? null);
-        // 1行目ヘッダーが実質空の列はマッピング候補から除外する
-        const visibleH = filterNonBlankHeaders(h);
-        setHeaders(visibleH);
-        // rows(Record) → string[][] にそろえる
-        setRows(r.map((row) => visibleH.map((col) => row[col] ?? "")));
-
-        const mapping: Record<string, string> = {};
-        visibleH.forEach((header) => {
-          const normalized = header.trim();
-          if (AUTO_MAP[normalized]) {
-            mapping[normalized] = AUTO_MAP[normalized];
-          }
-        });
-        setColumnMapping(mapping);
-        setStep(2);
-        return;
-      }
-      // csv: UTF-8 BOM / UTF-8 / Shift-JIS(CP932) を自動判定して decode する。
-      // 旧実装は UTF-8 固定で読んでおり、Excel 出力 (Shift-JIS / CP932) の
-      // 日本語CSVが文字化けしていたため共通デコーダ経由に変更。
-      const text = await readCsvFileAsText(file);
-      if (gen !== discardGenRef.current) return;
-      setCsvText(text);
-      setXlsxBase64(null);
-      const { headers: h, rows: r } = parseCsv(text);
-      // ヘッダーが実質空の列は候補から除外。位置(index)対応の rows も同じ列だけ残す。
-      const keepIdx: number[] = [];
-      h.forEach((header, idx) => {
-        if (header && header.replace(/[\s　]/g, "") !== "") keepIdx.push(idx);
-      });
-      const visibleH = keepIdx.map((i) => h[i]);
-      const visibleR = r.map((row) => keepIdx.map((i) => row[i] ?? ""));
-      setHeaders(visibleH);
-      setRows(visibleR);
-
-      const mapping: Record<string, string> = {};
-      visibleH.forEach((header) => {
-        const normalized = header.trim();
-        if (AUTO_MAP[normalized]) {
-          mapping[normalized] = AUTO_MAP[normalized];
-        }
-      });
-      setColumnMapping(mapping);
-      setStep(2);
-    } catch (e) {
-      setError(e instanceof Error ? e.message : "ファイル読込に失敗しました");
-    }
-  }, []);
-
-  // ------ Mapping ------
-  const updateMapping = (header: string, value: string) => {
-    setColumnMapping((prev) => {
-      const next = { ...prev };
-      if (value === "") {
-        delete next[header];
-      } else {
-        next[header] = value;
-      }
-      return next;
-    });
-  };
-
-  const mappedFields = useMemo(
-    () => new Set(Object.values(columnMapping)),
-    [columnMapping]
-  );
-
-  // ------ Validation ------
-  const validationSummary = useMemo(() => {
-    let valid = 0;
-    let warnings = 0;
-    let errors = 0;
-    const rowStatuses: { status: RowStatus; message: string }[] = [];
-    rows.forEach((row) => {
-      const v = validateRow(row, headers, columnMapping);
-      rowStatuses.push(v);
-      if (v.status === "valid") valid++;
-      else if (v.status === "warning") warnings++;
-      else errors++;
-    });
-    return { valid, warnings, errors, rowStatuses };
-  }, [rows, headers, columnMapping]);
-
-  // ------ Import ------
-  const handleImport = async () => {
-    if (importBlocked) return;
-    if (!csvText.trim() && !xlsxBase64) return;
-    setUploading(true);
-    setError(null);
-    setResult(null);
-
-    // 返事が来る前に離れたら、戻ったとき「取り込み履歴で確かめて」と出す(二重取り込みを防ぐ・§5.1)。
-    applyCsvPending("start");
-    try {
-      const json = await importCsv(
-        fileName || "import.csv",
-        csvText || null,
-        columnMapping,
-        xlsxBase64 ?? undefined,
-      );
-      // ⚠成功でも結果の形が欠けた返事は、取り込まれたか分からない(印を残して止める・@codex P2)。
-      if (!hasImportResultShape(json, IMPORT_RESULT_SHAPE)) throw new Error(UNREADABLE_IMPORT_RESULT);
-      setResult(json as ImportResult);
-      finishCsvFlow("main");
-      setStep(4);
-      fetchJobs();
-    } catch (err) {
-      // ⚠5xx・通信切れは印を残し、履歴で確かめるまで取り込みを止める(取り込まれたか分からない)。
-      applyCsvPending(isDefiniteSubmitFailure(err) ? "definite" : "unknown");
-      // 結果が分からないときも履歴を読み直す(古い履歴を見て「無かった」と思わせない)。
-      fetchJobs();
-      setError(err instanceof Error ? err.message : "取込に失敗しました");
-    } finally {
-      setUploading(false);
-    }
-  };
-
-  // ------ Duplicate preview ------
-  /** 下見の読み込みの番号。最後に始めたもの以外の応答は捨てる(戻る→プレビューへの連打で古い下見を出さない)。 */
-  const previewReqRef = useRef(0);
-  const runDuplicatePreview = async () => {
-    const req = ++previewReqRef.current;
-    setStep(3);
-    setPreviewLoading(true);
-    setDuplicatePreview(null);
-    try {
-      const res = await previewCsvDuplicates(
-        csvText || null,
-        columnMapping,
-        fileName,
-        xlsxBase64 ?? undefined,
-      );
-      if (req !== previewReqRef.current) return;
-      setDuplicatePreview(res as typeof duplicatePreview);
-    } catch {
-      // preview is best-effort
-    } finally {
-      if (req === previewReqRef.current) setPreviewLoading(false);
-    }
-  };
-  // ⚠下見の返事を待つ間に別の画面へ移ると、控えには「段階3・下見なし」が残る。
-  //   戻ったときは下見を取り直す(下見なしのまま「取り込む」を押させない)。控えた下見があれば取り直さない。
-  const previewResumedRef = useRef(false);
-  useEffect(() => {
-    if (!draftEnabled || previewResumedRef.current) return;
-    previewResumedRef.current = true;
-    if (s0?.main?.step === 3 && !s0.main.duplicatePreview) void runDuplicatePreview();
-    // eslint-disable-next-line react-hooks/exhaustive-deps -- 戻った直後に1回だけ(控えから戻した値で取る)
-  }, [draftEnabled]);
-
-  // ------ Reset ------
-  const handleReset = () => {
-    previewReqRef.current += 1;
-    setStep(1);
-    setCsvText("");
-    setXlsxBase64(null);
-    setFileName("");
-    setHeaders([]);
-    setRows([]);
-    setColumnMapping({});
-    setResult(null);
-    setError(null);
-    setDuplicatePreview(null);
-    setPreviewLoading(false);
-  };
-
   // ------ Reception × Owner ------
-  const handleRoFile = async (which: "reception" | "owner", file: File | null) => {
+  // 受付帳は上の共通の欄(handleReceptionFile)で入れる。ここは所有者ファイルだけ(第4回 D)。
+  const handleOwnerFile = async (file: File | null) => {
     const gen = discardGenRef.current;
     setRoError(null);
     setRoPreview(null);
     setRoResult(null);
     if (!file) {
-      if (which === "reception") setReceptionFile(null);
-      else setOwnerFile(null);
+      setOwnerFile(null);
       return;
     }
     // B-11: ファイル名では拒否しない。種別はプレビュー時にサーバーが
@@ -1106,13 +630,7 @@ function ImportScreen({ draftEnabled }: { draftEnabled: boolean }) {
     try {
       const buf = await readFileForImport(file);
       if (gen !== discardGenRef.current) return;
-      const entry = {
-        name: file.name,
-        csvText: buf.csvText,
-        xlsxBase64: buf.xlsxBase64,
-      };
-      if (which === "reception") setReceptionFile(entry);
-      else setOwnerFile(entry);
+      setOwnerFile({ name: file.name, csvText: buf.csvText, xlsxBase64: buf.xlsxBase64 });
     } catch (e) {
       setRoError(e instanceof Error ? e.message : "ファイル読込に失敗しました");
     }
@@ -1185,22 +703,6 @@ function ImportScreen({ draftEnabled }: { draftEnabled: boolean }) {
   };
 
   // ------ Reception → Property ------
-  const handleRpFile = async (file: File | null) => {
-    const gen = discardGenRef.current;
-    setRpError(null);
-    setRpPreview(null);
-    setRpResult(null);
-    if (!file) { setRpFile(null); return; }
-    // B-11: ファイル名では拒否しない (種別はプレビュー時に内容から判定)。
-    try {
-      const buf = await readFileForImport(file);
-      if (gen !== discardGenRef.current) return;
-      setRpFile({ name: file.name, csvText: buf.csvText, xlsxBase64: buf.xlsxBase64 });
-    } catch (e) {
-      setRpError(e instanceof Error ? e.message : "ファイル読込に失敗しました");
-    }
-  };
-
   const handleRpPreview = async () => {
     if (!rpFile) return;
     setRpLoading(true);
@@ -1260,23 +762,66 @@ function ImportScreen({ draftEnabled }: { draftEnabled: boolean }) {
     setRpShinkiFilter("existing");
   };
 
+  // ------ 受付帳(①②共通・第4回 D) ------
+  // 受付帳は1回だけ入れる。画面の state は流れごとに2つのまま(控え・送信中の印の数え方を変えない)で、
+  // 入れたファイルと取込条件を両方へ同じものとして渡す。変えたら両方の下見を捨てる(下見と違う中身で取り込ませない)。
+  const handleReceptionFile = async (file: File | null) => {
+    const gen = discardGenRef.current;
+    setRpError(null);
+    setRpPreview(null);
+    setRpResult(null);
+    setRoError(null);
+    setRoPreview(null);
+    setRoResult(null);
+    if (!file) {
+      setRpFile(null);
+      setReceptionFile(null);
+      return;
+    }
+    // B-11: ファイル名では拒否しない (種別はプレビュー時に内容から判定)。
+    try {
+      const buf = await readFileForImport(file);
+      if (gen !== discardGenRef.current) return;
+      const entry = { name: file.name, csvText: buf.csvText, xlsxBase64: buf.xlsxBase64 };
+      setRpFile(entry);
+      setReceptionFile(entry);
+    } catch (e) {
+      setRpError(e instanceof Error ? e.message : "ファイル読込に失敗しました");
+    }
+  };
+
+  const changeDlFilter = (v: "marked" | "unmarked" | "all") => {
+    setRpDlFilter(v);
+    setDlFilter(v);
+    setRpPreview(null);
+    setRoPreview(null);
+  };
+  const changeShinkiFilter = (v: "existing" | "new" | "all") => {
+    setRpShinkiFilter(v);
+    setShinkiFilter(v);
+    setRpPreview(null);
+    setRoPreview(null);
+  };
+
+  const handleReceptionReset = () => {
+    handleRpReset();
+    handleRoReset();
+  };
+
+  /** ②の所有者ファイルだけ外す(受付帳と条件は①と共通なので残す)。 */
+  const handleOwnerClear = () => {
+    setOwnerFile(null);
+    setRoPreview(null);
+    setRoResult(null);
+    setRoError(null);
+  };
+
   const handleDiscardDraft = () => {
     discardGenRef.current += 1;
     draftSaver.discard();
-    handleReset();
     handleRoReset();
     handleRpReset();
-    setTemplate("standard");
     setRestoredDismissed(true);
-  };
-
-  // ------ Render helpers ------
-  const statusIcon = (status: RowStatus) => {
-    if (status === "valid")
-      return <CheckCircle2 className="h-4 w-4 text-green-500" />;
-    if (status === "warning")
-      return <AlertTriangle className="h-4 w-4 text-amber-500" />;
-    return <XCircle className="h-4 w-4 text-red-500" />;
   };
 
   return (
@@ -1307,628 +852,40 @@ function ImportScreen({ draftEnabled }: { draftEnabled: boolean }) {
         <p className="mb-2 font-semibold text-blue-900 dark:text-blue-300">取込の進め方</p>
         <ol className="ml-4 list-decimal space-y-1 text-blue-900 dark:text-blue-300">
           <li>
-            <span className="font-medium">① 受付帳CSVから物件を新規作成</span>
-            <span className="ml-1 text-blue-700 dark:text-blue-300">— DL〇かつ既存の受付帳行から住所・地番・区分で物件レコードを作成します</span>
+            <span className="font-medium">受付帳を1回入れる</span>
+            <span className="ml-1 text-blue-700 dark:text-blue-300">— 取込条件（DL・新既）もここで1回だけ選びます</span>
           </li>
           <li>
-            <span className="font-medium">② 受付帳×所有者CSVで既存物件に所有者を紐づける</span>
+            <span className="font-medium">① 物件を新規作成</span>
+            <span className="ml-1 text-blue-700 dark:text-blue-300">— 受付帳の行から住所・地番・区分で物件レコードを作成します</span>
+          </li>
+          <li>
+            <span className="font-medium">② 所有者ファイルで所有者を付ける</span>
             <span className="ml-1 text-blue-700 dark:text-blue-300">— ①で作成した物件に所有者情報を紐づけます</span>
           </li>
           <li>
-            <span className="font-medium">③ 謄本PDF</span> は物件詳細または<Link href="/import/registry-pdf" className="font-semibold underline underline-offset-2">専用ページ</Link>から登録します
+            <span className="font-medium">謄本PDF</span> は物件詳細または<Link href="/import/registry-pdf" className="font-semibold underline underline-offset-2">専用ページ</Link>から登録します
           </li>
         </ol>
         <p className="mt-2 text-xs text-blue-700 dark:text-blue-300">
-          物件が未登録の状態で所有者CSVを取り込んでも、所有者は物件に紐づきません。①を先に実行してください。
+          物件が未登録の状態で所有者ファイルを取り込んでも、所有者は物件に紐づきません。①を先に実行してください。
         </p>
       </div>
 
-      {/* ===== legacy 汎用取込UI: 利用者には非表示（削除せず保持・hidden ゆえダーク化は意図的に対象外） ===== */}
-      <div className="hidden">
-      <h2 className="mb-6 text-2xl font-bold text-gray-800 dark:text-gray-100">受付帳CSV / Excel(.xlsx) 取込</h2>
-
-      {/* ============ Step Indicator ============ */}
-      <div className="mb-8 flex items-center justify-center gap-0">
-        {([1, 2, 3, 4] as Step[]).map((s, idx) => {
-          const meta = STEP_META[s];
-          const Icon = meta.icon;
-          const isActive = s === step;
-          const isDone = s < step;
-          return (
-            <div key={s} className="flex items-center">
-              {idx > 0 && (
-                <ChevronRight
-                  className={`mx-1 h-4 w-4 shrink-0 ${
-                    isDone ? "text-blue-500" : "text-gray-300"
-                  }`}
-                />
-              )}
-              <button
-                onClick={() => {
-                  if (isDone) setStep(s);
-                }}
-                disabled={!isDone}
-                className={`flex items-center gap-1.5 rounded-full px-4 py-1.5 text-sm font-medium transition-colors ${
-                  isActive
-                    ? "bg-indigo-600 text-white"
-                    : isDone
-                      ? "bg-blue-100 text-blue-700 hover:bg-blue-200"
-                      : "bg-gray-100 text-gray-400"
-                }`}
-              >
-                {isDone ? (
-                  <Check className="h-3.5 w-3.5" />
-                ) : (
-                  <Icon className="h-3.5 w-3.5" />
-                )}
-                {meta.label}
-              </button>
-            </div>
-          );
-        })}
-      </div>
-
-      {/* ============ Step 1: File Upload ============ */}
-      {step === 1 && (
-        <div className="mb-8 rounded-lg border border-gray-200 dark:border-gray-800 bg-white dark:bg-gray-900 p-6">
-          <h3 className="mb-4 text-lg font-semibold text-gray-700 dark:text-gray-200">
-            ファイル選択
-          </h3>
-
-          {/* Template selection */}
-          <div className="mb-5">
-            <label className="mb-1 block text-sm font-medium text-gray-600 dark:text-gray-300">
-              テンプレート
-            </label>
-            <div className="relative inline-block">
-              <select
-                value={template}
-                onChange={(e) => setTemplate(e.target.value)}
-                className="appearance-none rounded-md border border-gray-300 dark:border-gray-700 bg-white dark:bg-gray-900 py-2 pl-3 pr-9 text-sm text-gray-700 dark:text-gray-200 shadow-sm focus:border-indigo-500 focus:outline-none focus:ring-1 focus:ring-indigo-500"
-              >
-                {Object.entries(TEMPLATES).map(([key, t]) => (
-                  <option key={key} value={key}>
-                    {t.label}
-                  </option>
-                ))}
-              </select>
-              <ChevronDown className="pointer-events-none absolute right-2.5 top-1/2 h-4 w-4 -translate-y-1/2 text-gray-400 dark:text-gray-500" />
-            </div>
-            <div className="mt-2 rounded bg-gray-50 dark:bg-gray-800/50 p-3 text-xs text-gray-500 dark:text-gray-400">
-              <span className="font-medium text-gray-600 dark:text-gray-300">対応カラム: </span>
-              {TEMPLATES[template].columns.join(", ")}
-            </div>
-          </div>
-
-          {/* Drag & Drop zone */}
-          <FileDropZone
-            size="lg"
-            accept=".csv,.tsv,.txt,.xlsx"
-            onFiles={(files) => void processFile(files[0])}
-            title="CSV または Excel(.xlsx) ファイルをここにドラッグ＆ドロップ"
-          />
-
-          {fileName && (
-            <div className="mt-4 space-y-2">
-              <div className="flex items-center gap-2 text-sm text-gray-600 dark:text-gray-300">
-                <FileText className="h-4 w-4" />
-                <span>{fileName}</span>
-                <span className="text-gray-400 dark:text-gray-500">
-                  ({rows.length} 行)
-                </span>
-              </div>
-              {(() => {
-                const det = detectImportFileType(fileName);
-                if (det.label) {
-                  return (
-                    <div className="inline-flex items-center gap-1.5 rounded-md border border-emerald-200 bg-emerald-50 px-2 py-1 text-xs text-emerald-800">
-                      <CheckCircle2 className="h-3.5 w-3.5" />
-                      {det.label}
-                    </div>
-                  );
-                }
-                if (det.error) {
-                  return (
-                    <div className="inline-flex items-center gap-1.5 rounded-md border border-amber-200 bg-amber-50 px-2 py-1 text-xs text-amber-800 dark:border-amber-800 dark:bg-amber-950/40 dark:text-amber-300">
-                      <AlertTriangle className="h-3.5 w-3.5" />
-                      {det.error}
-                    </div>
-                  );
-                }
-                return null;
-              })()}
-            </div>
-          )}
-        </div>
-      )}
-
-      {/* ============ Step 2: Column Mapping ============ */}
-      {step === 2 && (
-        <div className="mb-8 rounded-lg border border-gray-200 dark:border-gray-800 bg-white dark:bg-gray-900 p-6">
-          <h3 className="mb-4 text-lg font-semibold text-gray-700 dark:text-gray-200">
-            カラム対応設定
-          </h3>
-          <p className="mb-4 text-sm text-gray-500 dark:text-gray-400">
-            CSVのヘッダーと取込先フィールドを対応させてください。
-          </p>
-
-          <div className="overflow-x-auto">
-            <table className="w-full text-left text-sm">
-              <thead className="border-b border-gray-200 dark:border-gray-800 bg-gray-50 dark:bg-gray-800/50">
-                <tr>
-                  <th className="px-3 py-2 font-medium text-gray-600 dark:text-gray-300 w-8"></th>
-                  <th className="px-3 py-2 font-medium text-gray-600 dark:text-gray-300">
-                    CSVヘッダー
-                  </th>
-                  <th className="px-3 py-2 font-medium text-gray-600 dark:text-gray-300 w-8">
-                    <ArrowRight className="h-4 w-4" />
-                  </th>
-                  <th className="px-3 py-2 font-medium text-gray-600 dark:text-gray-300">
-                    取込先フィールド
-                  </th>
-                  <th className="px-3 py-2 font-medium text-gray-600 dark:text-gray-300 w-12">
-                    状態
-                  </th>
-                </tr>
-              </thead>
-              <tbody className="divide-y divide-gray-100 dark:divide-gray-800">
-                {headers.map((header) => {
-                  const mapped = columnMapping[header] ?? "";
-                  const isMapped = mapped !== "";
-                  return (
-                    <tr key={header} className="hover:bg-gray-50 dark:hover:bg-gray-800">
-                      <td className="px-3 py-2 text-gray-300 dark:text-gray-600">
-                        <GripVertical className="h-4 w-4" />
-                      </td>
-                      <td className="px-3 py-2 font-mono text-gray-800 dark:text-gray-100">
-                        {header}
-                      </td>
-                      <td className="px-3 py-2 text-gray-300 dark:text-gray-600">
-                        <ArrowRight className="h-4 w-4" />
-                      </td>
-                      <td className="px-3 py-2">
-                        <div className="relative inline-block">
-                          <select
-                            value={mapped}
-                            onChange={(e) =>
-                              updateMapping(header, e.target.value)
-                            }
-                            className="appearance-none rounded border border-gray-300 dark:border-gray-700 bg-white dark:bg-gray-900 py-1 pl-2 pr-7 text-sm dark:text-gray-100 focus:border-indigo-500 focus:outline-none focus:ring-1 focus:ring-indigo-500"
-                          >
-                            <option value="">-- 未設定 --</option>
-                            {TARGET_FIELDS.map((f) => (
-                              <option
-                                key={f}
-                                value={f}
-                                disabled={
-                                  mappedFields.has(f) && mapped !== f
-                                }
-                              >
-                                {TARGET_FIELD_LABELS[f]}
-                                {mappedFields.has(f) && mapped !== f
-                                  ? " (使用済)"
-                                  : ""}
-                              </option>
-                            ))}
-                          </select>
-                          <ChevronDown className="pointer-events-none absolute right-1.5 top-1/2 h-3.5 w-3.5 -translate-y-1/2 text-gray-400 dark:text-gray-500" />
-                        </div>
-                      </td>
-                      <td className="px-3 py-2">
-                        {isMapped ? (
-                          <CheckCircle2 className="h-5 w-5 text-green-500" />
-                        ) : (
-                          <AlertTriangle className="h-5 w-5 text-amber-400" />
-                        )}
-                      </td>
-                    </tr>
-                  );
-                })}
-              </tbody>
-            </table>
-          </div>
-
-          <div className="mt-4 flex items-center justify-between text-sm text-gray-500 dark:text-gray-400">
-            {/* Excel の使用範囲が 1024 列まで広がっているケースで「N / 1024 カラム対応済」と
-                出るのが利用者には意味不明だったため、分母を撤去して割当数のみ表示する。 */}
-            <span>{Object.keys(columnMapping).length} 項目を割当済み</span>
-            {!mappedFields.has("住所") && (
-              <span className="text-amber-600 dark:text-amber-400 font-medium">
-                <AlertTriangle className="mr-1 inline h-4 w-4" />
-                住所フィールドの対応を推奨
-              </span>
-            )}
-          </div>
-
-          <div className="mt-6 flex gap-3">
-            <button
-              onClick={() => setStep(1)}
-              className="rounded-md border border-gray-300 dark:border-gray-700 px-4 py-2 text-sm font-medium text-gray-700 dark:text-gray-200 hover:bg-gray-50 dark:hover:bg-gray-800"
-            >
-              戻る
-            </button>
-            <button
-              onClick={runDuplicatePreview}
-              className="flex items-center gap-2 rounded-md bg-indigo-600 px-4 py-2 text-sm font-medium text-white hover:bg-indigo-700"
-            >
-              <Eye className="h-4 w-4" />
-              プレビューへ
-            </button>
-          </div>
-        </div>
-      )}
-
-      {/* ============ Step 3: Preview & Validate ============ */}
-      {step === 3 && (
-        <div className="mb-8 rounded-lg border border-gray-200 dark:border-gray-800 bg-white dark:bg-gray-900 p-6">
-          <h3 className="mb-4 text-lg font-semibold text-gray-700 dark:text-gray-200">
-            プレビュー・検証
-          </h3>
-
-          {/* Summary cards */}
-          <div className="mb-6 grid grid-cols-2 gap-3 sm:grid-cols-4">
-            <div className="rounded-lg border border-gray-200 dark:border-gray-800 bg-gray-50 dark:bg-gray-800/50 p-3 text-center">
-              <div className="text-2xl font-bold text-gray-800 dark:text-gray-100">
-                {rows.length}
-              </div>
-              <div className="text-xs text-gray-500 dark:text-gray-400">総行数</div>
-            </div>
-            <div className="rounded-lg border border-green-200 bg-green-50 p-3 text-center dark:border-green-800 dark:bg-green-950/40">
-              <div className="text-2xl font-bold text-green-700 dark:text-green-300">
-                {validationSummary.valid}
-              </div>
-              <div className="text-xs text-green-600 dark:text-green-400">有効</div>
-            </div>
-            <div className="rounded-lg border border-amber-200 bg-amber-50 p-3 text-center dark:border-amber-800 dark:bg-amber-950/40">
-              <div className="text-2xl font-bold text-amber-700 dark:text-amber-300">
-                {validationSummary.warnings}
-              </div>
-              <div className="text-xs text-amber-600 dark:text-amber-400">警告</div>
-            </div>
-            <div className="rounded-lg border border-red-200 bg-red-50 p-3 text-center dark:border-red-800 dark:bg-red-950/40">
-              <div className="text-2xl font-bold text-red-700 dark:text-red-300">
-                {validationSummary.errors}
-              </div>
-              <div className="text-xs text-red-600 dark:text-red-400">エラー</div>
-            </div>
-          </div>
-
-          {/* Preview table (first 5 rows) */}
-          <p className="mb-2 text-sm font-medium text-gray-600 dark:text-gray-300">
-            先頭5行プレビュー
-          </p>
-          <div className="overflow-x-auto rounded border border-gray-200 dark:border-gray-800">
-            <table className="w-full text-left text-xs">
-              <thead className="border-b border-gray-200 dark:border-gray-800 bg-gray-50 dark:bg-gray-800/50">
-                <tr>
-                  <th className="px-2 py-1.5 font-medium text-gray-500 dark:text-gray-400 w-8">
-                    #
-                  </th>
-                  <th className="px-2 py-1.5 font-medium text-gray-500 dark:text-gray-400 w-10">
-                    状態
-                  </th>
-                  {headers.map((h) => (
-                    <th
-                      key={h}
-                      className="px-2 py-1.5 font-medium text-gray-600 dark:text-gray-300 whitespace-nowrap"
-                    >
-                      {h}
-                      {columnMapping[h] && (
-                        <span className="ml-1 text-blue-500 dark:text-blue-400 font-normal">
-                          ({columnMapping[h]})
-                        </span>
-                      )}
-                    </th>
-                  ))}
-                </tr>
-              </thead>
-              <tbody className="divide-y divide-gray-100 dark:divide-gray-800">
-                {rows.slice(0, 5).map((row, i) => {
-                  const v = validationSummary.rowStatuses[i];
-                  return (
-                    <tr key={i} className="hover:bg-gray-50 dark:hover:bg-gray-800">
-                      <td className="px-2 py-1.5 text-gray-400 dark:text-gray-500">{i + 1}</td>
-                      <td className="px-2 py-1.5">
-                        <div className="flex items-center gap-1">
-                          {statusIcon(v?.status ?? "valid")}
-                        </div>
-                      </td>
-                      {headers.map((h, j) => (
-                        <td
-                          key={j}
-                          className="px-2 py-1.5 text-gray-700 dark:text-gray-200 max-w-[200px] truncate whitespace-nowrap"
-                          title={row[j] ?? ""}
-                        >
-                          {row[j] ?? ""}
-                        </td>
-                      ))}
-                    </tr>
-                  );
-                })}
-              </tbody>
-            </table>
-          </div>
-          {rows.length > 5 && (
-            <p className="mt-1 text-xs text-gray-400 dark:text-gray-500">
-              ...他 {rows.length - 5} 行
-            </p>
-          )}
-
-          {/* Duplicate preview section */}
-          {previewLoading && (
-            <div className="mt-4 flex items-center gap-2 rounded-md border border-blue-200 dark:border-blue-400/20 bg-blue-50 dark:bg-blue-500/10 p-4 text-sm text-blue-700 dark:text-blue-300">
-              <Loader2 className="h-4 w-4 animate-spin" />
-              重複チェック中...
-            </div>
-          )}
-
-          {duplicatePreview && !previewLoading && (
-            <div className="mt-4">
-              {/* ファイル種別判定結果 */}
-              {duplicatePreview.fileTypeLabel && (
-                <div className="mb-3 rounded-md border border-emerald-200 bg-emerald-50 px-3 py-2 text-sm text-emerald-800 flex items-center gap-2">
-                  <CheckCircle2 className="h-4 w-4" />
-                  <strong>{duplicatePreview.fileTypeLabel}</strong>
-                  <span className="text-xs text-emerald-600">
-                    （ファイル名: {fileName || "未設定"}）
-                  </span>
-                </div>
-              )}
-              {duplicatePreview.fileTypeError && (
-                <div className="mb-3 rounded-md border border-amber-200 bg-amber-50 px-3 py-2 text-sm text-amber-800 flex items-start gap-2">
-                  <AlertTriangle className="h-4 w-4 mt-0.5 shrink-0" />
-                  <div>
-                    <div className="font-medium">{duplicatePreview.fileTypeError}</div>
-                    <div className="text-xs text-amber-600 mt-0.5">
-                      （ファイル名: {fileName || "未設定"}）
-                    </div>
-                  </div>
-                </div>
-              )}
-              <div className="mb-3 grid grid-cols-2 gap-3 sm:grid-cols-5">
-                <div className="rounded-lg border border-gray-200 dark:border-gray-800 bg-gray-50 dark:bg-gray-800/50 p-2 text-center">
-                  <div className="text-lg font-bold text-gray-800 dark:text-gray-100">{duplicatePreview.totalRows}</div>
-                  <div className="text-xs text-gray-500 dark:text-gray-400">総行数(サーバー)</div>
-                </div>
-                <div className="rounded-lg border border-green-200 bg-green-50 p-2 text-center dark:border-green-800 dark:bg-green-950/40">
-                  <div className="text-lg font-bold text-green-700 dark:text-green-300">{duplicatePreview.validRows}</div>
-                  <div className="text-xs text-green-600 dark:text-green-400">新規登録予定</div>
-                </div>
-                <div className="rounded-lg border border-blue-200 bg-blue-50 p-2 text-center dark:border-blue-800 dark:bg-blue-950/40">
-                  <div className="text-lg font-bold text-blue-700 dark:text-blue-300">{duplicatePreview.updateCount ?? 0}</div>
-                  <div className="text-xs text-blue-600 dark:text-blue-400">更新候補</div>
-                </div>
-                <div className="rounded-lg border border-amber-200 bg-amber-50 p-2 text-center dark:border-amber-800 dark:bg-amber-950/40">
-                  <div className="text-lg font-bold text-amber-700 dark:text-amber-300">{duplicatePreview.duplicateCount}</div>
-                  <div className="text-xs text-amber-600 dark:text-amber-400">重複スキップ</div>
-                </div>
-                <div className="rounded-lg border border-red-200 bg-red-50 p-2 text-center dark:border-red-800 dark:bg-red-950/40">
-                  <div className="text-lg font-bold text-red-700 dark:text-red-300">{duplicatePreview.errorRows}</div>
-                  <div className="text-xs text-red-600 dark:text-red-400">エラー行</div>
-                </div>
-              </div>
-
-              {duplicatePreview.updates && duplicatePreview.updates.length > 0 && (
-                <div className="mb-3 rounded-md border border-blue-200 dark:border-blue-400/20 bg-blue-50 dark:bg-blue-500/10 p-4">
-                  <div className="mb-2 flex items-center gap-2 text-sm font-medium text-blue-800 dark:text-blue-300">
-                    <RefreshCw className="h-4 w-4" />
-                    更新候補 ({duplicatePreview.updateCount ?? 0}件)
-                  </div>
-                  <p className="mb-3 text-xs text-blue-600 dark:text-blue-300">
-                    以下の行は既存物件に一致する識別子/棟内部屋番号があるため、取込実行時に既存レコードを更新します（空欄の値は上書きしません）。
-                  </p>
-                  <div className="overflow-x-auto rounded border border-blue-200 dark:border-blue-400/20 bg-white dark:bg-gray-900">
-                    <table className="w-full text-left text-xs">
-                      <thead className="border-b border-blue-100 dark:border-blue-400/20 bg-blue-50 dark:bg-blue-500/10">
-                        <tr>
-                          <th className="px-2 py-1.5 font-medium text-blue-700 dark:text-blue-300">行番号</th>
-                          <th className="px-2 py-1.5 font-medium text-blue-700 dark:text-blue-300">CSV住所</th>
-                          <th className="px-2 py-1.5 font-medium text-blue-700 dark:text-blue-300">既存物件住所</th>
-                          <th className="px-2 py-1.5 font-medium text-blue-700 dark:text-blue-300">一致理由</th>
-                        </tr>
-                      </thead>
-                      <tbody className="divide-y divide-blue-50 dark:divide-blue-400/10">
-                        {duplicatePreview.updates.map((d, i) => (
-                          <tr key={i} className="hover:bg-blue-50/50 dark:hover:bg-blue-500/10">
-                            <td className="px-2 py-1.5 text-gray-600 dark:text-gray-300">{d.rowNumber}</td>
-                            <td className="px-2 py-1.5 text-gray-800 dark:text-gray-100 max-w-[200px] truncate" title={d.address}>{d.address}</td>
-                            <td className="px-2 py-1.5 text-gray-800 dark:text-gray-100 max-w-[200px] truncate" title={d.matchedAddress}>{d.matchedAddress}</td>
-                            <td className="px-2 py-1.5">
-                              <span className={`rounded px-1.5 py-0.5 ${badgeIntentClass("info")}`}>{d.matchReason}</span>
-                            </td>
-                          </tr>
-                        ))}
-                      </tbody>
-                    </table>
-                  </div>
-                  {(duplicatePreview.updateCount ?? 0) > 20 && (
-                    <p className="mt-2 text-xs text-blue-500 dark:text-blue-300">
-                      ※ 上位20件のみ表示（全{duplicatePreview.updateCount}件）
-                    </p>
-                  )}
-                </div>
-              )}
-
-              {duplicatePreview.duplicates.length > 0 && (
-                <div className="rounded-md border border-amber-200 dark:border-amber-400/25 bg-amber-50 dark:bg-amber-500/10 p-4">
-                  <div className="mb-2 flex items-center gap-2 text-sm font-medium text-amber-800 dark:text-amber-300">
-                    <AlertTriangle className="h-4 w-4" />
-                    重複スキップ候補 ({duplicatePreview.duplicateCount}件)
-                  </div>
-                  <p className="mb-3 text-xs text-amber-600 dark:text-amber-300">
-                    以下の行は住所一致のみなど取り違えリスクがあるため、取込実行時は「要レビュー」として記録し、既存レコードを更新しません。
-                  </p>
-                  <div className="overflow-x-auto rounded border border-amber-200 dark:border-amber-400/25 bg-white dark:bg-gray-900">
-                    <table className="w-full text-left text-xs">
-                      <thead className="border-b border-amber-100 dark:border-amber-400/20 bg-amber-50 dark:bg-amber-500/10">
-                        <tr>
-                          <th className="px-2 py-1.5 font-medium text-amber-700 dark:text-amber-300">行番号</th>
-                          <th className="px-2 py-1.5 font-medium text-amber-700 dark:text-amber-300">CSV住所</th>
-                          <th className="px-2 py-1.5 font-medium text-amber-700 dark:text-amber-300">既存物件住所</th>
-                          <th className="px-2 py-1.5 font-medium text-amber-700 dark:text-amber-300">一致理由</th>
-                        </tr>
-                      </thead>
-                      <tbody className="divide-y divide-amber-50 dark:divide-amber-400/10">
-                        {duplicatePreview.duplicates.map((d, i) => (
-                          <tr key={i} className="hover:bg-amber-50/50 dark:hover:bg-amber-500/10">
-                            <td className="px-2 py-1.5 text-gray-600 dark:text-gray-300">{d.rowNumber}</td>
-                            <td className="px-2 py-1.5 text-gray-800 dark:text-gray-100 max-w-[200px] truncate" title={d.address}>{d.address}</td>
-                            <td className="px-2 py-1.5 text-gray-800 dark:text-gray-100 max-w-[200px] truncate" title={d.matchedAddress}>{d.matchedAddress}</td>
-                            <td className="px-2 py-1.5">
-                              <span className={`rounded px-1.5 py-0.5 ${badgeIntentClass("warning")}`}>{d.matchReason}</span>
-                            </td>
-                          </tr>
-                        ))}
-                      </tbody>
-                    </table>
-                  </div>
-                  {duplicatePreview.duplicateCount > 20 && (
-                    <p className="mt-2 text-xs text-amber-500 dark:text-amber-300">
-                      ※ 上位20件のみ表示（全{duplicatePreview.duplicateCount}件）
-                    </p>
-                  )}
-                </div>
-              )}
-
-              {duplicatePreview.duplicates.length === 0 && duplicatePreview.duplicateCount === 0 && (
-                <div className="rounded-md border border-green-200 dark:border-green-400/20 bg-green-50 dark:bg-green-500/10 p-3 text-sm text-green-700 dark:text-green-300 flex items-center gap-2">
-                  <CheckCircle2 className="h-4 w-4" />
-                  重複候補はありません
-                </div>
-              )}
-            </div>
-          )}
-
-          {error && (
-            <div className="mt-4 rounded-md border border-red-200 dark:border-red-400/20 bg-red-50 dark:bg-red-500/10 p-3 text-sm text-red-700 dark:text-red-300">
-              {error}
-            </div>
-          )}
-
-          <div className="mt-6 flex gap-3">
-            <button
-              onClick={() => setStep(2)}
-              className="rounded-md border border-gray-300 dark:border-gray-700 px-4 py-2 text-sm font-medium text-gray-700 dark:text-gray-200 hover:bg-gray-50 dark:hover:bg-gray-800"
-            >
-              戻る
-            </button>
-            <button
-              onClick={handleImport}
-              disabled={uploading || importBlocked}
-              className="flex items-center gap-2 rounded-md bg-indigo-600 px-4 py-2 text-sm font-medium text-white hover:bg-indigo-700 disabled:opacity-50"
-            >
-              {uploading ? (
-                <>
-                  <Loader2 className="h-4 w-4 animate-spin" />
-                  取込中...
-                </>
-              ) : (
-                <>
-                  <Upload className="h-4 w-4" />
-                  取込実行
-                </>
-              )}
-            </button>
-          </div>
-        </div>
-      )}
-
-      {/* ============ Step 4: Import Result ============ */}
-      {step === 4 && result && (
-        <div className="mb-8 rounded-lg border border-gray-200 dark:border-gray-800 bg-white dark:bg-gray-900 p-6">
-          <h3 className="mb-4 text-lg font-semibold text-gray-700 dark:text-gray-200">
-            取込結果
-          </h3>
-
-          <div className="mb-6 rounded-md border border-green-200 dark:border-green-400/20 bg-green-50 dark:bg-green-500/10 p-5">
-            <div className="mb-3 flex items-center gap-2 text-green-800 dark:text-green-300">
-              <CheckCircle2 className="h-5 w-5" />
-              <span className="font-semibold">取込が完了しました</span>
-            </div>
-            <div className="grid grid-cols-2 gap-3 text-sm sm:grid-cols-5">
-              <div>
-                <span className="text-gray-600 dark:text-gray-300">総行数:</span>{" "}
-                <strong>{result.totalRows}</strong>
-              </div>
-              <div>
-                <span className="text-green-600 dark:text-green-300">成功:</span>{" "}
-                <strong className="text-green-700 dark:text-green-300">
-                  {result.successCount}
-                </strong>
-              </div>
-              <div>
-                <span className="text-blue-600 dark:text-blue-300">うち更新:</span>{" "}
-                <strong className="text-blue-700 dark:text-blue-300">
-                  {result.updateCount ?? 0}
-                </strong>
-              </div>
-              <div>
-                <span className="text-amber-600 dark:text-amber-300">要レビュー:</span>{" "}
-                <strong className="text-amber-700 dark:text-amber-300">
-                  {result.needsReviewCount}
-                </strong>
-              </div>
-              <div>
-                <span className="text-red-600 dark:text-red-300">エラー:</span>{" "}
-                <strong className="text-red-700 dark:text-red-300">{result.errorCount}</strong>
-              </div>
-            </div>
-            {result.parseErrors.length > 0 && (
-              <div className="mt-3 border-t border-green-200 pt-3">
-                <p className="mb-1 text-xs font-medium text-red-600 dark:text-red-400">
-                  パースエラー:
-                </p>
-                {result.parseErrors.map((e, i) => (
-                  <p key={i} className="text-xs text-red-500 dark:text-red-400">
-                    行 {e.row}: {e.message}
-                  </p>
-                ))}
-              </div>
-            )}
-          </div>
-
-          <div className="flex gap-3">
-            <Link
-              href={`/import/jobs/${result.jobId}`}
-              className="flex items-center gap-2 rounded-md border border-indigo-300 dark:border-indigo-400 bg-white dark:bg-gray-900 px-4 py-2 text-sm font-medium text-indigo-600 dark:text-indigo-400 hover:bg-indigo-50 dark:hover:bg-indigo-500/10"
-            >
-              <Eye className="h-4 w-4" />
-              ジョブ詳細を見る
-            </Link>
-            <button
-              onClick={handleReset}
-              className="flex items-center gap-2 rounded-md bg-indigo-600 px-4 py-2 text-sm font-medium text-white hover:bg-indigo-700"
-            >
-              <RefreshCw className="h-4 w-4" />
-              新しいファイルを取込
-            </button>
-          </div>
-        </div>
-      )}
-      </div>{/* /legacy 汎用取込UI */}
-
-      {/* ============ ① 受付帳CSVから物件を新規作成 ============ */}
-      <div className="mb-8 rounded-lg border border-gray-200 dark:border-gray-800 bg-white dark:bg-gray-900 p-6">
+      {/* ============ 受付帳を入れる(①②共通・第4回 D) ============ */}
+      {/* 以前は①と②で同じ受付帳を2回入れていた。1回だけ入れ、取込条件も1組にする。 */}
+      <div id="reception-shared" data-testid="reception-shared" className="mb-8 scroll-mt-4 rounded-lg border border-gray-200 dark:border-gray-800 bg-white dark:bg-gray-900 p-6">
         <div className="mb-4 flex items-center gap-2">
           <FileUp className="h-5 w-5 text-green-600 dark:text-green-400" />
           <h3 className="text-lg font-semibold text-gray-700 dark:text-gray-200">
-            ① 受付帳CSVから物件を新規作成（CSV / Excel(.xlsx) 対応）
+            受付帳を入れる（CSV / Excel(.xlsx) 対応）
           </h3>
-          <span className="ml-2 rounded bg-green-50 dark:bg-green-500/10 px-2 py-0.5 text-xs font-medium text-green-700 dark:text-green-300">
-            物件を新規作成
-          </span>
         </div>
         <p className="mb-3 text-sm text-gray-500 dark:text-gray-400">
-          受付帳CSVを読み込み、住所が既存物件と重複しない行だけ物件レコードを新規作成します。
-          地番・家屋番号・区分も自動で設定します。所有者の紐づけは②で行います。
+          受付帳は1回だけ入れます。下の①（物件を作る）と②（所有者を付ける）の両方で、このファイルと取込条件を使います。
         </p>
-        <ol className="mb-3 ml-5 list-decimal space-y-0.5 text-xs text-gray-600 dark:text-gray-300">
-          <li>受付帳CSV を選択</li>
-          <li>「プレビュー」で新規作成予定・重複・住所なし件数を確認</li>
-          <li>「取り込む」で物件を作成</li>
-        </ol>
 
-        {/* 取込条件 */}
+        {/* 取込条件: プレビュー・取込の両方(①②とも)に同じ条件が適用される */}
         <div className="mb-4 rounded-md border border-gray-200 dark:border-gray-800 bg-gray-50 dark:bg-gray-800/50 p-3">
           <div className="mb-2 text-xs font-semibold text-gray-700 dark:text-gray-200">取込条件</div>
           <div className="flex flex-wrap items-center gap-4">
@@ -1936,8 +893,8 @@ function ImportScreen({ draftEnabled }: { draftEnabled: boolean }) {
               <span className="text-xs text-gray-500 dark:text-gray-400">取込物件選択（DL）</span>
               <select
                 value={rpDlFilter}
-                onChange={(e) => { setRpDlFilter(e.target.value as typeof rpDlFilter); setRpPreview(null); }}
-                disabled={rpLoading}
+                onChange={(e) => changeDlFilter(e.target.value as typeof rpDlFilter)}
+                disabled={rpLoading || roLoading}
                 className="rounded-md border border-gray-300 dark:border-gray-700 bg-white dark:bg-gray-900 dark:text-gray-100 px-2 py-1 text-sm"
               >
                 <option value="marked">DLに〇がついている物件のみ</option>
@@ -1949,8 +906,8 @@ function ImportScreen({ draftEnabled }: { draftEnabled: boolean }) {
               <span className="text-xs text-gray-500 dark:text-gray-400">新既</span>
               <select
                 value={rpShinkiFilter}
-                onChange={(e) => { setRpShinkiFilter(e.target.value as typeof rpShinkiFilter); setRpPreview(null); }}
-                disabled={rpLoading}
+                onChange={(e) => changeShinkiFilter(e.target.value as typeof rpShinkiFilter)}
+                disabled={rpLoading || roLoading}
                 className="rounded-md border border-gray-300 dark:border-gray-700 bg-white dark:bg-gray-900 dark:text-gray-100 px-2 py-1 text-sm"
               >
                 <option value="existing">既存のみ</option>
@@ -1959,19 +916,61 @@ function ImportScreen({ draftEnabled }: { draftEnabled: boolean }) {
               </select>
             </label>
           </div>
+          <p className="mt-2 text-xs text-gray-500 dark:text-gray-400">
+            条件はプレビュー・取り込み実行の両方（①②とも）に同じものが適用されます。物件住所は「都道府県＋区＋住所＋番地」から作成されます。受付番号は取り込まず、「他」列は共有名義人の有無として扱います。
+          </p>
         </div>
 
         {/* ファイル選択 (D&D) */}
-        <div className="mb-4">
+        <div className="mb-3">
           <FileDropZone
             accept=".csv,.tsv,.txt,.xlsx"
-            onFiles={(files) => void handleRpFile(files[0])}
-            onNoneAccepted={() => void handleRpFile(null)}
+            onFiles={(files) => void handleReceptionFile(files[0])}
+            onNoneAccepted={() => void handleReceptionFile(null)}
             title="CSV または Excel(.xlsx) ファイルをここにドラッグ＆ドロップ"
             hint="受付帳のファイル — 種別は中身の列構成から自動判定します"
-            fileName={rpFile?.name ?? null}
+            fileName={rpFile?.name ?? receptionFile?.name ?? null}
           />
         </div>
+        {(rpFile || receptionFile || ownerFile || rpPreview || rpResult || roPreview || roResult) && (
+          <button
+            onClick={handleReceptionReset}
+            disabled={rpLoading || roLoading}
+            className="flex items-center gap-1.5 rounded-md border border-gray-300 dark:border-gray-700 px-3 py-2 text-sm text-gray-600 dark:text-gray-300 hover:bg-gray-50 dark:hover:bg-gray-800 disabled:opacity-50"
+          >
+            <RefreshCw className="h-4 w-4" />
+            選択をクリア（①②とも）
+          </button>
+        )}
+      </div>
+
+      {/* ============ ① 受付帳から物件を新規作成 ============ */}
+      <div className="mb-8 rounded-lg border border-gray-200 dark:border-gray-800 bg-white dark:bg-gray-900 p-6">
+        <div className="mb-4 flex items-center gap-2">
+          <FileUp className="h-5 w-5 text-green-600 dark:text-green-400" />
+          <h3 className="text-lg font-semibold text-gray-700 dark:text-gray-200">
+            ① 受付帳から物件を新規作成
+          </h3>
+          <span className="ml-2 rounded bg-green-50 dark:bg-green-500/10 px-2 py-0.5 text-xs font-medium text-green-700 dark:text-green-300">
+            物件を新規作成
+          </span>
+        </div>
+        <p className="mb-3 text-sm text-gray-500 dark:text-gray-400">
+          上で入れた受付帳から、住所が既存物件と重複しない行だけ物件レコードを新規作成します。
+          地番・家屋番号・区分も自動で設定します。所有者の紐づけは②で行います。
+        </p>
+        <ol className="mb-3 ml-5 list-decimal space-y-0.5 text-xs text-gray-600 dark:text-gray-300">
+          <li>「プレビュー」で新規作成予定・重複・住所なし件数を確認</li>
+          <li>「取り込む」で物件を作成</li>
+        </ol>
+        {!rpFile && receptionFile && (
+          <p
+            data-testid="rp-reception-kept-for-owner"
+            className="mb-3 rounded-md border border-gray-200 bg-gray-50 px-3 py-2 text-xs text-gray-600 dark:border-gray-700 dark:bg-gray-800/50 dark:text-gray-300"
+          >
+            上の受付帳は②（所有者を付ける）のために残しています。①は前回この受付帳で済ませた可能性があります（下の取り込み履歴で確かめられます）。①をもう一度行うときは、上で受付帳を入れ直してください。
+          </p>
+        )}
 
         {/* ボタン */}
         <div className="mb-4 flex flex-wrap items-center gap-2">
@@ -1992,16 +991,6 @@ function ImportScreen({ draftEnabled }: { draftEnabled: boolean }) {
             {rpLoading ? <Loader2 className="h-4 w-4 animate-spin" /> : <DownloadCloud className="h-4 w-4" />}
             取り込む（{rpPreview?.summary.toCreateCount ?? 0}件作成）
           </button>
-          {(rpFile || rpPreview || rpResult) && (
-            <button
-              onClick={handleRpReset}
-              disabled={rpLoading}
-              className="flex items-center gap-1.5 rounded-md border border-gray-300 dark:border-gray-700 px-3 py-2 text-sm text-gray-600 dark:text-gray-300 hover:bg-gray-50 dark:hover:bg-gray-800 disabled:opacity-50"
-            >
-              <RefreshCw className="h-4 w-4" />
-              リセット
-            </button>
-          )}
         </div>
 
         {/* エラー */}
@@ -2097,7 +1086,7 @@ function ImportScreen({ draftEnabled }: { draftEnabled: boolean }) {
         )}
       </div>
 
-      {/* ============ ② 受付帳 × 所有者 2ファイル突合 ============ */}
+      {/* ============ ② 受付帳 × 所有者で所有者を付ける(受付帳は上で入れたもの・第4回 D) ============ */}
       {/* ⚠id はメニューの「所有者CSV取込」の着地点(@codex #411 R1 P2)。
           この作業は同じページの下の方にあり、上から入ると見つからない。
           scroll-mt-4 = 固定ヘッダに隠れない余白。 */}
@@ -2108,77 +1097,51 @@ function ImportScreen({ draftEnabled }: { draftEnabled: boolean }) {
         <div className="mb-4 flex items-center gap-2">
           <FileUp className="h-5 w-5 text-blue-600 dark:text-blue-400" />
           <h3 className="text-lg font-semibold text-gray-700 dark:text-gray-200">
-            ② 受付帳 × 所有者 2ファイル突合（CSV / Excel(.xlsx) 対応）
+            ② 所有者ファイルで所有者を付ける（CSV / Excel(.xlsx) 対応）
           </h3>
           <span className="ml-2 rounded bg-blue-50 dark:bg-blue-500/10 px-2 py-0.5 text-xs font-medium text-blue-700 dark:text-blue-300">
             既存物件に反映
           </span>
         </div>
         <p className="mb-3 text-sm text-gray-500 dark:text-gray-400">
-          受付帳CSVと所有者CSVをキーで突合し、一意に特定できた行だけを既存物件に反映します。
+          上で入れた受付帳と所有者ファイルをキーで突合し、一意に特定できた行だけを既存物件に反映します。
           共有名義人は複数行のまま残します。空値では既存データを上書きしません。
         </p>
         <ol className="mb-3 ml-5 list-decimal space-y-0.5 text-xs text-gray-600 dark:text-gray-300">
-          <li>受付帳CSV を選択（受付帳の情報を読み込みます）</li>
-          <li>所有者CSV を選択（所有者名・住所などを読み込みます）</li>
+          <li>所有者ファイルを選択（所有者名・住所などを読み込みます。受付帳は上で入れたものを使います）</li>
           <li>「突合結果をプレビュー」で突合成功・未突合・要レビューを確認</li>
           <li>「確認済みデータを取り込む」で一意に特定できた行だけを反映</li>
         </ol>
-
-        {/* 取込条件: DL / 新既 のフィルタ。プレビュー・取込の両方に同じ条件が適用される */}
-        <div className="mb-4 rounded-md border border-gray-200 dark:border-gray-800 bg-gray-50 dark:bg-gray-800/50 p-3">
-          <div className="mb-2 text-xs font-semibold text-gray-700 dark:text-gray-200">取込条件</div>
-          <div className="flex flex-wrap items-center gap-4">
-            <label className="flex items-center gap-2 text-sm text-gray-700 dark:text-gray-200">
-              <span className="text-xs text-gray-500 dark:text-gray-400">取込物件選択（DL）</span>
-              <select
-                value={dlFilter}
-                onChange={(e) => setDlFilter(e.target.value as typeof dlFilter)}
-                disabled={roLoading}
-                className="rounded-md border border-gray-300 dark:border-gray-700 bg-white dark:bg-gray-900 dark:text-gray-100 px-2 py-1 text-sm"
-              >
-                <option value="marked">DLに〇がついている物件のみ</option>
-                <option value="unmarked">DLに〇がついていない物件のみ</option>
-                <option value="all">両方</option>
-              </select>
-            </label>
-            <label className="flex items-center gap-2 text-sm text-gray-700 dark:text-gray-200">
-              <span className="text-xs text-gray-500 dark:text-gray-400">新既</span>
-              <select
-                value={shinkiFilter}
-                onChange={(e) => setShinkiFilter(e.target.value as typeof shinkiFilter)}
-                disabled={roLoading}
-                className="rounded-md border border-gray-300 dark:border-gray-700 bg-white dark:bg-gray-900 dark:text-gray-100 px-2 py-1 text-sm"
-              >
-                <option value="existing">既存のみ</option>
-                <option value="new">新規のみ</option>
-                <option value="all">両方</option>
-              </select>
-            </label>
-          </div>
-          <p className="mt-2 text-xs text-gray-500 dark:text-gray-400">
-            条件はプレビュー・取り込み実行の両方に同じものが適用されます。物件住所は「都道府県＋区＋住所＋番地」から作成されます。受付番号は取り込まず、「他」列は共有名義人の有無として扱います。
+        <p className="mb-3 text-xs text-gray-500 dark:text-gray-400">
+          ※売却DMの対象は、所有者ファイルで DM列が〇 だった物件のみです(それ以外は送付対象になりません)。
+        </p>
+        {/* ⚠メニューの「所有者CSV取込」(/import#owner-match)はここへ直接着く。受付帳の欄は上にあり見えないので、
+            受付帳が無いときは理由と上へのリンクを出す(押せないプレビューだけ残さない・@codex #523 P2)。 */}
+        {!receptionFile && (
+          <p
+            data-testid="owner-match-needs-reception"
+            className="mb-3 rounded-md border border-amber-300 bg-amber-50 px-3 py-2 text-sm text-amber-900 dark:border-amber-500/40 dark:bg-amber-500/15 dark:text-amber-300"
+          >
+            {rpFile
+              ? // ①の控えだけが戻った=②は前回この受付帳で済ませたのかもしれない(作り直さない・@codex #523 P2)。
+                "上の受付帳は①（物件を作る）のために残しています。②は前回この受付帳で済ませた可能性があります（下の取り込み履歴で確かめられます）。②を行うときは、"
+              : "先に、"}
+            このページ上部の
+            <a href="#reception-shared" className="mx-1 font-semibold underline underline-offset-2">「受付帳を入れる」</a>
+            {rpFile ? "で受付帳を入れ直してください。" : "に受付帳を入れてください（②は上で入れた受付帳と所有者ファイルを突き合わせます）。"}
           </p>
-          <p className="mt-1 text-xs text-gray-500 dark:text-gray-400">
-            所有者CSVの「物件住所」が、受付帳CSVの物件住所と一致した場合のみ紐づけます。所有者住所は「都道府県＋所有者市区郡＋所有者住所＋建物名」を連結し、〒は別フィールドとして郵便番号に保存します。No / DL / 受付番号 / 「他」は紐づけキーに使いません。
-          </p>
-        </div>
+        )}
 
-        <div className="mb-4 grid grid-cols-1 gap-4 md:grid-cols-2">
-          {/* 受付帳 D&D */}
-          <FileDropZone
-            accept=".csv,.tsv,.txt,.xlsx"
-            onFiles={(files) => void handleRoFile("reception", files[0])}
-            onNoneAccepted={() => void handleRoFile("reception", null)}
-            title="CSV または Excel(.xlsx) ファイルをここにドラッグ＆ドロップ"
-            hint="受付帳 — 種別は中身の列構成から自動判定します"
-            fileName={receptionFile?.name ?? null}
-          />
+        <p className="mb-4 text-xs text-gray-500 dark:text-gray-400">
+          所有者ファイルの「物件住所」が、受付帳の物件住所と一致した場合のみ紐づけます。所有者住所は「都道府県＋所有者市区郡＋所有者住所＋建物名」を連結し、〒は別フィールドとして郵便番号に保存します。No / DL / 受付番号 / 「他」は紐づけキーに使いません。
+        </p>
+
+        <div className="mb-4">
           {/* 所有者 D&D */}
           <FileDropZone
             accept=".csv,.tsv,.txt,.xlsx"
-            onFiles={(files) => void handleRoFile("owner", files[0])}
-            onNoneAccepted={() => void handleRoFile("owner", null)}
+            onFiles={(files) => void handleOwnerFile(files[0])}
+            onNoneAccepted={() => void handleOwnerFile(null)}
             title="CSV または Excel(.xlsx) ファイルをここにドラッグ＆ドロップ"
             hint="所有者 — 種別は中身の列構成から自動判定します"
             fileName={ownerFile?.name ?? null}
@@ -2203,12 +1166,12 @@ function ImportScreen({ draftEnabled }: { draftEnabled: boolean }) {
             確認済みデータを取り込む
           </button>
           <button
-            onClick={handleRoReset}
+            onClick={handleOwnerClear}
             disabled={roLoading}
             className="flex items-center gap-2 rounded-md border border-gray-300 dark:border-gray-700 bg-white dark:bg-gray-900 px-3 py-2 text-sm text-gray-700 dark:text-gray-200 hover:bg-gray-50 dark:hover:bg-gray-800"
           >
             <RefreshCw className="h-4 w-4" />
-            選択をクリア
+            所有者ファイルをクリア
           </button>
         </div>
 

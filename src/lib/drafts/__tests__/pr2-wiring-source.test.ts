@@ -89,8 +89,12 @@ describe("取り込み(CSV)の配線", () => {
     expect(src).toMatch(/const \[importBlocked, setImportBlocked\] = useState\(restoreDecision\.showPending\);/);
     expect(src).toContain('onDismiss={() => applyCsvPending("confirm")}');
   });
+  // 画面に出ない古い取り込み手順(main・importCsv)は第4回 D で外した(残る流れは ro と rp)。
+  it("画面に出ない古い取り込み手順(importCsv)はもう無い", () => {
+    expect(src).not.toContain("await importCsv(");
+    expect(src).not.toContain('finishCsvFlow("main")');
+  });
   it.each([
-    ["importCsv(", "main"],
     ["importReceptionOwnerCsv(", "ro"],
     ["importReceptionPropertyCsv(", "rp"],
   ])("%s: 直前に印・済んだ流れを外してから数えて外す・失敗は 4xx か分からないかで分ける", (call, flow) => {
@@ -110,11 +114,10 @@ describe("取り込み(CSV)の配線", () => {
       /const finishCsvFlow = \(flow: "main" \| "ro" \| "rp"\) => \{\s*draftDataRef\.current = csvDraftAfterImport\(draftDataRef\.current, flow\);\s*draftSaver\.writeNow\(draftDataRef\.current\);\s*applyCsvPending\("ok"\);\s*\};/,
     );
   });
-  it("結果が分からない間は3つの取り込みボタンを押せない", () => {
-    expect(src).toMatch(/onClick=\{handleImport\}\s*disabled=\{uploading \|\| importBlocked\}/);
+  it("結果が分からない間は2つの取り込みボタンを押せない", () => {
     expect(src).toMatch(/onClick=\{handleRpImport\}\s*disabled=\{[^}]*\|\| importBlocked\}/);
     expect(src).toMatch(/onClick=\{handleRoImport\}\s*disabled=\{[^}]*\|\| importBlocked\}/);
-    for (const h of ["handleImport", "handleRoImport", "handleRpImport"]) {
+    for (const h of ["handleRoImport", "handleRpImport"]) {
       expect(src).toMatch(new RegExp(`const ${h} = async \\(\\) => \\{\\s*if \\(importBlocked\\) return;`));
     }
   });
@@ -133,7 +136,7 @@ describe("送っている途中は「最初からやり直す」を出さない(
   });
   it("取り込み(CSV): どれかの取り込み中・結果が分からない間は帯を出さない", () => {
     const src = read("src/app/(dashboard)/import/page.tsx");
-    expect(src).toMatch(/const importBusy = uploading \|\| previewLoading \|\| roLoading \|\| rpLoading \|\| importBlocked;/);
+    expect(src).toMatch(/const importBusy = roLoading \|\| rpLoading \|\| importBlocked;/);
     expect(src).toMatch(/restoreDecision\.start && restored && !restoredDismissed && !importBusy &&/);
   });
 });
@@ -149,9 +152,9 @@ describe("読み取り・下見の返事を待つ間も「最初からやり直�
       /restored && !restoredDismissed && !importing && !parsing && step !== "result" &&/,
     );
   });
-  it("取り込み(CSV): 重複の下見中", () => {
+  it("取り込み(CSV): 下見中(①②の読み込み中は roLoading / rpLoading)", () => {
     expect(read("src/app/(dashboard)/import/page.tsx")).toMatch(
-      /const importBusy = uploading \|\| previewLoading \|\| roLoading \|\| rpLoading \|\| importBlocked;/,
+      /const importBusy = roLoading \|\| rpLoading \|\| importBlocked;/,
     );
   });
 });
@@ -161,7 +164,7 @@ describe("取り込み(CSV): やり直した後に届いたファイルの読み
   it("やり直すと世代を進める", () => {
     expect(src).toMatch(/const handleDiscardDraft = \(\) => \{\s*discardGenRef\.current \+= 1;/);
   });
-  it.each(["const processFile = useCallback(async (file: File) => {", "const handleRoFile = async (", "const handleRpFile = async ("])(
+  it.each(["const handleReceptionFile = async (", "const handleOwnerFile = async ("])(
     "%s は読み込みの後に世代を確かめる",
     (head) => {
       const at = src.indexOf(head);
@@ -175,9 +178,9 @@ describe("取り込み(CSV): やり直した後に届いたファイルの読み
 
 describe("取り込み(CSV): 結果が分からないときは履歴を読み直し、読み終わるまで確かめたボタンを押せない(@codex P1)", () => {
   const src = read("src/app/(dashboard)/import/page.tsx");
-  it("3つの取り込みの失敗のあとで履歴を読み直す", () => {
+  it("2つの取り込みの失敗のあとで履歴を読み直す", () => {
     const m = src.match(/applyCsvPending\(isDefiniteSubmitFailure\((e|err)\) \? "definite" : "unknown"\);\s*(?:\/\/[^\n]*\n\s*)?fetchJobs\(\);/g) ?? [];
-    expect(m.length).toBe(3);
+    expect(m.length).toBe(2);
   });
   it("履歴を読んでいる間は「確かめたので続ける」を押せない", () => {
     expect(src).toContain('reason={importBlockReason} settling={historySettling} confirmDisabled={historySettling || jobsLoading || historyStale} historyError={historyStale && !jobsLoading && !historySettling} onDismiss={() => applyCsvPending("confirm")}');
@@ -239,9 +242,8 @@ describe("貼り付けて物件化: 見直しの間に画面を離れたら登�
 });
 
 describe("成功でも結果の形が欠けた返事は「分からない」扱い(@codex P2・CSV 3つの流れ+謄本)", () => {
-  it("取り込み(CSV): 3つの流れとも、流れを済ませる前に形を確かめる", () => {
+  it("取り込み(CSV): 2つの流れとも、流れを済ませる前に形を確かめる", () => {
     const src = read("src/app/(dashboard)/import/page.tsx");
-    expect(src).toMatch(/if \(!hasImportResultShape\(json, IMPORT_RESULT_SHAPE\)\) throw new Error\(UNREADABLE_IMPORT_RESULT\);\s*setResult\(json as ImportResult\);\s*finishCsvFlow\("main"\);/);
     expect(src).toMatch(/if \(!hasImportResultShape\(res, RO_RESULT_SHAPE\)\) throw new Error\(UNREADABLE_IMPORT_RESULT\);\s*setRoResult\(res\);\s*finishCsvFlow\("ro"\);/);
     expect(src).toMatch(/if \(!hasImportResultShape\(res, RP_RESULT_SHAPE\)\) throw new Error\(UNREADABLE_IMPORT_RESULT\);\s*setRpResult\(res\);\s*finishCsvFlow\("rp"\);/);
   });
@@ -295,15 +297,14 @@ describe("取り込み(CSV): F5 の仮の画面では取りに行かない(初�
   });
 });
 
-describe("取り込み(CSV): 下見の読み込み中に離れて戻ったら下見を取り直す", () => {
-  const src = read("src/app/(dashboard)/import/page.tsx");
-  it("段階3・下見なしの控えから戻ったときだけ、1回取り直す", () => {
-    expect(src).toMatch(/if \(!draftEnabled \|\| previewResumedRef\.current\) return;\s*previewResumedRef\.current = true;\s*if \(s0\?\.main\?\.step === 3 && !s0\.main\.duplicatePreview\) void runDuplicatePreview\(\);/);
-    expect(src).toContain("onClick={runDuplicatePreview}");
-  });
-  it("最後に始めた下見の応答だけを使う・やり直しで捨てる", () => {
-    expect(src).toMatch(/const req = \+\+previewReqRef\.current;[\s\S]{0,400}if \(req !== previewReqRef\.current\) return;\s*setDuplicatePreview\(/);
-    expect(src).toMatch(/const handleReset = \(\) => \{\s*previewReqRef\.current \+= 1;/);
+// 「下見の読み込み中に離れて戻ったら下見を取り直す」(画面に出ない古い取り込み手順=main の段階3)は、
+// 第4回 D でその手順ごと消したので確認も外した(古い控えの main は読めるが戻さない=main: null)。
+describe("取り込み(CSV): 古い取り込み手順の控えは戻さない", () => {
+  it("main は常に null で控え、段階3の下見の取り直しも無い", () => {
+    const src = read("src/app/(dashboard)/import/page.tsx");
+    expect(src).toContain("main: null,");
+    expect(src).not.toContain("runDuplicatePreview");
+    expect(src).not.toContain("s0?.main");
   });
 });
 

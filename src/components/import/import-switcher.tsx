@@ -9,7 +9,7 @@ import { IMPORT_TYPE_LABELS } from "@/lib/import-labels";
  * 取込画面の入口統合コンポーネント。
  *
  * `/import`、`/import/registry-pdf`、`/import/registry-dm`、`/import/paste` の各ページ先頭に表示し、
- * 「受付帳CSV」「謄本PDF」「登記DM取込」「貼り付けて物件化」の4タブを横並びで表示する。
+ * 「受付帳CSV」「謄本PDF」「取得済みPDFを一括添付」(旧 登記DM取込)「貼り付けて物件化」などのタブを横並びで表示する。
  *
  * - 内部ロジック・APIは既存ページ側そのまま（このコンポーネントは導線のみ）
  * - 既存URLは温存（既存リンク・ブックマーク互換）
@@ -19,7 +19,7 @@ import { IMPORT_TYPE_LABELS } from "@/lib/import-labels";
 const ITEMS: { href: string; label: string; icon: React.ComponentType<{ className?: string }> }[] = [
   { href: "/import", label: IMPORT_TYPE_LABELS.property_csv, icon: Upload },
   { href: "/import/registry-pdf", label: IMPORT_TYPE_LABELS.registry_pdf, icon: FileText },
-  { href: "/import/registry-dm", label: "登記DM取込", icon: Files },
+  { href: "/import/registry-dm", label: "取得済みPDFを一括添付", icon: Files },
   { href: "/import/paste", label: "貼り付けて物件化", icon: ClipboardPaste },
   { href: "/import/report-inbox", label: "査定報告書の受け取り箱", icon: FileCheck },
 ];

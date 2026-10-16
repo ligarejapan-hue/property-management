@@ -102,11 +102,23 @@ export function isLetterReady(s: LetterReadyFields): boolean {
   );
 }
 
+/** isLpReady の判定に要る台帳の列(DMメニューの準備チェックも同じ判定をする)。 */
+export const LP_READY_SELECT = {
+  lpBodyText: true,
+  lpHeadline: true,
+  lpTone: true,
+  lpLength: true,
+  lpAppeal: true,
+  lpStrength: true,
+} as const;
+
+export type LpReadyFields = Pick<ScenarioFull, keyof typeof LP_READY_SELECT>;
+
 /**
  * LPとして写せる状態か。DmLpVariant の NOT NULL 列(tone/length/appeal/strength)を埋められること、
  * かつ本文(lpBodyText)・見出し(lpHeadline)が空でないことが条件。どれか1つでも欠ければ「LP無し」扱い。
  */
-function isLpReady(s: ScenarioFull): boolean {
+export function isLpReady(s: LpReadyFields): boolean {
   return (
     !!s.lpBodyText?.trim() &&
     !!s.lpHeadline?.trim() &&

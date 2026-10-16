@@ -113,16 +113,23 @@ describe("dashboard-layout — 下部ツールバー被り解消", () => {
   });
 });
 
-describe("field-survey マップ — 表示切替パネルはモバイルで折りたたみ", () => {
-  it("モバイル専用の開閉ボタンがある（md では非表示）", () => {
+describe("field-survey マップ — 表示切替パネルは閉じて始まる", () => {
+  it("開閉ボタンがある（第4回 F で PC にも出す）", () => {
     // 2026-07-29:「ピン追加モード」廃止によりラベルは「巡回中」だけになった。
     // 併記で長くすると地図/航空写真ボタンへ重なりタップを奪う (既知の実機事故)。
     expect(fieldSurveyMap).toMatch(/表示切替\{hasActiveSession/);
     expect(fieldSurveyMap).toMatch(/aria-expanded=\{panelOpen\}/);
   });
-  it("パネル本体は折りたたみ時 hidden・md 以上で常時表示", () => {
+  it("パネル本体は折りたたみ時 hidden・PC でも閉じて始まる（第4回 F）", () => {
     expect(fieldSurveyMap).toMatch(/panelOpen \? "mt-2 block" : "hidden"/);
-    expect(fieldSurveyMap).toMatch(/md:block/);
+    // PC で常時展開に戻すと、地図の上とパネルの中に巡回ボタンが2組出る。
+    expect(fieldSurveyMap).not.toMatch(/md:block/);
+    expect(fieldSurveyMap).toMatch(/const \[panelOpen, setPanelOpen\] = useState\(false\)/);
+  });
+  it("巡回の失敗・破棄して終了が出たらパネルを自動で開く（第4回 F）", () => {
+    expect(fieldSurveyMap).toContain("onNeedsAttention={onTripNeedsAttention}");
+    expect(fieldSurveyMap).toContain("onTripNeedsAttention={openPanelForTrip}");
+    expect(fieldSurveyMap).toMatch(/const openPanelForTrip = useCallback\(\(\) => \{\s*quickStartRef\.current = false;\s*setPanelOpen\(true\);/);
   });
 });
 

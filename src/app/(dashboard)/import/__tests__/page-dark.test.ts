@@ -1,3 +1,5 @@
+// 第4回 D(2026-10-16): 画面に出ない古い取り込み手順(ステップのタブ・列対応・取込完了バナー・パースエラー)を
+// 消したため、その部分だけを見ていた配色の確認も外した。
 import { describe, it, expect } from "vitest";
 import { readFileSync } from "node:fs";
 import { fileURLToPath } from "node:url";
@@ -28,7 +30,6 @@ describe("import/page.tsx dark: 配色", () => {
   it("区切りに dark:divide-gray-800 がある", () => { expect(src).toContain("dark:divide-gray-800"); });
   // accent: アクティブタブ
   it("アクティブタブに dark:text-indigo-400 がある", () => { expect(src).toContain("dark:text-indigo-400"); });
-  it("アクティブタブ枠線に dark:border-indigo-400 がある", () => { expect(src).toContain("dark:border-indigo-400"); });
   // accent: 色付きメッセージpanel（情報/警告/成功/エラー）
   it("情報panel(blue)に dark:text-blue-300 がある", () => { expect(src).toContain("dark:text-blue-300"); });
   it("警告panel(amber)に dark:text-amber-300 がある", () => { expect(src).toContain("dark:text-amber-300"); });
@@ -95,12 +96,6 @@ describe("import/page.tsx dark: ページネーション/取込完了集計の�
   it("前へ/次へは共通 Pagination の Button(dark は部品テストで担保)", () => {
     expect(src).toContain('busy={jobsLoading}');
   });
-  it("取込完了バナーの集計ラベルに dark:text-*-300（成功/うち更新/要レビュー/エラー）", () => {
-    expect(src).toContain('text-green-600 dark:text-green-300">成功:');
-    expect(src).toContain('text-blue-600 dark:text-blue-300">うち更新:');
-    expect(src).toContain('text-amber-600 dark:text-amber-300">要レビュー:');
-    expect(src).toContain('text-red-600 dark:text-red-300">エラー:');
-  });
 });
 
 // 取込履歴テーブルの行ステータスは STATUS_CONFIG.color を dark:bg-gray-900 カード上の className に
@@ -124,18 +119,3 @@ describe("import/page.tsx dark: ReviewActionHint CTA リンクの暗面可読性
   });
 });
 
-// 最終掃き出し: 暗カード/暗ヘッダ上に残っていた bare 色文字（@codex round4 indigo CTA 指摘を機に全件点検）。
-describe("import/page.tsx dark: 暗面上の残り bare 色文字（最終掃き出し）", () => {
-  it("列対応の住所推奨 amber 警告に dark:text-amber-400", () => {
-    expect(src).toContain("text-amber-600 dark:text-amber-400 font-medium");
-  });
-  it("プレビュー表ヘッダの対応列注記(blue)に dark:text-blue-400", () => {
-    expect(src).toContain("text-blue-500 dark:text-blue-400 font-normal");
-  });
-  it("取込結果のパースエラー見出し(red-600)に dark:text-red-400", () => {
-    expect(src).toContain("text-xs font-medium text-red-600 dark:text-red-400");
-  });
-  it("取込結果のパースエラー明細(red-500)に dark:text-red-400", () => {
-    expect(src).toContain("text-xs text-red-500 dark:text-red-400");
-  });
-});

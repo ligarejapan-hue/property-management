@@ -170,6 +170,13 @@ interface TripControlsProps {
    * 軌跡の規模を平易に示すために表示する (圏外が長いと数百点になり得る)。
    */
   unsentLocationCount?: number;
+  /**
+   * 画面すっきり化 第4回(F): パネルは閉じて始まり、開始/終了は地図の上の
+   * ボタンだけになった。失敗の理由と「破棄して終了」はパネルの中にしか
+   * 出ないため、それらが出たら親にパネルを開いてもらう(閉じたままだと
+   * 地図の「巡回終了」を押しても何も起きないように見える)。
+   */
+  onNeedsAttention?: () => void;
 }
 
 type Phase =
@@ -194,6 +201,7 @@ export default function TripControls({
   onEndFailedRestoreRecorder,
   onBlockRecorderForEnd,
   unsentLocationCount,
+  onNeedsAttention,
 }: TripControlsProps) {
   const [phase, setPhase] = useState<Phase>("loading");
   const [session, setSession] = useState<ActiveSessionLike | null>(null);
@@ -222,6 +230,12 @@ export default function TripControls({
   // 圏外などで未送信 buffer が残り巡回終了がブロックされた状態。
   // 「破棄して終了」の脱出口ボタンを出すために保持する。
   const [endBlockedByBuffer, setEndBlockedByBuffer] = useState(false);
+
+  // 失敗の理由・破棄して終了が出たらパネルを開いてもらう(第4回 F)。
+  const needsAttention = !!error || endBlockedByBuffer;
+  useEffect(() => {
+    if (needsAttention) onNeedsAttention?.();
+  }, [needsAttention, onNeedsAttention]);
 
   // 地図上の「巡回を開始」ボタン用: 開始確認 modal を開くハンドラを親に登録する。
   // まだ session 取得中 (phase="loading") に押された場合は取得完了まで予約し、
@@ -900,21 +914,12 @@ export default function TripControls({
     <Panel>
       <div className="mb-1 text-xs font-semibold text-gray-600 dark:text-gray-300">巡回操作</div>
 
+      {/* 画面すっきり化 第4回(F): 開始/終了のボタンは地図の上の1組だけ。
+          パネルは状態を見せるだけにする(2組あると迷う)。 */}
       {session ? (
-        <ActiveSessionView
-          session={session}
-          now={now}
-          onEnd={() => setPhase("confirmEnd")}
-          disabled={phase === "ending"}
-        />
+        <ActiveSessionView session={session} now={now} />
       ) : (
-        <IdleView
-          onStart={() => {
-            refreshConsentNeed();
-            setPhase("confirmStart");
-          }}
-          disabled={phase === "starting"}
-        />
+        <IdleView />
       )}
 
       {error && (
@@ -992,29 +997,14 @@ function Panel({ children }: { children: React.ReactNode }) {
   return <div className="border-t border-gray-200 dark:border-gray-800 pt-2">{children}</div>;
 }
 
-function IdleView({
-  onStart,
-  disabled,
-}: {
-  onStart: () => void;
-  disabled: boolean;
-}) {
+function IdleView() {
   return (
     <>
-      <p className="mb-2 text-[11px] leading-snug text-gray-500 dark:text-gray-400">
+      <p className="mb-1 text-[11px] leading-snug text-gray-500 dark:text-gray-400">
         巡回未開始
       </p>
-      <button
-        type="button"
-        onClick={onStart}
-        disabled={disabled}
-        className="mb-1 w-full rounded border border-blue-300 bg-blue-50 px-2 py-1 text-xs font-semibold text-blue-700 hover:bg-blue-100 disabled:cursor-not-allowed disabled:opacity-60 dark:border-blue-500/40 dark:bg-blue-500/20 dark:text-blue-300 dark:hover:bg-blue-500/30"
-        data-testid="trip-start-button"
-      >
-        巡回開始
-      </button>
       <p className="text-[10px] leading-tight text-gray-400 dark:text-gray-500">
-        ※ 押すと位置の記録が始まり、地図が現在地へ移動します。
+        ※ 開始は地図の下の「巡回を開始」から(このパネルを閉じると出ます)。
       </p>
     </>
   );
@@ -1023,13 +1013,9 @@ function IdleView({
 function ActiveSessionView({
   session,
   now,
-  onEnd,
-  disabled,
 }: {
   session: ActiveSessionLike;
   now: Date;
-  onEnd: () => void;
-  disabled: boolean;
 }) {
   const startedAt = new Date(session.startedAt);
   const elapsed = formatElapsed(startedAt, now);
@@ -1038,23 +1024,14 @@ function ActiveSessionView({
       <p className="mb-1 text-[11px] leading-snug text-red-600 dark:text-red-400">
         ● 巡回中
       </p>
-      <dl className="mb-2 grid grid-cols-[max-content_1fr] gap-x-2 gap-y-0.5 text-[11px] text-gray-700 dark:text-gray-200">
+      <dl className="mb-1 grid grid-cols-[max-content_1fr] gap-x-2 gap-y-0.5 text-[11px] text-gray-700 dark:text-gray-200">
         <dt>経過</dt>
         <dd>{elapsed}</dd>
         <dt>取得点数</dt>
         <dd>{session.pointCount}</dd>
       </dl>
-      <button
-        type="button"
-        onClick={onEnd}
-        disabled={disabled}
-        className="w-full rounded border border-red-300 bg-red-50 px-2 py-1 text-xs font-semibold text-red-700 hover:bg-red-100 disabled:cursor-not-allowed disabled:opacity-60 dark:border-red-500/40 dark:bg-red-500/20 dark:text-red-300 dark:hover:bg-red-500/30"
-        data-testid="trip-end-button"
-      >
-        巡回終了
-      </button>
-      <p className="mt-1 text-[10px] leading-tight text-gray-400 dark:text-gray-500">
-        ※ 巡回終了時に位置記録は自動停止します。未送信点は失われる場合があります。
+      <p className="text-[10px] leading-tight text-gray-400 dark:text-gray-500">
+        ※ 終了は地図の左下の「巡回終了」から(このパネルを閉じると出ます)。終了時に位置記録は自動停止します。
       </p>
     </>
   );

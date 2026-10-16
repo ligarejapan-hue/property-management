@@ -341,6 +341,12 @@ export default function MailSettingsPage() {
             maxLength={2000}
             className="w-full rounded-md border border-gray-300 px-2 py-1.5 text-sm dark:border-gray-700 dark:bg-gray-900 dark:text-gray-100"
           />
+          {/* 第4回 E: 売却DM設定の「追跡用URL」とは別物(まとめない)。 */}
+          <p data-testid="mail-app-url-note" className="mt-1 text-xs text-gray-500 dark:text-gray-400">
+            社内の人が通知メールのリンクから開く、このシステムの住所です。お客さまがお手紙のQRで開く公開ページの住所は別の欄です(
+            <Link href="/admin/sale-dm-settings" className="font-semibold underline underline-offset-2">売却DM設定</Link>
+            の「追跡用URL」)。
+          </p>
         </Field>
         <Field label="通知の詳しさ">
           <select

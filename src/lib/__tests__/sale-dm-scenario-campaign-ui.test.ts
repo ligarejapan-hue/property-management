@@ -169,12 +169,21 @@ describe("走査: 作成画面", () => {
     expect(src).toContain("fetchSaleDmScenarioOptions()");
     expect(src).not.toMatch(/fetchSaleDmScenarioOptionsAll|fetchSaleDmScenarios\b|fetchSaleDmScenario\(/);
     expect(src).toContain("pickDefaultScenario(");
-    expect(src).toContain("種類を使わない(今までどおり)");
+    expect(src).toContain("種類を使わない(古いやり方・A/Bの型)");
     expect(src).toContain("(手紙が未登録)");
     expect(src).toContain(
       "受付帳取込の物件は相続、現地調査の物件は空き家、それ以外はここで選んだ種類になります。物件の『DMの種類』欄で直した物件はそちらが優先です。",
     );
-    expect(src).toContain("今までどおり、型Aで作ります");
+    expect(src).toContain("古いやり方(種類を使わず、型A/Bを自分で作って割り当てる)で作ります");
+  });
+  it("第4回 E: 「種類を使わない」は「古いやり方(A/Bの型)で作る」を押したときだけ並ぶ(奥へしまう・消さない)", () => {
+    const src = read(DIALOG);
+    expect(src).toContain("const showLegacyOption = legacyOpen || selected === NONE;");
+    expect(src).toMatch(/\{showLegacyOption && <option value=\{NONE\}>/);
+    expect(src).toContain('data-testid="sale-dm-create-legacy"');
+    expect(src).toContain("古いやり方(A/Bの型)で作る");
+    // 押したら種類を使わないが選ばれる(選択肢だけ出して選ばれないままにしない)。
+    expect(src).toMatch(/setLegacyOpen\(true\);\s*setSelected\(NONE\);/);
   });
   it("手紙が未登録(ready でない)の種類は選べない(種類を変えると同じ)", () => {
     const src = read(DIALOG);

@@ -1,12 +1,16 @@
 "use client";
 
 import Link from "next/link";
-import type { ReactNode } from "react";
+import { useEffect, useState, type ReactNode } from "react";
 import { useSession } from "next-auth/react";
 import { PageHeader } from "@/components/ui/page-header";
 import { USE_MOCK } from "@/lib/api-client";
 import { canSee, type AppRole } from "@/lib/nav/roles";
 import { Mail, MailX, FileSpreadsheet, Settings2 } from "lucide-react";
+import { DmReadinessView } from "@/components/sale-dm/dm-readiness-view";
+import { CampaignListView } from "@/components/sale-dm/campaign-list-view";
+import type { DmReadiness } from "@/lib/sale-dm-letter/dm-readiness";
+import type { CampaignListItem, CampaignListPage } from "@/lib/sale-dm-letter/campaign-list";
 
 // DM メニュー(メニュー再編・発注者決定 2026-08-24 案B)。
 //
@@ -19,6 +23,38 @@ import { Mail, MailX, FileSpreadsheet, Settings2 } from "lucide-react";
 //   開けないリンクは出さない**(@codex #411 R5 P2): 事務担当にも見せる画面なので、
 //   管理者専用の道具は「管理者にご依頼ください」に差し替える。実際の制御は
 //   従来どおり各画面の API が行う=ここは見せ方だけを合わせる。
+//
+// 画面すっきり化 第4回(E・発注者決定 2026-10-16): 上に「準備チェック」(売却DMを作る前に
+// 揃っているべきものを ✓/×)と「最近の発送」(自分が作った発送の新しい5件)を出す。
+// どちらも売却DMを使える人だけ(サーバーが 403 を返したら欄ごと出さない)。手順の案内は下に残す。
+
+/** 最近の発送に出す件数。 */
+const RECENT_CAMPAIGNS = 5;
+
+type Load<T> = { state: "loading" } | { state: "ok"; data: T } | { state: "hidden" } | { state: "error" };
+
+/** 売却DMの口を読む。403(売却DMを使えない人)は欄ごと出さない。 */
+function useSaleDmGet<T>(url: string): Load<T> {
+  const [load, setLoad] = useState<Load<T>>({ state: "loading" });
+  useEffect(() => {
+    const ac = new AbortController();
+    (async () => {
+      try {
+        const res = await fetch(url, { signal: ac.signal, cache: "no-store" });
+        if (res.status === 403) {
+          setLoad({ state: "hidden" });
+          return;
+        }
+        if (!res.ok) throw new Error(String(res.status));
+        setLoad({ state: "ok", data: (await res.json()) as T });
+      } catch {
+        if (!ac.signal.aborted) setLoad({ state: "error" });
+      }
+    })();
+    return () => ac.abort();
+  }, [url]);
+  return load;
+}
 
 interface Step {
   no: string;
@@ -99,15 +135,47 @@ export default function DmMenuPage() {
   const userRole = USE_MOCK
     ? "admin"
     : ((session?.user as { role?: string } | undefined)?.role ?? "VIEWER");
+  const readiness = useSaleDmGet<DmReadiness>("/api/properties/sale-dm/readiness");
+  const recent = useSaleDmGet<CampaignListPage>("/api/properties/sale-dm/campaigns");
+  const recentItems: CampaignListItem[] =
+    recent.state === "ok" ? recent.data.campaigns.slice(0, RECENT_CAMPAIGNS) : [];
 
   return (
     <div className="p-6">
       <PageHeader
         title="DMメニュー"
-        description="送る流れの順に、DMの道具を並べています。各道具はこれまでの場所でもそのまま使えます。"
+        description="売却DMの準備の状態と最近の発送、送る流れの順のDMの道具を並べています。各道具はこれまでの場所でもそのまま使えます。"
       />
 
-      <ol className="mt-6 grid gap-4 sm:grid-cols-2">
+      {readiness.state !== "hidden" && (
+        <section data-testid="dm-readiness" className="mt-6">
+          <h2 className="mb-2 text-base font-semibold text-gray-900 dark:text-gray-100">準備チェック</h2>
+          {readiness.state === "loading" && <p className="text-sm text-gray-500 dark:text-gray-400">確認中…</p>}
+          {readiness.state === "error" && (
+            <p role="alert" className="text-sm text-rose-700 dark:text-rose-300">準備の状態を読み込めませんでした。開き直してください。</p>
+          )}
+          {readiness.state === "ok" && <DmReadinessView readiness={readiness.data} isAdmin={canSee(userRole, "admin")} />}
+        </section>
+      )}
+
+      {recent.state !== "hidden" && (
+        <section data-testid="dm-recent-campaigns" className="mt-6">
+          <div className="mb-2 flex flex-wrap items-baseline justify-between gap-2">
+            <h2 className="text-base font-semibold text-gray-900 dark:text-gray-100">最近の発送</h2>
+            <Link href="/properties/sale-dm" className="text-sm font-semibold text-indigo-700 underline underline-offset-2 dark:text-indigo-300">
+              発送一覧をすべて見る
+            </Link>
+          </div>
+          {recent.state === "loading" && <p className="text-sm text-gray-500 dark:text-gray-400">読み込み中…</p>}
+          {recent.state === "error" && (
+            <p role="alert" className="text-sm text-rose-700 dark:text-rose-300">最近の発送を読み込めませんでした。開き直してください。</p>
+          )}
+          {recent.state === "ok" && <CampaignListView campaigns={recentItems} />}
+        </section>
+      )}
+
+      <h2 className="mt-8 text-base font-semibold text-gray-900 dark:text-gray-100">送る流れ</h2>
+      <ol className="mt-2 grid gap-4 sm:grid-cols-2">
         {STEPS.map((s) => {
           const usable = canSee(userRole, s.minRole);
           return (
