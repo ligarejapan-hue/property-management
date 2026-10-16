@@ -223,10 +223,19 @@ describe("renderLetterHtml の紙面", () => {
     expect(h).toContain("&lt;x&gt;情報&lt;/x&gt;");
   });
 
-  it("unsubscribeSlotHtml が無ければ停止枠は空(URL を描かない)", () => {
+  it("QR の枠が未指定(画面の見本)でも、印刷と同じ大きさの仮の枠を置き、URL/QR は描かない(見本と印刷の収まりを揃える)", () => {
     const h = renderLetterHtml({ ...base, body: BODY });
-    expect(h).toContain('class="unsubscribe-slot"');
     expect(h).not.toContain("http");
+    expect(h).not.toContain("<svg");
+    expect(h).toContain('class="sale-dm-track-qr letter-qr-placeholder"');
+    expect(h).toContain('class="sale-dm-unsub-qr letter-qr-placeholder"');
+    expect(h).toContain(LETTER_FIXED_TEXT.qrPlaceholderHint);
+    expect(h).toContain(LETTER_FIXED_TEXT.unsubscribeText);
+    expect(h).not.toContain(":empty");
+    // 枠を渡したときは仮の枠を出さない(CSS の定義は残る)
+    expect(html).not.toContain('class="sale-dm-track-qr letter-qr-placeholder"');
+    expect(html).not.toContain('class="sale-dm-unsub-qr letter-qr-placeholder"');
+    expect(html).not.toContain(LETTER_FIXED_TEXT.qrPlaceholderHint);
   });
 });
 

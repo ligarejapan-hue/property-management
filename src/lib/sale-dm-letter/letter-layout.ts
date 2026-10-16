@@ -43,6 +43,9 @@ export const LETTER_FIXED_TEXT = {
   /** 差出人が未設定のとき(画面の見本)に出す仮の文字 */
   senderPlaceholder: "（差出人名）",
   contactPlaceholder: "（差出人の連絡先）",
+  /** QR が未指定のとき(画面の見本)に、印刷と同じ大きさで置く仮の枠の文字(見本と印刷の収まりを揃える) */
+  qrPlaceholderHint: "印刷時にこの宛先専用のQRが入ります",
+  unsubscribeText: "今後このようなお手紙が不要な方は、左のQRコードからお申し出ください（配信停止）。",
 } as const;
 
 // \s は全角空白・ノーブレークスペース・BOM も含む(letter-illustration.ts と同じ)

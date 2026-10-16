@@ -3,6 +3,8 @@
 // url はテキスト表示分のみ HTML エスケープする(tracking-slot.ts と同じ流儀)。
 // 見た目(QR の大きさ・字の大きさ)は紙面テンプレ側の CSS で決める(ここは構造だけ)。
 
+import { LETTER_FIXED_TEXT } from "./letter-layout";
+
 function escapeHtml(s: string): string {
   return s
     .replace(/&/g, "&amp;")
@@ -26,7 +28,7 @@ export function renderUnsubscribeSlotHtml(artifacts: {
     `<div class="sale-dm-unsubscribe">`,
     `<div class="sale-dm-unsub-qr">${artifacts.qrSvg}</div>`,
     `<div class="sale-dm-unsub-text">`,
-    `<p>今後このようなお手紙が不要な方は、左のQRコードからお申し出ください（配信停止）。</p>`,
+    `<p>${LETTER_FIXED_TEXT.unsubscribeText}</p>`,
     `<p class="sale-dm-unsub-url">${escapeHtml(artifacts.url)}</p>`,
     `</div>`,
     `</div>`,

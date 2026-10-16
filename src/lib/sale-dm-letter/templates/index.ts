@@ -146,7 +146,7 @@ function pageCss(S: string): string {
     ${S} .letter-footnote { display: flex; gap: 3mm; align-items: center; margin-top: 1mm; padding-top: 1mm; border-top: 1px dashed var(--line); font-size: 7.5pt; color: #666; line-height: 1.5; }
     ${S} .letter-footnote p { margin: 0; text-align: left; }
     ${S} .unsubscribe-slot { flex: 3; }
-    ${S} .unsubscribe-slot:empty { display: none; }
+    ${S} .letter-qr-placeholder { border: 1px dashed var(--line); background: #fff; }
     ${S} .sale-dm-unsubscribe { display: flex; gap: 3mm; align-items: center; }
     ${S} .sale-dm-unsub-qr { width: 16.6mm; height: 16.6mm; flex: none; background: #fff; padding: 0.8mm; box-sizing: border-box; }
     ${S} .sale-dm-unsub-url { font-size: 6.5pt; color: #888; word-break: break-all; }
@@ -176,6 +176,14 @@ export function renderLetterHtml(input: LetterRenderInput): string {
   const telCls = contactText.length > 16 ? "letter-tel letter-tel--long" : "letter-tel";
   const body = bodyHtml(input.body, input.illustration);
   const logo = LP_BRAND.logo;
+  // QR の枠が未指定(画面の見本)でも、印刷と同じ大きさの仮の枠を置く(@codex #524 R2 P2:
+  // 見本で収まって見えた手紙が印刷で2枚目へ行かないよう、見本と印刷の高さを揃える)。URL/QR は描かない。
+  const trackingHtml =
+    input.trackingSlotHtml ??
+    `<div class="sale-dm-tracking"><div class="sale-dm-track-qr letter-qr-placeholder"></div><div class="sale-dm-track-text"><p class="sale-dm-track-caption">スマホで読み取り</p><p class="sale-dm-track-hint">${T.qrPlaceholderHint}</p></div></div>`;
+  const unsubscribeHtml =
+    input.unsubscribeSlotHtml ??
+    `<div class="sale-dm-unsubscribe"><div class="sale-dm-unsub-qr letter-qr-placeholder"></div><div class="sale-dm-unsub-text"><p>${T.unsubscribeText}</p><p class="sale-dm-unsub-url">${T.qrPlaceholderHint}</p></div></div>`;
 
   return `<div class="${cls}">
   <style>
@@ -211,11 +219,11 @@ export function renderLetterHtml(input: LetterRenderInput): string {
         未指定なら空(URL/QR を描かない=単体レンダリング時は生URLを載せない)。
       -->
       <div class="tracking-slot" data-tracking-token="${escapeHtml(input.trackingToken)}">
-        ${input.trackingSlotHtml ?? ""}
+        ${trackingHtml}
       </div>
     </div>
     <div class="letter-footnote">
-      <div class="unsubscribe-slot">${input.unsubscribeSlotHtml ?? ""}</div>
+      <div class="unsubscribe-slot">${unsubscribeHtml}</div>
       ${body.basis === null ? "" : `<p class="letter-basis">${escapeHtml(body.basis)}</p>`}
     </div>
   </div>
