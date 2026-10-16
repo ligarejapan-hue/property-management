@@ -23,7 +23,10 @@ describe("手紙のイラストの枠(台帳の画面)", () => {
     expect(html).toContain("イラストを選ぶ");
     expect(html).toContain("外す");
     expect(html).toContain("【イラスト】の行に入ります");
-    expect(html).toContain("横長(約3:1)");
+    // 2026-10-17 の紙面: 印が無ければ困りごとの枠の右・高さ55mmまで(横長 約2:1 がおすすめ)
+    expect(html).toContain("困りごとの枠の右");
+    expect(html).toContain("横長(約2:1)");
+    expect(html).toContain("55mm");
   });
   it("未登録なら画像も「外す」も出ない", () => {
     const html = renderToStaticMarkup(createElement(LetterIllustrationPanel, { scenarioId: "s1", illustration: null, onChanged: () => {} }));
