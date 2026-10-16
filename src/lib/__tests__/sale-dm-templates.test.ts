@@ -145,8 +145,17 @@ describe("renderLetterHtml の紙面", () => {
     const row = between(body, 'class="letter-row"', "</figure>");
     expect(row).toContain('class="letter-concerns"');
     expect(row).toContain("<img");
-    expect(html).toMatch(/\.letter-illustration img \{[^}]*height: auto/);
+    // 縦横比は元のまま(width/height とも auto)で、高さだけ上限(縦長の絵が紙面を占領しない・@codex #524 P2)
+    expect(html).toMatch(/\.letter-illustration img \{[^}]*width: auto[^}]*height: auto/);
+    expect(html).toMatch(/\.letter-illustration img \{[^}]*max-height: 55mm/);
     expect(html).not.toContain("object-fit");
+  });
+
+  it("QR は読める大きさ: 無料査定 22mm 箱(余白込み)・配信停止は記号 15mm 以上(マニュアルの約15mm以上に合わせる・@codex #524 P1)", () => {
+    expect(html).toMatch(/\.sale-dm-track-qr \{[^}]*width: 22mm; height: 22mm/);
+    const m = html.match(/\.sale-dm-unsub-qr \{[^}]*width: (\d+(?:\.\d+)?)mm; height: [\d.]+mm[^}]*padding: (\d+(?:\.\d+)?)mm/);
+    expect(m).not.toBeNull();
+    expect(Number(m![1]) - 2 * Number(m![2])).toBeGreaterThanOrEqual(15);
   });
 
   it("登記情報の一文は本文から外れ、問い合わせ枠の下の脚注に出る", () => {

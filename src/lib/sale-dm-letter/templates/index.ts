@@ -94,40 +94,40 @@ const TEMPLATE_VARS: Record<DesignTemplate, string> = {
 // 寸法は見本 PDF(scratchpad op/letter-design.cjs)で 4種類の文面が 1枚に収まることを確かめた値。
 function pageCss(S: string): string {
   return `
-    ${S} { box-sizing: border-box; width: 100%; min-height: 296.5mm; padding: 9mm 15mm 6mm; display: flex; flex-direction: column;
+    ${S} { box-sizing: border-box; width: 100%; min-height: 296.5mm; padding: 8mm 15mm 5mm; display: flex; flex-direction: column;
       font-family: var(--font); color: #222; font-size: 10pt; line-height: 1.5; background: #fff; }
-    ${S} p { margin: 0 0 1.6mm; text-align: justify; }
-    ${S} .letter-masthead { display: flex; justify-content: space-between; align-items: center; border-bottom: 2px solid var(--accent); padding-bottom: 1.5mm; margin-bottom: 2.5mm; }
+    ${S} p { margin: 0 0 1.3mm; text-align: justify; }
+    ${S} .letter-masthead { display: flex; justify-content: space-between; align-items: center; border-bottom: 2px solid var(--accent); padding-bottom: 1.5mm; margin-bottom: 2mm; }
     ${S} .letter-brand { display: flex; align-items: baseline; gap: 3mm; }
     ${S} .letter-brand-name { font-weight: 700; font-size: 13pt; color: var(--accent); }
     ${S} .letter-brand-sub { font-size: 8.5pt; color: #666; }
     ${S} .letter-badge { font-size: 9.5pt; color: var(--accent); border: 1.5px solid var(--accent); border-radius: 999px; padding: 0.5mm 4mm; white-space: nowrap; }
     ${S} .letter-badge b { font-size: 12pt; margin-left: 1mm; }
-    ${S} .letter-addr-block { margin-bottom: 2.5mm; }
+    ${S} .letter-addr-block { margin-bottom: 2mm; }
     ${S} .letter-addr-lines { font-size: 9.5pt; color: #555; display: flex; gap: 4mm; }
     ${S} .letter-addressee { font-size: 14pt; font-weight: 700; margin-top: 1mm; }
     ${S} .letter-addressee small { font-size: 12pt; font-weight: 500; }
-    ${S} .letter-catch { font-size: 12pt; line-height: 1.45; font-weight: 700; color: var(--accent); border-left: 2mm solid var(--accent); padding: 1mm 0 1mm 3.5mm; margin: 0 0 2.5mm; }
+    ${S} .letter-catch { font-size: 12pt; line-height: 1.45; font-weight: 700; color: var(--accent); border-left: 2mm solid var(--accent); padding: 1mm 0 1mm 3.5mm; margin: 0 0 2mm; }
     ${S} .letter-concerns { background: var(--tint); border-radius: 2.5mm; padding: 2mm 4.5mm 1mm; margin: 0.5mm 0 2.5mm; }
     ${S} .letter-concerns-head { font-weight: 700; margin: 0 0 1.5mm; }
     ${S} .letter-concerns ul { list-style: none; margin: 0; padding: 0; }
     ${S} .letter-concerns li { position: relative; padding-left: 6mm; margin: 0 0 0.3mm; }
     ${S} .letter-concerns li::before { content: "\\2713"; position: absolute; left: 1mm; top: 0; color: var(--accent); font-weight: 700; }
     ${S} .letter-illustration { margin: 0 auto 2.5mm; width: 70mm; }
-    ${S} .letter-row { display: flex; gap: 4mm; align-items: center; margin: 0.5mm 0 2.5mm; }
+    ${S} .letter-row { display: flex; gap: 4mm; align-items: center; margin: 0.5mm 0 2mm; }
     ${S} .letter-row .letter-concerns { flex: 1; margin: 0; }
     ${S} .letter-row .letter-illustration { flex: none; width: 52mm; margin: 0; }
-    ${S} .letter-illustration img { display: block; width: 100%; height: auto; border-radius: 1.5mm; }
-    ${S} .letter-note { border: 1px solid var(--line); border-radius: 2.5mm; padding: 2.5mm 4.5mm 0.5mm; margin: 3.5mm 0 2.5mm; font-size: 9pt; line-height: 1.55; position: relative; }
+    ${S} .letter-illustration img { display: block; max-width: 100%; max-height: 55mm; width: auto; height: auto; margin: 0 auto; border-radius: 1.5mm; }
+    ${S} .letter-note { border: 1px solid var(--line); border-radius: 2.5mm; padding: 2.5mm 4.5mm 0.5mm; margin: 3mm 0 2mm; font-size: 9pt; line-height: 1.55; position: relative; }
     ${S} .letter-note-label { position: absolute; top: -3mm; left: 4mm; background: #fff; color: var(--accent); font-size: 8.5pt; padding: 0 1.5mm; font-weight: 700; }
     ${S} .letter-ps { font-size: 10.5pt; }
-    ${S} .letter-sign { text-align: right; margin: 1mm 0 2.5mm; }
+    ${S} .letter-sign { text-align: right; margin: 0.5mm 0 1.5mm; }
     ${S} .letter-sign-name { font-size: 12pt; font-weight: 700; color: var(--accent); }
     ${S} .letter-sign-sub { font-size: 9pt; color: #666; }
-    ${S} .letter-contact { margin-top: auto; background: var(--tint); border-radius: 3mm; padding: 2.5mm 5mm 2mm; break-inside: avoid; }
+    ${S} .letter-contact { margin-top: auto; background: var(--tint); border-radius: 3mm; padding: 2mm 5mm 1.5mm; break-inside: avoid; }
     ${S} .letter-contact-head { font-weight: 700; font-size: 11.5pt; color: var(--accent); text-align: center; }
     ${S} .letter-contact-head span { font-size: 10pt; font-weight: 500; color: #444; margin-left: 3mm; }
-    ${S} .letter-contact-ai { font-size: 8.5pt; color: #555; text-align: center; margin: 0.5mm 0 1.5mm; }
+    ${S} .letter-contact-ai { font-size: 8.5pt; color: #555; text-align: center; margin: 0.5mm 0 1mm; }
     ${S} .letter-contact-grid { display: flex; align-items: stretch; }
     ${S} .letter-contact-tel { flex: 1; display: flex; flex-direction: column; justify-content: center; align-items: center; text-align: center; border-right: 1px solid var(--line); padding: 1mm 4mm; }
     ${S} .letter-label { font-size: 9pt; color: #555; }
@@ -143,15 +143,15 @@ function pageCss(S: string): string {
     ${S} .sale-dm-track-caption { font-size: 9pt; color: #555; }
     ${S} .sale-dm-track-hint { font-size: 8.5pt; color: #555; line-height: 1.5; }
     ${S} .sale-dm-track-url { font-size: 6.5pt; color: #888; word-break: break-all; }
-    ${S} .letter-footnote { display: flex; gap: 3mm; align-items: center; margin-top: 2mm; padding-top: 1.5mm; border-top: 1px dashed var(--line); font-size: 7.5pt; color: #666; line-height: 1.5; }
+    ${S} .letter-footnote { display: flex; gap: 3mm; align-items: center; margin-top: 1mm; padding-top: 1mm; border-top: 1px dashed var(--line); font-size: 7.5pt; color: #666; line-height: 1.5; }
     ${S} .letter-footnote p { margin: 0; text-align: left; }
     ${S} .unsubscribe-slot { flex: 3; }
     ${S} .unsubscribe-slot:empty { display: none; }
     ${S} .sale-dm-unsubscribe { display: flex; gap: 3mm; align-items: center; }
-    ${S} .sale-dm-unsub-qr { width: 11mm; height: 11mm; flex: none; background: #fff; padding: 0.8mm; box-sizing: border-box; }
+    ${S} .sale-dm-unsub-qr { width: 16.6mm; height: 16.6mm; flex: none; background: #fff; padding: 0.8mm; box-sizing: border-box; }
     ${S} .sale-dm-unsub-url { font-size: 6.5pt; color: #888; word-break: break-all; }
     ${S} .letter-basis { flex: 2; }
-    ${S} .letter-footer { text-align: center; margin-top: 2mm; }
+    ${S} .letter-footer { text-align: center; margin-top: 1.5mm; }
     ${S} .letter-footer img { display: inline-block; width: 36mm; height: auto; vertical-align: top; }
   `;
 }
