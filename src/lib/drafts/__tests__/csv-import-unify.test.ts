@@ -43,6 +43,13 @@ describe("unifyReceptionDraft(第4回 D: 受付帳は1回)", () => {
     expect(u.ro).toMatchObject({ dlFilter: "all", roPreview: null });
   });
 
+  it("①の控えだけのときも②に同じ受付帳・条件を渡す(所有者ファイルと下見は無し)", () => {
+    const u = unifyReceptionDraft(
+      draft({ rp: { rpFile: A, rpDlFilter: "all", rpShinkiFilter: "new", rpPreview: { x: 1 } } }),
+    )!;
+    expect(u.ro).toEqual({ receptionFile: A, ownerFile: null, dlFilter: "all", shinkiFilter: "new", roPreview: null });
+  });
+
   it("①が済んで控えから外れたら②の控えのファイル・条件を使う(下見も残す)", () => {
     const u = unifyReceptionDraft(
       draft({ ro: { receptionFile: B, ownerFile: O, dlFilter: "unmarked", shinkiFilter: "all", roPreview: { y: 1 } } }),

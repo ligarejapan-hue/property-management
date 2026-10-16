@@ -1605,7 +1605,9 @@ export default function FieldSurveyMap({
               data-testid="trip-quick-start"
               onClick={() => {
                 quickStartRef.current = true;
-                setPanelOpen(true);
+                // 第4回 F: パネルは開かない(確認は portal で出る)。開くと地図のボタンが隠れ、
+                // 確認を「やめる」で閉じたあとに開始ボタンが見えなくなる。失敗は
+                // onNeedsAttention でパネルが開いて理由が出る。
                 startTripRef.current?.();
               }}
               className={
