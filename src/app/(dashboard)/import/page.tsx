@@ -866,7 +866,7 @@ function ImportScreen({ draftEnabled }: { draftEnabled: boolean }) {
 
       {/* ============ 受付帳を入れる(①②共通・第4回 D) ============ */}
       {/* 以前は①と②で同じ受付帳を2回入れていた。1回だけ入れ、取込条件も1組にする。 */}
-      <div data-testid="reception-shared" className="mb-8 rounded-lg border border-gray-200 dark:border-gray-800 bg-white dark:bg-gray-900 p-6">
+      <div id="reception-shared" data-testid="reception-shared" className="mb-8 scroll-mt-4 rounded-lg border border-gray-200 dark:border-gray-800 bg-white dark:bg-gray-900 p-6">
         <div className="mb-4 flex items-center gap-2">
           <FileUp className="h-5 w-5 text-green-600 dark:text-green-400" />
           <h3 className="text-lg font-semibold text-gray-700 dark:text-gray-200">
@@ -1099,6 +1099,18 @@ function ImportScreen({ draftEnabled }: { draftEnabled: boolean }) {
         <p className="mb-3 text-xs text-gray-500 dark:text-gray-400">
           ※売却DMの対象は、所有者ファイルで DM列が〇 だった物件のみです(それ以外は送付対象になりません)。
         </p>
+        {/* ⚠メニューの「所有者CSV取込」(/import#owner-match)はここへ直接着く。受付帳の欄は上にあり見えないので、
+            受付帳が無いときは理由と上へのリンクを出す(押せないプレビューだけ残さない・@codex #523 P2)。 */}
+        {!receptionFile && (
+          <p
+            data-testid="owner-match-needs-reception"
+            className="mb-3 rounded-md border border-amber-300 bg-amber-50 px-3 py-2 text-sm text-amber-900 dark:border-amber-500/40 dark:bg-amber-500/15 dark:text-amber-300"
+          >
+            先に、このページ上部の
+            <a href="#reception-shared" className="mx-1 font-semibold underline underline-offset-2">「受付帳を入れる」</a>
+            に受付帳を入れてください（②は上で入れた受付帳と所有者ファイルを突き合わせます）。
+          </p>
+        )}
 
         <p className="mb-4 text-xs text-gray-500 dark:text-gray-400">
           所有者ファイルの「物件住所」が、受付帳の物件住所と一致した場合のみ紐づけます。所有者住所は「都道府県＋所有者市区郡＋所有者住所＋建物名」を連結し、〒は別フィールドとして郵便番号に保存します。No / DL / 受付番号 / 「他」は紐づけキーに使いません。

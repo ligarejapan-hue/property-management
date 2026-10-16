@@ -52,3 +52,13 @@ describe("旧 登記DM取込 = 取得済みPDFを一括添付", () => {
     expect(read("src/components/import/import-switcher.tsx")).toContain('{ href: "/import/registry-dm", label: "取得済みPDFを一括添付"');
   });
 });
+
+describe("②へ直接着いたとき(メニューの所有者CSV取込=/import#owner-match・@codex #523 P2)", () => {
+  it("受付帳が無ければ理由と上の欄へのリンクを出す", () => {
+    expect(src).toContain('id="reception-shared"');
+    const at = src.indexOf('id="owner-match"');
+    const owner = src.slice(at);
+    expect(owner).toMatch(/\{!receptionFile && \(\s*<p\s+data-testid="owner-match-needs-reception"/);
+    expect(owner).toContain('href="#reception-shared"');
+  });
+});
