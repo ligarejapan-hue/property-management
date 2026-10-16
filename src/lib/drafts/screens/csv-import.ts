@@ -181,8 +181,9 @@ export function canTrustJobHistory(p: {
  * - 取込条件 = ①の控えがあれば①、無ければ②。
  * - ⚠第4回より前の控えで①と②が別のファイル・別の条件だったら、②の下見は今の入力と合わないので捨てる
  *   (下見と違う中身で取り込ませない)。
- * - ①の控えだけのとき(②を先に済ませた・第4回より前に①だけ入れていた)も②に同じ受付帳を渡す
- *   (渡さないと②のプレビューが理由も出ずに押せないまま=提出前レビュー P2)。
+ * - ⚠片方の控えしか無いときは、もう片方を作り直さない。取り込みが済んだ流れは控えから外す
+ *   (csvDraftAfterImport)ので、「無い」は「済んだ」かもしれない。作り直すと済んだ取り込みがもう一度
+ *   押せる形になる(@codex #523 P2・①②とも)。画面は「もう片方のために残している」と案内する。
  */
 export function unifyReceptionDraft(d: CsvImportDraft | null): CsvImportDraft | null {
   if (!d || (!d.rp && !d.ro)) return d;
@@ -202,6 +203,6 @@ export function unifyReceptionDraft(d: CsvImportDraft | null): CsvImportDraft | 
             ? d.ro.roPreview
             : null,
       }
-    : { receptionFile: file, ownerFile: null, dlFilter, shinkiFilter, roPreview: null };
+    : null;
   return { ...d, ro };
 }

@@ -72,3 +72,20 @@ describe("①が済んだあと戻ったとき(@codex #523 P2)", () => {
     expect(src).toMatch(/\{!rpFile && receptionFile && \(\s*<p\s+data-testid="rp-reception-kept-for-owner"/);
   });
 });
+
+describe("②が済んだあと戻ったとき(@codex #523 P2・①と対称)", () => {
+  it("①の控えの受付帳を②へ渡さず、②に「①のために残している」と出す", () => {
+    expect(src).toMatch(/\} \| null>\(s0\?\.ro\?\.receptionFile \?\? null\);/);
+    const at = src.indexOf('data-testid="owner-match-needs-reception"');
+    expect(src.slice(at, at + 900)).toContain("上の受付帳は①（物件を作る）のために残しています。");
+  });
+});
+
+describe("片方の控えだけが戻っても取込条件は1組のまま", () => {
+  it("①②の条件の state は互いの控えから補う(画面の1組と②の取り込みがずれない)", () => {
+    expect(src).toContain('(s0?.ro?.dlFilter ?? s0?.rp?.rpDlFilter ?? "marked")');
+    expect(src).toContain('(s0?.ro?.shinkiFilter ?? s0?.rp?.rpShinkiFilter ?? "existing")');
+    expect(src).toContain('(s0?.rp?.rpDlFilter ?? s0?.ro?.dlFilter ?? "marked")');
+    expect(src).toContain('(s0?.rp?.rpShinkiFilter ?? s0?.ro?.shinkiFilter ?? "existing")');
+  });
+});

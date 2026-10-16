@@ -329,8 +329,8 @@ function ImportScreen({ draftEnabled }: { draftEnabled: boolean }) {
   const [roLoading, setRoLoading] = useState(false);
   const [roError, setRoError] = useState<string | null>(null);
   // 取込条件: 既定は「DLに〇がついている物件のみ」かつ「既存のみ」
-  const [dlFilter, setDlFilter] = useState<"marked" | "unmarked" | "all">(s0?.ro?.dlFilter ?? "marked");
-  const [shinkiFilter, setShinkiFilter] = useState<"existing" | "new" | "all">(s0?.ro?.shinkiFilter ?? "existing");
+  const [dlFilter, setDlFilter] = useState<"marked" | "unmarked" | "all">(s0?.ro?.dlFilter ?? s0?.rp?.rpDlFilter ?? "marked");
+  const [shinkiFilter, setShinkiFilter] = useState<"existing" | "new" | "all">(s0?.ro?.shinkiFilter ?? s0?.rp?.rpShinkiFilter ?? "existing");
 
   // Reception → Property (1-file) state
   const [rpFile, setRpFile] = useState<{
@@ -1117,9 +1117,13 @@ function ImportScreen({ draftEnabled }: { draftEnabled: boolean }) {
             data-testid="owner-match-needs-reception"
             className="mb-3 rounded-md border border-amber-300 bg-amber-50 px-3 py-2 text-sm text-amber-900 dark:border-amber-500/40 dark:bg-amber-500/15 dark:text-amber-300"
           >
-            先に、このページ上部の
+            {rpFile
+              ? // ①の控えだけが戻った=②は前回この受付帳で済ませたのかもしれない(作り直さない・@codex #523 P2)。
+                "上の受付帳は①（物件を作る）のために残しています。②は前回この受付帳で済ませた可能性があります（下の取り込み履歴で確かめられます）。②を行うときは、"
+              : "先に、"}
+            このページ上部の
             <a href="#reception-shared" className="mx-1 font-semibold underline underline-offset-2">「受付帳を入れる」</a>
-            に受付帳を入れてください（②は上で入れた受付帳と所有者ファイルを突き合わせます）。
+            {rpFile ? "で受付帳を入れ直してください。" : "に受付帳を入れてください（②は上で入れた受付帳と所有者ファイルを突き合わせます）。"}
           </p>
         )}
 
