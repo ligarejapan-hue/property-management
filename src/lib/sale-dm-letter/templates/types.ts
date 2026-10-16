@@ -11,10 +11,13 @@ export interface LetterRenderInput {
   senderName: string;
   senderContact: string;
   trackingToken: string; // 宛先固有の opaque トークン(slot の data 属性に出す)。
-  // 追跡枠に差し込む HTML 断片(renderTrackingSlotHtml の出力=QR+短縮URL)。
+  // 問い合わせ枠の右側(無料査定QR)に差し込む HTML 断片(renderTrackingSlotHtml の出力=QR+短縮URL)。
   // 呼び出し側(印刷route)が確定済み draft から生成して渡す。未指定なら枠は空。
   trackingSlotHtml?: string;
-  // 手紙のイラスト(設計 2026-10-05)。本文の【イラスト】の行(無ければ本文の上)に入る。
+  // 問い合わせ枠の下の小さな行(配信停止QR)に差し込む HTML 断片(renderUnsubscribeSlotHtml の出力)。
+  // 2026-10-17 の紙面から追跡枠とは別の場所に置くため、連結せず別に渡す。未指定なら空。
+  unsubscribeSlotHtml?: string;
+  // 手紙のイラスト(設計 2026-10-05)。本文の【イラスト】の行(無ければ困りごとの枠の横・それも無ければ本文の上)に入る。
   // null/未指定=イラスト無し(【イラスト】の行は消して描く)。src は /lp-assets/<publicId> だけ受け付ける。
   illustration?: import("../letter-illustration").LetterIllustration | null;
 }

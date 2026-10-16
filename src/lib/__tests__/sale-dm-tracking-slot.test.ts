@@ -20,4 +20,10 @@ describe("renderTrackingSlotHtml", () => {
     const html = renderTrackingSlotHtml(artifacts, { caption: "詳しくはこちら" });
     expect(html).toContain("詳しくはこちら");
   });
+
+  it("添え書き(任意 hint)も差し込め、エスケープされる", () => {
+    const html = renderTrackingSlotHtml(artifacts, { caption: "スマホで読み取り", hint: "くわしい<案内>" });
+    expect(html).toContain('class="sale-dm-track-hint"');
+    expect(html).toContain("くわしい&lt;案内&gt;");
+  });
 });

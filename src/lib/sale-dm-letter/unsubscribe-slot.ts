@@ -1,6 +1,7 @@
-// 配信停止QRの紙面断片。既存テンプレの追跡枠(trackingSlotHtml)へ**連結**して差し込む
-// (テンプレ本体・型は変更しない)。qrSvg は本システム生成の信頼できる SVG(qrcode 出力)。
+// 配信停止QRの紙面断片。紙面テンプレの問い合わせ枠の下の小さな行(unsubscribeSlotHtml)へ差し込む。
+// qrSvg は本システム生成の信頼できる SVG(qrcode 出力)。
 // url はテキスト表示分のみ HTML エスケープする(tracking-slot.ts と同じ流儀)。
+// 見た目(QR の大きさ・字の大きさ)は紙面テンプレ側の CSS で決める(ここは構造だけ)。
 
 function escapeHtml(s: string): string {
   return s
@@ -11,24 +12,22 @@ function escapeHtml(s: string): string {
 }
 
 /**
- * 停止枠の HTML 断片(小さめQR + URL + 案内文)。
- * 無料査定QR(追跡枠)と紛れないよう、専用クラス+控えめな見た目にする。
- * スタイルはインライン(テンプレの <style> を触らないため)。
+ * 停止枠の HTML 断片(小さめQR + 案内文 + URL)。
+ * 無料査定QR(追跡枠)と紛れないよう、専用クラスを持つ(大きさはテンプレで一回り小さく)。
  */
 export function renderUnsubscribeSlotHtml(artifacts: {
   url: string;
   qrSvg: string;
 }): string {
   return [
-    // qrcode の SVG は viewBox のみで width/height を持たない。枠(14mm)だけ絞っても
+    // qrcode の SVG は viewBox のみで width/height を持たない。枠だけ絞っても
     // 中の SVG は既定の内在サイズで溢れ得るため、SVG 自体を枠へ追従させる(@codex #416 R2 P2)。
     `<style>.sale-dm-unsub-qr svg{width:100%;height:100%;display:block}</style>`,
-    `<div class="sale-dm-unsubscribe" style="margin-top:4mm;padding-top:3mm;border-top:1px solid #ddd;display:flex;align-items:center;gap:4mm;justify-content:center">`,
-    // QR は追跡枠より一回り小さく(主役は査定QR。停止は選べる導線として明示)。
-    `<div class="sale-dm-unsub-qr" style="width:14mm;height:14mm;flex:none">${artifacts.qrSvg}</div>`,
-    `<div style="text-align:left;font-size:7.5pt;color:#777;line-height:1.6">`,
-    `<p style="margin:0">今後このようなお手紙が不要な場合は、こちらのQRコードからお申し出いただけます(配信停止)。</p>`,
-    `<p class="sale-dm-unsub-url" style="margin:0;word-break:break-all">${escapeHtml(artifacts.url)}</p>`,
+    `<div class="sale-dm-unsubscribe">`,
+    `<div class="sale-dm-unsub-qr">${artifacts.qrSvg}</div>`,
+    `<div class="sale-dm-unsub-text">`,
+    `<p>今後このようなお手紙が不要な方は、左のQRコードからお申し出ください（配信停止）。</p>`,
+    `<p class="sale-dm-unsub-url">${escapeHtml(artifacts.url)}</p>`,
     `</div>`,
     `</div>`,
   ].join("");

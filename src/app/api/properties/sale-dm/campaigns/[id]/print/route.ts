@@ -170,8 +170,7 @@ export async function GET(
         printableDrafts.map(async (d) => {
           const artifacts = await buildTrackingArtifacts(d.trackingToken, trackingBaseUrl);
           // 配信停止QR: `<trackingToken>.<HMAC署名>` を /u/ へ。追跡トークン単体では
-          // 停止できない(署名は紙面にしか存在しない)。追跡枠へ**連結**して差し込む
-          // (テンプレの slot 契約は据え置き)。
+          // 停止できない(署名は紙面にしか存在しない)。
           const unsubscribeUrl = buildUnsubscribeUrl(
             buildUnsubscribeToken(d.trackingToken, unsubscribeKey),
             trackingBaseUrl,
@@ -192,9 +191,12 @@ export async function GET(
             trackingToken: d.trackingToken,
             // 手紙のイラスト(設計 2026-10-05)。種類から写した型だけが持つ。削除済みは null(=イラスト無し)。
             illustration: letterIllustrationFromAsset(d.variant.illustrationAsset),
-            trackingSlotHtml:
-              renderTrackingSlotHtml(artifacts, { caption: "スマホで読み取り(無料査定)" }) +
-              unsubscribeSlotHtml,
+            // 2026-10-17 の紙面: 無料査定QRは問い合わせ枠の右、配信停止QRはその下の小さな行(別の slot)。
+            trackingSlotHtml: renderTrackingSlotHtml(artifacts, {
+              caption: "スマホで読み取り",
+              hint: "くわしいご案内と無料査定のお申し込み",
+            }),
+            unsubscribeSlotHtml,
           };
         }),
       );
