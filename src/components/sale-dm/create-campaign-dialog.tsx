@@ -7,6 +7,9 @@
  * 選択肢は選択肢の口(fetchSaleDmScenarioOptions=有効な種類・文面は含まず ready だけ)から取る。
  * 初期選択 = 手紙が登録済み(ready)の最初の種類、無ければ「種類を使わない」。手紙が未登録の種類は選べない。
  * 選択肢を読めなかったときは黙って「種類を使わない」で作らせない(理由と「再読み込み」を出し、読めるまで作成は押せない)。
+ * 画面すっきり化 第4回(E・発注者決定 2026-10-16): 「種類を使わない」は選択肢に常に並べず、
+ * 「古いやり方(A/Bの型)で作る」を押したときだけ出す(奥へしまう・消さない)。
+ * 選べる種類が1つも無いときは初めから「種類を使わない」になるので、そのときは並べたまま出す。
  *
  * 作成そのもの(API 呼び出し・冪等キー・作成後の案内・画面遷移)は呼び出し側(物件一覧)が持つ。
  * ここは選んだ値を onSubmit へ渡し、失敗の文言(API のメッセージそのまま)と、種類の登録が足りない理由のときだけ
@@ -41,6 +44,10 @@ export function SaleDmCreateCampaignDialog({
   const [options, setOptions] = useState<SaleDmScenarioOption[] | null>(null);
   const [loadError, setLoadError] = useState<string | null>(null);
   const [selected, setSelected] = useState<string>(NONE);
+  // 「古いやり方(A/Bの型)で作る」を押したか。
+  const [legacyOpen, setLegacyOpen] = useState(false);
+  // 種類を使わない選択肢を出すか(押したとき・初めから種類を使わないになっているとき)。
+  const showLegacyOption = legacyOpen || selected === NONE;
   const [error, setError] = useState<{ message: string; code: string | null } | null>(null);
 
   // ⚠状態は応答が返ってから書く(effect の中で同期に setState しない)。
@@ -138,14 +145,28 @@ export function SaleDmCreateCampaignDialog({
                   {o.ready ? "" : "(手紙が未登録)"}
                 </option>
               ))}
-              <option value={NONE}>種類を使わない(今までどおり)</option>
+              {showLegacyOption && <option value={NONE}>種類を使わない(古いやり方・A/Bの型)</option>}
             </select>
+          )}
+          {options !== null && !showLegacyOption && (
+            <button
+              type="button"
+              data-testid="sale-dm-create-legacy"
+              onClick={() => {
+                setLegacyOpen(true);
+                setSelected(NONE);
+              }}
+              disabled={busy}
+              className="mt-1 text-xs text-gray-500 underline underline-offset-2 hover:text-gray-700 disabled:opacity-60 dark:text-gray-400 dark:hover:text-gray-200"
+            >
+              古いやり方(A/Bの型)で作る
+            </button>
           )}
         </div>
         {options !== null && (
           <p className="text-xs text-gray-600 dark:text-gray-400">
             {selected === NONE
-              ? "今までどおり、型Aで作ります"
+              ? "古いやり方(種類を使わず、型A/Bを自分で作って割り当てる)で作ります"
               : "受付帳取込の物件は相続、現地調査の物件は空き家、それ以外はここで選んだ種類になります。物件の『DMの種類』欄で直した物件はそちらが優先です。"}
           </p>
         )}
