@@ -172,3 +172,34 @@ export function canTrustJobHistory(p: {
 }): boolean {
   return p.sameGen && p.defaultView && p.startedAt >= p.readyAt;
 }
+
+/**
+ * 画面すっきり化 第4回 D(2026-10-16): 受付帳は1回だけ入れ、①(rp)と②(ro)で同じファイル・同じ
+ * 取込条件を使う。画面の state は流れごとに2つのまま(控えの形・送信中の印の数え方を変えない)なので、
+ * 戻すときに2つを1つにそろえる。
+ * - ファイル = ①の控え(rp.rpFile)を優先。①が済んで控えから外れていれば②の控え(ro.receptionFile)。
+ * - 取込条件 = ①の控えがあれば①、無ければ②。
+ * - ⚠第4回より前の控えで①と②が別のファイル・別の条件だったら、②の下見は今の入力と合わないので捨てる
+ *   (下見と違う中身で取り込ませない)。
+ */
+export function unifyReceptionDraft(d: CsvImportDraft | null): CsvImportDraft | null {
+  if (!d || (!d.rp && !d.ro)) return d;
+  const file = d.rp?.rpFile ?? d.ro?.receptionFile ?? null;
+  const dlFilter = d.rp ? d.rp.rpDlFilter : d.ro!.dlFilter;
+  const shinkiFilter = d.rp ? d.rp.rpShinkiFilter : d.ro!.shinkiFilter;
+  const sameFile = (a: FileEntry | null, b: FileEntry | null) =>
+    a === b || (!!a && !!b && a.name === b.name && a.csvText === b.csvText && a.xlsxBase64 === b.xlsxBase64);
+  const ro = d.ro
+    ? {
+        ...d.ro,
+        receptionFile: file,
+        dlFilter,
+        shinkiFilter,
+        roPreview:
+          sameFile(d.ro.receptionFile, file) && d.ro.dlFilter === dlFilter && d.ro.shinkiFilter === shinkiFilter
+            ? d.ro.roPreview
+            : null,
+      }
+    : null;
+  return { ...d, ro };
+}

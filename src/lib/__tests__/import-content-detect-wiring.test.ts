@@ -70,12 +70,12 @@ describe("B-11: 取込画面はファイル選択時にファイル名で拒否�
   });
 });
 
-describe("B-11(@codex R1): 登記DM取込ウィザードにも判定注意を表示する", () => {
+describe("第4回 D: 旧 登記DM取込(取得済みPDFを一括添付)は受付帳・所有者の取込を持たない", () => {
   const src = read("src/app/(dashboard)/import/registry-dm/page.tsx");
 
-  it("プレビューの warning を両フロー (rp/ro) で表示する", () => {
-    expect(src).toMatch(/rpPreview\?\.receptionFileType\.warning/);
-    expect(src).toMatch(/roPreview\?\.receptionFileType\.warning/);
-    expect(src).toMatch(/roPreview\?\.ownerFileType\.warning/);
+  it("受付帳・所有者の取込は /import にまとめた(判定注意の表示も /import 側だけ=上の B-11 で担保)", () => {
+    expect(src).not.toMatch(/previewReceptionPropertyCsv|importReceptionPropertyCsv|previewReceptionOwnerCsv|importReceptionOwnerCsv/);
+    expect(src).toContain("<BulkFolderUpload");
+    expect(src).toContain('href="/import"');
   });
 });
