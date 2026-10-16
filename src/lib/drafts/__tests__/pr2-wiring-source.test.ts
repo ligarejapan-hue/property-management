@@ -287,3 +287,29 @@ describe("謄本: 選び直しの枠は選んだ後も残し、選んだファ�
     expect(src).toMatch(/importRegistryPdfFile\(\s*selectedFile,\s*propId,\s*(?:\/\/[^\n]*\n\s*)?selectedFile\.name,/);
   });
 });
+
+describe("取り込み(CSV): F5 の仮の画面では取りに行かない(初回の取得が2回走らない)", () => {
+  const src = read("src/app/(dashboard)/import/page.tsx");
+  it("履歴・異常ジョブ・実行者の一覧は draftEnabled のときだけ取りに行く", () => {
+    expect(src).toMatch(/useEffect\(\(\) => \{\s*if \(!draftEnabled\) return;\s*fetchJobs\(\);\s*\}, \[fetchJobs, draftEnabled\]\);/);
+    expect(src).toMatch(/useEffect\(\(\) => \{\s*if \(!draftEnabled\) return;\s*fetchStuck\(\);\s*\}, \[fetchStuck, draftEnabled\]\);/);
+    expect(src).toMatch(/useEffect\(\(\) => \{\s*if \(!draftEnabled\) return;\s*let cancelled = false;[\s\S]{0,200}await fetchUsers\(\)[\s\S]{0,900}\}, \[draftEnabled\]\);/);
+  });
+});
+
+// 「下見の読み込み中に離れて戻ったら下見を取り直す」(画面に出ない古い取り込み手順=main の段階3)は、
+// 第4回 D でその手順ごと消したので確認も外した(古い控えの main は読めるが戻さない=main: null)。
+describe("取り込み(CSV): 古い取り込み手順の控えは戻さない", () => {
+  it("main は常に null で控え、段階3の下見の取り直しも無い", () => {
+    const src = read("src/app/(dashboard)/import/page.tsx");
+    expect(src).toContain("main: null,");
+    expect(src).not.toContain("runDuplicatePreview");
+    expect(src).not.toContain("s0?.main");
+  });
+});
+
+describe("取り込み(CSV): 帯から取込履歴へ飛べる", () => {
+  it("履歴の枠に id がある", () => {
+    expect(read("src/app/(dashboard)/import/page.tsx")).toMatch(/\{\/\* =+ Job History =+ \*\/\}\s*<div id=\{IMPORT_HISTORY_ID\}/);
+  });
+});

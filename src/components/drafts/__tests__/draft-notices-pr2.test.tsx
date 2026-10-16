@@ -56,3 +56,12 @@ describe("取り込みの結果が分からない帯: 履歴を読み込めな�
     expect(html).toContain("取り込み履歴を読み込めませんでした。下の取り込み履歴を読み込み直してから続けてください。");
   });
 });
+
+describe("取り込み途中の帯: 取込履歴へ飛べる", () => {
+  it("どちらの帯にも「取込履歴を見る」のリンクがある", () => {
+    for (const reason of ["left", "unknown"] as const) {
+      const html = renderToStaticMarkup(createElement(DraftImportPendingNotice, { onDismiss: () => {}, reason }));
+      expect(html).toMatch(/<a href="#import-history"[^>]*>取込履歴を見る<\/a>/);
+    }
+  });
+});

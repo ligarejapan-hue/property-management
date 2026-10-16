@@ -54,7 +54,7 @@ import {
   type CsvImportDraft,
 } from "@/lib/drafts/screens/csv-import";
 import { useClientReady, useDraftAutosave, useRestoredDraft } from "@/hooks/use-draft";
-import { DraftImportPendingNotice, DraftRestoredNotice, DraftTooLargeNotice } from "@/components/drafts/draft-notices";
+import { DraftImportPendingNotice, DraftRestoredNotice, DraftTooLargeNotice, IMPORT_HISTORY_ID } from "@/components/drafts/draft-notices";
 import {
   IMPORT_TYPE_FILTER_OPTIONS,
   getImportTypeLabel,
@@ -488,9 +488,12 @@ function ImportScreen({ draftEnabled }: { draftEnabled: boolean }) {
     }
   }, [jobFilters, jobPage, jobLimit]);
 
+  // ⚠再読み込み(F5)では、控えを読む前の仮の画面がいったん作られて作り直される(下の ImportPage)。
+  //   仮の画面では取りに行かない(初回の取得が2回走らないように)。
   useEffect(() => {
+    if (!draftEnabled) return;
     fetchJobs();
-  }, [fetchJobs]);
+  }, [fetchJobs, draftEnabled]);
 
   // 待ち時間が過ぎたら履歴を自動で読み直す(その読み込みが確かめる根拠になる)。
   const fetchJobsRef = useRef(fetchJobs);
@@ -523,8 +526,9 @@ function ImportScreen({ draftEnabled }: { draftEnabled: boolean }) {
   }, []);
 
   useEffect(() => {
+    if (!draftEnabled) return;
     fetchStuck();
-  }, [fetchStuck]);
+  }, [fetchStuck, draftEnabled]);
 
   // 異常ジョブを「失敗にする」操作。確認ダイアログ → API 呼び出し →
   // 異常ジョブ一覧と履歴一覧の両方を refetch（履歴側に failed として反映する）。
@@ -573,6 +577,7 @@ function ImportScreen({ draftEnabled }: { draftEnabled: boolean }) {
   // 実行者」も絞り込み対象として選べるようになる。
   // フェッチは初回マウント時のみ（ユーザーマスタは滅多に変わらないため）。
   useEffect(() => {
+    if (!draftEnabled) return;
     let cancelled = false;
     (async () => {
       try {
@@ -592,7 +597,7 @@ function ImportScreen({ draftEnabled }: { draftEnabled: boolean }) {
     return () => {
       cancelled = true;
     };
-  }, []);
+  }, [draftEnabled]);
 
   // dropdown 表示用。name が空なら短縮 id をフォールバックに表示する。
   const executorOptions = useMemo(
@@ -1416,7 +1421,7 @@ function ImportScreen({ draftEnabled }: { draftEnabled: boolean }) {
       )}
 
       {/* ============ Job History ============ */}
-      <div className="rounded-lg border border-gray-200 dark:border-gray-800 bg-white dark:bg-gray-900 p-6">
+      <div id={IMPORT_HISTORY_ID} className="scroll-mt-4 rounded-lg border border-gray-200 dark:border-gray-800 bg-white dark:bg-gray-900 p-6">
         <div className="mb-4 flex items-center justify-between">
           <h3 className="text-lg font-semibold text-gray-700 dark:text-gray-200">取込履歴</h3>
           <button
