@@ -57,7 +57,7 @@ export default function LetterIllustrationPanel({ scenarioId, illustration, onCh
     <section className="rounded-md border border-gray-200 bg-white p-4 dark:border-gray-800 dark:bg-gray-900">
       <h2 className="text-base font-semibold text-gray-900 dark:text-gray-100">手紙のイラスト</h2>
       <p className="mt-1 text-xs text-gray-600 dark:text-gray-400">
-        手紙の本文の【イラスト】の行に入ります(無ければ本文の上)。横長(約3:1)がおすすめです。手紙に入った姿は、発送の画面の手紙の見本で確かめられます。
+        手紙の本文の【イラスト】の行に入ります(無ければ「・」の困りごとの枠の右、枠も無ければ本文の上)。横長(約2:1)がおすすめで、高さは55mmまでに収めます。手紙に入った姿は、発送の画面の手紙の見本で確かめられます。
       </p>
       <div className="mt-3 flex flex-wrap items-start gap-3">
         {illustration ? (
