@@ -13,8 +13,11 @@ import {
   AlertTriangle,
   Building2,
   Edit,
+  FileCheck,
   Loader2,
   Mail,
+  MapPinned,
+  MoreHorizontal,
   Trash2,
   UserPlus,
   X,
@@ -31,7 +34,9 @@ import AttachmentTab from "@/components/properties/attachment-tab";
 import HistoryTab from "@/components/properties/history-tab";
 import PhotoTab from "@/components/properties/photo-tab";
 import CandidateList from "@/components/properties/candidate-list";
-import ActionBar from "@/components/properties/action-bar";
+import ActionBar, { usePropertyAction } from "@/components/properties/action-bar";
+import { MenuButton, type MenuItem } from "@/components/ui/menu-button";
+import { useSession } from "next-auth/react";
 import DmScenarioField from "@/components/properties/dm-scenario-field";
 import RegistryLocationSearchButton from "@/components/properties/registry-location-search-button";
 import RegistryOwnerApplyButton from "@/components/properties/registry-owner-apply-button";
@@ -771,6 +776,15 @@ export default function PropertyDetailPage({
     setShowEditForm(true);
   }
 
+  // 画面すっきり化 第3回(発注者決定 2026-10-16): 状態を変える操作の実行は1か所に置き、
+  // ActionBar と「その他 ▾」の両方から使う(結果の文言は ActionBar の下に出る)。
+  const propertyAction = usePropertyAction(id, fetchProperty);
+  const { data: session } = useSession();
+  const myUserId = session?.user?.id ?? null;
+  // 「所在で謄本を検索」は「その他 ▾」から開く。start=開いた直後(確認から始める)/open=開いたまま。
+  const [registrySearch, setRegistrySearch] = useState<"closed" | "start" | "open">("closed");
+  const consumeRegistryAutoStart = useCallback(() => setRegistrySearch("open"), []);
+
   if (loading) {
     return (
       <div className="flex items-center justify-center py-24">
@@ -793,6 +807,33 @@ export default function PropertyDetailPage({
 
   // 販売図面テンプレの対応種別（土地/区分マンション/戸建/一棟）。対応外は null。
   const salesSheetKind = salesSheetTemplateKindFor(property.propertyType);
+
+  // 「その他 ▾」の中身(画面すっきり化 第3回)。出す条件は表に置いていたときと同じ。
+  const moreMenuItems: MenuItem[] = [
+    // DM 送付履歴ページは property:read + owner:read + record-scope を要するため canReadOwner で出し分ける(403 の行き止まりを避ける)。
+    ...(canReadOwner
+      ? [{ key: "dm-logs", label: "DM送付履歴", icon: Mail, href: `/properties/${property.id}/dm-logs`, title: "この物件の DM 送付履歴" }]
+      : []),
+    // 謄本の所在検索は registry:auto_fetch のある人だけ(部品の中でも同じ条件で出し分けている)。
+    ...(canAutoFetchRegistry
+      ? [{ key: "registry-search", label: "所在で謄本を検索", icon: MapPinned, onSelect: () => setRegistrySearch((s) => (s === "closed" ? "start" : s)) }]
+      : []),
+    // 済んでいる操作は出さない。サーバーは property:write を要るので、書けない人には出さない。
+    ...(canWriteProperty && property.registryStatus !== "obtained"
+      ? [{
+          key: "registry-obtained",
+          label: "登記取得済にする",
+          icon: FileCheck,
+          busy: propertyAction.loading === "mark_registry_obtained",
+          disabled: propertyAction.loading !== null,
+          onSelect: () => void propertyAction.run("mark_registry_obtained"),
+        }]
+      : []),
+    // 削除は DELETE /api/properties/[id] が property:delete を要求する。
+    ...(canDeleteProperty
+      ? [{ key: "delete", label: "物件を削除", icon: Trash2, danger: true, busy: deleting, onSelect: () => void handleDelete(), title: "この物件を削除" }]
+      : []),
+  ];
 
   // 見ている側(仕様 6.3・Task 9)。この物件の行が held_by_other/
   // held_by_self_other_screen なら、編集ボタン・案件ステータス・導入ルート・
@@ -826,20 +867,6 @@ export default function PropertyDetailPage({
           </h2>
         </div>
         <div className="flex flex-wrap items-center gap-2">
-          {/* DM 送付履歴ページ(/properties/[id]/dm-logs)への導線。route 新設なし・既存ページへのリンク。
-              dm-logs ページは property:read + owner:read + record-scope を要するため、既存導出済みの
-              canReadOwner でゲートして 403 dead-end を避ける（新ロジック追加なし・既存 state 利用）。 */}
-          {canReadOwner && (
-            <Link
-              href={`/properties/${property.id}/dm-logs`}
-              aria-label="DM送付履歴を見る"
-              title="この物件の DM 送付履歴"
-              className="flex items-center gap-1.5 whitespace-nowrap rounded-md border border-gray-300 px-3 py-2 text-sm text-gray-700 hover:bg-gray-50 dark:border-gray-700 dark:text-gray-200 dark:hover:bg-gray-800"
-            >
-              <Mail className="h-4 w-4" />
-              DM送付履歴
-            </Link>
-          )}
           {salesSheetKind && (
             <SalesSheetCreateButton
               propertyId={property.id}
@@ -866,22 +893,13 @@ export default function PropertyDetailPage({
             <Edit className="h-4 w-4" />
             物件を編集
           </button>
-          {canDeleteProperty && (
-            <button
-              onClick={handleDelete}
-              disabled={deleting}
-              aria-label="物件を削除"
-              title="この物件を削除"
-              className="flex items-center gap-1.5 whitespace-nowrap rounded-md border border-red-300 px-3 py-2 text-sm text-red-700 hover:bg-red-50 disabled:opacity-50"
-            >
-              {deleting ? (
-                <Loader2 className="h-4 w-4 animate-spin" />
-              ) : (
-                <Trash2 className="h-4 w-4" />
-              )}
-              物件を削除
-            </button>
-          )}
+          {/* 画面すっきり化 第3回(発注者決定 2026-10-16): たまに使う操作は「その他 ▾」へ。
+              機能は消さず置き場所だけ変える。出せる項目が無い人にはボタンごと出ない。 */}
+          <MenuButton
+            label="その他"
+            icon={MoreHorizontal}
+            items={moreMenuItems}
+          />
         </div>
       </div>
 
@@ -903,11 +921,11 @@ export default function PropertyDetailPage({
 
       {/* Action bar */}
       <ActionBar
-        propertyId={property.id}
-        registryStatus={property.registryStatus}
         dmStatus={property.dmStatus}
         investigationConfirmedAt={property.investigationConfirmedAt}
-        onActionComplete={fetchProperty}
+        // ⚠自分が誰か分からないうち(セッション読み込み中)は「担当にする」を出しておく。
+        assignedToMe={myUserId !== null && property.assignedTo === myUserId}
+        action={propertyAction}
       />
 
       {/* ⚠「謄本を自動取得」(不動産番号で引く導線)は 2026-08-15 に撤去した。番号取得は
@@ -915,6 +933,7 @@ export default function PropertyDetailPage({
           押しても必ず失敗する導線だった。取得の入口は下の「所在で謄本を検索」に一本化。 */}
 
       {/* 謄本 所在検索（PR-2b-3・番号無し物件を所在で検索→候補選択→取得。所在検索対応 provider のときのみ有効） */}
+      {registrySearch !== "closed" && (
       <RegistryLocationSearchButton
         propertyId={property.id}
         canAutoFetch={canAutoFetchRegistry}
@@ -938,16 +957,10 @@ export default function PropertyDetailPage({
         // 見ている側(仕様 6.3・Task 9)。物件が他の人の鍵なら、地番ポップアップの
         // 「保存して確認へ」だけを止める(検索・ログイン導線は止めない)。
         editLockHeld={propertyNoLockWritesBlocked}
+        autoStart={registrySearch === "start"}
+        onAutoStartConsumed={consumeRegistryAutoStart}
+        onClose={() => setRegistrySearch("closed")}
       />
-
-      {/* Warning badge */}
-      {!property.investigationConfirmedAt && (
-        <div className="mb-4 flex items-center gap-2 rounded-md border border-amber-200 bg-amber-50 px-4 py-2 dark:border-amber-800 dark:bg-amber-950/40">
-          <AlertTriangle className="h-4 w-4 text-amber-600 dark:text-amber-400" />
-          <span className="text-sm text-amber-800 dark:text-amber-300">
-            調査情報が未確認です。最新の情報を取得してください。
-          </span>
-        </div>
       )}
 
       {/* 品質警告セクション (§8-6): 一覧から外した警告を詳細で表示。ゼロ件=非表示。 */}

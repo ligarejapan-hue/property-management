@@ -55,13 +55,18 @@ describe("(5) 詳細条件の折りたたみ", () => {
     expect(init).toContain('sp.get("resendOnly")');
   });
 
-  it("よく使う3つ(検索・DM判断・担当者)は折りたたみの外にある", () => {
+  // 画面すっきり化 第3回(発注者決定 2026-10-16): いつも出すのは検索窓だけにし、
+  // DM判断・担当者は詳細条件の中へ移した(適用中は「（N件適用中）」で分かり、最初から開く)。
+  it("検索窓は折りたたみの外、DM判断・担当者は詳細条件の中", () => {
     const advancedAt = PAGE.indexOf("{advancedOpen && (");
     expect(advancedAt).toBeGreaterThan(-1);
     const before = PAGE.slice(PAGE.indexOf("よく使う条件"), advancedAt);
-    expect(before).toContain("value={dmFilter}");
-    expect(before).toContain("value={assigneeFilter}");
     expect(before).toContain("value={searchAllDraft}");
+    expect(before).not.toContain("value={dmFilter}");
+    expect(before).not.toContain("value={assigneeFilter}");
+    const after = PAGE.slice(advancedAt);
+    expect(after).toContain("value={dmFilter}");
+    expect(after).toContain("value={assigneeFilter}");
     // 詳細側の代表(種別・更新日)は前半に無い。
     expect(before).not.toContain("value={typeFilter}");
     expect(before).not.toContain("value={updatedFromFilter}");

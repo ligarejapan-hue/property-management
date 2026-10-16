@@ -1,6 +1,6 @@
 "use client";
 
-import { useCallback, useRef, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import {
   useRegistryPreflight,
   RegistryPreflightWarningLines,
@@ -75,6 +75,15 @@ interface RegistryLocationSearchButtonProps {
    *   本番でだけ「成功したのに画面が古いまま」が復活する（2026-08-20 の再演）。
    */
   onRegistryResultApplied: () => void | Promise<boolean | void>;
+  /**
+   * 物件の画面の「その他 ▾」から開いた直後は、もう一度ボタンを押させずに確認から始める
+   * (画面すっきり化 第3回)。⚠**1回だけ**: 始めたら onAutoStartConsumed で親に知らせ、
+   * 親は false に戻す(物件の取り直しでこの部品が作り直されたとき、勝手に確認へ戻さない)。
+   */
+  autoStart?: boolean;
+  onAutoStartConsumed?: () => void;
+  /** 何もしていないときに出す「閉じる」。省略時は出さない。 */
+  onClose?: () => void;
 }
 
 type State =
@@ -113,8 +122,17 @@ export default function RegistryLocationSearchButton({
   offerBuildingPath,
   onPropertyRefresh,
   onRegistryResultApplied,
+  autoStart = false,
+  onAutoStartConsumed,
+  onClose,
 }: RegistryLocationSearchButtonProps) {
-  const [state, setState] = useState<State>("idle");
+  // ⚠使えないとき(providerConfigured=false)は確認へ進めず、いつもの案内(取り込みの入口つき)を出す。
+  const [state, setState] = useState<State>(() =>
+    autoStart && canAutoFetch && providerConfigured ? "confirmSearch" : "idle",
+  );
+  useEffect(() => {
+    if (autoStart) onAutoStartConsumed?.();
+  }, [autoStart, onAutoStartConsumed]);
   const [candidates, setCandidates] = useState<RegistrySearchCandidate[]>([]);
   const [notSearchableReason, setNotSearchableReason] = useState<string | null>(null);
   const [selected, setSelected] = useState<RegistrySearchCandidate | null>(null);
@@ -545,6 +563,15 @@ export default function RegistryLocationSearchButton({
         >
           <MapPinned className="h-3.5 w-3.5" />
           所在で謄本を検索
+        </button>
+      )}
+      {showButton && onClose && (
+        <button
+          type="button"
+          onClick={onClose}
+          className="w-fit text-[11px] text-gray-500 hover:underline dark:text-gray-400"
+        >
+          閉じる
         </button>
       )}
 

@@ -4,7 +4,8 @@ import { useState, useEffect, useCallback, useMemo, useRef, Suspense } from "rea
 import { PageHeader } from "@/components/ui/page-header";
 import { useSearchParams, useRouter, usePathname } from "next/navigation";
 import Link from "next/link";
-import { Search, Loader2, Plus, Trash2, AlertTriangle, RotateCcw, Download } from "lucide-react";
+import { Search, Loader2, Plus, Trash2, AlertTriangle, RotateCcw, Download, CheckCircle2 } from "lucide-react";
+import { MenuButton } from "@/components/ui/menu-button";
 import { Pagination } from "@/components/ui/pagination";
 import { fetchProperties as apiFetchProperties, bulkUpdateProperties, deleteProperty, fetchQualityCheck, fetchUsers, fetchPropertySuggestions, createSaleDmCampaign, clearSaleDmUndeliverable, createDmBatch } from "@/lib/api-client";
 import { classifyPropertySearch, toMgmtIdQuery } from "@/lib/property-search-classify";
@@ -176,7 +177,9 @@ function PropertiesPageInner() {
   // 畳んだまま適用されていると、なぜ絞れているのか分からなくなるため。
   const [advancedOpen, setAdvancedOpen] = useState(() =>
     Boolean(
-      sp.get("propertyType") ||
+      sp.get("dmStatus") ||
+        sp.get("assignedTo") ||
+        sp.get("propertyType") ||
         sp.get("registryStatus") ||
         sp.get("dmSentMax") ||
         sp.get("caseStatus") ||
@@ -885,6 +888,8 @@ function PropertiesPageInner() {
   // トグルに「(N件適用中)」と出す(UI一貫性 第1弾(5))。
   const advancedFilterCount =
     [
+      // 画面すっきり化 第3回(2026-10-16): DM判断・担当者も詳細条件の中へ移した。
+      dmFilter, assigneeFilter,
       typeFilter, registryFilter, sendCountMaxFilter, caseFilter,
       introductionRouteFilter, updatedFromFilter, updatedToFilter,
     ].filter(Boolean).length +
@@ -1032,19 +1037,39 @@ function PropertiesPageInner() {
 
       {/* Action row */}
       <div className="mb-4 flex flex-wrap justify-end gap-2">
-        {canExportCsv && (
-          <div className="relative">
-            <button
-              type="button"
-              onClick={() => setShowColumnPicker((v) => !v)}
-              aria-haspopup="true"
-              aria-expanded={showColumnPicker}
-              className="inline-flex items-center gap-2 whitespace-nowrap rounded-md border border-gray-300 bg-white px-4 py-2 text-sm font-medium text-gray-700 hover:bg-gray-50 dark:border-gray-700 dark:bg-gray-900 dark:text-gray-200 dark:hover:bg-gray-800"
-              title="出力する列を選んでCSV出力"
-            >
-              <Download className="h-4 w-4" />
-              CSV出力
-            </button>
+        {/* 画面すっきり化 第3回(発注者決定 2026-10-16): 出力の3つは「出力 ▾」1つにまとめる。
+            出す条件は並べていたときと同じ。売却DMの作成・謄本の一括取得は、物件を選んだときの帯へ移した。 */}
+        <div className="relative">
+          <MenuButton
+            label="出力"
+            icon={Download}
+            items={[
+              // CSV出力は canExportCsv のときだけ(列を選ぶ小窓を開く)。
+              ...(canExportCsv
+                ? [{ key: "csv", label: "CSV出力", icon: Download, title: "出力する列を選んでCSV出力", onSelect: () => setShowColumnPicker(true) }]
+                : []),
+              ...(canExportDm
+                ? [{
+                    key: "dm-csv",
+                    label: "DM差込CSV出力",
+                    icon: Download,
+                    busy: exportingDm,
+                    disabled: exportingDm || searchPending,
+                    title: searchPending
+                      ? "検索語が入力途中です(管理IDを最後まで入力するか、消してください)"
+                      : "現在の検索条件で送付可の物件をDM差込CSV出力(控えが作られ、投函後に送付を確定できます)。最後の列に1通ごとの配信停止URLが入ります(QRの作り方は使い方ガイド)",
+                    onSelect: () => void handleExportDm(),
+                  }]
+                : []),
+              // 送付の確定: CSV出力(控え)に対して投函日を入れて送付記録を付ける(設計§2.2)。
+              // 確定APIは property:write も要求するため、出力可否に加えて write 権限でゲートする。
+              ...(canExportDm && canWriteProperty
+                ? [{ key: "dm-confirm", label: "送付の確定", icon: CheckCircle2, title: "出力したDMの投函が済んだら、日付を入れて送付記録を付ける", onSelect: () => setDmConfirmOpen(true) }]
+                : []),
+            ]}
+          />
+          {canExportCsv && (
+          <>
             {showColumnPicker && (
               <div
                 className="absolute right-0 z-20 mt-1 w-64 rounded-md border border-gray-200 bg-white p-3 shadow-lg dark:border-gray-800 dark:bg-gray-900"
@@ -1053,6 +1078,15 @@ function PropertiesPageInner() {
               >
                 <div className="mb-2 flex items-center justify-between">
                   <span className="text-xs font-medium text-gray-600 dark:text-gray-300">出力する列</span>
+                  <button
+                    type="button"
+                    className="text-xs text-gray-500 hover:underline dark:text-gray-400"
+                    onClick={() => setShowColumnPicker(false)}
+                  >
+                    閉じる
+                  </button>
+                </div>
+                <div className="mb-2 flex items-center justify-end">
                   <div className="flex gap-2">
                     <button
                       type="button"
@@ -1108,64 +1142,9 @@ function PropertiesPageInner() {
                 </button>
               </div>
             )}
-          </div>
-        )}
-        {canExportDm && (
-          <button
-            type="button"
-            onClick={handleExportDm}
-            disabled={exportingDm || searchPending}
-            className="inline-flex items-center gap-2 whitespace-nowrap rounded-md border border-gray-300 bg-white px-4 py-2 text-sm font-medium text-gray-700 hover:bg-gray-50 dark:border-gray-700 dark:bg-gray-900 dark:text-gray-200 dark:hover:bg-gray-800 disabled:cursor-not-allowed disabled:opacity-50"
-            title={
-              searchPending
-                ? "検索語が入力途中です(管理IDを最後まで入力するか、消してください)"
-                : "現在の検索条件で送付可の物件をDM差込CSV出力(控えが作られ、投函後に送付を確定できます)。最後の列に1通ごとの配信停止URLが入ります(QRの作り方は使い方ガイド)"
-            }
-          >
-            {exportingDm ? <Loader2 className="h-4 w-4 animate-spin" /> : <Download className="h-4 w-4" />}
-            DM差込CSV出力
-          </button>
-        )}
-        {/* 送付の確定: CSV出力(控え)に対して投函日を入れて送付記録を付ける(設計§2.2)。
-            確定APIは property:write も要求するため、出力可否に加えて write 権限でゲートする。 */}
-        {canExportDm && canWriteProperty && (
-          <button
-            type="button"
-            onClick={() => setDmConfirmOpen(true)}
-            className="inline-flex items-center gap-2 whitespace-nowrap rounded-md border border-gray-300 bg-white px-4 py-2 text-sm font-medium text-gray-700 hover:bg-gray-50 dark:border-gray-700 dark:bg-gray-900 dark:text-gray-200 dark:hover:bg-gray-800"
-            title="出力したDMの投函が済んだら、日付を入れて送付記録を付ける"
-          >
-            送付の確定
-          </button>
-        )}
-        {/* 権限(canCreateDm)に加え、文面生成が設定済み(capabilities.saleDmPrintReady)のときだけ出す。
-            未設定だと押しても 503 になるため導線自体を隠す。 */}
-        {canCreateDm && capabilities?.saleDmPrintReady && (
-          <button
-            type="button"
-            onClick={openCreateSaleDm}
-            disabled={creatingDm || loading || selectedIds.size === 0 || searchPending}
-            className="inline-flex items-center gap-2 whitespace-nowrap rounded-md border border-indigo-300 bg-white px-4 py-2 text-sm font-medium text-indigo-700 hover:bg-indigo-50 dark:border-indigo-400 dark:bg-gray-900 dark:text-indigo-400 dark:hover:bg-gray-800 disabled:cursor-not-allowed disabled:opacity-50"
-            title={
-              searchPending
-                ? "検索語が入力途中です(管理IDを最後まで入力するか、消してください)"
-                : "チェックした物件から売却DM下書きを作成(住所が無い物件は自動で除外)"
-            }
-          >
-            {creatingDm ? <Loader2 className="h-4 w-4 animate-spin" /> : <Plus className="h-4 w-4" />}
-            売却DMを作成{selectedIds.size > 0 ? `（${selectedIds.size}件）` : ""}
-          </button>
-        )}
-        {/* 謄本の一括取得。権限(registry:auto_fetch)に加え、有料取得が使える設定
-            (capabilities.registryPurchase=課金スイッチ+校正)のときだけ出す。休眠中は隠す。 */}
-        {canBulkRegistry && capabilities?.registryPurchase && (
-          <RegistryBulkFetchButton
-            propertyIds={properties
-              .filter((p) => selectedIds.has(p.id))
-              .map((p) => p.id)}
-            disabled={loading || selectedIds.size === 0 || searchPending}
-          />
-        )}
+          </>
+          )}
+        </div>
         <button
           type="button"
           onClick={() => {
@@ -1203,7 +1182,7 @@ function PropertiesPageInner() {
 
       {/* Filter bar (UI一貫性 第1弾: 検索窓を1本に統合・詳細条件は折りたたみ) */}
       <div className="mb-4 rounded-lg border border-gray-200 bg-white p-4 dark:border-gray-800 dark:bg-gray-900">
-        {/* よく使う条件(常時表示): 検索・DM判断・担当者・リセット */}
+        {/* よく使う条件(常時表示): 検索・所有者で探す・リセット(絞り込み中だけ)。DM判断・担当者は詳細条件の中(画面すっきり化 第3回) */}
         <div className="flex flex-wrap items-center gap-3">
         <div className="relative flex-1 min-w-[240px]">
           <Search className="absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-gray-400 dark:text-gray-500" />
@@ -1347,6 +1326,35 @@ function PropertiesPageInner() {
           )}
         </div>
 
+        {/* リセットは絞り込み中だけ出す(画面すっきり化 第3回)。 */}
+        {hasActiveFilter && (
+        <button
+          type="button"
+          onClick={handleResetFilters}
+          className="inline-flex items-center gap-1 rounded-md border border-gray-300 bg-white px-3 py-2 text-sm font-medium text-gray-700 hover:bg-gray-50 disabled:cursor-not-allowed disabled:opacity-50 dark:border-gray-700 dark:bg-gray-900 dark:text-gray-200 dark:hover:bg-gray-800"
+          title="全フィルタをリセット"
+        >
+          <RotateCcw className="h-3.5 w-3.5" />
+          リセット
+        </button>
+        )}
+
+        <button
+          type="button"
+          onClick={() => setAdvancedOpen((v) => !v)}
+          aria-expanded={advancedOpen}
+          className="inline-flex items-center gap-1 rounded-md border border-gray-300 bg-white px-3 py-2 text-sm font-medium text-gray-700 hover:bg-gray-50 dark:border-gray-700 dark:bg-gray-900 dark:text-gray-200 dark:hover:bg-gray-800"
+          title="種別・登記状況・日付などの詳細条件を開閉"
+        >
+          詳細条件{advancedFilterCount > 0 ? `（${advancedFilterCount}件適用中）` : ""}
+          {advancedOpen ? " ▴" : " ▾"}
+        </button>
+        </div>
+
+        {/* 詳細条件(折りたたみ)。適用中はトグルに件数が出るので、畳んでいても
+            「なぜ絞れているのか分からない」にはならない。 */}
+        {advancedOpen && (
+          <div className="mt-3 flex flex-wrap items-center gap-3 border-t border-gray-100 pt-3 dark:border-gray-800">
         <select
           value={dmFilter}
           onChange={handleDmFilterChange}
@@ -1372,33 +1380,6 @@ function PropertiesPageInner() {
           ))}
         </select>
 
-        <button
-          type="button"
-          onClick={handleResetFilters}
-          disabled={!hasActiveFilter}
-          className="inline-flex items-center gap-1 rounded-md border border-gray-300 bg-white px-3 py-2 text-sm font-medium text-gray-700 hover:bg-gray-50 disabled:cursor-not-allowed disabled:opacity-50 dark:border-gray-700 dark:bg-gray-900 dark:text-gray-200 dark:hover:bg-gray-800"
-          title="全フィルタをリセット"
-        >
-          <RotateCcw className="h-3.5 w-3.5" />
-          リセット
-        </button>
-
-        <button
-          type="button"
-          onClick={() => setAdvancedOpen((v) => !v)}
-          aria-expanded={advancedOpen}
-          className="inline-flex items-center gap-1 rounded-md border border-gray-300 bg-white px-3 py-2 text-sm font-medium text-gray-700 hover:bg-gray-50 dark:border-gray-700 dark:bg-gray-900 dark:text-gray-200 dark:hover:bg-gray-800"
-          title="種別・登記状況・日付などの詳細条件を開閉"
-        >
-          詳細条件{advancedFilterCount > 0 ? `（${advancedFilterCount}件適用中）` : ""}
-          {advancedOpen ? " ▴" : " ▾"}
-        </button>
-        </div>
-
-        {/* 詳細条件(折りたたみ)。適用中はトグルに件数が出るので、畳んでいても
-            「なぜ絞れているのか分からない」にはならない。 */}
-        {advancedOpen && (
-          <div className="mt-3 flex flex-wrap items-center gap-3 border-t border-gray-100 pt-3 dark:border-gray-800">
         <select
           value={typeFilter}
           onChange={handleFilterChange(setTypeFilter)}
@@ -1570,12 +1551,54 @@ function PropertiesPageInner() {
         </div>
       )}
 
+      {/* 選ぶ前の案内(画面すっきり化 第3回): まとめて行う操作は、物件を選んだときに出る帯の中にある。 */}
+      {/* ⚠使えない操作の名前は出さない(権限・設定は帯の中のボタンと同じ条件)。 */}
+      {selectedIds.size === 0 && properties.length > 0 && (
+        <p className="mb-2 text-xs text-gray-500 dark:text-gray-400">
+          物件を選ぶと、
+          {[
+            ...(canCreateDm && capabilities?.saleDmPrintReady ? ["売却DMの作成"] : []),
+            ...(canBulkRegistry && capabilities?.registryPurchase ? ["謄本の一括取得"] : []),
+            "まとめて変更",
+          ].join("・")}
+          ができます
+        </p>
+      )}
+
       {/* Bulk action bar */}
       {selectedIds.size > 0 && (
         <div className="mb-4 flex flex-wrap items-center gap-3 rounded-lg border border-blue-200 bg-blue-50 p-3 dark:border-blue-800 dark:bg-blue-950/40">
           <span className="text-sm font-medium text-blue-800 dark:text-blue-300">
             {selectedIds.size} 件選択中
           </span>
+          {/* 権限(canCreateDm)に加え、文面生成が設定済み(capabilities.saleDmPrintReady)のときだけ出す。
+              未設定だと押しても 503 になるため導線自体を隠す。 */}
+          {canCreateDm && capabilities?.saleDmPrintReady && (
+            <button
+              type="button"
+              onClick={openCreateSaleDm}
+              disabled={creatingDm || loading || selectedIds.size === 0 || searchPending}
+              className="inline-flex items-center gap-2 whitespace-nowrap rounded-md border border-indigo-300 bg-white px-4 py-2 text-sm font-medium text-indigo-700 hover:bg-indigo-50 dark:border-indigo-400 dark:bg-gray-900 dark:text-indigo-400 dark:hover:bg-gray-800 disabled:cursor-not-allowed disabled:opacity-50"
+              title={
+                searchPending
+                  ? "検索語が入力途中です(管理IDを最後まで入力するか、消してください)"
+                  : "チェックした物件から売却DM下書きを作成(住所が無い物件は自動で除外)"
+              }
+            >
+              {creatingDm ? <Loader2 className="h-4 w-4 animate-spin" /> : <Plus className="h-4 w-4" />}
+              売却DMを作成{selectedIds.size > 0 ? `（${selectedIds.size}件）` : ""}
+            </button>
+          )}
+          {/* 謄本の一括取得。権限(registry:auto_fetch)に加え、有料取得が使える設定
+              (capabilities.registryPurchase=課金スイッチ+校正)のときだけ出す。休眠中は隠す。 */}
+          {canBulkRegistry && capabilities?.registryPurchase && (
+            <RegistryBulkFetchButton
+              propertyIds={properties
+                .filter((p) => selectedIds.has(p.id))
+                .map((p) => p.id)}
+              disabled={loading || selectedIds.size === 0 || searchPending}
+            />
+          )}
           <select
             disabled={bulkUpdating || searchPending}
             onChange={(e) => {

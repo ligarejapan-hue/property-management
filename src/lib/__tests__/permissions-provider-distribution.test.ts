@@ -352,8 +352,9 @@ describe("properties 一覧 — provider 配布値の consume（F12-2）", () =>
   });
 
   it("ボタン表示は従来どおり canExportCsv / canExportDm でゲートされる", () => {
-    expect(pageSrc).toMatch(/canExportCsv\s*&&\s*\(/);
-    expect(pageSrc).toMatch(/canExportDm\s*&&\s*\(/);
+    // 画面すっきり化 第3回(2026-10-16): 出力は「出力 ▾」の項目になり、項目ごとに同じ条件で出し分ける。
+    expect(pageSrc).toMatch(/\.\.\.\(canExportCsv\s*\?/);
+    expect(pageSrc).toMatch(/\.\.\.\(canExportDm\s*\?/);
   });
 });
 
