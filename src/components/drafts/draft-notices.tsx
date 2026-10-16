@@ -93,6 +93,9 @@ export function DraftReselectFileNotice({ expectedName, chosenName }: { expected
   );
 }
 
+/** 取り込み(CSV)画面の「取込履歴」の枠の id(下の帯から飛ぶ先)。 */
+export const IMPORT_HISTORY_ID = "import-history";
+
 /**
  * 取り込み(CSV)の結果が分からない(設計書 §5.1 S4)。内容は戻さず、履歴で確かめてもらう。
  * reason="left" = 送信中に画面を離れて戻った / "unknown" = 画面に残ったまま 5xx・通信切れになった。
@@ -127,6 +130,10 @@ export function DraftImportPendingNotice({
       {historyError && (
         <span>取り込み履歴を読み込めませんでした。下の取り込み履歴を読み込み直してから続けてください。</span>
       )}
+      {/* 履歴は画面のいちばん下(3つの取り込みの後)にあって探しにくい=ここから飛べるようにする。 */}
+      <a href={`#${IMPORT_HISTORY_ID}`} className="font-medium underline underline-offset-2 hover:no-underline">
+        取込履歴を見る
+      </a>
       <button type="button" onClick={onDismiss} disabled={confirmDisabled} className={`${BTN} disabled:opacity-50`}>
         {reason === "left" ? "確かめたので閉じる" : "確かめたので続ける"}
       </button>
