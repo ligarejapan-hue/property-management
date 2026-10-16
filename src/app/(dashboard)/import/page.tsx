@@ -337,7 +337,10 @@ function ImportScreen({ draftEnabled }: { draftEnabled: boolean }) {
     name: string;
     csvText?: string;
     xlsxBase64?: string;
-  } | null>(s0?.rp?.rpFile ?? s0?.ro?.receptionFile ?? null);
+    // ⚠②の控え(ro.receptionFile)からは作り直さない。①が済むと①の控えは外れる(csvDraftAfterImport)ので、
+    //   ここで②の受付帳を①へ戻すと、戻ったときに①がもう一度押せる形になり二重の取り込みへ誘う(@codex #523 P2)。
+    //   ②の受付帳は共通の欄の表示(rpFile ?? receptionFile)と②だけで使う。
+  } | null>(s0?.rp?.rpFile ?? null);
   const [rpPreview, setRpPreview] = useState<ReceptionPropertyPreviewResponse | null>((s0?.rp?.rpPreview as never) ?? null);
   const [rpResult, setRpResult] = useState<ReceptionPropertyImportResponse | null>(null);
   const [rpLoading, setRpLoading] = useState(false);
@@ -955,6 +958,14 @@ function ImportScreen({ draftEnabled }: { draftEnabled: boolean }) {
           <li>「プレビュー」で新規作成予定・重複・住所なし件数を確認</li>
           <li>「取り込む」で物件を作成</li>
         </ol>
+        {!rpFile && receptionFile && (
+          <p
+            data-testid="rp-reception-kept-for-owner"
+            className="mb-3 rounded-md border border-gray-200 bg-gray-50 px-3 py-2 text-xs text-gray-600 dark:border-gray-700 dark:bg-gray-800/50 dark:text-gray-300"
+          >
+            上の受付帳は②（所有者を付ける）のために残しています。①は前回この受付帳で済ませた可能性があります（下の取り込み履歴で確かめられます）。①をもう一度行うときは、上で受付帳を入れ直してください。
+          </p>
+        )}
 
         {/* ボタン */}
         <div className="mb-4 flex flex-wrap items-center gap-2">

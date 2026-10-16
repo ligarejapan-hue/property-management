@@ -62,3 +62,13 @@ describe("②へ直接着いたとき(メニューの所有者CSV取込=/import#
     expect(owner).toContain('href="#reception-shared"');
   });
 });
+
+describe("①が済んだあと戻ったとき(@codex #523 P2)", () => {
+  it("②の控えの受付帳を①へ戻さない(①がもう一度押せる形にしない)", () => {
+    expect(src).toMatch(/\} \| null>\(s0\?\.rp\?\.rpFile \?\? null\);/);
+    expect(src).not.toContain("s0?.rp?.rpFile ?? s0?.ro?.receptionFile");
+  });
+  it("①に、受付帳は②のために残していると出す", () => {
+    expect(src).toMatch(/\{!rpFile && receptionFile && \(\s*<p\s+data-testid="rp-reception-kept-for-owner"/);
+  });
+});
