@@ -59,37 +59,46 @@ describe("letterIllustrationFromAsset", () => {
 });
 
 describe("renderLetterHtml とイラスト", () => {
+  // 紙面の下の会社ロゴも <img> なので、絵は figure(letter-illustration)で数える
+  const FIG = '<figure class="letter-illustration">';
   const count = (s: string, sub: string) => s.split(sub).length - 1;
 
   it("印の位置に img が1つだけ入り、【イラスト】の文字は出ない", () => {
     const html = renderLetterHtml({ ...base, body: "書き出し\n【イラスト】\n続き\n【イラスト】\n結び", illustration: ILL });
-    expect(count(html, "<img")).toBe(1);
+    expect(count(html, FIG)).toBe(1);
     expect(html).not.toContain("【イラスト】");
-    const i = html.indexOf("書き出し"), j = html.indexOf("<img"), k = html.indexOf("続き"), l = html.indexOf("結び");
+    const i = html.indexOf("書き出し"), j = html.indexOf(FIG), k = html.indexOf("続き"), l = html.indexOf("結び");
     expect(i).toBeGreaterThan(-1);
     expect(i < j && j < k && k < l).toBe(true);
     expect(html).toContain(`src="/lp-assets/${PID}"`);
     expect(html).toContain('width="1200"');
     expect(html).toContain('height="400"');
-    expect(html).toContain("max-height: 55mm");
+    // 縦横比は元のまま(引き伸ばし・切り落とし禁止)
+    expect(html).toMatch(/\.letter-illustration img \{[^}]*height: auto/);
   });
 
-  it("印が無ければ本文の上に入る", () => {
+  it("印が無ければ本文の上に入る(困りごとの枠があればその右に並ぶ)", () => {
     const html = renderLetterHtml({ ...base, body: "書き出し\n続き", illustration: ILL });
-    expect(html.indexOf("<img")).toBeLessThan(html.indexOf("書き出し"));
-    expect(html.indexOf("<img")).toBeGreaterThan(html.indexOf('class="letter-body"'));
+    expect(html.indexOf(FIG)).toBeLessThan(html.indexOf("書き出し"));
+    expect(html.indexOf(FIG)).toBeGreaterThan(html.indexOf('class="letter-body"'));
+    const withConcerns = renderLetterHtml({ ...base, body: "書き出し\n\n困りごと\n・ひとつ\n\n結び", illustration: ILL });
+    expect(withConcerns.indexOf(FIG)).toBeGreaterThan(withConcerns.indexOf("<li>ひとつ</li>"));
+    expect(withConcerns.indexOf(FIG)).toBeLessThan(withConcerns.indexOf("結び"));
+    expect(withConcerns).toContain('class="letter-row"');
   });
 
   it("イラスト無しなら img を出さず、印の行だけ消す", () => {
     const html = renderLetterHtml({ ...base, body: "書き出し\n【イラスト】\n続き" });
-    expect(html).not.toContain("<img");
+    expect(html).not.toContain(FIG);
     expect(html).not.toContain("【イラスト】");
-    expect(html).toContain("書き出し<br />\n続き");
+    expect(html).toContain("書き出し");
+    expect(html).toContain("続き");
+    expect(html).not.toContain('class="letter-row"');
   });
 
   it("src が安全でなければ描かない(印の行は消す)", () => {
     const html = renderLetterHtml({ ...base, body: "一\n【イラスト】\n二", illustration: { src: "javascript:alert(1)", width: 1, height: 1 } });
-    expect(html).not.toContain("<img");
+    expect(html).not.toContain(FIG);
     expect(html).not.toContain("javascript:");
     expect(html).not.toContain("【イラスト】");
   });
@@ -104,12 +113,12 @@ describe("renderLetterHtml とイラスト", () => {
     const a = renderLetterHtml({ ...base, body: "一\n二" });
     const b = renderLetterHtml({ ...base, body: "一\n二", illustration: null });
     expect(a).toBe(b);
-    expect(a).toContain('<div class="letter-body">一<br />\n二</div>');
+    expect(a).toContain("一<br />\n二");
   });
 
   it("まとめ印刷でも通ごとに入る", () => {
     const html = renderLetterSheetHtml("t", [{ ...base, body: "一", illustration: ILL }, { ...base, body: "二" }]);
-    expect(count(html, "<img")).toBe(1);
+    expect(count(html, FIG)).toBe(1);
   });
 });
 

@@ -30,4 +30,20 @@ describe("renderUnsubscribeSlotHtml", () => {
     const html = renderUnsubscribeSlotHtml(artifacts);
     expect(html).toContain("sale-dm-unsubscribe");
   });
+
+  it("見た目は紙面(テンプレ)側で決める=枠の大きさを決める style 属性を持たない(svg の追従だけ)", () => {
+    const html = renderUnsubscribeSlotHtml(artifacts);
+    expect(html).not.toContain("style=");
+    expect(html).toContain(".sale-dm-unsub-qr svg{width:100%;height:100%");
+  });
+});
+
+describe("印刷 route の配線(2026-10-17 紙面)", () => {
+  it("停止枠は追跡枠に連結せず unsubscribeSlotHtml として別に渡す", async () => {
+    const { readFileSync } = await import("node:fs");
+    const path = await import("node:path");
+    const s = readFileSync(path.join(process.cwd(), "src/app/api/properties/sale-dm/campaigns/[id]/print/route.ts"), "utf8");
+    expect(s).toMatch(/unsubscribeSlotHtml,?\s*\n/);
+    expect(s).not.toMatch(/\)\s*\+\s*\n?\s*unsubscribeSlotHtml/);
+  });
 });
