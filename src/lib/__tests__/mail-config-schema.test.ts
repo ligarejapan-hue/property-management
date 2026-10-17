@@ -41,9 +41,12 @@ describe("メール通知のスキーマ", () => {
     expect(sql).not.toMatch(/^\s*DROP\b/im);
     expect(sql).not.toMatch(/ALTER COLUMN[^;]*TYPE/i);
   });
-  it("nodemailer は dependencies・型は devDependencies", () => {
+  it("nodemailer は dependencies・型は本体に同梱(10 以降)=@types/nodemailer は入れない", () => {
     const pkg = JSON.parse(readFileSync(path.join(root, "package.json"), "utf8"));
     expect(pkg.dependencies.nodemailer).toBeDefined();
-    expect(pkg.devDependencies["@types/nodemailer"]).toBeDefined();
+    // 古い型の部品が残ると、本体の型と食い違っても skipLibCheck で隠れる(@codex #525)。
+    expect(pkg.devDependencies["@types/nodemailer"]).toBeUndefined();
+    // Auth.js の任意の相手指定(^7||^8)の外なので、同じ版にそろえないと npm install が止まる。
+    expect(pkg.overrides?.nodemailer).toBe("$nodemailer");
   });
 });
