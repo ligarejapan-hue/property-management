@@ -2,10 +2,11 @@
 
 import { useEffect, useRef, useState } from "react";
 import type { BuildingChoice } from "@/lib/building-link/resolve";
-import type { BuildingSuggestion } from "@/lib/building-link/suggest";
+import type { BuildingSuggestion, CatalogSuggestion } from "@/lib/building-link/suggest";
 import {
   allowsNewBuilding,
   canUseListKeys,
+  catalogSuggestionLine,
   choiceSummary,
   listState,
   isLatestRequest,
@@ -37,14 +38,17 @@ export interface BuildingNameComboboxProps {
 /** 候補の一覧(SSR テストのため切り出す)。一番下は常に「新しい棟として登録する」(D8)。 */
 export function BuildingSuggestionList({
   suggestions,
+  catalog = [],
   activeIndex,
   onPick,
   listId,
   allowNew = true,
 }: {
   suggestions: BuildingSuggestion[];
+  /** 名簿にあるマンション(棟の候補の下・「新しい棟」の上。設計 2026-10-18 §6.2)。 */
+  catalog?: CatalogSuggestion[];
   activeIndex: number;
-  onPick: (s: BuildingSuggestion | "new") => void;
+  onPick: (s: BuildingSuggestion | { catalog: CatalogSuggestion } | "new") => void;
   listId: string;
   /** false=一番下の「新しい棟」の代わりに、選べない注記を出す(partial)。 */
   allowNew?: boolean;
@@ -89,17 +93,48 @@ export function BuildingSuggestionList({
           </span>
         </li>
       ))}
+      {catalog.length > 0 && (
+        <li role="presentation" className="border-t border-gray-100 px-3 pt-2 text-[11px] font-medium text-gray-500 dark:border-gray-800 dark:text-gray-400">
+          名簿にあるマンション
+        </li>
+      )}
+      {catalog.map((c, j) => {
+        const i = suggestions.length + j;
+        return (
+          <li
+            key={`catalog-${c.catalogId}`}
+            id={`${listId}-opt-${i}`}
+            role="option"
+            aria-selected={i === activeIndex}
+            onMouseDown={(e) => {
+              e.preventDefault();
+              onPick({ catalog: c });
+            }}
+            className={`flex min-h-[44px] cursor-pointer flex-col justify-center px-3 py-1.5 text-sm ${
+              i === activeIndex ? "bg-indigo-50 dark:bg-indigo-950/40" : "hover:bg-gray-50 dark:hover:bg-gray-800"
+            }`}
+          >
+            <span className="flex flex-wrap items-center gap-1 text-gray-900 dark:text-gray-100">
+              {c.name}
+              {c.sameName && !c.sameArea && (
+                <span className="rounded bg-amber-100 px-1 text-[10px] text-amber-800 dark:bg-amber-900/40 dark:text-amber-300">丁目が違います</span>
+              )}
+            </span>
+            <span className="text-xs text-gray-500 dark:text-gray-400">{catalogSuggestionLine(c)}</span>
+          </li>
+        );
+      })}
       {allowNew ? (
         <li
-          id={`${listId}-opt-${suggestions.length}`}
+          id={`${listId}-opt-${suggestions.length + catalog.length}`}
           role="option"
-          aria-selected={activeIndex === suggestions.length}
+          aria-selected={activeIndex === suggestions.length + catalog.length}
           onMouseDown={(e) => {
             e.preventDefault();
             onPick("new");
           }}
           className={`flex min-h-[44px] cursor-pointer items-center border-t border-gray-100 px-3 text-sm text-indigo-700 dark:border-gray-800 dark:text-indigo-300 ${
-            activeIndex === suggestions.length ? "bg-indigo-50 dark:bg-indigo-950/40" : "hover:bg-gray-50 dark:hover:bg-gray-800"
+            activeIndex === suggestions.length + catalog.length ? "bg-indigo-50 dark:bg-indigo-950/40" : "hover:bg-gray-50 dark:hover:bg-gray-800"
           }`}
         >
           新しい棟として登録する
@@ -147,6 +182,7 @@ export default function BuildingNameCombobox(props: BuildingNameComboboxProps) {
   const selectable = canUseListKeys(state);
   const allowNew = allowsNewBuilding(state);
   const suggestions = selectable && result ? result.data : [];
+  const catalog = selectable && result ? result.catalog ?? [] : [];
   const [open, setOpen] = useState(false);
   const [activeIndex, setActiveIndex] = useState(-1);
   // 選んだ棟は「どの丁目で選んだか」と一緒に持つ。丁目が変わったら要約に使わない(@codex R4)。
@@ -171,11 +207,18 @@ export default function BuildingNameCombobox(props: BuildingNameComboboxProps) {
         const res = await fetch(`/api/buildings/suggest?${suggestQueryStringForArea(value, area)}`);
         if (!isLatestRequest(seq, seqRef.current)) return;
         if (!res.ok) return fail();
-        const body = (await res.json()) as { data?: unknown; complete?: unknown };
+        const body = (await res.json()) as { data?: unknown; complete?: unknown; catalog?: unknown };
         if (!Array.isArray(body.data)) return fail();
         if (isLatestRequest(seq, seqRef.current)) {
           // complete が無い応答は「全部確かめた」扱い(false のときだけ partial)。
-          setResult({ query: value, area, status: "ok", data: body.data as BuildingSuggestion[], complete: body.complete !== false });
+          setResult({
+            query: value,
+            area,
+            status: "ok",
+            data: body.data as BuildingSuggestion[],
+            complete: body.complete !== false,
+            catalog: Array.isArray(body.catalog) ? (body.catalog as CatalogSuggestion[]) : [],
+          });
           setActiveIndex(-1);
         }
       } catch {
@@ -186,10 +229,15 @@ export default function BuildingNameCombobox(props: BuildingNameComboboxProps) {
     return () => clearTimeout(timer);
   }, [value, area]);
 
-  const pick = (s: BuildingSuggestion | "new") => {
+  const pick = (s: BuildingSuggestion | { catalog: CatalogSuggestion } | "new") => {
     if (s === "new") {
       setSelected(null);
       onChoiceChange({ kind: "new" });
+    } else if ("catalog" in s) {
+      // 名簿の建物は建物名を入れるだけ(選び方は自動のまま)。保存したときに名簿の値の入った棟ができる(設計 §6.2)。
+      setSelected(null);
+      onChange(s.catalog.name);
+      if (choice.kind !== "auto") onChoiceChange({ kind: "auto" });
     } else {
       setSelected({ suggestion: s, area });
       onChange(s.name);
@@ -199,7 +247,7 @@ export default function BuildingNameCombobox(props: BuildingNameComboboxProps) {
     setActiveIndex(-1);
   };
 
-  const optionCount = suggestions.length + (allowNew ? 1 : 0);
+  const optionCount = suggestions.length + catalog.length + (allowNew ? 1 : 0);
   const listId = `${id}-suggestions`;
   const summary = choiceSummary(choice, selectedInArea(selected, area));
 
@@ -247,7 +295,7 @@ export default function BuildingNameCombobox(props: BuildingNameComboboxProps) {
             e.preventDefault();
             setActiveIndex((cur) => nextActiveIndex(cur, e.key as "ArrowDown" | "ArrowUp", optionCount));
           } else if (e.key === "Enter") {
-            const target = pickAtIndex(activeIndex, suggestions, allowNew);
+            const target = pickAtIndex(activeIndex, suggestions, allowNew, catalog);
             if (target === null) return;
             e.preventDefault();
             pick(target);
@@ -256,7 +304,7 @@ export default function BuildingNameCombobox(props: BuildingNameComboboxProps) {
       />
       {open && shouldFetchSuggestions(value) && (
         state === "ready" || state === "partial" ? (
-          <BuildingSuggestionList suggestions={suggestions} activeIndex={activeIndex} onPick={pick} listId={listId} allowNew={allowNew} />
+          <BuildingSuggestionList suggestions={suggestions} catalog={catalog} activeIndex={activeIndex} onPick={pick} listId={listId} allowNew={allowNew} />
         ) : (
           <BuildingSuggestionStatus state={state} listId={listId} />
         )

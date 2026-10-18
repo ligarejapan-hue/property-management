@@ -1,9 +1,10 @@
 import { NextRequest } from "next/server";
 import prisma from "@/lib/prisma";
+import type { Prisma } from "@/generated/prisma";
 import { getApiSession, getUserPermissions, ApiError, handleApiError, apiResponse } from "@/lib/api-helpers";
 import { hasPermission } from "@/lib/permissions";
 import { buildingNameKey } from "@/lib/building-identity";
-import { rankBuildingSuggestions, readAllLegacyBuildings, SUGGEST_MIN_KEY_LENGTH } from "@/lib/building-link/suggest";
+import { rankBuildingSuggestions, rankCatalogSuggestions, readAllLegacyBuildings, SUGGEST_MIN_KEY_LENGTH } from "@/lib/building-link/suggest";
 
 /** 1回に読む棟の上限(並べ替え前)。 */
 const FETCH_LIMIT = 50;
@@ -48,7 +49,27 @@ export async function GET(request: NextRequest) {
           take: FETCH_LIMIT,
           orderBy: { createdAt: "asc" },
         });
-    const [sameArea, exact, keyed, legacy] = await Promise.all([
+    // 名簿の建物(設計 2026-10-18 §6.2)。もう棟になったものは出さない(棟の候補に出ている)。
+    // ⚠名簿は読むだけ。「新しい棟」を出すかの判断(complete)には混ぜない。
+    // ⚠名簿は8万件超。部分一致だけだと「パーク」などで50件が埋まり、同じ名前の建物が落ちる
+    //   (棟の候補の @codex R1 と同じ形)。同じ名前+同じ丁目 → 同じ名前 → 部分一致 を別々に読む。
+    const catalogSelect = { id: true, name: true, address: true, nameKey: true, areaKey: true, builtYear: true, totalFloors: true, totalUnits: true } as const;
+    const catalogRead = (where: Prisma.MansionCatalogWhereInput) =>
+      prisma.mansionCatalog.findMany({
+        where: { building: { is: null }, ...where },
+        select: catalogSelect,
+        take: FETCH_LIMIT,
+        orderBy: { id: "asc" },
+      });
+    const catalogQuery = Promise.all([
+      target.areaKey === null ? Promise.resolve([]) : catalogRead({ nameKey, areaKey: target.areaKey }),
+      catalogRead({ nameKey }),
+      catalogRead({ OR: [{ nameKey: { contains: nameKey } }, { name: { contains: name, mode: "insensitive" } }] }),
+    ]).then((groups) => {
+      const seenCatalog = new Set<string>();
+      return groups.flat().filter((c) => !seenCatalog.has(c.id) && seenCatalog.add(c.id));
+    });
+    const [sameArea, exact, keyed, legacy, catalogRows] = await Promise.all([
       sameAreaQuery,
       prisma.building.findMany({
         where: { nameKey },
@@ -79,6 +100,7 @@ export async function GET(request: NextRequest) {
           ...(cursorId ? { cursor: { id: cursorId }, skip: 1 } : {}),
         }),
       ),
+      catalogQuery,
     ]);
     const seen = new Set<string>();
     const rows = [...sameArea, ...exact, ...keyed, ...legacy.rows].filter((b) => !seen.has(b.id) && seen.add(b.id));
@@ -90,7 +112,7 @@ export async function GET(request: NextRequest) {
       filtered.map((b) => ({ ...b, unitCount: b._count.properties })),
       target,
     );
-    return apiResponse({ data, complete: legacy.complete });
+    return apiResponse({ data, complete: legacy.complete, catalog: rankCatalogSuggestions(catalogRows, target) });
   } catch (error) {
     return handleApiError(error);
   }

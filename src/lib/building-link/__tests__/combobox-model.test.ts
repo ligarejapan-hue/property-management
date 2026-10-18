@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest";
-import { shouldFetchSuggestions, isLatestRequest, nextActiveIndex, suggestionBadges, choiceSummary, pickAtIndex, shouldHandleListKey, suggestQueryString, shouldOpenOnArrow, suggestArea, resultMatches, listState, canUseListKeys, areaChanged, selectedInArea } from "@/lib/building-link/combobox-model";
+import { shouldFetchSuggestions, isLatestRequest, nextActiveIndex, suggestionBadges, choiceSummary, pickAtIndex, shouldHandleListKey, suggestQueryString, shouldOpenOnArrow, suggestArea, resultMatches, listState, canUseListKeys, areaChanged, selectedInArea, catalogSuggestionLine } from "@/lib/building-link/combobox-model";
 
 const s = { id: "b1", name: "パーク第一", area: "東京都大田区南雪谷1丁目", unitCount: 3, sameName: true, sameArea: true };
 
@@ -166,5 +166,21 @@ describe("areaChanged 町丁目が分からない住所(@codex R5)", () => {
   });
   it("両方分かるなら町丁目で比べる(番地だけの直しは false)", () => {
     expect(areaChanged("東京都港区六本木1丁目1-2", "東京都港区六本木1丁目9-9")).toBe(false);
+  });
+});
+
+const cat = { catalogId: "c1", name: "プラウド青砥", area: "東京都葛飾区青戸4丁目", builtYear: 2026, totalFloors: 14, totalUnits: 155, sameName: true, sameArea: true };
+describe("名簿の候補", () => {
+  it("並びは 棟 → 名簿 → 新しい棟", () => {
+    const b = [{ id: "b1", name: "a", area: "", unitCount: 1, sameName: false, sameArea: false }];
+    expect(pickAtIndex(0, b, true, [cat])).toBe(b[0]);
+    expect(pickAtIndex(1, b, true, [cat])).toEqual({ catalog: cat });
+    expect(pickAtIndex(2, b, true, [cat])).toBe("new");
+    expect(pickAtIndex(2, b, false, [cat])).toBeNull();
+    expect(pickAtIndex(1, b, true)).toBe("new");
+  });
+  it("行の文字(無い値は省く)", () => {
+    expect(catalogSuggestionLine(cat)).toBe("東京都葛飾区青戸4丁目・2026年竣工・14階建・155戸");
+    expect(catalogSuggestionLine({ ...cat, builtYear: null, totalUnits: null })).toBe("東京都葛飾区青戸4丁目・14階建");
   });
 });

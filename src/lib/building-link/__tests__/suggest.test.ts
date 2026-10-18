@@ -1,6 +1,6 @@
 import { describe, it, expect } from "vitest";
 import { buildingNameKey } from "@/lib/building-identity";
-import { rankBuildingSuggestions, readAllLegacyBuildings, LEGACY_PAGE_SIZE, LEGACY_MAX_ROWS } from "@/lib/building-link/suggest";
+import { rankBuildingSuggestions, readAllLegacyBuildings, LEGACY_PAGE_SIZE, LEGACY_MAX_ROWS, rankCatalogSuggestions, CATALOG_SUGGEST_LIMIT } from "@/lib/building-link/suggest";
 
 const r = (id: string, name: string, address: string, unitCount = 1) => ({
   id, name, address, nameKey: null, areaKey: null, unitCount, createdAt: new Date("2026-01-01"),
@@ -81,5 +81,18 @@ describe("readAllLegacyBuildings(古い棟を全部読む・@codex R5)", () => {
   it("0件なら complete=true", async () => {
     const { fetchPage } = fakeDb(0);
     expect(await readAllLegacyBuildings(fetchPage)).toEqual({ rows: [], complete: true });
+  });
+});
+
+describe("rankCatalogSuggestions", () => {
+  const row = (id: string, nameKey: string, areaKey: string) => ({ id, name: id, address: `${areaKey}1番`, nameKey, areaKey, builtYear: 2000, totalFloors: 5, totalUnits: 20 });
+  it("同じ名前+同じ丁目 → 同じ名前 → 部分一致。最大5件・住所は町丁目まで", () => {
+    const rows = [row("p", "プラウド青砥二", "東京都葛飾区青戸4丁目"), row("o", "プラウド青砥", "東京都葛飾区青戸5丁目"), row("s", "プラウド青砥", "東京都葛飾区青戸4丁目"),
+      ...Array.from({ length: 6 }, (_, i) => row(`x${i}`, `プラウド青砥${i}`, "東京都葛飾区青戸1丁目"))];
+    const r = rankCatalogSuggestions(rows, { nameKey: "プラウド青砥", areaKey: "東京都葛飾区青戸4丁目" });
+    expect(r.map((s) => s.catalogId).slice(0, 2)).toEqual(["s", "o"]);
+    expect(r).toHaveLength(CATALOG_SUGGEST_LIMIT);
+    expect(r[0]).toMatchObject({ area: "東京都葛飾区青戸4丁目", sameName: true, sameArea: true });
+    expect(JSON.stringify(r)).not.toContain("1番");
   });
 });
