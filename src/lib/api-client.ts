@@ -5099,6 +5099,64 @@ export async function updateAgentInquiry(
   }
   return apiFetch<{ version: number }>(`/api/agent-inquiries/${id}`, deskJsonInit("PATCH", body));
 }
+/** 資料請求への資料送付(2026-10-18)。送ってよい添付と最初の文面。 */
+export interface MaterialCandidateFile {
+  id: string;
+  fileName: string;
+  fileSize: number;
+  type: string;
+  createdAt: string;
+  warning: string | null;
+}
+export interface MaterialCandidates {
+  mailConfigured: boolean;
+  to: string;
+  subject: string;
+  body: string;
+  files: MaterialCandidateFile[];
+  maxTotalBytes: number;
+  maxFiles: number;
+}
+export interface MaterialSendView {
+  id: string;
+  createdAt: string;
+  result: "sending" | "sent" | "failed";
+  state: "送信中" | "結果不明" | "送信済み" | "送れなかった";
+  sentBy: { name: string };
+  toAddress: string;
+  subject: string;
+  body: string;
+  attachments: { attachmentId: string; fileName: string; fileSize: number; type: string }[];
+  totalSize: number;
+  errorCode: string | null;
+}
+export async function fetchMaterialCandidates(inquiryId: string) {
+  if (USE_MOCK) {
+    await mockDelay();
+    throw new Error("モックでは資料を送れません");
+  }
+  return apiFetch<MaterialCandidates>(`/api/agent-inquiries/${inquiryId}/material-candidates`);
+}
+export async function fetchMaterialSends(inquiryId: string) {
+  if (USE_MOCK) {
+    await mockDelay();
+    return { items: [] as MaterialSendView[] };
+  }
+  return apiFetch<{ items: MaterialSendView[] }>(`/api/agent-inquiries/${inquiryId}/material-sends`);
+}
+export async function sendMaterial(
+  inquiryId: string,
+  body: { to: string; subject: string; body: string; attachmentIds: string[]; clientToken: string },
+) {
+  if (USE_MOCK) {
+    await mockDelay();
+    throw new Error("モックでは資料を送れません");
+  }
+  return apiFetch<{ id: string; result: string; version?: number; replayed?: boolean }>(
+    `/api/agent-inquiries/${inquiryId}/material-sends`,
+    deskJsonInit("POST", body),
+  );
+}
 export async function addAgentViewing(
   inquiryId: string,
   body: { viewingType: ViewingTypeKey; scheduledAt?: string | null; attendantId?: string | null },
