@@ -12,6 +12,9 @@ import { writeAuditLog } from "@/lib/audit";
 import { hasPermission } from "@/lib/permissions";
 import { buildingIdentityKeys } from "@/lib/building-link/apply";
 
+/** 検索の2段目「名簿にあるマンション」の件数の上限(設計 2026-10-18 §6.3)。 */
+const CATALOG_SEARCH_LIMIT = 20;
+
 const createBuildingSchema = z.object({
   name: z.string().trim().min(1, "マンション名は必須です"),
   address: z.string().min(1, "住所は必須です"),
@@ -60,7 +63,23 @@ export async function GET(request: NextRequest) {
       take: 100,
     });
 
-    return apiResponse({ data: buildings });
+    // 名簿にあるマンション(設計 2026-10-18 §6.3)。探したときだけ・棟になったものは出さない。
+    const catalog = q.length >= 2
+      ? await prisma.mansionCatalog.findMany({
+          where: {
+            building: { is: null },
+            OR: [
+              { name: { contains: q, mode: "insensitive" as const } },
+              { address: { contains: q, mode: "insensitive" as const } },
+            ],
+          },
+          select: { id: true, name: true, address: true, builtYear: true, builtMonth: true, totalFloors: true, totalUnits: true, managementCompany: true },
+          orderBy: [{ name: "asc" }],
+          take: CATALOG_SEARCH_LIMIT,
+        })
+      : [];
+
+    return apiResponse({ data: buildings, catalog });
   } catch (error) {
     return handleApiError(error);
   }

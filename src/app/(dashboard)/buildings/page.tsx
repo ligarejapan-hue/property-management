@@ -10,7 +10,11 @@ import {
   Loader2,
   ChevronRight,
 } from "lucide-react";
-import { fetchBuildings, createBuilding } from "@/lib/api-client";
+import { useRouter } from "next/navigation";
+import { fetchBuildings, createBuilding, adoptCatalogBuildingApi } from "@/lib/api-client";
+import { CatalogSearchResults, type CatalogSearchItem } from "@/components/buildings/catalog-search-results";
+import { useScreenProtection } from "@/components/screen-protection/screen-protection-provider";
+import { hasPermission } from "@/lib/permissions";
 import { debounce } from "@/lib/debounce";
 import { AddressLookupControls } from "@/components/address/address-lookup-controls";
 
@@ -36,6 +40,14 @@ export default function BuildingsPage() {
   const [keyword, setKeyword] = useState("");
   const [keywordDraft, setKeywordDraft] = useState("");
   const [showCreate, setShowCreate] = useState(false);
+  // 名簿にあるマンション(設計 2026-10-18 §6.3)。探したときだけ API が返す。
+  const [catalog, setCatalog] = useState<CatalogSearchItem[]>([]);
+  const [adoptingId, setAdoptingId] = useState<string | null>(null);
+  const [adoptError, setAdoptError] = useState<string | null>(null);
+  const router = useRouter();
+  // 登録ボタンは物件を書き込める人だけ(未取得・失敗=出さない。サーバーも同じ権限で止める)。
+  const { permissions } = useScreenProtection();
+  const canAdopt = permissions !== null && hasPermission(permissions, "property", "write");
 
   // 入力ドラフト → 確定 keyword への反映を 300ms 間引く committer（render 間で安定）。
   const commitKeyword = useMemo(
@@ -50,6 +62,8 @@ export default function BuildingsPage() {
     try {
       const res = await fetchBuildings(keyword || undefined);
       setBuildings(res.data as BuildingItem[]);
+      setCatalog(res.catalog ?? []);
+      setAdoptError(null);
     } catch {
       // ignore
     } finally {
@@ -60,6 +74,18 @@ export default function BuildingsPage() {
   useEffect(() => {
     load();
   }, [load]);
+
+  const adopt = async (id: string) => {
+    setAdoptingId(id);
+    setAdoptError(null);
+    try {
+      const r = await adoptCatalogBuildingApi(id);
+      router.push(`/buildings/${r.buildingId}`);
+    } catch (e) {
+      setAdoptError(e instanceof Error ? e.message : "登録できませんでした");
+      setAdoptingId(null);
+    }
+  };
 
   return (
     <div>
@@ -98,7 +124,11 @@ export default function BuildingsPage() {
           <Building className="mx-auto mb-3 h-10 w-10 text-gray-300 dark:text-gray-600" />
           {keyword ? (
             // 検索の0件。棟は存在するので「登録CTA」は出さない(誤って重複登録を促さない・@codex)。
-            <p className="text-sm text-gray-500 dark:text-gray-400">「{keyword}」に一致するマンション棟が見つかりません</p>
+            <p className="text-sm text-gray-500 dark:text-gray-400">
+              {catalog.length > 0
+                ? "自社のマンション棟には見つかりません。下の名簿から登録できます"
+                : `「${keyword}」に一致するマンション棟が見つかりません`}
+            </p>
           ) : (
             // 本当に0件(未登録)のときだけ登録CTAで次の操作へ導く(B-12 UI総点検)。
             <>
@@ -137,6 +167,10 @@ export default function BuildingsPage() {
             </Link>
           ))}
         </div>
+      )}
+
+      {keyword && !loading && (
+        <CatalogSearchResults items={catalog} canAdopt={canAdopt} adoptingId={adoptingId} error={adoptError} onAdopt={adopt} />
       )}
 
       {/* Create modal */}

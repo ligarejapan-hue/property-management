@@ -35,6 +35,7 @@ import type { AcquireResponse, HeartbeatResponse } from "./edit-lock/ui-state";
 // 棟の選び方・つないだ結果の型のみ(apply.ts は prisma を読むサーバー側のファイル=値は import しない)。
 import type { BuildingChoice } from "./building-link/resolve";
 import type { BuildingLinkOutcome } from "./building-link/apply";
+import type { CatalogSearchItem } from "@/components/buildings/catalog-search-results";
 
 export const USE_MOCK = process.env.NEXT_PUBLIC_USE_MOCK === "true";
 
@@ -3248,10 +3249,15 @@ export async function judgeCandidateAction(
 export async function fetchBuildings(keyword?: string) {
   if (USE_MOCK) {
     await mockDelay();
-    return { data: [] };
+    return { data: [], catalog: [] };
   }
   const qs = keyword ? `?keyword=${encodeURIComponent(keyword)}` : "";
-  return apiFetch<{ data: unknown[] }>(`/api/buildings${qs}`);
+  return apiFetch<{ data: unknown[]; catalog?: CatalogSearchItem[] }>(`/api/buildings${qs}`);
+}
+
+/** 名簿の建物をマンション棟にする(設計 2026-10-18 §6.3)。 */
+export async function adoptCatalogBuildingApi(id: string) {
+  return apiFetch<{ buildingId: string; kind: string }>(`/api/mansion-catalog/${encodeURIComponent(id)}/adopt`, { method: "POST" });
 }
 
 export async function fetchBuildingDetail(id: string) {
