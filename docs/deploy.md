@@ -970,3 +970,17 @@ sudo systemctl stop property-management
 bash scripts/restore-db.sh /var/backups/property-management/db_<TIMESTAMP>.sql.gz
 sudo systemctl start property-management
 ```
+
+## 11. マンション名簿の読み込み(2026-10-18〜)
+
+セルフイン(一都三県)から集めたマンション一覧を、裏の名簿(`mansion_catalog`)に入れる。名簿は画面の「マンション棟」一覧には並ばない(物件登録の補完と、棟の検索の2段目だけ)。
+
+1. 合言葉とフォルダを app.env に足す(root・値は画面に出さない・追記前に `app.env.bak-<日付>` に退避):
+   `MANSION_CATALOG_LOAD_SECRET`(`openssl rand -base64 32`)・`MANSION_CATALOG_DIR=/var/lib/property-management/mansion-catalog` → `flock -n /root/pm-deploy.lock systemctl restart property-management`
+2. 集めたファイルを写す(root。集める側のフォルダは DynamicUser の私有フォルダでアプリから読めない):
+   `install -d -o www-data -m 750 /var/lib/property-management/mansion-catalog && install -o www-data -m 640 /var/lib/selfin-collect/buildings-*.jsonl /var/lib/property-management/mansion-catalog/`
+3. 読み込む(合言葉は app.env から読む=画面に出さない):
+   `set -a; . /etc/property-management/app.env; set +a; printf 'x-mansion-catalog-secret: %s\n' "$MANSION_CATALOG_LOAD_SECRET" | curl -s -X POST -H @- http://127.0.0.1:3000/api/mansion-catalog/load-run`
+   → `{ files, inserted, updated, skipped, duplicates, linked }` の件数だけが返る(`linked`=今ある棟のうち名簿につないだ数)。
+   ⚠8万8千件を一度に読む(1回 500 件ずつ)。数分かかる。同時に2回は動かない(409)。
+4. 取り直したときは 2〜3 をもう一度(名簿だけが更新され、社内の棟の値は上書きしない)。
