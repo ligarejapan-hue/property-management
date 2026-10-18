@@ -212,6 +212,7 @@ model User {
   agentsCreated           Agent[]                 @relation("AgentCreatedBy")
   agentInquiriesAssigned  AgentInquiry[]          @relation("AgentInquiryAssignee")
   agentInquiriesCreated   AgentInquiry[]          @relation("AgentInquiryCreatedBy")
+  materialSends           AgentInquiryMaterialSend[] @relation("AgentInquiryMaterialSendSentBy")
   agentViewingsAttended   AgentViewing[]          @relation("AgentViewingAttendant")
   adPermissionsUpdated    PropertyAdPermission[]  @relation("PropertyAdPermissionUpdatedBy")
 
@@ -1624,6 +1625,9 @@ model MailConfig {
   inquiryAutoReplyEnabled Boolean @default(false) @map("inquiry_auto_reply_enabled")
   inquiryAutoReplySubject String? @map("inquiry_auto_reply_subject")
   inquiryAutoReplyBody    String? @map("inquiry_auto_reply_body")
+  // 資料請求への資料送付メールのひな形(2026-10-18)。未入力(null)なら既定の文面。
+  materialSendSubject     String? @map("material_send_subject")
+  materialSendBody        String? @map("material_send_body")
   updatedAt         DateTime @updatedAt @map("updated_at")
   updatedById       String?  @map("updated_by_id") @db.Uuid
 
@@ -1815,6 +1819,12 @@ enum ViewingType {
   preview
 }
 
+enum MaterialSendResult {
+  sending
+  sent
+  failed
+}
+
 enum AdMedium {
   own_site
   athome
@@ -1948,12 +1958,40 @@ model AgentInquiry {
   assignee  User?          @relation("AgentInquiryAssignee", fields: [assigneeId], references: [id])
   createdBy User           @relation("AgentInquiryCreatedBy", fields: [createdById], references: [id])
   viewings  AgentViewing[]
+  materialSends AgentInquiryMaterialSend[]
 
   @@unique([createdById, clientToken])
   @@index([status, receivedAt])
   @@index([propertyId, receivedAt])
   @@index([agentId, receivedAt])
   @@map("agent_inquiries")
+}
+
+/// 資料請求への資料送付メール(2026-10-18)。1回送るごとに1行。ファイルの中身は持たない(名前と大きさだけ)。
+model AgentInquiryMaterialSend {
+  id          String             @id @default(uuid()) @db.Uuid
+  inquiryId   String             @map("inquiry_id") @db.Uuid
+  sentById    String             @map("sent_by_id") @db.Uuid
+  toAddress   String             @map("to_address")
+  subject     String
+  body        String
+  /// [{attachmentId, fileName, fileSize, type}]
+  attachments Json               @db.JsonB
+  totalSize   Int                @map("total_size")
+  /// sending=送る前の予約(二重送信の防止)。sent/failed=結果。
+  result      MaterialSendResult @default(sending)
+  /// 失敗の短いコード(safeErrorCode の許可リストだけ)。SMTP の生メッセージは入れない。
+  errorCode   String?            @map("error_code")
+  clientToken String             @map("client_token") @db.Uuid
+  createdAt   DateTime           @default(now()) @map("created_at")
+  finishedAt  DateTime?          @map("finished_at")
+
+  inquiry AgentInquiry @relation(fields: [inquiryId], references: [id], onDelete: Restrict)
+  sentBy  User         @relation("AgentInquiryMaterialSendSentBy", fields: [sentById], references: [id], onDelete: Restrict)
+
+  @@unique([sentById, clientToken])
+  @@index([inquiryId, createdAt])
+  @@map("agent_inquiry_material_sends")
 }
 
 /// 内見の予定(1反響に複数)。scheduledAt が空=日程調整中。
