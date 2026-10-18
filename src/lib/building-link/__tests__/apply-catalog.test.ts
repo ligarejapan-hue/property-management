@@ -32,6 +32,18 @@ describe("applyBuildingLink × 名簿", () => {
     expect(db.buildings[0]).toMatchObject({ name: NAME, catalogId: "c1", builtYear: 2026, builtMonth: 9, totalFloors: 14, totalUnits: 155, managementCompany: "野村不動産パートナーズ" });
     expect(db.buildings[0]).not.toHaveProperty("basementFloors");
   });
+  it("★名簿から値を入れたことを同じ tx の監査に残す(名簿の id と埋めた欄の名前だけ)", async () => {
+    await applyBuildingLink(createFakeBuildingTx(db), input);
+    expect(db.auditLogs).toContainEqual({
+      userId: "u1", action: "building.catalog_adopt", targetTable: "buildings", targetId: db.buildings[0].id,
+      detail: { catalogId: "c1", kind: "created", filled: expect.arrayContaining(["builtYear", "totalFloors"]), propertyId: "p1" },
+    });
+  });
+  it("名簿を使わなかった棟には名簿の監査を書かない", async () => {
+    db.catalog = [];
+    await applyBuildingLink(createFakeBuildingTx(db), input);
+    expect((db.auditLogs ?? []).filter((l) => l.action === "building.catalog_adopt")).toEqual([]);
+  });
   it("★名簿に同じ鍵が2件なら値を入れない(違う建物の値を入れない)", async () => {
     db.catalog = [entry("c1"), entry("c2")];
     await applyBuildingLink(createFakeBuildingTx(db), input);

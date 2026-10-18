@@ -184,6 +184,23 @@ export async function applyBuildingLink(
       select: { id: true, name: true },
     });
     created = true;
+    // 名簿の値を入れたことを同じ tx で残す(名簿の id と埋めた欄の名前だけ・住所や値は書かない)。
+    if (fromCatalog) {
+      await tx.auditLog.create({
+        data: {
+          userId: input.userId,
+          action: "building.catalog_adopt",
+          targetTable: "buildings",
+          targetId: building.id,
+          detail: {
+            catalogId: fromCatalog.id,
+            kind: "created",
+            filled: Object.keys(catalogFillValues(fromCatalog)),
+            propertyId: input.propertyId,
+          },
+        },
+      });
+    }
     // 取込が作った棟の目印(取り消しが空の棟を消すときに引く=building-link/rollback.ts)。
     // ⚠**棟を作ったのと同じ tx で書く**(@codex P2・2026-10-05): writeAuditLog は失敗を握りつぶすので、
     //   tx の後に書くと、書けなかった棟は取り消しで見つからず空のまま残る。ここなら書けなければ

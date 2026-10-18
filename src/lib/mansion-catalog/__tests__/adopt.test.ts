@@ -19,8 +19,8 @@ function fakeTx(buildings: B[], catalog: CatalogEntry[] = [C], lock?: (k: string
     mansionCatalog: { findUnique: vi.fn(async ({ where }: { where: { id: string } }) => catalog.find((c) => c.id === where.id) ?? null) },
     building: {
       findFirst: vi.fn(async ({ where }: { where: { catalogId: string } }) => buildings.find((b) => b.catalogId === where.catalogId) ?? null),
-      findMany: vi.fn(async ({ where }: { where: { areaKey: string; nameKey: string } }) =>
-        buildings.filter((b) => b.areaKey === where.areaKey && b.nameKey === where.nameKey)),
+      findMany: vi.fn(async ({ where }: { where: { areaKey?: string; nameKey: string | null } }) =>
+        buildings.filter((b) => (where.nameKey === null ? b.nameKey === null : b.areaKey === where.areaKey && b.nameKey === where.nameKey))),
       create: vi.fn(async ({ data }: { data: Omit<B, "id"> }) => {
         if (data.catalogId && buildings.some((b) => b.catalogId === data.catalogId)) throw new Error("unique catalog_id");
         const b = { id: `new-${++seq}`, ...data } as B;
@@ -90,6 +90,13 @@ describe("adoptCatalogBuilding", () => {
     expect(f.buildings[0].version).toBe(2);
     expect(f.changes).toEqual([]);
     expect(f.audits[0]).toMatchObject({ userId: null, detail: { kind: "linked" } });
+  });
+  it("★比べる形が入る前の古い棟(nameKey が null)も同じ建物として見つけ、作らずにつなぐ(鍵も埋める)", async () => {
+    const f = fakeTx([{ id: "old", name: "プラウド青砥", address: "東京都葛飾区青戸4丁目2番14号", nameKey: null, areaKey: null, catalogId: null, createdBy: "u0", version: 1 }]);
+    const r = await adoptCatalogBuilding(f.tx, "c1", "u1");
+    expect(r).toMatchObject({ kind: "linked", building: { id: "old" } });
+    expect(f.buildings).toHaveLength(1);
+    expect(f.buildings[0]).toMatchObject({ catalogId: "c1", nameKey: C.nameKey, areaKey: C.areaKey });
   });
   it("★同じ鍵の棟が2つ・または別の名簿の建物につながった棟なら ambiguous(どれにも付けない・作らない)", async () => {
     const two = fakeTx([

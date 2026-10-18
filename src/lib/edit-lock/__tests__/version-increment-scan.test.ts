@@ -226,7 +226,7 @@ const ALLOWED_WITHOUT_VERSION: Record<string, AllowedEntry> = {
       "物件を作る/version を進める更新をした後に呼ぶ=版番号はその保存で進む)",
     keys: ["buildingId"],
   },
-  "src/lib/building-link/apply.ts:208": {
+  "src/lib/building-link/apply.ts:225": {
     reason:
       "property.buildingId/buildingName(棟へつなぎ、物件名を棟の正式な表記にそろえる。" +
       "理由は上と同じ=同じトランザクションの保存が版番号を進める)",
