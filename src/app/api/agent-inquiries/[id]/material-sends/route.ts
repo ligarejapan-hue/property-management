@@ -10,10 +10,15 @@ import { getStorage } from "@/lib/storage";
 import {
   MATERIAL_SEND_LIMITS,
   checkMaterialSelection,
+  isPlainMailText,
   isSingleAddress,
   sendStateLabel,
 } from "@/lib/agent-inquiry/material-send";
-import { loadMaterialInquiry, loadPropertyAttachments } from "@/lib/agent-inquiry/material-send-service";
+import {
+  guardMaterialFile,
+  loadMaterialInquiry,
+  loadPropertyAttachments,
+} from "@/lib/agent-inquiry/material-send-service";
 
 const NO_STORE = { "Cache-Control": "no-store" };
 type Ctx = { params: Promise<{ id: string }> };
@@ -21,8 +26,9 @@ const idOf = async (ctx: Ctx) => z.string().uuid().parse((await ctx.params).id);
 
 const sendSchema = z.object({
   to: z.string().trim().max(254),
-  subject: z.string().trim().min(1).max(MATERIAL_SEND_LIMITS.subject).refine((v) => !/[\r\n]/.test(v)),
-  body: z.string().min(1).max(MATERIAL_SEND_LIMITS.body),
+  subject: z.string().trim().min(1).max(MATERIAL_SEND_LIMITS.subject).refine((v) => !/[\r\n]/.test(v) && isPlainMailText(v)),
+  // 本文はメール設定のひな形と同じ決まり(改行・タブ以外の制御文字を受けない)。
+  body: z.string().min(1).max(MATERIAL_SEND_LIMITS.body).refine(isPlainMailText),
   attachmentIds: z.array(z.string().uuid()).max(MATERIAL_SEND_LIMITS.maxFiles)
     .refine((a) => new Set(a).size === a.length),
   clientToken: z.string().uuid(),
@@ -56,15 +62,25 @@ export async function POST(request: Request, ctx: Ctx) {
     const { session, perms } = await requireAgentInquiry("write");
     const id = await idOf(ctx);
     const input = sendSchema.parse(await parseJsonBody(request));
-    const replay = () =>
-      prisma.agentInquiryMaterialSend.findFirst({
-        where: { sentById: session.id, clientToken: input.clientToken },
-        select: { id: true, result: true },
-      });
-    const prev = await replay();
-    if (prev) return NextResponse.json({ ...prev, replayed: true }, { headers: NO_STORE });
-
     const q = await loadMaterialInquiry(id, session, perms);
+    // 同じ人が同じ鍵で押し直した=送らずに前の結果を返す。鍵は反響ごと(別の反響の結果は返さない)。
+    const replay = async () => {
+      const prev = await prisma.agentInquiryMaterialSend.findFirst({
+        where: { sentById: session.id, clientToken: input.clientToken },
+        select: { id: true, result: true, inquiryId: true, createdAt: true },
+      });
+      if (!prev) return null;
+      if (prev.inquiryId !== id) {
+        throw new ApiError(409, "画面を開き直してから送ってください", "CLIENT_TOKEN_MISMATCH");
+      }
+      return NextResponse.json(
+        { id: prev.id, result: prev.result, state: sendStateLabel(prev, new Date()), replayed: true },
+        { headers: NO_STORE },
+      );
+    };
+    const prev = await replay();
+    if (prev) return prev;
+
     if (!isSingleAddress(input.to)) throw new ApiError(400, "宛先のメールアドレスを1件、正しい形で入れてください", "INVALID_ADDRESS");
     const config = await loadMailSendConfig();
     if (!config) throw new ApiError(409, "管理画面のメール設定が必要です", "MAIL_NOT_CONFIGURED");
@@ -82,13 +98,27 @@ export async function POST(request: Request, ctx: Ctx) {
       throw new ApiError(400, msg, sel.code);
     }
 
+    // ファイルごとに /uploads と同じ守りを通す(記録は手で書ける=種類と物件だけでは足りない・最終レビュー C1)。
+    const guarded: { row: (typeof sel.rows)[number]; key: string; effectiveType: "general" | "registry" }[] = [];
+    for (const r of sel.rows) {
+      const g = await guardMaterialFile(r, session, perms);
+      if (!g.ok) throw new ApiError(400, "送れないファイルが含まれています。画面を開き直してください", "NOT_SELECTABLE");
+      guarded.push({ row: r, key: g.key, effectiveType: g.effectiveType });
+    }
+
     const storage = getStorage();
     const files: MailAttachment[] = [];
-    for (const r of sel.rows) {
-      const key = storage.keyFromUrl(r.fileUrl);
-      const got = key ? await storage.read(key) : null;
+    let readBytes = 0;
+    for (const { row: r, key } of guarded) {
+      const got = await storage.read(key);
       if (!got) throw new ApiError(409, `「${r.fileName}」を読み出せませんでした`, "FILE_UNAVAILABLE");
-      files.push({ filename: r.fileName, content: got.body, contentType: r.mimeType || got.contentType });
+      // 上限は記録の大きさ(手で書ける)ではなく、実際に読んだ大きさで確かめる。
+      readBytes += got.body.length;
+      if (readBytes > MATERIAL_SEND_LIMITS.maxTotalBytes) {
+        throw new ApiError(400, "ファイルの合計が 20MB を超えています", "TOO_LARGE");
+      }
+      // ファイルの種類もストレージの値を使う(記録の mimeType は手で書ける)。
+      files.push({ filename: r.fileName, content: got.body, contentType: got.contentType });
     }
 
     // 予約の行(一意制約で二重送信を防ぐ)。
@@ -101,8 +131,13 @@ export async function POST(request: Request, ctx: Ctx) {
           toAddress: input.to,
           subject: input.subject,
           body: input.body,
-          attachments: sel.rows.map((r) => ({ attachmentId: r.id, fileName: r.fileName, fileSize: r.fileSize, type: r.type })),
-          totalSize: sel.totalSize,
+          attachments: guarded.map(({ row: r, effectiveType }, i) => ({
+            attachmentId: r.id,
+            fileName: r.fileName,
+            fileSize: files[i].content.length,
+            type: effectiveType,
+          })),
+          totalSize: readBytes,
           result: "sending",
           clientToken: input.clientToken,
         },
@@ -111,7 +146,7 @@ export async function POST(request: Request, ctx: Ctx) {
     } catch (e) {
       if ((e as { code?: string } | null)?.code === "P2002") {
         const again = await replay();
-        if (again) return NextResponse.json({ ...again, replayed: true }, { headers: NO_STORE });
+        if (again) return again;
       }
       throw e;
     }
@@ -128,27 +163,34 @@ export async function POST(request: Request, ctx: Ctx) {
       );
     }
 
-    // 送信は済んだ=記録は必ず残す。反響の更新は version を見ない(他の人の更新とぶつかっても done にする)。
+    // 送信は済んだ=まず記録を送信済みにする(後の更新が落ちても「送信中」のまま残さない・最終レビュー I2)。
+    await prisma.agentInquiryMaterialSend.update({ where: { id: claim.id }, data: { result: "sent", finishedAt: new Date() } });
+    // 反響の更新は version を見ない(他の人の更新とぶつかっても done にする)。落ちても送信は成功として返す。
     const changeEmail = (q.contactEmail ?? "") !== input.to;
-    const version = await prisma.$transaction(async (tx) => {
-      await tx.agentInquiryMaterialSend.update({ where: { id: claim.id }, data: { result: "sent", finishedAt: new Date() } });
-      if (q.status === "done" && !changeEmail) return q.version;
-      const u = await tx.agentInquiry.update({
-        where: { id },
-        data: { status: "done", ...(changeEmail ? { contactEmail: input.to } : {}), version: { increment: 1 } },
-        select: { version: true },
-      });
-      return u.version;
-    });
+    let version = q.version;
+    let statusUpdated = true;
+    if (q.status !== "done" || changeEmail) {
+      try {
+        const u = await prisma.agentInquiry.update({
+          where: { id },
+          data: { status: "done", ...(changeEmail ? { contactEmail: input.to } : {}), version: { increment: 1 } },
+          select: { version: true },
+        });
+        version = u.version;
+      } catch (e) {
+        statusUpdated = false;
+        console.error("[material-send] inquiry update failed after send", { name: e instanceof Error ? e.name : "Unknown" });
+      }
+    }
 
     await writeAuditLog({
       userId: session.id,
       action: "agent_inquiry_material_send",
       targetTable: "agent_inquiries",
       targetId: id,
-      detail: { files: sel.rows.length, totalSize: sel.totalSize, statusChanged: q.status !== "done" },
+      detail: { files: guarded.length, totalSize: readBytes, statusChanged: statusUpdated && q.status !== "done" },
     });
-    for (const r of sel.rows.filter((x) => x.type === "registry")) {
+    for (const { row: r } of guarded.filter((x) => x.effectiveType === "registry")) {
       // 謄本の取り扱いの記録。宛先は書かない(送った記録の表で見る)。
       await writeAuditLog({
         userId: session.id,
@@ -158,7 +200,7 @@ export async function POST(request: Request, ctx: Ctx) {
         detail: { inquiryId: id, sendId: claim.id },
       });
     }
-    return NextResponse.json({ id: claim.id, result: "sent", version }, { status: 201, headers: NO_STORE });
+    return NextResponse.json({ id: claim.id, result: "sent", version, statusUpdated }, { status: 201, headers: NO_STORE });
   } catch (error) {
     return handleApiError(error);
   }

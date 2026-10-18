@@ -98,6 +98,14 @@ export function isSingleAddress(to: string): boolean {
   return z.string().email().max(254).safeParse(to).success;
 }
 
+/** 改行・タブ以外の制御文字を含まない(メールに目に見えない文字を混ぜない・メール設定のひな形と同じ決まり)。 */
+export function isPlainMailText(v: string): boolean {
+  return [...v].every((c) => {
+    const n = c.charCodeAt(0);
+    return n >= 0x20 ? n !== 0x7f : n === 0x0a || n === 0x0d || n === 0x09;
+  });
+}
+
 export const SENDING_STALE_MS = 10 * 60 * 1000;
 
 export function sendStateLabel(

@@ -5152,7 +5152,7 @@ export async function sendMaterial(
     await mockDelay();
     throw new Error("モックでは資料を送れません");
   }
-  return apiFetch<{ id: string; result: string; version?: number; replayed?: boolean }>(
+  return apiFetch<{ id: string; result: string; state?: string; version?: number; replayed?: boolean; statusUpdated?: boolean }>(
     `/api/agent-inquiries/${inquiryId}/material-sends`,
     deskJsonInit("POST", body),
   );

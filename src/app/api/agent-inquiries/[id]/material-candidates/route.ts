@@ -5,7 +5,12 @@ import { handleApiError } from "@/lib/api-helpers";
 import { requireAgentInquiry } from "@/lib/agent-inquiry/guard";
 import { loadMailSendConfig } from "@/lib/mail/mail-config";
 import { MATERIAL_SEND_LIMITS, REGISTRY_WARNING, selectableForMaterialSend } from "@/lib/agent-inquiry/material-send";
-import { initialMaterialText, loadMaterialInquiry, loadPropertyAttachments } from "@/lib/agent-inquiry/material-send-service";
+import {
+  guardMaterialFile,
+  initialMaterialText,
+  loadMaterialInquiry,
+  loadPropertyAttachments,
+} from "@/lib/agent-inquiry/material-send-service";
 
 const NO_STORE = { "Cache-Control": "no-store" };
 type Ctx = { params: Promise<{ id: string }> };
@@ -22,12 +27,16 @@ export async function GET(_req: Request, ctx: Ctx) {
       initialMaterialText(q, me?.name ?? ""),
       loadMailSendConfig(),
     ]);
-    const files = rows
-      .filter((r) => selectableForMaterialSend(r, q.propertyId, perms))
-      .map((r) => ({
-        id: r.id, fileName: r.fileName, fileSize: r.fileSize, type: r.type, createdAt: r.createdAt,
-        warning: r.type === "registry" ? REGISTRY_WARNING : null,
-      }));
+    // 送信と同じ守り(/uploads と同じ判定)を通ったものだけ出す=選べたのに送れない、を作らない。
+    const files = [];
+    for (const r of rows.filter((x) => selectableForMaterialSend(x, q.propertyId, perms))) {
+      const g = await guardMaterialFile(r, session, perms);
+      if (!g.ok) continue;
+      files.push({
+        id: r.id, fileName: r.fileName, fileSize: r.fileSize, type: g.effectiveType, createdAt: r.createdAt,
+        warning: g.effectiveType === "registry" ? REGISTRY_WARNING : null,
+      });
+    }
     return NextResponse.json(
       {
         mailConfigured: config != null,

@@ -184,7 +184,7 @@ export function extractStorageKeyFromFileUrl(
  * null を返すため、不正なスキーム URL は絶対に key として扱われない。
  * getStorage() が throw した場合は null (fail-closed = no match) とする。
  */
-function resolveStoredFileUrlToKey(fileUrl: string | null | undefined): string | null {
+export function resolveStoredFileUrlToKey(fileUrl: string | null | undefined): string | null {
   // step 1: /uploads/ 形式の既存動作を完全に維持
   const viaUploads = extractStorageKeyFromFileUrl(fileUrl);
   if (viaUploads !== null) return viaUploads;

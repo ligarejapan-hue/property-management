@@ -4,13 +4,14 @@ import { useEffect, useState } from "react";
 import { ModalShell } from "@/components/ui/modal-shell";
 import { Button } from "@/components/ui/button";
 import {
+  apiErrorCode,
   fetchMaterialCandidates,
   fetchMaterialSends,
   sendMaterial,
   type MaterialCandidates,
   type MaterialSendView,
 } from "@/lib/api-client";
-import { materialFormState } from "@/lib/agent-inquiry/material-send-form";
+import { afterSendError, afterSendResponse, materialFormState } from "@/lib/agent-inquiry/material-send-form";
 
 const inputCls = "w-full rounded-md border border-gray-300 px-2 py-1.5 text-sm dark:border-gray-700 dark:bg-gray-900";
 const mb = (n: number) => `${(n / 1024 / 1024).toFixed(1)}MB`;
@@ -191,17 +192,32 @@ export function MaterialSendDialog({
     setError(null);
     try {
       const r = await sendMaterial(inquiryId, { to: to.trim(), subject, body, attachmentIds: picked, clientToken: token });
-      // 押し直しで前の結果が返った(同じ鍵)=送れたときだけ閉じる。
-      if (r.result === "sending") {
-        // 同じ鍵の送信がまだ途中=鍵は替えない(替えると2通目が出る)。
-        setError("送信中です。少し待ってから、もう一度「送信」を押すか、送った記録を確かめてください");
+      // 押し直しで前の結果が返った(同じ鍵)ときも含めて、送れたときだけ閉じる。
+      const d = afterSendResponse(r);
+      if (d.renewToken) setToken(crypto.randomUUID());
+      if (d.kind === "sent") {
+        onSent();
         return;
       }
-      if (r.result !== "sent") throw new Error("前回の送信は送れませんでした。もう一度「送信」を押してください");
-      onSent();
+      setError(
+        d.kind === "failed"
+          ? "前回の送信は送れませんでした。もう一度「送信」を押してください"
+          : d.kind === "unknown"
+            ? "前回の送信は途中で止まり、届いたか分かりません。送った記録や相手に確かめてから、必要ならもう一度「送信」を押してください"
+            : "送信中です。少し待ってから、もう一度「送信」を押して結果を確かめてください",
+      );
     } catch (e) {
-      setError(e instanceof Error ? e.message : "送れませんでした");
-      setToken(crypto.randomUUID()); // 送り直しは新しい鍵(spec §6.2)
+      // はっきり送れなかったときだけ鍵を替える。通信切れなどは送れていることがある=同じ鍵で押し直すと
+      // サーバーが前の結果を返す(2通目は出ない・最終レビュー I1)。
+      const d = afterSendError(apiErrorCode(e));
+      if (d.renewToken) setToken(crypto.randomUUID());
+      setError(
+        d.unknown
+          ? "送れたか分かりません(通信が切れました)。もう一度「送信」を押すと、送れていたかを確かめます(2通目は出ません)"
+          : e instanceof Error
+            ? e.message
+            : "送れませんでした",
+      );
     } finally {
       setBusy(false);
     }

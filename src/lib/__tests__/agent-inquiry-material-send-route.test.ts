@@ -6,6 +6,13 @@ const h = vi.hoisted(() => ({
   loadMailSendConfig: vi.fn(),
   sendMailWithAttachments: vi.fn(),
   read: vi.fn(),
+  authorize: vi.fn(),
+  meta: vi.fn(),
+}));
+vi.mock("@/lib/uploads-authorization", async (orig) => ({
+  ...(await orig<typeof import("@/lib/uploads-authorization")>()),
+  authorizeUploadAccess: h.authorize,
+  resolveProtectedServeMeta: h.meta,
 }));
 vi.mock("@/lib/audit", () => ({ writeAuditLog: h.writeAuditLog }));
 vi.mock("@/lib/mail/mail-config", () => ({ loadMailSendConfig: h.loadMailSendConfig, MAIL_CONFIG_ID: "singleton" }));
@@ -75,6 +82,75 @@ beforeEach(() => {
   h.loadMailSendConfig.mockResolvedValue(CONFIG);
   h.read.mockResolvedValue({ body: Buffer.from("pdf"), contentType: "application/pdf", size: 3 });
   h.sendMailWithAttachments.mockResolvedValue({ ok: true });
+  h.authorize.mockReset().mockResolvedValue("ok");
+  h.meta.mockReset().mockResolvedValue(null);
+  pm.agentInquiry.update.mockReset().mockResolvedValue({ version: 3 });
+});
+
+describe("ファイルの守り(/uploads と同じ判定・最終レビュー C1)", () => {
+  it("/uploads で開けないファイル(守りが forbidden)は送らない", async () => {
+    h.authorize.mockResolvedValue("forbidden");
+    const res = await POST(json("POST", body()), ctx);
+    expect((await res.json()).error.code).toBe("NOT_SELECTABLE");
+    expect(h.sendMailWithAttachments).not.toHaveBeenCalled();
+    expect(h.authorize).toHaveBeenCalledWith(expect.objectContaining({ key: "attachments/a.pdf", downloadIntent: true }));
+  });
+  it("同じファイルを反響資料・査定報告書の記録が指していれば送らない(ふつうの添付として登録し直されていても)", async () => {
+    h.meta.mockResolvedValue({ kind: "report", attachmentId: "r", propertyId: PID, createdAt: null });
+    expect((await (await POST(json("POST", body()), ctx)).json()).error.code).toBe("NOT_SELECTABLE");
+    expect(h.sendMailWithAttachments).not.toHaveBeenCalled();
+  });
+  it("同じファイルを謄本の記録が指していれば謄本として扱う(謄本の権限が要る・監査に残す)", async () => {
+    h.meta.mockResolvedValue({ kind: "registry", isRegistry: true, attachmentId: "g", propertyId: PID, createdAt: null, certificateType: null });
+    expect((await (await POST(json("POST", body()), ctx)).json()).error.code).toBe("NOT_SELECTABLE");
+    grant(["agent_inquiry", "write"], ["property", "read"], ["registry_pdf", "preview"], ["registry_pdf", "download"]);
+    expect((await POST(json("POST", body()), ctx)).status).toBe(201);
+    expect(h.writeAuditLog.mock.calls.some((c) => c[0].action === "registry_pdf_mail_send")).toBe(true);
+  });
+  it("記録の大きさではなく、実際に読んだ大きさで 20MB を確かめる", async () => {
+    h.read.mockResolvedValue({ body: Buffer.alloc(20 * 1024 * 1024 + 1), contentType: "application/pdf", size: 20 * 1024 * 1024 + 1 });
+    expect((await (await POST(json("POST", body()), ctx)).json()).error.code).toBe("TOO_LARGE");
+    expect(h.sendMailWithAttachments).not.toHaveBeenCalled();
+  });
+  it("ファイルの種類はストレージの値を使う(記録の値は手で書ける)", async () => {
+    pm.attachment.findMany.mockResolvedValue([att({ mimeType: "text/html" })]);
+    await POST(json("POST", body()), ctx);
+    expect(h.sendMailWithAttachments.mock.calls[0][1].attachments[0].contentType).toBe("application/pdf");
+  });
+  it("候補にも同じ守り(開けないもの・反響資料と同じファイルは出さない・謄本と同じファイルは注意つき)", async () => {
+    grant(["agent_inquiry", "read"], ["property", "read"], ["registry_pdf", "preview"], ["registry_pdf", "download"]);
+    pm.attachment.findMany.mockResolvedValue([att(), att({ id: A2, fileUrl: "/uploads/attachments/b.pdf" }), att({ id: "c", fileUrl: "/uploads/attachments/c.pdf" })]);
+    h.authorize.mockImplementation(async ({ key }: { key: string }) => (key === "attachments/b.pdf" ? "forbidden" : "ok"));
+    h.meta.mockImplementation(async (key: string) =>
+      key === "attachments/c.pdf" ? { kind: "registry", isRegistry: true, attachmentId: "g", propertyId: PID, createdAt: null, certificateType: null } : null,
+    );
+    const d = await (await CANDIDATES(new Request("http://x"), ctx)).json();
+    expect(d.files.map((f: { id: string }) => f.id)).toEqual([A1, "c"]);
+    expect(d.files[1].warning).toContain("所有者の名前・住所");
+  });
+});
+
+describe("送信のあとの扱い(最終レビュー I2・I3・M1・M2)", () => {
+  it("送れた後に反響の更新が失敗しても、記録は送信済みにして 201(状態は直せなかったと返す)", async () => {
+    pm.agentInquiry.update.mockRejectedValue(new Error("db down"));
+    const res = await POST(json("POST", body()), ctx);
+    expect(res.status).toBe(201);
+    expect(await res.json()).toMatchObject({ result: "sent", statusUpdated: false });
+    expect(pm.agentInquiryMaterialSend.update).toHaveBeenCalledWith(expect.objectContaining({ data: expect.objectContaining({ result: "sent" }) }));
+  });
+  it("押し直しの応答に状態の表示(10分を過ぎた送信中=結果不明)を付ける", async () => {
+    pm.agentInquiryMaterialSend.findFirst.mockResolvedValue({ id: "s0", result: "sending", inquiryId: IID, createdAt: new Date(Date.now() - 11 * 60 * 1000) });
+    expect(await (await POST(json("POST", body()), ctx)).json()).toMatchObject({ id: "s0", result: "sending", state: "結果不明", replayed: true });
+  });
+  it("別の反響に同じ鍵を使ったら 409(前の結果を返さない)", async () => {
+    pm.agentInquiryMaterialSend.findFirst.mockResolvedValue({ id: "s0", result: "sent", inquiryId: "other", createdAt: new Date() });
+    const res = await POST(json("POST", body()), ctx);
+    expect(res.status).toBe(409);
+    expect(h.sendMailWithAttachments).not.toHaveBeenCalled();
+  });
+  it("本文に目に見えない制御文字があれば 422", async () => {
+    expect((await POST(json("POST", body({ body: "a\u0007b" })), ctx)).status).toBe(422);
+  });
 });
 
 describe("資料の送信 API", () => {
@@ -132,7 +208,7 @@ describe("資料の送信 API", () => {
     const res = await POST(json("POST", body({ to: "new@agent.jp" })), ctx);
     expect(res.status).toBe(201);
     expect(pm.agentInquiryMaterialSend.create).toHaveBeenCalledWith(expect.objectContaining({
-      data: expect.objectContaining({ result: "sending", clientToken: TOKEN, sentById: "u1", toAddress: "new@agent.jp", totalSize: 1000 }),
+      data: expect.objectContaining({ result: "sending", clientToken: TOKEN, sentById: "u1", toAddress: "new@agent.jp", totalSize: 3 }),
     }));
     const sent = h.sendMailWithAttachments.mock.calls[0][1];
     expect(sent).toMatchObject({ to: "new@agent.jp", subject: "件名", text: "本文" });
@@ -157,14 +233,14 @@ describe("資料の送信 API", () => {
     expect(pm.agentInquiry.update).not.toHaveBeenCalled();
   });
   it("同じ鍵の押し直しは送らずに前の結果を返す(Review Focus 2)", async () => {
-    pm.agentInquiryMaterialSend.findFirst.mockResolvedValue({ id: "s0", result: "sending" });
+    pm.agentInquiryMaterialSend.findFirst.mockResolvedValue({ id: "s0", result: "sending", inquiryId: IID, createdAt: new Date() });
     const res = await POST(json("POST", body()), ctx);
     expect(res.status).toBe(200);
     expect(await res.json()).toMatchObject({ id: "s0", result: "sending", replayed: true });
     expect(h.sendMailWithAttachments).not.toHaveBeenCalled();
   });
   it("同じ鍵が同時に届いて一意制約にぶつかった方は送らない", async () => {
-    pm.agentInquiryMaterialSend.findFirst.mockResolvedValueOnce(null).mockResolvedValueOnce({ id: "s0", result: "sending" });
+    pm.agentInquiryMaterialSend.findFirst.mockResolvedValueOnce(null).mockResolvedValueOnce({ id: "s0", result: "sending", inquiryId: IID, createdAt: new Date() });
     pm.agentInquiryMaterialSend.create.mockRejectedValueOnce(Object.assign(new Error("dup"), { code: "P2002" }));
     const res = await POST(json("POST", body()), ctx);
     expect(await res.json()).toMatchObject({ id: "s0", replayed: true });

@@ -10,6 +10,12 @@ import {
   type MaterialAttachmentRow,
 } from "./material-send";
 import { DESK_PROPERTY_SELECT, toDeskProperty } from "./desk-property";
+import { hasPermission } from "@/lib/permissions";
+import {
+  authorizeUploadAccess,
+  resolveProtectedServeMeta,
+  resolveStoredFileUrlToKey,
+} from "@/lib/uploads-authorization";
 
 export const MATERIAL_ATTACHMENT_SELECT = {
   id: true, targetType: true, targetId: true, type: true, isDeleted: true,
@@ -40,6 +46,34 @@ export async function loadPropertyAttachments(propertyId: string, ids?: string[]
     orderBy: { createdAt: "desc" },
     select: MATERIAL_ATTACHMENT_SELECT,
   });
+}
+
+export type MaterialFileGuard = { ok: true; key: string; effectiveType: "general" | "registry" } | { ok: false };
+
+/**
+ * 1つのファイルを外へ送ってよいか(/uploads で開くときと同じ守り・最終レビュー C1)。
+ * ⚠添付の記録は手で fileUrl を書いて登録できる(JSON の登録口)=記録の種類と物件だけでは足りない。
+ *   同じファイルを指す全部の記録(削除済み・別の物件・受け取り箱の置き場所)を見る authorizeUploadAccess を
+ *   ダウンロードの扱いで通し、反響資料・査定報告書と同じファイルは送らない・謄本と同じファイルは謄本として扱う。
+ */
+export async function guardMaterialFile(
+  row: MaterialAttachmentRow,
+  session: ApiSession,
+  perms: PermissionEntry[],
+): Promise<MaterialFileGuard> {
+  const key = resolveStoredFileUrlToKey(row.fileUrl);
+  if (!key) return { ok: false };
+  if ((await authorizeUploadAccess({ key, session, permissions: perms, downloadIntent: true })) !== "ok") return { ok: false };
+  const meta = await resolveProtectedServeMeta(key);
+  if (meta !== null && meta.kind !== "registry") return { ok: false };
+  const effectiveType = meta?.kind === "registry" || row.type === "registry" ? "registry" : "general";
+  if (
+    effectiveType === "registry" &&
+    !(hasPermission(perms, "registry_pdf", "preview") && hasPermission(perms, "registry_pdf", "download"))
+  ) {
+    return { ok: false };
+  }
+  return { ok: true, key, effectiveType };
 }
 
 /** ひな形(未登録なら既定)に差し込んだ件名・本文。 */
