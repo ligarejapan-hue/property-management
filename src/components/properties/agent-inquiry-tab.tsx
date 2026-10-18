@@ -13,6 +13,7 @@ import { AD_VALUE_WORD, nextAdValue, timelineKindLabel, timelineWhen } from "@/l
 import { notifyInquiryChanged, onInquiryChanged } from "@/lib/agent-inquiry/desk-sync";
 import { AD_TONE } from "@/components/agent-inquiry/ad-permission-chips";
 import { Button } from "@/components/ui/button";
+import { MaterialSendDialog } from "@/components/agent-inquiry/material-send-dialog";
 
 /** 広告の可否の保存に失敗したときの文言。 */
 export function adSaveErrorMessage(e: unknown): string {
@@ -32,6 +33,8 @@ export function PropertyInquiryView({
   message,
   onToggleAd,
   onReload,
+  canSendMaterial = false,
+  onOpenMaterial,
 }: {
   data: PropertyAgentInquiries;
   canEditAds: boolean;
@@ -39,6 +42,9 @@ export function PropertyInquiryView({
   message: string | null;
   onToggleAd: (m: AdMediumKey) => void;
   onReload: () => void;
+  /** 資料請求の行に「資料を送る」を出す(反響を書ける人)。API でも確かめる=見た目だけ。 */
+  canSendMaterial?: boolean;
+  onOpenMaterial?: (inquiryId: string) => void;
 }) {
   const c = data.counts;
   return (
@@ -120,6 +126,15 @@ export function PropertyInquiryView({
                 <span className="font-medium">{e.agentName}</span>
                 {e.contactName && <span>{`(${e.contactName}様)`}</span>}
                 {e.attendantName && <span className="ml-2 text-xs text-gray-500 dark:text-gray-400">{`立ち会い:${e.attendantName}`}</span>}
+                {e.kind === "material_request" && canSendMaterial && onOpenMaterial && (
+                  <button
+                    type="button"
+                    onClick={() => onOpenMaterial(e.inquiryId)}
+                    className="ml-2 rounded border border-teal-700 px-2 py-0.5 text-xs text-teal-700 dark:border-teal-300 dark:text-teal-300"
+                  >
+                    資料を送る
+                  </button>
+                )}
                 {e.resultNote && <p className="mt-0.5 whitespace-pre-wrap text-xs text-gray-600 dark:text-gray-300">{e.resultNote}</p>}
               </li>
             ))}
@@ -134,8 +149,24 @@ export function PropertyInquiryView({
  * 物件画面の「反響」タブ。読む=物件の閲覧権限、広告の可否を変える=物件の編集権限(canWrite は親が渡す)。
  * ⚠ここでは権限表を読まない(API が物件の規則で 403 を返す)。
  */
-export default function AgentInquiryTab({ propertyId, canWrite }: { propertyId: string; canWrite: boolean }) {
+export default function AgentInquiryTab({
+  propertyId,
+  canWrite,
+  canSendMaterial = false,
+}: {
+  propertyId: string;
+  canWrite: boolean;
+  canSendMaterial?: boolean;
+}) {
   const [data, setData] = useState<PropertyAgentInquiries | null>(null);
+  // 資料を送る小窓。×は隠すだけ(入力が残る)・キャンセルは外す(消える)=既存の決まり。
+  const [materialFor, setMaterialFor] = useState<string | null>(null);
+  const [materialHidden, setMaterialHidden] = useState(false);
+  // 行のボタン: 同じ反響なら隠していた小窓を戻す(入力が残る)・別の反響なら作り直す(key)。
+  const openMaterial = (id: string) => {
+    setMaterialHidden(false);
+    setMaterialFor(id);
+  };
   const [loadError, setLoadError] = useState<string | null>(null);
   const [savingMedium, setSavingMedium] = useState<AdMediumKey | null>(null);
   const [message, setMessage] = useState<string | null>(null);
@@ -221,7 +252,24 @@ export default function AgentInquiryTab({ propertyId, canWrite }: { propertyId: 
         message={message}
         onToggleAd={(m) => void toggle(m)}
         onReload={() => void load()}
+        canSendMaterial={canSendMaterial}
+        onOpenMaterial={openMaterial}
       />
+      {materialFor && (
+        <MaterialSendDialog
+          key={materialFor}
+          inquiryId={materialFor}
+          hidden={materialHidden}
+          onHide={() => setMaterialHidden(true)}
+          onClose={() => setMaterialFor(null)}
+          onSent={() => {
+            setMaterialFor(null);
+            // 反響が対応済みになった=受付の窓にも知らせ、この欄も読み直す。
+            notifyInquiryChanged();
+            void load();
+          }}
+        />
+      )}
     </>
   );
 }

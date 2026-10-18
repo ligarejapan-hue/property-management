@@ -4,6 +4,7 @@ import { useCallback, useEffect, useRef, useState } from "react";
 import { ModalShell } from "@/components/ui/modal-shell";
 import { Button } from "@/components/ui/button";
 import { useDeskAccess } from "./desk-access";
+import { MaterialSendDialog, MaterialSendHistory } from "./material-send-dialog";
 import {
   addAgentViewing,
   apiErrorCode,
@@ -190,6 +191,8 @@ export function InquiryDetailView({
   readOnlyText = false,
   addLocked = false,
   onConfirmAdd,
+  canSendMaterial = false,
+  onMaterialSent,
 }: {
   inquiry: InquiryView;
   canOpenProperty: boolean;
@@ -211,7 +214,15 @@ export function InquiryDetailView({
   /** 内見を足せたか分からない(通信が切れた等)。確かめるまで足すボタンを止める(@codex #459 R19)。 */
   addLocked?: boolean;
   onConfirmAdd?: () => void;
+  /** 資料請求に資料を送れる(反響を書ける+物件を開ける)。API でも必ず確かめる=ここは見た目だけ。 */
+  canSendMaterial?: boolean;
+  /** 資料を送れた(反響が対応済みになった)=最新を読み直す。 */
+  onMaterialSent?: () => void;
 }) {
+  // 資料を送る小窓。×は隠すだけ(入力が残る)・キャンセルは外す(消える)=既存の決まり。
+  const [materialOpen, setMaterialOpen] = useState(false);
+  const [materialHidden, setMaterialHidden] = useState(false);
+  const [materialReload, setMaterialReload] = useState(0);
   // メモの下書き(null=まだ触っていない)。詳細は反響の id だけで作り直すので、状態や担当を変えて版が
   // 進んでも・読み直しても、打ちかけのメモは消えない(最終レビュー I-1/I-2)。
   const [noteDraft, setNoteDraft] = useState<Draft | null>(null);
@@ -233,6 +244,7 @@ export function InquiryDetailView({
     onSaveNote(note);
   };
   return (
+    <>
     <ModalShell
       size="lg"
       title={`${KIND_LABEL[q.kind]} ― ${agentLabel(q.agent)}`}
@@ -349,6 +361,24 @@ export function InquiryDetailView({
             )}
           </div>
         )}
+        {q.kind === "material_request" && (
+          <div className="space-y-1">
+            {canSendMaterial && (
+              <button
+                type="button"
+                disabled={busy}
+                onClick={() => {
+                  setMaterialOpen(true);
+                  setMaterialHidden(false);
+                }}
+                className="rounded bg-teal-700 px-3 py-1 text-xs text-white disabled:opacity-60"
+              >
+                資料を送る
+              </button>
+            )}
+            <MaterialSendHistory inquiryId={q.id} reloadKey={materialReload} />
+          </div>
+        )}
         {error && (
           <div className="flex items-center justify-between gap-2 rounded bg-rose-50 px-2 py-1 text-rose-700 dark:bg-rose-950 dark:text-rose-200">
             <p>{error}</p>
@@ -361,6 +391,20 @@ export function InquiryDetailView({
         )}
       </div>
     </ModalShell>
+    {materialOpen && (
+      <MaterialSendDialog
+        inquiryId={q.id}
+        hidden={materialHidden}
+        onHide={() => setMaterialHidden(true)}
+        onClose={() => setMaterialOpen(false)}
+        onSent={() => {
+          setMaterialOpen(false);
+          setMaterialReload((n) => n + 1);
+          onMaterialSent?.();
+        }}
+      />
+    )}
+    </>
   );
 }
 
@@ -516,6 +560,11 @@ export default function InquiryDetail({
       onReload={reload}
       addLocked={addLocked}
       onConfirmAdd={() => setAddLocked(false)}
+      canSendMaterial={canWrite && data.canOpenProperty && !refreshFailed}
+      onMaterialSent={() => {
+        onChanged();
+        reload();
+      }}
     />
   );
 }

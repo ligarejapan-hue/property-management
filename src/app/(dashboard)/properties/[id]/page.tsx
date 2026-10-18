@@ -640,6 +640,7 @@ export default function PropertyDetailPage({
   // 判定ロジック（granted / full|edit / 複合 owner:write && owner_note）は従来どおり（緩めない）。
   const {
     canWriteProperty,
+    canSendInquiryMaterial,
     canDeleteProperty,
     canWriteOwner,
     canImportWrite,
@@ -750,8 +751,13 @@ export default function PropertyDetailPage({
         (p) =>
           p.resource === "user_management" && p.action === "read" && p.granted,
       );
+    // 反響タブの「資料を送る」(資料請求への資料送付)。送信 API も agent_inquiry:write を要求する=見た目のため。
+    const canSendInquiryMaterial = effectivePermissions.some(
+      (p) => p.resource === "agent_inquiry" && p.action === "write" && p.granted,
+    );
     return {
       canWriteProperty,
+      canSendInquiryMaterial,
       canDeleteProperty,
       canWriteOwner,
       canReadOwner,
@@ -1071,7 +1077,7 @@ export default function PropertyDetailPage({
         )}
         {/* 業者からの反響(設計 2026-09-28 §2.3)。広告の可否を変えられるのは物件の編集権限がある人だけ。 */}
         {activeTab === "inquiries" && (
-          <AgentInquiryTab key={property.id} propertyId={property.id} canWrite={canWriteProperty} />
+          <AgentInquiryTab key={property.id} propertyId={property.id} canWrite={canWriteProperty} canSendMaterial={canSendInquiryMaterial} />
         )}
         {activeTab === "comments" && (
           <CommentTab propertyId={property.id} />
