@@ -13,6 +13,7 @@ import type { Prisma } from "@/generated/prisma";
 import { ApiError } from "@/lib/api-helpers";
 import { writeAuditLog } from "@/lib/audit";
 import { areaKey, buildingAddressFromUnit, buildingNameKey } from "@/lib/building-identity";
+import { CATALOG_ENTRY_SELECT, catalogFillValues } from "@/lib/mansion-catalog/adopt";
 import {
   BUILDING_LINK_TARGET_TYPE,
   buildingLinkLockKey,
@@ -24,9 +25,10 @@ import {
 import { LEGACY_PAGE_SIZE, readAllLegacyBuildings } from "./suggest";
 
 export type BuildingLinkTx = Pick<Prisma.TransactionClient, "$executeRaw"> & {
-  building: Pick<Prisma.TransactionClient["building"], "findUnique" | "findMany" | "create">;
+  building: Pick<Prisma.TransactionClient["building"], "findUnique" | "findFirst" | "findMany" | "create">;
   property: Pick<Prisma.TransactionClient["property"], "update">;
   auditLog: Pick<Prisma.TransactionClient["auditLog"], "create">;
+  mansionCatalog: Pick<Prisma.TransactionClient["mansionCatalog"], "findMany">;
 };
 
 export interface ApplyBuildingLinkInput {
@@ -96,6 +98,19 @@ async function loadCandidates(tx: BuildingLinkTx, area: string, nameKey: string)
   }));
 }
 
+/**
+ * 新しい棟に入れる名簿の建物(設計 2026-10-18 §6.1)。同じ町丁目・同じ比べる形が**ちょうど1件**で、
+ * まだどの棟にもなっていないときだけ。⚠アドバイザリロックの中で呼ぶ(同じ鍵=adopt と同じロック)。
+ * ⚠もう棟になっている(棟の名前を手で変えた後など)ときは入れない=catalog_id の一意制約で保存ごと落とさない。
+ */
+async function catalogForNewBuilding(tx: BuildingLinkTx, area: string | null, nameKey: string) {
+  if (area === null) return null;
+  const rows = await tx.mansionCatalog.findMany({ where: { areaKey: area, nameKey }, select: CATALOG_ENTRY_SELECT, take: 2 });
+  if (rows.length !== 1) return null;
+  const used = await tx.building.findFirst({ where: { catalogId: rows[0].id }, select: { id: true } });
+  return used ? null : rows[0];
+}
+
 export async function applyBuildingLink(
   tx: BuildingLinkTx,
   input: ApplyBuildingLinkInput,
@@ -151,6 +166,12 @@ export async function applyBuildingLink(
   let building: { id: string; name: string };
   let created = false;
   if (d.kind === "create") {
+    // 人が「新しい棟」を選んだときは上でロックを取っていない。名簿を見る前に同じ鍵で取る
+    // (adopt と同時に来ても、同じ名簿の建物を2つの棟に付けない)。
+    if (input.choice.kind === "new") {
+      await tx.$executeRaw`SELECT pg_advisory_xact_lock(hashtext(${buildingLinkLockKey(area, nameKey)})::bigint)`;
+    }
+    const fromCatalog = await catalogForNewBuilding(tx, area, nameKey);
     building = await tx.building.create({
       data: {
         name: input.buildingName as string,
@@ -158,6 +179,7 @@ export async function applyBuildingLink(
         nameKey,
         areaKey: area,
         createdBy: input.userId,
+        ...(fromCatalog ? { catalogId: fromCatalog.id, ...catalogFillValues(fromCatalog) } : {}),
       },
       select: { id: true, name: true },
     });
