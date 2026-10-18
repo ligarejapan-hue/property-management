@@ -1123,6 +1123,11 @@ export interface MailSettings {
   inquiryAutoReplyBody: string | null;
   inquiryAutoReplyDefaultSubject: string;
   inquiryAutoReplyDefaultBody: string;
+  // 資料請求への資料送付メールのひな形。null のときは既定の文面を使う。
+  materialSendSubject: string | null;
+  materialSendBody: string | null;
+  materialSendDefaultSubject: string;
+  materialSendDefaultBody: string;
   // この設定で通知メールが送れる状態かどうか(サーバー側 isMailConfigComplete と同じ判定)。
   complete: boolean;
   // false のとき、サーバーに暗号化キーが無くパスワードを保存できない。
@@ -1145,6 +1150,10 @@ const EMPTY_MAIL_SETTINGS: MailSettings = {
   inquiryAutoReplyBody: null,
   inquiryAutoReplyDefaultSubject: "査定のお申し込みを受け付けました",
   inquiryAutoReplyDefaultBody: "このたびは査定のお申し込みをいただき、ありがとうございます。\n内容を確認のうえ、担当者よりご連絡いたします。",
+  materialSendSubject: null,
+  materialSendBody: null,
+  materialSendDefaultSubject: "【資料送付】{物件名}",
+  materialSendDefaultBody: "{会社名}\n{担当者名} 様\n\nお世話になっております。\nお問い合わせいただきました「{物件名}」の資料をお送りいたします。\nご確認のほど、よろしくお願いいたします。\n\n{自分の名前}",
   complete: false,
   cryptoConfigured: true,
   notifyRecipientCount: 0,
@@ -1172,6 +1181,9 @@ export async function updateMailSettings(body: {
   // 空文字=既定の文面に戻す。
   inquiryAutoReplySubject?: string;
   inquiryAutoReplyBody?: string;
+  // 資料送付メールのひな形。空文字=既定の文面に戻す。
+  materialSendSubject?: string;
+  materialSendBody?: string;
 }): Promise<{ data: MailSettings }> {
   if (USE_MOCK) {
     await mockDelay();

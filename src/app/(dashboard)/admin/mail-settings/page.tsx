@@ -47,6 +47,9 @@ export default function MailSettingsPage() {
   const [autoReplyEnabled, setAutoReplyEnabled] = useState(false);
   const [autoReplySubject, setAutoReplySubject] = useState("");
   const [autoReplyBody, setAutoReplyBody] = useState("");
+  // 資料請求への資料送付メールのひな形。空欄=既定の文面。
+  const [materialSubject, setMaterialSubject] = useState("");
+  const [materialBody, setMaterialBody] = useState("");
 
   // 接続方式ごとの既定ポート(選択を変えたときだけポートを合わせる用)。
   const KNOWN_DEFAULT_PORTS = ["465", "587"];
@@ -78,6 +81,8 @@ export default function MailSettingsPage() {
     autoReplyEnabled: false,
     autoReplySubject: "",
     autoReplyBody: "",
+    materialSubject: "",
+    materialBody: "",
   });
 
   const applySettings = (data: MailSettings) => {
@@ -93,6 +98,8 @@ export default function MailSettingsPage() {
     setAutoReplyEnabled(data.inquiryAutoReplyEnabled);
     setAutoReplySubject(data.inquiryAutoReplySubject ?? "");
     setAutoReplyBody(data.inquiryAutoReplyBody ?? "");
+    setMaterialSubject(data.materialSendSubject ?? "");
+    setMaterialBody(data.materialSendBody ?? "");
     setSavedSnapshot({
       smtpHost: data.smtpHost ?? "",
       smtpPort: String(data.smtpPort ?? 465),
@@ -104,6 +111,8 @@ export default function MailSettingsPage() {
       autoReplyEnabled: data.inquiryAutoReplyEnabled,
       autoReplySubject: data.inquiryAutoReplySubject ?? "",
       autoReplyBody: data.inquiryAutoReplyBody ?? "",
+      materialSubject: data.materialSendSubject ?? "",
+      materialBody: data.materialSendBody ?? "",
     });
   };
 
@@ -141,6 +150,8 @@ export default function MailSettingsPage() {
     autoReplyEnabled !== savedSnapshot.autoReplyEnabled ||
     autoReplySubject !== savedSnapshot.autoReplySubject ||
     autoReplyBody !== savedSnapshot.autoReplyBody ||
+    materialSubject !== savedSnapshot.materialSubject ||
+    materialBody !== savedSnapshot.materialBody ||
     password.trim() !== "";
 
   const save = async () => {
@@ -164,6 +175,8 @@ export default function MailSettingsPage() {
         inquiryAutoReplyEnabled: autoReplyEnabled,
         inquiryAutoReplySubject: autoReplySubject,
         inquiryAutoReplyBody: autoReplyBody,
+        materialSendSubject: materialSubject,
+        materialSendBody: materialBody,
       };
       // パスワードは入力があったときだけ送る(空欄=現状維持。サーバーは未指定キーを触らない)。
       if (password.trim() !== "") {
@@ -425,6 +438,46 @@ export default function MailSettingsPage() {
             この文面を自分あてに送ってみる
           </button>
         </div>
+      </section>
+
+      <section className="space-y-4 rounded-lg border border-gray-200 p-4 dark:border-gray-700">
+        <div>
+          <h2 className="text-sm font-semibold text-gray-800 dark:text-gray-100">資料送付メール</h2>
+          <p className="mt-1 text-xs text-gray-500 dark:text-gray-400">
+            <Link href="/inquiry-desk" className="font-semibold underline underline-offset-2">「反響の受付」</Link>で資料請求に「資料を送る」を押したときの最初の文面です。送る前にその場で直せます。
+            使える差し込み: {"{物件名}"} {"{会社名}"} {"{担当者名}"} {"{自分の名前}"}
+          </p>
+        </div>
+        <Field label="件名(空欄なら既定の件名)">
+          <input
+            value={materialSubject}
+            onChange={(e) => setMaterialSubject(e.target.value)}
+            placeholder={meta?.materialSendDefaultSubject ?? ""}
+            maxLength={200}
+            className="w-full rounded-md border border-gray-300 px-2 py-1.5 text-sm dark:border-gray-700 dark:bg-gray-900 dark:text-gray-100"
+          />
+        </Field>
+        <Field label="本文(空欄なら既定の文面。会社の署名もここに書いてください)">
+          <textarea
+            value={materialBody}
+            onChange={(e) => setMaterialBody(e.target.value)}
+            placeholder={meta?.materialSendDefaultBody ?? ""}
+            maxLength={10000}
+            rows={10}
+            className="w-full rounded-md border border-gray-300 px-2 py-1.5 text-sm dark:border-gray-700 dark:bg-gray-900 dark:text-gray-100"
+          />
+        </Field>
+        <button
+          type="button"
+          onClick={() => {
+            setMaterialSubject(meta?.materialSendDefaultSubject ?? "");
+            setMaterialBody(meta?.materialSendDefaultBody ?? "");
+          }}
+          disabled={!loaded}
+          className="rounded-md border border-gray-300 px-3 py-1.5 text-xs font-medium text-gray-700 hover:bg-gray-50 disabled:opacity-50 dark:border-gray-700 dark:text-gray-200 dark:hover:bg-gray-800"
+        >
+          既定の文面を入れて書き直す
+        </button>
       </section>
 
       <div className="flex flex-wrap items-center gap-3">
