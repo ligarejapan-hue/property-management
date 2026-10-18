@@ -28,6 +28,31 @@ export function rankBuildingSuggestions(
   }));
 }
 
+/** 名簿(mansion_catalog)の候補(設計 2026-10-18 §6.2)。⚠住所は町丁目まで。 */
+export interface CatalogSuggestion {
+  catalogId: string; name: string; area: string;
+  builtYear: number | null; totalFloors: number | null; totalUnits: number | null;
+  sameName: boolean; sameArea: boolean;
+}
+export const CATALOG_SUGGEST_LIMIT = 5;
+
+export function rankCatalogSuggestions(
+  rows: { id: string; name: string; address: string; nameKey: string | null; areaKey: string | null; builtYear: number | null; totalFloors: number | null; totalUnits: number | null }[],
+  target: { nameKey: string; areaKey: string | null },
+): CatalogSuggestion[] {
+  const scored = rows.map((c) => {
+    const nk = c.nameKey ?? buildingNameKey(c.name);
+    const ak = c.areaKey ?? areaKey(c.address);
+    const sameName = nk === target.nameKey;
+    const sameArea = target.areaKey !== null && ak === target.areaKey;
+    return { c, ak, sameName, sameArea, rank: sameName && sameArea ? 0 : sameName ? 1 : 2 };
+  });
+  scored.sort((x, y) => x.rank - y.rank || (y.c.totalUnits ?? 0) - (x.c.totalUnits ?? 0) || x.c.id.localeCompare(y.c.id));
+  return scored.slice(0, CATALOG_SUGGEST_LIMIT).map(({ c, ak, sameName, sameArea }) => ({
+    catalogId: c.id, name: c.name, area: ak ?? "", builtYear: c.builtYear, totalFloors: c.totalFloors, totalUnits: c.totalUnits, sameName, sameArea,
+  }));
+}
+
 /** 古い棟(nameKey が null)を読む1回の件数と、全体の上限(@codex R5)。 */
 export const LEGACY_PAGE_SIZE = 200;
 export const LEGACY_MAX_ROWS = 2000;

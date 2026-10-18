@@ -1,17 +1,24 @@
 import { vi } from "vitest";
 import type { BuildingLinkTx } from "@/lib/building-link/apply";
+import type { CatalogEntry } from "@/lib/mansion-catalog/adopt";
 
 export interface FakeBuilding {
   id: string; name: string; address: string;
   nameKey: string | null; areaKey: string | null;
   createdAt: Date; createdBy: string;
+  catalogId?: string | null;
+  [k: string]: unknown;
 }
 export interface FakeProperty { id: string; buildingId: string | null; buildingName: string | null }
 export interface FakeAuditLog {
   userId: string | null; action: string; targetTable: string | null; targetId: string | null; detail: unknown;
 }
 /** auditLogs: tx の中で書いた監査ログ(取込の目印。tx が巻き戻れば一緒に消える前提の行)。 */
-export interface FakeDb { buildings: FakeBuilding[]; properties: FakeProperty[]; executed: string[]; auditLogs?: FakeAuditLog[] }
+export interface FakeDb {
+  buildings: FakeBuilding[]; properties: FakeProperty[]; executed: string[]; auditLogs?: FakeAuditLog[];
+  /** マンション名簿(設計 2026-10-18)。無ければ空。 */
+  catalog?: CatalogEntry[];
+}
 
 /** テンプレート文字列の SQL を、値を埋めた1本の文字列にする(検査用)。 */
 function sqlText(strings: TemplateStringsArray, values: unknown[]): string {
@@ -56,6 +63,10 @@ function buildFake(db: FakeDb, lock?: (key: string) => Promise<void>) {
         const b = db.buildings.find((x) => x.id === where.id);
         return b ? view(b) : null;
       }),
+      findFirst: vi.fn(async ({ where }: { where: { catalogId: string } }) => {
+        const b = db.buildings.find((x) => x.catalogId === where.catalogId);
+        return b ? view(b) : null;
+      }),
       findMany: vi.fn(async ({ where, take, orderBy }: { where: Record<string, unknown>; take?: number; orderBy?: { id?: "asc" } }) => {
         // 値は一致、または { gt } (id の続きから読む=ページ送り)を写す。
         const rows = db.buildings.filter((b) =>
@@ -69,8 +80,10 @@ function buildFake(db: FakeDb, lock?: (key: string) => Promise<void>) {
         return rows.slice(0, take ?? rows.length).map(view);
       }),
       create: vi.fn(async ({ data }: { data: Omit<FakeBuilding, "id" | "createdAt"> }) => {
+        // 本物の一意制約(buildings.catalog_id)を写す。
+        if (data.catalogId && db.buildings.some((x) => x.catalogId === data.catalogId)) throw new Error("unique catalog_id");
         seq += 1;
-        const b: FakeBuilding = { id: `new-${seq}`, createdAt: new Date(2026, 9, 5, 0, 0, seq), ...data };
+        const b = { id: `new-${seq}`, createdAt: new Date(2026, 9, 5, 0, 0, seq), ...data } as FakeBuilding;
         db.buildings.push(b);
         return { id: b.id, name: b.name };
       }),
@@ -80,6 +93,10 @@ function buildFake(db: FakeDb, lock?: (key: string) => Promise<void>) {
         (db.auditLogs ??= []).push(data);
         return { id: `log-${db.auditLogs.length}` };
       }),
+    },
+    mansionCatalog: {
+      findMany: vi.fn(async ({ where, take }: { where: { areaKey: string; nameKey: string }; take?: number }) =>
+        (db.catalog ?? []).filter((c) => c.areaKey === where.areaKey && c.nameKey === where.nameKey).slice(0, take ?? Infinity)),
     },
     property: {
       update: vi.fn(async ({ where, data }: { where: { id: string }; data: Partial<FakeProperty> }) => {

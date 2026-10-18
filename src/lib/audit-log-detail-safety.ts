@@ -132,6 +132,10 @@ const ALWAYS_SAFE_KEYS: ReadonlySet<string> = new Set([
  * unknown action にはこれを付与せず ALWAYS_SAFE_KEYS のみで最も厳しく扱う。
  */
 const ACTION_EXTRA_KEYS: Readonly<Record<string, ReadonlySet<string>>> = {
+  // 名簿(マンション名簿)から棟にした・埋めた(設計 2026-10-18)。catalogId=名簿の行の UUID・
+  // kind=created/linked・filled=埋めた欄の名前(builtYear など)・propertyId=保存した物件の UUID。
+  // 住所・建物名・値は書かない設計。
+  "building.catalog_adopt": new Set(["catalogId", "kind", "filled", "propertyId"]),
   // 配信停止(郵送QR・公開経路)。draftId=対象宛先のUUID(非PII)・markedSent=送付済み
   // 未押下の手紙をその場で送付済み化したか・at=ISO時刻。氏名・住所は書かない設計。
   sale_dm_qr_unsubscribe: new Set(["draftId", "markedSent", "at"]),

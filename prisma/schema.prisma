@@ -298,6 +298,8 @@ model Building {
   // (src/lib/building-identity.ts)。null の古い行は、比べるときにその場で計算して埋める。
   nameKey             String?   @map("name_key")
   areaKey             String?   @map("area_key")
+  // 名簿(mansion_catalog)のどの建物から作った/埋めたか。同じ名簿の建物から棟を2つ作らない鍵(設計 2026-10-18)。
+  catalogId           String?   @unique @map("catalog_id") @db.Uuid
   version             Int       @default(1)
   createdBy           String    @map("created_by") @db.Uuid
   createdAt           DateTime  @default(now()) @map("created_at")
@@ -306,11 +308,46 @@ model Building {
   creator    User            @relation(fields: [createdBy], references: [id])
   properties Property[]
   photos     BuildingPhoto[]
+  catalog    MansionCatalog? @relation(fields: [catalogId], references: [id], onDelete: SetNull)
 
   @@index([name])
   @@index([address])
   @@index([areaKey, nameKey])
   @@map("buildings")
+}
+
+/// マンション名簿(セルフイン 全国マンションデータベースの一都三県・2026-10-17 収集・運営会社の許可済み)。
+/// 画面の「マンション棟」一覧には並べない。物件登録の補完と、棟の検索の2段目にだけ使う(設計 2026-10-18)。
+model MansionCatalog {
+  id                String    @id @default(uuid()) @db.Uuid
+  source            String
+  sourceId          String    @map("source_id")
+  name              String
+  address           String
+  prefCode          String    @map("pref_code")
+  stations          String[]
+  builtYear         Int?      @map("built_year")
+  builtMonth        Int?      @map("built_month")
+  totalFloors       Int?      @map("total_floors")
+  basementFloors    Int?      @map("basement_floors")
+  totalUnits        Int?      @map("total_units")
+  structureType     String?   @map("structure_type")
+  developer         String?
+  managementCompany String?   @map("management_company")
+  raw               Json      @db.JsonB
+  nameKey           String?   @map("name_key")
+  areaKey           String?   @map("area_key")
+  fetchedAt         DateTime  @map("fetched_at")
+  createdAt         DateTime  @default(now()) @map("created_at")
+  updatedAt         DateTime  @updatedAt @map("updated_at")
+
+  building Building?
+
+  @@unique([source, sourceId])
+  @@index([areaKey, nameKey])
+  @@index([nameKey])
+  @@index([name])
+  @@map("mansion_catalog")
 }
 
 model Property {

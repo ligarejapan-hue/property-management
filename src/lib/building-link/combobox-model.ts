@@ -1,7 +1,7 @@
 /** 物件名の候補つき入力欄の判断(設計 §6.1)。React に依存しない。 */
 import { areaKey, buildingNameKey } from "@/lib/building-identity";
 import type { BuildingChoice } from "./resolve";
-import { SUGGEST_MIN_KEY_LENGTH, type BuildingSuggestion } from "./suggest";
+import { SUGGEST_MIN_KEY_LENGTH, type BuildingSuggestion, type CatalogSuggestion } from "./suggest";
 
 export function shouldFetchSuggestions(name: string): boolean {
   return (buildingNameKey(name) ?? "").length >= SUGGEST_MIN_KEY_LENGTH;
@@ -61,6 +61,8 @@ export interface SuggestResult {
   data: BuildingSuggestion[];
   /** 古い棟を全部確かめられたか(@codex R5)。省略=true。 */
   complete?: boolean;
+  /** 名簿にあるマンション(設計 2026-10-18 §6.2)。省略=無し。 */
+  catalog?: CatalogSuggestion[];
 }
 /** partial=候補は選べるが、古い棟を全部は確かめられなかったので「新しい棟」は出さない。 */
 export type SuggestListState = "loading" | "error" | "ready" | "partial";
@@ -106,16 +108,32 @@ export function choiceSummary(choice: BuildingChoice, selected: BuildingSuggesti
   return null;
 }
 
-/** 強調中の行から選ぶ候補。範囲外(一覧が縮んだ等)は null=何も選ばない。一番下は「新しい棟」。 */
+/**
+ * 強調中の行から選ぶ候補。範囲外(一覧が縮んだ等)は null=何も選ばない。
+ * 並びは 棟の候補 → 名簿の候補 → 「新しい棟」(一番下)。
+ */
 export function pickAtIndex(
   index: number,
   suggestions: BuildingSuggestion[],
   /** false=「新しい棟」の行が無い(partial)。一番下を選んでも何も選ばない。 */
   allowNew: boolean = true,
-): BuildingSuggestion | "new" | null {
-  if (!Number.isInteger(index) || index < 0 || index > suggestions.length) return null;
-  if (index === suggestions.length) return allowNew ? "new" : null;
-  return suggestions[index];
+  catalog: CatalogSuggestion[] = [],
+): BuildingSuggestion | { catalog: CatalogSuggestion } | "new" | null {
+  const total = suggestions.length + catalog.length;
+  if (!Number.isInteger(index) || index < 0 || index > total) return null;
+  if (index < suggestions.length) return suggestions[index];
+  if (index < total) return { catalog: catalog[index - suggestions.length] };
+  return allowNew ? "new" : null;
+}
+
+/** 名簿の候補の2行目(町丁目・竣工年・階数・戸数。無い値は省く)。 */
+export function catalogSuggestionLine(s: CatalogSuggestion): string {
+  return [
+    s.area || "住所不明",
+    s.builtYear !== null ? `${s.builtYear}年竣工` : null,
+    s.totalFloors !== null ? `${s.totalFloors}階建` : null,
+    s.totalUnits !== null ? `${s.totalUnits}戸` : null,
+  ].filter(Boolean).join("・");
 }
 /** 日本語変換中のキー(Enter は変換の確定)は候補の操作として扱わない。 */
 export function shouldHandleListKey(isComposing: boolean): boolean {

@@ -98,8 +98,8 @@ describe("partial の配線(走査)", () => {
   );
   it("★応答の complete=false を partial として持ち、Enter は allowNew を渡して選ぶ", () => {
     expect(src).toContain("complete: body.complete !== false");
-    expect(src).toContain("pickAtIndex(activeIndex, suggestions, allowNew)");
-    expect(src).toContain("suggestions.length + (allowNew ? 1 : 0)");
+    expect(src).toContain("pickAtIndex(activeIndex, suggestions, allowNew, catalog)");
+    expect(src).toContain("suggestions.length + catalog.length + (allowNew ? 1 : 0)");
   });
 });
 
@@ -125,7 +125,7 @@ describe("partial の配線(走査)", () => {
   );
   it("★応答の complete=false を partial として持ち、Enter は allowNew を渡して選ぶ", () => {
     expect(src).toContain("complete: body.complete !== false");
-    expect(src).toContain("pickAtIndex(activeIndex, suggestions, allowNew)");
-    expect(src).toContain("suggestions.length + (allowNew ? 1 : 0)");
+    expect(src).toContain("pickAtIndex(activeIndex, suggestions, allowNew, catalog)");
+    expect(src).toContain("suggestions.length + catalog.length + (allowNew ? 1 : 0)");
   });
 });

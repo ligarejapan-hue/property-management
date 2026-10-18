@@ -26,19 +26,23 @@ vi.mock("@/lib/api-helpers", async () => {
   };
 });
 vi.mock("@/lib/permissions", () => ({ hasPermission: () => allowed }));
-vi.mock("@/lib/prisma", () => ({ default: { building: { findMany: vi.fn() } } }));
+vi.mock("@/lib/prisma", () => ({ default: { building: { findMany: vi.fn() }, mansionCatalog: { findMany: vi.fn() } } }));
 
 import prisma from "@/lib/prisma";
 import { NextRequest } from "next/server";
 import { GET } from "../route";
+import { buildingNameKey as buildingNameKeyForTest } from "@/lib/building-identity";
 
 const findMany = (prisma as unknown as { building: { findMany: Mock } }).building.findMany;
+const catalogFindMany = (prisma as unknown as { mansionCatalog: { findMany: Mock } }).mansionCatalog.findMany;
 const call = (qs: string) => GET(new NextRequest(`http://localhost/api/buildings/suggest?${qs}`));
 
 beforeEach(() => {
   allowed = true;
   findMany.mockReset();
   findMany.mockResolvedValue([]);
+  catalogFindMany.mockReset();
+  catalogFindMany.mockResolvedValue([]);
 });
 
 describe("GET /api/buildings/suggest", () => {
@@ -223,5 +227,29 @@ describe("GET /api/buildings/suggest 古い棟を全部読む(@codex R5)", () =>
     });
     const body = await (await call("name=" + encodeURIComponent("パーク第１"))).json();
     expect(body.complete).toBe(false);
+  });
+});
+
+describe("GET /api/buildings/suggest の名簿の段(設計 2026-10-18 §6.2)", () => {
+  const cat = (id: string, name: string, address: string) => ({
+    id, name, address, nameKey: buildingNameKeyForTest(name), areaKey: null, builtYear: 2000, totalFloors: 5, totalUnits: 20,
+  });
+  it("棟になっていない名簿だけを読み、住所は町丁目までで返す", async () => {
+    catalogFindMany.mockImplementation(async () => [cat("c1", "プラウド青砥", "東京都葛飾区青戸4丁目2番14号")]);
+    const res = await call("name=" + encodeURIComponent("プラウド青砥") + "&area=" + encodeURIComponent("東京都葛飾区青戸4丁目"));
+    const body = await res.json();
+    expect(body.catalog).toHaveLength(1);
+    expect(body.catalog[0]).toMatchObject({ catalogId: "c1", area: "東京都葛飾区青戸4丁目", sameName: true, sameArea: true });
+    expect(JSON.stringify(body.catalog)).not.toContain("2番");
+    for (const [args] of catalogFindMany.mock.calls) expect((args as { where: { building: unknown } }).where.building).toEqual({ is: null });
+  });
+  it("★部分一致が50件で埋まっても、同じ名前+同じ丁目の名簿は別の枠で読む", async () => {
+    catalogFindMany.mockImplementation(async ({ where }: { where: Record<string, unknown> }) => {
+      if ("OR" in where) return Array.from({ length: 50 }, (_, i) => cat(`p${i}`, `プラウド青砥${i}`, "東京都葛飾区青戸1丁目1番"));
+      if ("areaKey" in where) return [cat("same", "プラウド青砥", "東京都葛飾区青戸4丁目2番")];
+      return [];
+    });
+    const res = await call("name=" + encodeURIComponent("プラウド青砥") + "&area=" + encodeURIComponent("東京都葛飾区青戸4丁目"));
+    expect((await res.json()).catalog[0].catalogId).toBe("same");
   });
 });
