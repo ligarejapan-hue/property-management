@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useEffect, useCallback, useMemo } from "react";
+import { useState, useEffect, useCallback, useMemo, useRef } from "react";
 import { PageHeader } from "@/components/ui/page-header";
 import { SearchField } from "@/components/ui/search-field";
 import Link from "next/link";
@@ -15,6 +15,7 @@ import { fetchBuildings, createBuilding, adoptCatalogBuildingApi } from "@/lib/a
 import { CatalogSearchResults, type CatalogSearchItem } from "@/components/buildings/catalog-search-results";
 import { useScreenProtection } from "@/components/screen-protection/screen-protection-provider";
 import { hasPermission } from "@/lib/permissions";
+import { isLatestRequest } from "@/lib/building-link/combobox-model";
 import { debounce } from "@/lib/debounce";
 import { AddressLookupControls } from "@/components/address/address-lookup-controls";
 
@@ -57,17 +58,23 @@ export default function BuildingsPage() {
   // アンマウント時に保留中の確定を取り消す。
   useEffect(() => () => commitKeyword.cancel(), [commitKeyword]);
 
+  // 問い合わせの番号。⚠[@codex] 遅れて返った前の検索の結果で名簿の段を上書きしない
+  //   (違う建物の「マンション棟に登録」が押せてしまう)。最新の番号のときだけ結果を入れる。
+  const loadSeqRef = useRef(0);
   const load = useCallback(async () => {
+    const seq = ++loadSeqRef.current;
     setLoading(true);
     try {
       const res = await fetchBuildings(keyword || undefined);
+      if (!isLatestRequest(seq, loadSeqRef.current)) return;
       setBuildings(res.data as BuildingItem[]);
       setCatalog(res.catalog ?? []);
       setAdoptError(null);
     } catch {
-      // ignore
+      // 一覧は前のまま。名簿の段は前の検索のものなので消す。
+      if (isLatestRequest(seq, loadSeqRef.current)) setCatalog([]);
     } finally {
-      setLoading(false);
+      if (isLatestRequest(seq, loadSeqRef.current)) setLoading(false);
     }
   }, [keyword]);
 
