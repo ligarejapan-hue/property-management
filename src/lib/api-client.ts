@@ -35,7 +35,7 @@ import type { AcquireResponse, HeartbeatResponse } from "./edit-lock/ui-state";
 // 棟の選び方・つないだ結果の型のみ(apply.ts は prisma を読むサーバー側のファイル=値は import しない)。
 import type { BuildingChoice } from "./building-link/resolve";
 import type { BuildingLinkOutcome } from "./building-link/apply";
-import type { CatalogSearchItem } from "@/components/buildings/catalog-search-results";
+import type { CatalogSearchItem } from "@/lib/mansion-catalog/search";
 
 export const USE_MOCK = process.env.NEXT_PUBLIC_USE_MOCK === "true";
 
