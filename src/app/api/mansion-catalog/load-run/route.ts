@@ -4,6 +4,7 @@ import { join } from "path";
 import { createInterface } from "readline";
 import { ApiError, handleApiError, apiResponse } from "@/lib/api-helpers";
 import { loadCatalogLines } from "@/lib/mansion-catalog/load";
+import { createPrismaLinkDeps, linkExistingBuildings } from "@/lib/mansion-catalog/link-existing";
 import { createPrismaCatalogStore } from "@/lib/mansion-catalog/store";
 
 /**
@@ -40,7 +41,8 @@ export async function POST(request: Request) {
     try {
       const files = readdirSync(dir).filter((f) => FILE_RE.test(f)).sort();
       const result = await loadCatalogLines(readLines(dir, files), createPrismaCatalogStore());
-      const linked = 0; // Task 6 で今ある棟をつなぐ
+      // 今ある棟のうち名簿に1件だけ一致するものをつなぐ(空いている欄だけ埋める・設計 §6.4)。
+      const linked = await linkExistingBuildings(createPrismaLinkDeps());
       console.log(
         `[mansion-catalog] files=${files.length} inserted=${result.inserted} updated=${result.updated} skipped=${result.skipped} duplicates=${result.duplicates} linked=${linked}`,
       );

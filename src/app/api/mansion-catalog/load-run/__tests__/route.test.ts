@@ -5,6 +5,7 @@ import { join } from "node:path";
 
 const upsertMany = vi.fn(async (rows: unknown[]) => ({ inserted: rows.length, updated: 0 }));
 vi.mock("@/lib/mansion-catalog/store", () => ({ createPrismaCatalogStore: () => ({ upsertMany }) }));
+vi.mock("@/lib/mansion-catalog/link-existing", () => ({ linkExistingBuildings: async () => 0, createPrismaLinkDeps: () => ({}) }));
 vi.mock("@/lib/api-helpers", async () => {
   class MockApiError extends Error {
     constructor(public status: number, message: string, public code = "ERROR") { super(message); }
@@ -59,7 +60,7 @@ describe("POST /api/mansion-catalog/load-run", () => {
     writeFileSync(join(dir, "other.jsonl"), LINE + "\n");
     const res = await POST(req("s3cret"));
     expect(res.status).toBe(200);
-    expect(await res.json()).toMatchObject({ files: 1, inserted: 1, updated: 0, skipped: 1, duplicates: 0 });
+    expect(await res.json()).toMatchObject({ files: 1, inserted: 1, updated: 0, skipped: 1, duplicates: 0, linked: 0 });
   });
   it("proxy の公開リストに載っている(無いと 307 でログインへ飛ばされる)", () => {
     const src = readFileSync(join(process.cwd(), "src/proxy.ts"), "utf8");
