@@ -6,6 +6,7 @@
  */
 import type { Prisma } from "@/generated/prisma";
 import { buildingLinkLockKey } from "@/lib/building-link/resolve";
+import { BUILDING_TRACKED_FIELDS, recordChangesInTx } from "@/lib/change-log";
 
 export interface CatalogEntry {
   id: string; name: string; address: string;
@@ -43,6 +44,7 @@ export type AdoptTx = Pick<Prisma.TransactionClient, "$executeRaw"> & {
   mansionCatalog: Pick<Prisma.TransactionClient["mansionCatalog"], "findUnique">;
   building: Pick<Prisma.TransactionClient["building"], "findFirst" | "findMany" | "create" | "update">;
   auditLog: Pick<Prisma.TransactionClient["auditLog"], "create">;
+  changeLog: Pick<Prisma.TransactionClient["changeLog"], "createMany">;
 };
 export type AdoptResult =
   | { kind: "existing" | "linked" | "created"; building: { id: string; name: string } }
@@ -71,17 +73,38 @@ export async function adoptCatalogBuilding(
   const sameKey = c.areaKey !== null && c.nameKey !== null
     ? await tx.building.findMany({ where: { areaKey: c.areaKey, nameKey: c.nameKey }, select: BUILDING_FILL_SELECT, take: 3 })
     : [];
-  const audit = (buildingId: string, kind: "linked" | "created") =>
+  // 監査には id と埋めた欄の名前だけ(値・住所・建物名は書かない)。
+  const audit = (buildingId: string, kind: "linked" | "created", filled?: string[]) =>
     tx.auditLog.create({
-      data: { userId, action: "building.catalog_adopt", targetTable: "buildings", targetId: buildingId, detail: { catalogId: c.id, kind } },
+      data: {
+        userId, action: "building.catalog_adopt", targetTable: "buildings", targetId: buildingId,
+        detail: { catalogId: c.id, kind, ...(filled ? { filled } : {}) },
+      },
     });
   if (sameKey.length === 1 && sameKey[0].catalogId === null) {
+    const before = { ...sameKey[0] }; // 履歴の「前の値」(更新の前に写しておく)
+    const fill = fillEmptyFromCatalog(before, c);
+    // ⚠版番号を進める(棟の編集画面を開いたままの人が古い版で保存すると 409 になる=埋めた値を
+    //   空欄で上書きして消さない)。⚠この UPDATE は catalog_id(一意索引つき)を変えるので棟の行に
+    //   FOR UPDATE 相当のロックがかかる。ここの後は何も待たないので、待ちの輪は作らない。
     const b = await tx.building.update({
       where: { id: sameKey[0].id },
-      data: { catalogId: c.id, ...fillEmptyFromCatalog(sameKey[0], c) },
+      data: { catalogId: c.id, ...fill, version: { increment: 1 } },
       select: { id: true, name: true },
     });
-    await audit(b.id, "linked");
+    // 棟の変更履歴(人が押したときだけ。読み込みの後処理は人がいないので監査の filled で残す)。
+    if (userId !== null) {
+      await recordChangesInTx(tx, {
+        targetTable: "buildings",
+        targetId: b.id,
+        changedBy: userId,
+        oldValues: before,
+        newValues: fill,
+        trackedFields: BUILDING_TRACKED_FIELDS,
+        source: "api",
+      });
+    }
+    await audit(b.id, "linked", Object.keys(fill));
     return { kind: "linked", building: b };
   }
   if (sameKey.length > 0) return { kind: "ambiguous" };

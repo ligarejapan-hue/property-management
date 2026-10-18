@@ -12,7 +12,9 @@ type B = { id: string; name: string; address: string; nameKey: string | null; ar
 function fakeTx(buildings: B[], catalog: CatalogEntry[] = [C], lock?: (k: string) => Promise<void>) {
   let seq = 0;
   const audits: unknown[] = [];
+  const changes: unknown[] = [];
   const tx = {
+    changeLog: { createMany: vi.fn(async ({ data }: { data: unknown[] }) => { changes.push(...data); return { count: data.length }; }) },
     $executeRaw: vi.fn(async (_s: TemplateStringsArray, ...v: unknown[]) => { if (lock) await lock(String(v[0])); return 0; }),
     mansionCatalog: { findUnique: vi.fn(async ({ where }: { where: { id: string } }) => catalog.find((c) => c.id === where.id) ?? null) },
     building: {
@@ -27,13 +29,15 @@ function fakeTx(buildings: B[], catalog: CatalogEntry[] = [C], lock?: (k: string
       }),
       update: vi.fn(async ({ where, data }: { where: { id: string }; data: Partial<B> }) => {
         const b = buildings.find((x) => x.id === where.id)!;
-        Object.assign(b, data);
+        const { version, ...rest } = data as Partial<B> & { version?: { increment: number } };
+        Object.assign(b, rest);
+        if (version) b.version = ((b.version as number | undefined) ?? 1) + version.increment;
         return { id: b.id, name: b.name };
       }),
     },
     auditLog: { create: vi.fn(async ({ data }: { data: unknown }) => { audits.push(data); return { id: "a" }; }) },
   };
-  return { tx: tx as unknown as AdoptTx, audits, buildings };
+  return { tx: tx as unknown as AdoptTx, audits, buildings, changes };
 }
 
 describe("fillEmptyFromCatalog", () => {
@@ -71,6 +75,21 @@ describe("adoptCatalogBuilding", () => {
     const f = fakeTx([{ id: "b1", name: "プラウド青砥", address: "x", nameKey: C.nameKey, areaKey: C.areaKey, catalogId: null, createdBy: "u0", builtYear: 2025, totalFloors: null }]);
     expect(await adoptCatalogBuilding(f.tx, "c1", "u1")).toMatchObject({ kind: "linked", building: { id: "b1" } });
     expect(f.buildings[0]).toMatchObject({ catalogId: "c1", builtYear: 2025, totalFloors: 14 });
+  });
+  it("★つないで埋めたら版番号を進め(開いたままの編集画面で消されない)、埋めた欄を履歴と監査に残す", async () => {
+    const f = fakeTx([{ id: "b1", name: "プラウド青砥", address: "x", nameKey: C.nameKey, areaKey: C.areaKey, catalogId: null, createdBy: "u0", version: 3, builtYear: 2025, totalFloors: null }]);
+    await adoptCatalogBuilding(f.tx, "c1", "u1");
+    expect(f.buildings[0].version).toBe(4);
+    expect(f.changes).toContainEqual(expect.objectContaining({ targetTable: "buildings", targetId: "b1", fieldName: "totalFloors", oldValue: null, newValue: "14", changedBy: "u1" }));
+    expect(f.changes).not.toContainEqual(expect.objectContaining({ fieldName: "builtYear" }));
+    expect(f.audits[0]).toMatchObject({ detail: { catalogId: "c1", kind: "linked", filled: expect.arrayContaining(["totalFloors", "totalUnits"]) } });
+  });
+  it("★人のいない後処理(userId なし)でも版番号を進め、監査に埋めた欄を残す(履歴は人が要るので書かない)", async () => {
+    const f = fakeTx([{ id: "b1", name: "プラウド青砥", address: "x", nameKey: C.nameKey, areaKey: C.areaKey, catalogId: null, createdBy: "u0", version: 1 }]);
+    expect(await adoptCatalogBuilding(f.tx, "c1", null, { create: false })).toMatchObject({ kind: "linked" });
+    expect(f.buildings[0].version).toBe(2);
+    expect(f.changes).toEqual([]);
+    expect(f.audits[0]).toMatchObject({ userId: null, detail: { kind: "linked" } });
   });
   it("★同じ鍵の棟が2つ・または別の名簿の建物につながった棟なら ambiguous(どれにも付けない・作らない)", async () => {
     const two = fakeTx([

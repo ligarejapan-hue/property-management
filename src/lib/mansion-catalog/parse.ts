@@ -30,10 +30,26 @@ export interface CatalogRow {
 }
 
 const nfkc = (s: string) => s.normalize("NFKC");
+/** PostgreSQL の text・jsonb は NUL を受け付けない(1文字でその500件ごと落ちる)。 */
+const NUL_RE = /\u0000/g;
+/**
+ * 数として受け付ける範囲。外れた値は null(int の範囲を超えるとその500件ごと落ちる・
+ * ありえない値を棟に入れない)。
+ */
+const RANGE = { year: [1900, 2100], floors: [1, 100], basement: [1, 20], units: [1, 10000] } as const;
+const inRange = (n: number, [lo, hi]: readonly [number, number]) => (n >= lo && n <= hi ? n : null);
+
+/** raw に残す値から NUL を消す(文字列は中まで・配列とオブジェクトはたどる)。 */
+function stripNul(v: unknown): unknown {
+  if (typeof v === "string") return v.replace(NUL_RE, "");
+  if (Array.isArray(v)) return v.map(stripNul);
+  if (v && typeof v === "object") return Object.fromEntries(Object.entries(v).map(([k, x]) => [k.replace(NUL_RE, ""), stripNul(x)]));
+  return v;
+}
 
 export function cleanText(s: unknown): string | null {
   if (typeof s !== "string") return null;
-  const t = s.replace(/\s+/g, " ").trim();
+  const t = s.replace(NUL_RE, "").replace(/\s+/g, " ").trim();
   return t === "" || t === "不明" ? null : t;
 }
 
@@ -41,8 +57,10 @@ export function parseCompleted(s: string | null): { year: number; month: number 
   if (!s) return null;
   const m = nfkc(s).match(/(\d{4})年(?:\s*(\d{1,2})月)?/);
   if (!m) return null;
+  const year = inRange(Number(m[1]), RANGE.year);
+  if (year === null) return null;
   const month = m[2] ? Number(m[2]) : null;
-  return { year: Number(m[1]), month: month !== null && month >= 1 && month <= 12 ? month : null };
+  return { year, month: month !== null && month >= 1 && month <= 12 ? month : null };
 }
 
 export function parseFloors(s: string | null): { above: number | null; below: number | null } {
@@ -50,14 +68,16 @@ export function parseFloors(s: string | null): { above: number | null; below: nu
   const t = nfkc(s);
   const above = t.match(/地上\s*(\d+)\s*階/);
   const below = t.match(/地下\s*(\d+)\s*階/);
-  const n = (m: RegExpMatchArray | null) => (m && Number(m[1]) > 0 ? Number(m[1]) : null);
-  return { above: n(above), below: n(below) };
+  return {
+    above: above ? inRange(Number(above[1]), RANGE.floors) : null,
+    below: below ? inRange(Number(below[1]), RANGE.basement) : null,
+  };
 }
 
 export function parseUnits(s: string | null): number | null {
   if (!s) return null;
   const m = nfkc(s).replace(/,/g, "").match(/(\d+)\s*戸/);
-  return m && Number(m[1]) > 0 ? Number(m[1]) : null;
+  return m ? inRange(Number(m[1]), RANGE.units) : null;
 }
 
 export function toCatalogRow(line: string): CatalogRow | null {
@@ -65,7 +85,7 @@ export function toCatalogRow(line: string): CatalogRow | null {
   try {
     const v = JSON.parse(line);
     if (!v || typeof v !== "object" || Array.isArray(v)) return null;
-    o = v as Record<string, unknown>;
+    o = stripNul(v) as Record<string, unknown>;
   } catch {
     return null;
   }

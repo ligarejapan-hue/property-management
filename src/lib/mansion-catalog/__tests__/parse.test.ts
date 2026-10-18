@@ -69,3 +69,20 @@ describe("toCatalogRow", () => {
     expect(r.totalUnits).toBe(155);
   });
 });
+
+describe("★DB に入らない値で読み込み全体を止めない", () => {
+  it("ありえない大きさの数は null(int の範囲を超えるとその500件ごと落ちる)", () => {
+    expect(parseUnits("2147483648戸")).toBeNull();
+    expect(parseUnits("10001戸")).toBeNull();
+    expect(parseFloors("地上999階建 地下99階")).toEqual({ above: null, below: null });
+    expect(parseCompleted("1800年1月")).toBeNull();
+    expect(parseCompleted("2200年1月")).toBeNull();
+  });
+  it("NUL 文字は消す(PostgreSQL の text・jsonb に入らない)", () => {
+    expect(cleanText("野村\u0000不動産")).toBe("野村不動産");
+    const r = toCatalogRow(JSON.stringify({ ...JSON.parse(LINE), developer: "a\u0000b", extra: "x\u0000y" }))!;
+    expect(r.developer).toBe("ab");
+    // JSON.stringify は NUL を「\u0000」の6文字に書く。それが残っていない=raw からも消えた。
+    expect(JSON.stringify(r.raw)).not.toContain("\\u0000");
+  });
+});
