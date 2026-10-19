@@ -27,6 +27,7 @@ import { computeSaleDmGuideStep } from "@/lib/sale-dm-letter/step-guide";
 import { isScenarioCampaignView, scenarioCampaignNotices } from "@/lib/sale-dm-letter/scenario-campaign-ui";
 import { useEditScreenToken } from "@/hooks/use-edit-screen-token";
 import { BackLink } from "@/components/ui/back-link";
+import { Button } from "@/components/ui/button";
 
 export default function SaleDmWorkspacePage() {
   const params = useParams<{ campaignId: string }>();
@@ -233,7 +234,7 @@ export default function SaleDmWorkspacePage() {
     return (
       <div className="rounded-lg border border-red-200 bg-red-50 p-4 text-sm text-red-700 dark:border-red-800 dark:bg-red-950/40 dark:text-red-300">
         {error ?? "キャンペーンが見つかりません"}
-        <button onClick={load} className="ml-2 underline hover:no-underline">再試行</button>
+        <Button variant="ghost" size="sm" onClick={load} className="ml-2 underline hover:no-underline text-red-700 dark:text-red-300">再試行</Button>
       </div>
     );
   }
@@ -295,54 +296,50 @@ export default function SaleDmWorkspacePage() {
       {/* 送付フロー: 確定(draft→confirmed)→ 印刷/CSV → 送付済み(confirmed→sent・反響入力解禁) */}
       <div className="flex flex-wrap items-center gap-2">
         {draftIds.length > 0 && (
-          <button
-            type="button"
+          <Button
+            variant="primary"
             onClick={() => runAction(() => confirmSaleDmDrafts(draftIds))}
             disabled={actionBusy}
             data-guide="confirm"
-            className="inline-flex items-center gap-1.5 rounded-md bg-indigo-600 px-3 py-1.5 text-sm font-medium text-white hover:bg-indigo-700 disabled:opacity-50"
             title="下書きを確定する(印刷対象は確定済みのみ)"
           >
             <CheckCircle2 className="h-4 w-4" />
             確定({draftIds.length})
-          </button>
+          </Button>
         )}
-        <button
-          type="button"
+        <Button
+          variant="secondary"
           onClick={() => {
             if (confirmedSig !== "") setPrintClickedFor(confirmedSig);
             window.open(saleDmPrintUrl(campaignId), "_blank", "noopener");
           }}
           disabled={actionBusy}
           data-guide="print"
-          className="inline-flex items-center gap-1.5 rounded-md border border-gray-300 bg-white px-3 py-1.5 text-sm font-medium text-gray-700 hover:bg-gray-50 disabled:opacity-50"
           title="確定済みの手紙を別タブで開いて印刷"
         >
           <Printer className="h-4 w-4" />
           印刷
-        </button>
-        <button
-          type="button"
+        </Button>
+        <Button
+          variant="secondary"
           onClick={() => window.open(saleDmExportUrl(campaignId), "_blank", "noopener")}
           disabled={actionBusy}
-          className="inline-flex items-center gap-1.5 rounded-md border border-gray-300 bg-white px-3 py-1.5 text-sm font-medium text-gray-700 hover:bg-gray-50 disabled:opacity-50"
           title="差込用 CSV をダウンロード"
         >
           <Download className="h-4 w-4" />
           CSV出力
-        </button>
+        </Button>
         {confirmedIds.length > 0 && (
-          <button
-            type="button"
+          <Button
+            variant="success"
             onClick={() => runAction(() => markConfirmedSentBulk(confirmedIds))}
             disabled={actionBusy}
             data-guide="sent"
-            className="inline-flex items-center gap-1.5 rounded-md border border-green-300 bg-white px-3 py-1.5 text-sm font-medium text-green-700 hover:bg-green-50 disabled:opacity-50"
             title="確定済みを送付済みにする(配達結果・反響の入力が解禁)"
           >
             <Send className="h-4 w-4" />
             確定分を送付済みに({confirmedIds.length})
-          </button>
+          </Button>
         )}
         {(actionBusy || loading) && <Loader2 className="h-4 w-4 animate-spin text-indigo-500" />}
       </div>
