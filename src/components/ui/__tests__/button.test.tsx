@@ -70,6 +70,14 @@ describe("Button", () => {
     expect(out).not.toContain("bg-indigo-600");
   });
 
+  it("success = 緑(完了・成功の意味の操作。色の決まりで状態色は残す・第3回)", () => {
+    const out = html({ variant: "success" });
+    expect(out).toContain("bg-green-600");
+    expect(out).toContain("hover:bg-green-700");
+    expect(out).toContain("text-white");
+    expect(out).not.toContain("bg-indigo-600");
+  });
+
   it("lg = スマホの主操作(高さ44px以上)", () => {
     const out = html({ size: "lg" });
     expect(out).toContain("min-h-11");
