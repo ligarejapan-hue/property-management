@@ -1217,18 +1217,21 @@ function BasicTab({
                 {property.buildingName}
               </Link>
             ) : (
-              <Button variant="ghost"
+              // data-ui=raw: 値の欄の下線リンク(隣の Link と同じ見た目・余白を足すと値がずれる)
+              <button
+                type="button"
+                data-ui="raw"
                 data-testid="building-name-connect"
                 onClick={() => {
                   setLinkError(null);
                   setLinkOpen(true);
                 }}
-                className="underline text-blue-600 hover:text-blue-800 dark:text-blue-400 dark:hover:text-blue-300"
+                className="inline-flex items-center gap-1 font-medium text-blue-600 underline hover:text-blue-800 dark:text-blue-400 dark:hover:text-blue-300"
                 title="棟（マンション1棟）につないで、棟の画面を開きます"
               >
                 <Building2 className="h-4 w-4" />
                 {property.buildingName}
-              </Button>
+              </button>
             )}
           </dd>
           {nameMode === "connect" && (
@@ -2809,12 +2812,15 @@ function RegistryCountField({
       <dd className="flex flex-wrap items-center gap-x-3 gap-y-1 text-sm text-gray-900 dark:text-gray-100">
         <span>{total > 0 ? parts.join(" ／ ") : "謄本 0件"}</span>
         {total > 0 && (
-          <Button variant="ghost"
+          // data-ui=raw: 値の欄の下線リンク(余白を足すと行が高くなる)
+          <button
+            type="button"
+            data-ui="raw"
             onClick={onOpenAttachments}
-            className="underline underline-offset-2 text-blue-700 hover:text-blue-900 dark:text-blue-300 dark:hover:text-blue-200"
+            className="text-blue-700 underline underline-offset-2 hover:text-blue-900 dark:text-blue-300 dark:hover:text-blue-200"
           >
             添付を見る
-          </Button>
+          </button>
         )}
       </dd>
     </div>

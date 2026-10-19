@@ -163,7 +163,7 @@ export default function DmBatchConfirmModal({
                   onClick={() => handleConfirm(b.id)}
                   disabled={!b.downloadedAt || confirmingId !== null}
                   loading={confirmingId === b.id}
-                  loadingLabel="確定"
+                  loadingLabel=""
                   title={
                     !b.downloadedAt
                       ? "先にCSVをダウンロードしてください"

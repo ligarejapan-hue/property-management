@@ -86,4 +86,37 @@ describe("物件まわりの手書きボタン(UIの統一 第3回)", () => {
       });
     expect(offenders, "共通 Button(@/components/ui/button)へ置き換える").toEqual([]);
   });
+
+  it('data-ui="raw" には直前2行以内に理由のコメント(data-ui=raw: …)がある', () => {
+    const missing = files.flatMap((f) => {
+      const lines = readFileSync(f, "utf8").replace(/\r\n/g, "\n").split("\n");
+      return lines.flatMap((l, i) =>
+        l.includes('data-ui="raw"') &&
+        !lines.slice(Math.max(0, i - 3), i + 1).some((p) => /data-ui=raw:/.test(p))
+          ? [`${rel(f)}:${i + 1}`]
+          : [],
+      );
+    });
+    expect(missing).toEqual([]);
+  });
+
+  it("★文中・値の欄の下線リンクは Button にしない(余白で文がずれる・提出前レビュー指摘)", () => {
+    const cases: [string, string][] = [
+      // marker はコメントに出てこない、そのボタンだけの属性にする
+      ["src/components/properties/photo-tab-building-hint.tsx", "onClick={onEditProperty}"],
+      ["src/app/(dashboard)/properties/[id]/page.tsx", 'data-testid="building-name-connect"'],
+      ["src/app/(dashboard)/properties/[id]/page.tsx", "onClick={onOpenAttachments}"],
+    ];
+    for (const [file, marker] of cases) {
+      const src = readFileSync(join(process.cwd(), file), "utf8").replace(/\r\n/g, "\n");
+      const at = src.indexOf(marker);
+      expect(at, `${file} に ${marker} がある`).toBeGreaterThan(-1);
+      // marker を囲む直近の開きタグ(<button か <Button)
+      const open = Math.max(src.lastIndexOf("<button", at), src.lastIndexOf("<Button", at));
+      expect(src.startsWith("<button", open), `${file} の ${marker} は手書きの <button>`).toBe(true);
+      const tag = openingTags(src.slice(open), "button")[0] ?? "";
+      expect(tag, `${file} の ${marker}`).toMatch(/data-ui="raw"/);
+      expect(tag).toMatch(/underline/);
+    }
+  });
 });
