@@ -82,7 +82,7 @@ describe("Button", () => {
     expect(out).toContain("処理中");
     expect(out).toContain("disabled");
     expect(out).toContain('aria-busy="true"');
-    expect(out).toMatch(/<span class="invisible"[^>]*>保存する<\/span>/);
+    expect(out).toMatch(/<span class="[^"]*invisible[^"]*"[^>]*>保存する<\/span>/);
   });
 
   it("loadingLabel を差し替えられる", () => {
@@ -110,5 +110,17 @@ describe("Button", () => {
     const out = html({ disabled: true, loading: false }, "保存する");
     expect(out).toMatch(/<button[^>]*disabled=""/);
     expect(out).not.toContain("aria-busy");
+  });
+
+  it("★処理中/完了は同じマスに重ねる(幅=元の文言と新しい文言の広いほう・アイコン+文字でも縮まない・提出前レビュー指摘)", () => {
+    const out = html({ done: true }, "保存");
+    // 2枚を同じグリッドのマスに重ねる(absolute では長い文言がはみ出す)
+    expect(out).toMatch(/<span class="grid">/);
+    expect((out.match(/\[grid-area:1\/1\]/g) ?? []).length).toBe(2);
+    expect(out).not.toContain("absolute inset-0");
+    // 隠した元の文言も、ふだんと同じ並べ方(アイコンと文字の間隔)
+    expect(out).toMatch(/<span class="[^"]*invisible[^"]*inline-flex items-center justify-center gap-1\.5/);
+    // 文言は折り返さない
+    expect(out).toContain("whitespace-nowrap");
   });
 });

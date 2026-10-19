@@ -16,7 +16,7 @@
  * UIの統一 第2回(2026-10-19・設計書 docs/superpowers/specs/2026-10-19-ui-unify-motion-design.md):
  *   - ghost=枠なし(一覧の行内操作) / lg=スマホの主操作(高さ44px)
  *   - loading=くるくる+文言・自動で押せない(二度押し防止) / done=✓+文言(戻すのは呼び出し側)
- *   - 処理中・完了の間も元の文言を invisible で残し、幅を変えない(隣のボタンが動かない)
+ *   - 処理中・完了の間も元の文言を invisible で同じマスに重ねて残し、幅を縮めない(隣のボタンが動かない)
  */
 import { forwardRef, type ButtonHTMLAttributes } from "react";
 import { Check, Loader2 } from "lucide-react";
@@ -87,12 +87,17 @@ export const Button = forwardRef<HTMLButtonElement, ButtonProps>(
         {state === "idle" ? (
           children
         ) : (
-          <>
-            {/* 元の文言は幅を保つためだけに残す(処理中/完了の切替で隣のボタンが動かない)。 */}
-            <span className="invisible" aria-hidden="true">
+          // 元の文言と処理中/完了の文言を、同じグリッドのマスに重ねる。幅は2枚の広いほうになり、
+          // 元の文言はふだんと同じ並べ方(アイコンと文字の間隔)で隠れて残る=アイコン付きでも縮まない。
+          // ⚠absolute で重ねると、元より長い文言(「完了しました」)がボタンからはみ出す(提出前レビュー指摘)。
+          <span className="grid">
+            <span
+              className="invisible inline-flex items-center justify-center gap-1.5 whitespace-nowrap [grid-area:1/1]"
+              aria-hidden="true"
+            >
               {children}
             </span>
-            <span className="absolute inset-0 inline-flex items-center justify-center gap-1.5">
+            <span className="inline-flex items-center justify-center gap-1.5 whitespace-nowrap [grid-area:1/1]">
               {state === "loading" ? (
                 <Loader2 className="h-4 w-4 animate-spin" aria-hidden="true" />
               ) : (
@@ -100,7 +105,7 @@ export const Button = forwardRef<HTMLButtonElement, ButtonProps>(
               )}
               {state === "loading" ? loadingLabel : doneLabel}
             </span>
-          </>
+          </span>
         )}
       </button>
     );
