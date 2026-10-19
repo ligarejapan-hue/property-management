@@ -41,8 +41,9 @@ const SERIF = "'Hiragino Mincho ProN','Yu Mincho','YuMincho','Noto Serif JP','BI
 const CSS = [
   ":root{color-scheme:light}",
   "*{box-sizing:border-box}",
-  "body{margin:0;background:#f6f1e7;color:#2b2a26;font-family:-apple-system,BlinkMacSystemFont,'Hiragino Kaku Gothic ProN','Yu Gothic UI','Noto Sans JP',sans-serif;font-size:16px;line-height:1.9;-webkit-text-size-adjust:100%}",
-  "main{margin:0 auto;padding:0 0 96px}",
+  "body{margin:0;background:#f6f1e7;color:#2b2a26;font-family:-apple-system,BlinkMacSystemFont,'Hiragino Kaku Gothic ProN','Yu Gothic UI','Noto Sans JP',sans-serif;font-size:16px;line-height:1.75;-webkit-text-size-adjust:100%}",
+  // 下の余白=固定ボタン(約93px)+ホームバーのある iPhone の安全域(内部レビュー 2026-10-19)
+  "main{margin:0 auto;padding:0 0 calc(110px + env(safe-area-inset-bottom))}",
   `h1,h2,h3,.dl-when,.flow li::before,.faq .q,.faq .a b,.flow-total{font-family:${SERIF}}`,
   "h1{font-size:25px;line-height:1.5;margin:0 0 12px;letter-spacing:.02em}",
   "h2{font-size:21px;line-height:1.55;margin:0 0 12px;letter-spacing:.02em}",
@@ -52,7 +53,7 @@ const CSS = [
   "a{color:#0a5246}",
   ".band{background:#f7ebdd;color:#a85f1b;font-weight:700;text-align:center;padding:8px 12px;font-size:14px}",
   // ── 上部(ロゴ・電話) ──
-  ".top{background:#fffdf8;border-bottom:1px solid #ddd3bf}",
+  ".top{background:#fffdf8;border-bottom:1px solid #ddd3bf;border-top:3px solid #0e6b5c}",
   ".top-in{max-width:760px;margin:0 auto;padding:10px 16px;display:flex;align-items:center;justify-content:space-between;gap:12px}",
   ".brand-link{display:block;line-height:0}",
   ".brand img{display:block;width:150px;max-width:40vw;height:auto}",
@@ -61,17 +62,19 @@ const CSS = [
   ".top-tel a{display:block;font-size:19px;font-weight:700;color:#0e6b5c;text-decoration:none;letter-spacing:.04em;font-variant-numeric:tabular-nums}",
   // ── ヒーロー(画像は元の縦横比のまま=height:auto・切り落としなし。発注者ルール 2026-10-06) ──
   ".hero{display:block;width:100%;height:auto;background:#ece4d3}",
-  ".wrap{padding:20px 16px}",
-  ".eyebrow{display:inline-block;font-size:13px;font-weight:700;color:#0e6b5c;background:#e3efe9;border-radius:999px;padding:2px 12px;margin:0 0 10px}",
+  // スマホでは絵を少し内側に置いて角を付ける(2026-10-19 見本)。幅を狭めるだけで比率はそのまま。
+  "main>.hero{width:calc(100% - 24px);margin:12px auto 0;border-radius:14px}",
+  ".wrap{padding:16px 16px 20px}",
+  ".eyebrow{display:inline-block;font-size:13px;font-weight:700;color:#0e6b5c;border:1px solid #0e6b5c;border-radius:999px;padding:1px 10px;margin:0 0 10px}",
   ".lead{color:#5d594f;font-size:16px}",
   ".promises{list-style:none;margin:14px 0 18px;padding:0;display:flex;flex-wrap:wrap;gap:8px}",
   ".promises li{background:#fffdf8;border:1px solid #ddd3bf;border-radius:999px;padding:4px 12px 4px 30px;font-size:14px;font-weight:700;position:relative}",
   ".promises li::before{content:\"\";position:absolute;left:11px;top:50%;width:10px;height:6px;margin-top:-5px;border-left:2.5px solid #0e6b5c;border-bottom:2.5px solid #0e6b5c;transform:rotate(-45deg)}",
   ".cta-row{display:grid;gap:10px;margin:8px 0}",
-  ".cta{display:block;background:#0e6b5c;color:#fff;text-align:center;text-decoration:none;border-radius:10px;padding:14px;font-size:17px;font-weight:700;min-height:44px}",
-  ".cta.secondary{background:#fffdf8;color:#0a5246;border:2px solid #0e6b5c}",
+  ".cta{display:block;background:#0e6b5c;color:#fff;text-align:center;text-decoration:none;border-radius:12px;padding:14px;font-size:17px;font-weight:700;min-height:44px;box-shadow:0 6px 16px rgba(14,107,92,.22);letter-spacing:.02em}",
+  ".cta.secondary{background:#fffdf8;color:#0a5246;border:2px solid #0e6b5c;box-shadow:none}",
   // ── 本文の節 ──
-  "section{margin:36px 0}",
+  "section{margin:30px 0}",
   ".media{margin:10px 0 14px}",
   ".media img,img.fig{display:block;width:100%;height:auto;border-radius:12px;background:#ece4d3}",
   ".figure{margin:12px 0}",
@@ -79,20 +82,29 @@ const CSS = [
   ".dots{margin:0 0 12px;padding-left:1.3em}",
   ".dots li{margin:2px 0}",
   ".small-note{font-size:13px;color:#5d594f;line-height:1.7;margin-top:10px}",
+  // 「くわしく」で開く畳み(2026-10-19 見本): 長い文章だけの節・期限の補足・同意文。押せる所は44px以上。
+  "details.more{margin:6px 0 0}",
+  "details.more summary{cursor:pointer;list-style:none;font-size:13px;font-weight:700;color:#0a5246;min-height:44px;display:inline-flex;align-items:center;gap:6px}",
+  "details.more summary::-webkit-details-marker{display:none}",
+  "details.more summary::before{content:\"＋\";display:inline-grid;place-items:center;width:18px;height:18px;border-radius:50%;background:#e3efe9;font-size:12px}",
+  "details.more[open] summary::before{content:\"－\"}",
+  "details.more .more-body{margin-top:4px;font-size:14px;color:#3d3a33}",
+  "details.more .more-body p:last-child,details.more .more-body ul:last-child{margin-bottom:0}",
   // チェック札(□ の行)。押すと緑に。選んだ内容はスクリプトが申込欄へ入れる。
-  ".checks{list-style:none;margin:0 0 12px;padding:0;display:grid;gap:8px}",
-  ".check label{display:grid;grid-template-columns:28px 1fr;gap:12px;align-items:start;background:#fffdf8;border:1.5px solid #ddd3bf;border-radius:12px;padding:12px 14px;cursor:pointer;line-height:1.65;min-height:44px;position:relative}",
+  ".checks{list-style:none;margin:0 0 12px;padding:0;display:grid;gap:6px}",
+  ".check label{display:grid;grid-template-columns:24px 1fr;gap:10px;align-items:start;background:#fffdf8;border:1.5px solid #ddd3bf;border-radius:12px;padding:9px 12px;cursor:pointer;line-height:1.55;min-height:44px;position:relative}",
   ".check input{position:absolute;opacity:0;width:1px;height:1px}",
-  ".check .box{width:28px;height:28px;border:2px solid #ddd3bf;border-radius:6px;background:#f6f1e7;display:grid;place-items:center}",
+  ".check .box{width:24px;height:24px;border:2px solid #ddd3bf;border-radius:6px;background:#f6f1e7;display:grid;place-items:center}",
   ".check .box::after{content:\"\";width:12px;height:7px;border-left:3px solid #fffdf8;border-bottom:3px solid #fffdf8;transform:rotate(-45deg) translate(1px,-1px);opacity:0}",
   ".check input:checked~.box{background:#0e6b5c;border-color:#0e6b5c}",
   ".check input:checked~.box::after{opacity:1}",
   ".check input:focus-visible~.box{outline:3px solid #f6d96b;outline-offset:2px}",
   ".check label:has(input:checked){border-color:#0e6b5c;background:#e3efe9}",
-  ".check-result{background:#e3efe9;border-radius:12px;padding:14px;margin:0 0 12px}",
+  ".check-result{background:#e3efe9;border-radius:12px;padding:12px;margin:0 0 12px}",
   ".check-msg{font-weight:700;margin:0 0 10px}",
   // 案内役
-  ".guide{display:grid;grid-template-columns:96px 1fr;gap:14px;align-items:start;background:#fffdf8;border:1px solid #ddd3bf;border-radius:14px;padding:16px}",
+  ".guide{display:grid;grid-template-columns:96px 1fr;gap:14px;align-items:start;background:#fffdf8;border:1px solid #ddd3bf;border-radius:14px;padding:14px}",
+  ".guide p{font-size:15px;line-height:1.7}",
   ".guide-fig{margin:0;display:grid;gap:4px;justify-items:center}",
   ".guide-img{display:block;width:96px;height:auto;border-radius:12px;border:3px solid #e3efe9}",
   ".guide-fig figcaption{font-size:10px;color:#5d594f;text-align:center;line-height:1.3}",
@@ -100,40 +112,40 @@ const CSS = [
   ".guide h2{font-size:18px}",
   ".guide h2::before{display:none}",
   // 期限の年表
-  ".deadline{background:#fffdf8;border:1px solid #ddd3bf;border-radius:14px;padding:18px 14px 8px}",
+  ".deadline{background:#fffdf8;border:1px solid #ddd3bf;border-radius:14px;padding:14px 12px 6px}",
   ".dl-list{list-style:none;margin:0;padding:0}",
-  ".dl-item{display:grid;grid-template-columns:96px 1fr;gap:12px;position:relative;padding-bottom:16px}",
-  ".dl-item::before{content:\"\";position:absolute;left:48px;top:32px;bottom:0;width:2px;background:#ddd3bf}",
+  ".dl-item{display:grid;grid-template-columns:84px 1fr;gap:10px;position:relative;padding-bottom:12px}",
+  ".dl-item::before{content:\"\";position:absolute;left:42px;top:32px;bottom:0;width:2px;background:#ddd3bf}",
   ".dl-item:last-child::before{display:none}",
-  ".dl-when{align-self:start;background:#ece4d3;border-radius:8px;text-align:center;padding:6px 4px;font-weight:700;font-size:14px;line-height:1.35;position:relative;z-index:1}",
+  ".dl-when{align-self:start;background:#ece4d3;border-radius:8px;text-align:center;padding:5px 2px;font-weight:700;font-size:13px;line-height:1.35;position:relative;z-index:1}",
   ".dl-item.key .dl-when{background:#0e6b5c;color:#fffdf8}",
-  ".dl-what strong{display:block;font-size:16px}",
+  ".dl-what strong{display:block;font-size:15px}",
   ".dl-item.key .dl-what strong{color:#0e6b5c}",
-  ".dl-what span{display:block;font-size:14px;color:#5d594f;line-height:1.6}",
-  ".dl-what span+span{margin-top:4px;font-size:13px}",
+  ".dl-what span{display:block;font-size:13px;color:#5d594f;line-height:1.6}",
+  ".dl-what span+span{margin-top:4px}",
+  ".dl-what details.more{margin:2px 0 0}",
   // 流れ
-  ".flow{list-style:none;margin:0;padding:0;counter-reset:step;display:grid;gap:10px}",
-  ".flow li{counter-increment:step;display:grid;grid-template-columns:40px 1fr;gap:12px;align-items:start;background:#fffdf8;border:1px solid #ddd3bf;border-radius:12px;padding:12px 14px}",
-  ".flow li::before{content:counter(step);width:40px;height:40px;border-radius:50%;background:#e3efe9;color:#0e6b5c;font-weight:700;font-size:18px;display:grid;place-items:center}",
-  ".flow strong{display:block}",
-  ".flow span{display:block;font-size:14px;color:#5d594f;line-height:1.65}",
-  ".flow-total{margin:12px 0 0;font-weight:700;color:#0e6b5c;font-size:17px}",
-  // 売る・貸す・しばらく持つ
-  ".options{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:8px}",
-  // 3枚版(空き家など・リースバックなし)はスマホでも PC でも横に3つ(PC の4列より強い指定)
-  ".options.three{grid-template-columns:repeat(3,minmax(0,1fr))}",
-  ".opt-card{background:#fffdf8;border:1px solid #ddd3bf;border-radius:12px;padding:8px;text-align:center}",
-  ".opt-card h3{font-size:16px}",
-  ".opt-img{display:block;width:100%;max-width:200px;height:auto;margin:0 auto 6px;border-radius:10px}",
-  ".opt-card p{font-size:12px;color:#5d594f;line-height:1.6;margin:0;text-align:left}",
+  ".flow{list-style:none;margin:0;padding:0;counter-reset:step;display:grid;gap:6px}",
+  ".flow li{counter-increment:step;display:grid;grid-template-columns:32px 1fr;gap:10px;align-items:start;background:#fffdf8;border:1px solid #ddd3bf;border-radius:12px;padding:9px 12px}",
+  ".flow li::before{content:counter(step);width:32px;height:32px;border-radius:50%;background:#e3efe9;color:#0e6b5c;font-weight:700;font-size:15px;display:grid;place-items:center}",
+  ".flow strong{display:block;font-size:15px}",
+  ".flow span{display:block;font-size:13px;color:#5d594f;line-height:1.55}",
+  ".flow-total{margin:8px 0 0;font-weight:700;color:#0e6b5c;font-size:16px}",
+  // 売る・貸す・しばらく持つ(2026-10-19 見本: 絵を左に小さく置いた1行ずつの一覧。絵は元の比率のまま)
+  ".options{display:grid;grid-template-columns:1fr;gap:8px}",
+  ".options.three{grid-template-columns:1fr}",
+  ".opt-card{display:grid;grid-template-columns:64px 1fr;grid-template-rows:auto auto;gap:2px 12px;align-items:center;text-align:left;background:#fffdf8;border:1px solid #ddd3bf;border-radius:12px;padding:10px 12px}",
+  ".opt-card h3{font-size:16px;margin:0;align-self:end}",
+  ".opt-img{grid-row:1/3;width:64px;max-width:64px;margin:0;display:block;height:auto;border-radius:10px;align-self:center}",
+  ".opt-card p{font-size:13px;color:#5d594f;line-height:1.55;margin:0;text-align:left;align-self:start}",
   // 窓口はひとつ
-  ".network{background:#fffdf8;border:1px solid #ddd3bf;border-radius:14px;padding:14px 4px;display:grid;gap:8px;justify-items:center;text-align:center}",
-  ".net-svg{display:block;width:100%;max-width:420px;height:auto}",
+  ".network{background:#fffdf8;border:1px solid #ddd3bf;border-radius:14px;padding:10px 4px;display:grid;gap:8px;justify-items:center;text-align:center}",
+  ".net-svg{display:block;width:100%;max-width:300px;height:auto}",
   // よくある質問
-  ".faq details{background:#fffdf8;border:1px solid #ddd3bf;border-radius:12px;margin:8px 0}",
-  ".faq summary{cursor:pointer;list-style:none;display:grid;grid-template-columns:24px 1fr;gap:10px;align-items:start;padding:14px;font-weight:700;line-height:1.6;min-height:44px}",
+  ".faq details{background:#fffdf8;border:1px solid #ddd3bf;border-radius:12px;margin:6px 0}",
+  ".faq summary{cursor:pointer;list-style:none;display:grid;grid-template-columns:24px 1fr;gap:10px;align-items:start;padding:11px 12px;font-weight:700;line-height:1.5;min-height:44px}",
   ".faq summary::-webkit-details-marker{display:none}",
-  ".faq .q{color:#0e6b5c;font-size:19px;line-height:1.3}",
+  ".faq .q{color:#0e6b5c;font-size:17px;line-height:1.3}",
   ".faq .a{display:grid;grid-template-columns:24px 1fr;gap:10px;padding:0 14px 14px}",
   ".faq .a b{font-size:19px;line-height:1.4}",
   ".faq .a p{margin:0}",
@@ -167,8 +179,9 @@ const CSS = [
   ".cases.swipe .case-nav button:focus-visible{outline:3px solid #0e6b5c;outline-offset:2px}",
   ".cases.swipe .case-hint{margin:6px 0 0;text-align:center;font-size:13px;color:#6b665b}",
   // 会社案内
-  ".company{background:#fffdf8;border:1px solid #ddd3bf;border-radius:12px;padding:16px}",
-  ".company .co-logo{display:block;width:140px;height:auto;margin-bottom:8px}",
+  ".company{background:#fffdf8;border:1px solid #ddd3bf;border-radius:12px;padding:14px 16px;font-size:14px}",
+  ".company .co-logo{display:block;width:120px;height:auto;margin-bottom:6px}",
+  ".company p{margin:0}",
   ".company .name{font-weight:700;font-size:17px}",
   ".company .contact{color:#5d594f;white-space:pre-wrap;word-break:break-all}",
   ".company .hours,.company .co-hp{color:#5d594f;margin:4px 0 0}",
@@ -184,7 +197,13 @@ const CSS = [
   ".inquiry .pref{display:flex;flex-wrap:wrap;gap:8px 18px;margin-top:6px;font-weight:400}",
   ".inquiry .pref label{display:flex;align-items:center;gap:6px;margin:0;font-weight:400;min-height:44px}",
   ".inquiry .pref input,.inquiry .consent input{width:auto;min-height:0;margin:0}",
-  ".inquiry .privacy{font-size:14px;color:#4a5b5e;background:#f6f7f6;border-radius:8px;padding:10px 12px;margin:4px 0 12px;white-space:normal}",
+  ".inquiry .privacy{font-size:14px;color:#4a5b5e;background:#f6f7f6;border-radius:8px;padding:10px 12px;margin:6px 0 0;white-space:normal}",
+  ".inquiry details.privacy-more{margin:4px 0 12px}",
+  // 申込欄の頭の一言と電話(2026-10-19 見本)
+  ".inq-lead{margin:-4px 0 12px;color:#5d594f;font-size:14px}",
+  ".inq-lead b{color:#0e6b5c}",
+  ".inq-tel{font-size:14px;color:#5d594f;margin:0 0 12px;padding:10px 12px;background:#f6f1e7;border-radius:8px}",
+  ".inq-tel a{font-weight:700;color:#0e6b5c;text-decoration:none;font-size:17px}",
   ".inquiry .consent{display:flex;align-items:center;gap:8px;font-weight:700;min-height:44px}",
   ".inquiry button{margin-top:12px;width:100%;border:0;cursor:pointer;font:inherit;font-size:17px;font-weight:700}",
   ".inquiry fieldset:disabled button{background:#9fb3ae;cursor:not-allowed}",
@@ -198,30 +217,57 @@ const CSS = [
   ".hp{position:absolute;left:-9999px;width:1px;height:1px;overflow:hidden}",
   ".unsub{margin-top:28px;font-size:13px;color:#6b7a7d;text-align:center}",
   ".unsub a{color:#6b7a7d}",
-  ".bar{display:none}",
+  // 枠線を薄く・影を少し(2026-10-19 見本)。色・書体・文章は変えない。
+  ".check label,.guide,.deadline,.flow li,.opt-card,.network,.faq details,.case details,.company,.inquiry,.promises li{border-color:#e6dfd0;box-shadow:0 1px 2px rgba(43,42,38,.04)}",
+  // 写真つきの節: スマホでも写真を左に小さく置く(2026-10-19 見本)。写真は元の比率のまま。
+  ".split{display:grid;grid-template-columns:104px minmax(0,1fr);gap:12px;align-items:start}",
+  ".split .media{margin:4px 0 0}",
+  ".split .media img{border-radius:10px}",
+  ".split h2{font-size:18px}",
+  ".split h2::before{width:22px;margin-bottom:6px}",
+  // ── 画面下の固定ボタン(申込・電話)。スマホも PC も(発注者決定 2026-10-19)。
+  //    BAR_SCRIPT が「冒頭のボタンと申込欄が見えていない間」だけ .show を付ける。JS なしでは画面の外に隠れたまま
+  //    (冒頭と申込欄に同じボタンがあるので困らない)。IntersectionObserver が無い端末では最初から出す。
+  // 隠れている間は visibility も切る(Tab キーや読み上げが見えないボタンに届かないように)。出すときは即、隠すときは滑り終えてから。
+  ".bar{display:block;position:fixed;left:0;right:0;bottom:0;z-index:50;transform:translateY(110%);visibility:hidden;transition:transform .35s cubic-bezier(.2,.7,.2,1),visibility 0s .35s;background:rgba(255,253,248,.97);border-top:1px solid #e6dfd0;box-shadow:0 -6px 20px rgba(43,42,38,.08);backdrop-filter:saturate(1.2) blur(6px);padding:8px 12px calc(8px + env(safe-area-inset-bottom))}",
+  ".bar.show{transform:none;visibility:visible;transition:transform .35s cubic-bezier(.2,.7,.2,1),visibility 0s}",
+  ".bar-in{max-width:760px;margin:0 auto;display:grid;grid-template-columns:1fr auto;gap:8px;align-items:center}",
+  ".bar.single .bar-in{grid-template-columns:1fr}",
+  ".bar-note{grid-column:1/-1;font-size:12px;color:#5d594f;text-align:center;line-height:1.4;margin:0 0 2px}",
+  ".bar-note b{color:#0e6b5c}",
+  ".bar .cta{padding:12px;font-size:16px;margin:0;max-width:none;min-width:0}",
+  ".bar .cta.secondary{padding:12px 16px;white-space:nowrap}",
   "@media (max-width: 767px){",
-  "  .bar{display:grid;grid-template-columns:1fr 1fr;gap:8px;position:fixed;bottom:0;left:0;right:0;z-index:50;padding:10px 12px calc(10px + env(safe-area-inset-bottom));background:rgba(255,255,255,.96);border-top:1px solid #d6dedb;backdrop-filter:saturate(1.2) blur(6px)}",
-  "  .bar.single{grid-template-columns:1fr}",
-  "  .bar .cta{padding:12px;font-size:16px}",
+  "  .bar .cta{font-size:16px}",
   "}",
   "@media (min-width: 768px){",
-  "  main{max-width:760px;padding:24px 0 64px}",
+  "  main{max-width:760px;padding:24px 0 calc(110px + env(safe-area-inset-bottom))}",
   "  .hero{border-radius:14px}",
+  "  main>.hero{width:100%;margin:0}",
   "  .wrap{padding:24px 8px}",
   "  h1{font-size:32px}",
   "  h2{font-size:24px}",
   "  .cta{max-width:420px;margin:0 auto}",
   "  .cta-row{grid-template-columns:1fr 1fr}",
   "  .cta-row .cta{max-width:none;margin:0}",
-  "  .split{display:grid;grid-template-columns:1fr 1fr;gap:24px;align-items:center}",
+  "  .split{grid-template-columns:200px minmax(0,1fr);gap:20px;align-items:center}",
   "  .split .media{margin:0}",
+  "  .split h2{font-size:22px}",
   "  .guide{grid-template-columns:132px 1fr;padding:20px}",
   "  .guide-img{width:132px;height:auto}",
-  "  .options{grid-template-columns:repeat(4,minmax(0,1fr));gap:12px}",
-  "  .opt-card{padding:14px}",
-  "  .opt-card h3{font-size:18px}",
-  "  .opt-card p{font-size:14px;line-height:1.7}",
+  "  .options{grid-template-columns:repeat(2,minmax(0,1fr));gap:10px}",
+  "  .options.three{grid-template-columns:repeat(3,minmax(0,1fr))}",
+  "  .opt-card{grid-template-columns:72px 1fr;padding:12px 14px}",
+  "  .opt-img{width:72px;max-width:72px;height:auto}",
+  "  .opt-card h3{font-size:17px}",
+  "  .opt-card p{font-size:14px;line-height:1.6}",
+  "  .net-svg{max-width:360px}",
   "  .cases{grid-template-columns:1fr 1fr;align-items:start}",
+  "  .bar-in{grid-template-columns:1fr auto auto;gap:12px}",
+  "  .bar.single .bar-in{grid-template-columns:1fr auto}",
+  "  .bar-note{grid-column:1;text-align:left;font-size:13px;margin:0}",
+  "  .bar .cta{min-width:260px}",
+  "  .bar .cta.secondary{min-width:0}",
   "}",
   "@media (prefers-reduced-motion: reduce){*{scroll-behavior:auto!important;transition:none!important}}",
   "html{scroll-behavior:smooth}",
@@ -515,11 +561,34 @@ function fieldError(name: string): string {
   return `<p class="fld-err" data-err-for="${name}" role="alert" hidden></p>`;
 }
 
-function formSection(form: LpFormInput): string {
+/**
+ * 画面下の固定ボタンの出し入れ(固定文字列・live/プレビュー両方)。冒頭のボタン(.wrap>.cta-row)と申込欄(#inquiry)の
+ * どちらも見えていない間だけ .show を付ける(同じボタンが二重に見えない)。「動きを減らす」設定でも出す(動きではなく導線)。
+ * IntersectionObserver が無い端末・見張りの途中で失敗したときは最初から出す。
+ */
+const BAR_SCRIPT = [
+  "(function(){",
+  'var bar=document.querySelector(".bar");if(!bar)return;',
+  'if(!window.IntersectionObserver){bar.classList.add("show");return}',
+  'var hero=document.querySelector(".wrap>.cta-row"),inq=document.querySelector("#inquiry");',
+  "var hv=!!hero,iv=false;",
+  'function up(){bar.classList.toggle("show",!hv&&!iv)}',
+  "try{var io=new IntersectionObserver(function(es){for(var i=0;i<es.length;i++){if(es[i].target===hero){hv=es[i].isIntersecting}else if(es[i].target===inq){iv=es[i].isIntersecting}}up()},{threshold:0.05});",
+  "if(hero){io.observe(hero)}if(inq){io.observe(inq)}}",
+  'catch(_){bar.classList.add("show")}',
+  "})();",
+].join("");
+
+function formSection(form: LpFormInput, telHref: string | null, phone: string | null): string {
   const privacy = escapeHtml(form.privacyText).replace(/\n/g, "<br />");
   const pref = (value: string, label: string) =>
     `<label><input type="radio" name="contactPref" value="${value}" />${label}</label>`;
-  return `<section class="inquiry" id="${INQUIRY_SECTION_ID}"><h2>${escapeHtml(LP_CTA_LABEL)}</h2>` +
+  // 申込欄の頭に安心の一言(お名前と電話だけで送れる=必須が2つだけなのは parseInquiryForm の規則どおり)と電話の案内(2026-10-19 見本)。
+  const lead = `<p class="inq-lead"><b>お名前と電話番号だけ</b>でお送りいただけます(ほかは任意)。査定・ご相談は無料で、売却を前提にしません。</p>`;
+  const tel = telHref && phone
+    ? `<p class="inq-tel">お電話でも承ります(${escapeHtml(LP_BRAND.phoneHours)}) <a href="${telHref}" data-phone-tap="1">${escapeHtml(formatTel(phone))}</a></p>`
+    : "";
+  return `<section class="inquiry" id="${INQUIRY_SECTION_ID}"><h2>${escapeHtml(LP_CTA_LABEL)}</h2>${lead}${tel}` +
     `<form method="post" action="${escapeHtml(form.action)}" data-inquiry="1">` +
     // 送付前は欄がすべて入力できない。上部の帯だけでは気づかれない(2026-09-26 実機テスト)ので、フォームの中にも理由を書く。
     (form.disabled ? `<p class="inq-note">この宛先はまだ送付前のため、入力とお申し込みはできません(社内確認用の表示です。「送付済み」にすると入力できます)。</p>` : "") +
@@ -531,7 +600,8 @@ function formSection(form: LpFormInput): string {
     `<label>連絡のつきやすい時間帯<span class="opt">任意</span><input name="contactTime" type="text" maxlength="${INQUIRY_LIMITS.contactTime}" placeholder="例: 平日18時以降" /></label>` +
     `<label>ご要望・ご質問<span class="opt">任意</span><textarea name="message" maxlength="${INQUIRY_LIMITS.message}" rows="4"></textarea></label>` +
     `<div class="hp" aria-hidden="true"><label>この欄は空のままにしてください<input name="${HONEYPOT_FIELD}" type="text" tabindex="-1" autocomplete="off" /></label></div>` +
-    `<div class="privacy">${privacy}</div>` +
+    // 同意文は畳む(2026-10-19 見本)。同意のチェックは畳まない。
+    `<details class="more privacy-more"><summary>個人情報の取り扱いについて</summary><div class="privacy">${privacy}</div></details>` +
     `<label class="consent"><input type="checkbox" name="consent" value="yes" required />個人情報の取り扱いに同意する</label>${fieldError("consent")}` +
     `<div class="inq-msg" role="alert" aria-live="assertive" hidden></div>` +
     `<button type="submit" class="cta">${escapeHtml(LP_CTA_LABEL)}</button>` +
@@ -579,6 +649,9 @@ function renderCaseSection(s: LpRenderInput["sections"][number], prefix: string,
     `<span class="case-more" aria-hidden="true">続きを読む</span></summary><div class="case-body">${inner}</div></details></section>`;
 }
 
+/** 文章だけの節をこの字数(空白を除く)以上なら畳む。見本の「税の特例」(約330字)は畳み、2〜3行の節は畳まない。 */
+const FOLD_TEXT_MIN = 200;
+
 function renderSection(s: LpRenderInput["sections"][number], cta: string): string {
   const casePrefix = casePrefixOf(s.heading);
   if (casePrefix) return renderCaseSection(s, casePrefix, cta);
@@ -593,6 +666,10 @@ function renderSection(s: LpRenderInput["sections"][number], cta: string): strin
     return `<section><div class="guide">${renderFigureHtml("consult_guide")}<div><p class="guide-name">${escapeHtml(LP_BRAND.guideName)}</p>${h2}${body}</div></div></section>`;
   }
   const figure = s.media?.kind === "figure" ? `<div class="figure">${renderFigureHtml(s.media.figureKind)}</div>` : "";
+  // 文章だけの長い節(写真・図・チェック札なし)は、見出しを残して中身を「くわしく読む」に畳む(2026-10-19 見本)。
+  if (!s.media && !s.paragraphs.some((p) => isLineList(p, "□")) && s.paragraphs.join("").replace(/\s/g, "").length >= FOLD_TEXT_MIN) {
+    return `<section>${h2}<details class="more"><summary>くわしく読む</summary><div class="more-body">${body}</div></details></section>`;
+  }
   return `<section>${h2}${body}${figure}</section>`;
 }
 
@@ -636,9 +713,10 @@ export function renderLpPage(input: LpRenderInput): string {
     `<p style="margin-top:10px">${input.form ? "お電話でのご相談も承ります。" : "無料査定のお申し込み・ご相談は、お電話で承ります。"}</p>${telBtn}</section>`;
   const unsub = input.unsubscribeUrl ? `<p class="unsub">今後このようなお手紙が不要な方は <a href="${escapeHtml(input.unsubscribeUrl)}">こちら(配信停止)</a></p>` : "";
   const band = input.mode === "preview" ? `<div class="band">プレビュー ── この宛先はまだ送付前です。お申し込みは受け付けません</div>` : "";
+  const barNote = `<p class="bar-note"><b>査定・ご相談は無料</b>　売却を前提にしません</p>`;
   const bar = telHref
-    ? `<div class="bar">${cta}<a class="cta secondary" href="${telHref}" data-phone-tap="1">電話</a></div>`
-    : `<div class="bar single">${cta}</div>`;
+    ? `<div class="bar"><div class="bar-in">${barNote}${cta}<a class="cta secondary" href="${telHref}" data-phone-tap="1">電話</a></div></div>`
+    : `<div class="bar single"><div class="bar-in">${barNote}${cta}</div></div>`;
   const script = input.mode === "live" && input.phoneTapToken && telHref
     ? (() => {
         const url = jsString(`/t/${input.phoneTapToken}/phone-tap`);
@@ -653,6 +731,6 @@ export function renderLpPage(input: LpRenderInput): string {
   return `<!doctype html><html lang="ja"><head><meta charset="utf-8" /><meta name="viewport" content="width=device-width,initial-scale=1" /><meta name="robots" content="noindex,nofollow" /><meta name="referrer" content="strict-origin" /><title>${escapeHtml(input.headline)}</title><style>${CSS}</style></head><body>${band}${header}<main>` +
     (input.hero ? img(input.hero, "hero", "", true) : "") +
     `<div class="wrap">${heroCopy}` +
-    introHtml + sections + faq + (input.form ? formSection(input.form) : "") + company + unsub +
-    `</div></main>${bar}${script}${submitGuard}${checklistScript}<script>${MOTION_SCRIPT}${sections.includes('<div class="cases">') ? CASES_SCRIPT : ""}</script></body></html>`;
+    introHtml + sections + faq + (input.form ? formSection(input.form, telHref, input.company.phone) : "") + company + unsub +
+    `</div></main>${bar}<script data-lp-bar="1">${BAR_SCRIPT}</script>${script}${submitGuard}${checklistScript}<script>${MOTION_SCRIPT}${sections.includes('<div class="cases">') ? CASES_SCRIPT : ""}</script></body></html>`;
 }

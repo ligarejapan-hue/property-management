@@ -39,7 +39,7 @@ describe("loadLpPageData", () => {
     const r = await loadLpPageData(client(draft({ status: "confirmed" })) as never, "tok");
     // 送付前・社内プレビューでは計測(電話タップ)と申込送信のスクリプトを出さない。出るのは動きのスクリプト(2026-10-08)だけ
     expect(r.kind === "page" && r.html.includes("プレビュー") && !r.html.includes("sendBeacon") && !r.html.includes("fetch(f.action")).toBe(true);
-    expect(r.kind === "page" && (r.html.match(/<script/g) ?? []).length).toBe(1);
+    expect(r.kind === "page" && (r.html.match(/<script/g) ?? []).length).toBe(2); // 固定バー+動き(計測・送信の script は無い・2026-10-19)
   });
   it("未知 token・LP型なし・文章未保存は none", async () => {
     expect((await loadLpPageData(client(null) as never, "tok")).kind).toBe("none");
