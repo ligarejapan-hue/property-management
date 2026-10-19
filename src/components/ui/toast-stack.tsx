@@ -55,7 +55,7 @@ export function ToastStack({ toasts, onDismiss }: { toasts: ToastItem[]; onDismi
           <div
             key={t.id}
             role="status"
-            className={`pointer-events-auto flex gap-2.5 rounded-lg border border-l-4 border-gray-200 bg-white p-3 text-sm shadow-lg dark:border-gray-800 dark:bg-gray-900 ${tone.border} animate-[pm-toast-in_200ms_ease-out] motion-reduce:animate-none`}
+            className={`pointer-events-auto flex gap-2.5 rounded-lg border border-l-4 border-gray-200 bg-white p-3 text-sm shadow-lg dark:border-gray-800 dark:bg-gray-900 ${tone.border} animate-pm-toast-in motion-reduce:animate-none`}
           >
             <Icon className={`mt-0.5 h-4 w-4 shrink-0 ${tone.icon}`} aria-hidden="true" />
             <div className="min-w-0 flex-1">

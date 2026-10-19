@@ -4,6 +4,8 @@
 import { describe, expect, it } from "vitest";
 import { createElement } from "react";
 import { renderToStaticMarkup } from "react-dom/server";
+import { readFileSync } from "node:fs";
+import { join } from "node:path";
 import { ToastStack } from "../toast-stack";
 import { BellButton, NotificationPanel, type NotificationPanelItem } from "../notification-panel";
 
@@ -82,5 +84,13 @@ describe("NotificationPanel", () => {
     expect(panel("granted")).toContain("この PCに通知します");
     expect(panel("denied")).toContain("通知がブロックされています");
     expect(panel("unsupported")).toContain("iPhone はホーム画面に追加すると使えます。");
+  });
+});
+
+describe("お知らせの出る動き(UIの統一 第2回・2026-10-19)", () => {
+  it("出入りの決まり(220ms・ease-out-soft)で出る", () => {
+    const src = readFileSync(join(process.cwd(), "src/components/ui/toast-stack.tsx"), "utf8");
+    expect(src).toContain("animate-pm-toast-in motion-reduce:animate-none");
+    expect(src).not.toContain("animate-[pm-toast-in_200ms_ease-out]");
   });
 });

@@ -142,3 +142,17 @@ describe("小窓の中の透かし(画面保護)", () => {
     }
   });
 });
+
+describe("小窓の出る動き(UIの統一 第2回・2026-10-19)", () => {
+  const src = () => readFileSync(join(process.cwd(), "src/components/ui/modal-shell.tsx"), "utf8");
+  it("開くとき: 中身がふわっと上がり、背景が薄く暗くなる(reduced-motion では動かさない)", () => {
+    const s = src();
+    expect(s).toContain("animate-pm-dialog-in");
+    expect(s).toContain("backdrop:animate-pm-backdrop-in");
+    expect(s).toContain("motion-reduce:animate-none");
+    expect(s).toContain("motion-reduce:backdrop:animate-none");
+  });
+  it("閉じる動きは付けない(呼び出し側が部品ごと外す作り=即時に消える)", () => {
+    expect(src()).not.toMatch(/pm-dialog-out|onAnimationEnd/);
+  });
+});
