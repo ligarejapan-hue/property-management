@@ -7,7 +7,6 @@
  * 押せると、閉じた画面と進行中の削除で状態が食い違うため)。
  */
 import type { ReactNode } from "react";
-import { Loader2 } from "lucide-react";
 import { Button } from "./button";
 import { ModalShell } from "./modal-shell";
 
@@ -38,8 +37,7 @@ export function ConfirmDialog({
           <Button variant="secondary" onClick={onCancel} disabled={busy}>
             キャンセル
           </Button>
-          <Button variant="danger" onClick={onConfirm} disabled={busy}>
-            {busy && <Loader2 className="h-4 w-4 animate-spin" />}
+          <Button variant="danger" onClick={onConfirm} disabled={busy} loading={busy} loadingLabel={confirmLabel}>
             {confirmLabel}
           </Button>
         </>
