@@ -1,7 +1,8 @@
 "use client";
 
 import { useState, useRef, type Dispatch, type SetStateAction } from "react";
-import { AlertTriangle, ExternalLink, Loader2 } from "lucide-react";
+import { AlertTriangle, ExternalLink } from "lucide-react";
+import { Button } from "@/components/ui/button";
 import { isReadableChiban } from "@/lib/registry-fetch/chiban-input";
 import { codeFromErrorBody } from "@/lib/api-client";
 import { editLockHeaders } from "@/lib/edit-lock/screen-token-client";
@@ -246,22 +247,19 @@ export default function RegistryChibanPopup({
                 物件の「家屋番号」欄に入力してから実行してください。
               </p>
             </div>
-            <button
-              type="button"
+            <Button
+              variant="primary"
+              size="sm"
               onClick={() => setRoute("land")}
-              className="w-full rounded border border-indigo-400 bg-indigo-600 px-2.5 py-1.5 text-left font-medium text-white hover:bg-indigo-700"
+              className="w-full justify-start text-left"
             >
               土地の登記を取る（地図で地番を確認して入れる）
-            </button>
+            </Button>
           </div>
           <div className="flex justify-end">
-            <button
-              type="button"
-              onClick={onClose}
-              className="rounded border border-gray-300 px-2.5 py-1 text-gray-600 hover:bg-gray-50 dark:border-gray-700 dark:text-gray-300 dark:hover:bg-gray-800"
-            >
+            <Button variant="secondary" size="sm" onClick={onClose}>
               閉じる
-            </button>
+            </Button>
           </div>
         </>
       ) : (
@@ -283,18 +281,19 @@ export default function RegistryChibanPopup({
               <span className="break-all text-gray-800 dark:text-gray-100">
                 {propertyAddress}
               </span>
-              <button
-                type="button"
+              <Button
+                variant="secondary"
+                size="sm"
                 onClick={() => {
                   navigator.clipboard?.writeText(propertyAddress).then(
                     () => setCopied(true),
                     () => setCopied(false),
                   );
                 }}
-                className="shrink-0 rounded border border-gray-300 px-2 py-0.5 text-[11px] text-gray-600 hover:bg-gray-50 dark:border-gray-700 dark:text-gray-300 dark:hover:bg-gray-800"
+                className="shrink-0"
               >
                 {copied ? "コピーしました" : "コピー"}
-              </button>
+              </Button>
             </div>
           </div>
 
@@ -363,23 +362,20 @@ export default function RegistryChibanPopup({
           )}
 
           <div className="flex justify-end gap-2">
-            <button
-              type="button"
-              onClick={onClose}
-              className="rounded border border-gray-300 px-2.5 py-1 text-gray-600 hover:bg-gray-50 dark:border-gray-700 dark:text-gray-300 dark:hover:bg-gray-800"
-            >
+            <Button variant="secondary" size="sm" onClick={onClose}>
               キャンセル
-            </button>
+            </Button>
             {canWriteProperty && (
-              <button
-                type="button"
+              <Button
+                variant="primary"
+                size="sm"
                 onClick={save}
                 disabled={!canSave}
-                className="inline-flex items-center gap-1 rounded border border-indigo-400 bg-indigo-600 px-2.5 py-1 font-medium text-white hover:bg-indigo-700 disabled:cursor-not-allowed disabled:border-gray-200 disabled:bg-gray-300 dark:disabled:border-gray-700 dark:disabled:bg-gray-700"
+                loading={saving}
+                loadingLabel="保存して確認へ"
               >
-                {saving && <Loader2 className="h-3 w-3 animate-spin" />}
                 保存して確認へ
-              </button>
+              </Button>
             )}
           </div>
         </>
