@@ -433,7 +433,7 @@ function AttachmentRow({
       <Icon className="h-5 w-5 shrink-0 text-gray-500 dark:text-gray-400" />
       <div className="min-w-0 flex-1">
         {previewable ? (
-          {/* data-ui=raw: ファイル名そのものが押せる文字(1行で省略表示・余白を足すと下の行とずれる) */}
+          // data-ui=raw: ファイル名そのものが押せる文字(1行で省略表示・余白を足すと下の行とずれる)
           <button
             type="button"
             data-ui="raw"
