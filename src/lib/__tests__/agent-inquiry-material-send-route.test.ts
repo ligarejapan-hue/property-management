@@ -613,6 +613,15 @@ describe("資料の送信 API", () => {
       expect(audits().some((a) => a.action === "registry_pdf_mail_send")).toBe(true);
     }
   });
+  it("はっきり断られたときの「送れなかった」の書き込みが一時的に落ちても、やり直して記録する(@codex 23巡目 P2)", async () => {
+    h.sendMailWithAttachments.mockResolvedValue({ ok: false, code: "EAUTH" });
+    pm.agentInquiryMaterialSend.update.mockReset().mockRejectedValueOnce(new Error("db blip")).mockResolvedValue({});
+    const res = await POST(json("POST", body()), ctx);
+    expect(res.status).toBe(502);
+    expect((await res.json()).error.code).toBe("SEND_FAILED");
+    const failedCalls = pm.agentInquiryMaterialSend.update.mock.calls.filter((c) => c[0].data.result === "failed");
+    expect(failedCalls.length).toBe(2);
+  });
   it("結果不明の押し直しは、前の結果(結果不明)を返して送らない", async () => {
     pm.agentInquiryMaterialSend.findFirst.mockResolvedValue({ id: "s0", result: "sending", inquiryId: IID, createdAt: new Date(), errorCode: "ETIMEDOUT" });
     expect(await (await POST(json("POST", body()), ctx)).json()).toMatchObject({ result: "sending", state: "結果不明", replayed: true });

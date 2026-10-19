@@ -64,7 +64,7 @@ type AuditRow = {
  */
 async function finishSend(
   sendId: string,
-  data: { result?: "sent"; errorCode?: string; finishedAt: Date },
+  data: { result?: "sent" | "failed"; errorCode?: string; finishedAt: Date },
   audits: AuditRow[],
 ): Promise<boolean> {
   for (let i = 0; i < 3; i++) {
@@ -78,9 +78,11 @@ async function finishSend(
         });
         if (!cur || cur.result !== "sending" || cur.errorCode != null) return;
         await tx.agentInquiryMaterialSend.update({ where: { id: sendId }, data });
-        await tx.auditLog.createMany({
-          data: audits.map((a) => ({ ...a, detail: a.detail as object })),
-        });
+        if (audits.length > 0) {
+          await tx.auditLog.createMany({
+            data: audits.map((a) => ({ ...a, detail: a.detail as object })),
+          });
+        }
       });
       return true;
     } catch (e) {
@@ -299,10 +301,9 @@ export async function POST(request: Request, ctx: Ctx) {
     };
     if (!result.ok) {
       if (isDefiniteSmtpFailure(result.code)) {
-        await prisma.agentInquiryMaterialSend.update({
-          where: { id: claim.id },
-          data: { result: "failed", errorCode: result.code, finishedAt: new Date() },
-        });
+        // 「送れなかった」も同じやり直しで書く(一時的な失敗で送信中のまま残すと、押し直せない・@codex 23巡目 P2)。
+        // 送っていない=監査の行は無い。
+        await finishSend(claim.id, { result: "failed", errorCode: result.code ?? undefined, finishedAt: new Date() }, []);
         return NextResponse.json(
           {
             id: claim.id,
