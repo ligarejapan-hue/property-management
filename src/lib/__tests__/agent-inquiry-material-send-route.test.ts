@@ -45,6 +45,7 @@ import prismaMock from "@/lib/prisma";
 import { getApiSession, getUserPermissions } from "@/lib/api-helpers";
 import { assertPropertyReadable } from "@/lib/agent-inquiry/property-access";
 import { jsonRequest as json } from "./agent-inquiry-route-mocks";
+import { MATERIAL_SEND_LIMITS } from "@/lib/agent-inquiry/material-send";
 import { POST, GET as LIST } from "../../app/api/agent-inquiries/[id]/material-sends/route";
 import { GET as CANDIDATES } from "../../app/api/agent-inquiries/[id]/material-candidates/route";
 import { POST as APPLY } from "../../app/api/agent-inquiries/[id]/material-sends/apply/route";
@@ -208,8 +209,9 @@ describe("ファイルの守り(/uploads と同じ判定・最終レビュー C1
     expect((await POST(json("POST", body()), ctx)).status).toBe(201);
     expect(h.writeAuditLog.mock.calls.some((c) => c[0].action === "registry_pdf_mail_send")).toBe(true);
   });
-  it("記録の大きさではなく、実際に読んだ大きさで 20MB を確かめる", async () => {
-    h.read.mockResolvedValue({ body: Buffer.alloc(20 * 1024 * 1024 + 1), contentType: "application/pdf", size: 20 * 1024 * 1024 + 1 });
+  it("記録の大きさではなく、実際に読んだ大きさで上限を確かめる", async () => {
+    const over = MATERIAL_SEND_LIMITS.maxTotalBytes + 1;
+    h.read.mockResolvedValue({ body: Buffer.alloc(over), contentType: "application/pdf", size: over });
     expect((await (await POST(json("POST", body()), ctx)).json()).error.code).toBe("TOO_LARGE");
     expect(h.sendMailWithAttachments).not.toHaveBeenCalled();
   });
@@ -365,8 +367,8 @@ describe("資料の送信 API", () => {
     pm.attachment.findMany.mockResolvedValue([att({ type: "referral" })]);
     expect((await (await POST(json("POST", body()), ctx)).json()).error.code).toBe("NOT_SELECTABLE");
   });
-  it("合計 20MB 超は 400 TOO_LARGE", async () => {
-    pm.attachment.findMany.mockResolvedValue([att({ fileSize: 20 * 1024 * 1024 + 1 })]);
+  it("合計が上限を超えると 400 TOO_LARGE", async () => {
+    pm.attachment.findMany.mockResolvedValue([att({ fileSize: MATERIAL_SEND_LIMITS.maxTotalBytes + 1 })]);
     expect((await (await POST(json("POST", body()), ctx)).json()).error.code).toBe("TOO_LARGE");
   });
   it("ファイルが読めなければ 409 FILE_UNAVAILABLE・送らない", async () => {

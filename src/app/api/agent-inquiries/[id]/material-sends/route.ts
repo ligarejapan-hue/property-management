@@ -9,6 +9,7 @@ import { sendMailWithAttachments, type MailAttachment } from "@/lib/mail/transpo
 import { getStorage } from "@/lib/storage";
 import {
   MATERIAL_SEND_LIMITS,
+  MATERIAL_SEND_LIMIT_LABEL,
   checkMaterialSelection,
   isDefiniteSmtpFailure,
   isPlainMailText,
@@ -101,7 +102,7 @@ export async function POST(request: Request, ctx: Ctx) {
     if (!sel.ok) {
       const msg = {
         NOT_SELECTABLE: "送れないファイルが含まれています。画面を開き直してください",
-        TOO_LARGE: "ファイルの合計が 20MB を超えています",
+        TOO_LARGE: `ファイルの合計が ${MATERIAL_SEND_LIMIT_LABEL} を超えています`,
         NO_FILES: "送るファイルを選んでください",
         TOO_MANY: "一度に送れるのは 20 ファイルまでです",
       }[sel.code];
@@ -126,7 +127,7 @@ export async function POST(request: Request, ctx: Ctx) {
       // 上限は記録の大きさ(手で書ける)ではなく、実際に読んだ大きさで確かめる。
       readBytes += got.body.length;
       if (readBytes > MATERIAL_SEND_LIMITS.maxTotalBytes) {
-        throw new ApiError(400, "ファイルの合計が 20MB を超えています", "TOO_LARGE");
+        throw new ApiError(400, `ファイルの合計が ${MATERIAL_SEND_LIMIT_LABEL} を超えています`, "TOO_LARGE");
       }
       // ファイルの種類もストレージの値を使う(記録の mimeType は手で書ける)。
       files.push({ filename: r.fileName, content: got.body, contentType: got.contentType });

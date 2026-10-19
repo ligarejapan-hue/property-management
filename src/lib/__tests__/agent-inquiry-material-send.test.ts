@@ -8,6 +8,7 @@ import {
   isSingleAddress,
   sendStateLabel,
   isDefiniteSmtpFailure,
+  MATERIAL_SEND_LIMIT_LABEL,
   DEFAULT_MATERIAL_SUBJECT,
   type MaterialAttachmentRow,
 } from "@/lib/agent-inquiry/material-send";
@@ -53,7 +54,13 @@ describe("選んだ添付の確かめ", () => {
     expect(checkMaterialSelection([row(), row({ id: "a2", type: "referral" })], ["a1", "a2"], PID, REG))
       .toEqual({ ok: false, code: "NOT_SELECTABLE" });
   });
-  it("合計がちょうど 20MB は通る・1バイト超えると TOO_LARGE", () => {
+  it("上限は添付の符号化(base64・約4/3倍+改行)後でも、相手の受け取りの上限(多くは 20〜25MB)に収まる(@codex 5巡目 P2)", () => {
+    const max = MATERIAL_SEND_LIMITS.maxTotalBytes;
+    const encoded = Math.ceil(max / 3) * 4 * (78 / 76);
+    expect(encoded).toBeLessThanOrEqual(21 * 1024 * 1024);
+    expect(MATERIAL_SEND_LIMIT_LABEL).toBe(`${max / 1024 / 1024}MB`);
+  });
+  it("合計がちょうど上限は通る・1バイト超えると TOO_LARGE", () => {
     const max = MATERIAL_SEND_LIMITS.maxTotalBytes;
     expect(checkMaterialSelection([row({ fileSize: max })], ["a1"], PID, [])).toMatchObject({ ok: true, totalSize: max });
     expect(checkMaterialSelection([row({ fileSize: max - 10 }), row({ id: "a2", fileSize: 11 })], ["a1", "a2"], PID, []))

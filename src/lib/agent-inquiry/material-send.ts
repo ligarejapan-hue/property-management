@@ -3,8 +3,14 @@ import type { PermissionEntry } from "@/lib/api-helpers";
 import { hasPermission } from "@/lib/permissions";
 import { isOwnerPiiDocumentType } from "@/lib/uploads-authorization";
 
-/** 資料送付の上限(spec §2.2・§6)。相手のメールの受け取りが多くは 20〜25MB で止まるため合計 20MB。 */
-export const MATERIAL_SEND_LIMITS = { maxTotalBytes: 20 * 1024 * 1024, maxFiles: 20, subject: 200, body: 10_000 } as const;
+/**
+ * 資料送付の上限(spec §2.2・§6)。相手のメールの受け取りが多くは 20〜25MB で止まる。
+ * ⚠添付はメールの中で base64 になり約 4/3 倍(+改行)に増える=ファイルの合計 15MB で、メールは約 20.5MB
+ *   (@codex 5巡目 P2・20MB のままだと約 27MB になり受け取りで止まる)。
+ */
+export const MATERIAL_SEND_LIMITS = { maxTotalBytes: 15 * 1024 * 1024, maxFiles: 20, subject: 200, body: 10_000 } as const;
+/** 画面・案内に出す上限(例「15MB」)。数字はここだけで決める。 */
+export const MATERIAL_SEND_LIMIT_LABEL = `${MATERIAL_SEND_LIMITS.maxTotalBytes / 1024 / 1024}MB`;
 
 export const REGISTRY_WARNING = "所有者の名前・住所が載っています。送ってよい相手か確かめてください";
 

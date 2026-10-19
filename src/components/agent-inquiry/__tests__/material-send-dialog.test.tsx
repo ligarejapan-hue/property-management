@@ -15,7 +15,7 @@ import type { MaterialCandidates, MaterialSendView } from "@/lib/api-client";
 const MB = 1024 * 1024;
 const WARN = "所有者の名前・住所が載っています。送ってよい相手か確かめてください";
 const cand = (o: Partial<MaterialCandidates> = {}): MaterialCandidates => ({
-  mailConfigured: true, to: "sato@agent.jp", subject: "【資料送付】サンプル荘", body: "本文", maxTotalBytes: 20 * MB, maxFiles: 20,
+  mailConfigured: true, to: "sato@agent.jp", subject: "【資料送付】サンプル荘", body: "本文", maxTotalBytes: 15 * MB, maxFiles: 20,
   files: [
     { id: "a1", fileName: "図面.pdf", fileSize: 2 * MB, type: "general", createdAt: "2026-10-01T00:00:00Z", warning: null },
     { id: "a2", fileName: "謄本.pdf", fileSize: 1 * MB, type: "registry", createdAt: "2026-10-01T00:00:00Z", warning: WARN },
@@ -61,13 +61,14 @@ describe("資料を送る小窓(表示)", () => {
     expect(view({ picked: ["a2"] })).toContain(WARN);
     expect(view({ picked: ["a1"] })).not.toContain(WARN);
   });
-  it("20MB を超えると知らせて押せない", () => {
+  it("上限(サーバーが返す 15MB)を超えると知らせて押せない", () => {
     const c = cand({ files: [
-      { id: "b1", fileName: "大.pdf", fileSize: 15 * MB, type: "general", createdAt: "x", warning: null },
+      { id: "b1", fileName: "大.pdf", fileSize: 10 * MB, type: "general", createdAt: "x", warning: null },
       { id: "b2", fileName: "大2.pdf", fileSize: 6 * MB, type: "general", createdAt: "x", warning: null },
     ] });
     const html = view({ c, picked: ["b1", "b2"] });
-    expect(html).toContain("20MB を超えています");
+    expect(html).toContain("/ 15MB");
+    expect(html).toContain("15MB を超えています");
     expect(sendButton(html)).toContain('disabled=""');
   });
   it("メール設定が無ければ案内(メール設定へのリンク)", () => {

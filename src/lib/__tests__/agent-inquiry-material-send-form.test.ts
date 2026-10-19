@@ -28,7 +28,7 @@ describe("資料を送る小窓の状態(純関数)", () => {
   it("謄本を選ぶと注意が出る(同じ注意は1回)", () => {
     expect(materialFormState({ ...base, picked: ["a1", "a2"] }).warnings).toEqual([WARN]);
   });
-  it("20MB を超えると送れない", () => {
+  it("上限を超えると送れない", () => {
     const s = materialFormState({ ...base, picked: ["a1", "a3"] });
     expect(s.tooLarge).toBe(true);
     expect(s.canSend).toBe(false);

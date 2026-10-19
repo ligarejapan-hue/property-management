@@ -17,6 +17,8 @@ import { safeUuidV4 } from "@/lib/random-id";
 
 const inputCls = "w-full rounded-md border border-gray-300 px-2 py-1.5 text-sm dark:border-gray-700 dark:bg-gray-900";
 const mb = (n: number) => `${(n / 1024 / 1024).toFixed(1)}MB`;
+/** 上限の表示(サーバーが返す上限から作る=数字を画面に書かない)。 */
+const limitLabel = (n: number) => `${Math.round((n / 1024 / 1024) * 10) / 10}MB`;
 const jst = (iso: string) => new Date(iso).toLocaleString("ja-JP", { timeZone: "Asia/Tokyo" });
 
 /** 資料を送る小窓の見た目(spec §2.2)。状態は持たない=親(MaterialSendDialog)が持つ。 */
@@ -128,8 +130,8 @@ export function MaterialSendDialogView({
               </ul>
             )}
             <p className={`mt-1 text-xs ${st.tooLarge ? "font-bold text-rose-600" : "text-gray-500"}`}>
-              合計 {mb(st.total)} / 20MB
-              {st.tooLarge && "(20MB を超えています。ファイルを減らしてください)"}
+              合計 {mb(st.total)} / {limitLabel(c.maxTotalBytes)}
+              {st.tooLarge && `(${limitLabel(c.maxTotalBytes)} を超えています。ファイルを減らしてください)`}
             </p>
             {st.tooMany && <p className="text-xs font-bold text-rose-600">{`一度に送れるのは ${c.maxFiles} ファイルまでです`}</p>}
           </fieldset>
