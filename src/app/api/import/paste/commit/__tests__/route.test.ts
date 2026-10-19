@@ -312,6 +312,20 @@ describe("POST /api/import/paste/commit", () => {
     });
   });
 
+  it("★査定サイトの反響(Excel まとめ取込・HOME4U・タカウル)は導入ルートを「一括査定」にする", async () => {
+    for (const leadSource of ["excel_lead", "home4u_assessment", "takauru_assessment"]) {
+      for (const k of Object.keys(created)) delete created[k];
+      const res = await POST(req({ ...baseBody, leadSource }));
+      expect(res.status).toBe(200);
+      expect(created.property?.[0]).toMatchObject({ introductionRoute: "bulk_assessment" });
+    }
+  });
+
+  it("どこから来たか分からない貼り付けは今までどおり「Web問い合わせ」", async () => {
+    await POST(req({ ...baseBody, leadSource: "generic" }));
+    expect(created.property?.[0]).toMatchObject({ introductionRoute: "web_inquiry" });
+  });
+
   it("★所有者の住所は currentAddress に入れる(登記上住所には入れない)", async () => {
     await POST(req({
       ...baseBody,

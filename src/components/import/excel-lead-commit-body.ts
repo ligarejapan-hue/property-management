@@ -67,6 +67,8 @@ export interface ExcelLeadCommitBody {
   linkExistingOwnerId: null;
   /** 確定の時点で似た物件・同名の所有者が見つかったら作らずに 409 を返させる。 */
   requireNoDuplicates: true;
+  /** 顧客管理表(査定サイトの反響)からの取込=導入ルート「一括査定」。 */
+  leadSource: "excel_lead";
 }
 
 export function excelLeadCommitBody(row: { draft: PasteDraft; ownerNote: string }): ExcelLeadCommitBody {
@@ -123,6 +125,7 @@ export function excelLeadCommitBody(row: { draft: PasteDraft; ownerNote: string 
     externalLinkKey: row.draft.externalLinkKey,
     linkExistingOwnerId: null,
     requireNoDuplicates: true,
+    leadSource: "excel_lead",
   };
 }
 
