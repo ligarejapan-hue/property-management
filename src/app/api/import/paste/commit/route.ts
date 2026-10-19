@@ -36,6 +36,7 @@ import {
   BUILDING_NAME_TOO_LONG_MESSAGE,
 } from "@/lib/property-building-name";
 import { structuredFieldsFor } from "@/lib/paste-import/structured-fields";
+import { introductionRouteForLeadSource } from "@/lib/paste-import/lead-source-route";
 import { countPasteDuplicatesUnscoped } from "@/lib/paste-import-duplicates";
 import type { PropertyType, OccupancyStatus } from "@/generated/prisma";
 import { phoneForStore } from "@/lib/phone-format-jp";
@@ -162,6 +163,11 @@ interface CommitBody {
    * 見つかったら作らずに 409(NEEDS_REVIEW)を返す(人が確かめる)。
    */
   requireNoDuplicates?: boolean;
+  /**
+   * どこから来た反響か(貼り付け=読み取った書式・Excel まとめ取込="excel_lead")。
+   * 導入ルートだけに使う(査定サイト=一括査定・それ以外/省略=Web問い合わせ)。
+   */
+  leadSource?: unknown;
 }
 
 /**
@@ -570,7 +576,7 @@ export async function POST(request: NextRequest) {
             totalFloorArea,
             builtYear,
             note: p.note?.trim() || null,
-            introductionRoute: "web_inquiry",
+            introductionRoute: introductionRouteForLeadSource(body.leadSource),
             caseStatus: "new_case",
             registryStatus: "unconfirmed",
             dmStatus: "hold",

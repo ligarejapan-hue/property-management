@@ -37,6 +37,10 @@ describe("excelLeadCommitBody — 1行を登録APIの形にする", () => {
     expect(body.linkExistingOwnerId).toBeNull();
   });
 
+  it("★顧客管理表(査定サイトの反響)からの取込だと知らせる=導入ルートが「一括査定」になる", () => {
+    expect(body.leadSource).toBe("excel_lead");
+  });
+
   it("★土地面積・築年は物件の欄に入れる(備考に重ねて書かない・@codex PR#456 3巡目)", () => {
     expect(body.property).toMatchObject({ landArea: "90", builtYear: 2018 });
     expect(body.property.note ?? "").not.toContain("土地面積");

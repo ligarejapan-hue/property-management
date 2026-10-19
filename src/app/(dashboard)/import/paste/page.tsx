@@ -464,6 +464,8 @@ function PasteImportScreen({ draftEnabled }: { draftEnabled: boolean }) {
         externalLinkKey: externalLinkKey.trim() || null,
         linkExistingOwnerId: ownerMode === "link" ? linkedOwnerId : null,
         buildingChoice: propertyValues.propertyType === "apartment_unit" ? buildingChoice : undefined,
+        // 読み取った書式(HOME4U・タカウルなら導入ルートが「一括査定」になる)。
+        leadSource: draft.sourceProfile,
       };
 
       // 返事が来る前に離れたら、戻ったとき「登録されたか確かめて」と出す(二重登録を防ぐ・§5.1)。
