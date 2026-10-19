@@ -6,9 +6,17 @@ export interface PlainMail {
   subject: string;
   text: string;
 }
+export interface MailAttachment {
+  filename: string;
+  content: Buffer;
+  contentType: string;
+}
+export interface AttachmentMail extends PlainMail {
+  attachments: MailAttachment[];
+}
 export type SendResult = { ok: true } | { ok: false; code: string | null };
 
-type Sender = (config: MailSendConfig, mail: PlainMail) => Promise<void>;
+type Sender = (config: MailSendConfig, mail: PlainMail | AttachmentMail) => Promise<void>;
 let senderOverride: Sender | null = null;
 
 // テスト専用の差し替え口(本番コードから呼ばない)。
@@ -36,13 +44,28 @@ const realSender: Sender = async (config, mail) => {
     greetingTimeout: 10_000,
     socketTimeout: 20_000,
   });
-  await transporter.sendMail({ from: config.from, to: mail.to, subject: mail.subject, text: mail.text });
+  await transporter.sendMail({
+    from: config.from,
+    to: mail.to,
+    subject: mail.subject,
+    text: mail.text,
+    ...("attachments" in mail ? { attachments: mail.attachments } : {}),
+  });
 };
 
 // 1通送る。throw しない。件名の改行は除く(ヘッダ注入の多層防御)。
 // ⚠失敗の message は SMTP 応答・宛先を含み得るので出さない(name/code の許可リストだけ)。
 export async function sendPlainMail(config: MailSendConfig, mail: PlainMail): Promise<SendResult> {
-  const safe: PlainMail = { to: mail.to, subject: mail.subject.replace(/[\r\n]+/g, ""), text: mail.text };
+  return sendSafely(config, { to: mail.to, subject: mail.subject, text: mail.text });
+}
+
+/** 添付つきで1通送る(資料送付)。守りは sendPlainMail と同じ。 */
+export async function sendMailWithAttachments(config: MailSendConfig, mail: AttachmentMail): Promise<SendResult> {
+  return sendSafely(config, mail);
+}
+
+async function sendSafely(config: MailSendConfig, mail: PlainMail | AttachmentMail): Promise<SendResult> {
+  const safe = { ...mail, subject: mail.subject.replace(/[\r\n]+/g, "") };
   try {
     await (senderOverride ?? realSender)(config, safe);
     return { ok: true };

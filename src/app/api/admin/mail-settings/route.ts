@@ -19,6 +19,11 @@ import {
   defaultAutoReplyBody,
   defaultAutoReplySubject,
 } from "@/lib/sale-dm-letter/inquiry-auto-reply-mail";
+import {
+  DEFAULT_MATERIAL_BODY,
+  DEFAULT_MATERIAL_SUBJECT,
+  MATERIAL_SEND_LIMITS,
+} from "@/lib/agent-inquiry/material-send";
 
 // 設定は管理者(user_management:write)のみ。SMTPパスワードを含む高リスク設定のため admin 限定。
 async function requireMailAdmin() {
@@ -89,6 +94,18 @@ const putSchema = z.object({
     .max(AUTO_REPLY_LIMITS.body)
     .refine(isPlainMailText, { message: "本文に使えない文字が含まれています" })
     .optional(),
+  // 資料請求への資料送付メールのひな形(2026-10-18)。空文字で「既定の文面に戻す」(null で保存)。
+  materialSendSubject: z
+    .string()
+    .trim()
+    .max(MATERIAL_SEND_LIMITS.subject)
+    .refine((v) => !/[\r\n]/.test(v) && isPlainMailText(v), { message: "件名は1行で入力してください" })
+    .optional(),
+  materialSendBody: z
+    .string()
+    .max(MATERIAL_SEND_LIMITS.body)
+    .refine(isPlainMailText, { message: "本文に使えない文字が含まれています" })
+    .optional(),
 });
 
 type MailConfigRow = {
@@ -103,6 +120,8 @@ type MailConfigRow = {
   inquiryAutoReplyEnabled?: boolean;
   inquiryAutoReplySubject?: string | null;
   inquiryAutoReplyBody?: string | null;
+  materialSendSubject?: string | null;
+  materialSendBody?: string | null;
 } | null;
 
 // 応答形式(GET/PUT共通)。パスワードそのものは絶対に返さず hasPassword(真偽値)だけ返す。
@@ -126,6 +145,10 @@ async function buildResponseData(row: MailConfigRow) {
     inquiryAutoReplyBody: row?.inquiryAutoReplyBody ?? null,
     inquiryAutoReplyDefaultSubject: defaultAutoReplySubject(sender),
     inquiryAutoReplyDefaultBody: defaultAutoReplyBody(sender),
+    materialSendSubject: row?.materialSendSubject ?? null,
+    materialSendBody: row?.materialSendBody ?? null,
+    materialSendDefaultSubject: DEFAULT_MATERIAL_SUBJECT,
+    materialSendDefaultBody: DEFAULT_MATERIAL_BODY,
     complete: isMailConfigComplete(row),
     cryptoConfigured: isSecretCryptoConfigured(),
     notifyRecipientCount,
@@ -169,6 +192,12 @@ export async function PUT(request: NextRequest) {
       const text = body.inquiryAutoReplyBody.replace(/\r\n?/g, "\n");
       data.inquiryAutoReplyBody = text.trim() === "" ? null : text;
       fields.push("inquiryAutoReplyBody");
+    }
+    if (body.materialSendSubject !== undefined) { data.materialSendSubject = norm(body.materialSendSubject) ?? null; fields.push("materialSendSubject"); }
+    if (body.materialSendBody !== undefined) {
+      const text = body.materialSendBody.replace(/\r\n?/g, "\n");
+      data.materialSendBody = text.trim() === "" ? null : text;
+      fields.push("materialSendBody");
     }
 
     // パスワード: 値があれば暗号化して保存(マスターキー必須)。空文字はクリア(null)。未指定は触らない。

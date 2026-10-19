@@ -1123,6 +1123,11 @@ export interface MailSettings {
   inquiryAutoReplyBody: string | null;
   inquiryAutoReplyDefaultSubject: string;
   inquiryAutoReplyDefaultBody: string;
+  // 資料請求への資料送付メールのひな形。null のときは既定の文面を使う。
+  materialSendSubject: string | null;
+  materialSendBody: string | null;
+  materialSendDefaultSubject: string;
+  materialSendDefaultBody: string;
   // この設定で通知メールが送れる状態かどうか(サーバー側 isMailConfigComplete と同じ判定)。
   complete: boolean;
   // false のとき、サーバーに暗号化キーが無くパスワードを保存できない。
@@ -1145,6 +1150,10 @@ const EMPTY_MAIL_SETTINGS: MailSettings = {
   inquiryAutoReplyBody: null,
   inquiryAutoReplyDefaultSubject: "査定のお申し込みを受け付けました",
   inquiryAutoReplyDefaultBody: "このたびは査定のお申し込みをいただき、ありがとうございます。\n内容を確認のうえ、担当者よりご連絡いたします。",
+  materialSendSubject: null,
+  materialSendBody: null,
+  materialSendDefaultSubject: "【資料送付】{物件名}",
+  materialSendDefaultBody: "{会社名}\n{担当者名} 様\n\nお世話になっております。\nお問い合わせいただきました「{物件名}」の資料をお送りいたします。\nご確認のほど、よろしくお願いいたします。\n\n{自分の名前}",
   complete: false,
   cryptoConfigured: true,
   notifyRecipientCount: 0,
@@ -1172,6 +1181,9 @@ export async function updateMailSettings(body: {
   // 空文字=既定の文面に戻す。
   inquiryAutoReplySubject?: string;
   inquiryAutoReplyBody?: string;
+  // 資料送付メールのひな形。空文字=既定の文面に戻す。
+  materialSendSubject?: string;
+  materialSendBody?: string;
 }): Promise<{ data: MailSettings }> {
   if (USE_MOCK) {
     await mockDelay();
@@ -5086,6 +5098,72 @@ export async function updateAgentInquiry(
     return { version: body.version + 1 };
   }
   return apiFetch<{ version: number }>(`/api/agent-inquiries/${id}`, deskJsonInit("PATCH", body));
+}
+/** 資料請求への資料送付(2026-10-18)。送ってよい添付と最初の文面。 */
+export interface MaterialCandidateFile {
+  id: string;
+  fileName: string;
+  fileSize: number;
+  type: string;
+  createdAt: string;
+  warning: string | null;
+}
+export interface MaterialCandidates {
+  mailConfigured: boolean;
+  to: string;
+  subject: string;
+  body: string;
+  files: MaterialCandidateFile[];
+  maxTotalBytes: number;
+  maxFiles: number;
+}
+export interface MaterialSendView {
+  id: string;
+  createdAt: string;
+  result: "sending" | "sent" | "failed";
+  state: "送信中" | "結果不明" | "送信済み" | "送れなかった";
+  sentBy: { name: string };
+  toAddress: string;
+  subject: string;
+  body: string;
+  attachments: { attachmentId: string; fileName: string; fileSize: number; type: string }[];
+  totalSize: number;
+  errorCode: string | null;
+}
+export async function fetchMaterialCandidates(inquiryId: string) {
+  if (USE_MOCK) {
+    await mockDelay();
+    throw new Error("モックでは資料を送れません");
+  }
+  return apiFetch<MaterialCandidates>(`/api/agent-inquiries/${inquiryId}/material-candidates`);
+}
+export async function fetchMaterialSends(inquiryId: string) {
+  if (USE_MOCK) {
+    await mockDelay();
+    return { items: [] as MaterialSendView[], needsApply: false };
+  }
+  return apiFetch<{ items: MaterialSendView[]; needsApply: boolean }>(`/api/agent-inquiries/${inquiryId}/material-sends`);
+}
+/** 送れたのに反響へ反映できていない記録を反映し直す(書ける人だけ)。 */
+export async function applyMaterialSends(inquiryId: string) {
+  if (USE_MOCK) {
+    await mockDelay();
+    return { applied: false };
+  }
+  return apiFetch<{ applied: boolean }>(`/api/agent-inquiries/${inquiryId}/material-sends/apply`, { method: "POST" });
+}
+export async function sendMaterial(
+  inquiryId: string,
+  body: { to: string; subject: string; body: string; attachmentIds: string[]; clientToken: string },
+) {
+  if (USE_MOCK) {
+    await mockDelay();
+    throw new Error("モックでは資料を送れません");
+  }
+  return apiFetch<{ id: string; result: string; state?: string; version?: number; replayed?: boolean; statusUpdated?: boolean }>(
+    `/api/agent-inquiries/${inquiryId}/material-sends`,
+    deskJsonInit("POST", body),
+  );
 }
 export async function addAgentViewing(
   inquiryId: string,

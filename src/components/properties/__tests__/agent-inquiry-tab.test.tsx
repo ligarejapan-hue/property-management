@@ -88,8 +88,9 @@ describe("物件画面への組み込み", () => {
   it("タブ「反響」がネクストアクションの次にある", () => {
     expect(page).toMatch(/\{ key: "actions", label: "ネクストアクション" \},\n\s*\{ key: "inquiries", label: "反響" \},/);
   });
-  it("物件ごとに作り直し(key)、物件の編集権限を渡す", () => {
-    expect(page).toMatch(/<AgentInquiryTab key=\{property\.id\} propertyId=\{property\.id\} canWrite=\{canWriteProperty\} \/>/);
+  it("物件ごとに作り直し(key)、物件の編集権限と資料を送れるか(反響の書き込み権限)を渡す", () => {
+    expect(page).toMatch(/<AgentInquiryTab key=\{property\.id\} propertyId=\{property\.id\} canWrite=\{canWriteProperty\} canSendMaterial=\{canSendInquiryMaterial\} \/>/);
+    expect(page).toMatch(/p\.resource === "agent_inquiry" && p\.action === "write" && p\.granted/);
   });
   it("広告の可否の変更を権限なしで断られたら、その後はボタンを出さない", () => {
     const src = read("src/components/properties/agent-inquiry-tab.tsx");
@@ -104,5 +105,16 @@ describe("物件画面への組み込み", () => {
 describe("暗い画面の色", () => {
   it("「取り消し」に暗い画面の色", () => {
     expect(read("src/components/properties/agent-inquiry-tab.tsx")).toContain('text-xs text-gray-500 dark:text-gray-400">取り消し');
+  });
+});
+
+describe("資料請求に資料を送る", () => {
+  it("送れる人には資料請求の行にだけ「資料を送る」", () => {
+    const out = view({ canSendMaterial: true, onOpenMaterial: () => {} });
+    expect((out.match(/>資料を送る<\/button>/g) ?? []).length).toBe(1);
+  });
+  it("送れない人には出さない", () => {
+    expect(view({ canSendMaterial: false, onOpenMaterial: () => {} })).not.toContain(">資料を送る</button>");
+    expect(view()).not.toContain(">資料を送る</button>");
   });
 });
