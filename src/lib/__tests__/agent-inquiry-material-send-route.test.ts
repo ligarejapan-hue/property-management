@@ -113,8 +113,9 @@ beforeEach(() => {
   };
   history = [];
   applied = [];
+  newerApplied = [];
   pm.agentInquiryMaterialSend.findMany.mockReset().mockImplementation(async (a: { where: Record<string, unknown> }) =>
-    !("inquiryAppliedAt" in a.where) ? history : a.where.inquiryAppliedAt === null ? pending() : applied,
+    !("inquiryAppliedAt" in a.where) ? history : a.where.inquiryAppliedAt === null ? pending() : "createdAt" in a.where ? newerApplied : applied,
   );
   pm.agentInquiryMaterialSend.updateMany.mockReset().mockResolvedValue({ count: 1 });
   pm.agentInquiryMaterialSend.count.mockReset().mockImplementation(async () => pending().length);
@@ -122,6 +123,7 @@ beforeEach(() => {
 let pending: () => { id: string; toAddress: string; statusAtSend: string; contactEmailAtSend: string | null }[] = () => [];
 let history: unknown[] = [];
 let applied: { toAddress: string }[] = [];
+let newerApplied: { id: string }[] = [];
 /** 監査の行(取引の中で書いたもの+別に書いたもの)。 */
 const auditLogMock = () => (prismaMock as never as { auditLog: { createMany: Fn; create: Fn } }).auditLog;
 /** 反響への反映の監査(反映と同じ取引で書く=auditLog.create・@codex 12巡目 P2)。 */
@@ -405,6 +407,17 @@ describe("送れた後に反響の更新が落ちたら、あとで反映し直�
     const call = pm.agentInquiryMaterialSend.findMany.mock.calls.find((c) => c[0].where.wroteContact === true)![0];
     expect(call.where.inquiryAppliedAt).toEqual({ gt: at });
     expect(call).toMatchObject({ orderBy: { inquiryAppliedAt: "desc" }, take: 1 });
+  });
+  it("後から作った送信が先に反映済み=古い送信の宛先で上書きしない(@codex 20巡目 P2)", async () => {
+    const at = new Date("2026-10-19T03:00:00Z");
+    pending = () => [{ id: "sA", toAddress: "a@agent.jp", statusAtSend: "open", contactEmailAtSend: "sato@agent.jp", createdAt: at } as never];
+    applied = [{ toAddress: "b@agent.jp" }];
+    newerApplied = [{ id: "sB" }];
+    pm.agentInquiry.findUnique.mockResolvedValue(inquiry({ status: "done", contactEmail: "b@agent.jp" }));
+    await APPLY(json("POST", {}), ctx);
+    expect(pm.agentInquiry.update).not.toHaveBeenCalled();
+    const q = pm.agentInquiryMaterialSend.findMany.mock.calls.find((c) => "createdAt" in c[0].where)![0];
+    expect(q.where).toMatchObject({ createdAt: { gt: at }, inquiryAppliedAt: { not: null } });
   });
   it("宛先を書かなかった反映では印を付けない", async () => {
     pending = stuck;

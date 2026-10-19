@@ -238,6 +238,18 @@ export async function applySentMaterialToInquiry(
         })
       ).map((r) => r.toAddress),
     );
+    // 後から作った送信が先に反映済みなら、古い送信の宛先で上書きしない(順番が入れ替わって終わった・@codex 20巡目 P2)。
+    const newerApplied = await tx.agentInquiryMaterialSend.findMany({
+      where: {
+        inquiryId,
+        result: "sent",
+        inquiryAppliedAt: { not: null },
+        createdAt: { gt: latest.createdAt },
+        id: { notIn: pending.map((p) => p.id) },
+      },
+      take: 1,
+      select: { id: true },
+    });
     const curEmail = cur.contactEmail ?? "";
     // 比べるのは**最新の**未反映の送信の時点だけ(@codex 10・14巡目 P2): 古い送信の時点の値に手で戻した、は
     // 最新の送信より後の手の変更=上書きしない。宛先は、反映済みの資料送付が書いた値のままでもよい(同時に送った2件目)。
@@ -246,7 +258,7 @@ export async function applySentMaterialToInquiry(
     const emailTarget =
       curEmail === (latest.contactEmailAtSend ?? "") || autoWritten.has(curEmail) ? latest.toAddress : null;
     const setDone = cur.status !== "done" && cur.status === latest.statusAtSend;
-    const setEmail = emailTarget != null && curEmail !== emailTarget;
+    const setEmail = emailTarget != null && curEmail !== emailTarget && newerApplied.length === 0;
     const to = emailTarget ?? "";
     if (!setDone && !setEmail) return { version: cur.version, statusChanged: false, contactChanged: false, wrote: false };
     const u = await tx.agentInquiry.update({
