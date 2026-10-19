@@ -70,6 +70,13 @@ async function finishSend(
   for (let i = 0; i < 3; i++) {
     try {
       await prisma.$transaction(async (tx) => {
+        // やり直しのとき、前の書き込みが実は済んでいた(応答だけ落ちた)なら何もしない=監査を二重に書かない
+        // (@codex 19巡目 P2)。送信中のまま失敗の印も無い=まだ書いていない。
+        const cur = await tx.agentInquiryMaterialSend.findUnique({
+          where: { id: sendId },
+          select: { result: true, errorCode: true },
+        });
+        if (!cur || cur.result !== "sending" || cur.errorCode != null) return;
         await tx.agentInquiryMaterialSend.update({ where: { id: sendId }, data });
         await tx.auditLog.createMany({
           data: audits.map((a) => ({ ...a, detail: a.detail as object })),

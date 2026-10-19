@@ -35,6 +35,7 @@ vi.mock("@/lib/prisma", () => {
       update: vi.fn(async () => ({})),
       updateMany: vi.fn(async () => ({ count: 1 })),
       count: vi.fn(async () => 0),
+      findUnique: vi.fn(async () => ({ result: "sending", errorCode: null })),
     },
     $transaction: vi.fn(async (fn: (tx: unknown) => unknown) => fn(db)),
     $queryRaw: vi.fn(async () => []),
@@ -60,7 +61,7 @@ const pm = prismaMock as never as {
   buildingPhoto: { findMany: Fn };
   fieldSurveyPinPhoto: { findMany: Fn };
   mailConfig: { findUnique: Fn };
-  agentInquiryMaterialSend: { findFirst: Fn; findMany: Fn; create: Fn; update: Fn; updateMany: Fn; count: Fn };
+  agentInquiryMaterialSend: { findFirst: Fn; findMany: Fn; create: Fn; update: Fn; updateMany: Fn; count: Fn; findUnique: Fn };
 };
 const IID = "33333333-3333-4333-8333-333333333333";
 const PID = "11111111-1111-4111-8111-111111111111";
@@ -95,6 +96,8 @@ beforeEach(() => {
   pm.agentInquiryMaterialSend.findFirst.mockReset().mockResolvedValue(null);
   pm.agentInquiryMaterialSend.create.mockReset().mockResolvedValue({ id: "s1" });
   pm.agentInquiryMaterialSend.update.mockReset().mockResolvedValue({});
+  pm.agentInquiryMaterialSend.findUnique.mockReset().mockResolvedValue({ result: "sending", errorCode: null });
+  (prismaMock as never as { $transaction: Fn }).$transaction.mockReset().mockImplementation(async (fn: (tx: unknown) => unknown) => fn(prismaMock));
   h.loadMailSendConfig.mockResolvedValue(CONFIG);
   h.read.mockResolvedValue({ body: Buffer.from("pdf"), contentType: "application/pdf", size: 3 });
   h.sendMailWithAttachments.mockResolvedValue({ ok: true });
@@ -464,6 +467,23 @@ describe("送信のあとの扱い(最終レビュー I2・I3・M1・M2)", () =>
     await POST(json("POST", body({ to: "new@agent.jp" })), ctx);
     expect(pm.agentInquiry.update.mock.calls[0][0].data).toMatchObject({ contactEmail: "new@agent.jp" });
     expect(applyAudits()).toEqual([expect.objectContaining({ detail: { statusChanged: false, contactChanged: true } })]);
+  });
+  it("書き込みは済んだのに応答だけ落ちてやり直した=監査を二重に書かない(@codex 19巡目 P2)", async () => {
+    const tx = (prismaMock as never as { $transaction: Fn }).$transaction;
+    // 予約(1回目)はそのまま・送信済みの書き込み(2回目)は中身が済んでから応答だけ落ちる
+    tx.mockImplementationOnce(async (fn: (t: unknown) => unknown) => fn(prismaMock))
+      .mockImplementationOnce(async (fn: (t: unknown) => unknown) => {
+        await fn(prismaMock);
+        throw new Error("connection lost after commit");
+      });
+    // やり直しのときは、もう送信済みになっている
+    pm.agentInquiryMaterialSend.findUnique
+      .mockResolvedValueOnce({ result: "sending", errorCode: null })
+      .mockResolvedValue({ result: "sent", errorCode: null });
+    const res = await POST(json("POST", body()), ctx);
+    expect(res.status).toBe(201);
+    const cm = (prismaMock as never as { auditLog: { createMany: Fn } }).auditLog.createMany;
+    expect(cm).toHaveBeenCalledTimes(1);
   });
   it("送れたか分からないときも、印と監査を同じ取引で書く", async () => {
     h.sendMailWithAttachments.mockResolvedValue({ ok: false, code: "ETIMEDOUT" });
