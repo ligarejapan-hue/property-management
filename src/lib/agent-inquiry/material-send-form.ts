@@ -1,4 +1,4 @@
-import { MATERIAL_SEND_LIMITS, isSingleAddress } from "./material-send";
+import { MATERIAL_SEND_LIMITS, isSingleAddress } from "./material-send-limits";
 
 export interface MaterialFormFile {
   id: string;

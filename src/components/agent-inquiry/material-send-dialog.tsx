@@ -13,7 +13,7 @@ import {
   type MaterialSendView,
 } from "@/lib/api-client";
 import { afterSendError, afterSendResponse, materialFormState } from "@/lib/agent-inquiry/material-send-form";
-import { MATERIAL_SEND_LIMITS } from "@/lib/agent-inquiry/material-send";
+import { MATERIAL_SEND_LIMITS } from "@/lib/agent-inquiry/material-send-limits";
 import { safeUuidV4 } from "@/lib/random-id";
 
 const inputCls = "w-full rounded-md border border-gray-300 px-2 py-1.5 text-sm dark:border-gray-700 dark:bg-gray-900";
@@ -21,6 +21,11 @@ const mb = (n: number) => `${(n / 1024 / 1024).toFixed(1)}MB`;
 /** 上限の表示(サーバーが返す上限から作る=数字を画面に書かない)。 */
 const limitLabel = (n: number) => `${Math.round((n / 1024 / 1024) * 10) / 10}MB`;
 const jst = (iso: string) => new Date(iso).toLocaleString("ja-JP", { timeZone: "Asia/Tokyo" });
+/** 登録日(同じ名前・同じ大きさの版を見分ける)。読めない値は出さない。 */
+const jstDate = (iso: string) => {
+  const d = new Date(iso);
+  return Number.isNaN(d.getTime()) ? null : d.toLocaleDateString("ja-JP", { timeZone: "Asia/Tokyo" });
+};
 
 /** 資料を送る小窓の見た目(spec §2.2)。状態は持たない=親(MaterialSendDialog)が持つ。 */
 export function MaterialSendDialogView({
@@ -131,6 +136,7 @@ export function MaterialSendDialogView({
                       <input type="checkbox" checked={picked.includes(f.id)} disabled={busy} onChange={() => onToggle(f.id)} />
                       <span>{f.fileName}</span>
                       <span className="text-xs text-gray-500">{mb(f.fileSize)}</span>
+                      {jstDate(f.createdAt) && <span className="text-xs text-gray-500">{`${jstDate(f.createdAt)} 登録`}</span>}
                     </label>
                   </li>
                 ))}

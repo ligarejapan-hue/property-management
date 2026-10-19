@@ -57,6 +57,15 @@ describe("資料を送る小窓(表示)", () => {
     expect(html).toContain('value="sato@agent.jp"');
     expect(html).toContain("図面.pdf");
   });
+  it("候補のファイルに登録日を出す(同じ名前・同じ大きさの版を見分ける・@codex 7巡目 P2)", () => {
+    const c = cand({ files: [
+      { id: "v1", fileName: "図面.pdf", fileSize: 2 * MB, type: "general", createdAt: "2026-09-30T16:00:00Z", warning: null },
+      { id: "v2", fileName: "図面.pdf", fileSize: 2 * MB, type: "general", createdAt: "2026-10-15T03:00:00Z", warning: null },
+    ] });
+    const html = view({ c });
+    expect(html).toContain("2026/10/1 登録");
+    expect(html).toContain("2026/10/15 登録");
+  });
   it("件名・本文が長すぎると知らせる(@codex 6巡目 P2)", () => {
     expect(view({ subject: "あ".repeat(201) })).toContain("件名は 200 文字までです");
     expect(view({ body: "あ".repeat(10_001) })).toContain("本文は 10000 文字までです");
