@@ -5,6 +5,7 @@ import { clearDraft, draftKey, readDraft } from "@/lib/drafts/draft-store";
 import { decideEditDraftOnLoad, parsePropertyEditDraft } from "@/lib/drafts/screens/property-edit";
 import { DraftStaleNotice } from "@/components/drafts/draft-notices";
 import { BackLink } from "@/components/ui/back-link";
+import { Button } from "@/components/ui/button";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { formatBuiltYearMonth } from "@/lib/built-year-month";
@@ -889,16 +890,16 @@ export default function PropertyDetailPage({
               }}
             />
           )}
-          <button
+          <Button variant="secondary"
             onClick={() => setShowEditForm(true)}
             disabled={propertyEditLockHeld}
             aria-label="物件を編集"
             title={propertyEditLockHeld ? editLockUnavailableTitle(propertyEditLockRow) : "物件情報を編集"}
-            className="flex items-center gap-1.5 whitespace-nowrap rounded-md border border-gray-300 px-3 py-2 text-sm text-gray-700 hover:bg-gray-50 disabled:cursor-not-allowed disabled:opacity-50 dark:border-gray-700 dark:text-gray-200 dark:hover:bg-gray-800"
+            className="whitespace-nowrap"
           >
             <Edit className="h-4 w-4" />
             物件を編集
-          </button>
+          </Button>
           {/* 画面すっきり化 第3回(発注者決定 2026-10-16): たまに使う操作は「その他 ▾」へ。
               機能は消さず置き場所だけ変える。出せる項目が無い人にはボタンごと出ない。 */}
           <MenuButton
@@ -1003,7 +1004,8 @@ export default function PropertyDetailPage({
       <div className="mb-4 border-b border-gray-200 dark:border-gray-800">
         <nav className="-mb-px flex gap-0 overflow-x-auto">
           {tabs.map((tab) => (
-            <button
+            // data-ui=raw: タブの見出し(下線で切り替える見た目・ボタンの形ではない)
+            <button data-ui="raw"
               key={tab.key}
               onClick={() => setActiveTab(tab.key)}
               className={`whitespace-nowrap border-b-2 px-4 py-2.5 text-sm font-medium transition-colors ${
@@ -1215,19 +1217,18 @@ function BasicTab({
                 {property.buildingName}
               </Link>
             ) : (
-              <button
-                type="button"
+              <Button variant="ghost"
                 data-testid="building-name-connect"
                 onClick={() => {
                   setLinkError(null);
                   setLinkOpen(true);
                 }}
-                className="inline-flex items-center gap-1 font-medium text-blue-600 underline hover:text-blue-800 dark:text-blue-400 dark:hover:text-blue-300"
+                className="underline text-blue-600 hover:text-blue-800 dark:text-blue-400 dark:hover:text-blue-300"
                 title="棟（マンション1棟）につないで、棟の画面を開きます"
               >
                 <Building2 className="h-4 w-4" />
                 {property.buildingName}
-              </button>
+              </Button>
             )}
           </dd>
           {nameMode === "connect" && (
@@ -1461,16 +1462,14 @@ function OwnerTab({
                 onApplied={onRefresh}
               />
             )}
-          <button
-            type="button"
+          <Button variant="secondary" size="sm"
             onClick={() => setLinkModalOpen(true)}
             aria-label="所有者を追加（既存の所有者を紐付け / 新規作成して紐付け）"
             title="この物件に所有者を追加（既存紐付け / 新規作成）"
-            className="flex items-center gap-1.5 rounded-md border border-indigo-300 bg-indigo-50 px-3 py-1.5 text-xs font-medium text-indigo-700 hover:bg-indigo-100 dark:border-indigo-700 dark:bg-indigo-950/40 dark:text-indigo-300 dark:hover:bg-indigo-900/40"
           >
             <UserPlus className="h-3.5 w-3.5" />
             所有者を追加
-          </button>
+          </Button>
         </div>
       )}
 
@@ -1478,15 +1477,14 @@ function OwnerTab({
         <div className="rounded-lg border border-dashed border-gray-300 py-10 text-center dark:border-gray-700">
           <p className="text-sm text-gray-500 dark:text-gray-400">所有者が紐付けされていません</p>
           {showAdd ? (
-            <button
-              type="button"
+            <Button variant="primary"
               onClick={() => setLinkModalOpen(true)}
               aria-label="所有者を追加（既存の所有者を紐付け / 新規作成して紐付け）"
-              className="mt-3 inline-flex items-center gap-1.5 rounded-md bg-indigo-600 px-4 py-2 text-sm font-medium text-white hover:bg-indigo-700"
+              className="mt-3"
             >
               <UserPlus className="h-4 w-4" />
               所有者を追加
-            </button>
+            </Button>
           ) : (
             <p className="mt-1 text-xs text-gray-400 dark:text-gray-500">
               所有者を追加するには所有者の編集権限（owner:write）が必要です。
@@ -1864,24 +1862,24 @@ function OwnerCard({
         {/* 編集ボタンは canEditOwner (owner:read + owner:write + 編集可能項目あり + version 取得済み) のみ表示。
             見ている側(仕様 6.3): この所有者が他の人の鍵なら押せなくする(先に取得を試みて失敗させない)。 */}
         {editAllowed && !editing && (
-          <button
-            type="button"
+          <Button variant="secondary" size="sm"
             onClick={handleEdit}
             disabled={editLockHeld}
             aria-label={`所有者${idx + 1}/${total} ${po.owner.name ?? "（氏名未登録）"}の所有者情報を編集`}
             title={editLockHeld ? editLockUnavailableTitle(editLockStatusRow) : "所有者情報を編集"}
-            className="ml-auto flex items-center gap-1 rounded-md border border-gray-300 px-2.5 py-1 text-xs font-medium text-gray-600 hover:bg-gray-50 disabled:cursor-not-allowed disabled:opacity-50 dark:border-gray-700 dark:text-gray-300 dark:hover:bg-gray-800"
+            className="ml-auto"
           >
             <Edit className="h-3 w-3" />
             所有者情報を編集
-          </button>
+          </Button>
         )}
         {/* 付け替え: owner:write があれば事務担当でも使える。
             ⚠旧名は「誤紐づき修正」。**その名前では「外す」機能を誰も見つけられず**
             (本番の監査ログで利用 0 件)、発注者から「削除ができない」と報告された。
             名前は**やることそのもの**にする。 */}
         {canWrite && !editing && (
-          <button
+          // data-ui=raw: 琥珀の付け替えボタン(誤リンクの注意色・合う variant が無い)
+          <button data-ui="raw"
             type="button"
             onClick={() => setMislinkOpen(true)}
             title="この所有者を、別の所有者に付け替える"
@@ -1894,16 +1892,14 @@ function OwnerCard({
         {/* 外す: **管理者だけ**(発注者判断 2026-08-21「事務担当は付け替えだけに」)。
             条件は server (DELETE /api/properties/[id]/owners/[ownerId]) と同一。 */}
         {canRemoveOwnerLink && !editing && (
-          <button
-            type="button"
+          <Button variant="danger" size="sm"
             disabled={removing}
             onClick={handleRemoveLink}
             title="この所有者を、この物件から外す（所有者の情報そのものは残ります）"
             aria-label={`所有者${idx + 1}/${total} ${po.owner.name ?? "（氏名未登録）"}をこの物件から外す`}
-            className="flex items-center gap-1 rounded-md border border-red-300 bg-red-50 px-2.5 py-1 text-xs font-medium text-red-700 hover:bg-red-100 disabled:opacity-60 dark:border-red-800 dark:bg-red-950/40 dark:text-red-300 dark:hover:bg-red-900/40"
           >
             {removing ? "外しています..." : "この物件から外す"}
-          </button>
+          </Button>
         )}
       </div>
 
@@ -1983,7 +1979,8 @@ function OwnerCard({
                   {/* 発注者指摘(2026-09-26)「名前が入っていて邪魔」=打ち直すときに1回で空にできる。
                       空のまま保存しようとした場合は、これまでどおり必須の検査で止まる。 */}
                   {form.name !== "" && (
-                    <button
+                    // data-ui=raw: 入力欄の右端に重ねた消去の×(欄の中に収める形・共通ボタンの余白が合わない)
+                    <button data-ui="raw"
                       type="button"
                       aria-label="所有者名を消す"
                       title="所有者名を消す"
@@ -2091,8 +2088,7 @@ function OwnerCard({
                 <div className="flex items-center gap-2">
                   <label className="text-xs font-medium text-gray-700 dark:text-gray-200">現住所</label>
                   {canSplitCurrentAddress && !splitActive && (
-                    <button
-                      type="button"
+                    <Button variant="secondary" size="sm"
                       // ⚠ホバーで理由を出す（発注者指定の文言）。
                       title="登記上の住所と現在の所在が違う場合はクリックしてください"
                       onClick={() => {
@@ -2106,10 +2102,9 @@ function OwnerCard({
                         }));
                         setAddressSplit(true);
                       }}
-                      className="rounded-md border border-gray-300 px-2 py-0.5 text-[11px] text-gray-600 hover:bg-gray-50 dark:border-gray-700 dark:text-gray-300 dark:hover:bg-gray-800"
                     >
                       ⇅ 現住所を分ける
-                    </button>
+                    </Button>
                   )}
                 </div>
                 <input
@@ -2319,8 +2314,7 @@ function OwnerCard({
           )}
 
           <div className="flex gap-2">
-            <button
-              type="button"
+            <Button variant="primary" size="sm"
               onClick={handleSave}
               // ⚠鍵の可否(canSubmitSave・複製タブ確認待ち/取得中の他ユーザー保持を含む・
               //   fail openならlockUnavailableで押せる)と、この画面既存の入力検証を
@@ -2346,18 +2340,15 @@ function OwnerCard({
                   normalizeCompanyRegistryNumber(form.companyRegistryNumber) ===
                     null)
               }
-              className="rounded-md bg-indigo-600 px-4 py-1.5 text-xs font-medium text-white hover:bg-indigo-700 disabled:cursor-not-allowed disabled:bg-gray-300"
             >
               {saving ? "保存中..." : "保存"}
-            </button>
-            <button
-              type="button"
+            </Button>
+            <Button variant="secondary" size="sm"
               onClick={handleCancel}
               disabled={saving}
-              className="rounded-md border border-gray-300 px-4 py-1.5 text-xs font-medium text-gray-600 hover:bg-gray-50 disabled:cursor-not-allowed dark:border-gray-700 dark:text-gray-300 dark:hover:bg-gray-800"
             >
               キャンセル
-            </button>
+            </Button>
           </div>
         </div>
       ) : (
@@ -2473,22 +2464,18 @@ function PropertyOwnerNoteEditor({ po }: { po: ApiPropertyOwner }) {
         className="w-full rounded-md border border-gray-300 px-3 py-2 text-sm shadow-sm focus:border-indigo-500 focus:outline-none focus:ring-1 focus:ring-indigo-500 dark:border-gray-700 dark:bg-gray-900 dark:text-gray-100 dark:placeholder:text-gray-500"
       />
       <div className="mt-2 flex items-center gap-2">
-        <button
-          type="button"
+        <Button variant="primary" size="sm"
           disabled={!dirty || saving}
           onClick={() => persist(value.trim() === "" ? null : value)}
-          className="rounded-md bg-indigo-600 px-3 py-1.5 text-xs font-medium text-white hover:bg-indigo-700 disabled:cursor-not-allowed disabled:bg-gray-300"
         >
           {saving ? "保存中..." : "保存"}
-        </button>
-        <button
-          type="button"
+        </Button>
+        <Button variant="secondary" size="sm"
           disabled={saving || (savedValue === "" && value === "")}
           onClick={() => persist(null)}
-          className="rounded-md border border-gray-300 bg-white px-3 py-1.5 text-xs font-medium text-gray-700 hover:bg-gray-50 disabled:cursor-not-allowed disabled:opacity-50 dark:border-gray-700 dark:bg-gray-900 dark:text-gray-200 dark:hover:bg-gray-800"
         >
           削除
-        </button>
+        </Button>
         {error && <span className="text-xs text-red-600 dark:text-red-400">{error}</span>}
         {!error && savedAt && !dirty && !saving && (
           <span className="text-xs text-green-600 dark:text-green-400">保存しました</span>
@@ -2822,13 +2809,12 @@ function RegistryCountField({
       <dd className="flex flex-wrap items-center gap-x-3 gap-y-1 text-sm text-gray-900 dark:text-gray-100">
         <span>{total > 0 ? parts.join(" ／ ") : "謄本 0件"}</span>
         {total > 0 && (
-          <button
-            type="button"
+          <Button variant="ghost"
             onClick={onOpenAttachments}
-            className="text-blue-700 underline underline-offset-2 hover:text-blue-900 dark:text-blue-300 dark:hover:text-blue-200"
+            className="underline underline-offset-2 text-blue-700 hover:text-blue-900 dark:text-blue-300 dark:hover:text-blue-200"
           >
             添付を見る
-          </button>
+          </Button>
         )}
       </dd>
     </div>
@@ -2928,7 +2914,8 @@ function CorporateNumberCandidateBanner({
       </div>
       <div className="flex flex-wrap gap-1.5">
         {candidates.map((c) => (
-          <button
+          // data-ui=raw: 琥珀の注意枠の中の転記ボタン(琥珀の枠・合う variant が無い)
+          <button data-ui="raw"
             key={c}
             type="button"
             onClick={() => onTransfer(c)}
@@ -3015,7 +3002,8 @@ function CompanyRegistryNumberCandidateBanner({
         {candidates.map((c) => (
           <div key={c} className="flex flex-wrap items-center gap-1.5">
             <span className="font-mono text-[11px] text-amber-900">{c}</span>
-            <button
+            {/* data-ui=raw: 琥珀の注意枠の中の転記ボタン(琥珀の枠・合う variant が無い) */}
+            <button data-ui="raw"
               type="button"
               onClick={() => onTransferRegistry(c)}
               className="rounded-md border border-amber-300 bg-white px-2 py-0.5 text-[11px] text-amber-900 hover:bg-amber-100"
@@ -3023,13 +3011,11 @@ function CompanyRegistryNumberCandidateBanner({
               会社法人等番号欄に転記
             </button>
             {currentSearchInput.trim() === "" && (
-              <button
-                type="button"
+              <Button variant="secondary" size="sm"
                 onClick={() => onTransferSearch(c)}
-                className="rounded-md border border-blue-300 bg-white px-2 py-0.5 text-[11px] text-blue-700 hover:bg-blue-100"
               >
                 この番号で検索
-              </button>
+              </Button>
             )}
           </div>
         ))}
