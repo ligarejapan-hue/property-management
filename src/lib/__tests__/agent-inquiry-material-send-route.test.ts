@@ -34,6 +34,7 @@ vi.mock("@/lib/prisma", () => {
       create: vi.fn(async () => ({ id: "s1" })),
       update: vi.fn(async () => ({})),
       updateMany: vi.fn(async () => ({ count: 1 })),
+      count: vi.fn(async () => 0),
     },
     $transaction: vi.fn(async (fn: (tx: unknown) => unknown) => fn(db)),
   };
@@ -46,6 +47,7 @@ import { assertPropertyReadable } from "@/lib/agent-inquiry/property-access";
 import { jsonRequest as json } from "./agent-inquiry-route-mocks";
 import { POST, GET as LIST } from "../../app/api/agent-inquiries/[id]/material-sends/route";
 import { GET as CANDIDATES } from "../../app/api/agent-inquiries/[id]/material-candidates/route";
+import { POST as APPLY } from "../../app/api/agent-inquiries/[id]/material-sends/apply/route";
 
 type Fn = ReturnType<typeof vi.fn>;
 const pm = prismaMock as never as {
@@ -55,7 +57,7 @@ const pm = prismaMock as never as {
   buildingPhoto: { findMany: Fn };
   fieldSurveyPinPhoto: { findMany: Fn };
   mailConfig: { findUnique: Fn };
-  agentInquiryMaterialSend: { findFirst: Fn; findMany: Fn; create: Fn; update: Fn; updateMany: Fn };
+  agentInquiryMaterialSend: { findFirst: Fn; findMany: Fn; create: Fn; update: Fn; updateMany: Fn; count: Fn };
 };
 const IID = "33333333-3333-4333-8333-333333333333";
 const PID = "11111111-1111-4111-8111-111111111111";
@@ -98,15 +100,16 @@ beforeEach(() => {
   // 反響へまだ反映していない「送信済み」=この中で作った予約の行(送信済みにした後に読む)。
   pending = () => {
     const c = pm.agentInquiryMaterialSend.create.mock.calls.at(-1);
-    return c ? [{ id: "s1", toAddress: c[0].data.toAddress }] : [];
+    return c ? [{ id: "s1", toAddress: c[0].data.toAddress, finishedAt: new Date() }] : [];
   };
   history = [];
   pm.agentInquiryMaterialSend.findMany.mockReset().mockImplementation(async (a: { where: Record<string, unknown> }) =>
     "inquiryAppliedAt" in a.where ? pending() : history,
   );
   pm.agentInquiryMaterialSend.updateMany.mockReset().mockResolvedValue({ count: 1 });
+  pm.agentInquiryMaterialSend.count.mockReset().mockImplementation(async () => pending().length);
 });
-let pending: () => { id: string; toAddress: string }[] = () => [];
+let pending: () => { id: string; toAddress: string; finishedAt: Date }[] = () => [];
 let history: unknown[] = [];
 
 /** 物件の添付一覧(targetId で読む)と、同じファイルを指す記録の逆引き(fileUrl で読む)を分けて返す。 */
@@ -149,6 +152,25 @@ describe("同じファイルを別の物件の記録が指していれば送ら�
   it("同じ物件の写真・同じ物件の別の記録なら送れる/名前が似ているだけの別ファイルは数えない", async () => {
     pm.propertyPhoto.findMany.mockResolvedValue([{ propertyId: PID, fileUrl: "/uploads/attachments/a.pdf" }]);
     sameFileRecords([att({ id: "y" }), att({ id: "z", targetId: OTHER, fileUrl: "/uploads/attachments/a.pdf.bak" })]);
+    expect((await POST(json("POST", body()), ctx)).status).toBe(201);
+  });
+  it("別の物件の写真・棟の写真のサムネイルが同じファイルでも送らない(@codex 3巡目)", async () => {
+    pm.propertyPhoto.findMany.mockResolvedValue([{ propertyId: OTHER, fileUrl: "/uploads/x.jpg", thumbnailUrl: "/uploads/attachments/a.pdf" }]);
+    expect((await (await POST(json("POST", body()), ctx)).json()).error.code).toBe("NOT_SELECTABLE");
+    expect(pm.propertyPhoto.findMany).toHaveBeenCalledWith(expect.objectContaining({
+      where: { OR: [{ fileUrl: expect.anything() }, { thumbnailUrl: expect.anything() }] },
+    }));
+    pm.propertyPhoto.findMany.mockResolvedValue([]);
+    pm.buildingPhoto.findMany.mockResolvedValue([{ buildingId: "b", fileUrl: "/uploads/x.jpg", thumbnailUrl: "/uploads/attachments/a.pdf" }]);
+    expect((await (await POST(json("POST", body()), ctx)).json()).error.code).toBe("NOT_SELECTABLE");
+    expect(h.sendMailWithAttachments).not.toHaveBeenCalled();
+  });
+  it("置き場所が別の物件・写真の置き場所なら、記録が無くても送らない", async () => {
+    pm.attachment.findMany.mockResolvedValue([att({ fileUrl: `/uploads/properties/${OTHER}/attachments/a.pdf` })]);
+    expect((await (await POST(json("POST", body()), ctx)).json()).error.code).toBe("NOT_SELECTABLE");
+    pm.attachment.findMany.mockResolvedValue([att({ fileUrl: `/uploads/properties/${PID}/photos/a.jpg` })]);
+    expect((await (await POST(json("POST", body()), ctx)).json()).error.code).toBe("NOT_SELECTABLE");
+    pm.attachment.findMany.mockResolvedValue([att({ fileUrl: `/uploads/properties/${PID}/attachments/a.pdf` })]);
     expect((await POST(json("POST", body()), ctx)).status).toBe(201);
   });
   it("受け取り箱の置き場所のファイルは送らない", async () => {
@@ -201,7 +223,7 @@ describe("ファイルの守り(/uploads と同じ判定・最終レビュー C1
 });
 
 describe("送れた後に反響の更新が落ちたら、あとで反映し直す(@codex 2巡目 P2)", () => {
-  const stuck = () => [{ id: "s0", toAddress: "new@agent.jp" }];
+  const stuck = () => [{ id: "s0", toAddress: "new@agent.jp", finishedAt: new Date("2026-10-19T03:00:00Z") }];
   it("送信のあとの反映は、反映済みの印を付けてから反響を done にする(同じ取引の中)", async () => {
     await POST(json("POST", body()), ctx);
     expect(pm.agentInquiryMaterialSend.updateMany).toHaveBeenCalledWith(expect.objectContaining({
@@ -210,7 +232,7 @@ describe("送れた後に反響の更新が落ちたら、あとで反映し直�
     }));
     expect(pm.agentInquiry.update).toHaveBeenCalledWith(expect.objectContaining({ data: expect.objectContaining({ status: "done" }) }));
   });
-  it("同じ鍵の押し直しで、前回の送信済みが反響に反映されていなければ反映し直す", async () => {
+  it("同じ鍵の押し直しで、前回の送信済みが反響に反映されていなければ反映し直す(監査に残す)", async () => {
     pm.agentInquiryMaterialSend.findFirst.mockResolvedValue({ id: "s0", result: "sent", inquiryId: IID, createdAt: new Date() });
     pending = stuck;
     const res = await POST(json("POST", body()), ctx);
@@ -219,27 +241,46 @@ describe("送れた後に反響の更新が落ちたら、あとで反映し直�
     expect(pm.agentInquiry.update).toHaveBeenCalledWith(expect.objectContaining({
       where: { id: IID }, data: expect.objectContaining({ status: "done", contactEmail: "new@agent.jp" }),
     }));
+    expect(h.writeAuditLog).toHaveBeenCalledWith(expect.objectContaining({ action: "agent_inquiry_material_apply", targetId: IID }));
   });
-  it("送った記録を開いたとき(書ける人)にも反映し直す=小窓が閉じた後でも残らない", async () => {
+  it("記録を読む(GET)は書き換えない=未反映があるとだけ返す", async () => {
     pending = stuck;
-    await LIST(new Request("http://x"), ctx);
-    expect(pm.agentInquiry.update).toHaveBeenCalledWith(expect.objectContaining({ data: expect.objectContaining({ status: "done" }) }));
+    const d = await (await LIST(new Request("http://x"), ctx)).json();
+    expect(d.needsApply).toBe(true);
+    expect(pm.agentInquiry.update).not.toHaveBeenCalled();
+    expect(pm.agentInquiryMaterialSend.updateMany).not.toHaveBeenCalled();
   });
-  it("読むだけの人が記録を開いても、反響は書き換えない", async () => {
+  it("反映し直しの口(POST)は書ける人だけ=反映して監査に残す", async () => {
+    pending = stuck;
+    const res = await APPLY(json("POST", {}), ctx);
+    expect(await res.json()).toMatchObject({ applied: true });
+    expect(pm.agentInquiry.update).toHaveBeenCalledWith(expect.objectContaining({ data: expect.objectContaining({ status: "done" }) }));
+    expect(h.writeAuditLog).toHaveBeenCalledWith(expect.objectContaining({ action: "agent_inquiry_material_apply", userId: "u1" }));
+  });
+  it("読むだけの人は反映し直しの口を使えない", async () => {
     grant(["agent_inquiry", "read"], ["property", "read"]);
     pending = stuck;
-    await LIST(new Request("http://x"), ctx);
+    const res = await APPLY(json("POST", {}), ctx);
+    expect(res.status).toBe(403);
     expect(pm.agentInquiry.update).not.toHaveBeenCalled();
   });
   it("別の人が先に反映した(印が付けられなかった)なら、反響は書き換えない", async () => {
     pending = stuck;
     pm.agentInquiryMaterialSend.updateMany.mockResolvedValue({ count: 0 });
-    await LIST(new Request("http://x"), ctx);
+    expect(await (await APPLY(json("POST", {}), ctx)).json()).toMatchObject({ applied: false });
+    expect(pm.agentInquiry.update).not.toHaveBeenCalled();
+    expect(h.writeAuditLog).not.toHaveBeenCalled();
+  });
+  it("送った後に反響が書き換えられていれば(手で開き直した・宛先を直した)上書きしない=印だけ付ける", async () => {
+    pending = stuck;
+    pm.agentInquiry.findUnique.mockResolvedValue(inquiry({ updatedAt: new Date("2026-10-19T03:05:00Z") }));
+    expect(await (await APPLY(json("POST", {}), ctx)).json()).toMatchObject({ applied: false });
+    expect(pm.agentInquiryMaterialSend.updateMany).toHaveBeenCalled();
     expect(pm.agentInquiry.update).not.toHaveBeenCalled();
   });
-  it("反映が終わっていれば(未反映が無い)何もしない=あとで手で開き直した反響を done に戻さない", async () => {
+  it("未反映が無ければ何もしない", async () => {
     pending = () => [];
-    await LIST(new Request("http://x"), ctx);
+    expect(await (await APPLY(json("POST", {}), ctx)).json()).toMatchObject({ applied: false });
     expect(pm.agentInquiry.update).not.toHaveBeenCalled();
   });
 });

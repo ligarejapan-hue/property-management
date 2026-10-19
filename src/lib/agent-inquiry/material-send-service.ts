@@ -2,6 +2,7 @@ import prisma from "@/lib/prisma";
 import { ApiError, type ApiSession, type PermissionEntry } from "@/lib/api-helpers";
 import { assertPropertyReadable } from "@/lib/agent-inquiry/property-access";
 import { MAIL_CONFIG_ID } from "@/lib/mail/mail-config";
+import { writeAuditLog } from "@/lib/audit";
 import {
   DEFAULT_MATERIAL_BODY,
   DEFAULT_MATERIAL_SUBJECT,
@@ -82,16 +83,26 @@ export async function guardMaterialFile(
  * そのファイルを指す記録が、すべてこの物件のものか(@codex P2)。
  * ⚠authorizeUploadAccess は「その人が開けるか」しか見ない=両方の物件を開ける人は、別の物件のファイルを
  *   この物件の添付として登録し直して、この物件の反響から送れてしまう。送る資料は物件に縛る:
- *   別の物件・所有者に付いた添付(削除済みも)・別の物件の写真・棟の写真・巡回の写真・受け取り箱の置き場所は送らない。
+ *   別の物件・所有者に付いた添付(削除済みも)・別の物件の写真・棟の写真・巡回の写真(サムネイルも)・
+ *   受け取り箱の置き場所・別の物件の置き場所・写真の置き場所は送らない。
  */
 async function keyBelongsOnlyTo(key: string, propertyId: string): Promise<boolean> {
   if (key.startsWith("report-inbox/")) return false;
+  // 置き場所(properties/<物件>/<種類>/…)が別の物件・写真なら、記録が無くても送らない(@codex 3巡目)。
+  const place = /^properties\/([^/]+)\/([^/]+)\//.exec(key);
+  if (place && (place[1] !== propertyId || place[2] === "photos")) return false;
   const like = { contains: escapePrismaLikePattern(key) };
   const same = (u: string | null | undefined) => resolveStoredFileUrlToKey(u) === key;
   const [atts, photos, buildingPhotos, pinPhotos] = await Promise.all([
     prisma.attachment.findMany({ where: { fileUrl: like }, select: { targetType: true, targetId: true, propertyId: true, fileUrl: true } }),
-    prisma.propertyPhoto.findMany({ where: { fileUrl: like }, select: { propertyId: true, fileUrl: true } }),
-    prisma.buildingPhoto.findMany({ where: { fileUrl: like }, select: { fileUrl: true } }),
+    prisma.propertyPhoto.findMany({
+      where: { OR: [{ fileUrl: like }, { thumbnailUrl: like }] },
+      select: { propertyId: true, fileUrl: true, thumbnailUrl: true },
+    }),
+    prisma.buildingPhoto.findMany({
+      where: { OR: [{ fileUrl: like }, { thumbnailUrl: like }] },
+      select: { fileUrl: true, thumbnailUrl: true },
+    }),
     prisma.fieldSurveyPinPhoto.findMany({
       where: { OR: [{ fileUrl: like }, { thumbnailUrl: like }] },
       select: { fileUrl: true, thumbnailUrl: true },
@@ -102,8 +113,8 @@ async function keyBelongsOnlyTo(key: string, propertyId: string): Promise<boolea
     .every((a) => a.targetType === "property" && a.targetId === propertyId && (a.propertyId == null || a.propertyId === propertyId));
   return (
     attachmentsOk &&
-    photos.filter((p) => same(p.fileUrl)).every((p) => p.propertyId === propertyId) &&
-    !buildingPhotos.some((b) => same(b.fileUrl)) &&
+    photos.filter((p) => same(p.fileUrl) || same(p.thumbnailUrl)).every((p) => p.propertyId === propertyId) &&
+    !buildingPhotos.some((b) => same(b.fileUrl) || same(b.thumbnailUrl)) &&
     !pinPhotos.some((p) => same(p.fileUrl) || same(p.thumbnailUrl))
   );
 }
@@ -111,19 +122,21 @@ async function keyBelongsOnlyTo(key: string, propertyId: string): Promise<boolea
 /**
  * 送信済みでまだ反響へ反映していない記録を反映する(反響を done・宛先を最後に送った先に)(@codex 2巡目 P2)。
  * ⚠送信のあとの反響の更新が落ちても、押し直し・記録を開いたときにここを通って反映し直す。
- *   印(inquiryAppliedAt)を先に付けた人だけが反響を書く=二重に書かない。反映済みなら何もしない
- *   (あとで手で開き直した反響を done に戻さない)。反響の version は見ない(送信と同じ)。
+ *   印(inquiryAppliedAt)を先に付けた人だけが反響を書く=二重に書かない。反映済みなら何もしない。
+ *   ⚠反響の version は見ないが、**送った後に反響が書き換えられていれば上書きしない**(手で開き直した・
+ *   宛先を直した、を古い送信で戻さない)=印だけ付けて終える。
  */
 export async function applySentMaterialToInquiry(
   inquiryId: string,
-): Promise<{ version: number; statusChanged: boolean } | null> {
+): Promise<{ version: number; statusChanged: boolean; wrote: boolean } | null> {
   const pending = await prisma.agentInquiryMaterialSend.findMany({
     where: { inquiryId, result: "sent", inquiryAppliedAt: null },
     orderBy: { createdAt: "asc" },
-    select: { id: true, toAddress: true },
+    select: { id: true, toAddress: true, finishedAt: true },
   });
   if (pending.length === 0) return null;
-  const to = pending[pending.length - 1].toAddress;
+  const last = pending[pending.length - 1];
+  const to = last.toAddress;
   return prisma.$transaction(async (tx) => {
     const claimed = await tx.agentInquiryMaterialSend.updateMany({
       where: { id: { in: pending.map((p) => p.id) }, inquiryAppliedAt: null },
@@ -132,18 +145,48 @@ export async function applySentMaterialToInquiry(
     if (claimed.count === 0) return null;
     const cur = await tx.agentInquiry.findUnique({
       where: { id: inquiryId },
-      select: { status: true, contactEmail: true, version: true },
+      select: { status: true, contactEmail: true, version: true, updatedAt: true },
     });
     if (!cur) return null;
+    const touchedAfterSend = cur.updatedAt != null && last.finishedAt != null && cur.updatedAt > last.finishedAt;
     const changeEmail = (cur.contactEmail ?? "") !== to;
-    if (cur.status === "done" && !changeEmail) return { version: cur.version, statusChanged: false };
+    if (touchedAfterSend || (cur.status === "done" && !changeEmail)) {
+      return { version: cur.version, statusChanged: false, wrote: false };
+    }
     const u = await tx.agentInquiry.update({
       where: { id: inquiryId },
       data: { status: "done", ...(changeEmail ? { contactEmail: to } : {}), version: { increment: 1 } },
       select: { version: true },
     });
-    return { version: u.version, statusChanged: cur.status !== "done" };
+    return { version: u.version, statusChanged: cur.status !== "done", wrote: true };
   });
+}
+
+/** 送れたのに反響へ反映できていない記録があるか(読むだけ=書き換えない)。 */
+export async function hasUnappliedMaterialSend(inquiryId: string): Promise<boolean> {
+  return (await prisma.agentInquiryMaterialSend.count({ where: { inquiryId, result: "sent", inquiryAppliedAt: null } })) > 0;
+}
+
+/**
+ * 反映し直し(押し直し・反映し直しの口)。書き換えたときは監査に残す。落ちても画面の操作は止めない。
+ * ⚠呼ぶ側で agent_inquiry:write と物件を開けることを確かめてから呼ぶ。
+ */
+export async function reconcileMaterialSends(inquiryId: string, userId: string): Promise<boolean> {
+  try {
+    const a = await applySentMaterialToInquiry(inquiryId);
+    if (!a?.wrote) return false;
+    await writeAuditLog({
+      userId,
+      action: "agent_inquiry_material_apply",
+      targetTable: "agent_inquiries",
+      targetId: inquiryId,
+      detail: { statusChanged: a.statusChanged },
+    });
+    return true;
+  } catch (e) {
+    console.error("[material-send] inquiry reconcile failed", { name: e instanceof Error ? e.name : "Unknown" });
+    return false;
+  }
 }
 
 /** ひな形(未登録なら既定)に差し込んだ件名・本文。 */

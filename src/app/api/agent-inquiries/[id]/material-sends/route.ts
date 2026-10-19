@@ -14,12 +14,13 @@ import {
   isSingleAddress,
   sendStateLabel,
 } from "@/lib/agent-inquiry/material-send";
-import { hasPermission } from "@/lib/permissions";
 import {
   applySentMaterialToInquiry,
   guardMaterialFile,
+  hasUnappliedMaterialSend,
   loadMaterialInquiry,
   loadPropertyAttachments,
+  reconcileMaterialSends,
 } from "@/lib/agent-inquiry/material-send-service";
 
 const NO_STORE = { "Cache-Control": "no-store" };
@@ -36,23 +37,14 @@ const sendSchema = z.object({
   clientToken: z.string().uuid(),
 });
 
-/** 反響への反映し直し。落ちても画面の操作は止めない(次の機会にまた試す)。 */
-async function reconcile(inquiryId: string) {
-  try {
-    await applySentMaterialToInquiry(inquiryId);
-  } catch (e) {
-    console.error("[material-send] inquiry reconcile failed", { name: e instanceof Error ? e.name : "Unknown" });
-  }
-}
-
 /** 送った記録(新しい順)。 */
 export async function GET(_req: Request, ctx: Ctx) {
   try {
     const { session, perms } = await requireAgentInquiry("read");
     const id = await idOf(ctx);
     await loadMaterialInquiry(id, session, perms);
-    // 送れたのに反響へ反映できていない記録があれば、書ける人が開いたときに反映し直す(@codex 2巡目 P2)。
-    if (hasPermission(perms, "agent_inquiry", "write")) await reconcile(id);
+    // 読むだけ(書き換えない)。未反映があれば画面が反映し直しの口(POST apply)を呼ぶ(@codex 2巡目 P2)。
+    const needsApply = await hasUnappliedMaterialSend(id);
     const rows = await prisma.agentInquiryMaterialSend.findMany({
       where: { inquiryId: id },
       orderBy: { createdAt: "desc" },
@@ -63,7 +55,10 @@ export async function GET(_req: Request, ctx: Ctx) {
       },
     });
     const now = new Date();
-    return NextResponse.json({ items: rows.map((r) => ({ ...r, state: sendStateLabel(r, now) })) }, { headers: NO_STORE });
+    return NextResponse.json(
+      { items: rows.map((r) => ({ ...r, state: sendStateLabel(r, now) })), needsApply },
+      { headers: NO_STORE },
+    );
   } catch (error) {
     return handleApiError(error);
   }
@@ -86,7 +81,7 @@ export async function POST(request: Request, ctx: Ctx) {
       if (prev.inquiryId !== id) {
         throw new ApiError(409, "画面を開き直してから送ってください", "CLIENT_TOKEN_MISMATCH");
       }
-      if (prev.result === "sent") await reconcile(id);
+      if (prev.result === "sent") await reconcileMaterialSends(id, session.id);
       return NextResponse.json(
         { id: prev.id, result: prev.result, state: sendStateLabel(prev, new Date()), replayed: true },
         { headers: NO_STORE },

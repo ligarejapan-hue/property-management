@@ -5140,9 +5140,17 @@ export async function fetchMaterialCandidates(inquiryId: string) {
 export async function fetchMaterialSends(inquiryId: string) {
   if (USE_MOCK) {
     await mockDelay();
-    return { items: [] as MaterialSendView[] };
+    return { items: [] as MaterialSendView[], needsApply: false };
   }
-  return apiFetch<{ items: MaterialSendView[] }>(`/api/agent-inquiries/${inquiryId}/material-sends`);
+  return apiFetch<{ items: MaterialSendView[]; needsApply: boolean }>(`/api/agent-inquiries/${inquiryId}/material-sends`);
+}
+/** 送れたのに反響へ反映できていない記録を反映し直す(書ける人だけ)。 */
+export async function applyMaterialSends(inquiryId: string) {
+  if (USE_MOCK) {
+    await mockDelay();
+    return { applied: false };
+  }
+  return apiFetch<{ applied: boolean }>(`/api/agent-inquiries/${inquiryId}/material-sends/apply`, { method: "POST" });
 }
 export async function sendMaterial(
   inquiryId: string,

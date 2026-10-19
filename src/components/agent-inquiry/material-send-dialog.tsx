@@ -5,6 +5,7 @@ import { ModalShell } from "@/components/ui/modal-shell";
 import { Button } from "@/components/ui/button";
 import {
   apiErrorCode,
+  applyMaterialSends,
   fetchMaterialCandidates,
   fetchMaterialSends,
   sendMaterial,
@@ -285,15 +286,35 @@ export function MaterialSendHistoryView({
   );
 }
 
-/** 送った記録(状態つき)。reloadKey が変わると読み直す。 */
-export function MaterialSendHistory({ inquiryId, reloadKey }: { inquiryId: string; reloadKey: number }) {
+/**
+ * 送った記録(状態つき)。reloadKey が変わると読み直す。
+ * 送れたのに反響へ反映できていない記録があれば(needsApply)、反映し直しの口を1回呼び、反映できたら親に知らせる
+ * (親は反響を読み直す)。書けない人は口が断る=何もしない(@codex 2巡目 P2)。
+ */
+export function MaterialSendHistory({
+  inquiryId,
+  reloadKey,
+  onApplied,
+}: {
+  inquiryId: string;
+  reloadKey: number;
+  onApplied?: () => void;
+}) {
   const [items, setItems] = useState<MaterialSendView[]>([]);
   const [openId, setOpenId] = useState<string | null>(null);
   useEffect(() => {
     let alive = true;
     fetchMaterialSends(inquiryId)
       .then((d) => {
-        if (alive) setItems(d.items);
+        if (!alive) return;
+        setItems(d.items);
+        if (d.needsApply) {
+          applyMaterialSends(inquiryId)
+            .then((r) => {
+              if (alive && r.applied) onApplied?.();
+            })
+            .catch(() => {});
+        }
       })
       .catch(() => {
         if (alive) setItems([]);
@@ -301,6 +322,8 @@ export function MaterialSendHistory({ inquiryId, reloadKey }: { inquiryId: strin
     return () => {
       alive = false;
     };
+    // onApplied は親が毎回作り直す=依存に入れると読み直しが続く。
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [inquiryId, reloadKey]);
   return <MaterialSendHistoryView items={items} openId={openId} onToggle={(id) => setOpenId((o) => (o === id ? null : id))} />;
 }

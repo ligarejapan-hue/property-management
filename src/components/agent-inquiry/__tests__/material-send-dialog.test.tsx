@@ -1,6 +1,6 @@
 import { describe, it, expect, vi } from "vitest";
 import { renderToStaticMarkup } from "react-dom/server";
-vi.mock("@/lib/api-client", () => ({ fetchMaterialCandidates: vi.fn(), fetchMaterialSends: vi.fn(), sendMaterial: vi.fn() }));
+vi.mock("@/lib/api-client", () => ({ fetchMaterialCandidates: vi.fn(), fetchMaterialSends: vi.fn(), sendMaterial: vi.fn(), applyMaterialSends: vi.fn() }));
 vi.mock("@/components/ui/modal-shell", () => ({
   ModalShell: ({ title, children, footer }: { title: string; children: React.ReactNode; footer: React.ReactNode }) => (
     <div data-title={title}>
@@ -123,5 +123,20 @@ describe("押し直しの鍵(@codex P1)", () => {
     const src = readFileSync("src/components/agent-inquiry/material-send-dialog.tsx", "utf8");
     expect(src).not.toContain("crypto.randomUUID");
     expect(src.match(/safeUuidV4\(\)/g)?.length ?? 0).toBeGreaterThanOrEqual(3);
+  });
+});
+
+describe("送れたのに反響へ反映できていない記録(@codex 2巡目 P2)", () => {
+  it("記録の一覧が needsApply を返したら、反映し直しの口を呼び、親に知らせて読み直させる", async () => {
+    const { readFileSync } = await import("node:fs");
+    const src = readFileSync("src/components/agent-inquiry/material-send-dialog.tsx", "utf8");
+    const hist = src.slice(src.indexOf("export function MaterialSendHistory("));
+    expect(hist).toMatch(/d\.needsApply/);
+    expect(hist).toMatch(/applyMaterialSends\(inquiryId\)/);
+    expect(hist).toMatch(/onApplied\?\.\(\)/);
+    const detail = readFileSync("src/components/agent-inquiry/inquiry-detail.tsx", "utf8");
+    expect(detail).toMatch(/<MaterialSendHistory[^>]*onApplied=\{/);
+    const client = readFileSync("src/lib/api-client.ts", "utf8");
+    expect(client).toMatch(/material-sends\/apply`, \{ method: "POST"/);
   });
 });

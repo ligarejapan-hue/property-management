@@ -376,7 +376,7 @@ export function InquiryDetailView({
                 資料を送る
               </button>
             )}
-            <MaterialSendHistory inquiryId={q.id} reloadKey={materialReload} />
+            <MaterialSendHistory inquiryId={q.id} reloadKey={materialReload} onApplied={() => onMaterialSent?.()} />
           </div>
         )}
         {error && (
