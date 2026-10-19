@@ -222,7 +222,14 @@ export async function applySentMaterialToInquiry(
     const appliedTo = new Set(
       (
         await tx.agentInquiryMaterialSend.findMany({
-          where: { inquiryId, result: "sent", inquiryAppliedAt: { not: null }, id: { notIn: pending.map((p) => p.id) } },
+          // 宛先を実際に書いた送信だけ(反映済みの印だけ付いた送信は数えない・@codex 16巡目 P2)。
+          where: {
+            inquiryId,
+            result: "sent",
+            inquiryAppliedAt: { not: null },
+            wroteContact: true,
+            id: { notIn: pending.map((p) => p.id) },
+          },
           select: { toAddress: true },
         })
       ).map((r) => r.toAddress),
@@ -244,6 +251,9 @@ export async function applySentMaterialToInquiry(
       data: { ...(setDone ? { status: "done" as const } : {}), ...(setEmail ? { contactEmail: to } : {}), version: { increment: 1 } },
       select: { version: true },
     });
+    if (setEmail) {
+      await tx.agentInquiryMaterialSend.update({ where: { id: latest.id }, data: { wroteContact: true } });
+    }
     // 反響を書いた監査は、反映済みの印・反響の書き込みと同じ取引で(監査だけ抜けない・@codex 12巡目 P2)。
     await tx.auditLog.create({
       data: {

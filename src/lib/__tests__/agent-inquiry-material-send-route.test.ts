@@ -370,6 +370,22 @@ describe("送れた後に反響の更新が落ちたら、あとで反映し直�
     await APPLY(json("POST", {}), ctx);
     expect(pm.agentInquiry.update).not.toHaveBeenCalled();
   });
+  it("宛先を実際に書いた反映済みの送信だけを「資料送付が書いた宛先」とみなす(@codex 16巡目 P2)", async () => {
+    pending = stuck;
+    await APPLY(json("POST", {}), ctx);
+    const appliedQuery = pm.agentInquiryMaterialSend.findMany.mock.calls
+      .map((c) => c[0].where)
+      .find((w) => w.inquiryAppliedAt && w.inquiryAppliedAt.not === null);
+    expect(appliedQuery).toMatchObject({ wroteContact: true });
+    // 今回宛先を書いた送信(最新)に印を付ける
+    expect(pm.agentInquiryMaterialSend.update).toHaveBeenCalledWith({ where: { id: "s0" }, data: { wroteContact: true } });
+  });
+  it("宛先を書かなかった反映では印を付けない", async () => {
+    pending = stuck;
+    pm.agentInquiry.findUnique.mockResolvedValue(inquiry({ contactEmail: "new@agent.jp" }));
+    await APPLY(json("POST", {}), ctx);
+    expect(pm.agentInquiryMaterialSend.update.mock.calls.some((c) => c[0].data.wroteContact)).toBe(false);
+  });
   it("未反映が2件: 古い送信の時点の宛先に手で戻した=上書きしない", async () => {
     pending = () => [
       { id: "s1", toAddress: "b@agent.jp", statusAtSend: "done", contactEmailAtSend: "a@agent.jp" },

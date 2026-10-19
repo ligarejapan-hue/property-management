@@ -18,6 +18,7 @@ CREATE TABLE "agent_inquiry_material_sends" (
     "inquiry_applied_at" TIMESTAMP(3),
     "status_at_send" "AgentInquiryStatus" NOT NULL,
     "contact_email_at_send" TEXT,
+    "wrote_contact" BOOLEAN NOT NULL DEFAULT false,
     CONSTRAINT "agent_inquiry_material_sends_pkey" PRIMARY KEY ("id")
 );
 CREATE UNIQUE INDEX "agent_inquiry_material_sends_sent_by_id_client_token_key" ON "agent_inquiry_material_sends"("sent_by_id", "client_token");

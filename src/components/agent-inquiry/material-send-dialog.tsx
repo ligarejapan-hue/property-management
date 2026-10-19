@@ -280,11 +280,14 @@ export function MaterialSendHistoryView({
         {items.map((s) => (
           <li key={s.id} className="rounded border border-gray-200 px-2 py-1 dark:border-gray-700">
             <button type="button" className="w-full text-left text-xs" onClick={() => onToggle(s.id)}>
-              {`${jst(s.createdAt)} ・ ${s.sentBy.name} ・ ${s.toAddress} ・ ${s.attachments.length}ファイル ・ `}
+              {`${jst(s.createdAt)} ・ ${s.sentBy.name} ・ `}
+              {/* ボタンの中は画面の保護の対象外=宛先は保護の印つきの span に入れる(@codex 16巡目 P2) */}
+              <span data-pii-protected="true" data-pii-surface="dashboard">{s.toAddress}</span>
+              {` ・ ${s.attachments.length}ファイル ・ `}
               <span className={s.state === "送信済み" ? "text-teal-700 dark:text-teal-300" : "text-rose-600"}>{s.state}</span>
             </button>
             {openId === s.id && (
-              <div className="mt-1 space-y-1 text-xs">
+              <div data-pii-protected="true" data-pii-surface="dashboard" className="mt-1 space-y-1 text-xs">
                 <p className="font-medium">{s.subject}</p>
                 <p className="whitespace-pre-wrap">{s.body}</p>
                 <ul>

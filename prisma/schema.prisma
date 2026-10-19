@@ -1990,6 +1990,8 @@ model AgentInquiryMaterialSend {
   /// 送った時点の反響の状態と宛先。反映し直しは、ここから変わっていない欄だけ書く(手の変更を上書きしない)。
   statusAtSend       AgentInquiryStatus @map("status_at_send")
   contactEmailAtSend String?            @map("contact_email_at_send")
+  /// 反映し直しで、この送信の宛先を反響に実際に書いたか(「資料送付が書いた宛先」の判定に使う)。
+  wroteContact       Boolean            @default(false) @map("wrote_contact")
 
   inquiry AgentInquiry @relation(fields: [inquiryId], references: [id], onDelete: Restrict)
   sentBy  User         @relation("AgentInquiryMaterialSendSentBy", fields: [sentById], references: [id], onDelete: Restrict)

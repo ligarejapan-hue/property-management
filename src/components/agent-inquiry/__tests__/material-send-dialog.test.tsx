@@ -154,3 +154,19 @@ describe("送れたのに反響へ反映できていない記録(@codex 2巡目 
     expect(client).toMatch(/material-sends\/apply`, \{ method: "POST"/);
   });
 });
+
+describe("送った記録の宛先・文面は画面の保護をかける(@codex 16巡目 P2)", () => {
+  const item = {
+    id: "s1", createdAt: "2026-10-19T00:00:00Z", result: "sent" as const, state: "送信済み" as const,
+    sentBy: { name: "山田" }, toAddress: "secret@agent.jp", subject: "件名", body: "佐藤 様",
+    attachments: [], totalSize: 1, errorCode: null,
+  };
+  it("ボタンの中の宛先は、保護の印つきの span に入れる", () => {
+    const html = renderToStaticMarkup(<MaterialSendHistoryView items={[item]} openId={null} onToggle={() => {}} />);
+    expect(html).toMatch(/<span data-pii-protected="true" data-pii-surface="dashboard">secret@agent\.jp<\/span>/);
+  });
+  it("開いた本文(担当者名が入る)も保護の印つき", () => {
+    const html = renderToStaticMarkup(<MaterialSendHistoryView items={[item]} openId="s1" onToggle={() => {}} />);
+    expect(html).toMatch(/<div data-pii-protected="true" data-pii-surface="dashboard"[^>]*>[\s\S]*佐藤 様/);
+  });
+});
