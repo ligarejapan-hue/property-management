@@ -11,7 +11,7 @@
  */
 "use client";
 
-import { useRef, type KeyboardEvent, type ReactNode } from "react";
+import { useLayoutEffect, useRef, type KeyboardEvent, type ReactNode } from "react";
 
 export interface TabItem<K extends string = string> {
   key: K;
@@ -57,6 +57,34 @@ export function Tabs<K extends string = string>({
   className,
 }: TabsProps<K>) {
   const listRef = useRef<HTMLDivElement>(null);
+  const barRef = useRef<HTMLSpanElement>(null);
+  // すべる下線(2026-10-19 UIの統一)。⚠setState しない=位置は DOM の style に直接書く。
+  //   初回は位置を置いてから ready を立てる(読み込み直後に左端からすべって来ない)。
+  //   ready になるまでは各タブの border-b-2 が下線を出す(SSR・JS 無効でも下線が見える)。
+  //   折り返し(flex-wrap)で2段になっても、選択中タブの下に付く(offsetTop を使う)。
+  useLayoutEffect(() => {
+    const list = listRef.current;
+    const bar = barRef.current;
+    if (!list || !bar) return;
+    const place = () => {
+      const el = list.querySelector<HTMLElement>('[role="tab"][aria-selected="true"]');
+      if (!el) {
+        bar.style.opacity = "0";
+        return;
+      }
+      bar.style.translate = `${el.offsetLeft}px ${el.offsetTop + el.offsetHeight - 2}px`;
+      bar.style.width = `${el.offsetWidth}px`;
+      bar.style.opacity = "1";
+      if (list.dataset.slider !== "ready") {
+        bar.getBoundingClientRect(); // 位置を確定させてから transition を効かせる
+        list.dataset.slider = "ready";
+      }
+    };
+    place();
+    const ro = new ResizeObserver(place);
+    ro.observe(list);
+    return () => ro.disconnect();
+  }, [active, tabs]);
   // ⚠role="tab" を名乗る以上、ARIA の tab パターンどおりに動かす(@codex #406 R1 P2):
   //   roving tabIndex(Tab キーではタブ群を1つとして通過)+矢印キーで移動と選択。
   //   看板だけ掲げて矢印が効かないと、支援技術の利用者には「壊れたタブ」になる。
@@ -81,7 +109,7 @@ export function Tabs<K extends string = string>({
       ref={listRef}
       role="tablist"
       onKeyDown={handleKeyDown}
-      className={`flex flex-wrap border-b border-gray-200 dark:border-gray-800${className ? ` ${className}` : ""}`}
+      className={`group/tabs relative flex flex-wrap border-b border-gray-200 dark:border-gray-800${className ? ` ${className}` : ""}`}
     >
       {tabs.map((t) => (
         <button
@@ -93,7 +121,7 @@ export function Tabs<K extends string = string>({
           aria-controls={`${idBase}-panel`}
           tabIndex={active === t.key ? 0 : -1}
           onClick={() => onChange(t.key)}
-          className={`border-b-2 px-4 py-2 text-sm font-medium transition-colors ${
+          className={`border-b-2 px-4 py-2 text-sm font-medium transition-colors group-data-[slider=ready]/tabs:border-transparent dark:group-data-[slider=ready]/tabs:border-transparent ${
             active === t.key
               ? "border-indigo-600 text-indigo-700 dark:border-indigo-400 dark:text-indigo-400"
               : "border-transparent text-gray-500 hover:text-gray-700 dark:text-gray-400 dark:hover:text-gray-200"
@@ -102,6 +130,12 @@ export function Tabs<K extends string = string>({
           {t.label}
         </button>
       ))}
+      <span
+        ref={barRef}
+        data-tab-indicator
+        aria-hidden="true"
+        className="pointer-events-none absolute left-0 top-0 h-0.5 bg-indigo-600 opacity-0 duration-180 ease-out-soft group-data-[slider=ready]/tabs:transition-[translate,width] motion-reduce:transition-none dark:bg-indigo-400"
+      />
     </div>
   );
 }
