@@ -1,7 +1,8 @@
 "use client";
 
 import { useState, useEffect, useMemo } from "react";
-import { Loader2, X, Save, AlertTriangle } from "lucide-react";
+import { X, Save, AlertTriangle } from "lucide-react";
+import { Button } from "@/components/ui/button";
 import { USE_MOCK, fetchUsers, apiErrorCode, codeFromErrorBody } from "@/lib/api-client";
 import { OCCUPANCY_STATUS_OPTIONS, PROPERTY_TYPE_OPTIONS } from "@/lib/property-types";
 import {
@@ -729,15 +730,16 @@ export default function PropertyEditForm({
         {/* Header */}
         <div className="flex items-center justify-between border-b border-gray-200 dark:border-gray-800 px-6 py-4">
           <h3 className="text-lg font-bold text-gray-800 dark:text-gray-100">物件情報を編集</h3>
-          <button
-            type="button"
+          <Button
+            variant="ghost"
+            size="sm"
             onClick={handleCloseKeepDraft}
             aria-label="閉じる（入力は残します）"
             title="閉じる（入力は残します）"
-            className="rounded p-1 text-gray-400 dark:text-gray-500 hover:text-gray-600 dark:hover:text-gray-300"
+            className="text-gray-400 dark:text-gray-500 hover:text-gray-600 dark:hover:text-gray-300"
           >
             <X className="h-5 w-5" />
-          </button>
+          </Button>
         </div>
 
         {/* Body */}
@@ -837,15 +839,16 @@ export default function PropertyEditForm({
                               placeholder="(なし)"
                               className="w-full rounded-md border border-gray-300 dark:border-gray-700 bg-gray-50 dark:bg-gray-800 px-3 py-1.5 text-sm text-gray-500 dark:text-gray-400"
                             />
-                            <button
-                              type="button"
+                            <Button
+                              variant="secondary"
+                              size="sm"
                               onClick={() => handleChange(field.key, "")}
                               disabled={(values[field.key] ?? "") === ""}
                               data-testid={`clear-only-${field.key}-clear`}
-                              className="shrink-0 rounded-md border border-gray-300 dark:border-gray-600 px-3 py-1.5 text-xs font-medium text-gray-700 dark:text-gray-200 hover:bg-gray-50 dark:hover:bg-gray-700 disabled:opacity-50"
+                              className="shrink-0"
                             >
                               空にする
-                            </button>
+                            </Button>
                           </div>
                           <p className="mt-1 text-xs text-gray-500 dark:text-gray-400">
                             新しく入力することはできません。空にして保存すると、地番（建物は家屋番号）での謄本取得が使えるようになります。
@@ -958,13 +961,11 @@ export default function PropertyEditForm({
           <span className="mr-auto text-xs text-gray-400 dark:text-gray-500">
             バージョン: {property.version}
           </span>
-          <button
-            onClick={handleClose}
-            className="rounded-md border border-gray-300 dark:border-gray-700 px-4 py-2 text-sm text-gray-700 dark:text-gray-200 hover:bg-gray-50 dark:hover:bg-gray-800"
-          >
+          <Button variant="secondary" onClick={handleClose}>
             キャンセル
-          </button>
-          <button
+          </Button>
+          <Button
+            variant="primary"
             onClick={handleSave}
             // ⚠複製タブ検知(tokenReady)が終わるまでは押せない(D6・仕様6.2)。鍵を
             //   持てていなくても、取得自体に失敗したとき(lockUnavailable)は
@@ -981,15 +982,12 @@ export default function PropertyEditForm({
                 stateKind: lock.state.kind,
               })
             }
-            className="flex items-center gap-1.5 rounded-md bg-indigo-600 px-4 py-2 text-sm font-medium text-white hover:bg-indigo-700 disabled:opacity-50"
+            loading={saving}
+            loadingLabel="保存"
           >
-            {saving ? (
-              <Loader2 className="h-4 w-4 animate-spin" />
-            ) : (
-              <Save className="h-4 w-4" />
-            )}
+            <Save className="h-4 w-4" />
             保存
-          </button>
+          </Button>
         </div>
       </div>
     </div>

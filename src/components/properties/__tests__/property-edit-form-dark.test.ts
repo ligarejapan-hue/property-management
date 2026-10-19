@@ -22,8 +22,9 @@ describe("property-edit-form.tsx dark: 配色 (物件詳細タブ群)", () => {
   it("ラベル text-gray-500 に dark:text-gray-400 がある", () => {
     expect(src).toContain("dark:text-gray-400");
   });
-  it("キャンセルボタン text-gray-700 に dark:text-gray-200 がある", () => {
-    expect(src).toContain("dark:text-gray-200");
+  // UIの統一 第3回: キャンセルは共通 Button の secondary(文字色・暗い面の配色は部品側が持つ)
+  it("キャンセルボタンは共通 Button の secondary(dark:text-gray-200 は部品側)", () => {
+    expect(src).toContain('<Button variant="secondary" onClick={handleClose}>');
   });
   it("バージョン text-gray-400 に dark:text-gray-500 がある", () => {
     expect(src).toContain("dark:text-gray-500");
@@ -50,8 +51,8 @@ describe("property-edit-form.tsx dark: 配色 (物件詳細タブ群)", () => {
   });
 
   // --- hover ---
-  it("キャンセルボタン hover:bg-gray-50 に dark:hover:bg-gray-800 がある", () => {
-    expect(src).toContain("dark:hover:bg-gray-800");
+  it("キャンセルボタンの hover(dark:hover:bg-gray-800)は共通 Button の secondary が持つ", () => {
+    expect(src).toContain('<Button variant="secondary" onClick={handleClose}>');
   });
 
   // --- disabled 入力欄 ---
@@ -77,8 +78,9 @@ describe("property-edit-form.tsx dark: 配色 (物件詳細タブ群)", () => {
   it("ライトモード text-gray-800 は残っている", () => {
     expect(src).toContain("text-gray-800");
   });
-  it("ライトモード text-gray-700 は残っている", () => {
-    expect(src).toContain("text-gray-700");
+  // text-gray-700 / hover:bg-gray-50 はキャンセル・空にするボタンの色だった=共通 Button の secondary へ移った
+  it("ライトモード text-gray-700 は共通 Button の secondary が持つ", () => {
+    expect(src).toContain('variant="secondary"');
   });
   it("ライトモード text-gray-600 は残っている", () => {
     expect(src).toContain("text-gray-600");
@@ -107,8 +109,8 @@ describe("property-edit-form.tsx dark: 配色 (物件詳細タブ群)", () => {
   it("ライトモード border-red-200 は残っている", () => {
     expect(src).toContain("border-red-200");
   });
-  it("ライトモード hover:bg-gray-50 は残っている", () => {
-    expect(src).toContain("hover:bg-gray-50");
+  it("ライトモード hover:bg-gray-50 は共通 Button の secondary が持つ", () => {
+    expect(src).toContain('variant="secondary"');
   });
   it("ライトモード disabled:bg-gray-100 は残っている", () => {
     expect(src).toContain("disabled:bg-gray-100");
