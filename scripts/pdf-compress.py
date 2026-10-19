@@ -191,6 +191,8 @@ def main():
     ap.add_argument("src")
     ap.add_argument("dst")
     ap.add_argument("--max-bytes", type=int, required=True)
+    # max-bytes まで縮まなくても、一番小さい形がこれ以下なら受け取る(2026-10-19)。
+    ap.add_argument("--accept-bytes", type=int, default=None)
     a = ap.parse_args()
 
     in_bytes = os.path.getsize(a.src)
@@ -205,16 +207,31 @@ def main():
         return 0
 
     best = None
+    best_level = None
+    best_pages = None
     tmp = a.dst + ".try"
+    keep = a.dst + ".best"
     for level, quality in LEVELS:
         pages = _build(a.src, tmp, quality)
         size = os.path.getsize(tmp)
-        best = size if best is None else min(best, size)
         if size <= a.max_bytes:
             os.replace(tmp, a.dst)
+            if os.path.exists(keep):
+                os.remove(keep)
             print(json.dumps({"ok": True, "level": level, "inBytes": in_bytes, "outBytes": size, "pages": pages}))
             return 0
-    os.remove(tmp)
+        if best is None or size < best:
+            best, best_level, best_pages = size, level, pages
+            if a.accept_bytes is not None:
+                os.replace(tmp, keep)
+    if os.path.exists(tmp):
+        os.remove(tmp)
+    if a.accept_bytes is not None and best is not None and best <= a.accept_bytes and os.path.exists(keep):
+        os.replace(keep, a.dst)
+        print(json.dumps({"ok": True, "level": best_level, "inBytes": in_bytes, "outBytes": best, "pages": best_pages}))
+        return 0
+    if os.path.exists(keep):
+        os.remove(keep)
     print(json.dumps({"ok": False, "reason": "too_large", "inBytes": in_bytes, "bestBytes": best}))
     return 0
 

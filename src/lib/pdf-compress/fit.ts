@@ -1,10 +1,13 @@
 /**
- * 添付の入口から使う: 上限を超えた PDF を縮めて、保存してよい形にする。
- * 上限以下ならそのまま返す(手を触れない)。縮められなければ 422 で理由を返す。
+ * 添付の入口から使う: 目標(8MB)を超えた PDF を縮めて、保存してよい形にする。
+ * 目標以下ならそのまま返す(手を触れない)。
+ * 2026-10-19(発注者決定): 目標まで縮まなくても、保存してよい上限(20MB)以下なら保存する。
+ *   縮んだ形が上限以下ならそれを、縮まない(圧縮できない・元より小さくならない)ときは元のまま。
+ *   上限を超えたままのときだけ 422 で理由を返す。
  */
 import { ApiError } from "@/lib/api-helpers";
 import { MAX_FILE_SIZE } from "@/lib/storage/types";
-import { compressBusyMessage, compressFailureMessage } from "./policy";
+import { compressBusyMessage, compressFailureMessage, MAX_ATTACHMENT_BYTES } from "./policy";
 import {
   compressPdf,
   tryReserveCompressionSlot,
@@ -41,17 +44,23 @@ export function reserveLargePdfSlot(
 
 export async function fitPdfToLimit(
   buffer: Buffer,
-  opts: { limitBytes?: number; deps?: RunDeps } = {},
+  opts: { limitBytes?: number; acceptBytes?: number; deps?: RunDeps } = {},
 ): Promise<FittedPdf> {
   const limitBytes = opts.limitBytes ?? MAX_FILE_SIZE;
-  if (buffer.length <= limitBytes) return { buffer, originalSize: null, level: null };
-  const r = await compressPdf(buffer, limitBytes, opts.deps);
-  if (!r.ok) {
-    throw new ApiError(
-      422,
-      compressFailureMessage(r.reason, { inBytes: r.inBytes, bestBytes: r.bestBytes, limitBytes }),
-      "VALIDATION_ERROR",
-    );
+  const acceptBytes = Math.max(opts.acceptBytes ?? MAX_ATTACHMENT_BYTES, limitBytes);
+  const asIs: FittedPdf = { buffer, originalSize: null, level: null };
+  if (buffer.length <= limitBytes) return asIs;
+  const r = await compressPdf(buffer, limitBytes, opts.deps, acceptBytes);
+  if (r.ok) {
+    // 縮んでいなければ圧縮したことにしない(元のまま)。
+    if (r.buffer.length >= buffer.length && buffer.length <= acceptBytes) return asIs;
+    return { buffer: r.buffer, originalSize: r.inBytes, level: r.level };
   }
-  return { buffer: r.buffer, originalSize: r.inBytes, level: r.level };
+  // 縮められなくても、元が保存してよい上限以下なら元のまま保存する。
+  if (buffer.length <= acceptBytes) return asIs;
+  throw new ApiError(
+    422,
+    compressFailureMessage(r.reason, { inBytes: r.inBytes, bestBytes: r.bestBytes, limitBytes: acceptBytes }),
+    "VALIDATION_ERROR",
+  );
 }

@@ -21,6 +21,7 @@ import {
 import { normalizeFileUrlsInRecord } from "@/lib/url-normalize";
 import { assertImportJsonBodySize, assertImportMultipartBodySize } from "@/lib/import-body-size";
 import {
+  MAX_ATTACHMENT_BYTES,
   MAX_PDF_UPLOAD_BYTES,
   isPdfByMimeOrName,
   pdfTooLargeToAcceptMessage,
@@ -175,16 +176,18 @@ export async function POST(
         isPdfByMimeOrName(mimeType, fileName);
       if (pdfByName) mimeType = "application/pdf";
 
-      // ⚠**謄本以外の PDF** は、上限(8MB)を超えていたら自動で縮める(発注者決定 2026-10-09)。
-      //   謄本は課金して取った原本なので縮めない=従来どおり 8MB で断る。
-      //   上限以下の PDF には手を触れない。圧縮前の原本は残さない(決定)。
+      // ⚠**謄本以外の PDF** は、8MB を超えていたら自動で縮める(発注者決定 2026-10-09)。
+      //   謄本は課金して取った原本なので縮めない。8MB 以下の PDF には手を触れない。
+      //   圧縮前の原本は残さない(決定)。
+      // ⚠保存してよい上限は 20MB(発注者決定 2026-10-19・謄本も PDF 以外も同じ)。
+      //   縮めて 8MB まで届かなくても、20MB 以下なら保存する(fitPdfToLimit)。
       const compressible = attachmentType !== "registry" && mimeType === "application/pdf";
       if (compressible && fileSize > MAX_PDF_UPLOAD_BYTES) {
         throw new ApiError(422, pdfTooLargeToAcceptMessage(), "VALIDATION_ERROR");
       }
 
       const validate = () => {
-        const validationError = validateFile(fileSize, mimeType, ALLOWED_ATTACHMENT_MIMES);
+        const validationError = validateFile(fileSize, mimeType, ALLOWED_ATTACHMENT_MIMES, MAX_ATTACHMENT_BYTES);
         if (validationError) {
           throw new ApiError(422, validationError, "VALIDATION_ERROR");
         }
@@ -236,7 +239,7 @@ export async function POST(
         );
       }
 
-      const validationError = validateFile(fileSize, mimeType, ALLOWED_ATTACHMENT_MIMES);
+      const validationError = validateFile(fileSize, mimeType, ALLOWED_ATTACHMENT_MIMES, MAX_ATTACHMENT_BYTES);
       if (validationError) {
         throw new ApiError(422, validationError, "VALIDATION_ERROR");
       }

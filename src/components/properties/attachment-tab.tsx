@@ -35,7 +35,8 @@ import {
   type UploadProgress,
 } from "@/lib/attachments/multi-upload";
 import { registryDisplayName } from "@/lib/attachments/registry-display-name";
-import { MAX_PDF_UPLOAD_BYTES } from "@/lib/pdf-compress/policy";
+import { MAX_ATTACHMENT_BYTES, MAX_PDF_UPLOAD_BYTES } from "@/lib/pdf-compress/policy";
+import { MAX_FILE_SIZE } from "@/lib/storage/types";
 
 type AttachmentType = "general" | "registry";
 
@@ -54,11 +55,12 @@ interface AttachmentData {
   uploader: { id: string; name: string };
 }
 
-const MAX_SIZE_MB = 8;
+/** 保存してよい上限(20MB・2026-10-19 発注者決定・謄本も同じ)。値はサーバーと同じ定数から。 */
+const MAX_SIZE_MB = MAX_ATTACHMENT_BYTES / 1024 / 1024;
 /**
- * 通常添付の PDF は、8MB を超えてもサーバーが自動で縮める(2026-10-10)ので
- * ここまで受け付ける(値はサーバーと同じ定数から)。
- * 謄本PDFは縮めない(課金した原本)ので 8MB のまま。
+ * 通常添付の PDF は、8MB(MAX_FILE_SIZE)を超えるとサーバーが自動で縮める(2026-10-10)ので
+ * ここまで受け付ける(縮めて 20MB 以下になれば保存)。
+ * 謄本PDFは縮めない(課金した原本)ので 20MB まで。
  */
 const MAX_PDF_MB = MAX_PDF_UPLOAD_BYTES / 1024 / 1024;
 
@@ -205,7 +207,7 @@ export default function AttachmentTab({
       return "謄本PDFは PDF ファイルのみアップロードできます";
     }
     if (type === "general") {
-      setCompressingGeneral(compressible && file.size > MAX_SIZE_MB * 1024 * 1024);
+      setCompressingGeneral(compressible && file.size > MAX_FILE_SIZE);
     }
     try {
       await uploadFile(propertyId, file, "attachment", { attachmentType: type });
@@ -292,7 +294,7 @@ export default function AttachmentTab({
           accept=".pdf,.xlsx,.xls,.csv,.docx,.jpg,.jpeg,.png,.webp,.heic"
           multiple
           title="ファイルをここにドラッグ＆ドロップ"
-          hint={`上限 ${MAX_SIZE_MB}MB / PDF, Excel, CSV, Word, 画像（${MAX_SIZE_MB}MB を超えるPDFは${MAX_PDF_MB}MBまで自動で圧縮して保存）`}
+          hint={`上限 ${MAX_SIZE_MB}MB / PDF, Excel, CSV, Word, 画像（8MB を超えるPDFは自動で縮めます。${MAX_PDF_MB}MBまで受け付け、縮めて${MAX_SIZE_MB}MB以下になれば保存）`}
           onFiles={(files) => void handleUploads(files, "general")}
           busy={
             uploadingGeneral ? (
@@ -347,7 +349,7 @@ export default function AttachmentTab({
           hideFileNames
           icon={FileText}
           title="謄本PDFをここにドラッグ＆ドロップ"
-          hint={`PDF のみ / 上限 ${MAX_SIZE_MB}MB`}
+          hint={`PDF のみ / 上限 ${MAX_SIZE_MB}MB（縮めずにそのまま保存）`}
           onFiles={(files) => void handleUploads(files, "registry")}
           busy={
             uploadingRegistry ? (
