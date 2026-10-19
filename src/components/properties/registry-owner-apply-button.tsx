@@ -9,7 +9,7 @@
  * ⚠読み取れなかったときは黙って登録しない。理由を出して手入力へ誘導する。
  */
 import { useCallback, useState } from "react";
-import { FileUser, Loader2 } from "lucide-react";
+import { FileUser } from "lucide-react";
 
 import { ModalShell } from "@/components/ui/modal-shell";
 import { Button } from "@/components/ui/button";
@@ -104,23 +104,19 @@ export default function RegistryOwnerApplyButton({
 
   return (
     <>
-      {/* data-ui=raw: 薄い緑(emerald)の札型の目印ボタン。合う variant が無い */}
-      <button
-        data-ui="raw"
-        type="button"
+      <Button
+        variant="secondary"
+        size="sm"
         onClick={openPreview}
         disabled={phase === "loading"}
+        loading={phase === "loading"}
+        loadingLabel="謄本から所有者を反映"
         aria-label="添付済みの謄本から所有者を反映する"
         title="添付されている謄本（所有者事項）を読み取って所有者を登録します"
-        className="flex items-center gap-1.5 rounded-md border border-emerald-300 bg-emerald-50 px-3 py-1.5 text-xs font-medium text-emerald-700 hover:bg-emerald-100 disabled:opacity-60 dark:border-emerald-700 dark:bg-emerald-950/40 dark:text-emerald-300 dark:hover:bg-emerald-900/40"
       >
-        {phase === "loading" ? (
-          <Loader2 className="h-3.5 w-3.5 animate-spin" />
-        ) : (
-          <FileUser className="h-3.5 w-3.5" />
-        )}
+        <FileUser className="h-3.5 w-3.5" />
         謄本から所有者を反映
-      </button>
+      </Button>
 
       {errorMsg && phase === "idle" ? (
         <p role="alert" className="mt-1 text-xs text-red-600 dark:text-red-400">
