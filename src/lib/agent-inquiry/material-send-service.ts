@@ -15,6 +15,7 @@ import { hasPermission } from "@/lib/permissions";
 import {
   authorizeUploadAccess,
   escapePrismaLikePattern,
+  isOwnerPiiDocumentType,
   resolveProtectedServeMeta,
   resolveStoredFileUrlToKey,
 } from "@/lib/uploads-authorization";
@@ -52,24 +53,72 @@ export async function loadPropertyAttachments(propertyId: string, ids?: string[]
 
 export type MaterialFileGuard = { ok: true; key: string; effectiveType: "general" | "registry" } | { ok: false };
 
+const BATCH = 50;
+type KeyRecords = {
+  atts: { targetType: string; targetId: string; propertyId: string | null; type: string }[];
+  photoPropertyIds: string[];
+  other: boolean; // 棟の写真・巡回の写真
+};
+
 /**
- * 1つのファイルを外へ送ってよいか(/uploads で開くときと同じ守り・最終レビュー C1)。
- * ⚠添付の記録は手で fileUrl を書いて登録できる(JSON の登録口)=記録の種類と物件だけでは足りない。
- *   同じファイルを指す全部の記録(削除済み・別の物件・受け取り箱の置き場所)を見る authorizeUploadAccess を
- *   ダウンロードの扱いで通し、反響資料・査定報告書と同じファイルは送らない・謄本と同じファイルは謄本として扱う。
+ * 頼まれたファイルを指す全部の記録を、まとめて引く(ファイルの数によらず 4 表 × 50 件ごと・@codex 4巡目 P2)。
+ * 同じファイル(正規化した key の完全一致)だけを数える。
  */
-export async function guardMaterialFile(
+async function loadKeyRecords(keys: string[]): Promise<Map<string, KeyRecords>> {
+  const out = new Map<string, KeyRecords>(keys.map((k) => [k, { atts: [], photoPropertyIds: [], other: false }]));
+  const keyOf = (u: string | null | undefined) => {
+    const k = resolveStoredFileUrlToKey(u);
+    return k != null && out.has(k) ? k : null;
+  };
+  for (let i = 0; i < keys.length; i += BATCH) {
+    const likes = keys.slice(i, i + BATCH).map((k) => ({ contains: escapePrismaLikePattern(k) }));
+    const both = likes.flatMap((like) => [{ fileUrl: like }, { thumbnailUrl: like }]);
+    const [atts, photos, buildingPhotos, pinPhotos] = await Promise.all([
+      prisma.attachment.findMany({
+        where: { OR: likes.map((like) => ({ fileUrl: like })) },
+        select: { targetType: true, targetId: true, propertyId: true, fileUrl: true, type: true },
+      }),
+      prisma.propertyPhoto.findMany({ where: { OR: both }, select: { propertyId: true, fileUrl: true, thumbnailUrl: true } }),
+      prisma.buildingPhoto.findMany({ where: { OR: both }, select: { fileUrl: true, thumbnailUrl: true } }),
+      prisma.fieldSurveyPinPhoto.findMany({ where: { OR: both }, select: { fileUrl: true, thumbnailUrl: true } }),
+    ]);
+    for (const a of atts) {
+      const k = keyOf(a.fileUrl);
+      if (k) out.get(k)!.atts.push(a);
+    }
+    for (const p of photos) {
+      for (const k of new Set([keyOf(p.fileUrl), keyOf(p.thumbnailUrl)])) if (k) out.get(k)!.photoPropertyIds.push(p.propertyId);
+    }
+    for (const p of [...buildingPhotos, ...pinPhotos]) {
+      for (const k of [keyOf(p.fileUrl), keyOf(p.thumbnailUrl)]) if (k) out.get(k)!.other = true;
+    }
+  }
+  return out;
+}
+
+/**
+ * そのファイルを送ってよいか(記録だけで決める・DB は引かない)。
+ * ⚠送る資料は物件に縛る(@codex P2・3巡目): 両方の物件を開ける人が別の物件のファイルをこの物件の添付として
+ *   登録し直しても送らない。別の物件・所有者に付いた添付(削除済みも)・別の物件の写真・棟の写真・巡回の写真
+ *   (サムネイルも)・受け取り箱の置き場所・別の物件の置き場所・写真の置き場所は送らない。
+ * ⚠反響資料・査定報告書の記録(削除済みも)が同じファイルを指せば送らない。謄本の記録が指せば謄本として扱う。
+ */
+function decideMaterialFile(
   row: MaterialAttachmentRow,
-  session: ApiSession,
+  key: string,
+  rec: KeyRecords,
   perms: PermissionEntry[],
-): Promise<MaterialFileGuard> {
-  const key = resolveStoredFileUrlToKey(row.fileUrl);
-  if (!key) return { ok: false };
-  if (!(await keyBelongsOnlyTo(key, row.targetId))) return { ok: false };
-  if ((await authorizeUploadAccess({ key, session, permissions: perms, downloadIntent: true })) !== "ok") return { ok: false };
-  const meta = await resolveProtectedServeMeta(key);
-  if (meta !== null && meta.kind !== "registry") return { ok: false };
-  const effectiveType = meta?.kind === "registry" || row.type === "registry" ? "registry" : "general";
+): MaterialFileGuard {
+  const propertyId = row.targetId;
+  if (key.startsWith("report-inbox/")) return { ok: false };
+  const place = /^properties\/([^/]+)\/([^/]+)\//.exec(key);
+  if (place && (place[1] !== propertyId || place[2] === "photos")) return { ok: false };
+  if (rec.other || rec.photoPropertyIds.some((id) => id !== propertyId)) return { ok: false };
+  const onlyHere = rec.atts.every(
+    (a) => a.targetType === "property" && a.targetId === propertyId && (a.propertyId == null || a.propertyId === propertyId),
+  );
+  if (!onlyHere || rec.atts.some((a) => isOwnerPiiDocumentType(a.type))) return { ok: false };
+  const effectiveType = row.type === "registry" || rec.atts.some((a) => a.type === "registry") ? "registry" : "general";
   if (
     effectiveType === "registry" &&
     !(hasPermission(perms, "registry_pdf", "preview") && hasPermission(perms, "registry_pdf", "download"))
@@ -80,43 +129,59 @@ export async function guardMaterialFile(
 }
 
 /**
- * そのファイルを指す記録が、すべてこの物件のものか(@codex P2)。
- * ⚠authorizeUploadAccess は「その人が開けるか」しか見ない=両方の物件を開ける人は、別の物件のファイルを
- *   この物件の添付として登録し直して、この物件の反響から送れてしまう。送る資料は物件に縛る:
- *   別の物件・所有者に付いた添付(削除済みも)・別の物件の写真・棟の写真・巡回の写真(サムネイルも)・
- *   受け取り箱の置き場所・別の物件の置き場所・写真の置き場所は送らない。
+ * 候補の一覧用: 記録をまとめて引いて決める(行ごとに DB を引かない・@codex 4巡目 P2)。
+ * ⚠物件を開けることは呼ぶ側(loadMaterialInquiry)で確かめ済み。送る直前は guardMaterialFiles でさらに
+ *   /uploads と同じ判定も通す。
  */
-async function keyBelongsOnlyTo(key: string, propertyId: string): Promise<boolean> {
-  if (key.startsWith("report-inbox/")) return false;
-  // 置き場所(properties/<物件>/<種類>/…)が別の物件・写真なら、記録が無くても送らない(@codex 3巡目)。
-  const place = /^properties\/([^/]+)\/([^/]+)\//.exec(key);
-  if (place && (place[1] !== propertyId || place[2] === "photos")) return false;
-  const like = { contains: escapePrismaLikePattern(key) };
-  const same = (u: string | null | undefined) => resolveStoredFileUrlToKey(u) === key;
-  const [atts, photos, buildingPhotos, pinPhotos] = await Promise.all([
-    prisma.attachment.findMany({ where: { fileUrl: like }, select: { targetType: true, targetId: true, propertyId: true, fileUrl: true } }),
-    prisma.propertyPhoto.findMany({
-      where: { OR: [{ fileUrl: like }, { thumbnailUrl: like }] },
-      select: { propertyId: true, fileUrl: true, thumbnailUrl: true },
-    }),
-    prisma.buildingPhoto.findMany({
-      where: { OR: [{ fileUrl: like }, { thumbnailUrl: like }] },
-      select: { fileUrl: true, thumbnailUrl: true },
-    }),
-    prisma.fieldSurveyPinPhoto.findMany({
-      where: { OR: [{ fileUrl: like }, { thumbnailUrl: like }] },
-      select: { fileUrl: true, thumbnailUrl: true },
-    }),
-  ]);
-  const attachmentsOk = atts
-    .filter((a) => same(a.fileUrl))
-    .every((a) => a.targetType === "property" && a.targetId === propertyId && (a.propertyId == null || a.propertyId === propertyId));
-  return (
-    attachmentsOk &&
-    photos.filter((p) => same(p.fileUrl) || same(p.thumbnailUrl)).every((p) => p.propertyId === propertyId) &&
-    !buildingPhotos.some((b) => same(b.fileUrl) || same(b.thumbnailUrl)) &&
-    !pinPhotos.some((p) => same(p.fileUrl) || same(p.thumbnailUrl))
+export async function screenMaterialFiles(
+  rows: MaterialAttachmentRow[],
+  perms: PermissionEntry[],
+): Promise<Map<string, MaterialFileGuard>> {
+  const keyed = rows.map((r) => ({ r, key: resolveStoredFileUrlToKey(r.fileUrl) }));
+  const records = await loadKeyRecords([...new Set(keyed.flatMap((x) => (x.key ? [x.key] : [])))]);
+  return new Map(
+    keyed.map(({ r, key }): [string, MaterialFileGuard] => [r.id, key ? decideMaterialFile(r, key, records.get(key)!, perms) : { ok: false }]),
   );
+}
+
+/**
+ * 送る直前の守り(最大 20 ファイル)。まとめての判定に加えて、/uploads で開くときと同じ守り
+ * (authorizeUploadAccess をダウンロードの扱いで・resolveProtectedServeMeta)を1つずつ通す(最終レビュー C1)。
+ * ⚠添付の記録は手で fileUrl を書いて登録できる(JSON の登録口)=記録の種類と物件だけでは足りない。
+ */
+export async function guardMaterialFiles(
+  rows: MaterialAttachmentRow[],
+  session: ApiSession,
+  perms: PermissionEntry[],
+): Promise<MaterialFileGuard[]> {
+  const screened = await screenMaterialFiles(rows, perms);
+  const out: MaterialFileGuard[] = [];
+  for (const r of rows) {
+    const g = screened.get(r.id)!;
+    if (!g.ok) {
+      out.push(g);
+      continue;
+    }
+    if ((await authorizeUploadAccess({ key: g.key, session, permissions: perms, downloadIntent: true })) !== "ok") {
+      out.push({ ok: false });
+      continue;
+    }
+    const meta = await resolveProtectedServeMeta(g.key);
+    if (meta !== null && meta.kind !== "registry") {
+      out.push({ ok: false });
+      continue;
+    }
+    if (meta?.kind === "registry" && g.effectiveType !== "registry") {
+      out.push(
+        hasPermission(perms, "registry_pdf", "preview") && hasPermission(perms, "registry_pdf", "download")
+          ? { ok: true, key: g.key, effectiveType: "registry" }
+          : { ok: false },
+      );
+      continue;
+    }
+    out.push(g);
+  }
+  return out;
 }
 
 /**

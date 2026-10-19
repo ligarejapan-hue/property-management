@@ -6,10 +6,10 @@ import { requireAgentInquiry } from "@/lib/agent-inquiry/guard";
 import { loadMailSendConfig } from "@/lib/mail/mail-config";
 import { MATERIAL_SEND_LIMITS, REGISTRY_WARNING, selectableForMaterialSend } from "@/lib/agent-inquiry/material-send";
 import {
-  guardMaterialFile,
   initialMaterialText,
   loadMaterialInquiry,
   loadPropertyAttachments,
+  screenMaterialFiles,
 } from "@/lib/agent-inquiry/material-send-service";
 
 const NO_STORE = { "Cache-Control": "no-store" };
@@ -27,10 +27,12 @@ export async function GET(_req: Request, ctx: Ctx) {
       initialMaterialText(q, me?.name ?? ""),
       loadMailSendConfig(),
     ]);
-    // 送信と同じ守り(/uploads と同じ判定)を通ったものだけ出す=選べたのに送れない、を作らない。
+    // 送信と同じ記録の判定を通ったものだけ出す(まとめて引く=ファイルの数によらず決まった回数・@codex 4巡目 P2)。
+    const selectable = rows.filter((x) => selectableForMaterialSend(x, q.propertyId, perms));
+    const screened = await screenMaterialFiles(selectable, perms);
     const files = [];
-    for (const r of rows.filter((x) => selectableForMaterialSend(x, q.propertyId, perms))) {
-      const g = await guardMaterialFile(r, session, perms);
+    for (const r of selectable) {
+      const g = screened.get(r.id)!;
       if (!g.ok) continue;
       files.push({
         id: r.id, fileName: r.fileName, fileSize: r.fileSize, type: g.effectiveType, createdAt: r.createdAt,

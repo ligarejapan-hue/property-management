@@ -7,6 +7,7 @@ import {
   propertyDisplayName,
   isSingleAddress,
   sendStateLabel,
+  isDefiniteSmtpFailure,
   DEFAULT_MATERIAL_SUBJECT,
   type MaterialAttachmentRow,
 } from "@/lib/agent-inquiry/material-send";
@@ -90,6 +91,13 @@ describe("記録の表示", () => {
   it("送信中は10分を過ぎると結果不明", () => {
     expect(sendStateLabel({ result: "sending", createdAt: new Date("2026-10-18T09:55:00Z") }, now)).toBe("送信中");
     expect(sendStateLabel({ result: "sending", createdAt: new Date("2026-10-18T09:49:59Z") }, now)).toBe("結果不明");
+  });
+  it("送信中でも、送れたか分からない失敗(errorCode あり)はすぐ結果不明(@codex 4巡目 P1)", () => {
+    expect(sendStateLabel({ result: "sending", createdAt: now, errorCode: "ETIMEDOUT" }, now)).toBe("結果不明");
+  });
+  it("送る前に断られたとはっきり分かる失敗だけを「送れなかった」にする", () => {
+    for (const c of ["EAUTH", "EENVELOPE", "EMESSAGE", "EDNS", "ETLS"]) expect(isDefiniteSmtpFailure(c)).toBe(true);
+    for (const c of ["ETIMEDOUT", "ESOCKET", "ECONNECTION", "EPROTOCOL", null]) expect(isDefiniteSmtpFailure(c)).toBe(false);
   });
   it("sent/failed", () => {
     expect(sendStateLabel({ result: "sent", createdAt: now }, now)).toBe("送信済み");

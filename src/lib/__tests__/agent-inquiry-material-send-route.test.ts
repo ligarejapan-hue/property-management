@@ -115,7 +115,7 @@ let history: unknown[] = [];
 /** 物件の添付一覧(targetId で読む)と、同じファイルを指す記録の逆引き(fileUrl で読む)を分けて返す。 */
 const sameFileRecords = (others: Record<string, unknown>[]) =>
   pm.attachment.findMany.mockImplementation(async (a: { where: Record<string, unknown> }) =>
-    "fileUrl" in a.where ? [att(), ...others] : [att()],
+    "OR" in a.where ? [att(), ...others] : [att()],
   );
 
 describe("同じファイルを別の物件の記録が指していれば送らない(@codex P2)", () => {
@@ -173,6 +173,15 @@ describe("同じファイルを別の物件の記録が指していれば送ら�
     pm.attachment.findMany.mockResolvedValue([att({ fileUrl: `/uploads/properties/${PID}/attachments/a.pdf` })]);
     expect((await POST(json("POST", body()), ctx)).status).toBe(201);
   });
+  it("候補の一覧は、ファイルの数によらず決まった回数だけ DB を引く(@codex 4巡目 P2)", async () => {
+    const many = Array.from({ length: 60 }, (_, i) => att({ id: `f${i}`, fileUrl: `/uploads/attachments/f${i}.pdf` }));
+    pm.attachment.findMany.mockResolvedValue(many);
+    const d = await (await CANDIDATES(new Request("http://x"), ctx)).json();
+    expect(d.files).toHaveLength(60);
+    expect(pm.attachment.findMany.mock.calls.length).toBeLessThanOrEqual(3);
+    expect(pm.propertyPhoto.findMany.mock.calls.length).toBeLessThanOrEqual(2);
+    expect(h.authorize).not.toHaveBeenCalled();
+  });
   it("受け取り箱の置き場所のファイルは送らない", async () => {
     pm.attachment.findMany.mockResolvedValue([att({ fileUrl: "/uploads/report-inbox/a.pdf" })]);
     expect((await (await POST(json("POST", body()), ctx)).json()).error.code).toBe("NOT_SELECTABLE");
@@ -211,10 +220,16 @@ describe("ファイルの守り(/uploads と同じ判定・最終レビュー C1
   });
   it("候補にも同じ守り(開けないもの・反響資料と同じファイルは出さない・謄本と同じファイルは注意つき)", async () => {
     grant(["agent_inquiry", "read"], ["property", "read"], ["registry_pdf", "preview"], ["registry_pdf", "download"]);
-    pm.attachment.findMany.mockResolvedValue([att(), att({ id: A2, fileUrl: "/uploads/attachments/b.pdf" }), att({ id: "c", fileUrl: "/uploads/attachments/c.pdf" })]);
-    h.authorize.mockImplementation(async ({ key }: { key: string }) => (key === "attachments/b.pdf" ? "forbidden" : "ok"));
-    h.meta.mockImplementation(async (key: string) =>
-      key === "attachments/c.pdf" ? { kind: "registry", isRegistry: true, attachmentId: "g", propertyId: PID, createdAt: null, certificateType: null } : null,
+    const own = [att(), att({ id: A2, fileUrl: "/uploads/attachments/b.pdf" }), att({ id: "c", fileUrl: "/uploads/attachments/c.pdf" })];
+    // 候補は記録をまとめて引いて決める(@codex 4巡目 P2): b は削除済みの反響資料の記録と同じファイル・c は謄本の記録と同じファイル。
+    pm.attachment.findMany.mockImplementation(async (a: { where: Record<string, unknown> }) =>
+      "OR" in a.where
+        ? [
+            ...own,
+            att({ id: "x", type: "referral", isDeleted: true, fileUrl: "/uploads/attachments/b.pdf" }),
+            att({ id: "g", type: "registry", isDeleted: true, fileUrl: "/uploads/attachments/c.pdf" }),
+          ]
+        : own,
     );
     const d = await (await CANDIDATES(new Request("http://x"), ctx)).json();
     expect(d.files.map((f: { id: string }) => f.id)).toEqual([A1, "c"]);
@@ -378,14 +393,37 @@ describe("資料の送信 API", () => {
     await POST(json("POST", body()), ctx);
     expect(pm.agentInquiry.update).not.toHaveBeenCalled();
   });
-  it("SMTP 失敗: failed を残し 502・状態は変えない", async () => {
-    h.sendMailWithAttachments.mockResolvedValue({ ok: false, code: "ECONNECTION" });
+  it("SMTP 失敗(はっきり断られた): failed を残し 502・状態は変えない", async () => {
+    h.sendMailWithAttachments.mockResolvedValue({ ok: false, code: "EAUTH" });
     const res = await POST(json("POST", body()), ctx);
     expect(res.status).toBe(502);
+    expect((await res.json()).error.code).toBe("SEND_FAILED");
     expect(pm.agentInquiryMaterialSend.update).toHaveBeenCalledWith(expect.objectContaining({
-      data: expect.objectContaining({ result: "failed", errorCode: "ECONNECTION" }),
+      data: expect.objectContaining({ result: "failed", errorCode: "EAUTH" }),
     }));
     expect(pm.agentInquiry.update).not.toHaveBeenCalled();
+  });
+  it("SMTP 失敗(送れたか分からない=時間切れ・切断): 送信中のまま結果不明にし、2通目が出ないようにする(@codex 4巡目 P1)", async () => {
+    pm.attachment.findMany.mockResolvedValue([att({ type: "registry" })]);
+    grant(["agent_inquiry", "write"], ["property", "read"], ["registry_pdf", "preview"], ["registry_pdf", "download"]);
+    for (const code of ["ETIMEDOUT", "ECONNECTION", null]) {
+      vi.clearAllMocks();
+      h.sendMailWithAttachments.mockResolvedValue({ ok: false, code });
+      const res = await POST(json("POST", body()), ctx);
+      expect(res.status).toBe(502);
+      expect((await res.json()).error.code).toBe("SEND_UNKNOWN");
+      const upd = pm.agentInquiryMaterialSend.update.mock.calls.at(-1)![0];
+      expect(upd.data.result).toBeUndefined();
+      expect(upd.data).toMatchObject({ errorCode: code ?? "UNKNOWN" });
+      expect(pm.agentInquiry.update).not.toHaveBeenCalled();
+      // 届いたかもしれない=謄本の取り扱いの記録は残す
+      expect(h.writeAuditLog.mock.calls.some((c) => c[0].action === "registry_pdf_mail_send")).toBe(true);
+    }
+  });
+  it("結果不明の押し直しは、前の結果(結果不明)を返して送らない", async () => {
+    pm.agentInquiryMaterialSend.findFirst.mockResolvedValue({ id: "s0", result: "sending", inquiryId: IID, createdAt: new Date(), errorCode: "ETIMEDOUT" });
+    expect(await (await POST(json("POST", body()), ctx)).json()).toMatchObject({ result: "sending", state: "結果不明", replayed: true });
+    expect(h.sendMailWithAttachments).not.toHaveBeenCalled();
   });
   it("同じ鍵の押し直しは送らずに前の結果を返す(Review Focus 2)", async () => {
     pm.agentInquiryMaterialSend.findFirst.mockResolvedValue({ id: "s0", result: "sending", inquiryId: IID, createdAt: new Date() });
@@ -414,7 +452,11 @@ describe("資料の送信 API", () => {
 describe("候補と記録の API", () => {
   it("候補: 送れないものは出さず・謄本は権限があるときだけ注意つきで出す・文面は差し込み済み", async () => {
     grant(["agent_inquiry", "read"], ["property", "read"], ["registry_pdf", "preview"], ["registry_pdf", "download"]);
-    pm.attachment.findMany.mockResolvedValue([att(), att({ id: A2, type: "registry", fileName: "謄本.pdf" }), att({ id: "r", type: "report" })]);
+    pm.attachment.findMany.mockResolvedValue([
+      att(),
+      att({ id: A2, type: "registry", fileName: "謄本.pdf", fileUrl: "/uploads/attachments/t.pdf" }),
+      att({ id: "r", type: "report", fileUrl: "/uploads/attachments/r.pdf" }),
+    ]);
     const res = await CANDIDATES(new Request("http://x"), ctx);
     const d = await res.json();
     expect(d.files.map((f: { id: string }) => f.id)).toEqual([A1, A2]);

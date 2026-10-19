@@ -10,13 +10,14 @@ import { getStorage } from "@/lib/storage";
 import {
   MATERIAL_SEND_LIMITS,
   checkMaterialSelection,
+  isDefiniteSmtpFailure,
   isPlainMailText,
   isSingleAddress,
   sendStateLabel,
 } from "@/lib/agent-inquiry/material-send";
 import {
   applySentMaterialToInquiry,
-  guardMaterialFile,
+  guardMaterialFiles,
   hasUnappliedMaterialSend,
   loadMaterialInquiry,
   loadPropertyAttachments,
@@ -75,7 +76,7 @@ export async function POST(request: Request, ctx: Ctx) {
     const replay = async () => {
       const prev = await prisma.agentInquiryMaterialSend.findFirst({
         where: { sentById: session.id, clientToken: input.clientToken },
-        select: { id: true, result: true, inquiryId: true, createdAt: true },
+        select: { id: true, result: true, inquiryId: true, createdAt: true, errorCode: true },
       });
       if (!prev) return null;
       if (prev.inquiryId !== id) {
@@ -109,11 +110,12 @@ export async function POST(request: Request, ctx: Ctx) {
 
     // ファイルごとに /uploads と同じ守りを通す(記録は手で書ける=種類と物件だけでは足りない・最終レビュー C1)。
     const guarded: { row: (typeof sel.rows)[number]; key: string; effectiveType: "general" | "registry" }[] = [];
-    for (const r of sel.rows) {
-      const g = await guardMaterialFile(r, session, perms);
+    const checks = await guardMaterialFiles(sel.rows, session, perms);
+    sel.rows.forEach((r, i) => {
+      const g = checks[i];
       if (!g.ok) throw new ApiError(400, "送れないファイルが含まれています。画面を開き直してください", "NOT_SELECTABLE");
       guarded.push({ row: r, key: g.key, effectiveType: g.effectiveType });
-    }
+    });
 
     const storage = getStorage();
     const files: MailAttachment[] = [];
@@ -161,13 +163,51 @@ export async function POST(request: Request, ctx: Ctx) {
     }
 
     const result = await sendMailWithAttachments(config, { to: input.to, subject: input.subject, text: input.body, attachments: files });
+    const auditSend = async (detail: Record<string, unknown>) => {
+      await writeAuditLog({
+        userId: session.id,
+        action: "agent_inquiry_material_send",
+        targetTable: "agent_inquiries",
+        targetId: id,
+        detail: { files: guarded.length, totalSize: readBytes, ...detail },
+      });
+      for (const { row: r } of guarded.filter((x) => x.effectiveType === "registry")) {
+        // 謄本の取り扱いの記録。宛先は書かない(送った記録の表で見る)。
+        await writeAuditLog({
+          userId: session.id,
+          action: "registry_pdf_mail_send",
+          targetTable: "attachments",
+          targetId: r.id,
+          detail: { inquiryId: id, sendId: claim.id },
+        });
+      }
+    };
     if (!result.ok) {
+      if (isDefiniteSmtpFailure(result.code)) {
+        await prisma.agentInquiryMaterialSend.update({
+          where: { id: claim.id },
+          data: { result: "failed", errorCode: result.code, finishedAt: new Date() },
+        });
+        return NextResponse.json(
+          { id: claim.id, error: { code: "SEND_FAILED", message: "送れませんでした。時間をおいてもう一度押してください" } },
+          { status: 502, headers: NO_STORE },
+        );
+      }
+      // 送れたか分からない(時間切れ・切断)=送信中のまま失敗の印だけ付ける=結果不明。同じ鍵の押し直しは
+      // 前の結果を返すだけ(2通目を出さない・@codex 4巡目 P1)。届いたかもしれない=監査には残す。
       await prisma.agentInquiryMaterialSend.update({
         where: { id: claim.id },
-        data: { result: "failed", errorCode: result.code, finishedAt: new Date() },
+        data: { errorCode: result.code ?? "UNKNOWN", finishedAt: new Date() },
       });
+      await auditSend({ outcome: "unknown" });
       return NextResponse.json(
-        { id: claim.id, error: { code: "SEND_FAILED", message: "送れませんでした。時間をおいてもう一度押してください" } },
+        {
+          id: claim.id,
+          error: {
+            code: "SEND_UNKNOWN",
+            message: "送れたか分かりません(メールの相手先の応答が途中で切れました)。相手に届いたか確かめてください",
+          },
+        },
         { status: 502, headers: NO_STORE },
       );
     }
@@ -175,7 +215,7 @@ export async function POST(request: Request, ctx: Ctx) {
     // 送信は済んだ=まず記録を送信済みにする(後の更新が落ちても「送信中」のまま残さない・最終レビュー I2)。
     await prisma.agentInquiryMaterialSend.update({ where: { id: claim.id }, data: { result: "sent", finishedAt: new Date() } });
     // 反響の更新は version を見ない(他の人の更新とぶつかっても done にする)。落ちても送信は成功として返し、
-    // 押し直し・記録を開いたときに反映し直す(@codex 2巡目 P2)。
+    // 押し直し・反映し直しの口で反映し直す(@codex 2巡目 P2)。
     let version = q.version;
     let statusUpdated = true;
     let statusChanged = false;
@@ -189,24 +229,7 @@ export async function POST(request: Request, ctx: Ctx) {
       statusUpdated = false;
       console.error("[material-send] inquiry update failed after send", { name: e instanceof Error ? e.name : "Unknown" });
     }
-
-    await writeAuditLog({
-      userId: session.id,
-      action: "agent_inquiry_material_send",
-      targetTable: "agent_inquiries",
-      targetId: id,
-      detail: { files: guarded.length, totalSize: readBytes, statusChanged },
-    });
-    for (const { row: r } of guarded.filter((x) => x.effectiveType === "registry")) {
-      // 謄本の取り扱いの記録。宛先は書かない(送った記録の表で見る)。
-      await writeAuditLog({
-        userId: session.id,
-        action: "registry_pdf_mail_send",
-        targetTable: "attachments",
-        targetId: r.id,
-        detail: { inquiryId: id, sendId: claim.id },
-      });
-    }
+    await auditSend({ statusChanged });
     return NextResponse.json({ id: claim.id, result: "sent", version, statusUpdated }, { status: 201, headers: NO_STORE });
   } catch (error) {
     return handleApiError(error);

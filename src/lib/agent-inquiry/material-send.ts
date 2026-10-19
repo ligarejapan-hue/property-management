@@ -108,11 +108,23 @@ export function isPlainMailText(v: string): boolean {
 
 export const SENDING_STALE_MS = 10 * 60 * 1000;
 
+/**
+ * 送る前に断られたとはっきり分かる SMTP の失敗(認証・宛先・本文の拒否・名前解決・TLS)。
+ * ⚠これ以外(時間切れ・切断・不明)は、相手が受け取った後に応答だけ失われたことがある=「送れなかった」にしない
+ *   (押し直しで2通目を出さない・@codex 4巡目 P1)。
+ */
+const DEFINITE_SMTP_FAILURES: ReadonlySet<string> = new Set(["EAUTH", "EENVELOPE", "EMESSAGE", "EDNS", "ETLS"]);
+export function isDefiniteSmtpFailure(code: string | null): boolean {
+  return code != null && DEFINITE_SMTP_FAILURES.has(code);
+}
+
 export function sendStateLabel(
-  row: { result: "sending" | "sent" | "failed"; createdAt: Date | string },
+  row: { result: "sending" | "sent" | "failed"; createdAt: Date | string; errorCode?: string | null },
   now: Date,
 ): "送信中" | "結果不明" | "送信済み" | "送れなかった" {
   if (row.result === "sent") return "送信済み";
   if (row.result === "failed") return "送れなかった";
+  // 送信中のまま失敗の印がある=送れたか分からない失敗(すぐ結果不明)。
+  if (row.errorCode) return "結果不明";
   return now.getTime() - new Date(row.createdAt).getTime() > SENDING_STALE_MS ? "結果不明" : "送信中";
 }

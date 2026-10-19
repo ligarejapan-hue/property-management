@@ -58,7 +58,7 @@ describe("送信のあとの鍵の扱い(最終レビュー I1・I3)", () => {
   ])("はっきり送れなかった(%s)なら鍵を替える", (code) => {
     expect(afterSendError(code)).toEqual({ renewToken: true, unknown: false });
   });
-  it.each([[null], ["INTERNAL_ERROR"], ["UNAUTHORIZED"]])("送れたか分からない(%s=通信切れ・中継の時間切れ等)なら鍵を替えない", (code) => {
+  it.each([[null], ["INTERNAL_ERROR"], ["UNAUTHORIZED"], ["SEND_UNKNOWN"]])("送れたか分からない(%s=通信切れ・中継の時間切れ等)なら鍵を替えない", (code) => {
     expect(afterSendError(code)).toEqual({ renewToken: false, unknown: true });
   });
   it("押し直しの応答: 送信済みは閉じる・送れなかったは鍵を替える・送信中は待つ・結果不明は鍵を替える", () => {
