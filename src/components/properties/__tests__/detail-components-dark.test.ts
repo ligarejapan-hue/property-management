@@ -15,8 +15,9 @@ describe("action-bar.tsx dark: 配色 (phase2b 2b-3)", () => {
   it("ライトモード text-white はボタンに残っている", () => {
     expect(actionBarSrc).toContain("text-white");
   });
-  it("ライトモードの純 accent ボタン色（bg-green-600）は残っている", () => {
-    expect(actionBarSrc).toContain("bg-green-600");
+  // UIの統一 第3回: 「確認した」の緑の塗り(bg-green-600)は共通 Button の success が持つ
+  it("「確認した」は共通 Button の success（緑の塗りは部品側）", () => {
+    expect(actionBarSrc).toContain('variant="success"');
   });
   it("ライトモードの純 accent ボタン色（bg-indigo-600）は残っている", () => {
     expect(actionBarSrc).toContain("bg-indigo-600");
