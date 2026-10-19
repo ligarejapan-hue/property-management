@@ -14,7 +14,7 @@ import { writeAuditLog } from "@/lib/audit";
 import { lockPropertyRow } from "@/lib/property-record-guard";
 import { isPdfBuffer } from "@/lib/pdf-extract";
 import { getStorage, validateFile, ALLOWED_ATTACHMENT_MIMES } from "@/lib/storage";
-import { MAX_PDF_UPLOAD_BYTES, pdfTooLargeToAcceptMessage } from "@/lib/pdf-compress/policy";
+import { MAX_ATTACHMENT_BYTES, MAX_PDF_UPLOAD_BYTES, pdfTooLargeToAcceptMessage } from "@/lib/pdf-compress/policy";
 import { fitPdfToLimit, reserveLargePdfSlot } from "@/lib/pdf-compress/fit";
 import {
   assertImportJsonBodySize,
@@ -319,6 +319,7 @@ export async function POST(request: NextRequest) {
     if (pdfBuffer) {
       // ⚠反響PDFも「謄本以外の添付」なので、上限(8MB)を超えていれば自動で縮める
       //   (発注者決定 2026-10-09・原本は残さない)。縮めた後の実物で上限を確かめる。
+      //   保存してよい上限は 20MB(発注者決定 2026-10-19・8MB まで縮まなくても保存する)。
       const fitted = await fitPdfToLimit(pdfBuffer);
       pdfBuffer = fitted.buffer;
       pdfOriginalSize = fitted.originalSize;
@@ -326,6 +327,7 @@ export async function POST(request: NextRequest) {
         pdfBuffer.length,
         "application/pdf",
         ALLOWED_ATTACHMENT_MIMES,
+        MAX_ATTACHMENT_BYTES,
       );
       if (validationError) {
         throw new ApiError(400, validationError, "INVALID_FILE");

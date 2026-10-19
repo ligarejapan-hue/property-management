@@ -140,12 +140,16 @@ function isUnavailable(err: unknown): boolean {
 /**
  * PDF を上限以下に縮める。入力の Buffer は書き換えない。
  * ⚠呼び出し側は「上限を超えた PDF」でだけ呼ぶこと(上限以下には手を触れない決まり)。
+ * acceptBytes: maxBytes まで縮まなくても受け取ってよい大きさ(2026-10-19)。
+ *   スクリプトは一番小さくできた形が acceptBytes 以下ならそれを返す。
  */
 export function compressPdf(
   input: Buffer,
   maxBytes: number,
   deps: RunDeps = defaultDeps,
+  acceptBytes: number = maxBytes,
 ): Promise<PdfCompressResult> {
+  const accept = Math.max(acceptBytes, maxBytes);
   return serialize(async () => {
     const dir = await mkdtemp(path.join(tmpdir(), "pm-pdfc-"));
     try {
@@ -156,7 +160,14 @@ export function compressPdf(
       try {
         ({ stdout } = await deps.exec(
           deps.python,
-          [deps.script, src, dst, "--max-bytes", String(maxBytes)],
+          [
+            deps.script,
+            src,
+            dst,
+            "--max-bytes",
+            String(maxBytes),
+            ...(accept > maxBytes ? ["--accept-bytes", String(accept)] : []),
+          ],
           { timeout: TIMEOUT_MS },
         ));
       } catch (err) {
@@ -173,7 +184,7 @@ export function compressPdf(
       if (!parsed.ok) return parsed;
       const buffer = await readFile(dst);
       // スクリプトの申告ではなく、実物の大きさで上限を確かめる。
-      if (buffer.length > maxBytes || buffer.length === 0) {
+      if (buffer.length > accept || buffer.length === 0) {
         return { ok: false, reason: "error", inBytes: input.length, bestBytes: null };
       }
       return { ok: true, buffer, level: parsed.level, inBytes: input.length, outBytes: buffer.length };

@@ -1479,6 +1479,15 @@ describe("反響PDFの自動圧縮(2026-10-10)", () => {
     });
   });
 
+  it("★縮めて 8MB を超えたままでも、20MB 以下なら保存する(2026-10-19 発注者決定)", async () => {
+    const big = new File([Buffer.concat([Buffer.from("%PDF-1.4 "), Buffer.alloc(12 * 1024 * 1024, 0x20)])], "kiyaku.pdf", {
+      type: "application/pdf",
+    });
+    const res = await POST(await multipartReq(baseBody, big));
+    expect(res.status).toBe(200);
+    expect(created.attachment?.[0]).toMatchObject({ type: "referral", fileSize: big.size, originalSize: null });
+  });
+
   it("縮めなかった反響PDFは originalSize が null", async () => {
     const res = await POST(await multipartReq(baseBody, pdfFile()));
     expect(res.status).toBe(200);

@@ -101,14 +101,16 @@ export const ALLOWED_ATTACHMENT_MIMES = new Set([
 /**
  * Validate file size and MIME type.
  * Returns an error message string, or null if valid.
+ * maxBytes: 上限(既定 8MB)。物件の添付は 20MB(MAX_ATTACHMENT_BYTES・2026-10-19)を渡す。
  */
 export function validateFile(
   fileSize: number,
   mimeType: string,
   allowedMimes: Set<string>,
+  maxBytes: number = MAX_FILE_SIZE,
 ): string | null {
-  if (fileSize > MAX_FILE_SIZE) {
-    return `ファイルサイズが上限 (${MAX_FILE_SIZE / 1024 / 1024}MB) を超えています`;
+  if (fileSize > maxBytes) {
+    return `ファイルサイズが上限 (${maxBytes / 1024 / 1024}MB) を超えています`;
   }
   if (!allowedMimes.has(mimeType)) {
     return `許可されていないファイル形式です: ${mimeType}`;

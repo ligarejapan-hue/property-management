@@ -16,6 +16,7 @@ import {
   isPdfByMimeOrName,
   pdfTooLargeToAcceptMessage,
   MAX_PDF_UPLOAD_BYTES,
+  MAX_ATTACHMENT_BYTES,
 } from "../policy";
 import { ApiError } from "@/lib/api-helpers";
 
@@ -72,6 +73,20 @@ describe("compressPdf(別プロセスでの圧縮)", () => {
     const deps = fakeDeps(async () => ({ stdout: okJson("lossless", 100, 10), write: Buffer.alloc(80) }));
     const r = await compressPdf(Buffer.alloc(100), 50, deps);
     expect(r).toMatchObject({ ok: false, reason: "error" });
+  });
+
+  it("保存してよい上限(acceptBytes)を渡すと --accept-bytes を付け、目標を超えても上限以下なら受け取る(2026-10-19)", async () => {
+    const deps = fakeDeps(async (args) => {
+      expect(args.slice(3)).toEqual(["--max-bytes", "50", "--accept-bytes", "90"]);
+      return { stdout: okJson("jpeg75", 100, 80), write: Buffer.alloc(80) };
+    });
+    const r = await compressPdf(Buffer.alloc(100), 50, deps, 90);
+    expect(r).toMatchObject({ ok: true, outBytes: 80 });
+  });
+
+  it("保存してよい上限を超える実物は error(スクリプトの申告を信じない)", async () => {
+    const deps = fakeDeps(async () => ({ stdout: okJson("jpeg75", 100, 80), write: Buffer.alloc(95) }));
+    expect(await compressPdf(Buffer.alloc(100), 50, deps, 90)).toMatchObject({ ok: false, reason: "error" });
   });
 
   it("縮めきれない・暗号化・壊れた PDF は理由をそのまま返す", async () => {
@@ -249,14 +264,56 @@ describe("fitPdfToLimit(入口から使う)", () => {
     expect(r.level).toBe("lossless");
   });
 
-  it("縮められなければ 422 と理由つきの文言(黙って捨てない)", async () => {
+  it("保存してよい上限を超えたまま縮められなければ 422 と理由つきの文言(黙って捨てない)", async () => {
     const deps = fakeDeps(async () => ({
-      stdout: JSON.stringify({ ok: false, reason: "too_large", inBytes: 20 * 1024 * 1024, bestBytes: 9.5 * 1024 * 1024 }),
+      stdout: JSON.stringify({ ok: false, reason: "too_large", inBytes: 30 * 1024 * 1024, bestBytes: 25 * 1024 * 1024 }),
     }));
-    const err = await fitPdfToLimit(Buffer.alloc(20), { limitBytes: 8, deps }).catch((e) => e);
+    const err = await fitPdfToLimit(Buffer.alloc(20), { limitBytes: 8, acceptBytes: 10, deps }).catch((e) => e);
     expect(err).toBeInstanceOf(ApiError);
     expect((err as ApiError).status).toBe(422);
-    expect((err as ApiError).message).toContain("元 20.0MB → 最小 9.5MB");
+    expect((err as ApiError).message).toContain("元 30.0MB → 最小 25.0MB");
+  });
+
+  it("★保存してよい上限の既定は 20MB(2026-10-19 発注者決定)・目標の 8MB は変えない", async () => {
+    expect(MAX_ATTACHMENT_BYTES).toBe(20 * 1024 * 1024);
+    const deps = fakeDeps(async (args) => {
+      expect(args.slice(3)).toEqual(["--max-bytes", String(8 * 1024 * 1024), "--accept-bytes", String(20 * 1024 * 1024)]);
+      return { stdout: JSON.stringify({ ok: false, reason: "too_large", inBytes: 1, bestBytes: 1 }) };
+    });
+    await fitPdfToLimit(Buffer.alloc(8 * 1024 * 1024 + 1), { deps });
+    expect(deps.calls).toHaveLength(1);
+  });
+
+  it("★目標(8MB)まで縮まなくても、保存してよい上限以下まで縮めばその形で保存する", async () => {
+    const deps = fakeDeps(async () => ({ stdout: okJson("jpeg75", 30, 15), write: Buffer.alloc(15) }));
+    const r = await fitPdfToLimit(Buffer.alloc(30), { limitBytes: 8, acceptBytes: 20, deps });
+    expect(r.buffer.length).toBe(15);
+    expect(r.originalSize).toBe(30);
+  });
+
+  it("★縮めきれなくても、元が保存してよい上限以下なら元のまま保存する(管理規約 11.8MB の例)", async () => {
+    for (const reason of ["too_large", "encrypted", "invalid_pdf"] as const) {
+      const deps = fakeDeps(async () => ({ stdout: JSON.stringify({ ok: false, reason, inBytes: 12, bestBytes: null }) }));
+      const buf = Buffer.alloc(12, 7);
+      const r = await fitPdfToLimit(buf, { limitBytes: 8, acceptBytes: 20, deps });
+      expect(r).toEqual({ buffer: buf, originalSize: null, level: null });
+    }
+  });
+
+  it("圧縮の部品が無い・失敗したときも、元が保存してよい上限以下なら元のまま保存する", async () => {
+    const errSpy = vi.spyOn(console, "error").mockImplementation(() => {});
+    const deps = fakeDeps(async () => {
+      throw Object.assign(new Error("spawn"), { code: "ENOENT" });
+    });
+    const buf = Buffer.alloc(12);
+    expect(await fitPdfToLimit(buf, { limitBytes: 8, acceptBytes: 20, deps })).toEqual({ buffer: buf, originalSize: null, level: null });
+    errSpy.mockRestore();
+  });
+
+  it("縮めた結果が元より大きい・同じなら、元のまま保存する(圧縮したことにしない)", async () => {
+    const deps = fakeDeps(async () => ({ stdout: okJson("lossless", 12, 13), write: Buffer.alloc(13) }));
+    const buf = Buffer.alloc(12);
+    expect(await fitPdfToLimit(buf, { limitBytes: 8, acceptBytes: 20, deps })).toEqual({ buffer: buf, originalSize: null, level: null });
   });
 });
 
@@ -271,6 +328,11 @@ describe("文言", () => {
     expect(compressFailureMessage("encrypted", sizes)).toContain("パスワード付き");
     expect(compressFailureMessage("invalid_pdf", sizes)).toContain("8MB以下");
     expect(compressFailureMessage("unavailable", sizes)).toContain("8MB以下");
+  });
+  it("保存してよい上限(20MB)を渡せば、その数字で案内する", () => {
+    expect(compressFailureMessage("too_large", { ...sizes, inBytes: 30 * 1024 * 1024, bestBytes: 25 * 1024 * 1024, limitBytes: MAX_ATTACHMENT_BYTES })).toBe(
+      "PDFを自動で圧縮しましたが、上限(20MB)まで小さくできませんでした(元 30.0MB → 最小 25.0MB)。ページを分けて保存してください。",
+    );
   });
   it("受け取る上限は 50MB と案内する", () => {
     expect(MAX_PDF_UPLOAD_BYTES).toBe(50 * 1024 * 1024);

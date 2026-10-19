@@ -103,5 +103,32 @@ describe.skipIf(!available())("scripts/pdf-compress.py(実物)", () => {
       rmSync(dir, { recursive: true, force: true });
     }
   }, 120_000);
+
+  it("目標まで縮まなくても、一番小さい形が --accept-bytes 以下ならそれを返す・超えれば too_large(2026-10-19)", async () => {
+    const dir = mkdtempSync(path.join(tmpdir(), "pdfc-test-"));
+    try {
+      const src = path.join(dir, "in.pdf");
+      execFileSync(PYTHON, ["-c", MAKE_PDF, src], { timeout: 60_000 });
+      const input = readFileSync(src);
+      const deps = {
+        exec: async (file: string, args: string[], opts: { timeout: number }) => ({
+          stdout: execFileSync(file, args, { timeout: opts.timeout }).toString(),
+          stderr: "",
+        }),
+        python: PYTHON,
+        script: path.join(process.cwd(), "scripts", "pdf-compress.py"),
+      };
+      // 目標を 1 バイトにして、どの段階でも届かないようにする。
+      const miss = await compressPdf(input, 1, deps);
+      expect(miss).toMatchObject({ ok: false, reason: "too_large" });
+      if (miss.ok || miss.bestBytes === null) return;
+      const hit = await compressPdf(input, 1, deps, miss.bestBytes);
+      expect(hit).toMatchObject({ ok: true, outBytes: miss.bestBytes });
+      const under = await compressPdf(input, 1, deps, miss.bestBytes - 1);
+      expect(under).toMatchObject({ ok: false, reason: "too_large" });
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
+  }, 300_000);
 });
 

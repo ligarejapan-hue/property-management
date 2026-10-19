@@ -1,8 +1,9 @@
 /**
  * 物件の添付: 大きい PDF の自動圧縮(2026-10-10・発注者決定 2026-10-09)。
  *   - 謄本以外の PDF は、上限(8MB)を超えたら縮めて保存し、圧縮前の大きさを残す
- *   - 謄本(registry)は縮めない=従来どおり 8MB で断る(課金した原本)
- *   - PDF 以外(Excel・画像など)は従来どおり 8MB で断る
+ *   - 謄本(registry)は縮めない(課金した原本)=20MB まで受け付ける(2026-10-19 発注者決定)
+ *   - PDF 以外(Excel・画像など)も 20MB まで(縮めない)
+ *   - 謄本以外の PDF は、縮めて 20MB 以下になれば保存する
  *   - 受け取る上限(50MB)を超える PDF は、読む前に断る
  */
 import { describe, it, expect, vi, beforeEach } from "vitest";
@@ -53,8 +54,8 @@ vi.mock("@/lib/storage", () => {
     getStorage: () => storageStub,
     MAX_FILE_SIZE: MAX,
     ALLOWED_ATTACHMENT_MIMES: ATTACH,
-    validateFile: (size: number, mime: string, allowed: Set<string>) => {
-      if (size > MAX) return "ファイルサイズが上限 (8MB) を超えています";
+    validateFile: (size: number, mime: string, allowed: Set<string>, max = MAX) => {
+      if (size > max) return `ファイルサイズが上限 (${max / 1024 / 1024}MB) を超えています`;
       if (!allowed.has(mime)) return `許可されていないファイル形式です: ${mime}`;
       return null;
     },
@@ -124,10 +125,33 @@ describe("添付: 大きい PDF の自動圧縮", () => {
     expect(writeAuditLog.mock.calls[0][0].detail.compressedFrom).toBeUndefined();
   });
 
-  it("★謄本の PDF は縮めない(8MB を超えたら従来どおり断る・保存しない)", async () => {
-    const res = await POST(await req(12 * MB, "application/pdf", "touhon.pdf", "registry"), params);
-    expect(res.status).toBe(422);
+  it("★謄本の PDF は縮めずに 20MB まで保存する(16.9MB の謄本の例・2026-10-19)", async () => {
+    const res = await POST(await req(17 * MB, "application/pdf", "touhon.pdf", "registry"), params);
+    expect(res.status).toBe(201);
     expect(fitPdfToLimit).not.toHaveBeenCalled();
+    expect((storageStub.upload.mock.calls[0] as unknown[])[0]).toHaveLength(17 * MB);
+    expect(create.mock.calls[0][0].data).toMatchObject({ type: "registry", fileSize: 17 * MB, originalSize: null });
+  });
+
+  it("★謄本の PDF も 20MB を超えたら断る(読む前に・保存しない)", async () => {
+    const res = await POST(await req(21 * MB, "application/pdf", "touhon.pdf", "registry"), params);
+    expect(res.status).toBe(422);
+    expect((await res.json()).error.message).toBe("ファイルサイズが上限 (20MB) を超えています");
+    expect(fitPdfToLimit).not.toHaveBeenCalled();
+    expect(storageStub.upload).not.toHaveBeenCalled();
+  });
+
+  it("★通常の PDF は、縮めて 8MB を超えたままでも 20MB 以下なら保存する(管理規約 11.8MB の例)", async () => {
+    fitPdfToLimit.mockImplementationOnce(async (buf: Buffer) => ({ buffer: buf, originalSize: null, level: null }));
+    const res = await POST(await req(12 * MB, "application/pdf", "kiyaku.pdf"), params);
+    expect(res.status).toBe(201);
+    expect(create.mock.calls[0][0].data).toMatchObject({ fileSize: 12 * MB, originalSize: null, type: "general" });
+  });
+
+  it("通常の PDF は、縮めた後も 20MB を超えるなら保存しない", async () => {
+    fitPdfToLimit.mockImplementationOnce(async () => ({ buffer: Buffer.alloc(21 * MB), originalSize: 30 * MB, level: "jpeg75" }));
+    const res = await POST(await req(30 * MB, "application/pdf", "huge.pdf"), params);
+    expect(res.status).toBe(422);
     expect(storageStub.upload).not.toHaveBeenCalled();
   });
 
@@ -138,10 +162,26 @@ describe("添付: 大きい PDF の自動圧縮", () => {
     expect(create.mock.calls[0][0].data).toMatchObject({ type: "registry", originalSize: null });
   });
 
-  it("PDF 以外は 8MB を超えたら従来どおり断る(縮めない)", async () => {
-    const res = await POST(await req(9 * MB, "application/vnd.ms-excel", "a.xls"), params);
-    expect(res.status).toBe(422);
+  it("PDF 以外は縮めずに 20MB まで保存し、超えたら断る", async () => {
+    const ok = await POST(await req(9 * MB, "application/vnd.ms-excel", "a.xls"), params);
+    expect(ok.status).toBe(201);
+    const ng = await POST(await req(21 * MB, "application/vnd.ms-excel", "b.xls"), params);
+    expect(ng.status).toBe(422);
     expect(fitPdfToLimit).not.toHaveBeenCalled();
+  });
+
+  it("JSON の登録(ファイルの場所を渡す口)も 20MB まで", async () => {
+    const mk = (fileSize: number) => {
+      const body = JSON.stringify({ fileName: "a.pdf", fileUrl: "/uploads/properties/p-1/attachments/a.pdf", fileSize, mimeType: "application/pdf" });
+      return new Request("http://t/api/properties/p-1/attachments", {
+        method: "POST",
+        body,
+        headers: { "content-type": "application/json", "content-length": String(Buffer.byteLength(body)) },
+      }) as unknown as NextRequest;
+    };
+    const ng = await POST(mk(21 * MB), params);
+    expect(ng.status).toBe(422);
+    expect((await ng.json()).error.message).toBe("ファイルサイズが上限 (20MB) を超えています");
   });
 
   it("縮められなかったときの理由をそのまま返し、保存しない", async () => {
