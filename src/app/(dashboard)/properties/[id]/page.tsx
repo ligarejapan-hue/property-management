@@ -36,6 +36,7 @@ import PhotoTab from "@/components/properties/photo-tab";
 import CandidateList from "@/components/properties/candidate-list";
 import ActionBar, { usePropertyAction } from "@/components/properties/action-bar";
 import { MenuButton, type MenuItem } from "@/components/ui/menu-button";
+import { SkeletonRows } from "@/components/ui/skeleton";
 import { useSession } from "next-auth/react";
 import DmScenarioField from "@/components/properties/dm-scenario-field";
 import RegistryLocationSearchButton from "@/components/properties/registry-location-search-button";
@@ -787,9 +788,8 @@ export default function PropertyDetailPage({
 
   if (loading) {
     return (
-      <div className="flex items-center justify-center py-24">
-        <Loader2 className="h-6 w-6 animate-spin text-blue-500" />
-        <span className="ml-2 text-sm text-gray-500 dark:text-gray-400">読み込み中...</span>
+      <div className="mx-auto max-w-5xl px-4">
+        <SkeletonRows rows={10} label="物件を読み込み中" />
       </div>
     );
   }

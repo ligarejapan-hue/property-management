@@ -52,4 +52,75 @@ describe("Button", () => {
     expect(out).toContain("bg-indigo-600");
     expect(out).toContain("w-full");
   });
+
+  // ── UIの統一 第2回(2026-10-19): 影・ghost・lg・処理中/完了 ──
+  it("primary は薄い影・乗せると濃く(押せないときは影なし)", () => {
+    const out = html({});
+    expect(out).toContain("shadow-xs");
+    expect(out).toContain("hover:shadow-sm");
+    expect(out).toContain("disabled:shadow-none");
+    expect(html({ variant: "secondary" })).not.toContain("shadow-xs");
+  });
+
+  it("ghost = 枠なし・乗せると薄い灰", () => {
+    const out = html({ variant: "ghost" });
+    expect(out).toContain("bg-transparent");
+    expect(out).toContain("hover:bg-gray-100");
+    expect(out).toContain("dark:hover:bg-gray-800");
+    expect(out).not.toContain("bg-indigo-600");
+  });
+
+  it("lg = スマホの主操作(高さ44px以上)", () => {
+    const out = html({ size: "lg" });
+    expect(out).toContain("min-h-11");
+    expect(out).toContain("px-5");
+  });
+
+  it("loading: くるくる+文言・押せない・aria-busy・元の文言は幅を保つため invisible で残す", () => {
+    const out = html({ loading: true }, "保存する");
+    expect(out).toContain("animate-spin");
+    expect(out).toContain("処理中");
+    expect(out).toContain("disabled");
+    expect(out).toContain('aria-busy="true"');
+    expect(out).toMatch(/<span class="[^"]*invisible[^"]*"[^>]*>保存する<\/span>/);
+  });
+
+  it("loadingLabel を差し替えられる", () => {
+    const out = html({ loading: true, loadingLabel: "保存中" }, "保存する");
+    expect(out).toMatch(/>保存中</);
+    expect(out).not.toContain("loadingLabel");
+    expect(out).not.toContain("loadinglabel");
+  });
+
+  it("done: ✓(ポンと出る)+文言。loading より done が優先", () => {
+    const out = html({ done: true, loading: true }, "保存する");
+    expect(out).toContain("animate-pm-pop");
+    expect(out).toContain("motion-reduce:animate-none");
+    expect(out).toContain("完了しました");
+    expect(out).not.toContain("animate-spin");
+  });
+
+  it("通常時は invisible の重ねを出さない(余計な要素を増やさない)", () => {
+    const out = html({}, "保存する");
+    expect(out).not.toContain("invisible");
+    expect(out).toContain(">保存する</button>");
+  });
+
+  it("★呼び出し側の disabled は loading=false でも外れない", () => {
+    const out = html({ disabled: true, loading: false }, "保存する");
+    expect(out).toMatch(/<button[^>]*disabled=""/);
+    expect(out).not.toContain("aria-busy");
+  });
+
+  it("★処理中/完了は同じマスに重ねる(幅=元の文言と新しい文言の広いほう・アイコン+文字でも縮まない・提出前レビュー指摘)", () => {
+    const out = html({ done: true }, "保存");
+    // 2枚を同じグリッドのマスに重ねる(absolute では長い文言がはみ出す)
+    expect(out).toMatch(/<span class="grid">/);
+    expect((out.match(/\[grid-area:1\/1\]/g) ?? []).length).toBe(2);
+    expect(out).not.toContain("absolute inset-0");
+    // 隠した元の文言も、ふだんと同じ並べ方(アイコンと文字の間隔)
+    expect(out).toMatch(/<span class="[^"]*invisible[^"]*inline-flex items-center justify-center gap-1\.5/);
+    // 文言は折り返さない
+    expect(out).toContain("whitespace-nowrap");
+  });
 });

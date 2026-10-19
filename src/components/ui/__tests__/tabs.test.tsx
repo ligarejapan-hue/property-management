@@ -88,3 +88,43 @@ describe("Tabs", () => {
     expect(html).toContain("border-b border-gray-200");
   });
 });
+
+describe("タブの下線がすべる(UIの統一 第2回・2026-10-19)", () => {
+  const T = [
+    { key: "a", label: "氏名品質" },
+    { key: "b", label: "連絡先" },
+  ];
+  const html = () => renderToStaticMarkup(<Tabs idBase="t" tabs={T} active="a" onChange={() => {}} />);
+  it("すべる下線: aria-hidden の1本・最初は透明・ready で transition(reduced-motion では動かさない)", () => {
+    const bars = html().match(/<span[^>]*data-tab-indicator[^>]*>/g) ?? [];
+    expect(bars).toHaveLength(1);
+    expect(bars[0]).toContain('aria-hidden="true"');
+    expect(bars[0]).toContain("opacity-0");
+    expect(bars[0]).toContain("group-data-[slider=ready]/tabs:transition-[translate,width]");
+    expect(bars[0]).toContain("motion-reduce:transition-none");
+    expect(bars[0]).toContain("bg-indigo-600");
+    expect(bars[0]).toContain("dark:bg-indigo-400");
+  });
+  it("タブ列は relative group/tabs(下線の基準)", () => {
+    expect(html()).toMatch(/role="tablist"[^>]*class="[^"]*group\/tabs relative/);
+  });
+  it("★ready 後は各タブの下線を消す(明暗どちらでも二重にしない)", () => {
+    const btns = html().match(/<button[^>]*>/g) ?? [];
+    expect(btns.length).toBe(2);
+    for (const b of btns) {
+      expect(b).toContain("group-data-[slider=ready]/tabs:border-transparent");
+      expect(b).toContain("dark:group-data-[slider=ready]/tabs:border-transparent");
+    }
+  });
+  it("位置は effect 内で DOM に直接書く(setState しない)+幅の変化に追従", () => {
+    const src = readFileSync(join(process.cwd(), "src/components/ui/tabs.tsx"), "utf8");
+    expect(src).toContain("useLayoutEffect");
+    expect(src).toContain("new ResizeObserver");
+    expect(src).toContain('dataset.slider = "ready"');
+    expect(src).not.toMatch(/useState/);
+  });
+  it("★タブ1つずつの幅の変化も見る(書体の読み込み後に幅だけ変わる・@codex #531 P2)", () => {
+    const src = readFileSync(join(process.cwd(), "src/components/ui/tabs.tsx"), "utf8");
+    expect(src).toMatch(/querySelectorAll<HTMLElement>\('\[role="tab"\]'\)\.forEach\(\(t\) => ro\.observe\(t\)\)/);
+  });
+});

@@ -13,6 +13,7 @@
  * ブラウザ標準に任せる。規約:
  *   - 背景 = backdrop:bg-black/50 / カード = rounded-lg p-6 shadow-xl(白/dark)
  *   - フッタ = justify-end gap-2(ボタンは共通 Button)
+ *   - 開くときだけ 220ms で上がって現れる(閉じるのは即時・2026-10-19 UIの統一)
  *   - 見出しと aria-labelledby で紐付け(無名の dialog にしない)
  *
  * 開閉は従来どおり呼び出し側の条件描画({open && <ModalShell/>})。
@@ -82,7 +83,7 @@ export function ModalShell({
         if (onClose) onClose();
         else e.preventDefault();
       }}
-      className={`m-auto w-full ${SIZE_CLASSES[size]} rounded-lg bg-white p-6 shadow-xl backdrop:bg-black/50 dark:bg-gray-900${className ? ` ${className}` : ""}`}
+      className={`m-auto w-full ${SIZE_CLASSES[size]} rounded-lg bg-white p-6 shadow-xl backdrop:bg-black/50 animate-pm-dialog-in backdrop:animate-pm-backdrop-in motion-reduce:animate-none motion-reduce:backdrop:animate-none dark:bg-gray-900${className ? ` ${className}` : ""}`}
     >
       {/* 小窓はブラウザの最前面に出るので、外の透かしは隠れる。器で描けば全部の小窓にそろう(@codex #459 R8/R21 の一般化)。 */}
       {!bypass && watermarkText && <WatermarkOverlay text={watermarkText} />}

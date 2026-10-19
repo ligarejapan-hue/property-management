@@ -7,6 +7,7 @@ import Link from "next/link";
 import { Search, Loader2, Plus, Trash2, AlertTriangle, RotateCcw, Download, CheckCircle2 } from "lucide-react";
 import { MenuButton } from "@/components/ui/menu-button";
 import { Pagination } from "@/components/ui/pagination";
+import { SkeletonRows } from "@/components/ui/skeleton";
 import { fetchProperties as apiFetchProperties, bulkUpdateProperties, deleteProperty, fetchQualityCheck, fetchUsers, fetchPropertySuggestions, createSaleDmCampaign, clearSaleDmUndeliverable, createDmBatch } from "@/lib/api-client";
 import { classifyPropertySearch, toMgmtIdQuery } from "@/lib/property-search-classify";
 import { canCreateSaleDm, buildSaleDmPartialNotice } from "@/lib/sale-dm-letter/list-ui";
@@ -1691,10 +1692,7 @@ function PropertiesPageInner() {
       {/* Table (PC のみ: md: 以上) */}
       <div className="hidden md:block overflow-x-auto rounded-lg border border-gray-200 bg-white dark:border-gray-800 dark:bg-gray-900">
         {loading ? (
-          <div className="flex items-center justify-center py-16">
-            <Loader2 className="h-6 w-6 animate-spin text-blue-500" />
-            <span className="ml-2 text-sm text-gray-500 dark:text-gray-400">読み込み中...</span>
-          </div>
+          <SkeletonRows rows={8} label="物件を読み込み中" />
         ) : (
           <table className="w-full text-left text-sm">
             <thead className="border-b border-gray-200 bg-gray-50 dark:border-gray-800 dark:bg-gray-900">
@@ -1900,10 +1898,7 @@ function PropertiesPageInner() {
       {/* Card list (モバイル専用: md: 未満) */}
       <div className="md:hidden mt-2 flex flex-col gap-3">
         {loading ? (
-          <div className="flex items-center justify-center py-16">
-            <Loader2 className="h-6 w-6 animate-spin text-blue-500" />
-            <span className="ml-2 text-sm text-gray-500 dark:text-gray-400">読み込み中...</span>
-          </div>
+          <SkeletonRows rows={8} label="物件を読み込み中" />
         ) : visibleProperties.length === 0 ? (
           <div className="rounded-lg border border-gray-200 bg-white dark:border-gray-800 dark:bg-gray-900 px-4 py-8 text-center text-gray-500 dark:text-gray-400 text-sm">
             {warningOnly
