@@ -1987,6 +1987,9 @@ model AgentInquiryMaterialSend {
   finishedAt  DateTime?          @map("finished_at")
   /// 反響(done・宛先)へ反映した時刻。null の送信済み=反映が落ちた=押し直し・記録を開いたときに反映し直す。
   inquiryAppliedAt DateTime?     @map("inquiry_applied_at")
+  /// 送った時点の反響の状態と宛先。反映し直しは、ここから変わっていない欄だけ書く(手の変更を上書きしない)。
+  statusAtSend       AgentInquiryStatus @map("status_at_send")
+  contactEmailAtSend String?            @map("contact_email_at_send")
 
   inquiry AgentInquiry @relation(fields: [inquiryId], references: [id], onDelete: Restrict)
   sentBy  User         @relation("AgentInquiryMaterialSendSentBy", fields: [sentById], references: [id], onDelete: Restrict)

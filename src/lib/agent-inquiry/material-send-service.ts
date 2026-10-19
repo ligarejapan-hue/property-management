@@ -188,8 +188,9 @@ export async function guardMaterialFiles(
  * 送信済みでまだ反響へ反映していない記録を反映する(反響を done・宛先を最後に送った先に)(@codex 2巡目 P2)。
  * ⚠送信のあとの反響の更新が落ちても、押し直し・記録を開いたときにここを通って反映し直す。
  *   印(inquiryAppliedAt)を先に付けた人だけが反響を書く=二重に書かない。反映済みなら何もしない。
- *   ⚠反響の version は見ないが、**送った後に反響が書き換えられていれば上書きしない**(手で開き直した・
- *   宛先を直した、を古い送信で戻さない)=印だけ付けて終える。
+ *   ⚠反響の version は見ないが、**送った時点から手で変えられた欄は上書きしない**(状態を戻した・宛先を直した、
+ *   を古い送信で戻さない)。メモ・担当など別の欄の変更では止めない(@codex 8巡目)。比べるのは
+ *   最初の未反映の送信の時点(statusAtSend / contactEmailAtSend)。
  */
 export async function applySentMaterialToInquiry(
   inquiryId: string,
@@ -197,11 +198,11 @@ export async function applySentMaterialToInquiry(
   const pending = await prisma.agentInquiryMaterialSend.findMany({
     where: { inquiryId, result: "sent", inquiryAppliedAt: null },
     orderBy: { createdAt: "asc" },
-    select: { id: true, toAddress: true, finishedAt: true },
+    select: { id: true, toAddress: true, statusAtSend: true, contactEmailAtSend: true },
   });
   if (pending.length === 0) return null;
-  const last = pending[pending.length - 1];
-  const to = last.toAddress;
+  const first = pending[0];
+  const to = pending[pending.length - 1].toAddress;
   return prisma.$transaction(async (tx) => {
     const claimed = await tx.agentInquiryMaterialSend.updateMany({
       where: { id: { in: pending.map((p) => p.id) }, inquiryAppliedAt: null },
@@ -210,20 +211,20 @@ export async function applySentMaterialToInquiry(
     if (claimed.count === 0) return null;
     const cur = await tx.agentInquiry.findUnique({
       where: { id: inquiryId },
-      select: { status: true, contactEmail: true, version: true, updatedAt: true },
+      select: { status: true, contactEmail: true, version: true },
     });
     if (!cur) return null;
-    const touchedAfterSend = cur.updatedAt != null && last.finishedAt != null && cur.updatedAt > last.finishedAt;
-    const changeEmail = (cur.contactEmail ?? "") !== to;
-    if (touchedAfterSend || (cur.status === "done" && !changeEmail)) {
-      return { version: cur.version, statusChanged: false, wrote: false };
-    }
+    const statusUntouched = cur.status === first.statusAtSend;
+    const emailUntouched = (cur.contactEmail ?? "") === (first.contactEmailAtSend ?? "");
+    const setDone = statusUntouched && cur.status !== "done";
+    const setEmail = emailUntouched && (cur.contactEmail ?? "") !== to;
+    if (!setDone && !setEmail) return { version: cur.version, statusChanged: false, wrote: false };
     const u = await tx.agentInquiry.update({
       where: { id: inquiryId },
-      data: { status: "done", ...(changeEmail ? { contactEmail: to } : {}), version: { increment: 1 } },
+      data: { ...(setDone ? { status: "done" as const } : {}), ...(setEmail ? { contactEmail: to } : {}), version: { increment: 1 } },
       select: { version: true },
     });
-    return { version: u.version, statusChanged: cur.status !== "done", wrote: true };
+    return { version: u.version, statusChanged: setDone, wrote: true };
   });
 }
 

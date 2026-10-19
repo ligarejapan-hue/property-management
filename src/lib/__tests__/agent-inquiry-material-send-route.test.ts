@@ -102,7 +102,9 @@ beforeEach(() => {
   // 反響へまだ反映していない「送信済み」=この中で作った予約の行(送信済みにした後に読む)。
   pending = () => {
     const c = pm.agentInquiryMaterialSend.create.mock.calls.at(-1);
-    return c ? [{ id: "s1", toAddress: c[0].data.toAddress, finishedAt: new Date() }] : [];
+    return c
+      ? [{ id: "s1", toAddress: c[0].data.toAddress, statusAtSend: c[0].data.statusAtSend, contactEmailAtSend: c[0].data.contactEmailAtSend }]
+      : [];
   };
   history = [];
   pm.agentInquiryMaterialSend.findMany.mockReset().mockImplementation(async (a: { where: Record<string, unknown> }) =>
@@ -111,7 +113,7 @@ beforeEach(() => {
   pm.agentInquiryMaterialSend.updateMany.mockReset().mockResolvedValue({ count: 1 });
   pm.agentInquiryMaterialSend.count.mockReset().mockImplementation(async () => pending().length);
 });
-let pending: () => { id: string; toAddress: string; finishedAt: Date }[] = () => [];
+let pending: () => { id: string; toAddress: string; statusAtSend: string; contactEmailAtSend: string | null }[] = () => [];
 let history: unknown[] = [];
 
 /** 物件の添付一覧(targetId で読む)と、同じファイルを指す記録の逆引き(fileUrl で読む)を分けて返す。 */
@@ -241,7 +243,14 @@ describe("ファイルの守り(/uploads と同じ判定・最終レビュー C1
 });
 
 describe("送れた後に反響の更新が落ちたら、あとで反映し直す(@codex 2巡目 P2)", () => {
-  const stuck = () => [{ id: "s0", toAddress: "new@agent.jp", finishedAt: new Date("2026-10-19T03:00:00Z") }];
+  // 送った時点の反響=open・宛先 sato@agent.jp(inquiry() と同じ)。
+  const stuck = () => [{ id: "s0", toAddress: "new@agent.jp", statusAtSend: "open", contactEmailAtSend: "sato@agent.jp" }];
+  it("予約の行に、送った時点の反響の状態と宛先を残す", async () => {
+    await POST(json("POST", body({ to: "new@agent.jp" })), ctx);
+    expect(pm.agentInquiryMaterialSend.create).toHaveBeenCalledWith(expect.objectContaining({
+      data: expect.objectContaining({ statusAtSend: "open", contactEmailAtSend: "sato@agent.jp" }),
+    }));
+  });
   it("送信のあとの反映は、反映済みの印を付けてから反響を done にする(同じ取引の中)", async () => {
     await POST(json("POST", body()), ctx);
     expect(pm.agentInquiryMaterialSend.updateMany).toHaveBeenCalledWith(expect.objectContaining({
@@ -289,12 +298,36 @@ describe("送れた後に反響の更新が落ちたら、あとで反映し直�
     expect(pm.agentInquiry.update).not.toHaveBeenCalled();
     expect(h.writeAuditLog).not.toHaveBeenCalled();
   });
-  it("送った後に反響が書き換えられていれば(手で開き直した・宛先を直した)上書きしない=印だけ付ける", async () => {
+  it("送った後に状態も宛先も手で変えられていれば上書きしない=印だけ付ける", async () => {
     pending = stuck;
-    pm.agentInquiry.findUnique.mockResolvedValue(inquiry({ updatedAt: new Date("2026-10-19T03:05:00Z") }));
+    pm.agentInquiry.findUnique.mockResolvedValue(inquiry({ status: "in_progress", contactEmail: "other@agent.jp" }));
     expect(await (await APPLY(json("POST", {}), ctx)).json()).toMatchObject({ applied: false });
     expect(pm.agentInquiryMaterialSend.updateMany).toHaveBeenCalled();
     expect(pm.agentInquiry.update).not.toHaveBeenCalled();
+  });
+  it("メモ・担当など別の欄を直しただけなら反映する(@codex 8巡目 P2)", async () => {
+    pending = stuck;
+    pm.agentInquiry.findUnique.mockResolvedValue(inquiry({ updatedAt: new Date("2026-10-19T03:05:00Z"), note: "電話した" }));
+    expect(await (await APPLY(json("POST", {}), ctx)).json()).toMatchObject({ applied: true });
+    expect(pm.agentInquiry.update).toHaveBeenCalledWith(expect.objectContaining({
+      data: expect.objectContaining({ status: "done", contactEmail: "new@agent.jp" }),
+    }));
+  });
+  it("状態だけ手で変えられていれば、宛先だけ直す(状態は残す)", async () => {
+    pending = stuck;
+    pm.agentInquiry.findUnique.mockResolvedValue(inquiry({ status: "in_progress" }));
+    await APPLY(json("POST", {}), ctx);
+    const d = pm.agentInquiry.update.mock.calls[0][0].data;
+    expect(d.status).toBeUndefined();
+    expect(d.contactEmail).toBe("new@agent.jp");
+  });
+  it("宛先だけ手で直されていれば、状態だけ done にする(宛先は残す)", async () => {
+    pending = stuck;
+    pm.agentInquiry.findUnique.mockResolvedValue(inquiry({ contactEmail: "fixed@agent.jp" }));
+    await APPLY(json("POST", {}), ctx);
+    const d = pm.agentInquiry.update.mock.calls[0][0].data;
+    expect(d.status).toBe("done");
+    expect(d.contactEmail).toBeUndefined();
   });
   it("未反映が無ければ何もしない", async () => {
     pending = () => [];

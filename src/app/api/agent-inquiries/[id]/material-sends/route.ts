@@ -166,6 +166,9 @@ export async function POST(request: Request, ctx: Ctx) {
           totalSize: readBytes,
           result: "sending",
           clientToken: input.clientToken,
+          // 送った時点の反響(反映し直しで、あとから手で変えた欄を上書きしない・@codex 8巡目)。
+          statusAtSend: q.status,
+          contactEmailAtSend: q.contactEmail,
         },
         select: { id: true },
       });

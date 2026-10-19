@@ -21,6 +21,10 @@ describe("資料送付 migration(spec §5)", () => {
   it("反響へ反映した時刻(null=まだ・あとで反映し直す印)", () => {
     expect(sql).toMatch(/"inquiry_applied_at" TIMESTAMP\(3\),/);
   });
+  it("送った時点の反響の状態と宛先(反映し直しで手の変更を上書きしない・@codex 8巡目)", () => {
+    expect(sql).toMatch(/"status_at_send" "AgentInquiryStatus" NOT NULL,/);
+    expect(sql).toMatch(/"contact_email_at_send" TEXT,/);
+  });
   it("メール設定にひな形の2列(null 可)", () => {
     expect(sql).toMatch(/ALTER TABLE "mail_config" ADD COLUMN "material_send_subject" TEXT,\s*ADD COLUMN "material_send_body" TEXT;/);
   });
