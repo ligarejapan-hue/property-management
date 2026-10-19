@@ -21,7 +21,7 @@
 import { forwardRef, type ButtonHTMLAttributes } from "react";
 import { Check, Loader2 } from "lucide-react";
 
-export type ButtonVariant = "primary" | "secondary" | "danger" | "ghost";
+export type ButtonVariant = "primary" | "secondary" | "danger" | "ghost" | "success";
 export type ButtonSize = "md" | "sm" | "lg";
 
 const VARIANT_CLASSES: Record<ButtonVariant, string> = {
@@ -31,6 +31,9 @@ const VARIANT_CLASSES: Record<ButtonVariant, string> = {
     "border border-gray-300 bg-white text-gray-700 hover:bg-gray-50 disabled:hover:bg-white dark:border-gray-700 dark:bg-gray-900 dark:text-gray-200 dark:hover:bg-gray-800 dark:disabled:hover:bg-gray-900",
   danger:
     "bg-red-600 text-white hover:bg-red-700 disabled:hover:bg-red-600",
+  // 第3回: 完了・成功の意味の操作は緑のまま残す(設計書 §1「状態の色は残す」)
+  success:
+    "bg-green-600 text-white hover:bg-green-700 disabled:hover:bg-green-600",
   ghost:
     "bg-transparent text-gray-700 hover:bg-gray-100 disabled:hover:bg-transparent dark:text-gray-200 dark:hover:bg-gray-800",
 };
