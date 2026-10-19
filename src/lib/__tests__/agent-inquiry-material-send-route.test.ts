@@ -375,10 +375,18 @@ describe("送れた後に反響の更新が落ちたら、あとで反映し直�
     await APPLY(json("POST", {}), ctx);
     const appliedQuery = pm.agentInquiryMaterialSend.findMany.mock.calls
       .map((c) => c[0].where)
-      .find((w) => w.inquiryAppliedAt && w.inquiryAppliedAt.not === null);
+      .find((w) => w.inquiryAppliedAt && w.inquiryAppliedAt !== null && "wroteContact" in w);
     expect(appliedQuery).toMatchObject({ wroteContact: true });
     // 今回宛先を書いた送信(最新)に印を付ける
     expect(pm.agentInquiryMaterialSend.update).toHaveBeenCalledWith({ where: { id: "s0" }, data: { wroteContact: true } });
+  });
+  it("「資料送付が書いた宛先」は、最新の未反映の送信より後に書いた直近の1件だけ(@codex 17巡目 P2)", async () => {
+    const at = new Date("2026-10-19T03:00:00Z");
+    pending = () => [{ id: "s2", toAddress: "d@agent.jp", statusAtSend: "done", contactEmailAtSend: "c@agent.jp", createdAt: at } as never];
+    await APPLY(json("POST", {}), ctx);
+    const call = pm.agentInquiryMaterialSend.findMany.mock.calls.find((c) => c[0].where.wroteContact === true)![0];
+    expect(call.where.inquiryAppliedAt).toEqual({ gt: at });
+    expect(call).toMatchObject({ orderBy: { inquiryAppliedAt: "desc" }, take: 1 });
   });
   it("宛先を書かなかった反映では印を付けない", async () => {
     pending = stuck;

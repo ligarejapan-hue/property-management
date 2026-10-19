@@ -205,7 +205,7 @@ export async function applySentMaterialToInquiry(
     const pending = await tx.agentInquiryMaterialSend.findMany({
       where: pendingWhere,
       orderBy: { createdAt: "asc" },
-      select: { id: true, toAddress: true, statusAtSend: true, contactEmailAtSend: true },
+      select: { id: true, toAddress: true, statusAtSend: true, contactEmailAtSend: true, createdAt: true },
     });
     if (pending.length === 0) return null;
     const claimed = await tx.agentInquiryMaterialSend.updateMany({
@@ -218,18 +218,22 @@ export async function applySentMaterialToInquiry(
       select: { status: true, contactEmail: true, version: true },
     });
     if (!cur) return null;
+    const latest = pending[pending.length - 1];
     // 先に反映した資料送付が書いた宛先は「手の変更」ではない(同時に送った2件目を取りこぼさない)。
+    // ⚠数えるのは、宛先を実際に書いた送信のうち、最新の未反映の送信を作った**後に**書いた直近の1件だけ
+    //   (それより前に書いた宛先は、最新の送信の時点の宛先に含まれている=今その値なら手の変更・@codex 16・17巡目 P2)。
     const appliedTo = new Set(
       (
         await tx.agentInquiryMaterialSend.findMany({
-          // 宛先を実際に書いた送信だけ(反映済みの印だけ付いた送信は数えない・@codex 16巡目 P2)。
           where: {
             inquiryId,
             result: "sent",
-            inquiryAppliedAt: { not: null },
+            inquiryAppliedAt: { gt: latest.createdAt },
             wroteContact: true,
             id: { notIn: pending.map((p) => p.id) },
           },
+          orderBy: { inquiryAppliedAt: "desc" },
+          take: 1,
           select: { toAddress: true },
         })
       ).map((r) => r.toAddress),
@@ -238,7 +242,6 @@ export async function applySentMaterialToInquiry(
     // 比べるのは**最新の**未反映の送信の時点だけ(@codex 10・14巡目 P2): 古い送信の時点の値に手で戻した、は
     // 最新の送信より後の手の変更=上書きしない。宛先は、反映済みの資料送付が書いた値のままでもよい(同時に送った2件目)。
     // ⚠まだ反映していない送信の送り先は、反響に書かれたことがない=今その値なら手の変更(@codex 15巡目 P2)。
-    const latest = pending[pending.length - 1];
     const autoWritten = appliedTo;
     const emailTarget =
       curEmail === (latest.contactEmailAtSend ?? "") || autoWritten.has(curEmail) ? latest.toAddress : null;
