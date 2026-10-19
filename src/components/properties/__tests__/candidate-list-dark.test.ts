@@ -13,8 +13,9 @@ describe("candidate-list.tsx dark: 配色 (物件詳細タブ群)", () => {
   });
 
   // --- hover 背景 ---
-  it("hover:bg-gray-100 に dark:hover:bg-gray-700 がある", () => {
-    expect(src).toContain("dark:hover:bg-gray-700");
+  // UIの統一 第3回: 開閉ボタンは共通 Button の ghost(hover の暗い面の配色は部品側が持つ)
+  it("開閉ボタンは共通 Button の ghost(hover の配色は部品側)", () => {
+    expect(src).toContain('variant="ghost"');
   });
 
   // --- 文字 ---
@@ -30,8 +31,11 @@ describe("candidate-list.tsx dark: 配色 (物件詳細タブ群)", () => {
   it("text-gray-400 に dark:text-gray-500 がある", () => {
     expect(src).toContain("dark:text-gray-500");
   });
-  it("text-gray-600 (保留ボタン) に dark:text-gray-300 がある", () => {
-    expect(src).toContain("text-gray-600 dark:text-gray-300 bg-gray-200 dark:bg-gray-700");
+  // UIの統一 第3回: 判定の3ボタンは共通 Button(同一=success・別=danger・保留=secondary)。配色は部品側
+  it("判定の3ボタンは共通 Button の success / danger / secondary", () => {
+    expect(src).toContain('variant="success"');
+    expect(src).toContain('variant="danger"');
+    expect(src).toContain('variant="secondary"');
   });
 
   // --- 枠線 ---
@@ -67,11 +71,6 @@ describe("candidate-list.tsx dark: 配色 (物件詳細タブ群)", () => {
   });
   it("text-red-600 判定色に dark: が付いている", () => {
     expect(src).toContain("dark:text-red-400");
-  });
-
-  // --- 保留ボタン背景 ---
-  it("bg-gray-200 (保留ボタン) に dark:bg-gray-700 がある", () => {
-    expect(src).toContain("dark:bg-gray-700");
   });
 
   // --- ライト不変担保（add-only の証跡）---
@@ -114,10 +113,5 @@ describe("candidate-list.tsx dark: 配色 (物件詳細タブ群)", () => {
   it("ライトモード text-red-600 は残っている", () => {
     expect(src).toContain("text-red-600");
   });
-  it("ライトモード hover:bg-gray-100 は残っている", () => {
-    expect(src).toContain("hover:bg-gray-100");
-  });
-  it("ライトモード bg-gray-200 は残っている", () => {
-    expect(src).toContain("bg-gray-200");
-  });
+  // hover:bg-gray-100(開閉)・bg-gray-200(保留)はボタンの色だった=共通 Button へ移った(上の2本で担保)
 });
