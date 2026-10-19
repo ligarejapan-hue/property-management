@@ -3,6 +3,7 @@
 import { useState, useEffect, useCallback, useRef } from "react";
 import { ConfirmDialog } from "@/components/ui/confirm-dialog";
 import FileDropZone from "@/components/ui/file-drop-zone";
+import { Button } from "@/components/ui/button";
 import {
   Camera,
   Upload,
@@ -254,19 +255,23 @@ export default function PhotoTab({
         <div className="flex items-start justify-between gap-2 rounded-md border border-red-200 bg-red-50 p-3 text-sm text-red-700 dark:border-red-500/20 dark:bg-red-500/10 dark:text-red-300">
           <span>{error}</span>
           <div className="flex shrink-0 items-center gap-2">
-            <button
+            <Button
+              variant="ghost"
+              size="sm"
               onClick={fetchPhotosData}
-              className="underline hover:no-underline"
+              className="text-red-700 underline hover:no-underline dark:text-red-300"
             >
               再読み込み
-            </button>
-            <button
+            </Button>
+            <Button
+              variant="ghost"
+              size="sm"
               onClick={() => setError(null)}
-              className="text-red-500 hover:text-red-700"
+              className="text-red-500 hover:text-red-700 dark:text-red-400"
               title="閉じる"
             >
               <X className="h-4 w-4" />
-            </button>
+            </Button>
           </div>
         </div>
       )}
@@ -290,7 +295,9 @@ export default function PhotoTab({
         </div>
         <div className="flex items-center gap-2">
           {photos.length > 1 && (
+            // data-ui=raw: 押すと薄い青に変わる切替(並び替えモード)。合う variant が無い
             <button
+              data-ui="raw"
               onClick={() => setReorderMode((prev) => !prev)}
               className={`inline-flex items-center gap-1.5 rounded-md border px-3 py-1.5 text-sm font-medium transition-colors ${
                 reorderMode
@@ -310,18 +317,16 @@ export default function PhotoTab({
             className="hidden"
             onChange={handleFileChange}
           />
-          <button
+          <Button
+            variant="primary"
             onClick={handleUploadClick}
             disabled={uploading}
-            className="inline-flex items-center gap-1.5 rounded-md bg-indigo-600 px-3 py-1.5 text-sm font-medium text-white transition-colors hover:bg-indigo-700 disabled:opacity-50"
+            loading={uploading}
+            loadingLabel="アップロード"
           >
-            {uploading ? (
-              <Loader2 className="h-4 w-4 animate-spin" />
-            ) : (
-              <Upload className="h-4 w-4" />
-            )}
+            <Upload className="h-4 w-4" />
             アップロード
-          </button>
+          </Button>
         </div>
       </div>
 
@@ -357,7 +362,9 @@ export default function PhotoTab({
                 className="group relative overflow-hidden rounded-lg border border-gray-200 bg-white shadow-sm transition-shadow hover:shadow-md dark:border-gray-800 dark:bg-gray-900"
               >
                 {/* Thumbnail */}
+                {/* data-ui=raw: 写真の縮小表示(画像そのものが押せる面) */}
                 <button
+                  data-ui="raw"
                   type="button"
                   onClick={() => {
                     if (!reorderMode) setLightboxPhoto(photo);
@@ -402,13 +409,14 @@ export default function PhotoTab({
                         className="min-w-0 flex-1 rounded border border-blue-400 px-1 py-0.5 text-xs focus:outline-none dark:bg-gray-900 dark:text-gray-100"
                         placeholder="キャプション"
                       />
-                      <button
+                      <Button
+                        variant="primary"
+                        size="sm"
                         onClick={() => saveCaptionEdit(photo.id)}
-                        className="rounded bg-indigo-600 p-0.5 text-white"
                         title="保存"
                       >
                         <Check className="h-3 w-3" />
-                      </button>
+                      </Button>
                     </div>
                   ) : (
                     <div className="flex items-start justify-between gap-1">
@@ -421,13 +429,15 @@ export default function PhotoTab({
                         )}
                       </p>
                       {!reorderMode && (
-                        <button
+                        <Button
+                          variant="ghost"
+                          size="sm"
                           onClick={() => startCaptionEdit(photo)}
                           className="shrink-0 text-gray-300 hover:text-gray-600 dark:text-gray-600 dark:hover:text-gray-300"
                           title="キャプション編集"
                         >
                           <Pencil className="h-3 w-3" />
-                        </button>
+                        </Button>
                       )}
                     </div>
                   )}
@@ -439,7 +449,9 @@ export default function PhotoTab({
                 {/* Reorder controls */}
                 {reorderMode && (
                   <div className="absolute left-1 top-1 flex flex-col gap-1">
+                    {/* data-ui=raw: 写真の上に重ねる半透明の小さなつまみ(▲)。合う variant が無い */}
                     <button
+                      data-ui="raw"
                       onClick={() => handleMove(index, "up")}
                       disabled={index === 0}
                       className="rounded bg-white/80 p-1 text-xs font-bold text-gray-600 shadow backdrop-blur hover:bg-white disabled:opacity-30 dark:bg-gray-800/80 dark:text-gray-300 dark:hover:bg-gray-700"
@@ -447,7 +459,9 @@ export default function PhotoTab({
                     >
                       ▲
                     </button>
+                    {/* data-ui=raw: 写真の上に重ねる半透明の小さなつまみ(▼)。合う variant が無い */}
                     <button
+                      data-ui="raw"
                       onClick={() => handleMove(index, "down")}
                       disabled={index === photos.length - 1}
                       className="rounded bg-white/80 p-1 text-xs font-bold text-gray-600 shadow backdrop-blur hover:bg-white disabled:opacity-30 dark:bg-gray-800/80 dark:text-gray-300 dark:hover:bg-gray-700"
@@ -461,7 +475,9 @@ export default function PhotoTab({
                 {/* Action buttons (not in reorder mode) */}
                 {!reorderMode && (
                   <div className="absolute right-1 top-1 flex flex-col gap-1 opacity-0 transition-opacity group-hover:opacity-100">
+                    {/* data-ui=raw: 写真の上に重ねる丸いつまみ。代表のとき黄の塗りに変わる切替で、合う variant が無い */}
                     <button
+                      data-ui="raw"
                       onClick={() => handleTogglePrimary(photo)}
                       className={`rounded-full p-1 shadow backdrop-blur transition-colors ${
                         photo.isPrimary
@@ -472,7 +488,9 @@ export default function PhotoTab({
                     >
                       <Star className="h-3.5 w-3.5" />
                     </button>
+                    {/* data-ui=raw: 写真の上に重ねる半透明の丸いつまみ(隣の★とそろえる)。合う variant が無い */}
                     <button
+                      data-ui="raw"
                       onClick={() => setDeleteTargetId(photo.id)}
                       className="rounded-full bg-white/80 p-1 text-gray-400 shadow backdrop-blur hover:bg-white hover:text-red-600 dark:bg-gray-800/80 dark:text-gray-500 dark:hover:bg-gray-700"
                       title="削除"
@@ -506,7 +524,9 @@ export default function PhotoTab({
             className="relative mx-4 w-full max-w-2xl"
             onClick={(e) => e.stopPropagation()}
           >
+            {/* data-ui=raw: 拡大表示の角に重ねる丸い閉じるつまみ(rounded-full・影付き)。合う variant が無い */}
             <button
+              data-ui="raw"
               onClick={() => setLightboxPhoto(null)}
               className="absolute -right-2 -top-2 z-10 rounded-full bg-white p-1.5 text-gray-600 shadow-lg hover:text-gray-900 dark:bg-gray-800 dark:text-gray-300 dark:hover:text-gray-100"
             >
