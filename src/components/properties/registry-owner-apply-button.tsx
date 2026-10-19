@@ -104,7 +104,9 @@ export default function RegistryOwnerApplyButton({
 
   return (
     <>
+      {/* data-ui=raw: 薄い緑(emerald)の札型の目印ボタン。合う variant が無い */}
       <button
+        data-ui="raw"
         type="button"
         onClick={openPreview}
         disabled={phase === "loading"}
