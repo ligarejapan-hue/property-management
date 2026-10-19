@@ -108,6 +108,44 @@ async function keyBelongsOnlyTo(key: string, propertyId: string): Promise<boolea
   );
 }
 
+/**
+ * 送信済みでまだ反響へ反映していない記録を反映する(反響を done・宛先を最後に送った先に)(@codex 2巡目 P2)。
+ * ⚠送信のあとの反響の更新が落ちても、押し直し・記録を開いたときにここを通って反映し直す。
+ *   印(inquiryAppliedAt)を先に付けた人だけが反響を書く=二重に書かない。反映済みなら何もしない
+ *   (あとで手で開き直した反響を done に戻さない)。反響の version は見ない(送信と同じ)。
+ */
+export async function applySentMaterialToInquiry(
+  inquiryId: string,
+): Promise<{ version: number; statusChanged: boolean } | null> {
+  const pending = await prisma.agentInquiryMaterialSend.findMany({
+    where: { inquiryId, result: "sent", inquiryAppliedAt: null },
+    orderBy: { createdAt: "asc" },
+    select: { id: true, toAddress: true },
+  });
+  if (pending.length === 0) return null;
+  const to = pending[pending.length - 1].toAddress;
+  return prisma.$transaction(async (tx) => {
+    const claimed = await tx.agentInquiryMaterialSend.updateMany({
+      where: { id: { in: pending.map((p) => p.id) }, inquiryAppliedAt: null },
+      data: { inquiryAppliedAt: new Date() },
+    });
+    if (claimed.count === 0) return null;
+    const cur = await tx.agentInquiry.findUnique({
+      where: { id: inquiryId },
+      select: { status: true, contactEmail: true, version: true },
+    });
+    if (!cur) return null;
+    const changeEmail = (cur.contactEmail ?? "") !== to;
+    if (cur.status === "done" && !changeEmail) return { version: cur.version, statusChanged: false };
+    const u = await tx.agentInquiry.update({
+      where: { id: inquiryId },
+      data: { status: "done", ...(changeEmail ? { contactEmail: to } : {}), version: { increment: 1 } },
+      select: { version: true },
+    });
+    return { version: u.version, statusChanged: cur.status !== "done" };
+  });
+}
+
 /** ひな形(未登録なら既定)に差し込んだ件名・本文。 */
 export async function initialMaterialText(
   q: Awaited<ReturnType<typeof loadMaterialInquiry>>,

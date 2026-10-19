@@ -33,6 +33,7 @@ vi.mock("@/lib/prisma", () => {
       findMany: vi.fn(async () => []),
       create: vi.fn(async () => ({ id: "s1" })),
       update: vi.fn(async () => ({})),
+      updateMany: vi.fn(async () => ({ count: 1 })),
     },
     $transaction: vi.fn(async (fn: (tx: unknown) => unknown) => fn(db)),
   };
@@ -54,7 +55,7 @@ const pm = prismaMock as never as {
   buildingPhoto: { findMany: Fn };
   fieldSurveyPinPhoto: { findMany: Fn };
   mailConfig: { findUnique: Fn };
-  agentInquiryMaterialSend: { findFirst: Fn; findMany: Fn; create: Fn; update: Fn };
+  agentInquiryMaterialSend: { findFirst: Fn; findMany: Fn; create: Fn; update: Fn; updateMany: Fn };
 };
 const IID = "33333333-3333-4333-8333-333333333333";
 const PID = "11111111-1111-4111-8111-111111111111";
@@ -94,7 +95,19 @@ beforeEach(() => {
   h.authorize.mockReset().mockResolvedValue("ok");
   h.meta.mockReset().mockResolvedValue(null);
   pm.agentInquiry.update.mockReset().mockResolvedValue({ version: 3 });
+  // 反響へまだ反映していない「送信済み」=この中で作った予約の行(送信済みにした後に読む)。
+  pending = () => {
+    const c = pm.agentInquiryMaterialSend.create.mock.calls.at(-1);
+    return c ? [{ id: "s1", toAddress: c[0].data.toAddress }] : [];
+  };
+  history = [];
+  pm.agentInquiryMaterialSend.findMany.mockReset().mockImplementation(async (a: { where: Record<string, unknown> }) =>
+    "inquiryAppliedAt" in a.where ? pending() : history,
+  );
+  pm.agentInquiryMaterialSend.updateMany.mockReset().mockResolvedValue({ count: 1 });
 });
+let pending: () => { id: string; toAddress: string }[] = () => [];
+let history: unknown[] = [];
 
 /** 物件の添付一覧(targetId で読む)と、同じファイルを指す記録の逆引き(fileUrl で読む)を分けて返す。 */
 const sameFileRecords = (others: Record<string, unknown>[]) =>
@@ -184,6 +197,50 @@ describe("ファイルの守り(/uploads と同じ判定・最終レビュー C1
     const d = await (await CANDIDATES(new Request("http://x"), ctx)).json();
     expect(d.files.map((f: { id: string }) => f.id)).toEqual([A1, "c"]);
     expect(d.files[1].warning).toContain("所有者の名前・住所");
+  });
+});
+
+describe("送れた後に反響の更新が落ちたら、あとで反映し直す(@codex 2巡目 P2)", () => {
+  const stuck = () => [{ id: "s0", toAddress: "new@agent.jp" }];
+  it("送信のあとの反映は、反映済みの印を付けてから反響を done にする(同じ取引の中)", async () => {
+    await POST(json("POST", body()), ctx);
+    expect(pm.agentInquiryMaterialSend.updateMany).toHaveBeenCalledWith(expect.objectContaining({
+      where: expect.objectContaining({ inquiryAppliedAt: null }),
+      data: expect.objectContaining({ inquiryAppliedAt: expect.any(Date) }),
+    }));
+    expect(pm.agentInquiry.update).toHaveBeenCalledWith(expect.objectContaining({ data: expect.objectContaining({ status: "done" }) }));
+  });
+  it("同じ鍵の押し直しで、前回の送信済みが反響に反映されていなければ反映し直す", async () => {
+    pm.agentInquiryMaterialSend.findFirst.mockResolvedValue({ id: "s0", result: "sent", inquiryId: IID, createdAt: new Date() });
+    pending = stuck;
+    const res = await POST(json("POST", body()), ctx);
+    expect(await res.json()).toMatchObject({ result: "sent", replayed: true });
+    expect(h.sendMailWithAttachments).not.toHaveBeenCalled();
+    expect(pm.agentInquiry.update).toHaveBeenCalledWith(expect.objectContaining({
+      where: { id: IID }, data: expect.objectContaining({ status: "done", contactEmail: "new@agent.jp" }),
+    }));
+  });
+  it("送った記録を開いたとき(書ける人)にも反映し直す=小窓が閉じた後でも残らない", async () => {
+    pending = stuck;
+    await LIST(new Request("http://x"), ctx);
+    expect(pm.agentInquiry.update).toHaveBeenCalledWith(expect.objectContaining({ data: expect.objectContaining({ status: "done" }) }));
+  });
+  it("読むだけの人が記録を開いても、反響は書き換えない", async () => {
+    grant(["agent_inquiry", "read"], ["property", "read"]);
+    pending = stuck;
+    await LIST(new Request("http://x"), ctx);
+    expect(pm.agentInquiry.update).not.toHaveBeenCalled();
+  });
+  it("別の人が先に反映した(印が付けられなかった)なら、反響は書き換えない", async () => {
+    pending = stuck;
+    pm.agentInquiryMaterialSend.updateMany.mockResolvedValue({ count: 0 });
+    await LIST(new Request("http://x"), ctx);
+    expect(pm.agentInquiry.update).not.toHaveBeenCalled();
+  });
+  it("反映が終わっていれば(未反映が無い)何もしない=あとで手で開き直した反響を done に戻さない", async () => {
+    pending = () => [];
+    await LIST(new Request("http://x"), ctx);
+    expect(pm.agentInquiry.update).not.toHaveBeenCalled();
   });
 });
 
@@ -327,9 +384,9 @@ describe("候補と記録の API", () => {
     expect(d.mailConfigured).toBe(true);
   });
   it("記録: 新しい順・状態の表示つき", async () => {
-    pm.agentInquiryMaterialSend.findMany.mockResolvedValue([
+    history = [
       { id: "s1", createdAt: new Date(), result: "sent", sentBy: { name: "山田" }, toAddress: "a@x.jp", subject: "s", body: "b", attachments: [], totalSize: 1, errorCode: null },
-    ]);
+    ];
     const d = await (await LIST(new Request("http://x"), ctx)).json();
     expect(d.items[0].state).toBe("送信済み");
     expect(pm.agentInquiryMaterialSend.findMany).toHaveBeenCalledWith(expect.objectContaining({ orderBy: { createdAt: "desc" } }));

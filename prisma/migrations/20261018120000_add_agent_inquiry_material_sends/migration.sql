@@ -15,6 +15,7 @@ CREATE TABLE "agent_inquiry_material_sends" (
     "client_token" UUID NOT NULL,
     "created_at" TIMESTAMP(3) NOT NULL DEFAULT CURRENT_TIMESTAMP,
     "finished_at" TIMESTAMP(3),
+    "inquiry_applied_at" TIMESTAMP(3),
     CONSTRAINT "agent_inquiry_material_sends_pkey" PRIMARY KEY ("id")
 );
 CREATE UNIQUE INDEX "agent_inquiry_material_sends_sent_by_id_client_token_key" ON "agent_inquiry_material_sends"("sent_by_id", "client_token");

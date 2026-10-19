@@ -14,7 +14,9 @@ import {
   isSingleAddress,
   sendStateLabel,
 } from "@/lib/agent-inquiry/material-send";
+import { hasPermission } from "@/lib/permissions";
 import {
+  applySentMaterialToInquiry,
   guardMaterialFile,
   loadMaterialInquiry,
   loadPropertyAttachments,
@@ -34,12 +36,23 @@ const sendSchema = z.object({
   clientToken: z.string().uuid(),
 });
 
+/** 反響への反映し直し。落ちても画面の操作は止めない(次の機会にまた試す)。 */
+async function reconcile(inquiryId: string) {
+  try {
+    await applySentMaterialToInquiry(inquiryId);
+  } catch (e) {
+    console.error("[material-send] inquiry reconcile failed", { name: e instanceof Error ? e.name : "Unknown" });
+  }
+}
+
 /** 送った記録(新しい順)。 */
 export async function GET(_req: Request, ctx: Ctx) {
   try {
     const { session, perms } = await requireAgentInquiry("read");
     const id = await idOf(ctx);
     await loadMaterialInquiry(id, session, perms);
+    // 送れたのに反響へ反映できていない記録があれば、書ける人が開いたときに反映し直す(@codex 2巡目 P2)。
+    if (hasPermission(perms, "agent_inquiry", "write")) await reconcile(id);
     const rows = await prisma.agentInquiryMaterialSend.findMany({
       where: { inquiryId: id },
       orderBy: { createdAt: "desc" },
@@ -73,6 +86,7 @@ export async function POST(request: Request, ctx: Ctx) {
       if (prev.inquiryId !== id) {
         throw new ApiError(409, "画面を開き直してから送ってください", "CLIENT_TOKEN_MISMATCH");
       }
+      if (prev.result === "sent") await reconcile(id);
       return NextResponse.json(
         { id: prev.id, result: prev.result, state: sendStateLabel(prev, new Date()), replayed: true },
         { headers: NO_STORE },
@@ -165,22 +179,20 @@ export async function POST(request: Request, ctx: Ctx) {
 
     // 送信は済んだ=まず記録を送信済みにする(後の更新が落ちても「送信中」のまま残さない・最終レビュー I2)。
     await prisma.agentInquiryMaterialSend.update({ where: { id: claim.id }, data: { result: "sent", finishedAt: new Date() } });
-    // 反響の更新は version を見ない(他の人の更新とぶつかっても done にする)。落ちても送信は成功として返す。
-    const changeEmail = (q.contactEmail ?? "") !== input.to;
+    // 反響の更新は version を見ない(他の人の更新とぶつかっても done にする)。落ちても送信は成功として返し、
+    // 押し直し・記録を開いたときに反映し直す(@codex 2巡目 P2)。
     let version = q.version;
     let statusUpdated = true;
-    if (q.status !== "done" || changeEmail) {
-      try {
-        const u = await prisma.agentInquiry.update({
-          where: { id },
-          data: { status: "done", ...(changeEmail ? { contactEmail: input.to } : {}), version: { increment: 1 } },
-          select: { version: true },
-        });
-        version = u.version;
-      } catch (e) {
-        statusUpdated = false;
-        console.error("[material-send] inquiry update failed after send", { name: e instanceof Error ? e.name : "Unknown" });
+    let statusChanged = false;
+    try {
+      const a = await applySentMaterialToInquiry(id);
+      if (a) {
+        version = a.version;
+        statusChanged = a.statusChanged;
       }
+    } catch (e) {
+      statusUpdated = false;
+      console.error("[material-send] inquiry update failed after send", { name: e instanceof Error ? e.name : "Unknown" });
     }
 
     await writeAuditLog({
@@ -188,7 +200,7 @@ export async function POST(request: Request, ctx: Ctx) {
       action: "agent_inquiry_material_send",
       targetTable: "agent_inquiries",
       targetId: id,
-      detail: { files: guarded.length, totalSize: readBytes, statusChanged: statusUpdated && q.status !== "done" },
+      detail: { files: guarded.length, totalSize: readBytes, statusChanged },
     });
     for (const { row: r } of guarded.filter((x) => x.effectiveType === "registry")) {
       // 謄本の取り扱いの記録。宛先は書かない(送った記録の表で見る)。

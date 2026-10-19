@@ -18,6 +18,9 @@ describe("資料送付 migration(spec §5)", () => {
     expect(sql).toMatch(/CREATE UNIQUE INDEX "agent_inquiry_material_sends_sent_by_id_client_token_key" ON "agent_inquiry_material_sends"\("sent_by_id", "client_token"\);/);
     expect(sql).toMatch(/CREATE INDEX "agent_inquiry_material_sends_inquiry_id_created_at_idx" ON "agent_inquiry_material_sends"\("inquiry_id", "created_at"\);/);
   });
+  it("反響へ反映した時刻(null=まだ・あとで反映し直す印)", () => {
+    expect(sql).toMatch(/"inquiry_applied_at" TIMESTAMP\(3\),/);
+  });
   it("メール設定にひな形の2列(null 可)", () => {
     expect(sql).toMatch(/ALTER TABLE "mail_config" ADD COLUMN "material_send_subject" TEXT,\s*ADD COLUMN "material_send_body" TEXT;/);
   });

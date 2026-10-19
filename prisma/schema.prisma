@@ -1985,6 +1985,8 @@ model AgentInquiryMaterialSend {
   clientToken String             @map("client_token") @db.Uuid
   createdAt   DateTime           @default(now()) @map("created_at")
   finishedAt  DateTime?          @map("finished_at")
+  /// 反響(done・宛先)へ反映した時刻。null の送信済み=反映が落ちた=押し直し・記録を開いたときに反映し直す。
+  inquiryAppliedAt DateTime?     @map("inquiry_applied_at")
 
   inquiry AgentInquiry @relation(fields: [inquiryId], references: [id], onDelete: Restrict)
   sentBy  User         @relation("AgentInquiryMaterialSendSentBy", fields: [sentById], references: [id], onDelete: Restrict)
