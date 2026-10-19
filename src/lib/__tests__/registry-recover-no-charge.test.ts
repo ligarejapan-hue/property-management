@@ -119,12 +119,12 @@ const API_CLIENT = readFileSync(
 ).split(CR).join("");
 
 describe("回収の入口(画面)", () => {
-  /** 指定の onClick を持つ <button> の開始タグを切り出す。 */
+  /** 指定の onClick を持つボタンの開始タグを切り出す(UIの統一 第3回から共通 <Button>)。 */
   function buttonTag(onClick: string): string {
     const at = SEARCH_BUTTON_UI.indexOf(onClick);
     expect(at).toBeGreaterThan(-1);
-    const start = SEARCH_BUTTON_UI.lastIndexOf("<button", at);
-    const end = SEARCH_BUTTON_UI.indexOf(">", SEARCH_BUTTON_UI.indexOf("</button>", at) - 200);
+    const start = SEARCH_BUTTON_UI.lastIndexOf("<Button", at);
+    const end = SEARCH_BUTTON_UI.indexOf(">", SEARCH_BUTTON_UI.indexOf("</Button>", at) - 200);
     expect(start).toBeGreaterThan(-1);
     return SEARCH_BUTTON_UI.slice(start, Math.max(end, at));
   }
@@ -282,7 +282,7 @@ describe("回収の入口(画面)", () => {
     const at = SEARCH_BUTTON_UI.indexOf("const recoverEntryLink = recoverConfigured ? (");
     const seg = SEARCH_BUTTON_UI.slice(
       at,
-      SEARCH_BUTTON_UI.indexOf("</button>", at),
+      SEARCH_BUTTON_UI.indexOf("</Button>", at),
     );
     expect(seg).not.toContain("purchaseEnabled");
   });
