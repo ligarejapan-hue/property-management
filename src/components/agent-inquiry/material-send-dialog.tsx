@@ -12,6 +12,7 @@ import {
   type MaterialSendView,
 } from "@/lib/api-client";
 import { afterSendError, afterSendResponse, materialFormState } from "@/lib/agent-inquiry/material-send-form";
+import { safeUuidV4 } from "@/lib/random-id";
 
 const inputCls = "w-full rounded-md border border-gray-300 px-2 py-1.5 text-sm dark:border-gray-700 dark:bg-gray-900";
 const mb = (n: number) => `${(n / 1024 / 1024).toFixed(1)}MB`;
@@ -167,7 +168,7 @@ export function MaterialSendDialog({
   const [picked, setPicked] = useState<string[]>([]);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
-  const [token, setToken] = useState(() => crypto.randomUUID());
+  const [token, setToken] = useState(() => safeUuidV4());
 
   useEffect(() => {
     let alive = true;
@@ -194,7 +195,7 @@ export function MaterialSendDialog({
       const r = await sendMaterial(inquiryId, { to: to.trim(), subject, body, attachmentIds: picked, clientToken: token });
       // 押し直しで前の結果が返った(同じ鍵)ときも含めて、送れたときだけ閉じる。
       const d = afterSendResponse(r);
-      if (d.renewToken) setToken(crypto.randomUUID());
+      if (d.renewToken) setToken(safeUuidV4());
       if (d.kind === "sent") {
         onSent();
         return;
@@ -210,7 +211,7 @@ export function MaterialSendDialog({
       // はっきり送れなかったときだけ鍵を替える。通信切れなどは送れていることがある=同じ鍵で押し直すと
       // サーバーが前の結果を返す(2通目は出ない・最終レビュー I1)。
       const d = afterSendError(apiErrorCode(e));
-      if (d.renewToken) setToken(crypto.randomUUID());
+      if (d.renewToken) setToken(safeUuidV4());
       setError(
         d.unknown
           ? "送れたか分かりません(通信が切れました)。もう一度「送信」を押すと、送れていたかを確かめます(2通目は出ません)"

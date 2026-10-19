@@ -13,6 +13,7 @@ import { DESK_PROPERTY_SELECT, toDeskProperty } from "./desk-property";
 import { hasPermission } from "@/lib/permissions";
 import {
   authorizeUploadAccess,
+  escapePrismaLikePattern,
   resolveProtectedServeMeta,
   resolveStoredFileUrlToKey,
 } from "@/lib/uploads-authorization";
@@ -63,6 +64,7 @@ export async function guardMaterialFile(
 ): Promise<MaterialFileGuard> {
   const key = resolveStoredFileUrlToKey(row.fileUrl);
   if (!key) return { ok: false };
+  if (!(await keyBelongsOnlyTo(key, row.targetId))) return { ok: false };
   if ((await authorizeUploadAccess({ key, session, permissions: perms, downloadIntent: true })) !== "ok") return { ok: false };
   const meta = await resolveProtectedServeMeta(key);
   if (meta !== null && meta.kind !== "registry") return { ok: false };
@@ -74,6 +76,36 @@ export async function guardMaterialFile(
     return { ok: false };
   }
   return { ok: true, key, effectiveType };
+}
+
+/**
+ * そのファイルを指す記録が、すべてこの物件のものか(@codex P2)。
+ * ⚠authorizeUploadAccess は「その人が開けるか」しか見ない=両方の物件を開ける人は、別の物件のファイルを
+ *   この物件の添付として登録し直して、この物件の反響から送れてしまう。送る資料は物件に縛る:
+ *   別の物件・所有者に付いた添付(削除済みも)・別の物件の写真・棟の写真・巡回の写真・受け取り箱の置き場所は送らない。
+ */
+async function keyBelongsOnlyTo(key: string, propertyId: string): Promise<boolean> {
+  if (key.startsWith("report-inbox/")) return false;
+  const like = { contains: escapePrismaLikePattern(key) };
+  const same = (u: string | null | undefined) => resolveStoredFileUrlToKey(u) === key;
+  const [atts, photos, buildingPhotos, pinPhotos] = await Promise.all([
+    prisma.attachment.findMany({ where: { fileUrl: like }, select: { targetType: true, targetId: true, propertyId: true, fileUrl: true } }),
+    prisma.propertyPhoto.findMany({ where: { fileUrl: like }, select: { propertyId: true, fileUrl: true } }),
+    prisma.buildingPhoto.findMany({ where: { fileUrl: like }, select: { fileUrl: true } }),
+    prisma.fieldSurveyPinPhoto.findMany({
+      where: { OR: [{ fileUrl: like }, { thumbnailUrl: like }] },
+      select: { fileUrl: true, thumbnailUrl: true },
+    }),
+  ]);
+  const attachmentsOk = atts
+    .filter((a) => same(a.fileUrl))
+    .every((a) => a.targetType === "property" && a.targetId === propertyId && (a.propertyId == null || a.propertyId === propertyId));
+  return (
+    attachmentsOk &&
+    photos.filter((p) => same(p.fileUrl)).every((p) => p.propertyId === propertyId) &&
+    !buildingPhotos.some((b) => same(b.fileUrl)) &&
+    !pinPhotos.some((p) => same(p.fileUrl) || same(p.thumbnailUrl))
+  );
 }
 
 /** ひな形(未登録なら既定)に差し込んだ件名・本文。 */

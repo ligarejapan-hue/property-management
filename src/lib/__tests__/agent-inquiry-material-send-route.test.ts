@@ -23,6 +23,9 @@ vi.mock("@/lib/prisma", () => {
   const db: Record<string, unknown> = {
     agentInquiry: { findUnique: vi.fn(), update: vi.fn(async () => ({ version: 3 })) },
     attachment: { findMany: vi.fn(async () => []) },
+    propertyPhoto: { findMany: vi.fn(async () => []) },
+    buildingPhoto: { findMany: vi.fn(async () => []) },
+    fieldSurveyPinPhoto: { findMany: vi.fn(async () => []) },
     mailConfig: { findUnique: vi.fn(async () => null) },
     user: { findUnique: vi.fn(async () => ({ name: "山田" })) },
     agentInquiryMaterialSend: {
@@ -47,6 +50,9 @@ type Fn = ReturnType<typeof vi.fn>;
 const pm = prismaMock as never as {
   agentInquiry: { findUnique: Fn; update: Fn };
   attachment: { findMany: Fn };
+  propertyPhoto: { findMany: Fn };
+  buildingPhoto: { findMany: Fn };
+  fieldSurveyPinPhoto: { findMany: Fn };
   mailConfig: { findUnique: Fn };
   agentInquiryMaterialSend: { findFirst: Fn; findMany: Fn; create: Fn; update: Fn };
 };
@@ -75,7 +81,10 @@ beforeEach(() => {
   (getApiSession as Fn).mockResolvedValue({ id: "u1", role: "office_staff" });
   grant(["agent_inquiry", "read"], ["agent_inquiry", "write"], ["property", "read"]);
   pm.agentInquiry.findUnique.mockResolvedValue(inquiry());
-  pm.attachment.findMany.mockResolvedValue([att()]);
+  pm.attachment.findMany.mockReset().mockResolvedValue([att()]);
+  pm.propertyPhoto.findMany.mockReset().mockResolvedValue([]);
+  pm.buildingPhoto.findMany.mockReset().mockResolvedValue([]);
+  pm.fieldSurveyPinPhoto.findMany.mockReset().mockResolvedValue([]);
   // clearAllMocks は戻り値の設定を消さない=前のテストの「押し直し」設定を毎回戻す。
   pm.agentInquiryMaterialSend.findFirst.mockReset().mockResolvedValue(null);
   pm.agentInquiryMaterialSend.create.mockReset().mockResolvedValue({ id: "s1" });
@@ -85,6 +94,54 @@ beforeEach(() => {
   h.authorize.mockReset().mockResolvedValue("ok");
   h.meta.mockReset().mockResolvedValue(null);
   pm.agentInquiry.update.mockReset().mockResolvedValue({ version: 3 });
+});
+
+/** 物件の添付一覧(targetId で読む)と、同じファイルを指す記録の逆引き(fileUrl で読む)を分けて返す。 */
+const sameFileRecords = (others: Record<string, unknown>[]) =>
+  pm.attachment.findMany.mockImplementation(async (a: { where: Record<string, unknown> }) =>
+    "fileUrl" in a.where ? [att(), ...others] : [att()],
+  );
+
+describe("同じファイルを別の物件の記録が指していれば送らない(@codex P2)", () => {
+  const OTHER = "77777777-7777-4777-8777-777777777777";
+  it("別の物件の添付が同じファイルを指す=送らない・候補にも出さない", async () => {
+    sameFileRecords([att({ id: "x", targetId: OTHER })]);
+    expect((await (await POST(json("POST", body()), ctx)).json()).error.code).toBe("NOT_SELECTABLE");
+    expect(h.sendMailWithAttachments).not.toHaveBeenCalled();
+    expect((await (await CANDIDATES(new Request("http://x"), ctx)).json()).files).toEqual([]);
+  });
+  it("削除済みでも、別の物件の記録なら送らない", async () => {
+    sameFileRecords([att({ id: "x", targetId: OTHER, isDeleted: true })]);
+    expect((await (await POST(json("POST", body()), ctx)).json()).error.code).toBe("NOT_SELECTABLE");
+  });
+  it("propertyId が別の物件を指す記録も送らない", async () => {
+    sameFileRecords([att({ id: "x", propertyId: OTHER })]);
+    expect((await (await POST(json("POST", body()), ctx)).json()).error.code).toBe("NOT_SELECTABLE");
+  });
+  it("所有者に付いた記録が同じファイルを指せば送らない", async () => {
+    sameFileRecords([att({ id: "x", targetType: "owner", targetId: OTHER })]);
+    expect((await (await POST(json("POST", body()), ctx)).json()).error.code).toBe("NOT_SELECTABLE");
+  });
+  it("別の物件の写真・棟の写真・巡回の写真が同じファイルなら送らない", async () => {
+    pm.propertyPhoto.findMany.mockResolvedValue([{ propertyId: OTHER, fileUrl: "/uploads/attachments/a.pdf" }]);
+    expect((await (await POST(json("POST", body()), ctx)).json()).error.code).toBe("NOT_SELECTABLE");
+    pm.propertyPhoto.findMany.mockResolvedValue([]);
+    pm.buildingPhoto.findMany.mockResolvedValue([{ buildingId: "b", fileUrl: "/uploads/attachments/a.pdf" }]);
+    expect((await (await POST(json("POST", body()), ctx)).json()).error.code).toBe("NOT_SELECTABLE");
+    pm.buildingPhoto.findMany.mockResolvedValue([]);
+    pm.fieldSurveyPinPhoto.findMany.mockResolvedValue([{ fileUrl: "/uploads/attachments/a.pdf", thumbnailUrl: null }]);
+    expect((await (await POST(json("POST", body()), ctx)).json()).error.code).toBe("NOT_SELECTABLE");
+    expect(h.sendMailWithAttachments).not.toHaveBeenCalled();
+  });
+  it("同じ物件の写真・同じ物件の別の記録なら送れる/名前が似ているだけの別ファイルは数えない", async () => {
+    pm.propertyPhoto.findMany.mockResolvedValue([{ propertyId: PID, fileUrl: "/uploads/attachments/a.pdf" }]);
+    sameFileRecords([att({ id: "y" }), att({ id: "z", targetId: OTHER, fileUrl: "/uploads/attachments/a.pdf.bak" })]);
+    expect((await POST(json("POST", body()), ctx)).status).toBe(201);
+  });
+  it("受け取り箱の置き場所のファイルは送らない", async () => {
+    pm.attachment.findMany.mockResolvedValue([att({ fileUrl: "/uploads/report-inbox/a.pdf" })]);
+    expect((await (await POST(json("POST", body()), ctx)).json()).error.code).toBe("NOT_SELECTABLE");
+  });
 });
 
 describe("ファイルの守り(/uploads と同じ判定・最終レビュー C1)", () => {

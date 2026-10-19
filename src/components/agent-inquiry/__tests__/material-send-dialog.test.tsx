@@ -116,3 +116,12 @@ describe("送った記録(表示)", () => {
     expect(html).toContain("図面.pdf");
   });
 });
+
+describe("押し直しの鍵(@codex P1)", () => {
+  it("平文 HTTP でも動く safeUuidV4 を使い、crypto.randomUUID を直に呼ばない", async () => {
+    const { readFileSync } = await import("node:fs");
+    const src = readFileSync("src/components/agent-inquiry/material-send-dialog.tsx", "utf8");
+    expect(src).not.toContain("crypto.randomUUID");
+    expect(src.match(/safeUuidV4\(\)/g)?.length ?? 0).toBeGreaterThanOrEqual(3);
+  });
+});
