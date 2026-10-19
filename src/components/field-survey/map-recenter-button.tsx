@@ -123,7 +123,7 @@ export default function MapRecenterButton({
   }, [geolocation, livePosition, locating]);
 
   return (
-    <div className="pointer-events-none absolute bottom-14 left-3 z-10 flex flex-col items-start gap-1">
+    <div data-motion="off" className="pointer-events-none absolute bottom-14 left-3 z-10 flex flex-col items-start gap-1">
       {/* エラーはボタンの上に出す (下だと画面外へ落ちることがある)。
           タッチ端末では title が出ないため可視テキストで示す。 */}
       {error && (

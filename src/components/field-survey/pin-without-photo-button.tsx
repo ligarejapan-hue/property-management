@@ -32,7 +32,7 @@ export default function PinWithoutPhotoButton({
   onStart,
 }: PinWithoutPhotoButtonProps) {
   return (
-    <div className="pointer-events-none">
+    <div data-motion="off" className="pointer-events-none">
       <button
         type="button"
         onClick={onStart}

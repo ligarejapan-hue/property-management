@@ -419,7 +419,7 @@ export default function FieldSurveyHistoryMap({
         </div>
       )}
 
-      <div className="h-[calc(100%-2.25rem)] w-full">
+      <div data-motion="off" className="h-[calc(100%-2.25rem)] w-full">
         <APIProvider apiKey={apiKey}>
           <Map
             defaultCenter={center}

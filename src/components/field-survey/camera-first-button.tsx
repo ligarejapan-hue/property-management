@@ -46,6 +46,7 @@ export default function CameraFirstButton({
 
   return (
     <div
+      data-motion="off"
       className={
         inline
           ? "pointer-events-none"

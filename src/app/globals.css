@@ -28,6 +28,19 @@
   --color-gray-950: oklch(14.7% 0.004 49.25);
 }
 
+/*
+ * UIの統一と押した手応え(2026-10-19・設計書 docs/superpowers/specs/2026-10-19-ui-unify-motion-design.md):
+ * 動きの値はここ1か所。tsx からは ease-out-soft / animate-pm-* で使う。
+ */
+@theme {
+  --ease-out-soft: cubic-bezier(.2, .8, .2, 1);
+  --animate-pm-dialog-in: pm-dialog-in 220ms var(--ease-out-soft);
+  --animate-pm-backdrop-in: pm-backdrop-in 220ms var(--ease-out-soft);
+  --animate-pm-toast-in: pm-toast-in 220ms var(--ease-out-soft);
+  --animate-pm-pop: pm-pop 300ms var(--ease-out-soft);
+  --animate-pm-shimmer: pm-shimmer 1.4s linear infinite;
+}
+
 @theme inline {
   --color-background: var(--background);
   --color-foreground: var(--foreground);
@@ -114,5 +127,70 @@ body {
   to {
     opacity: 1;
     transform: none;
+  }
+}
+
+@keyframes pm-dialog-in {
+  from {
+    opacity: 0;
+    transform: translateY(8px) scale(0.97);
+  }
+  to {
+    opacity: 1;
+    transform: none;
+  }
+}
+@keyframes pm-backdrop-in {
+  from {
+    opacity: 0;
+  }
+  to {
+    opacity: 1;
+  }
+}
+@keyframes pm-pop {
+  from {
+    opacity: 0;
+    transform: scale(0.4);
+  }
+  to {
+    opacity: 1;
+    transform: none;
+  }
+}
+@keyframes pm-shimmer {
+  from {
+    background-position: 200% 0;
+  }
+  to {
+    background-position: -200% 0;
+  }
+}
+
+/*
+ * 全ボタンの手応え(UIの統一 第1回)。:where で詳細度0・@layer base なので、各画面が書いた
+ * transition-* / scale-* / outline-* / shadow-* が必ず勝つ。
+ * transform ではなく scale プロパティ = Tailwind v4 の translate-* / rotate-* と打ち消し合わない。
+ * 対象外: 3つ切替など aria-pressed のボタン群・data-motion="off" の要素とその中(地図の丸ボタン・謄本の実況)。
+ * 端末で「視差効果を減らす」を選んだ人には沈み・影の動きを出さない(色の変化だけ)。
+ */
+@layer base {
+  :where(button):not(:where([aria-pressed], [data-motion="off"], [data-motion="off"] *)) {
+    transition-property: color, background-color, border-color;
+    transition-duration: 180ms;
+    transition-timing-function: var(--ease-out-soft);
+  }
+  :where(button):focus-visible {
+    outline: 2px solid var(--color-indigo-500);
+    outline-offset: 2px;
+  }
+  @media (prefers-reduced-motion: no-preference) {
+    :where(button):not(:where([aria-pressed], [data-motion="off"], [data-motion="off"] *)) {
+      transition-property: color, background-color, border-color, box-shadow, scale;
+      transition-duration: 180ms, 180ms, 180ms, 180ms, 120ms;
+    }
+    :where(button):not(:where(:disabled, [aria-disabled="true"], [aria-pressed], [data-motion="off"], [data-motion="off"] *)):active {
+      scale: 0.97;
+    }
   }
 }
