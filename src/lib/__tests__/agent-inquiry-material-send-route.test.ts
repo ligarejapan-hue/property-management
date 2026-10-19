@@ -37,6 +37,7 @@ vi.mock("@/lib/prisma", () => {
       count: vi.fn(async () => 0),
     },
     $transaction: vi.fn(async (fn: (tx: unknown) => unknown) => fn(db)),
+    $queryRaw: vi.fn(async () => []),
   };
   return { default: db };
 });
@@ -107,14 +108,16 @@ beforeEach(() => {
       : [];
   };
   history = [];
+  applied = [];
   pm.agentInquiryMaterialSend.findMany.mockReset().mockImplementation(async (a: { where: Record<string, unknown> }) =>
-    "inquiryAppliedAt" in a.where ? pending() : history,
+    !("inquiryAppliedAt" in a.where) ? history : a.where.inquiryAppliedAt === null ? pending() : applied,
   );
   pm.agentInquiryMaterialSend.updateMany.mockReset().mockResolvedValue({ count: 1 });
   pm.agentInquiryMaterialSend.count.mockReset().mockImplementation(async () => pending().length);
 });
 let pending: () => { id: string; toAddress: string; statusAtSend: string; contactEmailAtSend: string | null }[] = () => [];
 let history: unknown[] = [];
+let applied: { toAddress: string }[] = [];
 
 /** 物件の添付一覧(targetId で読む)と、同じファイルを指す記録の逆引き(fileUrl で読む)を分けて返す。 */
 const sameFileRecords = (others: Record<string, unknown>[]) =>
@@ -312,6 +315,22 @@ describe("送れた後に反響の更新が落ちたら、あとで反映し直�
     expect(pm.agentInquiry.update).toHaveBeenCalledWith(expect.objectContaining({
       data: expect.objectContaining({ status: "done", contactEmail: "new@agent.jp" }),
     }));
+  });
+  it("反映し直しは反響の行を鍵で押さえてから読む(同じ反響の反映し直しを1つずつ・@codex 9巡目 P2)", async () => {
+    pending = stuck;
+    await APPLY(json("POST", {}), ctx);
+    const raw = (prismaMock as never as { $queryRaw: Fn }).$queryRaw;
+    expect(raw).toHaveBeenCalled();
+    expect((raw.mock.calls[0][0] as string[]).join("?")).toMatch(/FROM agent_inquiries WHERE id = \?::uuid FOR UPDATE/);
+  });
+  it("同時に送った2件目: 1件目の反映で変わった宛先・状態は「手の変更」と見なさず、2件目の宛先にする(@codex 9巡目 P2)", async () => {
+    pending = () => [{ id: "s2", toAddress: "second@agent.jp", statusAtSend: "open", contactEmailAtSend: "sato@agent.jp" }];
+    applied = [{ toAddress: "first@agent.jp" }];
+    pm.agentInquiry.findUnique.mockResolvedValue(inquiry({ status: "done", contactEmail: "first@agent.jp" }));
+    expect(await (await APPLY(json("POST", {}), ctx)).json()).toMatchObject({ applied: true });
+    const d = pm.agentInquiry.update.mock.calls[0][0].data;
+    expect(d.contactEmail).toBe("second@agent.jp");
+    expect(d.status).toBeUndefined();
   });
   it("状態だけ手で変えられていれば、宛先だけ直す(状態は残す)", async () => {
     pending = stuck;
