@@ -266,7 +266,7 @@ export async function POST(request: Request, ctx: Ctx) {
     let statusUpdated = true;
     let applied: Awaited<ReturnType<typeof applySentMaterialToInquiry>> = null;
     try {
-      const a = await applySentMaterialToInquiry(id);
+      const a = await applySentMaterialToInquiry(id, session.id);
       if (a) {
         version = a.version;
         applied = a;
@@ -275,16 +275,7 @@ export async function POST(request: Request, ctx: Ctx) {
       statusUpdated = false;
       console.error("[material-send] inquiry update failed after send", { name: e instanceof Error ? e.name : "Unknown" });
     }
-    // 反響を書いたら(状態・宛先のどちらでも)監査に残す(反映し直しと同じ・@codex 11巡目 P2)。
-    if (applied?.wrote) {
-      await writeAuditLog({
-        userId: session.id,
-        action: "agent_inquiry_material_apply",
-        targetTable: "agent_inquiries",
-        targetId: id,
-        detail: { statusChanged: applied.statusChanged, contactChanged: applied.contactChanged },
-      });
-    }
+    // 反響を書いた監査(状態・宛先のどちらでも)は applySentMaterialToInquiry が同じ取引で書く(@codex 11・12巡目 P2)。
     return NextResponse.json({ id: claim.id, result: "sent", version, statusUpdated }, { status: 201, headers: NO_STORE });
   } catch (error) {
     return handleApiError(error);

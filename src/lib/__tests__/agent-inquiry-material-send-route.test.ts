@@ -38,7 +38,7 @@ vi.mock("@/lib/prisma", () => {
     },
     $transaction: vi.fn(async (fn: (tx: unknown) => unknown) => fn(db)),
     $queryRaw: vi.fn(async () => []),
-    auditLog: { createMany: vi.fn(async () => ({ count: 1 })) },
+    auditLog: { createMany: vi.fn(async () => ({ count: 1 })), create: vi.fn(async () => ({})) },
   };
   return { default: db };
 });
@@ -120,8 +120,12 @@ let pending: () => { id: string; toAddress: string; statusAtSend: string; contac
 let history: unknown[] = [];
 let applied: { toAddress: string }[] = [];
 /** 監査の行(取引の中で書いたもの+別に書いたもの)。 */
+const auditLogMock = () => (prismaMock as never as { auditLog: { createMany: Fn; create: Fn } }).auditLog;
+/** 反響への反映の監査(反映と同じ取引で書く=auditLog.create・@codex 12巡目 P2)。 */
+const applyAudits = () => auditLogMock().create.mock.calls.map((c) => c[0].data).filter((d) => d.action === "agent_inquiry_material_apply");
 const audits = (): { action: string; detail?: unknown; targetId?: string }[] => [
-  ...(prismaMock as never as { auditLog: { createMany: Fn } }).auditLog.createMany.mock.calls.flatMap((c) => c[0].data),
+  ...auditLogMock().createMany.mock.calls.flatMap((c) => c[0].data),
+  ...auditLogMock().create.mock.calls.map((c) => c[0].data),
   ...h.writeAuditLog.mock.calls.map((c) => c[0]),
 ];
 
@@ -277,7 +281,7 @@ describe("送れた後に反響の更新が落ちたら、あとで反映し直�
     expect(pm.agentInquiry.update).toHaveBeenCalledWith(expect.objectContaining({
       where: { id: IID }, data: expect.objectContaining({ status: "done", contactEmail: "new@agent.jp" }),
     }));
-    expect(h.writeAuditLog).toHaveBeenCalledWith(expect.objectContaining({ action: "agent_inquiry_material_apply", targetId: IID }));
+    expect(applyAudits()).toEqual([expect.objectContaining({ targetId: IID, userId: "u1" })]);
   });
   it("記録を読む(GET)は書き換えない=未反映があるとだけ返す", async () => {
     pending = stuck;
@@ -291,7 +295,8 @@ describe("送れた後に反響の更新が落ちたら、あとで反映し直�
     const res = await APPLY(json("POST", {}), ctx);
     expect(await res.json()).toMatchObject({ applied: true });
     expect(pm.agentInquiry.update).toHaveBeenCalledWith(expect.objectContaining({ data: expect.objectContaining({ status: "done" }) }));
-    expect(h.writeAuditLog).toHaveBeenCalledWith(expect.objectContaining({ action: "agent_inquiry_material_apply", userId: "u1" }));
+    expect(applyAudits()).toEqual([expect.objectContaining({ userId: "u1" })]);
+    expect(h.writeAuditLog).not.toHaveBeenCalled(); // 取引の外で書かない
   });
   it("読むだけの人は反映し直しの口を使えない", async () => {
     grant(["agent_inquiry", "read"], ["property", "read"]);
@@ -305,7 +310,7 @@ describe("送れた後に反響の更新が落ちたら、あとで反映し直�
     pm.agentInquiryMaterialSend.updateMany.mockResolvedValue({ count: 0 });
     expect(await (await APPLY(json("POST", {}), ctx)).json()).toMatchObject({ applied: false });
     expect(pm.agentInquiry.update).not.toHaveBeenCalled();
-    expect(h.writeAuditLog).not.toHaveBeenCalled();
+    expect(applyAudits()).toEqual([]);
   });
   it("送った後に状態も宛先も手で変えられていれば上書きしない=印だけ付ける", async () => {
     pending = stuck;
@@ -392,9 +397,7 @@ describe("送信のあとの扱い(最終レビュー I2・I3・M1・M2)", () =>
     pm.agentInquiry.findUnique.mockResolvedValue(inquiry({ status: "done" }));
     await POST(json("POST", body({ to: "new@agent.jp" })), ctx);
     expect(pm.agentInquiry.update.mock.calls[0][0].data).toMatchObject({ contactEmail: "new@agent.jp" });
-    expect(h.writeAuditLog).toHaveBeenCalledWith(expect.objectContaining({
-      action: "agent_inquiry_material_apply", detail: { statusChanged: false, contactChanged: true },
-    }));
+    expect(applyAudits()).toEqual([expect.objectContaining({ detail: { statusChanged: false, contactChanged: true } })]);
   });
   it("送れたか分からないときも、印と監査を同じ取引で書く", async () => {
     h.sendMailWithAttachments.mockResolvedValue({ ok: false, code: "ETIMEDOUT" });

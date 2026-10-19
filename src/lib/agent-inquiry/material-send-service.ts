@@ -2,7 +2,6 @@ import prisma from "@/lib/prisma";
 import { ApiError, type ApiSession, type PermissionEntry } from "@/lib/api-helpers";
 import { assertPropertyReadable } from "@/lib/agent-inquiry/property-access";
 import { MAIL_CONFIG_ID } from "@/lib/mail/mail-config";
-import { writeAuditLog } from "@/lib/audit";
 import {
   DEFAULT_MATERIAL_BODY,
   DEFAULT_MATERIAL_SUBJECT,
@@ -194,6 +193,7 @@ export async function guardMaterialFiles(
  */
 export async function applySentMaterialToInquiry(
   inquiryId: string,
+  actorUserId: string,
 ): Promise<{ version: number; statusChanged: boolean; contactChanged: boolean; wrote: boolean } | null> {
   const pendingWhere = { inquiryId, result: "sent" as const, inquiryAppliedAt: null };
   if ((await prisma.agentInquiryMaterialSend.findMany({ where: pendingWhere, select: { id: true }, take: 1 })).length === 0) {
@@ -244,6 +244,16 @@ export async function applySentMaterialToInquiry(
       data: { ...(setDone ? { status: "done" as const } : {}), ...(setEmail ? { contactEmail: to } : {}), version: { increment: 1 } },
       select: { version: true },
     });
+    // 反響を書いた監査は、反映済みの印・反響の書き込みと同じ取引で(監査だけ抜けない・@codex 12巡目 P2)。
+    await tx.auditLog.create({
+      data: {
+        userId: actorUserId,
+        action: "agent_inquiry_material_apply",
+        targetTable: "agent_inquiries",
+        targetId: inquiryId,
+        detail: { statusChanged: setDone, contactChanged: setEmail },
+      },
+    });
     return { version: u.version, statusChanged: setDone, contactChanged: setEmail, wrote: true };
   });
 }
@@ -254,21 +264,13 @@ export async function hasUnappliedMaterialSend(inquiryId: string): Promise<boole
 }
 
 /**
- * 反映し直し(押し直し・反映し直しの口)。書き換えたときは監査に残す。落ちても画面の操作は止めない。
+ * 反映し直し(押し直し・反映し直しの口)。書き換えたときの監査は反映と同じ取引で書く。落ちても画面の操作は止めない。
  * ⚠呼ぶ側で agent_inquiry:write と物件を開けることを確かめてから呼ぶ。
  */
 export async function reconcileMaterialSends(inquiryId: string, userId: string): Promise<boolean> {
   try {
-    const a = await applySentMaterialToInquiry(inquiryId);
-    if (!a?.wrote) return false;
-    await writeAuditLog({
-      userId,
-      action: "agent_inquiry_material_apply",
-      targetTable: "agent_inquiries",
-      targetId: inquiryId,
-      detail: { statusChanged: a.statusChanged, contactChanged: a.contactChanged },
-    });
-    return true;
+    const a = await applySentMaterialToInquiry(inquiryId, userId);
+    return a?.wrote === true;
   } catch (e) {
     console.error("[material-send] inquiry reconcile failed", { name: e instanceof Error ? e.name : "Unknown" });
     return false;
