@@ -6,12 +6,13 @@ import { z } from "zod";
  */
 
 /**
- * 資料送付の上限(spec §2.2・§6)。相手のメールの受け取りが多くは 20〜25MB で止まる。
- * ⚠添付はメールの中で base64 になり約 4/3 倍(+改行)に増える=ファイルの合計 15MB で、メールは約 20.5MB
- *   (@codex 5巡目 P2・20MB のままだと約 27MB になり受け取りで止まる)。
+ * 資料送付の上限(spec §2.2・§6)。ファイルの合計 20MB(2026-10-19 発注者決定)。
+ * ⚠添付はメールの中で base64 になり約 4/3 倍(+改行)に増える=20MB 近くだとメールは約 27MB になり、
+ *   相手の受け取り(多くは 20〜25MB)で止まることがある。@codex 5巡目の指摘で一度 15MB にしたが、
+ *   発注者が承知の上で 20MB に戻した(下げるかは再提案しない)。
  */
-export const MATERIAL_SEND_LIMITS = { maxTotalBytes: 15 * 1024 * 1024, maxFiles: 20, subject: 200, body: 10_000 } as const;
-/** 画面・案内に出す上限(例「15MB」)。数字はここだけで決める。 */
+export const MATERIAL_SEND_LIMITS = { maxTotalBytes: 20 * 1024 * 1024, maxFiles: 20, subject: 200, body: 10_000 } as const;
+/** 画面・案内に出す上限(例「20MB」)。数字はここだけで決める。 */
 export const MATERIAL_SEND_LIMIT_LABEL = `${MATERIAL_SEND_LIMITS.maxTotalBytes / 1024 / 1024}MB`;
 
 /** 宛先は正しい形式のアドレス1件だけ(カンマ・セミコロン・改行・表示名つきは受けない=ヘッダ注入の多層防御)。 */
