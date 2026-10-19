@@ -2,6 +2,7 @@
 
 import { useState, useEffect } from "react";
 import { PageHeader } from "@/components/ui/page-header";
+import { Button } from "@/components/ui/button";
 import Link from "next/link";
 import {
   Loader2,
@@ -143,14 +144,14 @@ export default function QualityCheckPage() {
       <PageHeader
         title="物件データエラー確認"
         actions={
-          <button
+          <Button
+            variant="primary"
             onClick={runCheck}
             disabled={loading}
-            className="flex items-center gap-1.5 rounded-md bg-indigo-600 px-4 py-2 text-sm font-medium text-white hover:bg-indigo-700 disabled:opacity-50"
           >
             <RefreshCw className={`h-4 w-4 ${loading ? "animate-spin" : ""}`} />
             再チェック
-          </button>
+          </Button>
         }
       />
 
@@ -254,14 +255,13 @@ export default function QualityCheckPage() {
               ? `全 ${summary.total} 件中 ${issues.length} 件を表示（上限のため一部のみ）`
               : ""}
           </span>
-          <button
-            type="button"
+          <Button
+            variant="secondary"
             onClick={loadMore}
             disabled={loadingMore}
-            className="rounded-md border border-gray-300 px-4 py-2 text-sm font-medium text-gray-700 hover:bg-gray-50 disabled:opacity-50 dark:border-gray-700 dark:text-gray-200 dark:hover:bg-gray-800"
           >
             {loadingMore ? "読み込み中…" : "さらに読み込む"}
-          </button>
+          </Button>
         </div>
       )}
     </div>
