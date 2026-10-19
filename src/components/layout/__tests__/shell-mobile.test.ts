@@ -180,9 +180,14 @@ describe("iOS の入力欄フォーカス時の自動拡大を起こさない(20
     }
   });
   it("ルールは @layer の外(層の外の宣言は utilities 層の text-sm より優先される)", () => {
-    // @layer の内側に書くと text-sm が勝って 16px にならない。globals.css に @layer 宣言(行頭)が無いことで固定
-    // (コメント中の「@layer」は対象外にするため、行頭の宣言だけを見る)
-    expect(globalsCss).not.toMatch(/^\s*@layer\b/m);
+    // @layer の内側に書くと text-sm が勝って 16px にならない。
+    // 2026-10-19 UIの統一で、全ボタンの手応えをわざと @layer base に置いた(各画面の指定を勝たせるため)。
+    // そこで「@layer が1つも無い」ではなく「この media query がどの括弧の中にも無い(最上位)」で固定する。
+    // コメント中の括弧は数えない。
+    const before = globalsCss.slice(0, start).replace(/\/\*[\s\S]*?\*\//g, "");
+    const depth = (before.match(/\{/g) ?? []).length - (before.match(/\}/g) ?? []).length;
+    expect(start).toBeGreaterThan(-1);
+    expect(depth).toBe(0);
   });
   it("PC には影響しない(media query の外に同じ font-size 指定が無い)", () => {
     const outside = globalsCss.slice(0, start) + globalsCss.slice(start + block.length);

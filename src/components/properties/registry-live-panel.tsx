@@ -296,6 +296,7 @@ export default function RegistryLivePanel({
   return (
     <div
       data-testid="registry-live-panel"
+      data-motion="off"
       className="mt-3 rounded-md border border-gray-200 bg-gray-50 p-3 dark:border-gray-800 dark:bg-gray-900"
     >
       {/* 「実行中」の表示判定は store の done に加えて POST 決着 (searchSettled)

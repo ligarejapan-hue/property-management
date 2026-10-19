@@ -1301,7 +1301,7 @@ export default function FieldSurveyMap({
 
   return (
     <APIProvider apiKey={apiKey}>
-      <div className="relative h-full w-full">
+      <div data-motion="off" className="relative h-full w-full">
         <Map
           defaultCenter={DEFAULT_CENTER}
           defaultZoom={DEFAULT_ZOOM}
