@@ -14,6 +14,7 @@ import {
   Save,
   X,
 } from "lucide-react";
+import { Button } from "@/components/ui/button";
 import {
   fetchPropertyInvestigation,
   triggerPropertyInvestigation,
@@ -345,27 +346,23 @@ export default function InvestigationTab({ propertyId }: InvestigationTabProps) 
         )}
 
         <div className="ml-auto flex items-center gap-2">
-          <button
+          <Button
+            variant="secondary"
+            size="sm"
             onClick={handleFetch}
             disabled={fetching}
-            className="flex items-center gap-1.5 rounded-md border border-blue-300 bg-blue-50 px-3 py-1.5 text-xs font-medium text-blue-700 hover:bg-blue-100 disabled:opacity-50 dark:border-blue-500/40 dark:bg-blue-500/20 dark:text-blue-300 dark:hover:bg-blue-500/30"
+            loading={fetching}
+            loadingLabel="取得中..."
           >
-            {fetching ? (
-              <Loader2 className="h-3.5 w-3.5 animate-spin" />
-            ) : (
-              <RefreshCw className="h-3.5 w-3.5" />
-            )}
-            {fetching ? "取得中..." : "調査情報を取得"}
-          </button>
+            <RefreshCw className="h-3.5 w-3.5" />
+            調査情報を取得
+          </Button>
 
           {!isConfirmed && !editMode && investigation && (
-            <button
-              onClick={handleStartEdit}
-              className="flex items-center gap-1.5 rounded-md border border-gray-300 px-3 py-1.5 text-xs font-medium text-gray-700 hover:bg-gray-50 dark:border-gray-700 dark:text-gray-200 dark:hover:bg-gray-800"
-            >
+            <Button variant="secondary" size="sm" onClick={handleStartEdit}>
               <Edit className="h-3.5 w-3.5" />
               編集
-            </button>
+            </Button>
           )}
         </div>
       </div>
@@ -375,12 +372,14 @@ export default function InvestigationTab({ propertyId }: InvestigationTabProps) 
         <div className="flex items-center gap-2 rounded-md border border-red-200 bg-red-50 p-3 text-sm text-red-700 dark:border-red-500/20 dark:bg-red-500/10 dark:text-red-300">
           <AlertTriangle className="h-4 w-4 shrink-0" />
           {error}
-          <button
+          <Button
+            variant="ghost"
+            size="sm"
             onClick={() => setError(null)}
             className="ml-auto text-red-500 hover:text-red-700 dark:text-red-400 dark:hover:text-red-300"
           >
             <X className="h-4 w-4" />
-          </button>
+          </Button>
         </div>
       )}
 
@@ -540,54 +539,45 @@ export default function InvestigationTab({ propertyId }: InvestigationTabProps) 
       {/* --- Edit mode action bar --- */}
       {editMode && (
         <div className="flex items-center gap-2 border-t border-gray-200 pt-4 dark:border-gray-800">
-          <button
+          <Button
+            variant="primary"
             onClick={handleSave}
             disabled={saving}
-            className="flex items-center gap-1.5 rounded-md bg-indigo-600 px-4 py-2 text-sm font-medium text-white hover:bg-indigo-700 disabled:opacity-50"
+            loading={saving}
+            loadingLabel="保存"
           >
-            {saving ? (
-              <Loader2 className="h-4 w-4 animate-spin" />
-            ) : (
-              <Save className="h-4 w-4" />
-            )}
+            <Save className="h-4 w-4" />
             保存
-          </button>
-          <button
+          </Button>
+          <Button
+            variant="success"
             onClick={handleConfirm}
             disabled={confirming || saving}
-            className="flex items-center gap-1.5 rounded-md bg-green-600 px-4 py-2 text-sm font-medium text-white hover:bg-green-700 disabled:opacity-50"
+            loading={confirming}
+            loadingLabel="確認済みにする"
           >
-            {confirming ? (
-              <Loader2 className="h-4 w-4 animate-spin" />
-            ) : (
-              <CheckCircle2 className="h-4 w-4" />
-            )}
+            <CheckCircle2 className="h-4 w-4" />
             確認済みにする
-          </button>
-          <button
-            onClick={() => setEditMode(false)}
-            className="rounded-md border border-gray-300 px-4 py-2 text-sm text-gray-700 hover:bg-gray-50 dark:border-gray-700 dark:text-gray-200 dark:hover:bg-gray-800"
-          >
+          </Button>
+          <Button variant="secondary" onClick={() => setEditMode(false)}>
             キャンセル
-          </button>
+          </Button>
         </div>
       )}
 
       {/* --- Confirm button (display mode, not yet confirmed) --- */}
       {!editMode && !isConfirmed && investigation && (
         <div className="flex justify-end pt-1">
-          <button
+          <Button
+            variant="success"
             onClick={handleConfirm}
             disabled={confirming}
-            className="flex items-center gap-1.5 rounded-md bg-green-600 px-4 py-2 text-sm font-medium text-white hover:bg-green-700 disabled:opacity-50"
+            loading={confirming}
+            loadingLabel="確認済みにする"
           >
-            {confirming ? (
-              <Loader2 className="h-4 w-4 animate-spin" />
-            ) : (
-              <CheckCircle2 className="h-4 w-4" />
-            )}
+            <CheckCircle2 className="h-4 w-4" />
             確認済みにする
-          </button>
+          </Button>
         </div>
       )}
 
@@ -622,9 +612,11 @@ export default function InvestigationTab({ propertyId }: InvestigationTabProps) 
       {/* --- Audit log --- */}
       {investigation && (investigation.auditLogs?.length ?? 0) > 0 && (
         <div className="border-t border-gray-100 pt-4 dark:border-gray-800">
-          <button
+          <Button
+            variant="ghost"
+            size="sm"
             onClick={() => setShowAuditLog(!showAuditLog)}
-            className="flex items-center gap-1 text-xs font-medium text-gray-500 hover:text-gray-700 dark:text-gray-400 dark:hover:text-gray-200"
+            className="text-gray-500 hover:text-gray-700 dark:text-gray-400 dark:hover:text-gray-200"
           >
             {showAuditLog ? (
               <ChevronUp className="h-3.5 w-3.5" />
@@ -632,7 +624,7 @@ export default function InvestigationTab({ propertyId }: InvestigationTabProps) 
               <ChevronDown className="h-3.5 w-3.5" />
             )}
             操作履歴 ({investigation.auditLogs.length}件)
-          </button>
+          </Button>
 
           {showAuditLog && (
             <div className="mt-3 space-y-2">
