@@ -264,24 +264,25 @@ export async function POST(request: Request, ctx: Ctx) {
     // 押し直し・反映し直しの口で反映し直す(@codex 2巡目 P2)。
     let version = q.version;
     let statusUpdated = true;
-    let statusChanged = false;
+    let applied: Awaited<ReturnType<typeof applySentMaterialToInquiry>> = null;
     try {
       const a = await applySentMaterialToInquiry(id);
       if (a) {
         version = a.version;
-        statusChanged = a.statusChanged;
+        applied = a;
       }
     } catch (e) {
       statusUpdated = false;
       console.error("[material-send] inquiry update failed after send", { name: e instanceof Error ? e.name : "Unknown" });
     }
-    if (statusChanged) {
+    // 反響を書いたら(状態・宛先のどちらでも)監査に残す(反映し直しと同じ・@codex 11巡目 P2)。
+    if (applied?.wrote) {
       await writeAuditLog({
         userId: session.id,
         action: "agent_inquiry_material_apply",
         targetTable: "agent_inquiries",
         targetId: id,
-        detail: { statusChanged },
+        detail: { statusChanged: applied.statusChanged, contactChanged: applied.contactChanged },
       });
     }
     return NextResponse.json({ id: claim.id, result: "sent", version, statusUpdated }, { status: 201, headers: NO_STORE });

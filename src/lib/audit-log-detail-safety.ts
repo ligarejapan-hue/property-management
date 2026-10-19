@@ -136,7 +136,7 @@ const ACTION_EXTRA_KEYS: Readonly<Record<string, ReadonlySet<string>>> = {
   // statusChanged=反響を done にしたか。inquiryId/sendId=UUID。宛先・ファイル名は書かない設計(@codex 9巡目 P2)。
   agent_inquiry_material_send: new Set(["files", "totalSize", "outcome", "statusChanged"]),
   registry_pdf_mail_send: new Set(["inquiryId", "sendId"]),
-  agent_inquiry_material_apply: new Set(["statusChanged"]),
+  agent_inquiry_material_apply: new Set(["statusChanged", "contactChanged"]),
   // 名簿(マンション名簿)から棟にした・埋めた(設計 2026-10-18)。catalogId=名簿の行の UUID・
   // kind=created/linked・filled=埋めた欄の名前(builtYear など)・propertyId=保存した物件の UUID。
   // 住所・建物名・値は書かない設計。

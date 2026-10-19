@@ -388,6 +388,14 @@ describe("送信のあとの扱い(最終レビュー I2・I3・M1・M2)", () =>
     expect(actions).toEqual(["agent_inquiry_material_send", "registry_pdf_mail_send"]);
     expect(h.writeAuditLog.mock.calls.some((c) => c[0].action === "agent_inquiry_material_send")).toBe(false);
   });
+  it("対応済みの反響に別の宛先で送った=宛先だけ変えたときも監査に残す(@codex 11巡目 P2)", async () => {
+    pm.agentInquiry.findUnique.mockResolvedValue(inquiry({ status: "done" }));
+    await POST(json("POST", body({ to: "new@agent.jp" })), ctx);
+    expect(pm.agentInquiry.update.mock.calls[0][0].data).toMatchObject({ contactEmail: "new@agent.jp" });
+    expect(h.writeAuditLog).toHaveBeenCalledWith(expect.objectContaining({
+      action: "agent_inquiry_material_apply", detail: { statusChanged: false, contactChanged: true },
+    }));
+  });
   it("送れたか分からないときも、印と監査を同じ取引で書く", async () => {
     h.sendMailWithAttachments.mockResolvedValue({ ok: false, code: "ETIMEDOUT" });
     await POST(json("POST", body()), ctx);

@@ -194,7 +194,7 @@ export async function guardMaterialFiles(
  */
 export async function applySentMaterialToInquiry(
   inquiryId: string,
-): Promise<{ version: number; statusChanged: boolean; wrote: boolean } | null> {
+): Promise<{ version: number; statusChanged: boolean; contactChanged: boolean; wrote: boolean } | null> {
   const pendingWhere = { inquiryId, result: "sent" as const, inquiryAppliedAt: null };
   if ((await prisma.agentInquiryMaterialSend.findMany({ where: pendingWhere, select: { id: true }, take: 1 })).length === 0) {
     return null;
@@ -238,13 +238,13 @@ export async function applySentMaterialToInquiry(
     const setDone = cur.status !== "done" && pending.some((p) => p.statusAtSend === cur.status);
     const setEmail = emailTarget != null && curEmail !== emailTarget;
     const to = emailTarget ?? "";
-    if (!setDone && !setEmail) return { version: cur.version, statusChanged: false, wrote: false };
+    if (!setDone && !setEmail) return { version: cur.version, statusChanged: false, contactChanged: false, wrote: false };
     const u = await tx.agentInquiry.update({
       where: { id: inquiryId },
       data: { ...(setDone ? { status: "done" as const } : {}), ...(setEmail ? { contactEmail: to } : {}), version: { increment: 1 } },
       select: { version: true },
     });
-    return { version: u.version, statusChanged: setDone, wrote: true };
+    return { version: u.version, statusChanged: setDone, contactChanged: setEmail, wrote: true };
   });
 }
 
@@ -266,7 +266,7 @@ export async function reconcileMaterialSends(inquiryId: string, userId: string):
       action: "agent_inquiry_material_apply",
       targetTable: "agent_inquiries",
       targetId: inquiryId,
-      detail: { statusChanged: a.statusChanged },
+      detail: { statusChanged: a.statusChanged, contactChanged: a.contactChanged },
     });
     return true;
   } catch (e) {

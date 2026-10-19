@@ -16,7 +16,10 @@ describe("資料送付の監査の中身が監査ログ画面で読める", () =
     expect(sanitizeAuditDetail("registry_pdf_mail_send", { inquiryId: "i1", sendId: "s1" })).toEqual({ inquiryId: "i1", sendId: "s1" });
   });
   it("agent_inquiry_material_apply: 状態が変わったか", () => {
-    expect(sanitizeAuditDetail("agent_inquiry_material_apply", { statusChanged: false })).toEqual({ statusChanged: false });
+    expect(sanitizeAuditDetail("agent_inquiry_material_apply", { statusChanged: false, contactChanged: true })).toEqual({
+      statusChanged: false,
+      contactChanged: true,
+    });
   });
   it("宛先・ファイル名は書かれても消える", () => {
     expect(sanitizeAuditDetail("agent_inquiry_material_send", { toAddress: "a@x.jp", fileName: "謄本.pdf" })).toEqual({
