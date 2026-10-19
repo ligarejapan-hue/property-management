@@ -121,8 +121,9 @@ describe("history-tab.tsx dark: 配色 (物件詳細タブ群)", () => {
   it("ライトモード divide-gray-100 は残っている", () => {
     expect(src).toContain("divide-gray-100");
   });
-  it("ライトモード bg-white は残っている", () => {
-    expect(src).toContain("bg-white");
+  // UIの統一 第3回: bg-white はリセットボタンの色だった=共通 Button の secondary へ移った
+  it("リセットボタンは共通 Button の secondary（bg-white / dark:bg-gray-900 は部品側）", () => {
+    expect(src).toContain('variant="secondary"');
   });
   it("ライトモード text-gray-300 は残っている", () => {
     expect(src).toContain("text-gray-300");

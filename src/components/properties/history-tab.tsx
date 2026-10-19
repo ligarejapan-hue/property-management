@@ -5,6 +5,7 @@ import { Loader2, History, ChevronLeft, ChevronRight, Search } from "lucide-reac
 import { fetchChangeLogs as apiFetchChangeLogs, fetchSaleDmScenarioOptionsAll, type SaleDmScenarioOptionAll } from "@/lib/api-client";
 import { formatJaDateTime } from "@/lib/format-datetime";
 import { dmScenarioHistoryLabel } from "./dm-scenario-field-model";
+import { Button } from "@/components/ui/button";
 
 interface ChangeLogData {
   id: string;
@@ -229,8 +230,9 @@ export default function HistoryTab({
             />
           </div>
           <div className="flex items-end">
-            <button
-              type="button"
+            <Button
+              variant="secondary"
+              size="sm"
               onClick={() => {
                 setFieldNameFilter("");
                 setSourceFilter("");
@@ -238,10 +240,9 @@ export default function HistoryTab({
                 setDateTo("");
                 setPage(1);
               }}
-              className="rounded border border-gray-300 bg-white px-3 py-1.5 text-xs text-gray-600 hover:bg-gray-50 dark:border-gray-700 dark:bg-gray-900 dark:text-gray-300 dark:hover:bg-gray-800"
             >
               リセット
-            </button>
+            </Button>
           </div>
         </div>
       </div>
@@ -337,25 +338,27 @@ export default function HistoryTab({
                 全 {pagination.total} 件{pagination.total > 0 && `中 ${(page - 1) * 50 + 1}〜${Math.min(page * 50, pagination.total)} 件`}
               </p>
               <div className="flex items-center gap-2">
-                <button
+                <Button
+                  variant="secondary"
+                  size="sm"
                   disabled={page <= 1}
                   onClick={() => setPage((p) => Math.max(1, p - 1))}
-                  className="flex items-center gap-1 rounded border border-gray-300 px-2 py-1 text-xs disabled:opacity-40 dark:border-gray-700 dark:text-gray-300"
                 >
                   <ChevronLeft className="h-3 w-3" />
                   前へ
-                </button>
+                </Button>
                 <span className="text-xs text-gray-600 dark:text-gray-300">
                   {page} / {pagination.totalPages}
                 </span>
-                <button
+                <Button
+                  variant="secondary"
+                  size="sm"
                   disabled={page >= pagination.totalPages}
                   onClick={() => setPage((p) => p + 1)}
-                  className="flex items-center gap-1 rounded border border-gray-300 px-2 py-1 text-xs disabled:opacity-40 dark:border-gray-700 dark:text-gray-300"
                 >
                   次へ
                   <ChevronRight className="h-3 w-3" />
-                </button>
+                </Button>
               </div>
             </div>
           )}
