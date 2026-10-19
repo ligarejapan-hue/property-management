@@ -35,8 +35,17 @@ const VARIANT_CLASSES: Record<ButtonVariant, string> = {
   success:
     "bg-green-600 text-white hover:bg-green-700 disabled:hover:bg-green-600",
   ghost:
-    "bg-transparent text-gray-700 hover:bg-gray-100 disabled:hover:bg-transparent dark:text-gray-200 dark:hover:bg-gray-800",
+    "bg-transparent hover:bg-gray-100 disabled:hover:bg-transparent dark:hover:bg-gray-800",
 };
+
+// ghost の既定の文字色。呼び出し側が文字色を渡したときは付けない(第3回)。
+// ⚠同じ種類のクラスが2つあると、勝つのは className の順ではなく CSS の並び順(色名の
+//   アルファベット順など)になり、text-blue-600 が text-gray-700 に負ける。
+const GHOST_TEXT = "text-gray-700 dark:text-gray-200";
+const TEXT_COLOR = /^text-(?:inherit|current|white|black|transparent|[a-z]+-\d{2,3}(?:\/\d+)?)$/;
+const JUSTIFY = /^justify-/;
+const hasToken = (className: string | undefined, re: RegExp) =>
+  !!className && className.split(/\s+/).some((t) => re.test(t));
 
 const SIZE_CLASSES: Record<ButtonSize, string> = {
   md: "px-4 py-2 text-sm",
@@ -74,8 +83,13 @@ export const Button = forwardRef<HTMLButtonElement, ButtonProps>(
     },
     ref,
   ) {
-    const base =
-      "relative inline-flex items-center justify-center gap-1.5 rounded-md font-medium disabled:cursor-not-allowed disabled:opacity-60";
+    // 呼び出し側が並びの向き・文字色を渡したら、既定のほうを外す(上の GHOST_TEXT の⚠と同じ理由)。
+    const justify = hasToken(className, JUSTIFY) ? "" : " justify-center";
+    const base = `relative inline-flex items-center${justify} gap-1.5 rounded-md font-medium disabled:cursor-not-allowed disabled:opacity-60`;
+    const variantClasses =
+      variant === "ghost" && !hasToken(className, TEXT_COLOR)
+        ? `${VARIANT_CLASSES.ghost} ${GHOST_TEXT}`
+        : VARIANT_CLASSES[variant];
     // ⚠done を優先(完了の直後に loading が残っていても✓を見せる)。
     const state: "idle" | "loading" | "done" = done ? "done" : loading ? "loading" : "idle";
     return (
@@ -84,7 +98,7 @@ export const Button = forwardRef<HTMLButtonElement, ButtonProps>(
         type={type}
         disabled={disabled || state === "loading"}
         aria-busy={state === "loading" ? true : undefined}
-        className={`${base} ${VARIANT_CLASSES[variant]} ${SIZE_CLASSES[size]}${className ? ` ${className}` : ""}`}
+        className={`${base} ${variantClasses} ${SIZE_CLASSES[size]}${className ? ` ${className}` : ""}`}
         {...rest}
       >
         {state === "idle" ? (
