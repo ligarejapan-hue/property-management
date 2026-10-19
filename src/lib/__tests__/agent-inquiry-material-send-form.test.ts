@@ -33,6 +33,15 @@ describe("資料を送る小窓の状態(純関数)", () => {
     expect(s.tooLarge).toBe(true);
     expect(s.canSend).toBe(false);
   });
+  it("差し込み後の件名・本文が長すぎれば知らせて送れない(@codex 6巡目 P2)", () => {
+    const longSubject = materialFormState({ ...base, subject: "あ".repeat(201) });
+    expect(longSubject).toMatchObject({ subjectTooLong: true, canSend: false });
+    const longBody = materialFormState({ ...base, body: "あ".repeat(10_001) });
+    expect(longBody).toMatchObject({ bodyTooLong: true, canSend: false });
+    expect(materialFormState({ ...base, subject: "あ".repeat(200), body: "あ".repeat(10_000) })).toMatchObject({
+      subjectTooLong: false, bodyTooLong: false, canSend: true,
+    });
+  });
   it("上限のファイル数を超えると送れない", () => {
     const s = materialFormState({ ...base, picked: ["a1", "a2"], maxFiles: 1 });
     expect(s.tooMany).toBe(true);

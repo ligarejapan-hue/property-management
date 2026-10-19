@@ -92,6 +92,7 @@ beforeEach(() => {
   // clearAllMocks は戻り値の設定を消さない=前のテストの「押し直し」設定を毎回戻す。
   pm.agentInquiryMaterialSend.findFirst.mockReset().mockResolvedValue(null);
   pm.agentInquiryMaterialSend.create.mockReset().mockResolvedValue({ id: "s1" });
+  pm.agentInquiryMaterialSend.update.mockReset().mockResolvedValue({});
   h.loadMailSendConfig.mockResolvedValue(CONFIG);
   h.read.mockResolvedValue({ body: Buffer.from("pdf"), contentType: "application/pdf", size: 3 });
   h.sendMailWithAttachments.mockResolvedValue({ ok: true });
@@ -309,6 +310,23 @@ describe("送信のあとの扱い(最終レビュー I2・I3・M1・M2)", () =>
     expect(res.status).toBe(201);
     expect(await res.json()).toMatchObject({ result: "sent", statusUpdated: false });
     expect(pm.agentInquiryMaterialSend.update).toHaveBeenCalledWith(expect.objectContaining({ data: expect.objectContaining({ result: "sent" }) }));
+  });
+  it("送れた後に「送信済み」の書き込みが一時的に落ちても、やり直して送信済みにする(@codex 6巡目 P1)", async () => {
+    pm.agentInquiryMaterialSend.update.mockReset()
+      .mockRejectedValueOnce(new Error("db blip"))
+      .mockRejectedValueOnce(new Error("db blip"))
+      .mockResolvedValue({});
+    const res = await POST(json("POST", body()), ctx);
+    expect(res.status).toBe(201);
+    const sentCalls = pm.agentInquiryMaterialSend.update.mock.calls.filter((c) => c[0].data.result === "sent");
+    expect(sentCalls.length).toBe(3);
+  });
+  it("「送信済み」の書き込みがずっと落ちても、送れたことは返す(エラーにして押し直させない)", async () => {
+    pm.agentInquiryMaterialSend.update.mockReset().mockRejectedValue(new Error("db down"));
+    const res = await POST(json("POST", body()), ctx);
+    expect(res.status).toBe(201);
+    expect(await res.json()).toMatchObject({ result: "sent", recorded: false });
+    expect(h.sendMailWithAttachments).toHaveBeenCalledTimes(1);
   });
   it("押し直しの応答に状態の表示(10分を過ぎた送信中=結果不明)を付ける", async () => {
     pm.agentInquiryMaterialSend.findFirst.mockResolvedValue({ id: "s0", result: "sending", inquiryId: IID, createdAt: new Date(Date.now() - 11 * 60 * 1000) });

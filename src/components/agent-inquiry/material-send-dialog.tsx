@@ -13,6 +13,7 @@ import {
   type MaterialSendView,
 } from "@/lib/api-client";
 import { afterSendError, afterSendResponse, materialFormState } from "@/lib/agent-inquiry/material-send-form";
+import { MATERIAL_SEND_LIMITS } from "@/lib/agent-inquiry/material-send";
 import { safeUuidV4 } from "@/lib/random-id";
 
 const inputCls = "w-full rounded-md border border-gray-300 px-2 py-1.5 text-sm dark:border-gray-700 dark:bg-gray-900";
@@ -106,11 +107,17 @@ export function MaterialSendDialogView({
           </label>
           <label className="block">
             <span className="text-xs text-gray-500">件名</span>
-            <input aria-label="件名" value={subject} readOnly={busy} onChange={(e) => onSubject(e.target.value)} maxLength={200} className={inputCls} />
+            <input aria-label="件名" value={subject} readOnly={busy} onChange={(e) => onSubject(e.target.value)} maxLength={MATERIAL_SEND_LIMITS.subject} className={inputCls} />
+            {st.subjectTooLong && (
+              <span className="text-xs font-bold text-rose-600">{`件名は ${MATERIAL_SEND_LIMITS.subject} 文字までです。短くしてください`}</span>
+            )}
           </label>
           <label className="block">
             <span className="text-xs text-gray-500">本文</span>
-            <textarea aria-label="本文" value={body} readOnly={busy} onChange={(e) => onBody(e.target.value)} rows={8} maxLength={10000} className={inputCls} />
+            <textarea aria-label="本文" value={body} readOnly={busy} onChange={(e) => onBody(e.target.value)} rows={8} maxLength={MATERIAL_SEND_LIMITS.body} className={inputCls} />
+            {st.bodyTooLong && (
+              <span className="text-xs font-bold text-rose-600">{`本文は ${MATERIAL_SEND_LIMITS.body} 文字までです。短くしてください`}</span>
+            )}
           </label>
           <fieldset>
             <legend className="text-xs text-gray-500">付けるファイル(資料一覧から)</legend>

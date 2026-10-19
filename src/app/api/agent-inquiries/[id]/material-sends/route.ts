@@ -39,6 +39,20 @@ const sendSchema = z.object({
   clientToken: z.string().uuid(),
 });
 
+/** 送れた記録を「送信済み」にする(一時的な失敗は3回までやり直す)。書けたら true。 */
+async function markSent(sendId: string): Promise<boolean> {
+  for (let i = 0; i < 3; i++) {
+    try {
+      await prisma.agentInquiryMaterialSend.update({ where: { id: sendId }, data: { result: "sent", finishedAt: new Date() } });
+      return true;
+    } catch (e) {
+      console.error("[material-send] mark sent failed", { attempt: i + 1, name: e instanceof Error ? e.name : "Unknown" });
+      if (i < 2) await new Promise((r) => setTimeout(r, 200 * (i + 1)));
+    }
+  }
+  return false;
+}
+
 /** 送った記録(新しい順)。 */
 export async function GET(_req: Request, ctx: Ctx) {
   try {
@@ -214,7 +228,16 @@ export async function POST(request: Request, ctx: Ctx) {
     }
 
     // 送信は済んだ=まず記録を送信済みにする(後の更新が落ちても「送信中」のまま残さない・最終レビュー I2)。
-    await prisma.agentInquiryMaterialSend.update({ where: { id: claim.id }, data: { result: "sent", finishedAt: new Date() } });
+    // ⚠一時的に落ちてもやり直す。ずっと落ちても**エラーにしない**=送れたことを返す(エラーにすると押し直し→
+    //   10分後に結果不明→2通目、になる・@codex 6巡目 P1)。記録は送信中のまま残る=記録には結果不明と出る。
+    const recorded = await markSent(claim.id);
+    if (!recorded) {
+      await auditSend({ outcome: "sent_unrecorded" });
+      return NextResponse.json(
+        { id: claim.id, result: "sent", version: q.version, statusUpdated: false, recorded: false },
+        { status: 201, headers: NO_STORE },
+      );
+    }
     // 反響の更新は version を見ない(他の人の更新とぶつかっても done にする)。落ちても送信は成功として返し、
     // 押し直し・反映し直しの口で反映し直す(@codex 2巡目 P2)。
     let version = q.version;

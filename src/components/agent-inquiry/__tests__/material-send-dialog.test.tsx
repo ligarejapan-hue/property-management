@@ -57,6 +57,10 @@ describe("資料を送る小窓(表示)", () => {
     expect(html).toContain('value="sato@agent.jp"');
     expect(html).toContain("図面.pdf");
   });
+  it("件名・本文が長すぎると知らせる(@codex 6巡目 P2)", () => {
+    expect(view({ subject: "あ".repeat(201) })).toContain("件名は 200 文字までです");
+    expect(view({ body: "あ".repeat(10_001) })).toContain("本文は 10000 文字までです");
+  });
   it("謄本を選ぶと黄色の注意", () => {
     expect(view({ picked: ["a2"] })).toContain(WARN);
     expect(view({ picked: ["a1"] })).not.toContain(WARN);

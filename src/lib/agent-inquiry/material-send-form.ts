@@ -1,4 +1,4 @@
-import { isSingleAddress } from "./material-send";
+import { MATERIAL_SEND_LIMITS, isSingleAddress } from "./material-send";
 
 export interface MaterialFormFile {
   id: string;
@@ -60,14 +60,19 @@ export function materialFormState(s: {
   const tooLarge = total > s.maxTotalBytes;
   const tooMany = chosen.length > s.maxFiles;
   const warnings = [...new Set(chosen.map((f) => f.warning).filter((w): w is string => !!w))];
+  // ひな形を差し込んだ後で長くなることがある=サーバーと同じ上限で確かめる(@codex 6巡目 P2)。
+  const subjectTooLong = s.subject.trim().length > MATERIAL_SEND_LIMITS.subject;
+  const bodyTooLong = s.body.length > MATERIAL_SEND_LIMITS.body;
   const canSend =
     s.mailConfigured &&
     chosen.length > 0 &&
     !tooLarge &&
     !tooMany &&
+    !subjectTooLong &&
+    !bodyTooLong &&
     isSingleAddress(s.to.trim()) &&
     s.subject.trim() !== "" &&
     s.body.trim() !== "" &&
     !s.busy;
-  return { chosenCount: chosen.length, total, tooLarge, tooMany, warnings, canSend };
+  return { chosenCount: chosen.length, total, tooLarge, tooMany, subjectTooLong, bodyTooLong, warnings, canSend };
 }
