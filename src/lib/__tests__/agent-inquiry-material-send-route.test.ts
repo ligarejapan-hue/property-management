@@ -361,6 +361,15 @@ describe("送れた後に反響の更新が落ちたら、あとで反映し直�
     await APPLY(json("POST", {}), ctx);
     expect(pm.agentInquiry.update).not.toHaveBeenCalled();
   });
+  it("未反映が2件: 手で1件目の送り先(まだ反映していない)に直した=手の変更なので上書きしない(@codex 15巡目 P2)", async () => {
+    pending = () => [
+      { id: "s1", toAddress: "b@agent.jp", statusAtSend: "done", contactEmailAtSend: "a@agent.jp" },
+      { id: "s2", toAddress: "d@agent.jp", statusAtSend: "done", contactEmailAtSend: "c@agent.jp" },
+    ];
+    pm.agentInquiry.findUnique.mockResolvedValue(inquiry({ status: "done", contactEmail: "b@agent.jp" }));
+    await APPLY(json("POST", {}), ctx);
+    expect(pm.agentInquiry.update).not.toHaveBeenCalled();
+  });
   it("未反映が2件: 古い送信の時点の宛先に手で戻した=上書きしない", async () => {
     pending = () => [
       { id: "s1", toAddress: "b@agent.jp", statusAtSend: "done", contactEmailAtSend: "a@agent.jp" },

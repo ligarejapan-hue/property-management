@@ -229,9 +229,10 @@ export async function applySentMaterialToInquiry(
     );
     const curEmail = cur.contactEmail ?? "";
     // 比べるのは**最新の**未反映の送信の時点だけ(@codex 10・14巡目 P2): 古い送信の時点の値に手で戻した、は
-    // 最新の送信より後の手の変更=上書きしない。宛先は資料送付が書いた値のままでもよい(同時に送った2件目)。
+    // 最新の送信より後の手の変更=上書きしない。宛先は、反映済みの資料送付が書いた値のままでもよい(同時に送った2件目)。
+    // ⚠まだ反映していない送信の送り先は、反響に書かれたことがない=今その値なら手の変更(@codex 15巡目 P2)。
     const latest = pending[pending.length - 1];
-    const autoWritten = new Set([...appliedTo, ...pending.map((p) => p.toAddress)]);
+    const autoWritten = appliedTo;
     const emailTarget =
       curEmail === (latest.contactEmailAtSend ?? "") || autoWritten.has(curEmail) ? latest.toAddress : null;
     const setDone = cur.status !== "done" && cur.status === latest.statusAtSend;
