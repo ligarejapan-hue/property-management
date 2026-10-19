@@ -218,8 +218,6 @@ export async function applySentMaterialToInquiry(
       select: { status: true, contactEmail: true, version: true },
     });
     if (!cur) return null;
-    const first = pending[0];
-    const to = pending[pending.length - 1].toAddress;
     // 先に反映した資料送付が書いた宛先は「手の変更」ではない(同時に送った2件目を取りこぼさない)。
     const appliedTo = new Set(
       (
@@ -230,10 +228,16 @@ export async function applySentMaterialToInquiry(
       ).map((r) => r.toAddress),
     );
     const curEmail = cur.contactEmail ?? "";
-    const statusUntouched = cur.status === first.statusAtSend;
-    const emailUntouched = curEmail === (first.contactEmailAtSend ?? "") || appliedTo.has(curEmail);
-    const setDone = statusUntouched && cur.status !== "done";
-    const setEmail = emailUntouched && curEmail !== to;
+    // 未反映の送信を古い順に1件ずつ、その送信の時点と比べる(@codex 10巡目 P2): 今の宛先がその送信の時点の宛先
+    // (または資料送付が書いた宛先)のままなら、その送信の宛先にする。最後に当てはまった送信が勝つ。
+    const autoWritten = new Set([...appliedTo, ...pending.map((p) => p.toAddress)]);
+    let emailTarget: string | null = null;
+    for (const p of pending) {
+      if (curEmail === (p.contactEmailAtSend ?? "") || autoWritten.has(curEmail)) emailTarget = p.toAddress;
+    }
+    const setDone = cur.status !== "done" && pending.some((p) => p.statusAtSend === cur.status);
+    const setEmail = emailTarget != null && curEmail !== emailTarget;
+    const to = emailTarget ?? "";
     if (!setDone && !setEmail) return { version: cur.version, statusChanged: false, wrote: false };
     const u = await tx.agentInquiry.update({
       where: { id: inquiryId },

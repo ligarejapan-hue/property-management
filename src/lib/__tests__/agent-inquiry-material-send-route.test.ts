@@ -38,6 +38,7 @@ vi.mock("@/lib/prisma", () => {
     },
     $transaction: vi.fn(async (fn: (tx: unknown) => unknown) => fn(db)),
     $queryRaw: vi.fn(async () => []),
+    auditLog: { createMany: vi.fn(async () => ({ count: 1 })) },
   };
   return { default: db };
 });
@@ -118,6 +119,11 @@ beforeEach(() => {
 let pending: () => { id: string; toAddress: string; statusAtSend: string; contactEmailAtSend: string | null }[] = () => [];
 let history: unknown[] = [];
 let applied: { toAddress: string }[] = [];
+/** 監査の行(取引の中で書いたもの+別に書いたもの)。 */
+const audits = (): { action: string; detail?: unknown; targetId?: string }[] => [
+  ...(prismaMock as never as { auditLog: { createMany: Fn } }).auditLog.createMany.mock.calls.flatMap((c) => c[0].data),
+  ...h.writeAuditLog.mock.calls.map((c) => c[0]),
+];
 
 /** 物件の添付一覧(targetId で読む)と、同じファイルを指す記録の逆引き(fileUrl で読む)を分けて返す。 */
 const sameFileRecords = (others: Record<string, unknown>[]) =>
@@ -213,7 +219,7 @@ describe("ファイルの守り(/uploads と同じ判定・最終レビュー C1
     expect((await (await POST(json("POST", body()), ctx)).json()).error.code).toBe("NOT_SELECTABLE");
     grant(["agent_inquiry", "write"], ["property", "read"], ["registry_pdf", "preview"], ["registry_pdf", "download"]);
     expect((await POST(json("POST", body()), ctx)).status).toBe(201);
-    expect(h.writeAuditLog.mock.calls.some((c) => c[0].action === "registry_pdf_mail_send")).toBe(true);
+    expect(audits().some((a) => a.action === "registry_pdf_mail_send")).toBe(true);
   });
   it("記録の大きさではなく、実際に読んだ大きさで上限を確かめる", async () => {
     const over = MATERIAL_SEND_LIMITS.maxTotalBytes + 1;
@@ -332,6 +338,15 @@ describe("送れた後に反響の更新が落ちたら、あとで反映し直�
     expect(d.contactEmail).toBe("second@agent.jp");
     expect(d.status).toBeUndefined();
   });
+  it("未反映が2件: 1件目のあと手で宛先を直し、2件目をその宛先から送った=2件目の宛先にする(@codex 10巡目 P2)", async () => {
+    pending = () => [
+      { id: "s1", toAddress: "b@agent.jp", statusAtSend: "open", contactEmailAtSend: "a@agent.jp" },
+      { id: "s2", toAddress: "d@agent.jp", statusAtSend: "open", contactEmailAtSend: "c@agent.jp" },
+    ];
+    pm.agentInquiry.findUnique.mockResolvedValue(inquiry({ contactEmail: "c@agent.jp" }));
+    await APPLY(json("POST", {}), ctx);
+    expect(pm.agentInquiry.update.mock.calls[0][0].data.contactEmail).toBe("d@agent.jp");
+  });
   it("状態だけ手で変えられていれば、宛先だけ直す(状態は残す)", async () => {
     pending = stuck;
     pm.agentInquiry.findUnique.mockResolvedValue(inquiry({ status: "in_progress" }));
@@ -362,6 +377,22 @@ describe("送信のあとの扱い(最終レビュー I2・I3・M1・M2)", () =>
     expect(res.status).toBe(201);
     expect(await res.json()).toMatchObject({ result: "sent", statusUpdated: false });
     expect(pm.agentInquiryMaterialSend.update).toHaveBeenCalledWith(expect.objectContaining({ data: expect.objectContaining({ result: "sent" }) }));
+  });
+  it("送れたら「送信済み」と監査の行を同じ取引で書く(監査だけ抜けない・@codex 10巡目 P2)", async () => {
+    grant(["agent_inquiry", "write"], ["property", "read"], ["registry_pdf", "preview"], ["registry_pdf", "download"]);
+    pm.attachment.findMany.mockResolvedValue([att({ type: "registry" })]);
+    await POST(json("POST", body()), ctx);
+    const cm = (prismaMock as never as { auditLog: { createMany: Fn } }).auditLog.createMany;
+    expect(cm).toHaveBeenCalledTimes(1);
+    const actions = cm.mock.calls[0][0].data.map((d: { action: string }) => d.action);
+    expect(actions).toEqual(["agent_inquiry_material_send", "registry_pdf_mail_send"]);
+    expect(h.writeAuditLog.mock.calls.some((c) => c[0].action === "agent_inquiry_material_send")).toBe(false);
+  });
+  it("送れたか分からないときも、印と監査を同じ取引で書く", async () => {
+    h.sendMailWithAttachments.mockResolvedValue({ ok: false, code: "ETIMEDOUT" });
+    await POST(json("POST", body()), ctx);
+    const cm = (prismaMock as never as { auditLog: { createMany: Fn } }).auditLog.createMany;
+    expect(cm.mock.calls[0][0].data[0]).toMatchObject({ action: "agent_inquiry_material_send", detail: { outcome: "unknown" } });
   });
   it("送れた後に「送信済み」の書き込みが一時的に落ちても、やり直して送信済みにする(@codex 6巡目 P1)", async () => {
     pm.agentInquiryMaterialSend.update.mockReset()
@@ -489,7 +520,7 @@ describe("資料の送信 API", () => {
       expect(upd.data).toMatchObject({ errorCode: code ?? "UNKNOWN" });
       expect(pm.agentInquiry.update).not.toHaveBeenCalled();
       // 届いたかもしれない=謄本の取り扱いの記録は残す
-      expect(h.writeAuditLog.mock.calls.some((c) => c[0].action === "registry_pdf_mail_send")).toBe(true);
+      expect(audits().some((a) => a.action === "registry_pdf_mail_send")).toBe(true);
     }
   });
   it("結果不明の押し直しは、前の結果(結果不明)を返して送らない", async () => {
@@ -515,7 +546,7 @@ describe("資料の送信 API", () => {
     grant(["agent_inquiry", "write"], ["property", "read"], ["registry_pdf", "preview"], ["registry_pdf", "download"]);
     pm.attachment.findMany.mockResolvedValue([att({ type: "registry", fileName: "謄本.pdf" })]);
     await POST(json("POST", body()), ctx);
-    const call = h.writeAuditLog.mock.calls.find((c) => c[0].action === "registry_pdf_mail_send");
+    const call = audits().find((a) => a.action === "registry_pdf_mail_send");
     expect(call).toBeTruthy();
     expect(JSON.stringify(call)).not.toContain("sato@agent.jp");
   });

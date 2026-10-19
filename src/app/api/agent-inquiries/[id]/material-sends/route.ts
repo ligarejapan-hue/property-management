@@ -39,11 +39,23 @@ const sendSchema = z.object({
   clientToken: z.string().uuid(),
 });
 
-/** 送れた記録を「送信済み」にする(一時的な失敗は3回までやり直す)。書けたら true。 */
-async function markSent(sendId: string): Promise<boolean> {
+type AuditRow = { userId: string; action: string; targetTable: string; targetId: string; detail: Record<string, unknown> };
+
+/**
+ * 送った記録の結果と監査の行を同じ取引で書く(一時的な失敗は3回までやり直す)。書けたら true。
+ * ⚠監査だけ抜ける・記録だけ進む、を作らない(@codex 6巡目 P1・10巡目 P2)。
+ */
+async function finishSend(
+  sendId: string,
+  data: { result?: "sent"; errorCode?: string; finishedAt: Date },
+  audits: AuditRow[],
+): Promise<boolean> {
   for (let i = 0; i < 3; i++) {
     try {
-      await prisma.agentInquiryMaterialSend.update({ where: { id: sendId }, data: { result: "sent", finishedAt: new Date() } });
+      await prisma.$transaction(async (tx) => {
+        await tx.agentInquiryMaterialSend.update({ where: { id: sendId }, data });
+        await tx.auditLog.createMany({ data: audits.map((a) => ({ ...a, detail: a.detail as object })) });
+      });
       return true;
     } catch (e) {
       console.error("[material-send] mark sent failed", { attempt: i + 1, name: e instanceof Error ? e.name : "Unknown" });
@@ -181,24 +193,29 @@ export async function POST(request: Request, ctx: Ctx) {
     }
 
     const result = await sendMailWithAttachments(config, { to: input.to, subject: input.subject, text: input.body, attachments: files });
-    const auditSend = async (detail: Record<string, unknown>) => {
-      await writeAuditLog({
+    // 監査の行。送った記録の書き込みと同じ取引で書く(監査だけ抜けない・@codex 10巡目 P2)。
+    const auditRows = (detail: Record<string, unknown>): AuditRow[] => [
+      {
         userId: session.id,
         action: "agent_inquiry_material_send",
         targetTable: "agent_inquiries",
         targetId: id,
         detail: { files: guarded.length, totalSize: readBytes, ...detail },
-      });
-      for (const { row: r } of guarded.filter((x) => x.effectiveType === "registry")) {
-        // 謄本の取り扱いの記録。宛先は書かない(送った記録の表で見る)。
-        await writeAuditLog({
+      },
+      // 謄本の取り扱いの記録。宛先は書かない(送った記録の表で見る)。
+      ...guarded
+        .filter((x) => x.effectiveType === "registry")
+        .map(({ row: r }) => ({
           userId: session.id,
           action: "registry_pdf_mail_send",
           targetTable: "attachments",
           targetId: r.id,
           detail: { inquiryId: id, sendId: claim.id },
-        });
-      }
+        })),
+    ];
+    // 取引で書けなかったとき(ずっと DB が落ちている)だけ、1行ずつの書き込みで残せるだけ残す。
+    const auditFallback = async (detail: Record<string, unknown>) => {
+      for (const row of auditRows(detail)) await writeAuditLog(row);
     };
     if (!result.ok) {
       if (isDefiniteSmtpFailure(result.code)) {
@@ -213,11 +230,13 @@ export async function POST(request: Request, ctx: Ctx) {
       }
       // 送れたか分からない(時間切れ・切断)=送信中のまま失敗の印だけ付ける=結果不明。同じ鍵の押し直しは
       // 前の結果を返すだけ(2通目を出さない・@codex 4巡目 P1)。届いたかもしれない=監査には残す。
-      await prisma.agentInquiryMaterialSend.update({
-        where: { id: claim.id },
-        data: { errorCode: result.code ?? "UNKNOWN", finishedAt: new Date() },
-      });
-      await auditSend({ outcome: "unknown" });
+      const unknownDetail = { outcome: "unknown" };
+      const marked = await finishSend(
+        claim.id,
+        { errorCode: result.code ?? "UNKNOWN", finishedAt: new Date() },
+        auditRows(unknownDetail),
+      );
+      if (!marked) await auditFallback(unknownDetail);
       return NextResponse.json(
         {
           id: claim.id,
@@ -233,9 +252,9 @@ export async function POST(request: Request, ctx: Ctx) {
     // 送信は済んだ=まず記録を送信済みにする(後の更新が落ちても「送信中」のまま残さない・最終レビュー I2)。
     // ⚠一時的に落ちてもやり直す。ずっと落ちても**エラーにしない**=送れたことを返す(エラーにすると押し直し→
     //   10分後に結果不明→2通目、になる・@codex 6巡目 P1)。記録は送信中のまま残る=記録には結果不明と出る。
-    const recorded = await markSent(claim.id);
+    const recorded = await finishSend(claim.id, { result: "sent", finishedAt: new Date() }, auditRows({}));
     if (!recorded) {
-      await auditSend({ outcome: "sent_unrecorded" });
+      await auditFallback({ outcome: "sent_unrecorded" });
       return NextResponse.json(
         { id: claim.id, result: "sent", version: q.version, statusUpdated: false, recorded: false },
         { status: 201, headers: NO_STORE },
@@ -256,7 +275,15 @@ export async function POST(request: Request, ctx: Ctx) {
       statusUpdated = false;
       console.error("[material-send] inquiry update failed after send", { name: e instanceof Error ? e.name : "Unknown" });
     }
-    await auditSend({ statusChanged });
+    if (statusChanged) {
+      await writeAuditLog({
+        userId: session.id,
+        action: "agent_inquiry_material_apply",
+        targetTable: "agent_inquiries",
+        targetId: id,
+        detail: { statusChanged },
+      });
+    }
     return NextResponse.json({ id: claim.id, result: "sent", version, statusUpdated }, { status: 201, headers: NO_STORE });
   } catch (error) {
     return handleApiError(error);
