@@ -352,6 +352,24 @@ describe("送れた後に反響の更新が落ちたら、あとで反映し直�
     await APPLY(json("POST", {}), ctx);
     expect(pm.agentInquiry.update.mock.calls[0][0].data.contactEmail).toBe("d@agent.jp");
   });
+  it("未反映が2件: 古い送信の時点の状態に手で戻した=最新の送信より後の手の変更なので done にしない(@codex 14巡目 P2)", async () => {
+    pending = () => [
+      { id: "s1", toAddress: "sato@agent.jp", statusAtSend: "open", contactEmailAtSend: "sato@agent.jp" },
+      { id: "s2", toAddress: "sato@agent.jp", statusAtSend: "in_progress", contactEmailAtSend: "sato@agent.jp" },
+    ];
+    pm.agentInquiry.findUnique.mockResolvedValue(inquiry({ status: "open" }));
+    await APPLY(json("POST", {}), ctx);
+    expect(pm.agentInquiry.update).not.toHaveBeenCalled();
+  });
+  it("未反映が2件: 古い送信の時点の宛先に手で戻した=上書きしない", async () => {
+    pending = () => [
+      { id: "s1", toAddress: "b@agent.jp", statusAtSend: "done", contactEmailAtSend: "a@agent.jp" },
+      { id: "s2", toAddress: "d@agent.jp", statusAtSend: "done", contactEmailAtSend: "c@agent.jp" },
+    ];
+    pm.agentInquiry.findUnique.mockResolvedValue(inquiry({ status: "done", contactEmail: "a@agent.jp" }));
+    await APPLY(json("POST", {}), ctx);
+    expect(pm.agentInquiry.update).not.toHaveBeenCalled();
+  });
   it("状態だけ手で変えられていれば、宛先だけ直す(状態は残す)", async () => {
     pending = stuck;
     pm.agentInquiry.findUnique.mockResolvedValue(inquiry({ status: "in_progress" }));

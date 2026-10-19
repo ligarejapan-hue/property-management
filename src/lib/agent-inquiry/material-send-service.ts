@@ -228,14 +228,13 @@ export async function applySentMaterialToInquiry(
       ).map((r) => r.toAddress),
     );
     const curEmail = cur.contactEmail ?? "";
-    // 未反映の送信を古い順に1件ずつ、その送信の時点と比べる(@codex 10巡目 P2): 今の宛先がその送信の時点の宛先
-    // (または資料送付が書いた宛先)のままなら、その送信の宛先にする。最後に当てはまった送信が勝つ。
+    // 比べるのは**最新の**未反映の送信の時点だけ(@codex 10・14巡目 P2): 古い送信の時点の値に手で戻した、は
+    // 最新の送信より後の手の変更=上書きしない。宛先は資料送付が書いた値のままでもよい(同時に送った2件目)。
+    const latest = pending[pending.length - 1];
     const autoWritten = new Set([...appliedTo, ...pending.map((p) => p.toAddress)]);
-    let emailTarget: string | null = null;
-    for (const p of pending) {
-      if (curEmail === (p.contactEmailAtSend ?? "") || autoWritten.has(curEmail)) emailTarget = p.toAddress;
-    }
-    const setDone = cur.status !== "done" && pending.some((p) => p.statusAtSend === cur.status);
+    const emailTarget =
+      curEmail === (latest.contactEmailAtSend ?? "") || autoWritten.has(curEmail) ? latest.toAddress : null;
+    const setDone = cur.status !== "done" && cur.status === latest.statusAtSend;
     const setEmail = emailTarget != null && curEmail !== emailTarget;
     const to = emailTarget ?? "";
     if (!setDone && !setEmail) return { version: cur.version, statusChanged: false, contactChanged: false, wrote: false };
