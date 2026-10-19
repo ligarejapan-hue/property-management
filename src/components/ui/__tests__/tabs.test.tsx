@@ -123,4 +123,8 @@ describe("タブの下線がすべる(UIの統一 第2回・2026-10-19)", () => 
     expect(src).toContain('dataset.slider = "ready"');
     expect(src).not.toMatch(/useState/);
   });
+  it("★タブ1つずつの幅の変化も見る(書体の読み込み後に幅だけ変わる・@codex #531 P2)", () => {
+    const src = readFileSync(join(process.cwd(), "src/components/ui/tabs.tsx"), "utf8");
+    expect(src).toMatch(/querySelectorAll<HTMLElement>\('\[role="tab"\]'\)\.forEach\(\(t\) => ro\.observe\(t\)\)/);
+  });
 });

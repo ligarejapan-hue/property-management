@@ -83,6 +83,8 @@ export function Tabs<K extends string = string>({
     place();
     const ro = new ResizeObserver(place);
     ro.observe(list);
+    // タブ1つずつも見る(書体の読み込み後に、列の大きさは同じままタブの幅だけ変わる・@codex #531 P2)。
+    list.querySelectorAll<HTMLElement>('[role="tab"]').forEach((t) => ro.observe(t));
     return () => ro.disconnect();
   }, [active, tabs]);
   // ⚠role="tab" を名乗る以上、ARIA の tab パターンどおりに動かす(@codex #406 R1 P2):
