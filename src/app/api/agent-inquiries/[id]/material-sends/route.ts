@@ -189,6 +189,7 @@ export async function POST(request: Request, ctx: Ctx) {
       row: (typeof sel.rows)[number];
       key: string;
       effectiveType: "general" | "registry";
+      registryAttachmentId: string | null;
     }[] = [];
     const checks = await guardMaterialFiles(sel.rows, session, perms);
     sel.rows.forEach((r, i) => {
@@ -199,7 +200,7 @@ export async function POST(request: Request, ctx: Ctx) {
           "送れないファイルが含まれています。画面を開き直してください",
           "NOT_SELECTABLE",
         );
-      guarded.push({ row: r, key: g.key, effectiveType: g.effectiveType });
+      guarded.push({ row: r, key: g.key, effectiveType: g.effectiveType, registryAttachmentId: g.registryAttachmentId });
     });
 
     const storage = getStorage();
@@ -286,12 +287,17 @@ export async function POST(request: Request, ctx: Ctx) {
       // 謄本の取り扱いの記録。宛先は書かない(送った記録の表で見る)。
       ...guarded
         .filter((x) => x.effectiveType === "registry")
-        .map(({ row: r }) => ({
+        // 監査は実際の謄本の記録を指す。選んだ添付が別の記録(同じファイルのふつうの添付)なら、それも残す(@codex 25巡目 P2)。
+        .map(({ row: r, registryAttachmentId }) => ({
           userId: session.id,
           action: "registry_pdf_mail_send",
           targetTable: "attachments",
-          targetId: r.id,
-          detail: { inquiryId: id, sendId: claim.id },
+          targetId: registryAttachmentId ?? r.id,
+          detail: {
+            inquiryId: id,
+            sendId: claim.id,
+            ...(registryAttachmentId && registryAttachmentId !== r.id ? { selectedAttachmentId: r.id } : {}),
+          },
         })),
     ];
     // 取引で書けなかったとき(ずっと DB が落ちている)だけ、1行ずつの書き込みで残せるだけ残す。

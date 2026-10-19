@@ -50,11 +50,14 @@ export async function loadPropertyAttachments(propertyId: string, ids?: string[]
   });
 }
 
-export type MaterialFileGuard = { ok: true; key: string; effectiveType: "general" | "registry" } | { ok: false };
+/** registryAttachmentId=謄本として扱うときの、実際の謄本の記録(謄本の監査はこれを指す・@codex 25巡目 P2)。 */
+export type MaterialFileGuard =
+  | { ok: true; key: string; effectiveType: "general" | "registry"; registryAttachmentId: string | null }
+  | { ok: false };
 
 const BATCH = 50;
 type KeyRecords = {
-  atts: { targetType: string; targetId: string; propertyId: string | null; type: string }[];
+  atts: { id: string; targetType: string; targetId: string; propertyId: string | null; type: string }[];
   photoPropertyIds: string[];
   other: boolean; // 棟の写真・巡回の写真
 };
@@ -75,7 +78,7 @@ async function loadKeyRecords(keys: string[]): Promise<Map<string, KeyRecords>> 
     const [atts, photos, buildingPhotos, pinPhotos] = await Promise.all([
       prisma.attachment.findMany({
         where: { OR: likes.map((like) => ({ fileUrl: like })) },
-        select: { targetType: true, targetId: true, propertyId: true, fileUrl: true, type: true },
+        select: { id: true, targetType: true, targetId: true, propertyId: true, fileUrl: true, type: true },
       }),
       prisma.propertyPhoto.findMany({ where: { OR: both }, select: { propertyId: true, fileUrl: true, thumbnailUrl: true } }),
       prisma.buildingPhoto.findMany({ where: { OR: both }, select: { fileUrl: true, thumbnailUrl: true } }),
@@ -124,7 +127,9 @@ function decideMaterialFile(
   ) {
     return { ok: false };
   }
-  return { ok: true, key, effectiveType };
+  const registryAttachmentId =
+    effectiveType === "registry" ? (row.type === "registry" ? row.id : (rec.atts.find((a) => a.type === "registry")?.id ?? null)) : null;
+  return { ok: true, key, effectiveType, registryAttachmentId };
 }
 
 /**
@@ -173,7 +178,7 @@ export async function guardMaterialFiles(
     if (meta?.kind === "registry" && g.effectiveType !== "registry") {
       out.push(
         hasPermission(perms, "registry_pdf", "preview") && hasPermission(perms, "registry_pdf", "download")
-          ? { ok: true, key: g.key, effectiveType: "registry" }
+          ? { ok: true, key: g.key, effectiveType: "registry", registryAttachmentId: meta.attachmentId ?? null }
           : { ok: false },
       );
       continue;

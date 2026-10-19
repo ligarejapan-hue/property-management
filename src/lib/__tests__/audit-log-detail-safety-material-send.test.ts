@@ -13,7 +13,11 @@ describe("資料送付の監査の中身が監査ログ画面で読める", () =
     ).toEqual({ files: 2, totalSize: 3000, outcome: "unknown", statusChanged: true });
   });
   it("registry_pdf_mail_send: どの反響のどの送信か", () => {
-    expect(sanitizeAuditDetail("registry_pdf_mail_send", { inquiryId: "i1", sendId: "s1" })).toEqual({ inquiryId: "i1", sendId: "s1" });
+    expect(sanitizeAuditDetail("registry_pdf_mail_send", { inquiryId: "i1", sendId: "s1", selectedAttachmentId: "a1" })).toEqual({
+      inquiryId: "i1",
+      sendId: "s1",
+      selectedAttachmentId: "a1",
+    });
   });
   it("agent_inquiry_material_apply: 状態が変わったか", () => {
     expect(sanitizeAuditDetail("agent_inquiry_material_apply", { statusChanged: false, contactChanged: true })).toEqual({

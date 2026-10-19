@@ -211,6 +211,14 @@ describe("同じファイルを別の物件の記録が指していれば送ら�
     expect(pm.propertyPhoto.findMany.mock.calls.length).toBeLessThanOrEqual(2);
     expect(h.authorize).not.toHaveBeenCalled();
   });
+  it("同じ物件の謄本と同じファイルのふつうの添付を送った=謄本の監査は実際の謄本の記録を指す(@codex 25巡目 P2)", async () => {
+    grant(["agent_inquiry", "write"], ["property", "read"], ["registry_pdf", "preview"], ["registry_pdf", "download"]);
+    sameFileRecords([att({ id: "reg1", type: "registry" })]);
+    expect((await POST(json("POST", body()), ctx)).status).toBe(201);
+    const row = audits().find((a) => a.action === "registry_pdf_mail_send")!;
+    expect(row.targetId).toBe("reg1");
+    expect(row.detail).toMatchObject({ selectedAttachmentId: A1 });
+  });
   it("受け取り箱の置き場所のファイルは送らない", async () => {
     pm.attachment.findMany.mockResolvedValue([att({ fileUrl: "/uploads/report-inbox/a.pdf" })]);
     expect((await (await POST(json("POST", body()), ctx)).json()).error.code).toBe("NOT_SELECTABLE");
