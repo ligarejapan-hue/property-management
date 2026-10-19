@@ -5,6 +5,8 @@ import { dirname, join } from "node:path";
 
 const dir = dirname(fileURLToPath(import.meta.url));
 const src = readFileSync(join(dir, "..", "investigation-tab.tsx"), "utf8");
+// UIの統一 第3回(2026-10-19): ボタンは共通 Button になり、枠線ボタンの配色はそちらが持つ
+const buttonSrc = readFileSync(join(dir, "..", "..", "ui", "button.tsx"), "utf8");
 
 describe("investigation-tab.tsx dark: 配色 (物件詳細タブ群)", () => {
   // --- 面（背景）---
@@ -16,8 +18,9 @@ describe("investigation-tab.tsx dark: 配色 (物件詳細タブ群)", () => {
   });
 
   // --- hover 背景 ---
-  it("hover:bg-gray-50 に dark:hover:bg-gray-800 がある", () => {
-    expect(src).toContain("dark:hover:bg-gray-800");
+  it("hover:bg-gray-50 に dark:hover:bg-gray-800 がある(枠線ボタン=共通 Button の secondary)", () => {
+    expect(src).toContain('variant="secondary"');
+    expect(buttonSrc).toContain("dark:hover:bg-gray-800");
   });
 
   // --- 文字 ---
@@ -86,15 +89,10 @@ describe("investigation-tab.tsx dark: 配色 (物件詳細タブ群)", () => {
     expect(src).toContain("dark:border-amber-500/20");
   });
 
-  // --- 取得ボタン（active accent 分岐）---
-  it("取得ボタン active 状態に dark:border-blue-500/40 がある", () => {
-    expect(src).toContain("dark:border-blue-500/40");
-  });
-  it("取得ボタン active 状態に dark:bg-blue-500/20 がある", () => {
-    expect(src).toContain("dark:bg-blue-500/20");
-  });
-  it("取得ボタン active 状態に dark:text-blue-300 がある", () => {
-    expect(src).toContain("dark:text-blue-300");
+  // --- 取得ボタン(UIの統一 第3回で共通 Button の secondary に。ダークの枠線は Button が持つ)---
+  it("取得ボタンは共通 Button の secondary で、ダークの枠線 dark:border-gray-700 を持つ", () => {
+    expect(src).toMatch(/<Button\s+variant="secondary"[^>]*onClick=\{handleFetch\}/);
+    expect(buttonSrc).toContain("dark:border-gray-700");
   });
 
   // --- 参考情報ボックス（blue） ---
@@ -147,14 +145,11 @@ describe("investigation-tab.tsx dark: 配色 (物件詳細タブ群)", () => {
   it("ライトモード bg-blue-50 は残っている", () => {
     expect(src).toContain("bg-blue-50");
   });
-  it("ライトモード hover:bg-gray-50 は残っている", () => {
-    expect(src).toContain("hover:bg-gray-50");
+  it("ライトモード hover:bg-gray-50 は残っている(共通 Button の secondary)", () => {
+    expect(buttonSrc).toContain("hover:bg-gray-50");
   });
   it("ライトモード divide-gray-100 は残っている", () => {
     expect(src).toContain("divide-gray-100");
-  });
-  it("ライトモード border-blue-300 は残っている", () => {
-    expect(src).toContain("border-blue-300");
   });
   it("ライトモード text-blue-700 は残っている", () => {
     expect(src).toContain("text-blue-700");

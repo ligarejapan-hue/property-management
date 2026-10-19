@@ -97,7 +97,6 @@ describe("registry-location-search-button.tsx: dark 配色（暗面可読化）"
     "dark:bg-gray-900",
     "dark:bg-gray-800/60",
     "dark:border-gray-700",
-    "dark:hover:bg-gray-800",
   ];
   for (const cls of darkClasses) {
     it(`${cls} がある`, () => {
@@ -107,9 +106,6 @@ describe("registry-location-search-button.tsx: dark 配色（暗面可読化）"
 
   // ライト不変担保（solid ボタン + accent 地/文字）。
   const lightClasses = [
-    "bg-indigo-600",
-    "text-white",
-    "hover:bg-indigo-700",
     "border-indigo-200",
     "bg-indigo-50",
     "text-indigo-800",
@@ -120,12 +116,29 @@ describe("registry-location-search-button.tsx: dark 配色（暗面可読化）"
     "border-red-300",
     "bg-red-50",
     "bg-white",
-    "border-gray-300",
-    "hover:bg-gray-50",
   ];
   for (const cls of lightClasses) {
     it(`ライト ${cls} が残っている`, () => {
       expect(src).toContain(cls);
+    });
+  }
+
+  // UIの統一 第3回(2026-10-19): ボタンは共通 Button になり、塗り(藍)・枠線ボタンの配色はそちらが持つ。
+  const buttonSrc = readFileSync(join(dir, "..", "..", "ui", "button.tsx"), "utf8");
+  it("ボタンは共通 Button の primary / secondary を使う", () => {
+    expect(src).toContain('variant="primary"');
+    expect(src).toContain('variant="secondary"');
+  });
+  for (const cls of [
+    "bg-indigo-600",
+    "text-white",
+    "hover:bg-indigo-700",
+    "border-gray-300",
+    "hover:bg-gray-50",
+    "dark:hover:bg-gray-800",
+  ]) {
+    it(`共通 Button に ${cls} がある`, () => {
+      expect(buttonSrc).toContain(cls);
     });
   }
 });

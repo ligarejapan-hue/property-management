@@ -16,7 +16,8 @@ describe("properties/page.tsx dark: 配色 (T2)", () => {
   });
   it("サジェストボタン: hover:bg-indigo-50 と dark:hover:bg-gray-800 が同一クラス属性に共存する", () => {
     // 暗背景 hover 時に白文字(dark:text-gray-100)が読める状態を保つ
-    const match = src.match(/className="[^"]*hover:bg-indigo-50[^"]*"/);
+    // UIの統一 第3回: サジェストの行は className がテンプレート文字列(以前は売却DMボタンの属性に当たっていた)
+    const match = src.match(/className=\{?[`"][^`"]*hover:bg-indigo-50[^`"]*[`"]/);
     expect(match).not.toBeNull();
     expect(match![0]).toContain("dark:hover:bg-gray-800");
   });

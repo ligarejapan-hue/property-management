@@ -33,12 +33,15 @@ function buttonContaining(src: string, label: string): string {
   let at = src.indexOf(label);
   expect(at, `ラベルが見つからない: ${label}`).toBeGreaterThan(-1);
   while (at !== -1) {
-    const open = src.lastIndexOf("<button", at);
-    const close = src.indexOf("</button>", at);
+    // UIの統一 第3回: 共通 Button(<Button>)も同じボタン要素として扱う
+    const open = Math.max(src.lastIndexOf("<button", at), src.lastIndexOf("<Button", at));
+    const closes = [src.indexOf("</button>", at), src.indexOf("</Button>", at)].filter((i) => i !== -1);
+    const close = closes.length > 0 ? Math.min(...closes) : -1;
     if (open !== -1 && close !== -1) {
       const el = src.slice(open, close);
       // 開きタグ以降に別の <button> が無い = この要素の中にラベルがある
-      if (!el.slice(1).includes("<button")) return el;
+      const rest = el.slice(1);
+      if (!rest.includes("<button") && !rest.includes("<Button")) return el;
     }
     at = src.indexOf(label, at + 1);
   }
@@ -78,6 +81,7 @@ describe("所有者を外す導線", () => {
     ).toBeGreaterThan(-1);
     // 囲いとボタンの間に別のボタンが挟まっていない = この囲いがこのボタンに掛かっている
     expect(pageSrc.slice(guardAt, btnAt)).not.toContain("</button>");
+    expect(pageSrc.slice(guardAt, btnAt)).not.toContain("</Button>");
   });
 
   it("押す前に確認し、何が消えて何が残るかを書く", () => {

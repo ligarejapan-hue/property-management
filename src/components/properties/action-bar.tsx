@@ -11,6 +11,7 @@ import {
   Loader2,
 } from "lucide-react";
 import { executePropertyAction } from "@/lib/api-client";
+import { Button } from "@/components/ui/button";
 
 /**
  * 物件の状態を変える操作(POST /api/properties/[id]/actions)の実行と結果の表示。
@@ -128,19 +129,17 @@ export default function ActionBar(props: ActionBarProps) {
           「自分を担当にする」は、すでに自分が担当なら出さない(押しても何も変わらないため)。 */}
       {!props.assignedToMe && (
         <div className="flex flex-wrap gap-2">
-          <button
-            type="button"
+          <Button
+            variant="secondary"
+            size="sm"
             onClick={() => handleAction("assign_to_me")}
             disabled={loading !== null}
-            className="flex items-center gap-1.5 rounded-md bg-gray-600 px-3 py-1.5 text-xs font-medium text-white hover:bg-gray-700 disabled:opacity-50"
+            loading={loading === "assign_to_me"}
+            loadingLabel="自分を担当にする"
           >
-            {loading === "assign_to_me" ? (
-              <Loader2 className="h-3.5 w-3.5 animate-spin" />
-            ) : (
-              <UserCheck className="h-3.5 w-3.5" />
-            )}
+            <UserCheck className="h-3.5 w-3.5" />
             自分を担当にする
-          </button>
+          </Button>
         </div>
       )}
 
@@ -152,20 +151,19 @@ export default function ActionBar(props: ActionBarProps) {
           <span className="text-sm text-amber-800 dark:text-amber-300">
             調査情報が未確認です。最新の情報を取得してください。
           </span>
-          <button
-            type="button"
+          <Button
+            variant="success"
+            size="sm"
             onClick={() => handleAction("confirm_investigation")}
             disabled={loading !== null}
+            loading={loading === "confirm_investigation"}
+            loadingLabel="確認した"
             aria-label="調査を確認する"
-            className="ml-auto flex items-center gap-1.5 rounded-md bg-green-600 px-3 py-1 text-xs font-medium text-white hover:bg-green-700 disabled:opacity-50"
+            className="ml-auto"
           >
-            {loading === "confirm_investigation" ? (
-              <Loader2 className="h-3.5 w-3.5 animate-spin" />
-            ) : (
-              <CheckCircle2 className="h-3.5 w-3.5" />
-            )}
+            <CheckCircle2 className="h-3.5 w-3.5" />
             確認した
-          </button>
+          </Button>
         </div>
       )}
 

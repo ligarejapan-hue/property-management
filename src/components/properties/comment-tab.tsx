@@ -4,6 +4,7 @@ import { useState, useEffect, useCallback } from "react";
 import { Send, Loader2, MessageCircle, CornerDownRight } from "lucide-react";
 import { fetchComments as apiFetchComments, postComment } from "@/lib/api-client";
 import { formatJaDateTime } from "@/lib/format-datetime";
+import { Button } from "@/components/ui/button";
 
 interface Author {
   id: string;
@@ -131,25 +132,19 @@ function CommentForm({
           className="flex-1 rounded-md border border-gray-300 px-3 py-2 text-sm focus:border-indigo-500 focus:ring-1 focus:ring-indigo-500 focus:outline-none resize-none dark:border-gray-700 dark:bg-gray-900 dark:text-gray-100"
         />
         <div className="flex flex-col gap-1">
-          <button
+          <Button
             type="submit"
+            variant="primary"
             disabled={submitting || !body.trim()}
-            className="flex items-center gap-1 rounded-md bg-indigo-600 px-3 py-2 text-sm font-medium text-white hover:bg-indigo-700 disabled:opacity-50 disabled:cursor-not-allowed"
+            loading={submitting}
+            loadingLabel=""
           >
-            {submitting ? (
-              <Loader2 className="h-4 w-4 animate-spin" />
-            ) : (
-              <Send className="h-4 w-4" />
-            )}
-          </button>
+            <Send className="h-4 w-4" />
+          </Button>
           {onCancel && (
-            <button
-              type="button"
-              onClick={onCancel}
-              className="rounded-md border border-gray-300 px-3 py-1.5 text-xs text-gray-600 hover:bg-gray-50 dark:border-gray-700 dark:text-gray-300 dark:hover:bg-gray-800"
-            >
+            <Button variant="secondary" size="sm" onClick={onCancel}>
               取消
-            </button>
+            </Button>
           )}
         </div>
       </div>
@@ -186,13 +181,15 @@ function CommentItem({
       <p className="text-sm text-gray-700 whitespace-pre-wrap dark:text-gray-200">
         {comment.body}
       </p>
-      <button
+      <Button
+        variant="ghost"
+        size="sm"
         onClick={() => setShowReplyForm(!showReplyForm)}
-        className="mt-2 flex items-center gap-1 text-xs text-indigo-600 hover:text-indigo-800 dark:text-indigo-400 dark:hover:text-indigo-300"
+        className="mt-2 text-indigo-600 hover:text-indigo-800 dark:text-indigo-400 dark:hover:text-indigo-300"
       >
         <CornerDownRight className="h-3 w-3" />
         返信
-      </button>
+      </Button>
 
       {/* Replies */}
       {comment.replies?.length > 0 && (

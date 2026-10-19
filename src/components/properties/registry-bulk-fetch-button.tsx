@@ -15,6 +15,7 @@ import {
   RegistryTargetSummary,
 } from "@/components/properties/registry-preflight-warnings";
 import { useRouter } from "next/navigation";
+import { Button } from "@/components/ui/button";
 import { createRegistryFetchJob } from "@/lib/api-client";
 // ⚠冪等キーの張り替え判定は**サーバの照合と同じ材料**で行う（定義元は1つ）。
 import { buildBulkIdempotencySignature } from "@/lib/registry-fetch/bulk/idempotency";
@@ -92,8 +93,10 @@ export function RegistryBulkFetchButton({ propertyIds, disabled }: Props) {
 
   return (
     <>
+      {/* data-ui=raw: 薄い藍の塗り+藍の枠(一覧の上の一括操作の札型)=合う variant が無い */}
       <button
         type="button"
+        data-ui="raw"
         onClick={() => {
           setError(null);
           setCertificateType("owner");
@@ -173,16 +176,15 @@ export function RegistryBulkFetchButton({ propertyIds, disabled }: Props) {
             )}
 
             <div className="mt-5 flex justify-end gap-2">
-              <button
-                type="button"
+              <Button
+                variant="secondary"
                 onClick={() => setOpen(false)}
                 disabled={creating}
-                className="rounded border border-gray-300 px-3 py-1.5 text-sm text-gray-700 hover:bg-gray-50 disabled:opacity-60 dark:border-gray-700 dark:text-gray-200 dark:hover:bg-gray-800"
               >
                 やめる
-              </button>
-              <button
-                type="button"
+              </Button>
+              <Button
+                variant="primary"
                 onClick={handleConfirm}
                 disabled={
                   creating ||
@@ -193,14 +195,13 @@ export function RegistryBulkFetchButton({ propertyIds, disabled }: Props) {
                   preflight.targetsUnavailable
                 }
                 title={preflight.pending ? "事前確認中です" : undefined}
-                className="rounded bg-indigo-600 px-3 py-1.5 text-sm font-medium text-white hover:bg-indigo-700 disabled:cursor-not-allowed disabled:opacity-60"
               >
                 {creating
                   ? "作成中…"
                   : preflight.pending
                     ? "確認中..."
                     : `${certificateType === "all" ? "全部事項" : "所有者事項"}で取得を開始`}
-              </button>
+              </Button>
             </div>
           </div>
         </div>

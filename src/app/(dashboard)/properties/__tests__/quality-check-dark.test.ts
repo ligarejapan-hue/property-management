@@ -47,8 +47,8 @@ describe('quality-check page dark mode', () => {
   })
 
   it('load-more button has dark border and text', () => {
-    expect(src).toContain('dark:text-gray-200')
-    expect(src).toContain('dark:hover:bg-gray-800')
+    // UIの統一 第3回: 共通 Button の secondary(暗い色の組は Button 側が持つ)
+    expect(src).toMatch(/<Button\s+variant="secondary"\s+onClick=\{loadMore\}/)
   })
 
   it('neutral summary card count has dark text supplement', () => {

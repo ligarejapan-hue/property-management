@@ -17,6 +17,7 @@ import {
   deleteNextAction,
 } from "@/lib/api-client";
 import { jstToday, nextActionDeadline } from "@/lib/notifications/reminder-schedule";
+import { Button } from "@/components/ui/button";
 
 /**
  * 期限切れか。時刻あり=予定日＋時刻(日本時間)を過ぎた、時刻なし=予定日が日本時間の今日より前。
@@ -108,13 +109,10 @@ export default function NextActionTab({
       {/* Header */}
       <div className="flex items-center justify-between mb-4">
         <div className="flex items-center gap-3">
-          <button
-            onClick={() => setShowForm(!showForm)}
-            className="flex items-center gap-1 rounded-md bg-indigo-600 px-3 py-1.5 text-sm font-medium text-white hover:bg-indigo-700"
-          >
+          <Button variant="primary" onClick={() => setShowForm(!showForm)}>
             <Plus className="h-4 w-4" />
             追加
-          </button>
+          </Button>
           <label className="flex items-center gap-1.5 text-sm text-gray-600 dark:text-gray-300">
             <input
               type="checkbox"
@@ -166,7 +164,9 @@ export default function NextActionTab({
                       : "border-gray-200 bg-white dark:border-gray-800 dark:bg-gray-900"
                 }`}
               >
+                {/* data-ui=raw: 完了のチェック枠(四角いチェックボックス型・ボタンの形をしていない) */}
                 <button
+                  data-ui="raw"
                   onClick={() => toggleComplete(action)}
                   className={`mt-0.5 flex h-5 w-5 shrink-0 items-center justify-center rounded border ${
                     action.isCompleted
@@ -200,13 +200,15 @@ export default function NextActionTab({
                     <span>担当: {action.assignee.name}</span>
                   </div>
                 </div>
-                <button
+                <Button
+                  variant="ghost"
+                  size="sm"
                   onClick={() => handleDeleteAction(action.id)}
-                  className="shrink-0 rounded p-1 text-gray-400 hover:bg-red-50 hover:text-red-500 dark:text-gray-500 dark:hover:bg-red-500/10"
+                  className="shrink-0 text-gray-400 hover:text-red-500 dark:text-gray-500"
                   title="削除"
                 >
                   <Trash2 className="h-4 w-4" />
-                </button>
+                </Button>
               </div>
             );
           })}
@@ -340,20 +342,16 @@ function CreateActionForm({
       </div>
       {error && <p className="mt-2 text-xs text-red-600 dark:text-red-400">{error}</p>}
       <div className="mt-3 flex gap-2">
-        <button
+        <Button
           type="submit"
+          variant="primary"
           disabled={submitting || !content.trim() || !assignedTo}
-          className="rounded-md bg-indigo-600 px-4 py-1.5 text-sm font-medium text-white hover:bg-indigo-700 disabled:opacity-50"
         >
           {submitting ? "作成中..." : "作成"}
-        </button>
-        <button
-          type="button"
-          onClick={onCancel}
-          className="rounded-md border border-gray-300 px-4 py-1.5 text-sm text-gray-600 hover:bg-gray-50 dark:border-gray-700 dark:text-gray-300 dark:hover:bg-gray-800"
-        >
+        </Button>
+        <Button variant="secondary" onClick={onCancel}>
           キャンセル
-        </button>
+        </Button>
       </div>
     </form>
   );

@@ -70,6 +70,32 @@ describe("Button", () => {
     expect(out).not.toContain("bg-indigo-600");
   });
 
+  it("success = 緑(完了・成功の意味の操作。色の決まりで状態色は残す・第3回)", () => {
+    const out = html({ variant: "success" });
+    expect(out).toContain("bg-green-600");
+    expect(out).toContain("hover:bg-green-700");
+    expect(out).toContain("text-white");
+    expect(out).not.toContain("bg-indigo-600");
+  });
+
+  it("★ghost に文字色を渡すと既定の灰の文字色を外す(CSS の並び順で負けない・第3回)", () => {
+    const out = html({ variant: "ghost", className: "text-red-600 dark:text-red-400" });
+    expect(out).toContain("text-red-600");
+    expect(out).not.toContain("text-gray-700");
+    expect(out).not.toContain("dark:text-gray-200");
+    // 文字の大きさ(text-xs 等)や hover の色は「文字色」に数えない
+    const sized = html({ variant: "ghost", size: "sm", className: "hover:text-red-600 text-left" });
+    expect(sized).toContain("text-gray-700");
+    expect(html({ variant: "ghost" })).toContain("text-gray-700");
+  });
+
+  it("★justify-* を渡すと既定の justify-center を外す(左寄せの幅いっぱいボタン・第3回)", () => {
+    const out = html({ className: "w-full justify-start" });
+    expect(out).toContain("justify-start");
+    expect(out).not.toContain("justify-center");
+    expect(html({})).toContain("justify-center");
+  });
+
   it("lg = スマホの主操作(高さ44px以上)", () => {
     const out = html({ size: "lg" });
     expect(out).toContain("min-h-11");

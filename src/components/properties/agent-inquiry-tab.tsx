@@ -85,8 +85,10 @@ export function PropertyInquiryView({
             }
             return (
               <li key={m}>
+                {/* data-ui=raw: 広告可否の札型の切替(値ごとの薄い色・押すたびに ○→×→△→未設定)=合う variant が無い */}
                 <button
                   type="button"
+                  data-ui="raw"
                   data-ad-medium={m}
                   // 保存中は6つとも止める=連打で古い値(from)のまま2回目を送らない。
                   disabled={savingMedium != null}
@@ -127,8 +129,10 @@ export function PropertyInquiryView({
                 {e.contactName && <span>{`(${e.contactName}様)`}</span>}
                 {e.attendantName && <span className="ml-2 text-xs text-gray-500 dark:text-gray-400">{`立ち会い:${e.attendantName}`}</span>}
                 {e.kind === "material_request" && canSendMaterial && onOpenMaterial && (
+                  // data-ui=raw: 資料送付の色(ティールの枠線・反響の受付の「資料を送る」と揃えた色)=合う variant が無い
                   <button
                     type="button"
+                    data-ui="raw"
                     onClick={() => onOpenMaterial(e.inquiryId)}
                     className="ml-2 rounded border border-teal-700 px-2 py-0.5 text-xs text-teal-700 dark:border-teal-300 dark:text-teal-300"
                   >

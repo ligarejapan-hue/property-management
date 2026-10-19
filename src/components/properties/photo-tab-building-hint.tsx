@@ -41,8 +41,10 @@ export function PhotoTabBuildingHint({
       <p className={textClass}>
         この物件単体の写真です。物件名(マンション名)を入れると棟につながり、共用部・外観の写真を部屋どうしで共有できます。
         {onEditProperty && (
+          // data-ui=raw: 文の途中の下線リンク(余白を足すと文の中でふくらむ)
           <button
             type="button"
+            data-ui="raw"
             onClick={onEditProperty}
             className="ml-1 font-medium text-blue-600 underline hover:text-blue-800 dark:text-blue-400 dark:hover:text-blue-300"
           >

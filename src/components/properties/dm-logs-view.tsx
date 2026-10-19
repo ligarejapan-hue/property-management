@@ -4,6 +4,7 @@ import { useState, useEffect, useCallback, useMemo, useRef } from "react";
 import { USE_MOCK } from "@/lib/api-client";
 import { Loader2, Mail, ChevronLeft, ChevronRight, Plus, Trash2, MessageCircle } from "lucide-react";
 import { dmMethodLabel, dmTypeLabel } from "@/lib/dm-method-labels";
+import { Button } from "@/components/ui/button";
 import {
   REACTION_STATUSES,
   REACTION_LABELS,
@@ -145,20 +146,18 @@ function CreateLogForm({
         </label>
       </div>
       <div className="mt-3 flex gap-2">
-        <button
+        <Button
+          variant="primary"
           type="submit"
           disabled={submitting || !sentOn}
-          className="rounded-md bg-indigo-600 px-3 py-1.5 text-sm font-medium text-white hover:bg-indigo-700 disabled:cursor-not-allowed disabled:opacity-50"
+          loading={submitting}
+          loadingLabel="記録中..."
         >
-          {submitting ? "記録中..." : "記録する"}
-        </button>
-        <button
-          type="button"
-          onClick={onCancel}
-          className="rounded-md border border-gray-300 px-3 py-1.5 text-sm text-gray-700 hover:bg-gray-50 dark:border-gray-700 dark:text-gray-200 dark:hover:bg-gray-800"
-        >
+          記録する
+        </Button>
+        <Button variant="secondary" onClick={onCancel}>
           キャンセル
-        </button>
+        </Button>
       </div>
     </form>
   );
@@ -271,9 +270,12 @@ function ReactionEditor({
           取り消し・変更は管理者のみになります。もう一度押すと確定します。
         </span>
       )}
-      <button
-        type="button"
+      <Button
+        variant="primary"
+        size="sm"
         disabled={saving}
+        loading={saving}
+        loadingLabel="保存中..."
         onClick={() => {
           // 「拒否」への変更だけ 2 回押し(既に拒否の記録を拒否のまま保存するのは対象外)。
           if (status === "refused" && log.reactionStatus !== "refused" && !refusalArmed) {
@@ -282,17 +284,12 @@ function ReactionEditor({
           }
           onSave(status, reactedAt, note, clearNote);
         }}
-        className="rounded-md bg-indigo-600 px-2 py-1 text-xs font-medium text-white hover:bg-indigo-700 disabled:opacity-50"
       >
-        {saving ? "保存中..." : refusalArmed ? "拒否として保存（確定）" : "保存"}
-      </button>
-      <button
-        type="button"
-        onClick={onCancel}
-        className="rounded-md border border-gray-300 px-2 py-1 text-xs text-gray-700 dark:border-gray-700 dark:text-gray-200"
-      >
+        {refusalArmed ? "拒否として保存（確定）" : "保存"}
+      </Button>
+      <Button variant="secondary" size="sm" onClick={onCancel}>
         やめる
-      </button>
+      </Button>
     </div>
   );
 }
@@ -508,14 +505,10 @@ export default function DmLogsView({ propertyId }: { propertyId: string }) {
           <h1 className="text-xl font-bold text-gray-800 dark:text-gray-100">DM 送付履歴</h1>
         </div>
         {canWrite && (
-          <button
-            type="button"
-            onClick={() => setShowForm((v) => !v)}
-            className="flex items-center gap-1 rounded-md bg-indigo-600 px-3 py-1.5 text-sm font-medium text-white hover:bg-indigo-700"
-          >
+          <Button variant="primary" onClick={() => setShowForm((v) => !v)}>
             <Plus className="h-4 w-4" />
             記録を追加
-          </button>
+          </Button>
         )}
       </div>
 
@@ -656,13 +649,14 @@ export default function DmLogsView({ propertyId }: { propertyId: string }) {
                             {log.reactionSource === "sale_dm_sync" && "(自動)"}
                           </span>
                           {canWrite && (
-                            <button
-                              type="button"
+                            <Button
+                              variant="ghost"
+                              size="sm"
                               onClick={() => setEditingReactionId(log.id)}
-                              className="rounded px-1 py-0.5 text-xs text-indigo-600 hover:bg-indigo-50 dark:text-indigo-400 dark:hover:bg-indigo-500/10"
+                              className="text-indigo-600 dark:text-indigo-400"
                             >
                               記録
-                            </button>
+                            </Button>
                           )}
                         </div>
                       )}
@@ -679,14 +673,15 @@ export default function DmLogsView({ propertyId }: { propertyId: string }) {
                       <td className="px-2 py-2">
                         {/* 売却DM由来・一括確定由来はサーバが 409 で拒否するため、ボタン自体を出さない(#364 R6)。 */}
                         {log.deletable && (
-                          <button
-                            type="button"
+                          <Button
+                            variant="ghost"
+                            size="sm"
                             onClick={() => handleDelete(log.id)}
-                            className="shrink-0 rounded p-1 text-gray-400 hover:bg-red-50 hover:text-red-500 dark:text-gray-500 dark:hover:bg-red-500/10"
+                            className="shrink-0 text-gray-400 hover:text-red-500 dark:text-gray-500"
                             title="この記録を取り消す"
                           >
                             <Trash2 className="h-4 w-4" />
-                          </button>
+                          </Button>
                         )}
                       </td>
                     )}
@@ -700,27 +695,27 @@ export default function DmLogsView({ propertyId }: { propertyId: string }) {
             <div className="mt-4 flex items-center justify-between">
               <p className="text-xs text-gray-500 dark:text-gray-400">全 {pagination.total} 件</p>
               <div className="flex items-center gap-2">
-                <button
-                  type="button"
+                <Button
+                  variant="secondary"
+                  size="sm"
                   disabled={page <= 1}
                   onClick={() => setPage((p) => Math.max(1, p - 1))}
-                  className="flex items-center gap-1 rounded border border-gray-300 dark:border-gray-700 px-2 py-1 text-xs disabled:opacity-40"
                 >
                   <ChevronLeft className="h-3 w-3" />
                   前へ
-                </button>
+                </Button>
                 <span className="text-xs text-gray-600 dark:text-gray-300">
                   {page} / {pagination.totalPages}
                 </span>
-                <button
-                  type="button"
+                <Button
+                  variant="secondary"
+                  size="sm"
                   disabled={page >= pagination.totalPages}
                   onClick={() => setPage((p) => p + 1)}
-                  className="flex items-center gap-1 rounded border border-gray-300 dark:border-gray-700 px-2 py-1 text-xs disabled:opacity-40"
                 >
                   次へ
                   <ChevronRight className="h-3 w-3" />
-                </button>
+                </Button>
               </div>
             </div>
           )}

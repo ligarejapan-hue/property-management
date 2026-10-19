@@ -8,6 +8,7 @@ import {
   type DmBatchSummary,
 } from "@/lib/api-client";
 import { formatJaDateTime } from "@/lib/format-datetime";
+import { Button } from "@/components/ui/button";
 
 // 送付の確定モーダル(設計書§2.2)。未確定の控え(出力日時・件数)を一覧し、
 // 投函日を入れて確定する。宛先(PII)は表示しない。
@@ -84,14 +85,15 @@ export default function DmBatchConfirmModal({
             <Mail className="h-5 w-5 text-indigo-500" />
             送付の確定
           </h2>
-          <button
-            type="button"
+          <Button
+            variant="ghost"
+            size="sm"
             onClick={onClose}
-            className="rounded p-1 text-gray-400 hover:bg-gray-100 hover:text-gray-600 dark:hover:bg-gray-800"
+            className="text-gray-400 hover:text-gray-600"
             aria-label="閉じる"
           >
             <X className="h-5 w-5" />
-          </button>
+          </Button>
         </div>
 
         <p className="mb-3 text-sm text-gray-600 dark:text-gray-400">
@@ -156,35 +158,33 @@ export default function DmBatchConfirmModal({
                     </span>
                   )}
                 </div>
-                <button
-                  type="button"
+                <Button
+                  variant="primary"
                   onClick={() => handleConfirm(b.id)}
                   disabled={!b.downloadedAt || confirmingId !== null}
+                  loading={confirmingId === b.id}
+                  loadingLabel=""
                   title={
                     !b.downloadedAt
                       ? "先にCSVをダウンロードしてください"
                       : "この控えの宛先全件を送付済みとして記録"
                   }
-                  className="shrink-0 rounded-md bg-indigo-600 px-3 py-1.5 text-sm font-medium text-white hover:bg-indigo-700 disabled:cursor-not-allowed disabled:opacity-50"
+                  className="shrink-0"
                 >
-                  {confirmingId === b.id ? (
-                    <Loader2 className="h-4 w-4 animate-spin" />
-                  ) : (
-                    "確定"
-                  )}
-                </button>
+                  確定
+                </Button>
               </li>
             ))}
           </ul>
         )}
         {hasMore && !loading && (
-          <button
-            type="button"
+          <Button
+            variant="secondary"
             onClick={() => fetchBatches(page + 1, true)}
-            className="mt-2 w-full rounded-md border border-gray-300 px-3 py-1.5 text-sm text-gray-700 hover:bg-gray-50 dark:border-gray-700 dark:text-gray-200 dark:hover:bg-gray-800"
+            className="mt-2 w-full"
           >
             さらに表示
-          </button>
+          </Button>
         )}
       </div>
     </div>

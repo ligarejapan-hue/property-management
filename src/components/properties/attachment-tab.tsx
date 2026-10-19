@@ -3,6 +3,7 @@
 import { useState, useEffect, useCallback, useRef } from "react";
 import { ConfirmDialog } from "@/components/ui/confirm-dialog";
 import FileDropZone from "@/components/ui/file-drop-zone";
+import { Button } from "@/components/ui/button";
 import {
   Loader2,
   Paperclip,
@@ -432,8 +433,10 @@ function AttachmentRow({
       <Icon className="h-5 w-5 shrink-0 text-gray-500 dark:text-gray-400" />
       <div className="min-w-0 flex-1">
         {previewable ? (
+          // data-ui=raw: ファイル名そのものが押せる文字(1行で省略表示・余白を足すと下の行とずれる)
           <button
             type="button"
+            data-ui="raw"
             onClick={onPreviewClick}
             className="block w-full truncate text-left text-sm font-medium text-indigo-600 dark:text-indigo-400 hover:underline"
             title="プレビュー"
@@ -453,13 +456,15 @@ function AttachmentRow({
         </p>
       </div>
       {previewable && (
-        <button
+        <Button
+          variant="ghost"
+          size="sm"
           onClick={onPreviewClick}
-          className="shrink-0 rounded p-1 text-gray-400 dark:text-gray-500 hover:bg-indigo-50 hover:text-indigo-500 dark:hover:bg-gray-800"
+          className="shrink-0 text-gray-400 dark:text-gray-500 hover:text-indigo-500"
           title="プレビュー"
         >
           <Eye className="h-4 w-4" />
-        </button>
+        </Button>
       )}
       <a
         href={downloadHref}
@@ -471,13 +476,15 @@ function AttachmentRow({
       >
         <Download className="h-4 w-4" />
       </a>
-      <button
+      <Button
+        variant="ghost"
+        size="sm"
         onClick={onDeleteClick}
-        className="shrink-0 rounded p-1 text-gray-400 dark:text-gray-500 hover:bg-red-50 hover:text-red-500"
+        className="shrink-0 text-gray-400 dark:text-gray-500 hover:text-red-500"
         title="削除"
       >
         <Trash2 className="h-4 w-4" />
-      </button>
+      </Button>
     </div>
   );
 }
@@ -526,13 +533,15 @@ function PreviewModal({
             >
               <Download className="h-4 w-4" />
             </a>
-            <button
+            <Button
+              variant="ghost"
+              size="sm"
               onClick={onClose}
-              className="rounded p-1 text-gray-500 dark:text-gray-400 hover:bg-gray-200 dark:hover:bg-gray-700"
+              className="text-gray-500 dark:text-gray-400"
               title="閉じる"
             >
               <X className="h-5 w-5" />
-            </button>
+            </Button>
           </div>
         </div>
         {/* Body */}

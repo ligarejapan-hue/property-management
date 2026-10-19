@@ -16,6 +16,7 @@ import {
   Link2,
 } from "lucide-react";
 import { fetchCandidates as apiFetchCandidates } from "@/lib/api-client";
+import { Button } from "@/components/ui/button";
 import { PROPERTY_TYPE_LABELS } from "@/lib/property-types";
 
 interface Candidate {
@@ -134,10 +135,11 @@ function CandidateCard({
           <Link2 className="h-3.5 w-3.5 shrink-0" />
           <span className="truncate">{candidate.address}</span>
         </Link>
-        <button
-          type="button"
+        <Button
+          variant="ghost"
+          size="sm"
           onClick={() => setExpanded((prev) => !prev)}
-          className="shrink-0 rounded p-1 text-gray-400 dark:text-gray-500 hover:bg-gray-100 dark:hover:bg-gray-700 hover:text-gray-600 dark:hover:text-gray-300 transition-colors"
+          className="shrink-0 text-gray-400 dark:text-gray-500 hover:text-gray-600 dark:hover:text-gray-300"
           aria-label={expanded ? "詳細を閉じる" : "詳細を開く"}
         >
           {expanded ? (
@@ -145,7 +147,7 @@ function CandidateCard({
           ) : (
             <ChevronDown className="h-4 w-4" />
           )}
-        </button>
+        </Button>
       </div>
 
       {/* Body */}
@@ -204,27 +206,27 @@ function CandidateCard({
           </div>
         ) : (
           <div className="flex items-center gap-2">
-            <button
-              type="button"
+            <Button
+              variant="success"
+              size="sm"
               onClick={() => onJudge(candidate.id, "same")}
-              className="rounded px-3 py-1 text-xs font-medium text-white bg-green-600 hover:bg-green-700 transition-colors"
             >
               同一物件
-            </button>
-            <button
-              type="button"
+            </Button>
+            <Button
+              variant="danger"
+              size="sm"
               onClick={() => onJudge(candidate.id, "different")}
-              className="rounded px-3 py-1 text-xs font-medium text-white bg-red-600 hover:bg-red-700 transition-colors"
             >
               別物件
-            </button>
-            <button
-              type="button"
+            </Button>
+            <Button
+              variant="secondary"
+              size="sm"
               onClick={() => onJudge(candidate.id, "pending")}
-              className="rounded px-3 py-1 text-xs font-medium text-gray-600 dark:text-gray-300 bg-gray-200 dark:bg-gray-700 hover:bg-gray-300 dark:hover:bg-gray-600 transition-colors"
             >
               保留
-            </button>
+            </Button>
           </div>
         )}
       </div>

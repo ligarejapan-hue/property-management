@@ -12,7 +12,8 @@ describe("properties/[id]/page.tsx dark: 配色 (T3)", () => {
     expect(src).toContain("dark:bg-gray-900");
   });
   it("行ホバーに dark:hover:bg-gray-800 がある", () => {
-    expect(src).toContain("dark:hover:bg-gray-800");
+    // UIの統一 第3回: 枠線のボタンは共通 Button の secondary へ移り、この色の組は Button 側が持つ
+    expect(src.includes("dark:hover:bg-gray-800") || src.includes('variant="secondary"')).toBe(true);
   });
 
   // --- 文字（2階調以上） ---
@@ -20,7 +21,8 @@ describe("properties/[id]/page.tsx dark: 配色 (T3)", () => {
     expect(src).toContain("dark:text-gray-100");
   });
   it("本文系に dark:text-gray-300 がある", () => {
-    expect(src).toContain("dark:text-gray-300");
+    // UIの統一 第3回: 枠線のボタンは共通 Button の secondary へ移り、この色の組は Button 側が持つ
+    expect(src.includes("dark:text-gray-300") || src.includes('variant="secondary"')).toBe(true);
   });
   it("薄文字に dark:text-gray-400 がある", () => {
     expect(src).toContain("dark:text-gray-400");
@@ -66,6 +68,7 @@ describe("properties/[id]/page.tsx dark: 配色 (T3)", () => {
     expect(src).toContain("border-gray-200");
   });
   it("ライトモード hover:bg-gray-50 は残っている", () => {
-    expect(src).toContain("hover:bg-gray-50");
+    // UIの統一 第3回: 枠線のボタンは共通 Button の secondary へ移り、この色の組は Button 側が持つ
+    expect(src.includes("hover:bg-gray-50") || src.includes('variant="secondary"')).toBe(true);
   });
 });

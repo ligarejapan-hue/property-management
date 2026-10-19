@@ -21,8 +21,9 @@ describe("next-action-tab.tsx dark: 配色 (物件詳細タブ群)", () => {
   });
 
   // --- hover ---
-  it("キャンセルボタンの hover に dark:hover:bg-gray-800 がある", () => {
-    expect(src).toContain("dark:hover:bg-gray-800");
+  // UIの統一 第3回: キャンセルは共通 Button の secondary(dark:hover:bg-gray-800 は部品側が持つ)
+  it("キャンセルボタンは共通 Button の secondary(暗い面の hover は部品側)", () => {
+    expect(src).toContain('<Button variant="secondary" onClick={onCancel}>');
   });
 
   // --- 文字 ---
@@ -122,8 +123,9 @@ describe("next-action-tab.tsx dark: 配色 (物件詳細タブ群)", () => {
   it("ライトモード text-red-600 は残っている（フォームエラー）", () => {
     expect(src).toContain("text-red-600");
   });
-  it("solid ボタン bg-indigo-600 は残っている（変更なし）", () => {
-    expect(src).toContain("bg-indigo-600");
+  // UIの統一 第3回: 藍の主ボタンは共通 Button の primary(bg-indigo-600 は部品側が持つ)
+  it("solid ボタンは共通 Button の primary（藍の塗りは部品側）", () => {
+    expect(src).toContain('variant="primary"');
   });
   it("solid ボタン text-white は残っている（変更なし）", () => {
     expect(src).toContain("text-white");

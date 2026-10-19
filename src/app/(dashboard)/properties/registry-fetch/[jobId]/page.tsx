@@ -10,6 +10,7 @@
  */
 import { useCallback, useEffect, useRef, useState } from "react";
 import { PageHeader } from "@/components/ui/page-header";
+import { Button } from "@/components/ui/button";
 import { useParams, useRouter } from "next/navigation";
 import Link from "next/link";
 import {
@@ -240,16 +241,20 @@ export default function RegistryBulkFetchProgressPage() {
         <div className="mt-4 rounded border border-amber-300 bg-amber-50 p-3 text-sm text-amber-800 dark:border-amber-700 dark:bg-amber-950 dark:text-amber-300">
           {pausedMessage(progress.pausedReason)}
           <div className="mt-2 flex gap-2">
+            {/* data-ui=raw: 琥珀の一時停止の帯に合わせた琥珀の塗り(合う variant が無い) */}
             <button
               type="button"
+              data-ui="raw"
               onClick={handleResume}
               className="rounded bg-amber-600 px-3 py-1.5 text-white hover:bg-amber-700"
             >
               残りの取得を再開する
             </button>
             {/* 一時停止中も中止できる(バックエンドは paused の中止を許可)。 */}
+            {/* data-ui=raw: 琥珀の一時停止の帯に合わせた琥珀の枠(合う variant が無い) */}
             <button
               type="button"
+              data-ui="raw"
               onClick={handleCancel}
               className="rounded border border-amber-400 px-3 py-1.5 text-amber-800 hover:bg-amber-100 dark:text-amber-200 dark:hover:bg-amber-900"
             >
@@ -268,13 +273,9 @@ export default function RegistryBulkFetchProgressPage() {
 
       {(progress.status === "processing" || progress.status === "pending") && (
         <div className="mt-5">
-          <button
-            type="button"
-            onClick={handleCancel}
-            className="rounded border border-gray-300 px-3 py-1.5 text-sm text-gray-700 hover:bg-gray-50 dark:border-gray-700 dark:text-gray-200 dark:hover:bg-gray-800"
-          >
+          <Button variant="secondary" onClick={handleCancel}>
             中止する
-          </button>
+          </Button>
         </div>
       )}
     </div>

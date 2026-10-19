@@ -7,6 +7,7 @@ import {
   RegistryTargetNote,
 } from "@/components/properties/registry-preflight-warnings";
 import RegistryChibanPopup from "@/components/properties/registry-chiban-popup";
+import { Button } from "@/components/ui/button";
 import { isSearchableTarget } from "@/lib/registry-fetch/registry-target";
 import { resolveRecoverEntry } from "@/lib/registry-fetch/recover-entry";
 import { decideAfterSearch } from "@/lib/registry-fetch/after-search";
@@ -249,9 +250,12 @@ export default function RegistryLocationSearchButton({
    * 候補を持たない経路なので、物件自身の地番/家屋番号から探す確認画面へ進む。
    */
   const recoverEntryLink = recoverConfigured ? (
-    <button
-      type="button"
+    <Button
+      variant="ghost"
+      size="sm"
       disabled={preparingRecover}
+      loading={preparingRecover}
+      loadingLabel="最新の情報を取り直しています…"
       onClick={async () => {
         // ⚠reset() は使わない。溜まっている親の取り直しを流すと詳細ページが
         //   読み込み中に差し替わり、**この部品ごと消えて**直後の setState が
@@ -286,12 +290,10 @@ export default function RegistryLocationSearchButton({
         setSelected(null);
         setState("confirmObtain");
       }}
-      className="w-fit text-[11px] text-indigo-600 dark:text-indigo-400 hover:underline disabled:opacity-60"
+      className="w-fit text-indigo-600 hover:underline dark:text-indigo-400"
     >
-      {preparingRecover
-        ? "最新の情報を取り直しています…"
-        : "取得済みの謄本を取り込む（課金なし）"}
-    </button>
+      取得済みの謄本を取り込む（課金なし）
+    </Button>
   ) : null;
 
   // ⚠**共通部品(registry-preflight-warnings)の同じ判定と、文言をそろえる**。
@@ -547,32 +549,30 @@ export default function RegistryLocationSearchButton({
   return (
     <div className="mb-4 flex flex-col gap-1">
       {showButton && (
-        <button
-          type="button"
+        <Button
+          variant="primary"
+          size="sm"
           onClick={() => {
             if (providerDisabled) return;
             reset();
             setState("confirmSearch");
           }}
           disabled={providerDisabled}
-          className={
-            "flex w-fit items-center gap-1.5 rounded-md px-3 py-1.5 text-xs font-medium text-white " +
-            "bg-indigo-600 hover:bg-indigo-700 " +
-            "disabled:cursor-not-allowed disabled:opacity-60"
-          }
+          className="w-fit"
         >
           <MapPinned className="h-3.5 w-3.5" />
           所在で謄本を検索
-        </button>
+        </Button>
       )}
       {showButton && onClose && (
-        <button
-          type="button"
+        <Button
+          variant="ghost"
+          size="sm"
           onClick={onClose}
-          className="w-fit text-[11px] text-gray-500 hover:underline dark:text-gray-400"
+          className="w-fit text-gray-500 hover:underline dark:text-gray-400"
         >
           閉じる
-        </button>
+        </Button>
       )}
 
       {/* 【回収】購入済みの取り込みは**「所在で謄本を検索」の流れの中**で行う(発注者指示 2026-08-21)。
@@ -603,13 +603,9 @@ export default function RegistryLocationSearchButton({
           {/* ⚠**ページを作り直す**取り直しは閉じたときだけ(@codex #380 R3 P2)。その場で
               呼ぶと詳細ページが読み込み中の画面に差し替わり、実況の見返しが即座に消える。
               成功直後の反映は onRegistryResultApplied（画面を作り直さない静かな更新）が担う。 */}
-          <button
-            type="button"
-            onClick={reset}
-            className="rounded border border-gray-300 bg-white px-2 py-0.5 font-medium text-gray-600 hover:bg-gray-50 dark:border-gray-600 dark:bg-gray-800 dark:text-gray-300 dark:hover:bg-gray-700"
-          >
+          <Button variant="secondary" size="sm" onClick={reset}>
             閉じる（物件情報を更新）
-          </button>
+          </Button>
         </div>
       )}
 
@@ -619,9 +615,14 @@ export default function RegistryLocationSearchButton({
             {errorMsg ?? "取得を中止しました。課金は発生していません。"}
           </p>
           {recoverEntryLink}
-          <button type="button" onClick={reset} className="w-fit text-indigo-600 dark:text-indigo-400 hover:underline">
+          <Button
+            variant="ghost"
+            size="sm"
+            onClick={reset}
+            className="w-fit text-indigo-600 hover:underline dark:text-indigo-400"
+          >
             閉じる
-          </button>
+          </Button>
         </div>
       )}
 
@@ -638,13 +639,14 @@ export default function RegistryLocationSearchButton({
             <span>{errorMsg}</span>
           </p>
           {recoverEntryLink}
-          <button
-            type="button"
+          <Button
+            variant="ghost"
+            size="sm"
             onClick={reset}
-            className="w-fit text-[11px] text-indigo-600 dark:text-indigo-400 hover:underline"
+            className="w-fit text-indigo-600 hover:underline dark:text-indigo-400"
           >
             閉じる
-          </button>
+          </Button>
         </div>
       )}
 
@@ -723,22 +725,25 @@ export default function RegistryLocationSearchButton({
                 ⚠分類がまだ読めていない間（pending / targetsUnavailable）は、
                 出したうえで押せなくする（fail closed・確認中であることが伝わる）。 */}
             {(!target || isSearchableTarget(target.kind)) && (
-              <button
-                type="button"
+              <Button
+                variant="primary"
+                size="sm"
                 onClick={runSearch}
                 disabled={preflight.pending || preflight.targetsUnavailable}
-                className="rounded bg-indigo-600 px-2 py-1 font-medium text-white hover:bg-indigo-700 disabled:cursor-not-allowed disabled:bg-gray-300 dark:disabled:bg-gray-700"
+                loading={preflight.pending}
+                loadingLabel="確認中..."
               >
-                {preflight.pending ? "確認中..." : "検索する"}
-              </button>
+                検索する
+              </Button>
             )}
             {/* ⚠検索できない物件にも**回収**の入口を出す(@codex #394 R6 P1)。
                 取込が途中まで進むと不動産番号が入って所在検索の対象外になり、
                 候補経由の入口だけだと**買った書類に二度と手が届かない**。
                 この経路は物件自身の地番で探すので候補が要らず、課金もしない。 */}
             {target && !isSearchableTarget(target.kind) && (
-              <button
-                type="button"
+              <Button
+                variant="secondary"
+                size="sm"
                 onClick={() => {
                   // ⚠**種類(所有者事項/全部事項)を選ばせてから**走らせる
                   //   (@codex #394 R9 P1)。既定のまま固定すると、全部事項で
@@ -746,14 +751,13 @@ export default function RegistryLocationSearchButton({
                   setSelected(null);
                   setState("confirmObtain");
                 }}
-                className="rounded border border-indigo-300 dark:border-indigo-500/40 bg-white dark:bg-gray-900 px-2 py-1 font-medium text-indigo-700 dark:text-indigo-300 hover:bg-indigo-50 dark:hover:bg-indigo-500/10"
               >
                 取得済みを取り込む（課金なし）
-              </button>
+              </Button>
             )}
-            <button type="button" onClick={reset} className="rounded border border-gray-300 dark:border-gray-700 bg-white dark:bg-gray-900 px-2 py-1 text-gray-600 dark:text-gray-300 hover:bg-gray-50 dark:hover:bg-gray-800">
+            <Button variant="secondary" size="sm" onClick={reset}>
               {target && !isSearchableTarget(target.kind) ? "閉じる" : "キャンセル"}
-            </button>
+            </Button>
           </div>
         </div>
       )}
@@ -861,16 +865,17 @@ export default function RegistryLocationSearchButton({
                     {/* ⚠有料スイッチが入っていなくても押せる。次の画面で
                         「取得(有料)」と「取得済みを取り込む(課金なし)」を選ぶため。
                         取得の方は次の画面で押せなくなる(準備中)。 */}
-                    <button
-                      type="button"
+                    <Button
+                      variant="primary"
+                      size="sm"
                       onClick={() => {
                         setSelected(c);
                         setState("confirmObtain");
                       }}
-                      className="shrink-0 rounded bg-indigo-600 px-2 py-1 font-medium text-white hover:bg-indigo-700"
+                      className="shrink-0"
                     >
                       選ぶ
-                    </button>
+                    </Button>
                   </li>
                 ))}
               </ul>
@@ -878,9 +883,14 @@ export default function RegistryLocationSearchButton({
           )}
           {/* ⚠候補が0件でも行き止まりにしない。買った書類が残っているかもしれない。 */}
           {candidates.length === 0 && recoverEntryLink}
-          <button type="button" onClick={reset} className="w-fit text-gray-500 dark:text-gray-400 hover:underline">
+          <Button
+            variant="ghost"
+            size="sm"
+            onClick={reset}
+            className="w-fit text-gray-500 hover:underline dark:text-gray-400"
+          >
             閉じる
-          </button>
+          </Button>
         </div>
       )}
 
@@ -975,8 +985,9 @@ export default function RegistryLocationSearchButton({
           <div className="mt-1 flex flex-wrap gap-1">
             {/* 有料取得は候補を選んだときだけ(候補なしの入口は回収専用)。 */}
             {selected && (
-            <button
-              type="button"
+            <Button
+              variant="primary"
+              size="sm"
               // ⚠**関数を直接渡さない**。引数を取るようになったため、クリックイベントが
               //   候補として渡ってしまう（tsc が検出）。
               // ⚠**画面に出ている警告を承認内容として送る**（@codex #399 R6 P2）。
@@ -995,24 +1006,26 @@ export default function RegistryLocationSearchButton({
                     ? "事前確認中です"
                     : undefined
               }
-              className="rounded bg-indigo-600 px-2 py-1 font-medium text-white hover:bg-indigo-700 disabled:cursor-not-allowed disabled:opacity-60"
+              loading={preflight.pending}
+              loadingLabel="確認中..."
             >
-              {preflight.pending ? "確認中..." : "取得する（有料）"}
-            </button>
+              取得する（有料）
+            </Button>
             )}
             {/* 【回収】既に買った書類の取り込み。⚠有料スイッチと無関係に使える
                 (課金操作をしないため)。押しても新たな料金は発生しない。 */}
-            <button
-              type="button"
+            <Button
+              variant="secondary"
+              size="sm"
               onClick={() => runRecover(!selected)}
               disabled={preflight.pending || preflight.targetsUnavailable}
               title={preflight.pending ? "事前確認中です" : undefined}
-              className="rounded border border-indigo-300 dark:border-indigo-500/40 bg-white dark:bg-gray-900 px-2 py-1 font-medium text-indigo-700 dark:text-indigo-300 hover:bg-indigo-50 dark:hover:bg-indigo-500/10 disabled:cursor-not-allowed disabled:opacity-60"
             >
               取得済みを取り込む（課金なし）
-            </button>
-            <button
-              type="button"
+            </Button>
+            <Button
+              variant="secondary"
+              size="sm"
               onClick={() => {
                 if (!selected) {
                   reset();
@@ -1021,10 +1034,9 @@ export default function RegistryLocationSearchButton({
                 setSelected(null);
                 setState("results");
               }}
-              className="rounded border border-gray-300 dark:border-gray-700 bg-white dark:bg-gray-900 px-2 py-1 text-gray-600 dark:text-gray-300 hover:bg-gray-50 dark:hover:bg-gray-800"
             >
               戻る
-            </button>
+            </Button>
           </div>
           <p className="mt-0.5 text-[11px] text-gray-600 dark:text-gray-400">
             ※「取得済みを取り込む」は、以前この地番で購入した謄本が登記情報提供サービスに
