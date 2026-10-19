@@ -110,7 +110,7 @@ beforeEach(() => {
     return c
       ? [{
           id: "s1", toAddress: c[0].data.toAddress, statusAtSend: c[0].data.statusAtSend, contactEmailAtSend: c[0].data.contactEmailAtSend,
-          statusEditSeqAtSend: c[0].data.statusEditSeqAtSend, contactEmailEditSeqAtSend: c[0].data.contactEmailEditSeqAtSend, createdAt: new Date(),
+          statusEditSeqAtSend: c[0].data.statusEditSeqAtSend, contactEmailEditSeqAtSend: c[0].data.contactEmailEditSeqAtSend, reserveSeq: 1,
         }]
       : [];
   };
@@ -118,14 +118,14 @@ beforeEach(() => {
   applied = [];
   newerApplied = [];
   pm.agentInquiryMaterialSend.findMany.mockReset().mockImplementation(async (a: { where: Record<string, unknown> }) =>
-    !("inquiryAppliedAt" in a.where) ? history : a.where.inquiryAppliedAt === null ? pending() : "createdAt" in a.where ? newerApplied : applied,
+    !("inquiryAppliedAt" in a.where) ? history : a.where.inquiryAppliedAt === null ? pending() : "reserveSeq" in a.where ? newerApplied : applied,
   );
   pm.agentInquiryMaterialSend.updateMany.mockReset().mockResolvedValue({ count: 1 });
   pm.agentInquiryMaterialSend.count.mockReset().mockImplementation(async () => pending().length);
 });
 type PendingRow = {
   id: string; toAddress: string; statusAtSend: string; contactEmailAtSend: string | null;
-  statusEditSeqAtSend?: number; contactEmailEditSeqAtSend?: number; createdAt?: Date;
+  statusEditSeqAtSend?: number; contactEmailEditSeqAtSend?: number; reserveSeq?: number;
 };
 let pending: () => PendingRow[] = () => [];
 let history: unknown[] = [];
@@ -285,9 +285,13 @@ describe("送れた後に反響の更新が落ちたら、あとで反映し直�
       }),
     }));
   });
-  it("予約の時刻はアプリの時計で入れる(反映の時刻と同じ時計で比べる・@codex 18巡目 P2)", async () => {
+  it("予約の順はデータベースが振る番号で決める(時計を使わない・@codex 24巡目 P2)", async () => {
     await POST(json("POST", body()), ctx);
-    expect(pm.agentInquiryMaterialSend.create.mock.calls[0][0].data.createdAt).toBeInstanceOf(Date);
+    const data = pm.agentInquiryMaterialSend.create.mock.calls[0][0].data;
+    expect(data.createdAt).toBeUndefined();
+    expect(data.reserveSeq).toBeUndefined(); // データベースが振る
+    const q = pm.agentInquiryMaterialSend.findMany.mock.calls.find((c) => c[0].where.inquiryAppliedAt === null && c[0].orderBy)![0];
+    expect(q.orderBy).toEqual({ reserveSeq: "asc" });
   });
   it("予約の行に、送った時点の反響の状態と宛先を残す", async () => {
     await POST(json("POST", body({ to: "new@agent.jp" })), ctx);
@@ -405,14 +409,13 @@ describe("送れた後に反響の更新が落ちたら、あとで反映し直�
     expect(pm.agentInquiry.update).not.toHaveBeenCalled();
   });
   it("後から作った送信が先に反映済み=古い送信の宛先・状態で上書きしない(@codex 20・21巡目 P2)", async () => {
-    const at = new Date("2026-10-19T03:00:00Z");
-    pending = () => [{ id: "sA", toAddress: "a@agent.jp", statusAtSend: "open", contactEmailAtSend: "sato@agent.jp", statusEditSeqAtSend: 0, contactEmailEditSeqAtSend: 0, createdAt: at }];
+    pending = () => [{ id: "sA", toAddress: "a@agent.jp", statusAtSend: "open", contactEmailAtSend: "sato@agent.jp", statusEditSeqAtSend: 0, contactEmailEditSeqAtSend: 0, reserveSeq: 7 }];
     newerApplied = [{ id: "sB" }];
     pm.agentInquiry.findUnique.mockResolvedValue(inquiry({ status: "open", contactEmail: "b@agent.jp" }));
     await APPLY(json("POST", {}), ctx);
     expect(pm.agentInquiry.update).not.toHaveBeenCalled();
-    const q = pm.agentInquiryMaterialSend.findMany.mock.calls.find((c) => "createdAt" in c[0].where)![0];
-    expect(q.where).toMatchObject({ createdAt: { gt: at }, inquiryAppliedAt: { not: null } });
+    const q = pm.agentInquiryMaterialSend.findMany.mock.calls.find((c) => "reserveSeq" in c[0].where)![0];
+    expect(q.where).toMatchObject({ reserveSeq: { gt: 7 }, inquiryAppliedAt: { not: null } });
   });
   it("状態だけ人が変えていれば、宛先だけ直す(状態は残す)", async () => {
     pending = stuck;

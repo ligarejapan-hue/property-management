@@ -225,7 +225,7 @@ export async function POST(request: Request, ctx: Ctx) {
     // 予約の行(一意制約で二重送信を防ぐ)。
     // ⚠反響を押さえて読み直し、その時点の状態と宛先を残す(読み込みから予約までの別の人の変更を
     //   「送った後の手の変更」と取り違えない・@codex 18巡目 P2)。
-    // ⚠予約の時刻はアプリの時計で入れる(反映の時刻 inquiryAppliedAt と同じ時計で比べる・@codex 18巡目 P2)。
+    // ⚠送信の新旧はデータベースが振る通し番号(reserveSeq)で決める(時計を使わない・@codex 24巡目 P2)。
     let claim: { id: string };
     try {
       claim = await prisma.$transaction(async (tx) => {
@@ -237,7 +237,6 @@ export async function POST(request: Request, ctx: Ctx) {
         if (!now) throw new ApiError(404, "反響が見つかりません", "NOT_FOUND");
         return tx.agentInquiryMaterialSend.create({
           data: {
-            createdAt: new Date(),
             inquiryId: id,
             sentById: session.id,
             toAddress: input.to,

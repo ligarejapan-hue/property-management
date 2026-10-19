@@ -25,6 +25,7 @@ describe("資料送付 migration(spec §5)", () => {
     expect(sql).toMatch(/"status_at_send" "AgentInquiryStatus" NOT NULL,/);
     expect(sql).toMatch(/"contact_email_at_send" TEXT,/);
     expect(sql).toMatch(/"status_edit_seq_at_send" INTEGER NOT NULL,/);
+    expect(sql).toMatch(/"reserve_seq" SERIAL NOT NULL,/);
     expect(sql).toMatch(/"contact_email_edit_seq_at_send" INTEGER NOT NULL,/);
   });
   it("反響に、人が状態・宛先を変えた回数(足すだけ・既定 0・@codex 22巡目)", () => {

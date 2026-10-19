@@ -19,6 +19,7 @@ CREATE TABLE "agent_inquiry_material_sends" (
     "status_at_send" "AgentInquiryStatus" NOT NULL,
     "contact_email_at_send" TEXT,
     "status_edit_seq_at_send" INTEGER NOT NULL,
+    "reserve_seq" SERIAL NOT NULL,
     "contact_email_edit_seq_at_send" INTEGER NOT NULL,
     CONSTRAINT "agent_inquiry_material_sends_pkey" PRIMARY KEY ("id")
 );

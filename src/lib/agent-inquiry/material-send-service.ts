@@ -204,7 +204,7 @@ export async function applySentMaterialToInquiry(
     await tx.$queryRaw`SELECT id FROM agent_inquiries WHERE id = ${inquiryId}::uuid FOR UPDATE`;
     const pending = await tx.agentInquiryMaterialSend.findMany({
       where: pendingWhere,
-      orderBy: { createdAt: "asc" },
+      orderBy: { reserveSeq: "asc" },
       select: {
         id: true,
         toAddress: true,
@@ -212,7 +212,7 @@ export async function applySentMaterialToInquiry(
         contactEmailAtSend: true,
         statusEditSeqAtSend: true,
         contactEmailEditSeqAtSend: true,
-        createdAt: true,
+        reserveSeq: true,
       },
     });
     if (pending.length === 0) return null;
@@ -234,7 +234,7 @@ export async function applySentMaterialToInquiry(
         inquiryId,
         result: "sent",
         inquiryAppliedAt: { not: null },
-        createdAt: { gt: latest.createdAt },
+        reserveSeq: { gt: latest.reserveSeq },
         id: { notIn: pending.map((p) => p.id) },
       },
       take: 1,

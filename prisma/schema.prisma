@@ -1996,6 +1996,9 @@ model AgentInquiryMaterialSend {
   /// 送った時点の、人が状態・宛先を変えた回数(AgentInquiry.statusEditSeq / contactEmailEditSeq)。
   /// 反映し直しは、この回数から増えていない欄だけ書く(値の一致ではなく回数で見る・@codex 22巡目)。
   statusEditSeqAtSend       Int @map("status_edit_seq_at_send")
+  /// 予約の順(データベースが振る通し番号)。予約は反響を押さえて作る=同じ反響の中では予約した順に増える。
+  /// 送信の新旧はこれで決める(時計を使わない・@codex 24巡目 P2)。
+  reserveSeq                Int @default(autoincrement()) @map("reserve_seq")
   contactEmailEditSeqAtSend Int @map("contact_email_edit_seq_at_send")
 
   inquiry AgentInquiry @relation(fields: [inquiryId], references: [id], onDelete: Restrict)
