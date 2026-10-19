@@ -70,7 +70,7 @@ const A2 = "55555555-5555-4555-8555-555555555555";
 const TOKEN = "66666666-6666-4666-8666-666666666666";
 const ctx = { params: Promise.resolve({ id: IID }) };
 const inquiry = (o: Record<string, unknown> = {}) => ({
-  id: IID, kind: "material_request", status: "open", version: 2, propertyId: PID,
+  id: IID, kind: "material_request", status: "open", version: 2, propertyId: PID, statusEditSeq: 0, contactEmailEditSeq: 0,
   contactName: "佐藤", contactEmail: "sato@agent.jp",
   agent: { companyName: "△△不動産" }, property: { id: PID, propertyType: "mansion_unit", buildingName: "サンプル荘", roomNo: "101", address: "東京都品川区南品川1-2-3", building: null, adPermissions: [] }, ...o,
 });
@@ -108,7 +108,10 @@ beforeEach(() => {
   pending = () => {
     const c = pm.agentInquiryMaterialSend.create.mock.calls.at(-1);
     return c
-      ? [{ id: "s1", toAddress: c[0].data.toAddress, statusAtSend: c[0].data.statusAtSend, contactEmailAtSend: c[0].data.contactEmailAtSend }]
+      ? [{
+          id: "s1", toAddress: c[0].data.toAddress, statusAtSend: c[0].data.statusAtSend, contactEmailAtSend: c[0].data.contactEmailAtSend,
+          statusEditSeqAtSend: c[0].data.statusEditSeqAtSend, contactEmailEditSeqAtSend: c[0].data.contactEmailEditSeqAtSend, createdAt: new Date(),
+        }]
       : [];
   };
   history = [];
@@ -120,7 +123,11 @@ beforeEach(() => {
   pm.agentInquiryMaterialSend.updateMany.mockReset().mockResolvedValue({ count: 1 });
   pm.agentInquiryMaterialSend.count.mockReset().mockImplementation(async () => pending().length);
 });
-let pending: () => { id: string; toAddress: string; statusAtSend: string; contactEmailAtSend: string | null }[] = () => [];
+type PendingRow = {
+  id: string; toAddress: string; statusAtSend: string; contactEmailAtSend: string | null;
+  statusEditSeqAtSend?: number; contactEmailEditSeqAtSend?: number; createdAt?: Date;
+};
+let pending: () => PendingRow[] = () => [];
 let history: unknown[] = [];
 let applied: { toAddress: string }[] = [];
 let newerApplied: { id: string }[] = [];
@@ -262,16 +269,20 @@ describe("ファイルの守り(/uploads と同じ判定・最終レビュー C1
 
 describe("送れた後に反響の更新が落ちたら、あとで反映し直す(@codex 2巡目 P2)", () => {
   // 送った時点の反響=open・宛先 sato@agent.jp(inquiry() と同じ)。
-  const stuck = () => [{ id: "s0", toAddress: "new@agent.jp", statusAtSend: "open", contactEmailAtSend: "sato@agent.jp" }];
+  const stuck = (): PendingRow[] => [
+    { id: "s0", toAddress: "new@agent.jp", statusAtSend: "open", contactEmailAtSend: "sato@agent.jp", statusEditSeqAtSend: 0, contactEmailEditSeqAtSend: 0 },
+  ];
   it("予約のときに反響を押さえて読み直し、その時点の状態と宛先を残す(@codex 18巡目 P2)", async () => {
     pm.agentInquiry.findUnique
       .mockResolvedValueOnce(inquiry()) // 最初の読み込み(open)
-      .mockResolvedValueOnce({ status: "in_progress", contactEmail: "mid@agent.jp" }); // 予約の直前に別の人が変えた
+      .mockResolvedValueOnce({ status: "in_progress", contactEmail: "mid@agent.jp", statusEditSeq: 3, contactEmailEditSeq: 1 }); // 予約の直前に別の人が変えた
     await POST(json("POST", body()), ctx);
     const raw = (prismaMock as never as { $queryRaw: Fn }).$queryRaw;
     expect((raw.mock.calls[0][0] as string[]).join("?")).toMatch(/FROM agent_inquiries WHERE id = \?::uuid FOR UPDATE/);
     expect(pm.agentInquiryMaterialSend.create).toHaveBeenCalledWith(expect.objectContaining({
-      data: expect.objectContaining({ statusAtSend: "in_progress", contactEmailAtSend: "mid@agent.jp" }),
+      data: expect.objectContaining({
+        statusAtSend: "in_progress", contactEmailAtSend: "mid@agent.jp", statusEditSeqAtSend: 3, contactEmailEditSeqAtSend: 1,
+      }),
     }));
   });
   it("予約の時刻はアプリの時計で入れる(反映の時刻と同じ時計で比べる・@codex 18巡目 P2)", async () => {
@@ -332,16 +343,16 @@ describe("送れた後に反響の更新が落ちたら、あとで反映し直�
     expect(pm.agentInquiry.update).not.toHaveBeenCalled();
     expect(applyAudits()).toEqual([]);
   });
-  it("送った後に状態も宛先も手で変えられていれば上書きしない=印だけ付ける", async () => {
+  it("送った後に状態も宛先も人が変えた(編集の回数が増えた)=上書きしない・印だけ付ける", async () => {
     pending = stuck;
-    pm.agentInquiry.findUnique.mockResolvedValue(inquiry({ status: "in_progress", contactEmail: "other@agent.jp" }));
+    pm.agentInquiry.findUnique.mockResolvedValue(inquiry({ status: "in_progress", contactEmail: "other@agent.jp", statusEditSeq: 1, contactEmailEditSeq: 1 }));
     expect(await (await APPLY(json("POST", {}), ctx)).json()).toMatchObject({ applied: false });
     expect(pm.agentInquiryMaterialSend.updateMany).toHaveBeenCalled();
     expect(pm.agentInquiry.update).not.toHaveBeenCalled();
   });
-  it("メモ・担当など別の欄を直しただけなら反映する(@codex 8巡目 P2)", async () => {
+  it("メモ・担当など別の欄を直しただけ(編集の回数は増えない)なら反映する(@codex 8巡目 P2)", async () => {
     pending = stuck;
-    pm.agentInquiry.findUnique.mockResolvedValue(inquiry({ updatedAt: new Date("2026-10-19T03:05:00Z"), note: "電話した" }));
+    pm.agentInquiry.findUnique.mockResolvedValue(inquiry({ version: 9, note: "電話した" }));
     expect(await (await APPLY(json("POST", {}), ctx)).json()).toMatchObject({ applied: true });
     expect(pm.agentInquiry.update).toHaveBeenCalledWith(expect.objectContaining({
       data: expect.objectContaining({ status: "done", contactEmail: "new@agent.jp" }),
@@ -354,105 +365,66 @@ describe("送れた後に反響の更新が落ちたら、あとで反映し直�
     expect(raw).toHaveBeenCalled();
     expect((raw.mock.calls[0][0] as string[]).join("?")).toMatch(/FROM agent_inquiries WHERE id = \?::uuid FOR UPDATE/);
   });
-  it("同時に送った2件目: 1件目の反映で変わった宛先・状態は「手の変更」と見なさず、2件目の宛先にする(@codex 9巡目 P2)", async () => {
-    pending = () => [{ id: "s2", toAddress: "second@agent.jp", statusAtSend: "open", contactEmailAtSend: "sato@agent.jp" }];
-    applied = [{ toAddress: "first@agent.jp" }];
+  it("同時に送った2件目: 1件目の反映は編集の回数を増やさない=2件目の宛先にする(@codex 9巡目 P2)", async () => {
+    pending = () => [{ id: "s2", toAddress: "second@agent.jp", statusAtSend: "open", contactEmailAtSend: "sato@agent.jp", statusEditSeqAtSend: 0, contactEmailEditSeqAtSend: 0 }];
     pm.agentInquiry.findUnique.mockResolvedValue(inquiry({ status: "done", contactEmail: "first@agent.jp" }));
     expect(await (await APPLY(json("POST", {}), ctx)).json()).toMatchObject({ applied: true });
     const d = pm.agentInquiry.update.mock.calls[0][0].data;
     expect(d.contactEmail).toBe("second@agent.jp");
     expect(d.status).toBeUndefined();
   });
-  it("未反映が2件: 1件目のあと手で宛先を直し、2件目をその宛先から送った=2件目の宛先にする(@codex 10巡目 P2)", async () => {
+  it("資料送付の反映では、人の編集の回数を増やさない", async () => {
+    pending = stuck;
+    await APPLY(json("POST", {}), ctx);
+    const d = pm.agentInquiry.update.mock.calls[0][0].data;
+    expect(d.statusEditSeq).toBeUndefined();
+    expect(d.contactEmailEditSeq).toBeUndefined();
+  });
+  it("1件目の反映のあと、人が元の値に戻した=値は送った時点と同じでも回数が増えている=上書きしない(@codex 22巡目 P2)", async () => {
+    pending = () => [{ id: "s2", toAddress: "second@agent.jp", statusAtSend: "open", contactEmailAtSend: "sato@agent.jp", statusEditSeqAtSend: 0, contactEmailEditSeqAtSend: 0 }];
+    pm.agentInquiry.findUnique.mockResolvedValue(inquiry({ status: "open", contactEmail: "sato@agent.jp", statusEditSeq: 1, contactEmailEditSeq: 1 }));
+    await APPLY(json("POST", {}), ctx);
+    expect(pm.agentInquiry.update).not.toHaveBeenCalled();
+  });
+  it("未反映が2件: 比べるのは最新の送信の時点の回数(1件目のあと人が直し、2件目はその後に送った=2件目の宛先にする・@codex 10巡目)", async () => {
     pending = () => [
-      { id: "s1", toAddress: "b@agent.jp", statusAtSend: "open", contactEmailAtSend: "a@agent.jp" },
-      { id: "s2", toAddress: "d@agent.jp", statusAtSend: "open", contactEmailAtSend: "c@agent.jp" },
+      { id: "s1", toAddress: "b@agent.jp", statusAtSend: "open", contactEmailAtSend: "a@agent.jp", statusEditSeqAtSend: 0, contactEmailEditSeqAtSend: 0 },
+      { id: "s2", toAddress: "d@agent.jp", statusAtSend: "open", contactEmailAtSend: "c@agent.jp", statusEditSeqAtSend: 0, contactEmailEditSeqAtSend: 1 },
     ];
-    pm.agentInquiry.findUnique.mockResolvedValue(inquiry({ contactEmail: "c@agent.jp" }));
+    pm.agentInquiry.findUnique.mockResolvedValue(inquiry({ contactEmail: "c@agent.jp", contactEmailEditSeq: 1 }));
     await APPLY(json("POST", {}), ctx);
     expect(pm.agentInquiry.update.mock.calls[0][0].data.contactEmail).toBe("d@agent.jp");
   });
-  it("未反映が2件: 古い送信の時点の状態に手で戻した=最新の送信より後の手の変更なので done にしない(@codex 14巡目 P2)", async () => {
+  it("未反映が2件: 最新の送信の後に人が状態を変えた(古い時点の値に戻した)=done にしない(@codex 14巡目)", async () => {
     pending = () => [
-      { id: "s1", toAddress: "sato@agent.jp", statusAtSend: "open", contactEmailAtSend: "sato@agent.jp" },
-      { id: "s2", toAddress: "sato@agent.jp", statusAtSend: "in_progress", contactEmailAtSend: "sato@agent.jp" },
+      { id: "s1", toAddress: "sato@agent.jp", statusAtSend: "open", contactEmailAtSend: "sato@agent.jp", statusEditSeqAtSend: 0, contactEmailEditSeqAtSend: 0 },
+      { id: "s2", toAddress: "sato@agent.jp", statusAtSend: "in_progress", contactEmailAtSend: "sato@agent.jp", statusEditSeqAtSend: 1, contactEmailEditSeqAtSend: 0 },
     ];
-    pm.agentInquiry.findUnique.mockResolvedValue(inquiry({ status: "open" }));
+    pm.agentInquiry.findUnique.mockResolvedValue(inquiry({ status: "open", statusEditSeq: 2 }));
     await APPLY(json("POST", {}), ctx);
     expect(pm.agentInquiry.update).not.toHaveBeenCalled();
   });
-  it("未反映が2件: 手で1件目の送り先(まだ反映していない)に直した=手の変更なので上書きしない(@codex 15巡目 P2)", async () => {
-    pending = () => [
-      { id: "s1", toAddress: "b@agent.jp", statusAtSend: "done", contactEmailAtSend: "a@agent.jp" },
-      { id: "s2", toAddress: "d@agent.jp", statusAtSend: "done", contactEmailAtSend: "c@agent.jp" },
-    ];
-    pm.agentInquiry.findUnique.mockResolvedValue(inquiry({ status: "done", contactEmail: "b@agent.jp" }));
-    await APPLY(json("POST", {}), ctx);
-    expect(pm.agentInquiry.update).not.toHaveBeenCalled();
-  });
-  it("宛先を実際に書いた反映済みの送信だけを「資料送付が書いた宛先」とみなす(@codex 16巡目 P2)", async () => {
-    pending = stuck;
-    await APPLY(json("POST", {}), ctx);
-    const appliedQuery = pm.agentInquiryMaterialSend.findMany.mock.calls
-      .map((c) => c[0].where)
-      .find((w) => w.inquiryAppliedAt && w.inquiryAppliedAt !== null && "wroteContact" in w);
-    expect(appliedQuery).toMatchObject({ wroteContact: true });
-    // 今回宛先を書いた送信(最新)に印を付ける
-    expect(pm.agentInquiryMaterialSend.update).toHaveBeenCalledWith({ where: { id: "s0" }, data: { wroteContact: true } });
-  });
-  it("「資料送付が書いた宛先」は、最新の未反映の送信より後に書いた直近の1件だけ(@codex 17巡目 P2)", async () => {
+  it("後から作った送信が先に反映済み=古い送信の宛先・状態で上書きしない(@codex 20・21巡目 P2)", async () => {
     const at = new Date("2026-10-19T03:00:00Z");
-    pending = () => [{ id: "s2", toAddress: "d@agent.jp", statusAtSend: "done", contactEmailAtSend: "c@agent.jp", createdAt: at } as never];
-    await APPLY(json("POST", {}), ctx);
-    const call = pm.agentInquiryMaterialSend.findMany.mock.calls.find((c) => c[0].where.wroteContact === true)![0];
-    expect(call.where.inquiryAppliedAt).toEqual({ gt: at });
-    expect(call).toMatchObject({ orderBy: { inquiryAppliedAt: "desc" }, take: 1 });
-  });
-  it("後から作った送信が先に反映済み=古い送信の宛先で上書きしない(@codex 20巡目 P2)", async () => {
-    const at = new Date("2026-10-19T03:00:00Z");
-    pending = () => [{ id: "sA", toAddress: "a@agent.jp", statusAtSend: "open", contactEmailAtSend: "sato@agent.jp", createdAt: at } as never];
-    applied = [{ toAddress: "b@agent.jp" }];
+    pending = () => [{ id: "sA", toAddress: "a@agent.jp", statusAtSend: "open", contactEmailAtSend: "sato@agent.jp", statusEditSeqAtSend: 0, contactEmailEditSeqAtSend: 0, createdAt: at }];
     newerApplied = [{ id: "sB" }];
-    pm.agentInquiry.findUnique.mockResolvedValue(inquiry({ status: "done", contactEmail: "b@agent.jp" }));
+    pm.agentInquiry.findUnique.mockResolvedValue(inquiry({ status: "open", contactEmail: "b@agent.jp" }));
     await APPLY(json("POST", {}), ctx);
     expect(pm.agentInquiry.update).not.toHaveBeenCalled();
     const q = pm.agentInquiryMaterialSend.findMany.mock.calls.find((c) => "createdAt" in c[0].where)![0];
     expect(q.where).toMatchObject({ createdAt: { gt: at }, inquiryAppliedAt: { not: null } });
   });
-  it("後から作った送信が先に反映済み=古い送信で状態も戻さない(手で開き直した反響を done にしない・@codex 21巡目 P2)", async () => {
-    const at = new Date("2026-10-19T03:00:00Z");
-    pending = () => [{ id: "sA", toAddress: "sato@agent.jp", statusAtSend: "open", contactEmailAtSend: "sato@agent.jp", createdAt: at } as never];
-    newerApplied = [{ id: "sB" }];
-    pm.agentInquiry.findUnique.mockResolvedValue(inquiry({ status: "open" }));
-    await APPLY(json("POST", {}), ctx);
-    expect(pm.agentInquiry.update).not.toHaveBeenCalled();
-  });
-  it("宛先を書かなかった反映では印を付けない", async () => {
+  it("状態だけ人が変えていれば、宛先だけ直す(状態は残す)", async () => {
     pending = stuck;
-    pm.agentInquiry.findUnique.mockResolvedValue(inquiry({ contactEmail: "new@agent.jp" }));
-    await APPLY(json("POST", {}), ctx);
-    expect(pm.agentInquiryMaterialSend.update.mock.calls.some((c) => c[0].data.wroteContact)).toBe(false);
-  });
-  it("未反映が2件: 古い送信の時点の宛先に手で戻した=上書きしない", async () => {
-    pending = () => [
-      { id: "s1", toAddress: "b@agent.jp", statusAtSend: "done", contactEmailAtSend: "a@agent.jp" },
-      { id: "s2", toAddress: "d@agent.jp", statusAtSend: "done", contactEmailAtSend: "c@agent.jp" },
-    ];
-    pm.agentInquiry.findUnique.mockResolvedValue(inquiry({ status: "done", contactEmail: "a@agent.jp" }));
-    await APPLY(json("POST", {}), ctx);
-    expect(pm.agentInquiry.update).not.toHaveBeenCalled();
-  });
-  it("状態だけ手で変えられていれば、宛先だけ直す(状態は残す)", async () => {
-    pending = stuck;
-    pm.agentInquiry.findUnique.mockResolvedValue(inquiry({ status: "in_progress" }));
+    pm.agentInquiry.findUnique.mockResolvedValue(inquiry({ status: "in_progress", statusEditSeq: 1 }));
     await APPLY(json("POST", {}), ctx);
     const d = pm.agentInquiry.update.mock.calls[0][0].data;
     expect(d.status).toBeUndefined();
     expect(d.contactEmail).toBe("new@agent.jp");
   });
-  it("宛先だけ手で直されていれば、状態だけ done にする(宛先は残す)", async () => {
+  it("宛先だけ人が直していれば、状態だけ done にする(宛先は残す)", async () => {
     pending = stuck;
-    pm.agentInquiry.findUnique.mockResolvedValue(inquiry({ contactEmail: "fixed@agent.jp" }));
+    pm.agentInquiry.findUnique.mockResolvedValue(inquiry({ contactEmail: "fixed@agent.jp", contactEmailEditSeq: 1 }));
     await APPLY(json("POST", {}), ctx);
     const d = pm.agentInquiry.update.mock.calls[0][0].data;
     expect(d.status).toBe("done");

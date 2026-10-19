@@ -230,7 +230,7 @@ export async function POST(request: Request, ctx: Ctx) {
         await tx.$queryRaw`SELECT id FROM agent_inquiries WHERE id = ${id}::uuid FOR UPDATE`;
         const now = await tx.agentInquiry.findUnique({
           where: { id },
-          select: { status: true, contactEmail: true },
+          select: { status: true, contactEmail: true, statusEditSeq: true, contactEmailEditSeq: true },
         });
         if (!now) throw new ApiError(404, "反響が見つかりません", "NOT_FOUND");
         return tx.agentInquiryMaterialSend.create({
@@ -253,6 +253,8 @@ export async function POST(request: Request, ctx: Ctx) {
             // 送った時点の反響(反映し直しで、あとから手で変えた欄を上書きしない・@codex 8巡目)。
             statusAtSend: now.status,
             contactEmailAtSend: now.contactEmail,
+            statusEditSeqAtSend: now.statusEditSeq,
+            contactEmailEditSeqAtSend: now.contactEmailEditSeq,
           },
           select: { id: true },
         });

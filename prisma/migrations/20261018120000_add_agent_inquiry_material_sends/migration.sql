@@ -18,7 +18,8 @@ CREATE TABLE "agent_inquiry_material_sends" (
     "inquiry_applied_at" TIMESTAMP(3),
     "status_at_send" "AgentInquiryStatus" NOT NULL,
     "contact_email_at_send" TEXT,
-    "wrote_contact" BOOLEAN NOT NULL DEFAULT false,
+    "status_edit_seq_at_send" INTEGER NOT NULL,
+    "contact_email_edit_seq_at_send" INTEGER NOT NULL,
     CONSTRAINT "agent_inquiry_material_sends_pkey" PRIMARY KEY ("id")
 );
 CREATE UNIQUE INDEX "agent_inquiry_material_sends_sent_by_id_client_token_key" ON "agent_inquiry_material_sends"("sent_by_id", "client_token");
@@ -28,3 +29,7 @@ ALTER TABLE "agent_inquiry_material_sends" ADD CONSTRAINT "agent_inquiry_materia
 
 ALTER TABLE "mail_config" ADD COLUMN "material_send_subject" TEXT,
 ADD COLUMN "material_send_body" TEXT;
+
+-- 人が反響の状態・宛先を変えた回数(資料送付の反映し直しが、送った後の人の変更を上書きしないため)。足すだけ・既定 0。
+ALTER TABLE "agent_inquiries" ADD COLUMN "status_edit_seq" INTEGER NOT NULL DEFAULT 0,
+ADD COLUMN "contact_email_edit_seq" INTEGER NOT NULL DEFAULT 0;

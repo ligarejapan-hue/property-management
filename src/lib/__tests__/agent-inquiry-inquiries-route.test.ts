@@ -190,6 +190,22 @@ describe("反響 API", () => {
     const last = (writeAuditLog as Fn).mock.calls.at(-1)![0];
     expect(last.detail).toEqual({ changed: ["note", "status"], status: "done" });
   });
+  it("変更: 状態・宛先を人が変えたら、その回数を1つ増やす(監査の項目名には入れない・資料送付の反映し直しが使う)", async () => {
+    await PATCH(json("PATCH", { status: "in_progress", version: 1 }), ctx);
+    let data = pm.agentInquiry.updateMany.mock.calls.at(-1)![0].data;
+    expect(data).toMatchObject({ statusEditSeq: { increment: 1 } });
+    expect(data.contactEmailEditSeq).toBeUndefined();
+    await PATCH(json("PATCH", { contactEmail: "x@agent.jp", version: 2 }), ctx);
+    data = pm.agentInquiry.updateMany.mock.calls.at(-1)![0].data;
+    expect(data).toMatchObject({ contactEmailEditSeq: { increment: 1 } });
+    expect(data.statusEditSeq).toBeUndefined();
+    await PATCH(json("PATCH", { note: "メモ", version: 3 }), ctx);
+    data = pm.agentInquiry.updateMany.mock.calls.at(-1)![0].data;
+    expect(data.statusEditSeq).toBeUndefined();
+    expect(data.contactEmailEditSeq).toBeUndefined();
+    const last = (writeAuditLog as Fn).mock.calls.at(-1)![0];
+    expect(JSON.stringify(last.detail)).not.toContain("EditSeq");
+  });
   it("担当者の振り替えは有効な利用者だけ", async () => {
     pm.user.findUnique.mockResolvedValueOnce(null);
     expect((await PATCH(json("PATCH", { assigneeId: UID, version: 1 }), ctx)).status).toBe(422);

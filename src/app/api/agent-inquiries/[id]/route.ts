@@ -53,9 +53,14 @@ export async function PATCH(request: Request, ctx: Ctx) {
       ...(assigneeId !== undefined ? { assigneeId } : {}),
       ...(note !== undefined ? { note: note?.trim() || null } : {}),
     };
+    // 人が状態・宛先を変えた回数(資料送付の反映し直しが、送った後の人の変更を上書きしないため)。
+    const editSeq = {
+      ...(status !== undefined ? { statusEditSeq: { increment: 1 } } : {}),
+      ...("contactEmail" in data ? { contactEmailEditSeq: { increment: 1 } } : {}),
+    };
     const res = await prisma.agentInquiry.updateMany({
       where: { id, version },
-      data: { ...data, version: { increment: 1 } },
+      data: { ...data, ...editSeq, version: { increment: 1 } },
     });
     if (res.count === 0) {
       const cur = await prisma.agentInquiry.findUnique({ where: { id }, select: { id: true } });
