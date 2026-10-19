@@ -46,27 +46,27 @@ describe("renderLpPage", () => {
     expect(html).toContain('<div class="figure"><div class="flow-box"><ol class="flow">');
     expect(html).not.toContain("/uploads/");
   });
-  it("live ではプレビュー帯が無く、電話タップの script が token 付きで1本だけ(ほかは動きの script のみ)", () => {
+  it("live ではプレビュー帯が無く、電話タップの script が token 付きで1本だけ(ほかは固定バーと動きの script のみ)", () => {
     expect(html).not.toContain("プレビュー");
-    // 電話タップ1本+動き1本(動き=2026-10-08 発注者承認・計測や送信はしない)
-    expect((html.match(/<script/g) ?? []).length).toBe(2);
+    // 固定バー1本+電話タップ1本+動き1本(動き=2026-10-08 発注者承認・固定バー=2026-10-19・計測や送信はしない)
+    expect((html.match(/<script/g) ?? []).length).toBe(3);
     expect(html.split("sendBeacon(").length - 1).toBe(1);
     expect(html).toContain('sendBeacon("/t/tok/phone-tap")');
   });
-  it("preview ではプレビュー帯が出て、計測・送信の script が無く、tel は押せるが計測されない(動きの script だけ)", () => {
+  it("preview ではプレビュー帯が出て、計測・送信の script が無く、tel は押せるが計測されない(固定バーと動きの script だけ)", () => {
     const p = renderLpPage(input({ mode: "preview", phoneTapToken: null }));
     expect(p).toContain("プレビュー");
-    expect((p.match(/<script/g) ?? []).length).toBe(1);
+    expect((p.match(/<script/g) ?? []).length).toBe(2);
     expect(p).toContain('classList.add("anim")');
     expect(p).not.toContain("sendBeacon");
     expect(p).not.toContain("/phone-tap"); // 計測の送り先(data-phone-tap 属性は tel の印なので残る)
     expect(p).toContain("tel:0312345678");
   });
-  it("PC/スマホの両方の CSS がある(固定バーはスマホだけ・PC は中央 760px)", () => {
+  it("PC/スマホの両方の CSS がある(固定バーはどちらにも・PC は中央 760px)", () => {
     expect(html).toContain("@media (max-width: 767px)");
     expect(html).toContain("@media (min-width: 768px)");
     expect(html).toContain("max-width:760px");
-    expect(html).toContain("position:fixed;bottom:0");
+    expect(html).toMatch(/\.bar\{display:block;position:fixed;left:0;right:0;bottom:0/);
     expect(html).toContain("prefers-reduced-motion");
   });
   it("電話番号が無い会社案内では tel ボタンを出さず連絡先を文字で出す", () => {
@@ -90,7 +90,7 @@ describe("renderLpPage", () => {
   });
   it("phoneTapToken に </script> が含まれても script タグを閉じない(</script>-safe な埋め込み)", () => {
     const h = renderLpPage(input({ phoneTapToken: "</script><img>" }));
-    expect((h.match(/<script/g) ?? []).length).toBe(2);
+    expect((h.match(/<script/g) ?? []).length).toBe(3);
     expect(h).not.toContain("</script><img>");
     expect(h).toContain("sendBeacon(");
   });

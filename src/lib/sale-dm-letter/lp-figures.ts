@@ -296,11 +296,15 @@ export function renderFigureHtml(kind: FigureKind): string {
   switch (kind) {
     case "inheritance_deadlines":
       return `<div class="deadline" role="group" aria-label="${esc(FIGURE_LABELS.inheritance_deadlines)}"><ol class="dl-list">` +
-        DEADLINE_ITEMS.map((d) =>
-          `<li class="dl-item${d.key ? " key" : ""}"><div class="dl-when">${d.when}</div><div class="dl-what"><strong>${esc(d.title)}</strong>` +
-          d.notes.map((n) => `<span>${esc(n)}</span>`).join("") + `</div></li>`,
-        ).join("") +
-        `</ol><p class="small-note">${esc(DEADLINE_FOOTNOTE)}</p></div>`;
+        DEADLINE_ITEMS.map((d) => {
+          // 2つ目以降の補足(※書き)は「くわしく」に畳む。売却期限(key)の行は全部見せる(2026-10-19 見本)。
+          const spans = d.notes.map((n) => `<span>${esc(n)}</span>`);
+          const notes = d.key || spans.length <= 1
+            ? spans.join("")
+            : `${spans[0]}<details class="more"><summary>くわしく</summary><div class="more-body">${spans.slice(1).join("")}</div></details>`;
+          return `<li class="dl-item${d.key ? " key" : ""}"><div class="dl-when">${d.when}</div><div class="dl-what"><strong>${esc(d.title)}</strong>${notes}</div></li>`;
+        }).join("") +
+        `</ol><details class="more"><summary>特例の条件について</summary><div class="more-body"><p class="small-note">${esc(DEADLINE_FOOTNOTE)}</p></div></details></div>`;
     case "sale_flow":
       return `<div class="flow-box"><ol class="flow">` +
         FLOW_STEPS.map(([t, s]) => `<li><div><strong>${esc(t)}</strong><span>${esc(s)}</span></div></li>`).join("") +
