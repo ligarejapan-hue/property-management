@@ -258,6 +258,21 @@ describe("ファイルの守り(/uploads と同じ判定・最終レビュー C1
 describe("送れた後に反響の更新が落ちたら、あとで反映し直す(@codex 2巡目 P2)", () => {
   // 送った時点の反響=open・宛先 sato@agent.jp(inquiry() と同じ)。
   const stuck = () => [{ id: "s0", toAddress: "new@agent.jp", statusAtSend: "open", contactEmailAtSend: "sato@agent.jp" }];
+  it("予約のときに反響を押さえて読み直し、その時点の状態と宛先を残す(@codex 18巡目 P2)", async () => {
+    pm.agentInquiry.findUnique
+      .mockResolvedValueOnce(inquiry()) // 最初の読み込み(open)
+      .mockResolvedValueOnce({ status: "in_progress", contactEmail: "mid@agent.jp" }); // 予約の直前に別の人が変えた
+    await POST(json("POST", body()), ctx);
+    const raw = (prismaMock as never as { $queryRaw: Fn }).$queryRaw;
+    expect((raw.mock.calls[0][0] as string[]).join("?")).toMatch(/FROM agent_inquiries WHERE id = \?::uuid FOR UPDATE/);
+    expect(pm.agentInquiryMaterialSend.create).toHaveBeenCalledWith(expect.objectContaining({
+      data: expect.objectContaining({ statusAtSend: "in_progress", contactEmailAtSend: "mid@agent.jp" }),
+    }));
+  });
+  it("予約の時刻はアプリの時計で入れる(反映の時刻と同じ時計で比べる・@codex 18巡目 P2)", async () => {
+    await POST(json("POST", body()), ctx);
+    expect(pm.agentInquiryMaterialSend.create.mock.calls[0][0].data.createdAt).toBeInstanceOf(Date);
+  });
   it("予約の行に、送った時点の反響の状態と宛先を残す", async () => {
     await POST(json("POST", body({ to: "new@agent.jp" })), ctx);
     expect(pm.agentInquiryMaterialSend.create).toHaveBeenCalledWith(expect.objectContaining({

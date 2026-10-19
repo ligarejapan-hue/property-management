@@ -27,19 +27,36 @@ import {
 
 const NO_STORE = { "Cache-Control": "no-store" };
 type Ctx = { params: Promise<{ id: string }> };
-const idOf = async (ctx: Ctx) => z.string().uuid().parse((await ctx.params).id);
+const idOf = async (ctx: Ctx) =>
+  z
+    .string()
+    .uuid()
+    .parse((await ctx.params).id);
 
 const sendSchema = z.object({
   to: z.string().trim().max(254),
-  subject: z.string().trim().min(1).max(MATERIAL_SEND_LIMITS.subject).refine((v) => !/[\r\n]/.test(v) && isPlainMailText(v)),
+  subject: z
+    .string()
+    .trim()
+    .min(1)
+    .max(MATERIAL_SEND_LIMITS.subject)
+    .refine((v) => !/[\r\n]/.test(v) && isPlainMailText(v)),
   // 本文はメール設定のひな形と同じ決まり(改行・タブ以外の制御文字を受けない)。
   body: z.string().min(1).max(MATERIAL_SEND_LIMITS.body).refine(isPlainMailText),
-  attachmentIds: z.array(z.string().uuid()).max(MATERIAL_SEND_LIMITS.maxFiles)
+  attachmentIds: z
+    .array(z.string().uuid())
+    .max(MATERIAL_SEND_LIMITS.maxFiles)
     .refine((a) => new Set(a).size === a.length),
   clientToken: z.string().uuid(),
 });
 
-type AuditRow = { userId: string; action: string; targetTable: string; targetId: string; detail: Record<string, unknown> };
+type AuditRow = {
+  userId: string;
+  action: string;
+  targetTable: string;
+  targetId: string;
+  detail: Record<string, unknown>;
+};
 
 /**
  * 送った記録の結果と監査の行を同じ取引で書く(一時的な失敗は3回までやり直す)。書けたら true。
@@ -54,11 +71,16 @@ async function finishSend(
     try {
       await prisma.$transaction(async (tx) => {
         await tx.agentInquiryMaterialSend.update({ where: { id: sendId }, data });
-        await tx.auditLog.createMany({ data: audits.map((a) => ({ ...a, detail: a.detail as object })) });
+        await tx.auditLog.createMany({
+          data: audits.map((a) => ({ ...a, detail: a.detail as object })),
+        });
       });
       return true;
     } catch (e) {
-      console.error("[material-send] mark sent failed", { attempt: i + 1, name: e instanceof Error ? e.name : "Unknown" });
+      console.error("[material-send] mark sent failed", {
+        attempt: i + 1,
+        name: e instanceof Error ? e.name : "Unknown",
+      });
       if (i < 2) await new Promise((r) => setTimeout(r, 200 * (i + 1)));
     }
   }
@@ -78,8 +100,16 @@ export async function GET(_req: Request, ctx: Ctx) {
       orderBy: { createdAt: "desc" },
       take: 50,
       select: {
-        id: true, createdAt: true, result: true, toAddress: true, subject: true, body: true,
-        attachments: true, totalSize: true, errorCode: true, sentBy: { select: { name: true } },
+        id: true,
+        createdAt: true,
+        result: true,
+        toAddress: true,
+        subject: true,
+        body: true,
+        attachments: true,
+        totalSize: true,
+        errorCode: true,
+        sentBy: { select: { name: true } },
       },
     });
     const now = new Date();
@@ -111,14 +141,24 @@ export async function POST(request: Request, ctx: Ctx) {
       }
       if (prev.result === "sent") await reconcileMaterialSends(id, session.id);
       return NextResponse.json(
-        { id: prev.id, result: prev.result, state: sendStateLabel(prev, new Date()), replayed: true },
+        {
+          id: prev.id,
+          result: prev.result,
+          state: sendStateLabel(prev, new Date()),
+          replayed: true,
+        },
         { headers: NO_STORE },
       );
     };
     const prev = await replay();
     if (prev) return prev;
 
-    if (!isSingleAddress(input.to)) throw new ApiError(400, "宛先のメールアドレスを1件、正しい形で入れてください", "INVALID_ADDRESS");
+    if (!isSingleAddress(input.to))
+      throw new ApiError(
+        400,
+        "宛先のメールアドレスを1件、正しい形で入れてください",
+        "INVALID_ADDRESS",
+      );
     const config = await loadMailSendConfig();
     if (!config) throw new ApiError(409, "管理画面のメール設定が必要です", "MAIL_NOT_CONFIGURED");
 
@@ -136,11 +176,20 @@ export async function POST(request: Request, ctx: Ctx) {
     }
 
     // ファイルごとに /uploads と同じ守りを通す(記録は手で書ける=種類と物件だけでは足りない・最終レビュー C1)。
-    const guarded: { row: (typeof sel.rows)[number]; key: string; effectiveType: "general" | "registry" }[] = [];
+    const guarded: {
+      row: (typeof sel.rows)[number];
+      key: string;
+      effectiveType: "general" | "registry";
+    }[] = [];
     const checks = await guardMaterialFiles(sel.rows, session, perms);
     sel.rows.forEach((r, i) => {
       const g = checks[i];
-      if (!g.ok) throw new ApiError(400, "送れないファイルが含まれています。画面を開き直してください", "NOT_SELECTABLE");
+      if (!g.ok)
+        throw new ApiError(
+          400,
+          "送れないファイルが含まれています。画面を開き直してください",
+          "NOT_SELECTABLE",
+        );
       guarded.push({ row: r, key: g.key, effectiveType: g.effectiveType });
     });
 
@@ -149,40 +198,57 @@ export async function POST(request: Request, ctx: Ctx) {
     let readBytes = 0;
     for (const { row: r, key } of guarded) {
       const got = await storage.read(key);
-      if (!got) throw new ApiError(409, `「${r.fileName}」を読み出せませんでした`, "FILE_UNAVAILABLE");
+      if (!got)
+        throw new ApiError(409, `「${r.fileName}」を読み出せませんでした`, "FILE_UNAVAILABLE");
       // 上限は記録の大きさ(手で書ける)ではなく、実際に読んだ大きさで確かめる。
       readBytes += got.body.length;
       if (readBytes > MATERIAL_SEND_LIMITS.maxTotalBytes) {
-        throw new ApiError(400, `ファイルの合計が ${MATERIAL_SEND_LIMIT_LABEL} を超えています`, "TOO_LARGE");
+        throw new ApiError(
+          400,
+          `ファイルの合計が ${MATERIAL_SEND_LIMIT_LABEL} を超えています`,
+          "TOO_LARGE",
+        );
       }
       // ファイルの種類もストレージの値を使う(記録の mimeType は手で書ける)。
       files.push({ filename: r.fileName, content: got.body, contentType: got.contentType });
     }
 
     // 予約の行(一意制約で二重送信を防ぐ)。
+    // ⚠反響を押さえて読み直し、その時点の状態と宛先を残す(読み込みから予約までの別の人の変更を
+    //   「送った後の手の変更」と取り違えない・@codex 18巡目 P2)。
+    // ⚠予約の時刻はアプリの時計で入れる(反映の時刻 inquiryAppliedAt と同じ時計で比べる・@codex 18巡目 P2)。
     let claim: { id: string };
     try {
-      claim = await prisma.agentInquiryMaterialSend.create({
-        data: {
-          inquiryId: id,
-          sentById: session.id,
-          toAddress: input.to,
-          subject: input.subject,
-          body: input.body,
-          attachments: guarded.map(({ row: r, effectiveType }, i) => ({
-            attachmentId: r.id,
-            fileName: r.fileName,
-            fileSize: files[i].content.length,
-            type: effectiveType,
-          })),
-          totalSize: readBytes,
-          result: "sending",
-          clientToken: input.clientToken,
-          // 送った時点の反響(反映し直しで、あとから手で変えた欄を上書きしない・@codex 8巡目)。
-          statusAtSend: q.status,
-          contactEmailAtSend: q.contactEmail,
-        },
-        select: { id: true },
+      claim = await prisma.$transaction(async (tx) => {
+        await tx.$queryRaw`SELECT id FROM agent_inquiries WHERE id = ${id}::uuid FOR UPDATE`;
+        const now = await tx.agentInquiry.findUnique({
+          where: { id },
+          select: { status: true, contactEmail: true },
+        });
+        if (!now) throw new ApiError(404, "反響が見つかりません", "NOT_FOUND");
+        return tx.agentInquiryMaterialSend.create({
+          data: {
+            createdAt: new Date(),
+            inquiryId: id,
+            sentById: session.id,
+            toAddress: input.to,
+            subject: input.subject,
+            body: input.body,
+            attachments: guarded.map(({ row: r, effectiveType }, i) => ({
+              attachmentId: r.id,
+              fileName: r.fileName,
+              fileSize: files[i].content.length,
+              type: effectiveType,
+            })),
+            totalSize: readBytes,
+            result: "sending",
+            clientToken: input.clientToken,
+            // 送った時点の反響(反映し直しで、あとから手で変えた欄を上書きしない・@codex 8巡目)。
+            statusAtSend: now.status,
+            contactEmailAtSend: now.contactEmail,
+          },
+          select: { id: true },
+        });
       });
     } catch (e) {
       if ((e as { code?: string } | null)?.code === "P2002") {
@@ -192,7 +258,12 @@ export async function POST(request: Request, ctx: Ctx) {
       throw e;
     }
 
-    const result = await sendMailWithAttachments(config, { to: input.to, subject: input.subject, text: input.body, attachments: files });
+    const result = await sendMailWithAttachments(config, {
+      to: input.to,
+      subject: input.subject,
+      text: input.body,
+      attachments: files,
+    });
     // 監査の行。送った記録の書き込みと同じ取引で書く(監査だけ抜けない・@codex 10巡目 P2)。
     const auditRows = (detail: Record<string, unknown>): AuditRow[] => [
       {
@@ -224,7 +295,13 @@ export async function POST(request: Request, ctx: Ctx) {
           data: { result: "failed", errorCode: result.code, finishedAt: new Date() },
         });
         return NextResponse.json(
-          { id: claim.id, error: { code: "SEND_FAILED", message: "送れませんでした。時間をおいてもう一度押してください" } },
+          {
+            id: claim.id,
+            error: {
+              code: "SEND_FAILED",
+              message: "送れませんでした。時間をおいてもう一度押してください",
+            },
+          },
           { status: 502, headers: NO_STORE },
         );
       }
@@ -242,7 +319,8 @@ export async function POST(request: Request, ctx: Ctx) {
           id: claim.id,
           error: {
             code: "SEND_UNKNOWN",
-            message: "送れたか分かりません(メールの相手先の応答が途中で切れました)。相手に届いたか確かめてください",
+            message:
+              "送れたか分かりません(メールの相手先の応答が途中で切れました)。相手に届いたか確かめてください",
           },
         },
         { status: 502, headers: NO_STORE },
@@ -252,7 +330,11 @@ export async function POST(request: Request, ctx: Ctx) {
     // 送信は済んだ=まず記録を送信済みにする(後の更新が落ちても「送信中」のまま残さない・最終レビュー I2)。
     // ⚠一時的に落ちてもやり直す。ずっと落ちても**エラーにしない**=送れたことを返す(エラーにすると押し直し→
     //   10分後に結果不明→2通目、になる・@codex 6巡目 P1)。記録は送信中のまま残る=記録には結果不明と出る。
-    const recorded = await finishSend(claim.id, { result: "sent", finishedAt: new Date() }, auditRows({}));
+    const recorded = await finishSend(
+      claim.id,
+      { result: "sent", finishedAt: new Date() },
+      auditRows({}),
+    );
     if (!recorded) {
       await auditFallback({ outcome: "sent_unrecorded" });
       return NextResponse.json(
@@ -273,10 +355,15 @@ export async function POST(request: Request, ctx: Ctx) {
       }
     } catch (e) {
       statusUpdated = false;
-      console.error("[material-send] inquiry update failed after send", { name: e instanceof Error ? e.name : "Unknown" });
+      console.error("[material-send] inquiry update failed after send", {
+        name: e instanceof Error ? e.name : "Unknown",
+      });
     }
     // 反響を書いた監査(状態・宛先のどちらでも)は applySentMaterialToInquiry が同じ取引で書く(@codex 11・12巡目 P2)。
-    return NextResponse.json({ id: claim.id, result: "sent", version, statusUpdated }, { status: 201, headers: NO_STORE });
+    return NextResponse.json(
+      { id: claim.id, result: "sent", version, statusUpdated },
+      { status: 201, headers: NO_STORE },
+    );
   } catch (error) {
     return handleApiError(error);
   }
