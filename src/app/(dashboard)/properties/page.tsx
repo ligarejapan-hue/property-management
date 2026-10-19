@@ -2,6 +2,7 @@
 
 import { useState, useEffect, useCallback, useMemo, useRef, Suspense } from "react";
 import { PageHeader } from "@/components/ui/page-header";
+import { Button } from "@/components/ui/button";
 import { useSearchParams, useRouter, usePathname } from "next/navigation";
 import Link from "next/link";
 import { Search, Loader2, Plus, Trash2, AlertTriangle, RotateCcw, Download, CheckCircle2 } from "lucide-react";
@@ -1023,16 +1024,14 @@ function PropertiesPageInner() {
           className="mb-3 flex flex-wrap items-center gap-3 rounded-md border border-blue-200 bg-blue-50 px-3 py-2 text-sm text-blue-900 dark:border-blue-900 dark:bg-blue-950/40 dark:text-blue-200"
         >
           <span>この所有者の物件だけを表示しています</span>
-          <button
-            type="button"
+          <Button variant="secondary" size="sm"
             onClick={() => {
               setOwnerFilter("");
               setPage(1);
             }}
-            className="rounded-md border border-blue-300 px-2 py-1 text-xs hover:bg-blue-100 dark:border-blue-800 dark:hover:bg-blue-900/40"
           >
             絞り込みを解除
-          </button>
+          </Button>
         </div>
       )}
 
@@ -1079,19 +1078,16 @@ function PropertiesPageInner() {
               >
                 <div className="mb-2 flex items-center justify-between">
                   <span className="text-xs font-medium text-gray-600 dark:text-gray-300">出力する列</span>
-                  <button
-                    type="button"
-                    className="text-xs text-gray-500 hover:underline dark:text-gray-400"
+                  <Button variant="ghost" size="sm"
                     onClick={() => setShowColumnPicker(false)}
                   >
                     閉じる
-                  </button>
+                  </Button>
                 </div>
                 <div className="mb-2 flex items-center justify-end">
                   <div className="flex gap-2">
-                    <button
-                      type="button"
-                      className="text-xs text-indigo-600 dark:text-indigo-400 hover:underline"
+                    <Button variant="ghost" size="sm"
+                      className="text-indigo-600 dark:text-indigo-400"
                       onClick={() =>
                         setSelectedExportColumns(
                           new Set(EXPORT_COLUMNS.map((c) => c.key)),
@@ -1099,14 +1095,12 @@ function PropertiesPageInner() {
                       }
                     >
                       全選択
-                    </button>
-                    <button
-                      type="button"
-                      className="text-xs text-gray-500 hover:underline"
+                    </Button>
+                    <Button variant="ghost" size="sm"
                       onClick={() => setSelectedExportColumns(new Set())}
                     >
                       全解除
-                    </button>
+                    </Button>
                   </div>
                 </div>
                 <div className="max-h-64 overflow-y-auto">
@@ -1125,11 +1119,10 @@ function PropertiesPageInner() {
                     </label>
                   ))}
                 </div>
-                <button
-                  type="button"
+                <Button variant="primary"
                   onClick={handleExportCsv}
                   disabled={selectedExportColumns.size === 0 || searchPending}
-                  className="mt-2 inline-flex w-full items-center justify-center gap-2 rounded-md bg-indigo-600 px-3 py-1.5 text-sm font-medium text-white hover:bg-indigo-700 disabled:cursor-not-allowed disabled:opacity-50"
+                  className="mt-2 w-full"
                   title={
                     searchPending
                       ? "検索語が入力途中です(管理IDを最後まで入力するか、消してください)"
@@ -1140,24 +1133,23 @@ function PropertiesPageInner() {
                 >
                   <Download className="h-4 w-4" />
                   CSV出力
-                </button>
+                </Button>
               </div>
             )}
           </>
           )}
         </div>
-        <button
-          type="button"
+        <Button variant="primary"
           onClick={() => {
             // 手で開いたら、この画面の自動の開き直しは済んだことにする(×で控えを残して閉じた直後に開き直さない・@codex P2)。
             setNewDraftAutoOpened(true);
             setShowNewModal(true);
           }}
-          className="inline-flex items-center gap-2 whitespace-nowrap rounded-md bg-indigo-600 px-4 py-2 text-sm font-medium text-white hover:bg-indigo-700"
+          className="whitespace-nowrap"
         >
           <Plus className="h-4 w-4" />
           新規物件登録
-        </button>
+        </Button>
       </div>
 
       {showNewModal && (
@@ -1201,8 +1193,7 @@ function PropertiesPageInner() {
             POST の suggest のみに流れる=URL・property_list 監査に載らない。
             絞り込み窓と経路を分けることで、打ち間違い(候補0件)でも漏れない。 */}
         <div className="relative">
-          <button
-            type="button"
+          <Button variant="secondary"
             onClick={() => {
               setOwnerSearchOpen((v) => {
                 const next = !v;
@@ -1214,11 +1205,10 @@ function PropertiesPageInner() {
               });
             }}
             aria-expanded={ownerSearchOpen}
-            className="inline-flex items-center gap-1 rounded-md border border-gray-300 bg-white px-3 py-2 text-sm font-medium text-gray-700 hover:bg-gray-50 dark:border-gray-700 dark:bg-gray-900 dark:text-gray-200 dark:hover:bg-gray-800"
             title="所有者名・電話番号から物件を開く(一覧の絞り込みには使いません)"
           >
             所有者で探す{ownerSearchOpen ? " ▴" : " ▾"}
-          </button>
+          </Button>
           {ownerSearchOpen && (
             <div className="absolute left-0 top-full z-50 mt-1 w-[360px] max-w-[90vw] rounded-md border border-gray-200 bg-white p-3 shadow-lg dark:border-gray-800 dark:bg-gray-900">
               <p className="mb-2 text-[11px] text-gray-500 dark:text-gray-400">
@@ -1272,7 +1262,8 @@ function PropertiesPageInner() {
             <ul className="absolute left-0 top-full z-50 mt-1 w-full min-w-[320px] rounded-md border border-gray-200 bg-white shadow-lg dark:border-gray-800 dark:bg-gray-900">
               {suggestResults.map((item) => (
                 <li key={item.id}>
-                  <button
+                  {/* data-ui=raw: 検索候補の一覧の行全体が押せる面(ボタンの形ではない) */}
+                  <button data-ui="raw"
                     type="button"
                     onMouseDown={(e) => e.preventDefault()}
                     onClick={() => {
@@ -1329,27 +1320,23 @@ function PropertiesPageInner() {
 
         {/* リセットは絞り込み中だけ出す(画面すっきり化 第3回)。 */}
         {hasActiveFilter && (
-        <button
-          type="button"
+        <Button variant="secondary"
           onClick={handleResetFilters}
-          className="inline-flex items-center gap-1 rounded-md border border-gray-300 bg-white px-3 py-2 text-sm font-medium text-gray-700 hover:bg-gray-50 disabled:cursor-not-allowed disabled:opacity-50 dark:border-gray-700 dark:bg-gray-900 dark:text-gray-200 dark:hover:bg-gray-800"
           title="全フィルタをリセット"
         >
           <RotateCcw className="h-3.5 w-3.5" />
           リセット
-        </button>
+        </Button>
         )}
 
-        <button
-          type="button"
+        <Button variant="secondary"
           onClick={() => setAdvancedOpen((v) => !v)}
           aria-expanded={advancedOpen}
-          className="inline-flex items-center gap-1 rounded-md border border-gray-300 bg-white px-3 py-2 text-sm font-medium text-gray-700 hover:bg-gray-50 dark:border-gray-700 dark:bg-gray-900 dark:text-gray-200 dark:hover:bg-gray-800"
           title="種別・登記状況・日付などの詳細条件を開閉"
         >
           詳細条件{advancedFilterCount > 0 ? `（${advancedFilterCount}件適用中）` : ""}
           {advancedOpen ? " ▴" : " ▾"}
-        </button>
+        </Button>
         </div>
 
         {/* 詳細条件(折りたたみ)。適用中はトグルに件数が出るので、畳んでいても
@@ -1543,12 +1530,12 @@ function PropertiesPageInner() {
       {error && (
         <div className="mb-4 rounded-lg border border-red-200 bg-red-50 p-4 text-sm text-red-700 dark:border-red-800 dark:bg-red-950/40 dark:text-red-300">
           {error}
-          <button
+          <Button variant="ghost" size="sm"
             onClick={fetchProperties}
-            className="ml-2 text-red-800 underline hover:no-underline dark:text-red-300"
+            className="ml-2 underline hover:no-underline text-red-800 dark:text-red-300"
           >
             再試行
-          </button>
+          </Button>
         </div>
       )}
 
@@ -1575,11 +1562,10 @@ function PropertiesPageInner() {
           {/* 権限(canCreateDm)に加え、文面生成が設定済み(capabilities.saleDmPrintReady)のときだけ出す。
               未設定だと押しても 503 になるため導線自体を隠す。 */}
           {canCreateDm && capabilities?.saleDmPrintReady && (
-            <button
-              type="button"
+            <Button variant="secondary"
               onClick={openCreateSaleDm}
               disabled={creatingDm || loading || selectedIds.size === 0 || searchPending}
-              className="inline-flex items-center gap-2 whitespace-nowrap rounded-md border border-indigo-300 bg-white px-4 py-2 text-sm font-medium text-indigo-700 hover:bg-indigo-50 dark:border-indigo-400 dark:bg-gray-900 dark:text-indigo-400 dark:hover:bg-gray-800 disabled:cursor-not-allowed disabled:opacity-50"
+              className="whitespace-nowrap"
               title={
                 searchPending
                   ? "検索語が入力途中です(管理IDを最後まで入力するか、消してください)"
@@ -1588,7 +1574,7 @@ function PropertiesPageInner() {
             >
               {creatingDm ? <Loader2 className="h-4 w-4 animate-spin" /> : <Plus className="h-4 w-4" />}
               売却DMを作成{selectedIds.size > 0 ? `（${selectedIds.size}件）` : ""}
-            </button>
+            </Button>
           )}
           {/* 謄本の一括取得。権限(registry:auto_fetch)に加え、有料取得が使える設定
               (capabilities.registryPurchase=課金スイッチ+校正)のときだけ出す。休眠中は隠す。 */}
@@ -1631,11 +1617,9 @@ function PropertiesPageInner() {
             <option value="hold">未判断</option>
           </select>
           {canDeleteProperty && (
-          <button
-            type="button"
+          <Button variant="danger" size="sm"
             disabled={bulkDeleting || bulkUpdating || searchPending}
             onClick={handleBulkDelete}
-            className="inline-flex items-center gap-1 rounded-md border border-red-300 bg-white px-3 py-1 text-xs font-medium text-red-700 hover:bg-red-50 disabled:cursor-not-allowed disabled:opacity-50"
           >
             {bulkDeleting ? (
               <Loader2 className="h-3.5 w-3.5 animate-spin" />
@@ -1643,15 +1627,15 @@ function PropertiesPageInner() {
               <Trash2 className="h-3.5 w-3.5" />
             )}
             選択した物件を削除
-          </button>
+          </Button>
           )}
-          <button
+          <Button variant="ghost" size="sm"
             onClick={() => setSelectedIds(new Set())}
             disabled={bulkDeleting}
-            className="ml-auto text-xs text-gray-500 hover:text-gray-700 disabled:opacity-50"
+            className="ml-auto"
           >
             選択解除
-          </button>
+          </Button>
         </div>
       )}
 
@@ -1669,12 +1653,12 @@ function PropertiesPageInner() {
               一括削除結果: 成功 <b>{bulkDeleteResult.successCount}</b> 件 / 失敗{" "}
               <b>{bulkDeleteResult.failureCount}</b> 件
             </div>
-            <button
+            <Button variant="ghost" size="sm"
               onClick={() => setBulkDeleteResult(null)}
-              className="text-xs underline hover:no-underline"
+              className="underline hover:no-underline text-inherit dark:text-inherit"
             >
               閉じる
-            </button>
+            </Button>
           </div>
           {bulkDeleteResult.failures.length > 0 && (
             <ul className="mt-2 max-h-40 list-disc space-y-0.5 overflow-auto pl-5 text-xs">
@@ -1833,15 +1817,13 @@ function PropertiesPageInner() {
                           宛先不明
                         </span>
                         {canWriteProperty && (
-                          <button
-                            type="button"
+                          <Button variant="secondary" size="sm"
                             onClick={() => handleClearUndeliverable(property.id)}
                             disabled={clearingUndelivId === property.id}
                             aria-label="宛先不明を解除"
-                            className="rounded border border-gray-300 px-1.5 py-0.5 text-[10px] font-medium text-gray-600 hover:bg-gray-50 disabled:opacity-50 dark:border-gray-600 dark:text-gray-300 dark:hover:bg-gray-800"
                           >
                             解除
-                          </button>
+                          </Button>
                         )}
                       </span>
                     )}
@@ -1860,19 +1842,18 @@ function PropertiesPageInner() {
                   </td>
                   <td className="whitespace-nowrap px-2 py-3" onClick={(e) => e.stopPropagation()}>
                     {canDeleteProperty && (
-                      <button
-                        type="button"
+                      <Button variant="ghost" size="sm"
                         title="この物件を削除"
                         disabled={deletingId === property.id}
                         onClick={() => handleDelete(property.id, property.address)}
-                        className="inline-flex items-center justify-center rounded-md p-1.5 text-red-600 hover:bg-red-50 disabled:cursor-not-allowed disabled:opacity-50"
+                        className="text-red-600 hover:text-red-700 dark:text-red-400"
                       >
                         {deletingId === property.id ? (
                           <Loader2 className="h-4 w-4 animate-spin" />
                         ) : (
                           <Trash2 className="h-4 w-4" />
                         )}
-                      </button>
+                      </Button>
                     )}
                   </td>
                 </tr>
@@ -1966,8 +1947,7 @@ function PropertiesPageInner() {
                           </p>
                         ))}
                         {hasMore && (
-                          <button
-                            type="button"
+                          <Button variant="ghost" size="sm"
                             onClick={(e) => {
                               e.stopPropagation();
                               setExpandedOwners((prev) => {
@@ -1977,12 +1957,12 @@ function PropertiesPageInner() {
                                 return next;
                               });
                             }}
-                            className="mt-1 inline-flex items-center min-h-[44px] py-2 text-xs text-indigo-600 dark:text-indigo-400 hover:underline"
+                            className="mt-1 min-h-[44px] text-indigo-600 dark:text-indigo-400"
                           >
                             {isExpanded
                               ? "▴ 折りたたむ"
                               : `他${owners.length - OWNER_PREVIEW}名 ▾`}
-                          </button>
+                          </Button>
                         )}
                       </>
                     )}
@@ -2013,15 +1993,13 @@ function PropertiesPageInner() {
                         宛先不明
                       </span>
                       {canWriteProperty && (
-                        <button
-                          type="button"
+                        <Button variant="secondary" size="sm"
                           onClick={() => handleClearUndeliverable(property.id)}
                           disabled={clearingUndelivId === property.id}
                           aria-label="宛先不明を解除"
-                          className="rounded border border-gray-300 px-1.5 py-0.5 text-[10px] font-medium text-gray-600 hover:bg-gray-50 disabled:opacity-50 dark:border-gray-600 dark:text-gray-300 dark:hover:bg-gray-800"
                         >
                           解除
-                        </button>
+                        </Button>
                       )}
                     </span>
                   )}

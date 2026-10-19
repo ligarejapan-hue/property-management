@@ -119,7 +119,8 @@ describe("物件一覧: いつも出ている操作", () => {
   });
 
   it("リセットは絞り込み中だけ出す", () => {
-    expect(LIST).toMatch(/\{hasActiveFilter && \(\s*<button\s+type="button"\s+onClick=\{handleResetFilters\}/);
+    // UIの統一 第3回: 共通 Button(secondary)へ置き換え済み
+    expect(LIST).toMatch(/\{hasActiveFilter && \(\s*<Button\s+variant="secondary"\s+onClick=\{handleResetFilters\}/);
   });
 
   it("DM判断・担当者が URL で効いているときは、詳細条件を最初から開き、件数にも数える", () => {
