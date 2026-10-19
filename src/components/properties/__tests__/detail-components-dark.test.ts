@@ -81,8 +81,9 @@ describe("attachment-tab.tsx dark: 配色 (phase2b 2b-3)", () => {
   });
 
   // --- close ボタン neutral hover ---
-  it("モーダル閉じるボタンに dark:hover:bg-gray-700 がある", () => {
-    expect(attachmentTabSrc).toContain("dark:hover:bg-gray-700");
+  // UIの統一 第3回: 閉じるは共通 Button の ghost(暗い面の hover は部品側が持つ)
+  it("モーダル閉じるボタンは共通 Button の ghost(暗い面の hover は部品側)", () => {
+    expect(attachmentTabSrc).toMatch(/<Button\s+variant="ghost"\s+size="sm"\s+onClick=\{onClose\}/);
   });
 
   // --- ライト側クラスが依然存在する（不変担保） ---
