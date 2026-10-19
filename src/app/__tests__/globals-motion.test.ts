@@ -60,10 +60,24 @@ describe("全ボタンの手応え(@layer base)", () => {
 });
 
 describe("対象外の印", () => {
-  it("地図の外枠(丸ボタン群)", () => {
-    expect(read("src/components/field-survey/field-survey-map.tsx")).toContain(
-      '<div data-motion="off" className="relative h-full w-full">',
+  const fsMap = read("src/components/field-survey/field-survey-map.tsx");
+  it("★地図の外枠には付けない(ピンの登録・詳細の小窓のボタンまで止まるため・提出前レビュー指摘)", () => {
+    expect(fsMap).toContain('<div className="relative h-full w-full">');
+    expect(fsMap).not.toContain('<div data-motion="off" className="relative h-full w-full">');
+  });
+  it("Google の地図そのもの(拡大・縮小・吹き出しの×)", () => {
+    expect(fsMap).toMatch(/<div data-motion="off" className="h-full w-full">\s*<Map\b/);
+    expect(read("src/components/field-survey/field-survey-history-map.tsx")).toMatch(
+      /<div data-motion="off" className="h-\[calc\(100%-2\.25rem\)\] w-full">/,
     );
+  });
+  it("地図の丸ボタン(現在地・撮影・写真なし・巡回の開始/終了・記録中の札)", () => {
+    for (const id of ["trip-quick-end", "trip-quick-start", "location-recording-chip"]) {
+      expect(fsMap, id).toMatch(new RegExp(`data-testid="${id}"\\s+data-motion="off"`));
+    }
+    for (const f of ["map-recenter-button", "camera-first-button", "pin-without-photo-button"]) {
+      expect(read(`src/components/field-survey/${f}.tsx`), f).toContain('data-motion="off"');
+    }
   });
   it("謄本の実況パネル(中止ボタン・写真の縮小表示)", () => {
     expect(read("src/components/properties/registry-live-panel.tsx")).toMatch(

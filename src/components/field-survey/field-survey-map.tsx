@@ -1301,7 +1301,9 @@ export default function FieldSurveyMap({
 
   return (
     <APIProvider apiKey={apiKey}>
-      <div data-motion="off" className="relative h-full w-full">
+      <div className="relative h-full w-full">
+        {/* 地図そのもの(Google の拡大・縮小・吹き出しの×)は押しても沈ませない(UIの統一 第1回)。 */}
+        <div data-motion="off" className="h-full w-full">
         <Map
           defaultCenter={DEFAULT_CENTER}
           defaultZoom={DEFAULT_ZOOM}
@@ -1373,6 +1375,7 @@ export default function FieldSurveyMap({
             </AdvancedMarker>
           )}
         </Map>
+        </div>
 
         <ControlPanel
           layers={layers}
@@ -1437,6 +1440,7 @@ export default function FieldSurveyMap({
           <button
             type="button"
             data-testid="trip-quick-end"
+            data-motion="off"
             onClick={() => endTripRef.current?.()}
             className="absolute bottom-[7.25rem] left-3 z-10 flex items-center gap-1 rounded-full border border-gray-300 bg-white/95 px-3 py-2 text-xs font-semibold text-gray-800 shadow-lg hover:bg-gray-50 dark:border-gray-600 dark:bg-gray-900/95 dark:text-gray-100 dark:hover:bg-gray-800"
           >
@@ -1603,6 +1607,7 @@ export default function FieldSurveyMap({
             <button
               type="button"
               data-testid="trip-quick-start"
+              data-motion="off"
               onClick={() => {
                 quickStartRef.current = true;
                 // 第4回 F: パネルは開かない(確認は portal で出る)。開くと地図のボタンが隠れ、
@@ -1634,6 +1639,7 @@ export default function FieldSurveyMap({
           <button
             type="button"
             data-testid="location-recording-chip"
+            data-motion="off"
             onClick={() => setPanelOpen(true)}
             className={
               recorder.status === "recording"
