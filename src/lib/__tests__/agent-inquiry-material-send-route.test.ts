@@ -419,6 +419,14 @@ describe("送れた後に反響の更新が落ちたら、あとで反映し直�
     const q = pm.agentInquiryMaterialSend.findMany.mock.calls.find((c) => "createdAt" in c[0].where)![0];
     expect(q.where).toMatchObject({ createdAt: { gt: at }, inquiryAppliedAt: { not: null } });
   });
+  it("後から作った送信が先に反映済み=古い送信で状態も戻さない(手で開き直した反響を done にしない・@codex 21巡目 P2)", async () => {
+    const at = new Date("2026-10-19T03:00:00Z");
+    pending = () => [{ id: "sA", toAddress: "sato@agent.jp", statusAtSend: "open", contactEmailAtSend: "sato@agent.jp", createdAt: at } as never];
+    newerApplied = [{ id: "sB" }];
+    pm.agentInquiry.findUnique.mockResolvedValue(inquiry({ status: "open" }));
+    await APPLY(json("POST", {}), ctx);
+    expect(pm.agentInquiry.update).not.toHaveBeenCalled();
+  });
   it("宛先を書かなかった反映では印を付けない", async () => {
     pending = stuck;
     pm.agentInquiry.findUnique.mockResolvedValue(inquiry({ contactEmail: "new@agent.jp" }));
