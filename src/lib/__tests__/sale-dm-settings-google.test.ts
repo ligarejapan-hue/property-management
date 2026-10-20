@@ -60,6 +60,10 @@ describe("LPの設定: Google のタグ(広告用の公開ページ・設計 202
     const upd = pm.saleDmConfig.upsert.mock.calls[0][0].update;
     expect(upd.googleTagId).toBe("AW-12345ABC");
     expect(upd.googleConvLabel).toBe("LbL-1234");
+    // 応答にも GET と同じ形で返す(画面は応答で欄を上書きするため・@codex #535 R2 P2)
+    const saved = await res.json();
+    expect(saved.data.googleTagId).toBe("AW-12345ABC");
+    expect(saved.data.googleConvLabel).toBe("LbL-1234");
     const res2 = await PUT(putReq({ googleTagId: "", googleConvLabel: "" }));
     expect(res2.status).toBe(200);
     const upd2 = pm.saleDmConfig.upsert.mock.calls[1][0].update;

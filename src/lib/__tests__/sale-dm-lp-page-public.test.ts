@@ -90,6 +90,10 @@ describe("renderLpPage(public=広告用の公開ページ)", () => {
     const g2 = renderLpPage(publicInput({ public: { ...publicInput().public!, google: { tagId: "G-ABCD1234", convLabel: null } } }));
     expect(g2).not.toContain("'event','conversion'");
     expect(g2).toContain("gtag('event','generate_lead')");
+    // G-/GT- の ID にラベルが残っていても conversion は送らない(Google広告の宛先は AW- だけ・@codex #535 R2)
+    const g3 = renderLpPage(publicInput({ public: { ...publicInput().public!, google: { tagId: "G-ABCD1234", convLabel: "AbCd-12_x" } } }));
+    expect(g3).not.toContain("'event','conversion'");
+    expect(g3).toContain("gtag('config','G-ABCD1234')");
   });
   it("送信スクリプトは申込完了(done)のときに document へ lp:inquiry-done を出す(値は含めない)。サーバーが silent(機械送信)と返したときは出さない", () => {
     expect(html).toContain('new CustomEvent("lp:inquiry-done")');

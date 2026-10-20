@@ -792,7 +792,8 @@ function ogMetaTags(input: LpRenderInput, pub: LpPublicInput): string {
 function googleTagScripts(google: { tagId: string; convLabel: string | null }): string {
   // 許可リスト([A-Z0-9-] / [A-Za-z0-9_-])を通った値だけを受け取る前提。念のためここでも合わなければ出さない。
   if (!/^[A-Z0-9-]+$/.test(google.tagId) || (google.convLabel !== null && !/^[A-Za-z0-9_-]+$/.test(google.convLabel))) return "";
-  const conv = google.convLabel ? `gtag('event','conversion',{send_to:'${google.tagId}/${google.convLabel}'});` : "";
+  // コンバージョン(send_to: AW-xxx/ラベル)は Google広告の ID(AW-)のときだけ。G-/GT- にラベルが残っていても送らない(@codex #535 R2 P2)。
+  const conv = google.convLabel && google.tagId.startsWith("AW-") ? `gtag('event','conversion',{send_to:'${google.tagId}/${google.convLabel}'});` : "";
   return `<script async src="https://www.googletagmanager.com/gtag/js?id=${google.tagId}"></script>` +
     `<script>window.dataLayer=window.dataLayer||[];function gtag(){dataLayer.push(arguments)}gtag('js',new Date());gtag('config','${google.tagId}');` +
     `document.addEventListener("lp:inquiry-done",function(){try{${conv}gtag('event','generate_lead')}catch(_){}});</script>`;

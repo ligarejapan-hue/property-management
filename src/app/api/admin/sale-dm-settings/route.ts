@@ -172,6 +172,8 @@ export async function PUT(request: NextRequest) {
           provider: row.provider, model: row.model, trackingBaseUrl: row.trackingBaseUrl,
           lpUrl: row.lpUrl, senderName: row.senderName, senderContact: row.senderContact,
           privacyText: row.privacyText,
+          // GET と同じ形で返す(画面は応答で欄を上書きする=欠けると保存直後に空に見え、次の保存で消える・@codex #535 R2 P2)。
+          googleTagId: row.googleTagId ?? null, googleConvLabel: row.googleConvLabel ?? null,
           hasAnthropicKey: !!row.anthropicApiKeyEnc, hasOpenaiKey: !!row.openaiApiKeyEnc,
           encryptionConfigured: isSecretCryptoConfigured(), updatedAt: row.updatedAt,
         },

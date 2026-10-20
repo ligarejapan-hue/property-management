@@ -120,14 +120,23 @@ export async function DELETE(_req: Request, { params }: Ctx) {
       if (cur.autoKey) {
         throw new ApiError(409, "自動で選ばれる種類(相続・相続（マンション）・空き家)は消せません。止めるときは「使わない」にしてください", "SCENARIO_RESERVED");
       }
-      const [p, c, v, l] = await Promise.all([
+      // 論理削除なので DB の RESTRICT は効かない=参照を自分で数える。広告用の公開ページからの申込(dm_inquiries.scenario_id)も
+      // 含める(@codex #535 R2 P2: 申込のある種類を隠すと申込の出どころが辿れなくなる)。
+      const [p, c, v, l, q] = await Promise.all([
         tx.property.count({ where: { dmScenarioId: id } }),
         tx.dmCampaign.count({ where: { defaultScenarioId: id } }),
         tx.dmVariant.count({ where: { scenarioId: id } }),
         tx.dmLpVariant.count({ where: { scenarioId: id } }),
+        tx.dmInquiry.count({ where: { scenarioId: id } }),
       ]);
-      if (p + c + v + l > 0) {
-        throw new ApiError(409, "このDMの種類は物件や発送で使われています。「使わない」にしてください", "SCENARIO_IN_USE");
+      if (p + c + v + l + q > 0) {
+        throw new ApiError(
+          409,
+          q > 0 && p + c + v + l === 0
+            ? "このDMの種類には広告用ページからの申込があります。「使わない」にしてください"
+            : "このDMの種類は物件や発送で使われています。「使わない」にしてください",
+          "SCENARIO_IN_USE",
+        );
       }
       await tx.dmScenario.update({ where: { id }, data: { deletedAt: new Date(), active: false } });
     });
