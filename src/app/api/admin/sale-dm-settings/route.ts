@@ -13,7 +13,7 @@ import { hasPermission } from "@/lib/permissions";
 import { writeAuditLog } from "@/lib/audit";
 import { encryptSecret, isSecretCryptoConfigured } from "@/lib/sale-dm-letter/secret-crypto";
 import { SALE_DM_CONFIG_ID } from "@/lib/sale-dm-letter/config-store";
-import { normalizeGoogleConvLabel, normalizeGoogleTagId } from "@/lib/sale-dm-letter/lp-public";
+import { normalizeGoogleConvLabel, normalizeGoogleTagId, normalizedValue } from "@/lib/sale-dm-letter/lp-public";
 
 // 設定は管理者(user_management:write)のみ。APIキー(課金)を含む高リスク設定のため admin 限定。
 async function requireSaleDmAdmin() {
@@ -61,13 +61,13 @@ const putSchema = z.object({
     .trim()
     .max(40)
     .optional()
-    .refine((v) => v === undefined || normalizeGoogleTagId(v) !== "invalid", { message: "Googleタグ ID は G-/AW-/GT- で始まる英数字(例: AW-123456789)で入力してください" }),
+    .refine((v) => v === undefined || normalizeGoogleTagId(v).kind !== "invalid", { message: "Googleタグ ID は G-/AW-/GT- で始まる英数字(例: AW-123456789)で入力してください" }),
   googleConvLabel: z
     .string()
     .trim()
     .max(80)
     .optional()
-    .refine((v) => v === undefined || normalizeGoogleConvLabel(v) !== "invalid", { message: "コンバージョン ラベルは英数字・ハイフン・アンダースコアで 4〜64 文字にしてください" }),
+    .refine((v) => v === undefined || normalizeGoogleConvLabel(v).kind !== "invalid", { message: "コンバージョン ラベルは英数字・ハイフン・アンダースコアで 4〜64 文字にしてください" }),
   // APIキー: 指定時は暗号化して保存・空文字は「クリア」・未指定(undefined)は現状維持(=画面では値を返さない)。
   anthropicApiKey: z.string().trim().max(500).optional(),
   openaiApiKey: z.string().trim().max(500).optional(),
@@ -126,13 +126,11 @@ export async function PUT(request: NextRequest) {
     if (body.privacyText !== undefined) { data.privacyText = norm(body.privacyText) ?? null; changed.push("privacyText"); }
     // Google のタグ(広告用の公開ページ): 許可リストを通した形(大文字の ID)で保存。空はクリア。
     if (body.googleTagId !== undefined) {
-      const v = normalizeGoogleTagId(body.googleTagId);
-      data.googleTagId = v === "invalid" ? null : v;
+      data.googleTagId = normalizedValue(normalizeGoogleTagId(body.googleTagId));
       changed.push("googleTagId");
     }
     if (body.googleConvLabel !== undefined) {
-      const v = normalizeGoogleConvLabel(body.googleConvLabel);
-      data.googleConvLabel = v === "invalid" ? null : v;
+      data.googleConvLabel = normalizedValue(normalizeGoogleConvLabel(body.googleConvLabel));
       changed.push("googleConvLabel");
     }
 

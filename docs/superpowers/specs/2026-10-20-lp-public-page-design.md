@@ -53,6 +53,9 @@
 - migration 1本(追加・NULL可への緩和・CHECK 制約)。列は任意なので DB はそのままでよいが、**公開ページからの申込(draft_id が NULL の行)が入ったあとに旧コードへ戻すと旧コードが落ちる**(宛先を必ずあるものとして読むため・@codex #535 P1)。戻し方は docs/deploy.md「8.1」(公開名を外す→公開ページの申込の行を退避表へ→旧コード→再開時に戻す)。
 - nginx の `/lp/` は `/t/` と同じくアクセスログ・エラーログに残さない(query の utm_* は訪問者が自由に書ける文字列・@codex #535 P2)。
 - 機械送信(honeypot)への「受け付けました」は JSON に `silent:true` を添え、ページは申込完了の合図(Google のコンバージョン)を出さない(@codex #535 P2)。
+- Google のタグには素の URL(document.location)を渡さない。`page_location` は `origin+pathname` に、許可リスト(英数字と . _ - のみ・gclid は英数字と _ -)を通った印だけを付け直した query(`safeAdQuery`)。@ や空白を含む utm の値(連絡先が紛れ得る)はタグへ送らない(@codex #535 R4 P1)。
+- 申込の記録は DMの種類の行を `FOR UPDATE` でロックし「使う・削除なし・公開名が同じ」を読み直してから入れる(削除(論理削除)との競合を決着させる・@codex #535 R4 P2)。
+- 正規化の結果は `{kind: empty|invalid|ok}` の形(文字列の目印 "invalid" は有効な公開名・ラベルと衝突する・@codex #535 R4 P2)。
 
 ## 5. 今回入れないもの(次の回)
 

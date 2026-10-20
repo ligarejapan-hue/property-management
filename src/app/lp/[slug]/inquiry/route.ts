@@ -37,13 +37,14 @@ const throttleAuditLimiter = createRateLimiter({ limit: 1, windowMs: 300_000 });
 
 export async function POST(req: NextRequest, { params }: { params: Promise<{ slug: string }> }) {
   const { slug: rawSlug } = await params;
-  const slug = normalizePublicSlug(rawSlug);
-  const backHref = slug && slug !== "invalid" ? `${publicLpPath(slug)}#inquiry` : "/";
+  const normalized = normalizePublicSlug(rawSlug);
+  const slug = normalized.kind === "ok" ? normalized.value : null;
+  const backHref = slug ? `${publicLpPath(slug)}#inquiry` : "/";
   const reply = createResponder(wantsJsonReply(req), backHref);
 
   if (!ipLimiter.hit(`lp-inq-ip:${clientRateKey(req.headers)}`)) return reply("throttled", 429);
   if (isCrossSiteOrigin(req.headers, req.url)) return reply("unavailable", 403);
-  if (slug === null || slug === "invalid") return reply("unavailable", 404);
+  if (slug === null) return reply("unavailable", 404);
 
   let publicEnabled = false;
   try {
@@ -95,13 +96,16 @@ export async function POST(req: NextRequest, { params }: { params: Promise<{ slu
   slugLimiter.hit(slugKey, rateNow);
   globalLimiter.hit("global", rateNow);
 
-  let inquiryId: string;
+  let recorded: Awaited<ReturnType<typeof recordPublicInquiry>>;
   try {
-    inquiryId = (await recordPublicInquiry(prisma, { id: scenario.id, slug }, parsed.value, readAdParams(get))).inquiryId;
+    recorded = await recordPublicInquiry(prisma, { id: scenario.id, slug }, parsed.value, readAdParams(get));
   } catch (err) {
     console.error("[lp_public_inquiry] record failed", { name: err instanceof Error ? err.name : "Unknown" });
     return reply("busy", 503);
   }
+  // 存在確認から記録までの間に種類が削除・「使わない」・公開名の変更をされた(ロック下の読み直しが最終判定)。
+  if (recorded.kind === "unavailable") return reply("unavailable", 404);
+  const inquiryId = recorded.inquiryId;
 
   await writeAuditLog({
     action: "lp_public_inquiry_submit",

@@ -97,7 +97,7 @@ export async function loadSaleDmPublicPageConfig(): Promise<{
   const tagId = normalizeGoogleTagId(db?.googleTagId);
   const convLabel = normalizeGoogleConvLabel(db?.googleConvLabel);
   const google: GoogleTagConfig | null =
-    tagId && tagId !== "invalid" ? { tagId, convLabel: convLabel === "invalid" ? null : convLabel } : null;
+    tagId.kind === "ok" ? { tagId: tagId.value, convLabel: convLabel.kind === "ok" ? convLabel.value : null } : null;
   return {
     senderName: pick(db?.senderName, env.senderName),
     senderContact: pick(db?.senderContact, env.senderContact),

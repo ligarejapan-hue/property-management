@@ -755,7 +755,7 @@ export function renderLpPage(input: LpRenderInput): string {
   // 広告用の公開ページ: 検索に載せる・見出し情報(OGP)・Google のタグ(設定があるときだけ)。DM 用は今までどおり noindex・外部読み込みなし。
   const robots = input.mode === "public" ? "index,follow" : "noindex,nofollow";
   const ogMeta = pub ? ogMetaTags(input, pub) : "";
-  const googleTag = pub?.google ? googleTagScripts(pub.google) : "";
+  const googleTag = pub?.google ? googleTagScripts(pub.google, pub.safeQuery) : "";
   return `<!doctype html><html lang="ja"><head><meta charset="utf-8" /><meta name="viewport" content="width=device-width,initial-scale=1" /><meta name="robots" content="${robots}" /><meta name="referrer" content="strict-origin" /><title>${escapeHtml(input.headline)}</title>${ogMeta}<style>${CSS}</style>${googleTag}</head><body>${band}${header}<main>` +
     (input.hero ? img(input.hero, "hero", "", true) : "") +
     `<div class="wrap">${heroCopy}` +
@@ -789,12 +789,15 @@ function ogMetaTags(input: LpRenderInput, pub: LpPublicInput): string {
  *  - gtag.js は Google が随時差し替える配信物なので integrity(SRI)は付けられない。CSP の script-src で配信元だけを許す。
  *  - 申込完了は送信スクリプトが出す lp:inquiry-done の合図で送る(Google広告のコンバージョン=ラベルがあるとき・GA4 の generate_lead=常に)。
  */
-function googleTagScripts(google: { tagId: string; convLabel: string | null }): string {
+function googleTagScripts(google: { tagId: string; convLabel: string | null }, safeQuery: string): string {
   // 許可リスト([A-Z0-9-] / [A-Za-z0-9_-])を通った値だけを受け取る前提。念のためここでも合わなければ出さない。
   if (!/^[A-Z0-9-]+$/.test(google.tagId) || (google.convLabel !== null && !/^[A-Za-z0-9_-]+$/.test(google.convLabel))) return "";
   // コンバージョン(send_to: AW-xxx/ラベル)は Google広告の ID(AW-)のときだけ。G-/GT- にラベルが残っていても送らない(@codex #535 R2 P2)。
   const conv = google.convLabel && google.tagId.startsWith("AW-") ? `gtag('event','conversion',{send_to:'${google.tagId}/${google.convLabel}'});` : "";
+  // page_location は素の URL(document.location)を使わない: query の utm_* は訪問者が自由に書ける文字列(連絡先が紛れ得る)なので、
+  // サーバーで許可リストを通した印だけを付け直した URL を渡す(@codex #535 R4 P1)。
+  const loc = `location.origin+location.pathname+${jsString(safeQuery)}`;
   return `<script async src="https://www.googletagmanager.com/gtag/js?id=${google.tagId}"></script>` +
-    `<script>window.dataLayer=window.dataLayer||[];function gtag(){dataLayer.push(arguments)}gtag('js',new Date());gtag('config','${google.tagId}');` +
+    `<script>window.dataLayer=window.dataLayer||[];function gtag(){dataLayer.push(arguments)}gtag('js',new Date());gtag('config','${google.tagId}',{page_location:${loc}});` +
     `document.addEventListener("lp:inquiry-done",function(){try{${conv}gtag('event','generate_lead')}catch(_){}});</script>`;
 }

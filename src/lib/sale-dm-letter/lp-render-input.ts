@@ -19,6 +19,8 @@ export interface LpFormInput { action: string; privacyText: string; disabled: bo
 export interface LpPublicInput {
   /** ページを開いた URL の広告の印(フォームの隠し欄に写す)。 */
   adParams: AdParams;
+  /** Google のタグに渡す page_location の query(許可リストを通った印だけ・先頭 "?"・無ければ ""。lp-public.ts safeAdQuery)。 */
+  safeQuery: string;
   /** Google のタグ(設定があるときだけ読み込む)。 */
   google: GoogleTagConfig | null;
   /** 見出し情報(OGP)。url=このページの絶対URL(追跡用URL未設定なら相対)・imageUrl=一番上の写真の絶対URL(無ければ null)。 */

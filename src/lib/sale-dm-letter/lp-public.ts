@@ -11,11 +11,24 @@ import { LP_PAGE_HEADERS } from "./lp-page";
 /** 公開名: 半角小文字英数字とハイフン 2〜40 字。 */
 export const PUBLIC_SLUG_RE = /^[a-z0-9-]{2,40}$/;
 
-/** 空=null(公開しない)・規則外="invalid"・それ以外は小文字に揃えた公開名。 */
-export function normalizePublicSlug(raw: string | null | undefined): string | null | "invalid" {
+/**
+ * 正規化の結果。⚠文字列の目印("invalid" など)は使わない=規則上は有効な値(公開名 "invalid"・ラベル "invalid")と
+ * 衝突する(@codex #535 R4 P2)。
+ */
+export type Normalized = { kind: "empty" } | { kind: "invalid" } | { kind: "ok"; value: string };
+const EMPTY: Normalized = { kind: "empty" };
+const INVALID: Normalized = { kind: "invalid" };
+
+/** 空=empty(公開しない)・規則外=invalid・それ以外は小文字に揃えた公開名。 */
+export function normalizePublicSlug(raw: string | null | undefined): Normalized {
   const s = (raw ?? "").trim().toLowerCase();
-  if (s === "") return null;
-  return PUBLIC_SLUG_RE.test(s) ? s : "invalid";
+  if (s === "") return EMPTY;
+  return PUBLIC_SLUG_RE.test(s) ? { kind: "ok", value: s } : INVALID;
+}
+
+/** 正規化の結果から値だけ取り出す(empty/invalid は null)。保存前の検証を通った値を読む側で使う。 */
+export function normalizedValue(n: Normalized): string | null {
+  return n.kind === "ok" ? n.value : null;
 }
 
 export function publicLpPath(slug: string): string {
@@ -51,20 +64,39 @@ export const EMPTY_AD_PARAMS: Readonly<AdParams> = Object.freeze({
   utmSource: null, utmMedium: null, utmCampaign: null, utmTerm: null, utmContent: null, gclid: null,
 });
 
+/**
+ * Google のタグに渡してよい広告の印だけで組んだ query(先頭の "?" 付き・無ければ "")。
+ * 広告の印は訪問者が自由に書ける文字列(電話番号・メールが紛れ得る)なので、タグには素の URL を渡さず、
+ * 許可リスト(英数字と . _ - のみ・@ や空白を含むものは落とす)を通った値だけを付け直す(@codex #535 R4 P1)。
+ * gclid は Google が発行する英数字の印。
+ */
+const SAFE_UTM_RE = /^[A-Za-z0-9_.-]{1,100}$/;
+const SAFE_GCLID_RE = /^[A-Za-z0-9_-]{1,200}$/;
+export function safeAdQuery(ad: AdParams): string {
+  const parts: string[] = [];
+  for (const [query, field] of AD_PARAM_KEYS) {
+    const v = ad[field];
+    if (!v) continue;
+    const ok = field === "gclid" ? SAFE_GCLID_RE.test(v) : SAFE_UTM_RE.test(v);
+    if (ok) parts.push(`${query}=${encodeURIComponent(v)}`);
+  }
+  return parts.length === 0 ? "" : `?${parts.join("&")}`;
+}
+
 /** Google のタグ ID(G-=GA4 / AW-=Google広告 / GT-=Google タグ)。 */
 export const GOOGLE_TAG_ID_RE = /^(G|AW|GT)-[A-Z0-9]{4,20}$/;
-export function normalizeGoogleTagId(raw: string | null | undefined): string | null | "invalid" {
+export function normalizeGoogleTagId(raw: string | null | undefined): Normalized {
   const s = (raw ?? "").trim().toUpperCase();
-  if (s === "") return null;
-  return GOOGLE_TAG_ID_RE.test(s) ? s : "invalid";
+  if (s === "") return EMPTY;
+  return GOOGLE_TAG_ID_RE.test(s) ? { kind: "ok", value: s } : INVALID;
 }
 
 /** 申込完了のコンバージョン ラベル(Google広告の「send_to」の後半)。 */
 export const GOOGLE_CONV_LABEL_RE = /^[A-Za-z0-9_-]{4,64}$/;
-export function normalizeGoogleConvLabel(raw: string | null | undefined): string | null | "invalid" {
+export function normalizeGoogleConvLabel(raw: string | null | undefined): Normalized {
   const s = (raw ?? "").trim();
-  if (s === "") return null;
-  return GOOGLE_CONV_LABEL_RE.test(s) ? s : "invalid";
+  if (s === "") return EMPTY;
+  return GOOGLE_CONV_LABEL_RE.test(s) ? { kind: "ok", value: s } : INVALID;
 }
 
 export interface GoogleTagConfig { tagId: string; convLabel: string | null }

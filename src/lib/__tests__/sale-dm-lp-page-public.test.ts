@@ -22,6 +22,7 @@ const publicInput = (over: Partial<LpRenderInput> = {}): LpRenderInput => ({
   form: { action: "/lp/souzoku/inquiry", privacyText: "同意文", disabled: false },
   public: {
     adParams: { utmSource: "google", utmMedium: "cpc", utmCampaign: 'aki"<x>', utmTerm: null, utmContent: null, gclid: "G1.abc" },
+    safeQuery: "?utm_source=google&utm_medium=cpc",
     google: null,
     og: { url: "https://app.example.com/lp/souzoku", imageUrl: `https://app.example.com/lp-assets/${"a".repeat(32)}` },
   },
@@ -82,7 +83,10 @@ describe("renderLpPage(public=広告用の公開ページ)", () => {
   it("Google のタグがあるときだけ gtag.js を読み込み、申込完了の合図(lp:inquiry-done)でコンバージョンを送る", () => {
     const h = renderLpPage(publicInput({ public: { ...publicInput().public!, google: { tagId: "AW-12345ABC", convLabel: "AbCd-12_x" } } }));
     expect(h).toContain('<script async src="https://www.googletagmanager.com/gtag/js?id=AW-12345ABC"></script>');
-    expect(h).toContain("gtag('config','AW-12345ABC')");
+    // page_location は素の URL ではなく、許可リストを通った印だけを付け直した URL(utm_campaign の 'aki"<x>' は落ちている・@codex #535 R4 P1)
+    // "&" は <script> 内で安全な & に(jsString)
+    expect(h).toContain('gtag(\'config\',\'AW-12345ABC\',{page_location:location.origin+location.pathname+"?utm_source=google\\u0026utm_medium=cpc"})');
+    expect(h).not.toContain("document.location");
     expect(h).toContain("gtag('event','conversion',{send_to:'AW-12345ABC/AbCd-12_x'})");
     expect(h).toContain("gtag('event','generate_lead')");
     expect(h).toContain('document.addEventListener("lp:inquiry-done"');
@@ -93,7 +97,7 @@ describe("renderLpPage(public=広告用の公開ページ)", () => {
     // G-/GT- の ID にラベルが残っていても conversion は送らない(Google広告の宛先は AW- だけ・@codex #535 R2)
     const g3 = renderLpPage(publicInput({ public: { ...publicInput().public!, google: { tagId: "G-ABCD1234", convLabel: "AbCd-12_x" } } }));
     expect(g3).not.toContain("'event','conversion'");
-    expect(g3).toContain("gtag('config','G-ABCD1234')");
+    expect(g3).toContain("gtag('config','G-ABCD1234',{page_location:");
   });
   it("送信スクリプトは申込完了(done)のときに document へ lp:inquiry-done を出す(値は含めない)。サーバーが silent(機械送信)と返したときは出さない", () => {
     expect(html).toContain('new CustomEvent("lp:inquiry-done")');

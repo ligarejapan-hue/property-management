@@ -8,7 +8,7 @@ import { loadSaleDmPublicPageConfig } from "./config-store";
 import { buildLpRenderInput, hasRenderableLpVariant, type LpSourceRows } from "./lp-render-input";
 import { renderLpPage } from "./lp-page";
 import { DEFAULT_PRIVACY_TEXT } from "./privacy-text";
-import { normalizePublicSlug, readAdParams, buildPublicLpHeaders, publicLpPath } from "./lp-public";
+import { normalizePublicSlug, readAdParams, buildPublicLpHeaders, publicLpPath, safeAdQuery } from "./lp-public";
 
 export interface PublicLpScenarioRow {
   id: string;
@@ -43,8 +43,9 @@ export async function loadPublicLpPage(
 ): Promise<PublicLpPage> {
   const cfg = await loadSaleDmPublicPageConfig();
   if (!cfg.lpPublicEnabled) return { kind: "none" };
-  const slug = normalizePublicSlug(rawSlug);
-  if (slug === null || slug === "invalid") return { kind: "none" };
+  const normalized = normalizePublicSlug(rawSlug);
+  if (normalized.kind !== "ok") return { kind: "none" };
+  const slug = normalized.value;
 
   const s = await client.dmScenario.findFirst({
     where: { publicSlug: slug, deletedAt: null, active: true },
@@ -79,6 +80,7 @@ export async function loadPublicLpPage(
       form: { action: `${path}/inquiry`, privacyText: cfg.privacyText ?? DEFAULT_PRIVACY_TEXT, disabled: false },
       public: {
         adParams: readAdParams(query),
+        safeQuery: safeAdQuery(readAdParams(query)),
         google: cfg.google,
         og: { url: `${base}${path}`, imageUrl: heroImage ? `${base}/lp-assets/${heroImage.publicId}` : null },
       },

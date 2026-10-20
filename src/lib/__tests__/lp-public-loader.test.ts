@@ -50,10 +50,13 @@ describe("loadPublicLpPage(/lp/<公開名>)", () => {
   });
   it("Google のタグが設定されていれば読み込みと CSP の緩和を public ページだけに入れる", async () => {
     cfg.mockResolvedValue({ ...CFG, google: { tagId: "AW-12345ABC", convLabel: "LbL-1234" } });
-    const r = await loadPublicLpPage(client(scenario()) as never, "souzoku", q({}));
+    const r = await loadPublicLpPage(client(scenario()) as never, "souzoku", q({ utm_source: "google", utm_campaign: "taro@example.jp" }));
     expect(r.kind).toBe("page");
     if (r.kind !== "page") return;
     expect(r.html).toContain("googletagmanager.com/gtag/js?id=AW-12345ABC");
+    // タグに渡す URL には許可リストを通った印だけ(メールアドレスの入った utm_campaign は落ちる)
+    expect(r.html).toContain('page_location:location.origin+location.pathname+"?utm_source=google"');
+    expect(r.html).not.toContain("taro@example.jp\"})");
     expect(r.html).toContain("AW-12345ABC/LbL-1234");
     expect(r.headers["Content-Security-Policy"]).toContain("https://www.googletagmanager.com");
   });

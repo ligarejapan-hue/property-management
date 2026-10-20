@@ -70,7 +70,7 @@ beforeEach(() => {
   vi.clearAllMocks();
   loadCfg.mockResolvedValue({ ...CFG });
   findFirst.mockImplementation(async ({ where }: { where: { publicSlug: string } }) => (where.publicSlug === "souzoku" ? { ...SCENARIO } : null));
-  rec.mockResolvedValue({ inquiryId: "inq1" });
+  rec.mockResolvedValue({ kind: "recorded", inquiryId: "inq1" });
 });
 
 describe("GET /lp/[slug](広告用の公開ページ)", () => {
@@ -173,10 +173,17 @@ describe("POST /lp/[slug]/inquiry(広告用の公開ページの申込)", () => 
     expect((await post(VALID, fixedIp)).status).toBe(429);
     expect(rec).toHaveBeenCalledTimes(5);
   });
-  it("本文の形式が違えば 415・記録に失敗したら 503(busy)", async () => {
+  it("本文の形式が違えば 415・記録に失敗したら 503(busy)・ロック下で種類が消えていたら 404(通知なし)", async () => {
     expect((await post(VALID, { "content-type": "application/json" })).status).toBe(415);
     rec.mockRejectedValueOnce(new Error("db"));
     expect((await post(VALID)).status).toBe(503);
+    rec.mockResolvedValueOnce({ kind: "unavailable" });
+    expect((await post(VALID)).status).toBe(404);
     expect(notify).not.toHaveBeenCalled();
+    expect(audit).not.toHaveBeenCalled();
+  });
+  it("公開名「invalid」は規則上は有効な公開名として扱う(内部の目印と衝突しない・@codex #535 R4)", async () => {
+    findFirst.mockImplementationOnce(async ({ where }: { where: { publicSlug: string } }) => (where.publicSlug === "invalid" ? { ...SCENARIO } : null));
+    expect((await post(VALID, {}, "invalid")).status).toBe(200);
   });
 });
