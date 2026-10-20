@@ -20,7 +20,10 @@ describe("C-2: 取込ボタンは0件のとき非活性を明示(UI総点検)", 
 
   it("0件では disabled、かつ無効時はグレーにして緑のままにしない", () => {
     expect(src).toContain("toCreateCount === 0"); // 0件で disabled
-    expect(src).toContain("disabled:bg-gray-200"); // 無効時はグレー
+    // 第5回: 共通 Button。作る物件が1件以上のときだけ緑(success)、それ以外は白の枠(secondary)=0件で緑にしない。
+    expect(src).toMatch(
+      /<Button\s+variant=\{rpPreview && rpPreview\.summary\.toCreateCount > 0 \? "success" : "secondary"\}\s+onClick=\{handleRpImport\}\s+disabled=\{!rpPreview \|\| rpPreview\.summary\.toCreateCount === 0/,
+    );
   });
 });
 

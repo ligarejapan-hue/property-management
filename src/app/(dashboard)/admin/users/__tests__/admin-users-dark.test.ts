@@ -30,7 +30,8 @@ describe("admin/users/page.tsx dark: 配色 (A1)", () => {
     expect(usersPage).toContain("dark:text-gray-100");
   });
   it("本文2階調に暗テキストクラスがある", () => {
-    expect(usersPage).toContain("dark:text-gray-200");
+    // 補助ボタンの暗色は共通 Button(secondary/ghost)が持つ。行内の操作は dark:text-gray-300。
+    expect(usersPage).toMatch(/dark:text-gray-(200|300)/);
   });
   it("補助文字に暗テキストクラスがある", () => {
     expect(usersPage).toContain("dark:text-gray-400");

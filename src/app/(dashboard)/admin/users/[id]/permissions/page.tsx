@@ -11,6 +11,7 @@ import {
   isDisplayLevelResource,
   withExclusiveDisplayLevel,
 } from "@/lib/permission-display-levels";
+import { Button } from "@/components/ui/button";
 
 // ⚠テンプレート編集画面（admin/templates/[id]）の RESOURCES と必ず同内容にすること
 //   （片方だけだとテンプレ運用環境で付与できず必ず 403。sale_dm で実際に起きた事故）。
@@ -385,8 +386,10 @@ export default function UserPermissionsPage({
                           bgColor = "bg-red-100 text-red-800 line-through dark:bg-red-500/15 dark:text-red-300";
                           indicator = " [O]";
                         }
+                        // data-ui=raw: 継承/許可/拒否を順に切り替える状態の札(色が状態を表す)
                         return (
                           <button
+                            data-ui="raw"
                             key={action}
                             type="button"
                             onClick={() => toggleOverride(res.key, action)}
@@ -438,19 +441,15 @@ export default function UserPermissionsPage({
             {message}
           </span>
         )}
-        <button
-          type="button"
+        <Button
           disabled={saving}
+          loading={saving}
+          loadingLabel="保存中"
           onClick={handleSave}
-          className="inline-flex items-center gap-1.5 rounded-md bg-indigo-600 px-6 py-2 text-sm font-semibold text-white shadow-sm hover:bg-indigo-500 disabled:opacity-50"
         >
-          {saving ? (
-            <Loader2 className="h-4 w-4 animate-spin" />
-          ) : (
-            <Save className="h-4 w-4" />
-          )}
+          <Save className="h-4 w-4" />
           保存
-        </button>
+        </Button>
       </div>
     </div>
   );

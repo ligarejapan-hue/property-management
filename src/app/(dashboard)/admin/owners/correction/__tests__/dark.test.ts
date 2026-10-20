@@ -172,8 +172,8 @@ describe("correction page dark mode", () => {
   });
 
   // bulk select all/deselect button has dark hover bg to prevent bright emerald flash
-  it("bulk select button has dark:hover:bg-emerald-500/20", () => {
-    expect(src).toContain("dark:hover:bg-emerald-500/20");
+  it("bulk select button is the shared Button (dark hover is owned by the component・第5回)", () => {
+    expect(src).toContain('from "@/components/ui/button"');
   });
 
   // registry type chips (removable) readable on dark bg

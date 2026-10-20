@@ -7,6 +7,7 @@ import { PageHeader } from "@/components/ui/page-header";
 import { BackLink } from "@/components/ui/back-link";
 import { ConfirmDialog } from "@/components/ui/confirm-dialog";
 import { fetchSaleDmLpAssets, deleteSaleDmLpAsset, LP_ASSET_URL, type SaleDmLpAsset } from "@/lib/api-client";
+import { Button } from "@/components/ui/button";
 
 /** LP用写真ライブラリの管理(管理者)。追加は「DMの種類」の各種類(または各キャンペーンのLP型)の「写真と図」から。ここは一覧と削除だけ。 */
 export default function AdminLpAssetsPage() {
@@ -59,7 +60,7 @@ export default function AdminLpAssetsPage() {
               )}
               <div className="flex items-center justify-between px-2 py-1.5 text-xs">
                 <span className="truncate text-gray-700">{a.label ?? "(ラベルなし)"} · {a.width}×{a.height} · {Math.round(a.bytes / 1024)}KB</span>
-                <button type="button" onClick={() => setTarget(a)} disabled={a.referenced} title={a.referenced ? "LPまたはDMの種類で使われています" : "削除"} className="text-red-600 disabled:opacity-40"><Trash2 className="h-4 w-4" /></button>
+                <Button variant="ghost" size="sm" onClick={() => setTarget(a)} disabled={a.referenced} title={a.referenced ? "LPまたはDMの種類で使われています" : "削除"} className="text-red-600"><Trash2 className="h-4 w-4" /></Button>
               </div>
             </li>
           ))}

@@ -3,7 +3,7 @@
 import { useState } from "react";
 import { PageHeader } from "@/components/ui/page-header";
 import { signOutWithNotificationCleanup } from "@/lib/notifications/logout";
-import { Loader2 } from "lucide-react";
+import { Button } from "@/components/ui/button";
 
 export default function ChangePasswordPage() {
   const [form, setForm] = useState({
@@ -132,14 +132,14 @@ export default function ChangePasswordPage() {
             変更後は再ログインが必要になります。
           </p>
           <div className="pt-2">
-            <button
+            <Button
               type="submit"
               disabled={saving}
-              className="flex items-center gap-1.5 rounded-md bg-indigo-600 px-4 py-2 text-sm font-medium text-white hover:bg-indigo-700 disabled:opacity-50"
+              loading={saving}
+              loadingLabel="変更中"
             >
-              {saving && <Loader2 className="h-4 w-4 animate-spin" />}
               変更する
-            </button>
+            </Button>
           </div>
         </form>
       </div>

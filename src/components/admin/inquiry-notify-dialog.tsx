@@ -108,13 +108,14 @@ export function InquiryNotifyDialog({
               {!loaded && (
                 <>
                   <p className="mt-1">設定を読み込めませんでした。再読み込みしてください。保存は行えません。</p>
-                  <button
-                    type="button"
+                  <Button
+                    variant="secondary"
+                    size="sm"
                     onClick={load}
-                    className="mt-2 inline-flex items-center gap-1 rounded-md border border-red-300 bg-white px-2 py-1 text-xs font-medium text-red-700 hover:bg-red-100 dark:border-red-500/40 dark:bg-gray-900 dark:text-red-300 dark:hover:bg-red-950"
+                    className="mt-2"
                   >
                     再読み込み
-                  </button>
+                  </Button>
                 </>
               )}
             </div>

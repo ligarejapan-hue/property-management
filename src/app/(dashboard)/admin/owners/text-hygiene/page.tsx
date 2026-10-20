@@ -2,6 +2,7 @@
 
 import { useState, useEffect, useCallback, useRef } from "react";
 import { PageHeader } from "@/components/ui/page-header";
+import { Button } from "@/components/ui/button";
 import Link from "next/link";
 import { Loader2, AlertTriangle, Wand2, ExternalLink } from "lucide-react";
 import { visualizeTextHygiene } from "@/lib/text-hygiene-display";
@@ -237,6 +238,7 @@ export default function TextHygieneAuditPage() {
           <button
             key={opt.value}
             type="button"
+            aria-pressed={type === opt.value}
             onClick={() => setType(opt.value)}
             className={`rounded-md px-3 py-1.5 text-sm font-medium transition-colors ${
               type === opt.value
@@ -345,8 +347,9 @@ export default function TextHygieneAuditPage() {
                         {canSanitize &&
                           (confirmKey === key ? (
                             <span className="flex items-center gap-2">
-                              <button
-                                type="button"
+                              <Button
+                                variant="danger"
+                                size="sm"
                                 disabled={busyKey === key}
                                 onClick={() =>
                                   handleSanitize(
@@ -355,31 +358,30 @@ export default function TextHygieneAuditPage() {
                                     owner.version,
                                   )
                                 }
-                                className="inline-flex items-center gap-1 rounded-md bg-red-600 px-2 py-1 text-xs font-medium text-white hover:bg-red-700 disabled:opacity-50"
+                                loading={busyKey === key}
+                                loadingLabel="実行中"
                               >
-                                {busyKey === key && (
-                                  <Loader2 className="h-3 w-3 animate-spin" />
-                                )}
                                 実行する
-                              </button>
-                              <button
-                                type="button"
+                              </Button>
+                              <Button
+                                variant="ghost"
+                                size="sm"
                                 disabled={busyKey === key}
                                 onClick={() => setConfirmKey(null)}
-                                className="text-xs text-gray-500 hover:text-gray-700 dark:text-gray-400 dark:hover:text-gray-200"
+                                className="text-gray-500 hover:text-gray-700 dark:text-gray-400 dark:hover:text-gray-200"
                               >
                                 取消
-                              </button>
+                              </Button>
                             </span>
                           ) : (
-                            <button
-                              type="button"
+                            <Button
+                              variant="secondary"
+                              size="sm"
                               onClick={() => setConfirmKey(key)}
-                              className="inline-flex items-center gap-1 rounded-md border border-gray-300 bg-white px-2 py-1 text-xs font-medium text-gray-700 hover:bg-gray-50 dark:border-gray-700 dark:bg-gray-900 dark:text-gray-200 dark:hover:bg-gray-800"
                             >
                               <Wand2 className="h-3 w-3" />
                               不可視文字を除去
-                            </button>
+                            </Button>
                           ))}
                         <Link
                           href={owner.detailUrl}
@@ -401,15 +403,15 @@ export default function TextHygieneAuditPage() {
 
       {meta.hasNextPage && !loading && (
         <div className="mt-4 flex justify-center">
-          <button
-            type="button"
+          <Button
+            variant="secondary"
             disabled={loadingMore}
             onClick={() => load(type, meta.nextCursor, true)}
-            className="inline-flex items-center gap-2 rounded-md border border-gray-300 bg-white px-4 py-2 text-sm font-medium text-gray-700 shadow-sm hover:bg-gray-50 disabled:opacity-50 dark:border-gray-700 dark:bg-gray-900 dark:text-gray-200 dark:hover:bg-gray-800"
+            loading={loadingMore}
+            loadingLabel="読み込み中"
           >
-            {loadingMore && <Loader2 className="h-4 w-4 animate-spin" />}
             もっと読み込む
-          </button>
+          </Button>
         </div>
       )}
     </div>

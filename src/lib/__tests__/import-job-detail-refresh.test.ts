@@ -52,7 +52,8 @@ describe("取込ジョブ詳細: 再取得でちらつかせない", () => {
     expect(PAGE).toMatch(/actionLoading/);
     // どの行を処理中かは従来どおり見せる(スピナー表示は行固有のまま)
     expect(PAGE).toMatch(/const isLoading = actionLoading === row\.id;/);
-    expect(PAGE).toMatch(/\{isLoading \? \(/);
+    // 第5回: 行の操作ボタンは共通 Button の loading で処理中のくるくるを出す
+    expect(PAGE).toMatch(/loading=\{isLoading\}/);
   });
 
   it("書き込み操作は「いずれかの処理中・再取得中」で全て止まる(二重作成の防止)", () => {

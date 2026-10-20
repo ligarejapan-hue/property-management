@@ -17,8 +17,8 @@ describe("postal-code-audit/page.tsx dark: 配色", () => {
   it("テーブルヘッダ面に dark:bg-gray-800/50 がある", () => {
     expect(src).toContain("dark:bg-gray-800/50");
   });
-  it("行ホバーに dark:hover:bg-gray-800 がある", () => {
-    expect(src).toContain("dark:hover:bg-gray-800");
+  it("CSV ボタンは共通 Button(ホバーの dark は部品側で担保・第5回)", () => {
+    expect(src).toContain('from "@/components/ui/button"');
   });
 
   // --- 文字 ---
@@ -121,7 +121,7 @@ describe("postal-code-audit/page.tsx dark: 配色", () => {
   it("not_processed バッジ bg-orange-100 text-orange-700 は color-locked（dark: 未追加）", () => {
     expect(src).toContain("bg-orange-100 px-2 py-0.5 text-xs font-medium text-orange-700");
   });
-  it("indigo-600 solid ボタンは据え置き（dark: 非追加）", () => {
-    expect(src).toContain("bg-indigo-600");
+  it("照合ボタンは共通 Button の primary(藍は部品側・第5回)", () => {
+    expect(src).toMatch(/<Button\s+onClick=\{runAudit\}/);
   });
 });

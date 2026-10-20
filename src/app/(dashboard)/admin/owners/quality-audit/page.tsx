@@ -3,6 +3,7 @@
 import { useState, useEffect, useCallback, useRef, Fragment } from "react";
 import { Tabs, tabPanelProps } from "@/components/ui/tabs";
 import { PageHeader } from "@/components/ui/page-header";
+import { Button } from "@/components/ui/button";
 import Link from "next/link";
 import { Loader2, AlertTriangle, ExternalLink, Wand2 } from "lucide-react";
 import type {
@@ -345,49 +346,52 @@ export default function QualityAuditPage() {
       if (preview.eligible) {
         return (
           <span className="flex items-center gap-2">
-            <button
-              type="button"
+            <Button
+              variant="success"
+              size="sm"
               disabled={busy}
               onClick={handleApply}
-              className="inline-flex items-center gap-1 rounded-md bg-emerald-600 px-2 py-1 text-xs font-medium text-white hover:bg-emerald-700 disabled:opacity-50"
+              loading={busy}
+              loadingLabel="適用中"
             >
-              {busy && <Loader2 className="h-3 w-3 animate-spin" />}
               適用
-            </button>
-            <button
-              type="button"
+            </Button>
+            <Button
+              variant="ghost"
+              size="sm"
               disabled={busy}
               onClick={() => setPreview(null)}
-              className="text-xs text-gray-500 hover:text-gray-700 dark:text-gray-400 dark:hover:text-gray-200"
+              className="text-gray-500 hover:text-gray-700 dark:text-gray-400 dark:hover:text-gray-200"
             >
               取消
-            </button>
+            </Button>
           </span>
         );
       }
       return (
         <span className="flex items-center gap-2 text-xs text-amber-700">
           適用不可{preview.blockReasons.length > 0 ? `: ${preview.blockReasons.join(", ")}` : ""}
-          <button
-            type="button"
+          <Button
+            variant="ghost"
+            size="sm"
             onClick={() => setPreview(null)}
             className="text-gray-500 hover:text-gray-700 dark:text-gray-400 dark:hover:text-gray-200"
           >
             取消
-          </button>
+          </Button>
         </span>
       );
     }
     return (
-      <button
-        type="button"
+      <Button
+        variant="secondary"
+        size="sm"
         disabled={busy}
         onClick={() => handlePreview(fix)}
-        className="inline-flex items-center gap-1 rounded-md border border-gray-300 bg-white px-2 py-1 text-xs font-medium text-gray-700 hover:bg-gray-50 disabled:opacity-50 dark:border-gray-700 dark:bg-gray-900 dark:text-gray-200 dark:hover:bg-gray-800"
       >
         <Wand2 className="h-3 w-3" />
         {label}
-      </button>
+      </Button>
     );
   }
 
@@ -461,6 +465,7 @@ export default function QualityAuditPage() {
             <button
               key={opt.value}
               type="button"
+              aria-pressed={type === opt.value}
               onClick={() => setType(opt.value)}
               className={`rounded-md px-3 py-1.5 text-sm font-medium transition-colors ${
                 type === opt.value
@@ -689,15 +694,15 @@ export default function QualityAuditPage() {
 
       {meta.hasNextPage && !loading && (
         <div className="mt-4 flex justify-center">
-          <button
-            type="button"
+          <Button
+            variant="secondary"
             disabled={loadingMore}
             onClick={() => load(tab, type, meta.nextCursor, true)}
-            className="inline-flex items-center gap-2 rounded-md border border-gray-300 bg-white px-4 py-2 text-sm font-medium text-gray-700 shadow-sm hover:bg-gray-50 disabled:opacity-50 dark:border-gray-700 dark:bg-gray-900 dark:text-gray-200 dark:hover:bg-gray-800"
+            loading={loadingMore}
+            loadingLabel="読み込み中"
           >
-            {loadingMore && <Loader2 className="h-4 w-4 animate-spin" />}
             もっと読み込む
-          </button>
+          </Button>
         </div>
       )}
     </div>

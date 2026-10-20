@@ -2,6 +2,7 @@
 
 import { useState, useCallback, useMemo, useRef } from "react";
 import { PageHeader } from "@/components/ui/page-header";
+import { Button } from "@/components/ui/button";
 import Link from "next/link";
 import {
   FileText,
@@ -701,7 +702,9 @@ function RegistryPdfScreen({ draftEnabled }: { draftEnabled: boolean }) {
         <div className="rounded-lg border border-gray-200 dark:border-gray-800 bg-white dark:bg-gray-900 p-6">
           {/* Tab switch */}
           <div className="mb-6 flex border-b border-gray-200 dark:border-gray-800">
+            {/* data-ui=raw: 下線つきのタブ帯(帯の下線で選択を示す形でボタンの形ではない) */}
             <button
+              data-ui="raw"
               onClick={() => setUploadTab("file")}
               className={`flex items-center gap-1.5 border-b-2 px-4 py-2.5 text-sm font-medium transition-colors ${
                 uploadTab === "file"
@@ -712,7 +715,9 @@ function RegistryPdfScreen({ draftEnabled }: { draftEnabled: boolean }) {
               <Upload className="h-4 w-4" />
               ファイルアップロード
             </button>
+            {/* data-ui=raw: 下線つきのタブ帯(同上) */}
             <button
+              data-ui="raw"
               onClick={() => setUploadTab("text")}
               className={`flex items-center gap-1.5 border-b-2 px-4 py-2.5 text-sm font-medium transition-colors ${
                 uploadTab === "text"
@@ -775,25 +780,18 @@ function RegistryPdfScreen({ draftEnabled }: { draftEnabled: boolean }) {
 
           {/* Next button */}
           <div className="mt-6 flex justify-end">
-            <button
+            <Button
+              variant="primary"
               onClick={handleParse}
               disabled={
                 (uploadTab === "file" ? !selectedFile : !text.trim()) || parsing
               }
-              className="flex items-center gap-2 rounded-md bg-indigo-600 px-5 py-2.5 text-sm font-medium text-white hover:bg-indigo-700 disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
+              loading={parsing}
+              loadingLabel="解析中"
             >
-              {parsing ? (
-                <>
-                  <Loader2 className="h-4 w-4 animate-spin" />
-                  解析中...
-                </>
-              ) : (
-                <>
-                  抽出開始
-                  <ArrowRight className="h-4 w-4" />
-                </>
-              )}
-            </button>
+              抽出開始
+              <ArrowRight className="h-4 w-4" />
+            </Button>
           </div>
         </div>
       )}
@@ -826,8 +824,9 @@ function RegistryPdfScreen({ draftEnabled }: { draftEnabled: boolean }) {
                 。読み取れた内容が不足している場合は、本文をテキストにしてから、下のボタンで「テキストを貼り付けるモード」に切り替えて投入してください。
               </p>
               <div className="mt-3 flex flex-wrap items-center gap-3">
-                <button
-                  type="button"
+                <Button
+                  variant="secondary"
+                  size="sm"
                   data-testid="scanned-pdf-switch-to-paste"
                   onClick={() => {
                     // Phase F-2a: paste タブへ切替。textarea は空のままにする（不完全な
@@ -841,11 +840,10 @@ function RegistryPdfScreen({ draftEnabled }: { draftEnabled: boolean }) {
                     setEmbeddedTextLength(null);
                     setStep("upload");
                   }}
-                  className="inline-flex items-center gap-1.5 rounded-md border border-red-400 dark:border-red-400/50 bg-white dark:bg-gray-900 px-3 py-1.5 text-xs font-medium text-red-700 dark:text-red-300 hover:bg-red-100 dark:hover:bg-red-500/10"
                 >
                   <ClipboardPaste className="h-3.5 w-3.5" />
                   テキストを貼り付けるモードに切り替える
-                </button>
+                </Button>
                 <span className="text-[11px] text-red-700 dark:text-red-300">
                   ※ 画像から自動で文字にすることはできません。抽出できた内容がそのまま使える場合は、このまま先へ進めます。
                 </span>
@@ -963,13 +961,16 @@ function RegistryPdfScreen({ draftEnabled }: { draftEnabled: boolean }) {
                           />
                         </td>
                         <td className="py-2">
-                          <button
+                          <Button
+                            variant="ghost"
+                            size="sm"
                             onClick={() => removeOwner(idx)}
-                            className="rounded p-1.5 text-red-400 dark:text-red-500 hover:bg-red-50 dark:hover:bg-red-500/10 hover:text-red-600 dark:hover:text-red-400 transition-colors"
+                            className="text-red-400 dark:text-red-500 hover:text-red-600 dark:hover:text-red-400"
                             title="削除"
+                            aria-label="削除"
                           >
                             <Trash2 className="h-4 w-4" />
-                          </button>
+                          </Button>
                         </td>
                       </tr>
                     ))}
@@ -980,13 +981,10 @@ function RegistryPdfScreen({ draftEnabled }: { draftEnabled: boolean }) {
               <p className="text-sm text-gray-400 dark:text-gray-500">所有者が抽出されていません</p>
             )}
 
-            <button
-              onClick={addOwner}
-              className="mt-3 flex items-center gap-1.5 rounded-md border border-gray-300 dark:border-gray-700 px-3 py-1.5 text-sm font-medium text-gray-600 dark:text-gray-300 hover:bg-gray-50 dark:hover:bg-gray-800 transition-colors"
-            >
+            <Button variant="secondary" onClick={addOwner} className="mt-3">
               <Plus className="h-4 w-4" />
               所有者を追加
-            </button>
+            </Button>
           </div>
 
           {/* Registration target */}
@@ -1055,8 +1053,10 @@ function RegistryPdfScreen({ draftEnabled }: { draftEnabled: boolean }) {
                   {propertySearchResults.length > 0 && (
                     <div className="max-h-[200px] overflow-y-auto rounded border border-gray-200 dark:border-gray-800 bg-white dark:bg-gray-900">
                       {propertySearchResults.map((p) => (
+                        // data-ui=raw: 検索結果の一覧の行そのもの(行全体が押せる面)
                         <button
                           key={p.id}
+                          data-ui="raw"
                           onClick={() => {
                             setExistingPropertyId(p.id);
                             setPropertySearchQuery(p.address);
@@ -1115,20 +1115,14 @@ function RegistryPdfScreen({ draftEnabled }: { draftEnabled: boolean }) {
 
           {/* Navigation */}
           <div className="flex justify-between">
-            <button
-              onClick={() => setStep("upload")}
-              className="flex items-center gap-1.5 rounded-md border border-gray-300 dark:border-gray-700 px-4 py-2 text-sm font-medium text-gray-600 dark:text-gray-300 hover:bg-gray-50 dark:hover:bg-gray-800 transition-colors"
-            >
+            <Button variant="secondary" onClick={() => setStep("upload")}>
               <ArrowLeft className="h-4 w-4" />
               戻る
-            </button>
-            <button
-              onClick={() => setStep("confirm")}
-              className="flex items-center gap-2 rounded-md bg-indigo-600 px-5 py-2.5 text-sm font-medium text-white hover:bg-indigo-700 transition-colors"
-            >
+            </Button>
+            <Button variant="primary" onClick={() => setStep("confirm")}>
               確認画面へ
               <ArrowRight className="h-4 w-4" />
-            </button>
+            </Button>
           </div>
         </div>
       )}
@@ -1234,39 +1228,29 @@ function RegistryPdfScreen({ draftEnabled }: { draftEnabled: boolean }) {
 
           {/* Actions */}
           <div className="flex justify-between">
-            <button
-              onClick={() => setStep("extract")}
-              className="flex items-center gap-1.5 rounded-md border border-gray-300 dark:border-gray-700 px-4 py-2 text-sm font-medium text-gray-600 dark:text-gray-300 hover:bg-gray-50 dark:hover:bg-gray-800 transition-colors"
-            >
+            <Button variant="secondary" onClick={() => setStep("extract")}>
               <ArrowLeft className="h-4 w-4" />
               戻る
-            </button>
+            </Button>
             <div className="flex gap-3">
-              <button
+              <Button
+                variant="secondary"
                 onClick={handleReset}
                 disabled={pendingBlocked || importing}
                 // ⚠送信途中の確認待ちの間は押させない(印を消すのは「確かめたので続ける」だけ・§5.1)。
-                className="rounded-md border border-gray-300 dark:border-gray-700 px-4 py-2 text-sm font-medium text-gray-600 dark:text-gray-300 hover:bg-gray-50 dark:hover:bg-gray-800 transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
               >
                 キャンセル
-              </button>
-              <button
+              </Button>
+              <Button
+                variant="primary"
                 onClick={handleImport}
                 disabled={importing || needsReselect || pendingBlocked}
-                className="flex items-center gap-2 rounded-md bg-indigo-600 px-5 py-2.5 text-sm font-medium text-white hover:bg-indigo-700 disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
+                loading={importing}
+                loadingLabel="登録中"
               >
-                {importing ? (
-                  <>
-                    <Loader2 className="h-4 w-4 animate-spin" />
-                    登録中...
-                  </>
-                ) : (
-                  <>
-                    <CheckCircle2 className="h-4 w-4" />
-                    登録実行
-                  </>
-                )}
-              </button>
+                <CheckCircle2 className="h-4 w-4" />
+                登録実行
+              </Button>
             </div>
           </div>
         </div>
@@ -1428,12 +1412,9 @@ function RegistryPdfScreen({ draftEnabled }: { draftEnabled: boolean }) {
 
           {/* Start over */}
           <div className="flex justify-end">
-            <button
-              onClick={handleReset}
-              className="flex items-center gap-1.5 rounded-md border border-gray-300 dark:border-gray-700 px-4 py-2 text-sm font-medium text-gray-600 dark:text-gray-300 hover:bg-gray-50 dark:hover:bg-gray-800 transition-colors"
-            >
+            <Button variant="secondary" onClick={handleReset}>
               新しい取込を開始
-            </button>
+            </Button>
           </div>
         </div>
       )}

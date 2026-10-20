@@ -1,0 +1,97 @@
+/**
+ * UIの統一 第5回(2026-10-20): 管理と取り込みの画面に手書きの <button> を残さない。
+ *
+ * 設計書 docs/superpowers/specs/2026-10-19-ui-unify-motion-design.md §4。
+ * 範囲 = src/components/admin・src/components/import・src/app/(dashboard)/admin・
+ * src/app/(dashboard)/import の .tsx(テストを除く)。
+ * 手書きの <button> は共通 Button へ置き換える。残してよいのは:
+ *   - 開きタグに aria-pressed / role="tab" / data-motion="off" を持つもの(専用の見た目が仕様)
+ *   - 開きタグに data-ui="raw" を持つもの = ボタンの形をしていない押せる面(写真の縮小表示・
+ *     拡大表示の背景・行全体など)。付けるときは直前に理由のコメントを1行書く
+ *   - 下の FILE_ALLOW(ファイル丸ごと手書きのまま・理由付き)
+ * 判定の部品は第3回の raw-button-scan-properties.test.ts と同じ。
+ */
+import { describe, it, expect } from "vitest";
+import { readdirSync, readFileSync, statSync } from "node:fs";
+import { join, relative } from "node:path";
+
+const ROOTS = [
+  "src/components/admin",
+  "src/components/import",
+  "src/app/(dashboard)/admin",
+  "src/app/(dashboard)/import",
+];
+
+const FILE_ALLOW = new Set<string>([]);
+
+function walk(dir: string): string[] {
+  return readdirSync(dir).flatMap((name) => {
+    const p = join(dir, name);
+    if (statSync(p).isDirectory()) return name === "__tests__" ? [] : walk(p);
+    return p.endsWith(".tsx") ? [p] : [];
+  });
+}
+
+/** `<button` から、波かっこ・引用符の外にある最初の `>` までを開きタグとして返す。 */
+function openingTags(src: string, tag: string): string[] {
+  const out: string[] = [];
+  const re = new RegExp(`<${tag}(?![\\w-])`, "g");
+  let m: RegExpExecArray | null;
+  while ((m = re.exec(src))) {
+    let depth = 0;
+    let quote: string | null = null;
+    let i = m.index + m[0].length;
+    for (; i < src.length; i++) {
+      const c = src[i];
+      if (quote) {
+        if (c === quote) quote = null;
+        continue;
+      }
+      if (c === '"' || c === "'" || c === "`") quote = c;
+      else if (c === "{") depth++;
+      else if (c === "}") depth--;
+      else if (c === ">" && depth === 0) break;
+    }
+    out.push(src.slice(m.index, i + 1));
+  }
+  return out;
+}
+
+const isAllowedTag = (t: string) =>
+  /\baria-pressed\b/.test(t) ||
+  /role="tab"/.test(t) ||
+  /data-motion="off"/.test(t) ||
+  /data-ui="raw"/.test(t);
+
+describe("管理と取り込みの手書きボタン(UIの統一 第5回)", () => {
+  const files = ROOTS.flatMap((r) => walk(join(process.cwd(), r)));
+  const rel = (f: string) => relative(process.cwd(), f).replace(/\\/g, "/");
+
+  it("走査の範囲にファイルがある(パスの書き間違いで空振りしない)", () => {
+    expect(files.length).toBeGreaterThan(30);
+  });
+
+  it("手書きの <button> が残っていない(許可は aria-pressed・role=tab・data-motion=off・data-ui=raw)", () => {
+    const offenders = files
+      .filter((f) => !FILE_ALLOW.has(rel(f)))
+      .flatMap((f) => {
+        const src = readFileSync(f, "utf8").replace(/\r\n/g, "\n");
+        const n = openingTags(src, "button").filter((t) => !isAllowedTag(t)).length;
+        return n > 0 ? [`${rel(f)}: ${n}`] : [];
+      });
+    expect(offenders, "共通 Button(@/components/ui/button)へ置き換える").toEqual([]);
+  });
+
+  it('data-ui="raw" には直前2行以内に理由のコメント(data-ui=raw: …)がある', () => {
+    const missing = files.flatMap((f) => {
+      const lines = readFileSync(f, "utf8").replace(/\r\n/g, "\n").split("\n");
+      return lines.flatMap((l, i) =>
+        l.includes('data-ui="raw"') &&
+        !lines.slice(Math.max(0, i - 3), i + 1).some((p) => /data-ui=raw:/.test(p))
+          ? [`${rel(f)}:${i + 1}`]
+          : [],
+      );
+    });
+    expect(missing).toEqual([]);
+  });
+});

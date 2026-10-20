@@ -11,6 +11,7 @@ import {
   isDisplayLevelResource,
   withExclusiveDisplayLevel,
 } from "@/lib/permission-display-levels";
+import { Button } from "@/components/ui/button";
 
 const RESOURCES = [
   { key: "property", label: "物件", actions: ["read", "write", "delete"] },
@@ -344,19 +345,15 @@ export default function TemplateEditPage({
             {message}
           </span>
         )}
-        <button
-          type="button"
+        <Button
           disabled={saving}
+          loading={saving}
+          loadingLabel="保存中"
           onClick={handleSave}
-          className="inline-flex items-center gap-1.5 rounded-md bg-indigo-600 px-6 py-2 text-sm font-semibold text-white shadow-sm hover:bg-indigo-500 disabled:opacity-50"
         >
-          {saving ? (
-            <Loader2 className="h-4 w-4 animate-spin" />
-          ) : (
-            <Save className="h-4 w-4" />
-          )}
+          <Save className="h-4 w-4" />
           保存
-        </button>
+        </Button>
       </div>
     </div>
   );
