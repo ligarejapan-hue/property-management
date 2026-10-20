@@ -854,6 +854,34 @@ INSERT INTO dm_inquiries SELECT * FROM dm_inquiries_public_hold_<日付> ON CONF
 
 退避した申込は旧コードの間は画面に出ない(対応中の案件があれば退避表を直接見る)。通知メール・受付メールは退避前に送信済みの分は再送されない(`notify_status`/`auto_reply_status` も退避表にそのまま残る)。
 
+### 8.2 案件ステータスの整理(2026-10-20・migration `20261020120000_case_status_reorg_values` / `20261020120001_case_status_reorg_migrate`)より前へ戻すとき
+
+enum `CaseStatus` に `contract_planned`(契約予定)・`contracted`(契約完了)、enum `ChangeSource` に `auto`(自動)を足し、やめた6値の物件を近い値へ移した。PostgreSQL は enum の値を消せないので値は残してよい。**古い版はこの3値を知らず、その行を読むと失敗し得る**(物件一覧・物件の変更履歴)ため、**サービスを止めてから**その行を古い版が知っている値へ退避する。やめた6値からの移し替えは戻さない(古い版も移し先の値を知っている)。
+
+```bash
+sudo systemctl stop property-management
+```
+
+```sql
+-- 契約予定・契約完了の物件を控えて「商談中」へ(戻し先は控えから復元する)
+CREATE TABLE case_status_reorg_backup_<日付> AS
+  SELECT id, case_status::text AS case_status FROM properties WHERE case_status IN ('contract_planned', 'contracted');
+UPDATE properties SET case_status = 'negotiating', version = version + 1
+  WHERE case_status IN ('contract_planned', 'contracted');
+-- 自動で書いた変更履歴を控えて「api」へ
+CREATE TABLE change_logs_auto_backup_<日付> AS SELECT id FROM change_logs WHERE source = 'auto';
+UPDATE change_logs SET source = 'api' WHERE source = 'auto';
+```
+
+旧コードへの切り替えは上の手順(`git checkout <previous-tag>` → `npm ci --include=dev` → `npx prisma generate` → `npm run build` → `npm prune --omit=dev` → start)。⚠`prisma migrate resolve --rolled-back` は使わない(値を残したままなので、記録が実態とずれる)。
+
+```sql
+-- 再び新コードへ進めたら戻す(旧版の間に手で変えた物件は上書きしないよう「商談中」のままの行だけ戻す)
+UPDATE properties p SET case_status = b.case_status::"CaseStatus", version = p.version + 1
+  FROM case_status_reorg_backup_<日付> b WHERE p.id = b.id AND p.case_status = 'negotiating';
+UPDATE change_logs c SET source = 'auto' FROM change_logs_auto_backup_<日付> b WHERE c.id = b.id;
+```
+
 ### 現況「賃貸中」(`20261014090000_occupancy_rented`)より前へ戻すとき
 
 この migration は enum `OccupancyStatus` に値 `rented`(賃貸中)を足すだけ。PostgreSQL は enum の値を消せないので、

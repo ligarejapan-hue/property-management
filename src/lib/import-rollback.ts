@@ -131,7 +131,7 @@ interface ChangeLogInput {
   fieldName: string;
   oldValue: string | null;
   newValue: string | null;
-  source: "manual" | "api" | "csv_import" | "pdf_import";
+  source: "manual" | "api" | "csv_import" | "pdf_import" | "auto";
   changedAt: Date;
   /** 任意。指定があれば JobWindow.executedBy と一致するもののみ候補にする */
   changedBy?: string;

@@ -2,10 +2,12 @@ import { vi, describe, it, expect, beforeEach } from "vitest";
 
 vi.mock("@/lib/property-record-guard", () => ({ lockPropertyRow: vi.fn(async () => undefined) }));
 vi.mock("@/lib/dm-reaction/sync", () => ({ syncSaleDmReaction: vi.fn(async () => undefined) }));
+vi.mock("@/lib/case-status-auto", () => ({ autoAdvanceCaseStatus: vi.fn(async () => true) }));
 
 import { recordInquiry } from "@/lib/sale-dm-letter/inquiry-record";
 import { lockPropertyRow } from "@/lib/property-record-guard";
 import { syncSaleDmReaction } from "@/lib/dm-reaction/sync";
+import { autoAdvanceCaseStatus } from "@/lib/case-status-auto";
 
 const INPUT = { name: "山田", phone: "090-1234-5678", email: null, contactPref: null, contactTime: null, message: "相談したい", propertyAddress: null };
 const NOW = new Date("2026-09-20T01:00:00.000Z");
@@ -13,7 +15,7 @@ const NOW = new Date("2026-09-20T01:00:00.000Z");
 const RENDERABLE_LP_VARIANT = { headline: "見出し", bodyText: "本文" };
 
 function makeClient(
-  draft: { id: string; propertyId: string; status: string } | null,
+  draft: { id: string; propertyId: string; status: string; generatedBy?: string } | null,
   lockedStatus = draft?.status,
   claims = { form: 1, lp: 0 },
   lockedLpVariant: { headline: string | null; bodyText: string | null } | null = RENDERABLE_LP_VARIANT,
@@ -46,6 +48,20 @@ function makeClient(
 beforeEach(() => { vi.clearAllMocks(); });
 
 describe("recordInquiry", () => {
+  it("申込を記録したら、案件ステータスの自動の切り替え(所有者とやりとり中)を同じ tx で呼ぶ・記録者は手紙を作った人", async () => {
+    const { client, tx } = makeClient({ id: "d1", propertyId: "p1", status: "sent", generatedBy: "u9" });
+    expect((await recordInquiry(client as never, "t", INPUT, NOW)).kind).toBe("recorded");
+    expect(autoAdvanceCaseStatus).toHaveBeenCalledWith(tx, { propertyId: "p1", to: "contacting_owner", changedBy: "u9" });
+  });
+
+  it("書かないとき(送付前・LP型なし)は自動の切り替えも呼ばない", async () => {
+    const a = makeClient({ id: "d1", propertyId: "p1", status: "sent" }, "confirmed");
+    await recordInquiry(a.client as never, "t", INPUT, NOW);
+    const b = makeClient({ id: "d1", propertyId: "p1", status: "sent" }, "sent", { form: 1, lp: 0 }, null);
+    await recordInquiry(b.client as never, "t", INPUT, NOW);
+    expect(autoAdvanceCaseStatus).not.toHaveBeenCalled();
+  });
+
   it("未知 token は unknown(何も書かない)", async () => {
     const { client } = makeClient(null);
     expect(await recordInquiry(client as never, "x", INPUT, NOW)).toEqual({ kind: "unknown" });

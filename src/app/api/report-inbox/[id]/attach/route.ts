@@ -13,6 +13,7 @@ import { lockPropertyRow } from "@/lib/property-record-guard";
 import { canAccessPropertyRecord } from "@/lib/property-access";
 import { assertReportInboxAccess, SCRUB_ON_DISCARD } from "@/lib/report-inbox/access";
 import { REPORT_ATTACHMENT_TYPE, reportDisplayName } from "@/lib/attachments/report-display-name";
+import { autoAdvanceCaseStatus } from "@/lib/case-status-auto";
 
 // ---------- POST /api/report-inbox/:id/attach  { propertyId } ----------
 // 受け取り箱の報告書を、人が選んだ物件に「査定報告書」として添付する。
@@ -101,6 +102,8 @@ export async function POST(request: NextRequest, { params }: { params: Promise<{
           select: { id: true },
         });
         await tx.reportInboxItem.update({ where: { id }, data: { attachmentId: attachment.id } });
+        // 査定報告書が付いた=査定に入った。未着手・所有者とやりとり中のときだけ「査定中」へ(発注者決定 2026-10-20)。
+        await autoAdvanceCaseStatus(tx, { propertyId, to: "appraisal", changedBy: session.id });
         return attachment.id;
       });
     } catch (e) {

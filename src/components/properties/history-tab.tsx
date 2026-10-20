@@ -5,6 +5,7 @@ import { Loader2, History, ChevronLeft, ChevronRight, Search } from "lucide-reac
 import { fetchChangeLogs as apiFetchChangeLogs, fetchSaleDmScenarioOptionsAll, type SaleDmScenarioOptionAll } from "@/lib/api-client";
 import { formatJaDateTime } from "@/lib/format-datetime";
 import { dmScenarioHistoryLabel } from "./dm-scenario-field-model";
+import { caseStatusHistoryLabel, historyChangerLabel } from "./history-tab-model";
 import { Button } from "@/components/ui/button";
 
 interface ChangeLogData {
@@ -92,6 +93,7 @@ const SOURCE_LABELS: Record<string, string> = {
   api: "API",
   csv_import: "CSV取込",
   pdf_import: "PDF取込",
+  auto: "自動",
 };
 
 export default function HistoryTab({
@@ -159,6 +161,7 @@ export default function HistoryTab({
   }, [hasDmScenarioRow, scenarioAll]);
 
   const displayValue = (fieldName: string, value: string | null): string | null => {
+    if (fieldName === "caseStatus") return caseStatusHistoryLabel(value);
     if (fieldName !== "dmScenarioId") return value;
     if (scenarioAll === "failed") return value ? "(名前を読み込めませんでした)" : "自動";
     return dmScenarioHistoryLabel(value, scenarioAll);
@@ -296,7 +299,7 @@ export default function HistoryTab({
                       {formatJaDateTime(log.changedAt)}
                     </td>
                     <td className="whitespace-nowrap px-3 py-2">
-                      {log.changer.name}
+                      {historyChangerLabel(log)}
                     </td>
                     <td className="whitespace-nowrap px-3 py-2 text-xs">
                       <span className="inline-flex rounded-full bg-gray-100 px-2 py-0.5 text-[11px] font-medium text-gray-600 dark:bg-gray-800 dark:text-gray-300">
