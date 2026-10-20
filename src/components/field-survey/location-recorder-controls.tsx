@@ -16,6 +16,7 @@
  */
 
 import { useState } from "react";
+import { Button } from "@/components/ui/button";
 import { LocationConsentModal } from "@/components/field-survey/location-consent-notice";
 import {
   hasLocationConsent,
@@ -72,8 +73,9 @@ export default function LocationRecorderControls({
       )}
 
       {!recording && status !== "stopping" && (
-        <button
-          type="button"
+        <Button
+          variant="secondary"
+          size="sm"
           onClick={() => {
             if (hasLocationConsent()) {
               onStart();
@@ -81,22 +83,23 @@ export default function LocationRecorderControls({
             }
             setConfirming(true);
           }}
-          className="mt-2 w-full rounded border border-blue-300 bg-blue-50 px-2 py-1 text-xs font-semibold text-blue-700 hover:bg-blue-100 dark:border-blue-500/40 dark:bg-blue-500/20 dark:text-blue-300 dark:hover:bg-blue-500/30"
+          className="mt-2 w-full"
           data-testid="location-record-start-button"
         >
           位置記録を再開
-        </button>
+        </Button>
       )}
       {(recording || status === "stopping") && (
-        <button
-          type="button"
+        <Button
+          variant="secondary"
+          size="sm"
           onClick={() => onStop()}
           disabled={status === "stopping"}
-          className="mt-2 w-full rounded border border-gray-300 bg-white px-2 py-1 text-xs font-semibold text-gray-700 hover:bg-gray-50 disabled:cursor-not-allowed disabled:opacity-60 dark:border-gray-700 dark:bg-gray-900 dark:text-gray-200 dark:hover:bg-gray-800"
+          className="mt-2 w-full"
           data-testid="location-record-stop-button"
         >
           位置記録停止
-        </button>
+        </Button>
       )}
 
       {error && (

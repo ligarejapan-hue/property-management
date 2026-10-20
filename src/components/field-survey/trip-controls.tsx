@@ -29,6 +29,7 @@
 
 import { useCallback, useEffect, useRef, useState } from "react";
 import { createPortal } from "react-dom";
+import { Button } from "@/components/ui/button";
 import { LocationConsentNotice } from "@/components/field-survey/location-consent-notice";
 import {
   hasLocationConsent,
@@ -936,18 +937,19 @@ export default function TripControls({
           {/* 圏外で終業する日の脱出口: 未送信の軌跡を諦めて終了する。破棄は
               endSession 内で PATCH 成功後に行う (offline で終了自体が失敗する
               場合は破棄されず軌跡を保全する)。 */}
-          <button
-            type="button"
+          <Button
+            variant="danger"
+            size="sm"
             data-testid="trip-discard-and-end"
             onClick={() => {
               setEndBlockedByBuffer(false);
               void endSession(session, { discardUnsent: true });
             }}
             disabled={phase !== "active"}
-            className="w-full rounded border border-red-300 bg-red-50 px-2 py-1 text-[11px] font-semibold text-red-700 hover:bg-red-100 dark:border-red-500/40 dark:bg-red-500/10 dark:text-red-300 dark:hover:bg-red-500/20"
+            className="w-full"
           >
             未送信の位置記録を破棄して終了する
-          </button>
+          </Button>
           <p className="mt-1 text-[11px] font-medium leading-tight text-gray-600 dark:text-gray-300">
             まだ送信できていない移動の記録
             {typeof unsentLocationCount === "number" && unsentLocationCount > 0
@@ -1171,20 +1173,12 @@ function ModalActions({
 }) {
   return (
     <div className="flex justify-end gap-2">
-      <button
-        type="button"
-        onClick={onCancel}
-        className="rounded border border-gray-300 bg-white px-3 py-1 text-xs text-gray-700 hover:bg-gray-50 dark:border-gray-700 dark:bg-gray-900 dark:text-gray-200 dark:hover:bg-gray-800"
-      >
+      <Button variant="secondary" size="sm" onClick={onCancel}>
         {cancelLabel}
-      </button>
-      <button
-        type="button"
-        onClick={onAgree}
-        className="rounded border border-indigo-600 bg-indigo-600 px-3 py-1 text-xs font-semibold text-white hover:bg-indigo-700"
-      >
+      </Button>
+      <Button variant="primary" size="sm" onClick={onAgree}>
         {agreeLabel}
-      </button>
+      </Button>
     </div>
   );
 }

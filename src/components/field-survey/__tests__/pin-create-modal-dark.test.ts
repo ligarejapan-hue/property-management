@@ -33,8 +33,9 @@ describe("pin-create-modal dark mode", () => {
     expect(readSrc()).toContain("dark:border-gray-700");
   });
 
-  test("use-current-location button has dark hover (hover:bg-gray-800)", () => {
-    expect(readSrc()).toContain("dark:hover:bg-gray-800");
+  // UIの統一 第4回: 補助ボタンは共通 Button(secondary)=ダークの hover は部品側が持つ
+  test("secondary buttons use shared Button (dark hover は部品側)", () => {
+    expect(readSrc()).toMatch(/variant="secondary"[\s\S]{0,200}data-testid="pin-create-replace-location"/);
   });
 
   test("use-current-location button has dark text (text-gray-200)", () => {
@@ -95,8 +96,8 @@ describe("pin-create-modal dark mode", () => {
     expect(readSrc()).toContain("dark:border-gray-700");
   });
 
-  test("photo add button has dark hover", () => {
-    expect(readSrc()).toContain("dark:hover:bg-gray-800");
+  test("photo add button uses shared secondary Button (dark hover は部品側)", () => {
+    expect(readSrc()).toMatch(/variant="secondary"[\s\S]{0,200}data-testid="pin-create-photo-add"/);
   });
 
   test("photo thumbnail has dark border (border-gray-800)", () => {
@@ -191,8 +192,8 @@ describe("pin-create-modal dark mode", () => {
     expect(readSrc()).toContain("text-amber-900");
   });
 
-  test("solid indigo submit button preserved", () => {
-    expect(readSrc()).toContain("bg-indigo-600");
+  test("solid indigo submit button preserved (共通 Button の primary)", () => {
+    expect(readSrc()).toMatch(/variant="primary"[\s\S]{0,250}data-testid="pin-create-submit"/);
   });
 
   test("light text-emerald-700 preserved", () => {

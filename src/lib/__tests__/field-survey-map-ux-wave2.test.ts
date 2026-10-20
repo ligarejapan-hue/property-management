@@ -197,7 +197,9 @@ describe("シート・モーダルの操作性", () => {
     expect(DETAIL).toContain("max-h-[55vh]");
     expect(DETAIL).not.toContain("max-h-[70vh]");
     const close = DETAIL.indexOf('aria-label="閉じる"');
-    expect(DETAIL.slice(close, close + 200)).toContain("-m-2 p-2 text-lg");
+    // UIの統一 第4回: 共通 Button(ghost・sm)+大きめの×(h-5)で当たりを保つ。
+    expect(DETAIL.slice(close - 200, close)).toContain('variant="ghost"');
+    expect(DETAIL.slice(close, close + 200)).toContain('<X className="h-5 w-5" />');
     const esc = DETAIL.indexOf('e.key !== "Escape"');
     expect(esc).toBeGreaterThan(-1);
     const escBody = DETAIL.slice(esc, esc + 900);

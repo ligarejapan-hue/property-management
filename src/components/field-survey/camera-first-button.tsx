@@ -67,6 +67,7 @@ export default function CameraFirstButton({
           aria-label (読み上げ) と title (PC のツールチップ)。 */}
       <button
         type="button"
+        data-motion="off"
         onClick={() => inputRef.current?.click()}
         disabled={disabled}
         data-testid="camera-first-button"

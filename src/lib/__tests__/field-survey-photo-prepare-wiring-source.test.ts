@@ -98,7 +98,7 @@ describe("pin-create-modal — 失敗中の写真差し替え", () => {
     );
     // disabled 属性はボタン記述の testid より前にあるため、ボタン周辺全体で確認
     const buttons = MODAL_SRC.match(
-      /<div className="flex gap-2">[\s\S]*?写真を追加[\s\S]{0,40}<\/button>/,
+      /<div className="flex gap-2">[\s\S]*?写真を追加[\s\S]{0,40}<\/Button>/,
     );
     expect(buttons).not.toBeNull();
     expect(buttons?.[0] ?? "").not.toMatch(/busy\s*\|\|\s*photoUploadFailed/);

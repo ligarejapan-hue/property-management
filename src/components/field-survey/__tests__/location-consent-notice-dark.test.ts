@@ -25,15 +25,16 @@ describe("location-consent-notice.tsx dark: 配色", () => {
   it("本文に dark:text-gray-200 がある (text-gray-700 対応)", () => {
     expect(src).toContain("dark:text-gray-200");
   });
-  it("キャンセルボタン枠 border-gray-300 に dark:border-gray-700 がある", () => {
-    expect(src).toContain("dark:border-gray-700");
+  // UIの統一 第4回: キャンセル/同意は共通 Button(枠・塗り・暗い面の配色は部品側が持つ)
+  it("キャンセルボタンは共通 Button の secondary", () => {
+    expect(src).toContain('<Button variant="secondary" size="sm" onClick={onCancel}>');
   });
 
   // --- ライト不変担保 ---
   it("ライトモード bg-white は残っている", () => {
     expect(src).toContain("bg-white");
   });
-  it("ライトモード bg-indigo-600 solid ボタンは残っている", () => {
-    expect(src).toContain("bg-indigo-600");
+  it("同意して記録開始は共通 Button の primary", () => {
+    expect(src).toContain('<Button variant="primary" size="sm" onClick={onAgree}>');
   });
 });

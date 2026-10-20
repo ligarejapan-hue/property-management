@@ -112,6 +112,8 @@ import { pinMarkerStyle } from "@/lib/field-survey-pin-marker";
 import CurrentLocationStatus from "@/components/field-survey/current-location-status";
 import MapRecenterButton from "@/components/field-survey/map-recenter-button";
 import { useScreenProtection } from "@/components/screen-protection/screen-protection-provider";
+import { Button } from "@/components/ui/button";
+import { X } from "lucide-react";
 
 // 東京駅付近を初期表示の中心にする (海外案件用ではない国内利用前提)。
 const DEFAULT_CENTER = { lat: 35.6812, lng: 139.7671 };
@@ -1532,15 +1534,16 @@ export default function FieldSurveyMap({
                   ? "位置を保存しています…"
                   : "ピンを家の上へドラッグして直せます"}
               </span>
-              <button
-                type="button"
+              <Button
+                variant="secondary"
+                size="sm"
                 data-testid="pin-move-done"
                 onClick={clearPinMove}
                 disabled={movingPin}
-                className="shrink-0 rounded border border-indigo-400 bg-white px-2 py-0.5 font-semibold text-indigo-800 hover:bg-indigo-100 disabled:cursor-not-allowed disabled:opacity-50 dark:border-indigo-500/50 dark:bg-gray-900 dark:text-indigo-200 dark:hover:bg-gray-800"
+                className="shrink-0"
               >
                 完了
-              </button>
+              </Button>
             </div>
           )}
           {cameraFirstPhase === "awaiting-map-tap" && !panelOpen && (
@@ -1676,25 +1679,27 @@ export default function FieldSurveyMap({
             className="pointer-events-auto absolute bottom-28 left-1/2 z-10 flex -translate-x-1/2 items-center gap-2 rounded-md border border-emerald-300 bg-emerald-50 px-3 py-2 text-xs font-semibold text-emerald-800 shadow dark:border-emerald-500/40 dark:bg-emerald-500/15 dark:text-emerald-300"
           >
             <span>ピンを保存しました</span>
-            <button
-              type="button"
+            <Button
+              variant="secondary"
+              size="sm"
               onClick={handleAddPhotoToCreatedPin}
               data-testid="pin-saved-add-photo"
-              className="rounded border border-emerald-400 bg-white px-2 py-0.5 text-[11px] text-emerald-800 hover:bg-emerald-100 dark:border-emerald-500/50 dark:bg-gray-900 dark:text-emerald-300 dark:hover:bg-gray-800"
             >
               写真を追加
-            </button>
-            <button
-              type="button"
+            </Button>
+            <Button
+              variant="secondary"
+              size="sm"
               onClick={() => {
                 void handleUndoCreatedPin();
               }}
               disabled={pinMutations.deleteLoading}
+              loading={pinMutations.deleteLoading}
+              loadingLabel="取り消し中"
               data-testid="pin-saved-undo"
-              className="rounded border border-gray-300 bg-white px-2 py-0.5 text-[11px] text-gray-700 hover:bg-gray-100 disabled:opacity-60 dark:border-gray-700 dark:bg-gray-900 dark:text-gray-200 dark:hover:bg-gray-800"
             >
-              {pinMutations.deleteLoading ? "取り消し中…" : "取り消す"}
-            </button>
+              取り消す
+            </Button>
           </div>
         )}
 
@@ -1770,26 +1775,28 @@ export default function FieldSurveyMap({
             <span>{error}</span>
             {/* 第3弾: 失敗しても「地図を動かす」以外にやり直す手が無かった。
                 押した瞬間に取り直す(消えていた色や線もここから戻せる)。 */}
-            <button
-              type="button"
+            <Button
+              variant="secondary"
+              size="sm"
               data-testid="map-error-retry"
               onClick={() => {
                 setError(null);
                 bumpRefetch();
               }}
-              className="shrink-0 rounded border border-red-400 bg-white px-2 py-0.5 font-semibold text-red-800 hover:bg-red-100 dark:border-red-500/40 dark:bg-gray-900 dark:text-red-300 dark:hover:bg-gray-800"
+              className="shrink-0"
             >
               再試行
-            </button>
+            </Button>
             {/* 第2弾: 読んだら消せる(従来は地図を動かすまで消えなかった)。 */}
-            <button
-              type="button"
+            <Button
+              variant="ghost"
+              size="sm"
               onClick={() => setError(null)}
               aria-label="閉じる"
-              className="-m-1 p-1 leading-none text-red-700 hover:text-red-900 dark:text-red-300 dark:hover:text-red-100"
+              className="shrink-0 text-red-700 dark:text-red-400"
             >
-              ×
-            </button>
+              <X className="h-4 w-4" aria-hidden="true" />
+            </Button>
           </div>
         )}
       </div>
@@ -1894,16 +1901,16 @@ function ControlPanel({
   // 連鎖(地図/ページ)を止める。
   return (
     <div className="pointer-events-none absolute bottom-3 right-3 top-3 flex flex-col items-end md:w-56">
-      <button
-        type="button"
+      <Button
+        variant="secondary"
         onClick={onTogglePanelOpen}
         aria-expanded={panelOpen}
-        className="pointer-events-auto flex shrink-0 items-center gap-1 whitespace-nowrap rounded-md border border-gray-200 bg-white px-3 py-2 text-sm text-gray-700 shadow dark:border-gray-800 dark:bg-gray-900 dark:text-gray-200"
+        className="pointer-events-auto shrink-0 whitespace-nowrap shadow"
       >
         {/* ラベルは短く保つ。長くなると左上の地図/航空写真ボタンに重なり
             タップを奪う (過去に実機で発生した既知ホットスポット)。 */}
         表示切替{hasActiveSession ? "・巡回中" : ""} {panelOpen ? "▴" : "▾"}
-      </button>
+      </Button>
       <div
         className={`${panelOpen ? "mt-2 block" : "hidden"} pointer-events-auto min-h-0 w-56 overflow-y-auto overscroll-contain rounded-md border border-gray-200 bg-white p-3 text-sm shadow dark:border-gray-800 dark:bg-gray-900`}
       >
@@ -1955,15 +1962,18 @@ function ControlPanel({
 
       {/* 第3弾: 手で最新にできる口。同僚のピンや、失敗して消えた色をここから
           取り直せる(従来は地図を動かすしか手が無かった)。 */}
-      <button
-        type="button"
+      <Button
+        variant="secondary"
+        size="sm"
         data-testid="map-refresh"
         onClick={onRefresh}
         disabled={mapLoading}
-        className="mb-3 w-full rounded-md border border-gray-300 bg-white px-3 py-2 text-xs font-semibold text-gray-700 hover:bg-gray-50 disabled:cursor-not-allowed disabled:opacity-60 dark:border-gray-600 dark:bg-gray-900 dark:text-gray-200 dark:hover:bg-gray-800"
+        loading={mapLoading}
+        loadingLabel="更新中"
+        className="mb-3 w-full"
       >
-        {mapLoading ? "更新中…" : "最新に更新"}
-      </button>
+        最新に更新
+      </Button>
 
       <div className="mb-2 text-xs font-semibold text-gray-600 dark:text-gray-300">表示切替</div>
       <label className="mb-1 flex cursor-pointer items-center gap-2">

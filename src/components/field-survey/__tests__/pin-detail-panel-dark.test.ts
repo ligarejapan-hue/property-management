@@ -102,8 +102,11 @@ describe("pin-detail-panel dark mode", () => {
     expect(readSrc()).toContain("dark:border-gray-700");
   });
 
-  test("camera/gallery buttons have dark hover background (hover:bg-gray-800)", () => {
-    expect(readSrc()).toContain("dark:hover:bg-gray-800");
+  // UIの統一 第4回: 撮る/追加は共通 Button(secondary)=ダークの枠・hover は部品側が持つ
+  test("camera/gallery buttons use shared secondary Button (dark hover は部品側)", () => {
+    const src = readSrc();
+    expect(src).toMatch(/variant="secondary"[\s\S]{0,200}data-testid="pin-photo-camera"/);
+    expect(src).toMatch(/variant="secondary"[\s\S]{0,200}data-testid="pin-photo-add"/);
   });
 
   // ── ReadOnlyView ─────────────────────────────────────────────────────────
@@ -130,15 +133,15 @@ describe("pin-detail-panel dark mode", () => {
     expect(ok).toBe(true);
   });
 
-  test("ReadOnlyView edit button has dark blue accent background", () => {
-    expect(readSrc()).toContain("dark:bg-blue-500/20");
+  // UIの統一 第4回: 編集(薄い青の補助ボタン)は共通 Button の secondary へ(ダーク対応は部品側)。
+  test("ReadOnlyView edit button uses shared secondary Button", () => {
+    expect(readSrc()).toMatch(
+      /variant="secondary"[\s\S]{0,200}data-testid="pin-detail-edit-button"/,
+    );
   });
 
-  test("ReadOnlyView edit button has dark blue text", () => {
+  test("blue info banner keeps dark blue text/border", () => {
     expect(readSrc()).toContain("dark:text-blue-300");
-  });
-
-  test("ReadOnlyView edit button has dark blue border", () => {
     expect(readSrc()).toContain("dark:border-blue-500/40");
   });
 
@@ -208,10 +211,6 @@ describe("pin-detail-panel dark mode", () => {
 
   test("light bg-blue-50 preserved", () => {
     expect(readSrc()).toContain("bg-blue-50");
-  });
-
-  test("light text-blue-700 preserved", () => {
-    expect(readSrc()).toContain("text-blue-700");
   });
 
   // 事前敵対レビュー対応: EditView 種類/状態ラジオラベル(無色span)に dark:text-gray-200

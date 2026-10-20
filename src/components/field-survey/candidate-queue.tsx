@@ -2,6 +2,7 @@
 
 import { useCallback, useEffect, useRef, useState } from "react";
 import { PageHeader } from "@/components/ui/page-header";
+import { Button } from "@/components/ui/button";
 import { useRouter } from "next/navigation";
 import Link from "next/link";
 import { Loader2 } from "lucide-react";
@@ -537,8 +538,10 @@ export default function CandidateQueue({
                       {/* 場所特定の手がかり: 現地写真。タップした時だけ読み込む
                           (本番はサムネイル生成が無く原寸のため、常時読込を避ける)。 */}
                       {photoCount > 0 && (
+                        // data-ui=raw: 同じ行の「地図で見る」「ストリートビュー」(Link・a)と同じ札の形にそろえる(ROW_CHIP_CLASS)
                         <button
                           type="button"
+                          data-ui="raw"
                           data-testid="candidate-photo-toggle"
                           onClick={() => togglePhoto(r.id)}
                           aria-expanded={photoShown}
@@ -569,8 +572,10 @@ export default function CandidateQueue({
                       {place ? (
                         <CandidatePlaceLinks lat={place.lat} lng={place.lng} />
                       ) : (
+                        // data-ui=raw: 同じ行の「地図で見る」(Link)と同じ札の形にそろえる(ROW_CHIP_CLASS)
                         <button
                           type="button"
+                          data-ui="raw"
                           data-testid="candidate-place-toggle"
                           onClick={() => {
                             void showPlace(r.id);
@@ -600,8 +605,8 @@ export default function CandidateQueue({
                   </div>
                   <div className="flex shrink-0 items-center gap-2">
                     {canReject && (
-                      <button
-                        type="button"
+                      <Button
+                        variant="danger"
                         data-testid="candidate-reject"
                         onClick={() => {
                           setRejectError(null);
@@ -610,22 +615,20 @@ export default function CandidateQueue({
                           setRejectPinId(next);
                         }}
                         disabled={pinMutations.deleteLoading}
-                        className="rounded border border-red-300 dark:border-red-500/40 bg-red-50 dark:bg-red-500/10 px-3 py-1.5 text-sm text-red-700 dark:text-red-300 hover:bg-red-100 dark:hover:bg-red-500/20 disabled:cursor-not-allowed disabled:opacity-60"
                       >
                         候補から外す
-                      </button>
+                      </Button>
                     )}
                     {canWriteProperty && (
-                      <button
-                        type="button"
+                      <Button
+                        variant="primary"
                         onClick={() => {
                           setConvertedNotice(false);
                           setConvertPinId(r.id);
                         }}
-                        className="rounded border border-emerald-300 dark:border-emerald-500/40 bg-emerald-50 dark:bg-emerald-500/10 px-3 py-1.5 text-sm text-emerald-700 dark:text-emerald-300 hover:bg-emerald-100 dark:hover:bg-emerald-500/20"
                       >
                         物件にする
-                      </button>
+                      </Button>
                     )}
                   </div>
                 </div>
@@ -649,8 +652,9 @@ export default function CandidateQueue({
                       </p>
                     )}
                     <div className="mt-2 flex justify-end gap-2">
-                      <button
-                        type="button"
+                      <Button
+                        variant="secondary"
+                        size="sm"
                         data-testid="candidate-reject-cancel"
                         onClick={() => {
                           rejectPinIdRef.current = null;
@@ -658,21 +662,22 @@ export default function CandidateQueue({
                           setRejectError(null);
                         }}
                         disabled={pinMutations.deleteLoading}
-                        className="rounded border border-gray-300 dark:border-gray-700 bg-white dark:bg-gray-900 px-3 py-1 text-xs text-gray-700 dark:text-gray-200 hover:bg-gray-50 dark:hover:bg-gray-800 disabled:opacity-60"
                       >
                         やめる
-                      </button>
-                      <button
-                        type="button"
+                      </Button>
+                      <Button
+                        variant="danger"
+                        size="sm"
                         data-testid="candidate-reject-confirm"
                         onClick={() => {
                           void handleRejectConfirm(r.id);
                         }}
                         disabled={pinMutations.deleteLoading}
-                        className="rounded border border-red-600 bg-red-600 px-3 py-1 text-xs font-semibold text-white hover:bg-red-700 disabled:cursor-not-allowed disabled:opacity-60"
+                        loading={pinMutations.deleteLoading}
+                        loadingLabel="外しています"
                       >
-                        {pinMutations.deleteLoading ? "外しています…" : "外す"}
-                      </button>
+                        外す
+                      </Button>
                     </div>
                   </div>
                 )}
@@ -713,16 +718,17 @@ export default function CandidateQueue({
           (件数からの推測にすると、ちょうど上限件数のときに出ない/出続ける)。 */}
       {rows !== null && rows.length > 0 && nextCursor !== null && (
         <div className="mt-4 flex flex-col items-center gap-2">
-          <button
-            type="button"
+          <Button
+            variant="secondary"
+            size="lg"
             data-testid="candidate-load-more"
             onClick={() => void loadMore()}
             disabled={loadingMore}
-            className="inline-flex min-h-[44px] items-center gap-2 rounded-md border border-gray-300 bg-white px-4 py-2 text-sm font-medium text-gray-700 hover:bg-gray-50 disabled:opacity-50 dark:border-gray-600 dark:bg-gray-800 dark:text-gray-200 dark:hover:bg-gray-700"
+            loading={loadingMore}
+            loadingLabel="読み込み中"
           >
-            {loadingMore && <Loader2 className="h-4 w-4 animate-spin" />}
-            {loadingMore ? "読み込み中…" : "もっと見る"}
-          </button>
+            もっと見る
+          </Button>
           <p className="text-xs text-gray-500 dark:text-gray-400">
             さらに候補があります（{CANDIDATE_LIST_LIMIT}件ずつ表示）
           </p>

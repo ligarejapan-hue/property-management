@@ -24,6 +24,7 @@ import {
   useMap,
 } from "@vis.gl/react-google-maps";
 import Link from "next/link";
+import { Button } from "@/components/ui/button";
 import { useCallback, useEffect, useRef, useState } from "react";
 import { useMapGestureHandling } from "@/components/field-survey/use-map-gesture-handling";
 import RoutePolyline, {
@@ -366,15 +367,18 @@ export default function FieldSurveyHistoryMap({
           履歴閲覧中（read-only）
           {meta?.staffName ? ` / ${meta.staffName}` : ""}
         </span>
-        <button
-          type="button"
+        <Button
+          variant="secondary"
+          size="sm"
           data-testid="history-reload"
           onClick={() => setReloadNonce((n) => n + 1)}
           disabled={loading}
-          className="ml-auto rounded border border-blue-300 bg-white px-2 py-1 text-blue-700 hover:bg-blue-100 disabled:cursor-not-allowed disabled:opacity-50 dark:border-blue-500/40 dark:bg-gray-900 dark:text-blue-400 dark:hover:bg-gray-800"
+          loading={loading}
+          loadingLabel="更新中"
+          className="ml-auto"
         >
-          {loading ? "更新中…" : "更新"}
-        </button>
+          更新
+        </Button>
         <Link
           href="/field-survey/map"
           data-testid="history-back-to-map"
@@ -393,8 +397,10 @@ export default function FieldSurveyHistoryMap({
           {/* 第3弾: 同じ巡回のまま読み直せる導線。従来は失敗すると開き直す
               しかなく、「時間をおいて再度お試しください」と言いながら
               試す手段が画面に無かった。 */}
+          {/* data-ui=raw: 琥珀の注意枠の中のボタン(枠の色に合わせた専用の見た目) */}
           <button
             type="button"
+            data-ui="raw"
             data-testid="history-retry"
             onClick={() => setReloadNonce((n) => n + 1)}
             disabled={loading}
@@ -530,8 +536,10 @@ function HistoryPinInfo({
           )}
         </dd>
       </dl>
+      {/* data-ui=raw: 地図の吹き出し(InfoWindow)の中の文字リンク */}
       <button
         type="button"
+        data-ui="raw"
         onClick={onOpenDetail}
         data-testid="history-pin-open-detail"
         className="mt-2 text-indigo-600 hover:underline"

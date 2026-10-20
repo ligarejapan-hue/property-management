@@ -15,6 +15,8 @@
  */
 
 import { useCallback, useEffect, useRef, useState } from "react";
+import { X } from "lucide-react";
+import { Button } from "@/components/ui/button";
 import { ConfirmDialog } from "@/components/ui/confirm-dialog";
 import {
   FIELD_SURVEY_PIN_STATUSES,
@@ -348,15 +350,16 @@ export default function PinDetailPanel({
     >
       <div className="flex items-center justify-between border-b border-gray-200 dark:border-gray-800 p-3">
         <h2 className="text-sm font-semibold text-gray-800 dark:text-gray-100">調査ピン詳細</h2>
-        <button
-          type="button"
+        <Button
+          variant="ghost"
+          size="sm"
           onClick={onClose}
           disabled={closeBlocked}
           aria-label="閉じる"
-          className="-m-2 p-2 text-lg leading-none text-gray-500 hover:text-gray-800 disabled:cursor-not-allowed disabled:opacity-40 dark:text-gray-400 dark:hover:text-gray-100"
+          className="text-gray-400 hover:text-gray-600"
         >
-          ×
-        </button>
+          <X className="h-5 w-5" />
+        </Button>
       </div>
 
       <div className="p-3 text-sm">
@@ -440,14 +443,15 @@ export default function PinDetailPanel({
         {canDelete && !editing && (
           <div className="mt-4 border-t border-gray-200 dark:border-gray-800 pt-3">
             {!confirmingDelete ? (
-              <button
-                type="button"
+              <Button
+                variant="danger"
+                size="sm"
                 data-testid="pin-detail-delete-button"
                 onClick={() => setConfirmingDelete(true)}
-                className="w-full rounded border border-red-300 dark:border-red-500/40 bg-red-50 dark:bg-red-500/10 px-2 py-1 text-xs font-semibold text-red-700 dark:text-red-300 hover:bg-red-100 dark:hover:bg-red-500/20"
+                className="w-full"
               >
                 削除
-              </button>
+              </Button>
             ) : (
               <div
                 role="alertdialog"
@@ -468,25 +472,27 @@ export default function PinDetailPanel({
                   </p>
                 )}
                 <div className="mt-2 flex justify-end gap-2">
-                  <button
-                    type="button"
+                  <Button
+                    variant="secondary"
+                    size="sm"
                     onClick={() => setConfirmingDelete(false)}
                     disabled={mutations.deleteLoading}
-                    className="rounded border border-gray-300 dark:border-gray-700 bg-white dark:bg-gray-900 px-3 py-1 text-xs text-gray-700 dark:text-gray-200 hover:bg-gray-50 dark:hover:bg-gray-800 disabled:opacity-60"
                   >
                     キャンセル
-                  </button>
-                  <button
-                    type="button"
+                  </Button>
+                  <Button
+                    variant="danger"
+                    size="sm"
                     onClick={() => {
                       void handleDelete();
                     }}
                     disabled={mutations.deleteLoading}
+                    loading={mutations.deleteLoading}
+                    loadingLabel="削除中"
                     data-testid="pin-detail-delete-confirm-button"
-                    className="rounded border border-red-600 bg-red-600 px-3 py-1 text-xs font-semibold text-white hover:bg-red-700 disabled:cursor-not-allowed disabled:opacity-60"
                   >
-                    {mutations.deleteLoading ? "削除中…" : "削除する"}
-                  </button>
+                    削除する
+                  </Button>
                 </div>
               </div>
             )}
@@ -694,8 +700,10 @@ function PinPhotoSection({
         <ul className="grid grid-cols-3 gap-2">
           {photos.map((p) => (
             <li key={p.id} className="relative">
+              {/* data-ui=raw: 写真の縮小表示(画像そのものが押せる面) */}
               <button
                 type="button"
+                data-ui="raw"
                 onClick={() => setPreviewId(p.id)}
                 data-testid="pin-photo-thumb"
                 className="block h-20 w-full overflow-hidden rounded border border-gray-200 dark:border-gray-800"
@@ -721,17 +729,20 @@ function PinPhotoSection({
                   間違いで、確認なしに現地写真が消えていた)。押すと確認を出す。 */}
               {canEdit && (
                 <div className="mt-0.5 flex justify-end">
-                  <button
-                    type="button"
+                  <Button
+                    variant="ghost"
+                    size="sm"
                     onClick={() => setConfirmDeletePhotoId(p.id)}
                     disabled={
                       photoMutations.deleteLoading || pendingDeleteIds.includes(p.id)
                     }
+                    loading={pendingDeleteIds.includes(p.id)}
+                    loadingLabel="削除中"
                     data-testid="pin-photo-delete"
-                    className="rounded px-1.5 py-0.5 text-[11px] text-red-700 hover:bg-red-50 disabled:opacity-60 dark:text-red-400 dark:hover:bg-red-500/10"
+                    className="text-red-700 dark:text-red-400"
                   >
-                    {pendingDeleteIds.includes(p.id) ? "削除中…" : "削除"}
-                  </button>
+                    削除
+                  </Button>
                 </div>
               )}
             </li>
@@ -763,8 +774,10 @@ function PinPhotoSection({
             onError={() => markBroken(preview.id)}
             className="max-h-64 w-full object-contain"
           />
+          {/* data-ui=raw: 拡大表示の下の下線リンク(文字だけの閉じる) */}
           <button
             type="button"
+            data-ui="raw"
             onClick={() => setPreviewId(null)}
             className="mt-1 text-[11px] text-gray-500 dark:text-gray-400 underline hover:text-gray-800 dark:hover:text-gray-100"
           >
@@ -797,24 +810,24 @@ function PinPhotoSection({
             }}
           />
           <div className="flex gap-2">
-            <button
-              type="button"
+            <Button
+              variant="secondary"
+              size="sm"
               onClick={() => cameraInputRef.current?.click()}
               disabled={photoMutations.uploadLoading}
               data-testid="pin-photo-camera"
-              className="rounded border border-gray-300 dark:border-gray-700 bg-white dark:bg-gray-900 px-2 py-1 text-[11px] text-gray-700 dark:text-gray-200 hover:bg-gray-50 dark:hover:bg-gray-800 disabled:opacity-60"
             >
               写真を撮る
-            </button>
-            <button
-              type="button"
+            </Button>
+            <Button
+              variant="secondary"
+              size="sm"
               onClick={() => galleryInputRef.current?.click()}
               disabled={photoMutations.uploadLoading}
               data-testid="pin-photo-add"
-              className="rounded border border-gray-300 dark:border-gray-700 bg-white dark:bg-gray-900 px-2 py-1 text-[11px] text-gray-700 dark:text-gray-200 hover:bg-gray-50 dark:hover:bg-gray-800 disabled:opacity-60"
             >
               写真を追加
-            </button>
+            </Button>
           </div>
           {detachedError && (
             <div
@@ -826,8 +839,10 @@ function PinPhotoSection({
                 パネルを離れている間の写真の処理が失敗しました（{detachedError}）。
                 もう一度お試しください。
               </span>
+              {/* data-ui=raw: エラー枠の中の文字だけの下線リンク(閉じる) */}
               <button
                 type="button"
+                data-ui="raw"
                 onClick={() => setDetachedError(null)}
                 data-testid="pin-photo-detached-error-dismiss"
                 className="shrink-0 underline"
@@ -915,14 +930,14 @@ function ReadOnlyView({
               紐付け済 →
             </a>
           ) : canConvert ? (
-            <button
-              type="button"
+            <Button
+              variant="primary"
+              size="sm"
               onClick={onConvert}
               data-testid="pin-detail-convert-button"
-              className="rounded border border-emerald-300 dark:border-emerald-500/40 bg-emerald-50 dark:bg-emerald-500/10 px-2 py-1 text-[11px] font-semibold text-emerald-700 dark:text-emerald-300 hover:bg-emerald-100 dark:hover:bg-emerald-500/20"
             >
               この場所を物件にする
-            </button>
+            </Button>
           ) : (
             "—"
           )}
@@ -932,25 +947,29 @@ function ReadOnlyView({
       {canEdit && (
         <div className="mt-3">
           {detail.status === "open" ? (
-            <button
-              type="button"
+            <Button
+              variant="success"
               data-testid="pin-quick-close"
               onClick={() => onQuickStatus("closed")}
               disabled={quickStatusSaving}
-              className="w-full rounded-md bg-emerald-600 px-3 py-2 text-sm font-semibold text-white hover:bg-emerald-700 disabled:cursor-not-allowed disabled:opacity-60"
+              loading={quickStatusSaving}
+              loadingLabel="保存中"
+              className="w-full"
             >
-              {quickStatusSaving ? "保存中…" : "✔ この場所を対応済みにする"}
-            </button>
+              ✔ この場所を対応済みにする
+            </Button>
           ) : detail.status === "closed" ? (
-            <button
-              type="button"
+            <Button
+              variant="secondary"
               data-testid="pin-quick-reopen"
               onClick={() => onQuickStatus("open")}
               disabled={quickStatusSaving}
-              className="w-full rounded-md border border-gray-300 bg-white px-3 py-2 text-sm font-medium text-gray-700 hover:bg-gray-50 disabled:cursor-not-allowed disabled:opacity-60 dark:border-gray-700 dark:bg-gray-900 dark:text-gray-200 dark:hover:bg-gray-800"
+              loading={quickStatusSaving}
+              loadingLabel="保存中"
+              className="w-full"
             >
-              {quickStatusSaving ? "保存中…" : "未対応に戻す"}
-            </button>
+              未対応に戻す
+            </Button>
           ) : null}
           {quickStatusError && (
             <p
@@ -974,14 +993,15 @@ function ReadOnlyView({
         </div>
       </div>
       {canEdit && (
-        <button
-          type="button"
+        <Button
+          variant="secondary"
+          size="sm"
           onClick={onEdit}
           data-testid="pin-detail-edit-button"
-          className="mt-3 w-full rounded border border-blue-300 dark:border-blue-500/40 bg-blue-50 dark:bg-blue-500/20 px-2 py-1 text-xs font-semibold text-blue-700 dark:text-blue-300 hover:bg-blue-100 dark:hover:bg-blue-500/30"
+          className="mt-3 w-full"
         >
           編集
-        </button>
+        </Button>
       )}
     </>
   );
@@ -1103,23 +1123,20 @@ function EditView({
       )}
 
       <div className="flex justify-end gap-2">
-        <button
-          type="button"
-          onClick={onCancel}
-          disabled={saving}
-          className="rounded border border-gray-300 dark:border-gray-700 bg-white dark:bg-gray-900 px-3 py-1 text-xs text-gray-700 dark:text-gray-200 hover:bg-gray-50 dark:hover:bg-gray-800 disabled:opacity-60"
-        >
+        <Button variant="secondary" size="sm" onClick={onCancel} disabled={saving}>
           キャンセル
-        </button>
-        <button
-          type="button"
+        </Button>
+        <Button
+          variant="primary"
+          size="sm"
           onClick={onSave}
           disabled={saving}
+          loading={saving}
+          loadingLabel="保存中"
           data-testid="pin-edit-save-button"
-          className="rounded border border-indigo-600 bg-indigo-600 px-3 py-1 text-xs font-semibold text-white hover:bg-indigo-700 disabled:cursor-not-allowed disabled:opacity-60"
         >
-          {saving ? "保存中…" : "保存"}
-        </button>
+          保存
+        </Button>
       </div>
       {/* updatedAt の表示はしない (UI 上の Hint としては不要) */}
       <p className="mt-2 text-[10px] text-gray-400 dark:text-gray-500">

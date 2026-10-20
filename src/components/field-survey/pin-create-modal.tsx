@@ -19,6 +19,7 @@
  */
 
 import { useEffect, useRef, useState } from "react";
+import { Button } from "@/components/ui/button";
 import {
   FIELD_SURVEY_PIN_TYPES,
   formatPinType,
@@ -231,15 +232,15 @@ export default function PinCreateModal({
             位置は変わらず、同じ写真でもう1本の重複 pin を作ってしまう。 */}
         {!photoUploadFailed && (
           <div className="mb-3">
-            <button
-              type="button"
+            <Button
+              variant="secondary"
+              size="sm"
               onClick={() => onReplaceLocation(photoFile)}
               disabled={busy}
-              className="rounded border border-gray-300 dark:border-gray-700 bg-white dark:bg-gray-900 px-2 py-1 text-[11px] text-gray-700 dark:text-gray-200 hover:bg-gray-50 dark:hover:bg-gray-800 disabled:cursor-not-allowed disabled:opacity-60"
               data-testid="pin-create-replace-location"
             >
               地図で置き直す
-            </button>
+            </Button>
             <p className="mt-1 text-[11px] leading-tight text-gray-500 dark:text-gray-400">
               写真はそのままで、もう一度地図をタップできます。
             </p>
@@ -331,24 +332,24 @@ export default function PinCreateModal({
             {/* 失敗中 (photoUploadFailed) も選び直し可: 変換できない写真は
                 同じ file の再試行が必ず再失敗するため、「別の写真を」の案内と
                 操作を一致させる (選び直しは onReplaceRetryPhoto で親に反映)。 */}
-            <button
-              type="button"
+            <Button
+              variant="secondary"
+              size="sm"
               onClick={() => cameraInputRef.current?.click()}
               disabled={busy}
               data-testid="pin-create-photo-camera"
-              className="rounded border border-gray-300 dark:border-gray-700 bg-white dark:bg-gray-900 px-2 py-1 text-[11px] text-gray-700 dark:text-gray-200 hover:bg-gray-50 dark:hover:bg-gray-800 disabled:cursor-not-allowed disabled:opacity-60"
             >
               写真を撮る
-            </button>
-            <button
-              type="button"
+            </Button>
+            <Button
+              variant="secondary"
+              size="sm"
               onClick={() => galleryInputRef.current?.click()}
               disabled={busy}
               data-testid="pin-create-photo-add"
-              className="rounded border border-gray-300 dark:border-gray-700 bg-white dark:bg-gray-900 px-2 py-1 text-[11px] text-gray-700 dark:text-gray-200 hover:bg-gray-50 dark:hover:bg-gray-800 disabled:cursor-not-allowed disabled:opacity-60"
             >
               写真を追加
-            </button>
+            </Button>
           </div>
           {photoPreviewUrl && (
             <div className="mt-2 flex items-center gap-2">
@@ -397,8 +398,10 @@ export default function PinCreateModal({
               </p>
             )}
             <div className="mt-2 flex justify-end gap-2">
+              {/* data-ui=raw: 琥珀の注意枠の中のボタン(枠の色に合わせた専用の見た目・第3回と同じ扱い) */}
               <button
                 type="button"
+                data-ui="raw"
                 onClick={onFinishWithoutPhoto}
                 disabled={photoUploading}
                 data-testid="pin-create-photo-finish-without"
@@ -406,8 +409,10 @@ export default function PinCreateModal({
               >
                 写真なしで完了
               </button>
+              {/* data-ui=raw: 琥珀の注意枠の中のボタン(枠の色に合わせた専用の見た目・第3回と同じ扱い) */}
               <button
                 type="button"
+                data-ui="raw"
                 onClick={onRetryPhoto}
                 disabled={photoUploading}
                 data-testid="pin-create-photo-retry"
@@ -419,23 +424,20 @@ export default function PinCreateModal({
           </div>
         ) : (
           <div className="flex justify-end gap-2">
-            <button
-              type="button"
-              onClick={onCancel}
-              disabled={busy}
-              className="rounded border border-gray-300 dark:border-gray-700 bg-white dark:bg-gray-900 px-3 py-1 text-xs text-gray-700 dark:text-gray-200 hover:bg-gray-50 dark:hover:bg-gray-800 disabled:opacity-60"
-            >
+            <Button variant="secondary" size="sm" onClick={onCancel} disabled={busy}>
               キャンセル
-            </button>
-            <button
-              type="button"
+            </Button>
+            <Button
+              variant="primary"
+              size="sm"
               onClick={handleSubmit}
               disabled={!canSubmit}
+              loading={busy}
+              loadingLabel="保存中"
               data-testid="pin-create-submit"
-              className="rounded border border-indigo-600 bg-indigo-600 px-3 py-1 text-xs font-semibold text-white hover:bg-indigo-700 disabled:cursor-not-allowed disabled:opacity-60"
             >
-              {busy ? "保存中…" : "保存"}
-            </button>
+              保存
+            </Button>
           </div>
         )}
       </div>
