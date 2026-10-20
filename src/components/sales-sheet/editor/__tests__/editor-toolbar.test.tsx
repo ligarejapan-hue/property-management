@@ -82,7 +82,8 @@ describe("EditorToolbar — 描画", () => {
     expect(withAddr).toContain("地図QRを追加");
     // React SSR は disabled=true のとき属性 `disabled=""` を出力(className の disabled: とは別)。
     const tag = (html: string) => {
-      const s = html.slice(html.indexOf("data-toolbar-add-map-qr"));
+      // 共通 Button は disabled を data-* より前に出すので、開きタグ全体で見る
+      const s = html.slice(html.lastIndexOf("<button", html.indexOf("data-toolbar-add-map-qr")));
       return s.slice(0, s.indexOf(">"));
     };
     expect(tag(withAddr).includes('disabled=""')).toBe(false); // 住所あり=活性
@@ -175,9 +176,14 @@ describe("EditorToolbar — 描画", () => {
     expect(html).toContain("やり直す");
     // canUndo=false → undo は disabled 属性あり、canRedo=true → redo は無し
     // (クラス名の "disabled:opacity-50" に誤マッチしないよう属性形 'disabled=""' で判定)
-    const undoBtn = html.slice(html.indexOf("data-toolbar-undo"), html.indexOf("data-toolbar-redo"));
+    // 共通 Button は disabled を data-* より前に出すので、開きタグ全体(<button …>)で見る
+    const openTag = (attr: string) => {
+      const s = html.slice(html.lastIndexOf("<button", html.indexOf(attr)));
+      return s.slice(0, s.indexOf(">"));
+    };
+    const undoBtn = openTag("data-toolbar-undo");
     expect(undoBtn).toContain('disabled=""');
-    const redoBtn = html.slice(html.indexOf("data-toolbar-redo"), html.indexOf("data-toolbar-save"));
+    const redoBtn = openTag("data-toolbar-redo");
     expect(redoBtn).not.toContain('disabled=""');
   });
 
@@ -316,8 +322,10 @@ describe("旧ひな型では自動機能のボタンを止める", () => {
   it("canAutoLayout=false で自動整列・自動調整が無効になり、理由が出る", () => {
     const html = renderToStaticMarkup(<EditorToolbar {...baseProps} canAutoLayout={false} />);
     for (const attr of ["data-toolbar-auto-arrange", "data-toolbar-auto-balance"]) {
-      const s = html.slice(html.indexOf(attr));
-      expect(s.slice(0, s.indexOf(">"))).toContain("disabled");
+      // 共通 Button は disabled を data-* より前に出すので、開きタグ全体で見る
+      const at = html.indexOf(attr);
+      const s = html.slice(html.lastIndexOf("<button", at));
+      expect(s.slice(0, s.indexOf(">"))).toContain('disabled=""');
     }
     expect(html).toContain(LEGACY_TEMPLATE_NOTE);
   });

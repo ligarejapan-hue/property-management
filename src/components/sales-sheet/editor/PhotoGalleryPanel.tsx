@@ -12,6 +12,7 @@
 import { useCallback, useEffect, useState } from "react";
 import { isSafeImageSrc } from "@/lib/sales-sheet/css-safety";
 import FileDropZone from "@/components/ui/file-drop-zone";
+import { Button } from "@/components/ui/button";
 
 export interface GalleryPhoto {
   id: string;
@@ -44,7 +45,9 @@ export function PhotoGrid({
       {photos.map((p) => {
         const addable = isSafeImageSrc(p.fileUrl);
         return (
+          // data-ui=raw: 写真の縮小表示そのものが押せる面(ボタンの形をしていない)
           <button
+            data-ui="raw"
             key={p.id}
             type="button"
             disabled={!addable}
@@ -236,14 +239,15 @@ export function PhotoGalleryPanel({
       >
         <div className="mb-3 flex items-center justify-between">
           <h2 className="text-base font-bold text-gray-900 dark:text-gray-100">写真を追加</h2>
-          <button
-            type="button"
+          <Button
+            variant="ghost"
+            size="sm"
             aria-label="閉じる"
             onClick={onClose}
-            className="rounded px-2 py-1 text-sm text-gray-500 hover:bg-gray-100 dark:text-gray-400 dark:hover:bg-zinc-700"
+            className="text-gray-500 dark:text-gray-400"
           >
             ✕
-          </button>
+          </Button>
         </div>
 
         <div className="mb-4 space-y-2 border-b border-gray-200 pb-4 dark:border-gray-700">

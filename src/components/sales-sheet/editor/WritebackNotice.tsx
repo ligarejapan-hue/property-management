@@ -92,7 +92,8 @@ export function WritebackNotice({ designId }: { designId: string }): React.React
             <li key={m}>{m}</li>
           ))}
         </ul>
-        <button type="button" onClick={() => setMessages([])} className="shrink-0 text-xs underline">
+        {/* data-ui=raw: 色付きの注意枠の中の下線リンク風の専用ボタン */}
+        <button data-ui="raw" type="button" onClick={() => setMessages([])} className="shrink-0 text-xs underline">
           閉じる
         </button>
       </div>

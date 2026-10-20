@@ -79,8 +79,8 @@ describe("再送ボタンと再送エラーの表示(fix round 1)", () => {
   it("再送ボタンは disabled で切り替える(送信中も消さない)", () => {
     expect(list).toMatch(/disabled=\{resendingIds\.has\(i\.id\)\}/);
     // 従来の「送信中はボタンごと非表示にする」書き方(!resendingIds.has(i.id) && <button)が
-    // 残っていないこと。
-    expect(list).not.toMatch(/\{!resendingIds\.has\(i\.id\)\s*&&\s*\(\s*<button/);
+    // 残っていないこと(UIの統一 第6回で共通 Button になったので <Button も見る)。
+    expect(list).not.toMatch(/\{!resendingIds\.has\(i\.id\)\s*&&\s*\(\s*<[Bb]utton/);
   });
 
   it("再送の失敗は行ごとの resendErrors で表示し、パネル全体の setError は使わない", () => {

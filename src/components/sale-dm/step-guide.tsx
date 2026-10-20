@@ -167,7 +167,8 @@ export function SaleDmStepGuide({
   if (!on) {
     return (
       <div className="flex justify-end">
-        <button type="button" onClick={() => writeOff(false)} className="text-xs text-indigo-700 underline hover:no-underline dark:text-indigo-300">
+        {/* data-ui=raw: 文中の下線リンク */}
+        <button type="button" data-ui="raw" onClick={() => writeOff(false)} className="text-xs text-indigo-700 underline hover:no-underline dark:text-indigo-300">
           手順の案内を出す
         </button>
       </div>
@@ -192,13 +193,16 @@ export function SaleDmStepGuide({
             {current && (
               <button
                 type="button"
+                // data-ui=raw: 琥珀の案内枠の中の下線リンク
+                data-ui="raw"
                 onClick={() => targetRef.current?.scrollIntoView({ block: "center", behavior: "smooth" })}
                 className="text-indigo-700 underline hover:no-underline dark:text-indigo-300"
               >
                 光っているボタンへ移動
               </button>
             )}
-            <button type="button" onClick={() => writeOff(true)} className="text-gray-600 underline hover:no-underline dark:text-gray-300">
+            {/* data-ui=raw: 琥珀の案内枠の中の下線リンク */}
+            <button type="button" data-ui="raw" onClick={() => writeOff(true)} className="text-gray-600 underline hover:no-underline dark:text-gray-300">
               案内を消す
             </button>
           </span>
@@ -206,7 +210,8 @@ export function SaleDmStepGuide({
         {state === "add_lp" && onSkipLp && (
           <div className="mt-1.5 flex flex-wrap items-center gap-2 text-gray-700 dark:text-gray-200">
             <span>ご案内ページを使わない場合は、お手紙のQRは外部LPへ転送されます。</span>
-            <button type="button" onClick={onSkipLp} className="text-indigo-700 underline hover:no-underline dark:text-indigo-300">
+            {/* data-ui=raw: 琥珀の案内枠の中の下線リンク */}
+            <button type="button" data-ui="raw" onClick={onSkipLp} className="text-indigo-700 underline hover:no-underline dark:text-indigo-300">
               LP型を使わずに進む
             </button>
           </div>
@@ -214,8 +219,10 @@ export function SaleDmStepGuide({
         {state === "print" && onPrintConfirmed && (
           <div className="mt-1.5 flex flex-wrap items-center gap-2 text-gray-700 dark:text-gray-200">
             <span>別のタブで手紙とQR(申込用・配信停止用)が出たら、次へ進みます。</span>
+            {/* data-ui=raw: 琥珀の案内枠の中の専用ボタン(琥珀色のまま) */}
             <button
               type="button"
+              data-ui="raw"
               onClick={onPrintConfirmed}
               className="rounded-md bg-amber-500 px-2.5 py-1 font-medium text-white hover:bg-amber-600"
             >

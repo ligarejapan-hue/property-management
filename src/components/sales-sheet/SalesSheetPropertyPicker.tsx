@@ -1,6 +1,7 @@
 "use client";
 
 import { Loader2, Plus, Search } from "lucide-react";
+import { Button } from "@/components/ui/button";
 import type { PickerRow } from "@/lib/sales-sheet/picker";
 
 export interface SalesSheetPropertyPickerProps {
@@ -52,14 +53,10 @@ export function SalesSheetPropertyPicker({
           />
         </div>
         {canWrite && (
-          <button
-            type="button"
-            onClick={onOpenRegister}
-            className="flex items-center gap-1.5 whitespace-nowrap rounded-md bg-indigo-600 px-4 py-2 text-sm font-medium text-white hover:bg-indigo-700"
-          >
+          <Button onClick={onOpenRegister} className="whitespace-nowrap">
             <Plus className="h-4 w-4" />
             新しい物件を登録して作成
-          </button>
+          </Button>
         )}
       </div>
 
@@ -118,7 +115,9 @@ export function SalesSheetPropertyPicker({
             return (
               <li key={row.id} className="border-b border-gray-100 last:border-b-0 dark:border-gray-800">
                 {actionable ? (
+                  // data-ui=raw: 一覧の行全体が押せる面(ボタンの形をしていない)
                   <button
+                    data-ui="raw"
                     type="button"
                     onClick={() => onSelect(row)}
                     className="flex w-full items-center gap-3 px-4 py-3 text-left hover:bg-indigo-50/60 dark:hover:bg-indigo-900/20"
@@ -137,25 +136,25 @@ export function SalesSheetPropertyPicker({
       {/* エラー時はページ送りを出さない（古い件数/ページ数での操作防止・@codex P3 の表示側ガード）。 */}
       {!loading && !error && totalPages > 1 && (
         <div className="mt-4 flex items-center justify-center gap-3 text-sm text-gray-600 dark:text-gray-300">
-          <button
-            type="button"
+          <Button
+            variant="secondary"
+            size="sm"
             onClick={() => onPageChange(page - 1)}
             disabled={page <= 1}
-            className="rounded-md border border-gray-300 px-3 py-1.5 hover:bg-gray-50 disabled:opacity-40 dark:border-gray-700 dark:hover:bg-gray-800"
           >
             前へ
-          </button>
+          </Button>
           <span>
             {page} / {totalPages}（全 {total} 件）
           </span>
-          <button
-            type="button"
+          <Button
+            variant="secondary"
+            size="sm"
             onClick={() => onPageChange(page + 1)}
             disabled={page >= totalPages}
-            className="rounded-md border border-gray-300 px-3 py-1.5 hover:bg-gray-50 disabled:opacity-40 dark:border-gray-700 dark:hover:bg-gray-800"
           >
             次へ
-          </button>
+          </Button>
         </div>
       )}
     </div>

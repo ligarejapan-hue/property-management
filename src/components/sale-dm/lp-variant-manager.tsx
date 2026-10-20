@@ -2,6 +2,7 @@
 
 import { useMemo, useState } from "react";
 import { Loader2, Plus, Trash2, Pencil, FileText, Copy, Image as ImageIcon, Eye } from "lucide-react";
+import { Button } from "@/components/ui/button";
 import type { SaleDmCampaign, SaleDmLpVariant, SaleDmLpVariantOptions } from "@/lib/api-client";
 import {
   createSaleDmLpVariant,
@@ -134,9 +135,9 @@ export default function SaleDmLpVariantManager({ campaign, onChanged }: { campai
       <div className="flex items-center justify-between">
         <h3 className="text-sm font-medium text-gray-700">{scenario ? "ご案内ページ(DMの種類ごと)" : "LP型(ご案内ページの A/B)"}</h3>
         {!scenario && (
-        <button type="button" onClick={startNew} disabled={busy} data-guide="add_lp" className="inline-flex items-center gap-1 rounded-md border border-gray-300 px-2 py-1 text-xs font-medium text-gray-700 hover:bg-gray-50 disabled:opacity-50">
+        <Button type="button" variant="secondary" size="sm" onClick={startNew} disabled={busy} data-guide="add_lp">
           <Plus className="h-3.5 w-3.5" /> LP型を追加
-        </button>
+        </Button>
         )}
       </div>
       {scenario && campaign.lpVariants.length === 0 && (
@@ -156,14 +157,14 @@ export default function SaleDmLpVariantManager({ campaign, onChanged }: { campai
               {v.headline ? <span className="ml-2 text-gray-500">「{v.headline}」</span> : <span className="ml-2 text-amber-700">文章なし</span>}
             </div>
             <div className="flex gap-1">
-              <button type="button" onClick={() => openLetter(v)} disabled={busy} data-guide={v.id === lpGuideId ? "lp_text" : undefined} aria-label={`LP型「${v.label}」の文章`} title="プロンプトを表示して、手元のAIで作った文章を貼り付けます" className="rounded p-1 text-indigo-600 hover:bg-indigo-50 disabled:opacity-50"><FileText className="h-3.5 w-3.5" /></button>
-              <button type="button" onClick={() => openMedia(v)} disabled={busy || !v.headline} aria-label={`LP型「${v.label}」の写真と図`} title={v.headline ? "写真と図" : "先に文章を保存してください"} className="rounded p-1 text-emerald-700 hover:bg-emerald-50 disabled:opacity-50"><ImageIcon className="h-3.5 w-3.5" /></button>
-              <button type="button" onClick={() => openPreview(v)} disabled={busy || !v.headline} aria-label={`LP型「${v.label}」のプレビュー`} title={v.headline ? "プレビュー" : "先に文章を保存してください"} className="rounded p-1 text-sky-700 hover:bg-sky-50 disabled:opacity-50"><Eye className="h-3.5 w-3.5" /></button>
+              <Button type="button" variant="ghost" size="sm" onClick={() => openLetter(v)} disabled={busy} data-guide={v.id === lpGuideId ? "lp_text" : undefined} aria-label={`LP型「${v.label}」の文章`} title="プロンプトを表示して、手元のAIで作った文章を貼り付けます" className="text-indigo-600"><FileText className="h-3.5 w-3.5" /></Button>
+              <Button type="button" variant="ghost" size="sm" onClick={() => openMedia(v)} disabled={busy || !v.headline} aria-label={`LP型「${v.label}」の写真と図`} title={v.headline ? "写真と図" : "先に文章を保存してください"} className="text-emerald-700"><ImageIcon className="h-3.5 w-3.5" /></Button>
+              <Button type="button" variant="ghost" size="sm" onClick={() => openPreview(v)} disabled={busy || !v.headline} aria-label={`LP型「${v.label}」のプレビュー`} title={v.headline ? "プレビュー" : "先に文章を保存してください"} className="text-sky-700"><Eye className="h-3.5 w-3.5" /></Button>
               {!scenario && (
-              <button type="button" onClick={() => startEdit(v)} disabled={busy} aria-label={`LP型「${v.label}」を編集`} className="rounded p-1 text-gray-600 hover:bg-gray-100 disabled:opacity-50"><Pencil className="h-3.5 w-3.5" /></button>
+              <Button type="button" variant="ghost" size="sm" onClick={() => startEdit(v)} disabled={busy} aria-label={`LP型「${v.label}」を編集`} className="text-gray-600"><Pencil className="h-3.5 w-3.5" /></Button>
               )}
               {!scenario && (
-              <button type="button" onClick={() => remove(v)} disabled={busy} aria-label={`LP型「${v.label}」を削除`} className="rounded p-1 text-red-600 hover:bg-red-50 disabled:opacity-50"><Trash2 className="h-3.5 w-3.5" /></button>
+              <Button type="button" variant="ghost" size="sm" onClick={() => remove(v)} disabled={busy} aria-label={`LP型「${v.label}」を削除`} className="text-red-600"><Trash2 className="h-3.5 w-3.5" /></Button>
               )}
             </div>
           </li>
@@ -196,10 +197,10 @@ export default function SaleDmLpVariantManager({ campaign, onChanged }: { campai
             </label>
           ))}
           <div className="flex justify-end gap-2">
-            <button type="button" onClick={() => setEditing(null)} disabled={busy} className="rounded border border-gray-300 bg-white px-2.5 py-1 text-gray-600 hover:bg-gray-50 disabled:opacity-50">キャンセル</button>
-            <button type="button" onClick={submit} disabled={busy || form.label.trim().length === 0} data-guide={editing === "new" ? "add_lp_save" : undefined} className="inline-flex items-center gap-1 rounded bg-indigo-600 px-2.5 py-1 text-white hover:bg-indigo-700 disabled:opacity-50">
+            <Button type="button" variant="secondary" size="sm" onClick={() => setEditing(null)} disabled={busy}>キャンセル</Button>
+            <Button type="button" size="sm" onClick={submit} disabled={busy || form.label.trim().length === 0} data-guide={editing === "new" ? "add_lp_save" : undefined}>
               {busy && <Loader2 className="h-3 w-3 animate-spin" />} 保存
-            </button>
+            </Button>
           </div>
         </div>
       )}
@@ -208,7 +209,7 @@ export default function SaleDmLpVariantManager({ campaign, onChanged }: { campai
         <div className="mt-3 rounded-md border border-indigo-200 bg-indigo-50/40 p-3 text-xs">
           <div className="flex items-center justify-between">
             <span className="font-medium text-gray-700">「{letterFor.label}」の文章</span>
-            <button type="button" onClick={() => { setLetterFor(null); setLetter(null); setLetterNotice(null); }} className="text-gray-500 hover:underline">閉じる</button>
+            <Button type="button" variant="ghost" size="sm" onClick={() => { setLetterFor(null); setLetter(null); setLetterNotice(null); }} className="text-gray-500">閉じる</Button>
           </div>
           {letter.frozen && letter.rawTemplate ? (
             <p className="mt-2 rounded bg-amber-50 px-2 py-1.5 text-amber-800">{scenario ? <>この種類のご案内ページはすでに送付の実績があるため、文章は変更できません。文章を変えるときは「DMの種類」の画面で直し、新しい発送を作ってください。<ScenarioEditLink scenarioId={letterFor.scenarioId} /></> : "このLP型はすでに送付の実績があるため、文章は変更できません。文章を変えるときは新しいLP型を追加してください。"}</p>
@@ -219,11 +220,11 @@ export default function SaleDmLpVariantManager({ campaign, onChanged }: { campai
               <p className="mt-1 text-gray-500">返ってきた文章は【見出し】〜【よくある質問】までをそのまま貼ります。</p>
               <div className="mt-1.5 flex items-start gap-2">
                 <pre className="max-h-40 flex-1 overflow-auto whitespace-pre-wrap rounded border border-gray-200 bg-white p-2 text-[11px] leading-relaxed text-gray-700">{letter.prompt}</pre>
-                <button type="button" onClick={copyPrompt} disabled={busy} className="flex items-center gap-1 rounded border border-indigo-300 bg-white px-2 py-1 text-indigo-700 hover:bg-indigo-50 disabled:opacity-50"><Copy className="h-3.5 w-3.5" />コピー</button>
+                <Button type="button" variant="secondary" size="sm" onClick={copyPrompt} disabled={busy}><Copy className="h-3.5 w-3.5" />コピー</Button>
               </div>
               <textarea value={pasteBody} onChange={(e) => setPasteBody(e.target.value)} placeholder="ここに、お手元のAIで作った文章を貼り付けてください(【見出し】から始まります)" rows={10} className="mt-2 w-full rounded-md border border-gray-300 px-2 py-1 text-sm" />
               <div className="mt-1.5 flex justify-end gap-2">
-                <button type="button" onClick={saveTemplate} disabled={busy} data-guide={letterFor?.id === lpGuideId ? "lp_text_save" : undefined} className="rounded bg-indigo-600 px-2.5 py-1 text-white hover:bg-indigo-700 disabled:opacity-50">文章を保存</button>
+                <Button type="button" size="sm" onClick={saveTemplate} disabled={busy} data-guide={letterFor?.id === lpGuideId ? "lp_text_save" : undefined}>文章を保存</Button>
               </div>
             </>
           )}

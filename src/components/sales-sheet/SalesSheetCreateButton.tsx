@@ -2,6 +2,7 @@
 
 import { useEffect, useState } from "react";
 import { useRouter } from "next/navigation";
+import { Button } from "@/components/ui/button";
 import type { SalesSheetTemplateKind } from "@/lib/sales-sheet/template-kind";
 import { unitBuildingFacts } from "@/lib/sales-sheet/unit-building-facts";
 import type { WritebackSummary } from "@/components/sales-sheet/editor/WritebackNotice";
@@ -1488,22 +1489,20 @@ export function SalesSheetCreateDialog({
         )}
         {error && <p className="mt-2 text-sm text-red-600 dark:text-red-400">{error}</p>}
         <div className="mt-4 flex justify-end gap-2">
-          <button
-            type="button"
+          <Button
+            variant="ghost"
             onClick={onClose}
             disabled={busy}
-            className="rounded px-3 py-2 text-sm text-gray-600 hover:bg-gray-100 disabled:opacity-50 dark:text-gray-400 dark:hover:bg-neutral-700"
+            className="text-gray-600 dark:text-gray-400"
           >
             キャンセル
-          </button>
-          <button
-            type="button"
+          </Button>
+          <Button
             onClick={create}
             disabled={busy || gate.submitBlocked}
-            className="rounded bg-indigo-600 px-3 py-2 text-sm font-semibold text-white hover:bg-indigo-700 disabled:opacity-50"
           >
             {gate.submitBlocked ? "物件の情報を読み込み中…" : busy ? "作成中…" : "作成してエディタを開く"}
-          </button>
+          </Button>
         </div>
       </div>
     </div>
@@ -1536,13 +1535,13 @@ export function SalesSheetCreateButton({
 
   return (
     <div>
-      <button
-        type="button"
+      <Button
+        variant="secondary"
         onClick={() => setOpen(true)}
-        className="flex items-center gap-1.5 whitespace-nowrap rounded-md border border-indigo-300 px-3 py-2 text-sm text-indigo-700 hover:bg-indigo-50 dark:border-indigo-700 dark:text-indigo-300 dark:hover:bg-indigo-900/20"
+        className="whitespace-nowrap"
       >
         販売図面を作成（{cfg.label}）
-      </button>
+      </Button>
       <SalesSheetCreateDialog
         propertyId={propertyId}
         kind={kind}

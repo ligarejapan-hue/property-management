@@ -124,11 +124,11 @@ export default function LpMediaPanel({ api, label, onClose }: { api: LpMediaApi;
       )}
       {!data?.frozen && choice.kind === "asset" && (
         <>
-          <button type="button" onClick={() => setPicking({ kind: "section", heading })} disabled={busy} className="text-indigo-700 hover:underline disabled:opacity-50">写真を選ぶ…</button>
-          <button type="button" onClick={() => clearSection(heading)} disabled={busy} className="text-gray-600 hover:underline">外す</button>
+          <Button type="button" variant="ghost" size="sm" onClick={() => setPicking({ kind: "section", heading })} disabled={busy} className="text-indigo-700">写真を選ぶ…</Button>
+          <Button type="button" variant="ghost" size="sm" onClick={() => clearSection(heading)} disabled={busy} className="text-gray-600">外す</Button>
         </>
       )}
-      {!data?.frozen && <button type="button" onClick={() => void copyPrompt({ kind: "section", heading })} disabled={busy} className="inline-flex items-center gap-1 text-indigo-700 hover:underline disabled:opacity-50"><Copy className="h-3 w-3" />画像の指示文</button>}
+      {!data?.frozen && <Button type="button" variant="ghost" size="sm" onClick={() => void copyPrompt({ kind: "section", heading })} disabled={busy} className="text-indigo-700"><Copy className="h-3 w-3" />画像の指示文</Button>}
     </div>
   );
 
@@ -136,7 +136,7 @@ export default function LpMediaPanel({ api, label, onClose }: { api: LpMediaApi;
     <div className="mt-3 rounded-md border border-emerald-200 bg-emerald-50/40 p-3 text-xs">
       <div className="flex items-center justify-between">
         <span className="font-medium text-gray-700"><ImageIcon className="mr-1 inline h-3.5 w-3.5" />「{label}」の写真と図</span>
-        <button type="button" onClick={onClose} className="text-gray-500 hover:underline"><X className="inline h-3 w-3" /> 閉じる</button>
+        <Button type="button" variant="ghost" size="sm" onClick={onClose} className="text-gray-500"><X className="inline h-3 w-3" /> 閉じる</Button>
       </div>
       {!data || !plan ? (
         error ? <p className="mt-2 text-red-600">{error}</p> : <p className="mt-2 text-gray-500"><Loader2 className="inline h-3 w-3 animate-spin" /> 読み込み中</p>
@@ -156,9 +156,9 @@ export default function LpMediaPanel({ api, label, onClose }: { api: LpMediaApi;
               {plan.hero ? thumb(plan.hero.assetId) : <span className="text-gray-500">なし</span>}
               {!data.frozen && (
                 <>
-                  <button type="button" onClick={() => setPicking({ kind: "hero" })} disabled={busy} className="text-indigo-700 hover:underline disabled:opacity-50">写真を選ぶ…</button>
-                  {plan.hero && <button type="button" onClick={() => setPlan(setHero(plan, null))} disabled={busy} className="text-gray-600 hover:underline">外す</button>}
-                  <button type="button" onClick={() => void copyPrompt({ kind: "hero" })} disabled={busy} className="inline-flex items-center gap-1 text-indigo-700 hover:underline disabled:opacity-50"><Copy className="h-3 w-3" />画像の指示文</button>
+                  <Button type="button" variant="ghost" size="sm" onClick={() => setPicking({ kind: "hero" })} disabled={busy} className="text-indigo-700">写真を選ぶ…</Button>
+                  {plan.hero && <Button type="button" variant="ghost" size="sm" onClick={() => setPlan(setHero(plan, null))} disabled={busy} className="text-gray-600">外す</Button>}
+                  <Button type="button" variant="ghost" size="sm" onClick={() => void copyPrompt({ kind: "hero" })} disabled={busy} className="text-indigo-700"><Copy className="h-3 w-3" />画像の指示文</Button>
                 </>
               )}
             </div>

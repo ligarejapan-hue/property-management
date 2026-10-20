@@ -151,6 +151,8 @@ export function SaleDmCreateCampaignDialog({
           {options !== null && !showLegacyOption && (
             <button
               type="button"
+              // data-ui=raw: 下線リンク風の小さな行
+              data-ui="raw"
               data-testid="sale-dm-create-legacy"
               onClick={() => {
                 setLegacyOpen(true);

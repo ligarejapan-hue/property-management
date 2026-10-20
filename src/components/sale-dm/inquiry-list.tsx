@@ -4,6 +4,7 @@ import { useCallback, useEffect, useRef, useState } from "react";
 import Link from "next/link";
 import { useSession } from "next-auth/react";
 import { Loader2, Inbox } from "lucide-react";
+import { Button } from "@/components/ui/button";
 import {
   USE_MOCK,
   fetchSaleDmInquiries,
@@ -245,13 +246,9 @@ export default function SaleDmInquiryList(props: SaleDmInquiryListProps) {
 
   // 先頭ページから読み直す(再読み込みと同じ見た目)。
   const refreshButton = (
-    <button
-      type="button"
-      onClick={() => void load()}
-      className="rounded-md border border-gray-300 bg-white px-2 py-1 text-xs text-gray-700 hover:bg-gray-50"
-    >
+    <Button type="button" variant="secondary" size="sm" onClick={() => void load()}>
       最新に更新
-    </button>
+    </Button>
   );
 
   const renderList = (list: InquiryRow[]) => (
@@ -336,14 +333,15 @@ export default function SaleDmInquiryList(props: SaleDmInquiryListProps) {
               ) : null}
               {/* 送信中もボタンは残す(disabled だけ切り替える)。押した直後にボタンごと消すと、
                   クリック直後にフォーカスが失われる(fix round 1・Minor #2)。 */}
-              <button
+              <Button
                 type="button"
+                variant="secondary"
+                size="sm"
                 onClick={() => void resendNotify(i.id)}
                 disabled={resendingIds.has(i.id)}
-                className="rounded-md border border-gray-300 bg-white px-2 py-1 text-xs text-gray-700 hover:bg-gray-50 disabled:cursor-not-allowed disabled:opacity-50"
               >
                 再送
-              </button>
+              </Button>
             </div>
           )}
           {resendErrors[i.id] && (
@@ -409,13 +407,9 @@ export default function SaleDmInquiryList(props: SaleDmInquiryListProps) {
         <p className="mb-2 flex flex-wrap items-center gap-2 text-xs text-red-600" role="alert">
           <span>{error}</span>
           {items === null && (
-            <button
-              type="button"
-              onClick={() => void load()}
-              className="rounded-md border border-gray-300 bg-white px-2 py-1 text-xs text-gray-700 hover:bg-gray-50"
-            >
+            <Button type="button" variant="secondary" size="sm" onClick={() => void load()}>
               再読み込み
-            </button>
+            </Button>
           )}
         </p>
       )}
@@ -476,14 +470,15 @@ export default function SaleDmInquiryList(props: SaleDmInquiryListProps) {
         <section className="mt-4 border-t border-gray-100 pt-3 dark:border-gray-800">
           <div className="mb-1 flex flex-wrap items-center gap-2">
             <h3 className="text-xs font-semibold text-gray-700 dark:text-gray-200">対応済み</h3>
-            <button
+            <Button
               type="button"
+              variant="secondary"
+              size="sm"
               onClick={() => setShowDone((v) => !v)}
               aria-expanded={showDone}
-              className="rounded-md border border-gray-300 bg-white px-2 py-1 text-xs text-gray-700 hover:bg-gray-50"
             >
               {showDone ? "対応済みを隠す" : `対応済みを表示(${counts?.done ?? 0}件)`}
-            </button>
+            </Button>
           </div>
           {showDone && (
             <>
@@ -506,15 +501,16 @@ export default function SaleDmInquiryList(props: SaleDmInquiryListProps) {
 
       {nextCursor !== null && (
         <div className="mt-3 flex justify-center">
-          <button
+          <Button
             type="button"
+            variant="secondary"
+            size="sm"
             onClick={() => void loadMore()}
             disabled={loadingMore}
-            className="inline-flex items-center gap-1 rounded-md border border-gray-300 bg-white px-2 py-1 text-xs text-gray-700 hover:bg-gray-50 disabled:opacity-50"
           >
             {loadingMore && <Loader2 className="h-3 w-3 animate-spin" />}
             さらに読み込む
-          </button>
+          </Button>
         </div>
       )}
     </div>
