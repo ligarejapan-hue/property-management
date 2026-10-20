@@ -287,11 +287,28 @@ describe("migration ファイル分割の確認", () => {
     expect(sql).toMatch(/ADD VALUE IF NOT EXISTS 'confirming_owner' AFTER 'site_checked'/i);
   });
 
-  it("2026-10-20 整理: 値を足す migration と移し替える migration が分かれ、移し替えは対応表と同じ", () => {
+  it("2026-10-20 整理: enum を作り直し、DB の並び(並べ替えの順)が現役12値の順+やめた値は後ろ(@codex #538 P2)", () => {
     const add = fs.readFileSync(path.join(migDir, "20261020120000_case_status_reorg_values", "migration.sql"), "utf8");
-    expect(add).toMatch(/ADD VALUE IF NOT EXISTS 'contract_planned' AFTER 'on_sale'/);
-    expect(add).toMatch(/ADD VALUE IF NOT EXISTS 'contracted' AFTER 'contract_planned'/);
+    const m = /CREATE TYPE "CaseStatus" AS ENUM \(([^)]*)\)/.exec(add);
+    expect(m).not.toBeNull();
+    const order = [...m![1].matchAll(/'(\w+)'/g)].map((x) => x[1]);
+    expect(order.slice(0, CASE_STATUS_VALUES.length)).toEqual([...CASE_STATUS_VALUES]);
+    expect(order.slice(CASE_STATUS_VALUES.length).sort()).toEqual(Object.keys(CASE_STATUS_DEPRECATED_MAP).sort());
+    // 列の型を新しい enum へ付け替え、既定値を付け直し、古い型を消す
+    expect(add).toMatch(/ALTER COLUMN "case_status" TYPE "CaseStatus" USING "case_status"::text::"CaseStatus"/);
+    expect(add).toMatch(/SET DEFAULT 'new_case'/);
+    expect(add).toMatch(/DROP TYPE "CaseStatus_old"/);
     expect(add).not.toMatch(/^\s*UPDATE/im);
+  });
+
+  it("2026-10-20 整理: schema.prisma の enum の並びも同じ", () => {
+    const schema = fs.readFileSync(path.resolve(__dirname, "../../../prisma/schema.prisma"), "utf8");
+    const body = /enum CaseStatus \{([^}]*)\}/.exec(schema)![1];
+    const vals = body.split(/\r?\n/).map((l) => l.replace(/\/\/.*$/, "").trim()).filter(Boolean);
+    expect(vals).toEqual([...CASE_STATUS_VALUES, ...Object.keys(CASE_STATUS_DEPRECATED_MAP)]);
+  });
+
+  it("2026-10-20 整理: 移し替えは対応表と同じ", () => {
     const mig = fs.readFileSync(path.join(migDir, "20261020120001_case_status_reorg_migrate", "migration.sql"), "utf8");
     expect(mig).not.toMatch(/ADD VALUE/i);
     const fromSql: Record<string, string> = {};

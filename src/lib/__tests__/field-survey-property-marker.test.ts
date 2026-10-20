@@ -111,11 +111,14 @@ describe("propertyMarkerStyle", () => {
     expect(isPropertyCaseDone("sold")).toBe(true);
     expect(isPropertyCaseDone("closed")).toBe(true);
     expect(isPropertyCaseDone("done")).toBe(true); // 旧値
+    // 「他社で決まった」も終わった案件(2026-10-20 の整理で意味がはっきりした・@codex #538 P2)
+    expect(isPropertyCaseDone("other_brokerage")).toBe(true);
+    expect(isPropertyCaseDone("contracted")).toBe(false);
     expect(isPropertyCaseDone("negotiating")).toBe(false);
     expect(isPropertyCaseDone(null)).toBe(false);
     expect(isPropertyCaseDone(undefined)).toBe(false);
     // 見た目と同じ判断であること(規則が二重化していない)。
-    for (const cs of ["sold", "closed", "done", "negotiating", null]) {
+    for (const cs of ["sold", "closed", "done", "other_brokerage", "negotiating", null]) {
       const style = propertyMarkerStyle({ propertyType: "house", caseStatus: cs });
       expect(style.glyph === PROPERTY_DONE_GLYPH, String(cs)).toBe(
         isPropertyCaseDone(cs),

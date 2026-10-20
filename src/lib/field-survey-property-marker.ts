@@ -37,8 +37,9 @@ export const PROPERTY_DONE_GLYPH = "✓";
  * ⚠`done` は廃止された旧値だが**既存データには今も入っている**(新規設定は不可・
  *   正規化では closed 相当)。地図APIは生の caseStatus を返すため、ここで拾わないと
  *   終わった物件が現役の赤で出て状態を誤らせる(@codex #409 R2 P2)。
+ * `other_brokerage`(他社で決まった)も終わった案件(2026-10-20 の整理で名前が変わり意味がはっきりした)。
  */
-const DONE_CASE_STATUSES = new Set(["sold", "closed", "done"]);
+const DONE_CASE_STATUSES = new Set(["sold", "other_brokerage", "closed", "done"]);
 
 /**
  * 案件が終わっているか。まとめ表示(クラスタ)も**この同じ規則**を使う

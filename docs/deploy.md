@@ -863,9 +863,9 @@ sudo systemctl stop property-management
 ```
 
 ```sql
--- 契約予定・契約完了の物件を控えて「商談中」へ(戻し先は控えから復元する)
+-- 契約予定・契約完了の物件を、その時点の版(version)ごと控えて「商談中」へ(戻し先は控えから復元する)
 CREATE TABLE case_status_reorg_backup_<日付> AS
-  SELECT id, case_status::text AS case_status FROM properties WHERE case_status IN ('contract_planned', 'contracted');
+  SELECT id, case_status::text AS case_status, version FROM properties WHERE case_status IN ('contract_planned', 'contracted');
 UPDATE properties SET case_status = 'negotiating', version = version + 1
   WHERE case_status IN ('contract_planned', 'contracted');
 -- 自動で書いた変更履歴を控えて「api」へ
@@ -873,12 +873,16 @@ CREATE TABLE change_logs_auto_backup_<日付> AS SELECT id FROM change_logs WHER
 UPDATE change_logs SET source = 'api' WHERE source = 'auto';
 ```
 
-旧コードへの切り替えは上の手順(`git checkout <previous-tag>` → `npm ci --include=dev` → `npx prisma generate` → `npm run build` → `npm prune --omit=dev` → start)。⚠`prisma migrate resolve --rolled-back` は使わない(値を残したままなので、記録が実態とずれる)。
+旧コードへの切り替えは 8.1 の手順 4 と同じ(古いタグへ戻して入れ直し・build・start)。⚠`prisma migrate resolve --rolled-back` は使わない(値を残したままなので、記録が実態とずれる)。
 
 ```sql
--- 再び新コードへ進めたら戻す(旧版の間に手で変えた物件は上書きしないよう「商談中」のままの行だけ戻す)
+-- 再び新コードへ進めたら戻す。戻すのは「退避で版を1つ進めたあと、旧版の間に誰も保存していない行」
+-- (版がちょうど +1)だけ=途中で別の段階に変えてから「商談中」に戻した物件なども上書きしない(@codex #538 P2)。
+-- 版を進めずに書く経路は案件ステータスを書かない(版番号の走査の許可リスト)ので、版で見分けられる。
 UPDATE properties p SET case_status = b.case_status::"CaseStatus", version = p.version + 1
-  FROM case_status_reorg_backup_<日付> b WHERE p.id = b.id AND p.case_status = 'negotiating';
+  FROM case_status_reorg_backup_<日付> b WHERE p.id = b.id AND p.version = b.version + 1;
+-- 戻せなかった行(SELECT b.*, p.case_status FROM case_status_reorg_backup_<日付> b JOIN properties p ON p.id = b.id
+--   WHERE p.case_status::text <> b.case_status)は、旧版の間に保存された物件。画面で段階を確かめて必要なら手で直す。
 UPDATE change_logs c SET source = 'auto' FROM change_logs_auto_backup_<日付> b WHERE c.id = b.id;
 ```
 
