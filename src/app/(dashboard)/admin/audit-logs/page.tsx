@@ -170,6 +170,7 @@ const ACTION_LABELS: Record<string, string> = {
   sale_dm_lp_phone_tap: "売却DM LP 電話タップ",
   sale_dm_lp_preview_view: "売却DM LP プレビュー表示",
   sale_dm_inquiry_submit: "売却DM 査定申込(公開)",
+  lp_public_inquiry_submit: "広告用ページ 査定申込(公開)",
   sale_dm_inquiry_view: "売却DM 申込一覧の閲覧",
   sale_dm_inquiry_status_update: "売却DM 申込の対応状況変更",
   mail_settings_update: "メール送信設定更新",

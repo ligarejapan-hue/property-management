@@ -1,4 +1,3 @@
-import { NextResponse } from "next/server";
 import type { NextRequest } from "next/server";
 import prisma from "@/lib/prisma";
 import { writeAuditLog } from "@/lib/audit";
@@ -9,16 +8,9 @@ import { recordInquiry, type InquiryClientLike } from "@/lib/sale-dm-letter/inqu
 import { startInquiryNotify } from "@/lib/sale-dm-letter/inquiry-notify";
 import { startInquiryAutoReply } from "@/lib/sale-dm-letter/inquiry-auto-reply";
 import { hasRenderableLpVariant } from "@/lib/sale-dm-letter/lp-render-input";
-import { PUBLIC_PAGE_HEADERS } from "@/lib/sale-dm-letter/unsubscribe-page";
 import { loadSaleDmLpUrl, loadSaleDmPublicPageConfig } from "@/lib/sale-dm-letter/config-store";
-import {
-  renderInquiryBusyPage,
-  renderInquiryDonePage,
-  renderInquiryInvalidPage,
-  renderInquiryPreviewPage,
-  renderInquiryThrottledPage,
-  renderInquiryUnavailablePage,
-} from "@/lib/sale-dm-letter/inquiry-page";
+// 結果の返し方・本文の読み取りは広告用の公開ページの受け口(/lp/<公開名>/inquiry)と共通(inquiry-http.ts・2026-10-20)。
+import { createResponder, readBoundedBody } from "@/lib/sale-dm-letter/inquiry-http";
 
 /**
  * 公開LPの査定申込の受け口(設計 §2.5)。認証不要(proxy.ts の PUBLIC_PATHS "/t/"・nginx の公開範囲 /t/ の中)。
@@ -62,74 +54,6 @@ const TOKEN_FORMAT = /^[A-Za-z0-9_-]{1,64}$/;
 // nginx の 12MB よりはるかに小さい。認証なしの受け口で大きな本文を解析させない。
 const MAX_BODY_BYTES = 32 * 1024;
 const FORM_CONTENT_TYPE = "application/x-www-form-urlencoded";
-
-type ReplyKind = "done" | "invalid" | "preview" | "unavailable" | "busy" | "throttled";
-
-// accept: application/json のとき(LP の送信スクリプト)の応答ヘッダ。入力値は JSON にも入れない。
-const JSON_HEADERS: Readonly<Record<string, string>> = {
-  "Content-Type": "application/json; charset=utf-8",
-  "Cache-Control": "no-store",
-  "X-Content-Type-Options": "nosniff",
-  "Referrer-Policy": "strict-origin",
-};
-
-function renderReplyPage(kind: ReplyKind, messages: readonly string[], backHref: string): string {
-  switch (kind) {
-    case "done": return renderInquiryDonePage();
-    case "invalid": return renderInquiryInvalidPage(messages, backHref);
-    case "preview": return renderInquiryPreviewPage();
-    case "unavailable": return renderInquiryUnavailablePage();
-    case "busy": return renderInquiryBusyPage();
-    case "throttled": return renderInquiryThrottledPage();
-  }
-}
-
-/** 結果の返し方を1か所に。JS 送信(accept: application/json)は画面を離れないよう JSON、
- *  それ以外(JS なしの通常送信)は従来どおり HTML ページ。状態コードは両方同じ。 */
-function createResponder(wantsJson: boolean, backHref: string) {
-  return (kind: ReplyKind, status: number, messages: readonly string[] = []): NextResponse => {
-    if (wantsJson) {
-      const payload = kind === "invalid" ? { result: kind, messages } : { result: kind };
-      return new NextResponse(JSON.stringify(payload), { status, headers: { ...JSON_HEADERS } });
-    }
-    return new NextResponse(renderReplyPage(kind, messages, backHref), {
-      status,
-      headers: { ...PUBLIC_PAGE_HEADERS },
-    });
-  };
-}
-
-/** 本文を上限つきで読む。上限を超えた時点で読むのをやめて 413(content-length の無い分割送信も含む)。 */
-async function readBoundedBody(
-  req: Request,
-  max: number,
-): Promise<{ ok: true; text: string } | { ok: false; status: 413 | 400 }> {
-  if (!req.body) return { ok: true, text: "" };
-  const reader = req.body.getReader();
-  const chunks: Uint8Array[] = [];
-  let total = 0;
-  try {
-    for (;;) {
-      const { done, value } = await reader.read();
-      if (done) break;
-      total += value.byteLength;
-      if (total > max) {
-        await reader.cancel().catch(() => {});
-        return { ok: false, status: 413 };
-      }
-      chunks.push(value);
-    }
-    const bytes = new Uint8Array(total);
-    let offset = 0;
-    for (const c of chunks) {
-      bytes.set(c, offset);
-      offset += c.byteLength;
-    }
-    return { ok: true, text: new TextDecoder("utf-8").decode(bytes) };
-  } catch {
-    return { ok: false, status: 400 };
-  }
-}
 
 export async function POST(
   req: NextRequest,
@@ -197,7 +121,8 @@ export async function POST(
 
   const parsed = parseInquiryForm(get);
   if (parsed.kind === "bot") {
-    return reply("done", 200);
+    // 人と同じ「受け付けました」。silent=ページが申込完了の合図を出さない(広告用の公開ページと同じ作法・@codex #535 P2)。
+    return reply("done", 200, [], { silent: true });
   }
   if (parsed.kind === "invalid") {
     const messages = parsed.errors.map((e) => INQUIRY_ERROR_MESSAGES[e]);

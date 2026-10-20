@@ -32,7 +32,7 @@ function fixLinkFor(code: string | null | undefined): { href: string; label: str
 
 // 一覧の1行の形。campaign モード(SaleDmInquiry)・all モード(SaleDmInquiryAcrossCampaigns)の
 // どちらの応答もそのまま items に積めるよう、横断項目は任意にしておく。
-type InquiryRow = SaleDmInquiry & Partial<Pick<SaleDmInquiryAcrossCampaigns, "campaignId" | "campaignName" | "location" | "propertyTypeLabel">>;
+type InquiryRow = SaleDmInquiry & Partial<Pick<SaleDmInquiryAcrossCampaigns, "campaignId" | "campaignName" | "location" | "propertyTypeLabel" | "scenarioName" | "adRoute">>;
 
 function formatJst(iso: string): string {
   return new Date(iso).toLocaleString("ja-JP", { timeZone: "Asia/Tokyo", year: "numeric", month: "2-digit", day: "2-digit", hour: "2-digit", minute: "2-digit" });
@@ -270,13 +270,23 @@ export default function SaleDmInquiryList(props: SaleDmInquiryListProps) {
             <span className="text-xs text-gray-500">{formatJst(i.submittedAt)}</span>
             <span className="text-sm font-semibold text-gray-800 dark:text-gray-100">{i.name}</span>
             {mode === "all" ? (
-              <span className="text-xs text-gray-500">
-                {i.campaignName ?? "(削除されたキャンペーン)"}
-                {i.location ? ` ・ ${i.location}` : ""}
-                {i.propertyTypeLabel ? `(${i.propertyTypeLabel})` : ""}
-              </span>
+              i.source === "public" ? (
+                // 広告用の公開ページからの申込(設計 2026-10-20): 宛先・物件が無い。種類の名前・本人が書いた所在地・広告の経路を出す。
+                <span className="text-xs text-gray-500" data-inquiry-source="public">
+                  <span className="mr-1 inline-flex items-center rounded-full bg-sky-100 px-2 py-0.5 text-[11px] font-medium text-sky-800 dark:bg-sky-950/40 dark:text-sky-300">広告ページ</span>
+                  {i.scenarioName ?? "-"}
+                  {` ・ ${i.propertyAddress ?? (i.freeTextHidden ? "所在地は表示する権限がありません" : "所在地の記入なし")}`}
+                  {i.adRoute ? ` ・ 経路: ${i.adRoute}` : ""}
+                </span>
+              ) : (
+                <span className="text-xs text-gray-500">
+                  {i.campaignName ?? "(削除されたキャンペーン)"}
+                  {i.location ? ` ・ ${i.location}` : ""}
+                  {i.propertyTypeLabel ? `(${i.propertyTypeLabel})` : ""}
+                </span>
+              )
             ) : (
-              <span className="text-xs text-gray-500">宛先: {recipientName(i.draftId)}</span>
+              <span className="text-xs text-gray-500">宛先: {i.draftId ? recipientName(i.draftId) : "-"}</span>
             )}
             <select
               value={i.handleStatus}

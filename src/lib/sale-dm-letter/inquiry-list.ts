@@ -8,7 +8,12 @@ export type HandleStatus = (typeof HANDLE_STATUSES)[number];
 
 export interface InquiryListRow {
   id: string;
-  draftId: string;
+  /** 手紙の宛先。広告用の公開ページからの申込(source=public)は null。 */
+  draftId: string | null;
+  /** 申込の出どころ: dm(手紙のQR) | public(広告用の公開ページ)。 */
+  source: string;
+  /** 広告用の公開ページで本人が入力した物件の所在地。自由記述と同じ扱い(freeTextHidden なら null)。 */
+  propertyAddress: string | null;
   submittedAt: Date;
   name: string;
   phone: string | null;
@@ -41,9 +46,12 @@ export interface InquiryListRow {
   freeTextHidden: boolean;
 }
 
-type SourceRow = Omit<InquiryListRow, "contactHidden" | "emailHidden" | "freeTextHidden" | "phone" | "autoReplyStatus"> & {
+type SourceRow = Omit<InquiryListRow, "contactHidden" | "emailHidden" | "freeTextHidden" | "phone" | "autoReplyStatus" | "source" | "propertyAddress"> & {
   phone: string;
   autoReplyStatus: string;
+  /** 省略=dm(2026-10-20 より前の読み手との互換)。 */
+  source?: string;
+  propertyAddress?: string | null;
 };
 
 /** 連絡先の表示可否。email は phone とは別の owner_email 表示レベルで決まる(@codex P1)。 */
@@ -69,6 +77,9 @@ export function toInquiryListRows(rows: SourceRow[], visibility: InquiryVisibili
     contactTime: freeTextVisible ? r.contactTime : null,
     message: freeTextVisible ? r.message : null,
     handleNote: freeTextVisible ? r.handleNote : null,
+    source: r.source ?? "dm",
+    // 所在地は本人の自由記述(番地まで書かれる)=自由記述と同じ条件でだけ返す。
+    propertyAddress: freeTextVisible ? (r.propertyAddress ?? null) : null,
     contactHidden: !visibility.contact,
     email: visibility.email ? r.email : null,
     autoReplyStatus: visibility.email ? r.autoReplyStatus : null,

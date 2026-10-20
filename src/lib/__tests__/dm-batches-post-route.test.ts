@@ -295,7 +295,7 @@ describe("POST /api/properties/dm-batches", () => {
       senderContact: null,
       trackingBaseUrl: undefined,
       lpPublicEnabled: true,
-      privacyText: null,
+      privacyText: null, google: null,
     });
     const ng = (await (await POST(makeRequest({ ...BODY, attemptKey: `${BODY.attemptKey}-2` }))).json()) as {
       unsubscribeUrlAvailable: boolean;

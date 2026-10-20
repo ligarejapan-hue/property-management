@@ -15,6 +15,12 @@ export interface InquiryNotifyFacts {
   contactPref: string | null;
   contactTime: string | null;
   message: string | null;
+  /** 申込の出どころ(設計 2026-10-20)。省略=dm(手紙のQR)。public=広告用の公開ページ(宛先・物件・DM型・LP型が無い)。 */
+  source?: "dm" | "public";
+  /** 広告用の公開ページで本人が入力した物件の所在地(任意)。PII=full のときだけ中身を出す。 */
+  propertyAddress?: string | null;
+  /** どの広告から来たか(utm)。full のときだけ出す。 */
+  ad?: { utmSource: string | null; utmMedium: string | null; utmCampaign: string | null } | null;
 }
 
 const PREF_LABEL: Record<string, string> = { phone: "電話", email: "メール", either: "どちらでも" };
@@ -36,22 +42,37 @@ export function buildInquiryNotifyMail(
   f: InquiryNotifyFacts,
   opts: { detail: "minimal" | "full"; appBaseUrl: string | null },
 ): { subject: string; text: string } {
+  const isPublic = f.source === "public";
   const place = oneLine(f.location ?? "所在地不明");
   const kind = oneLine(f.propertyTypeLabel ?? "物件");
-  const subject = [...`【査定申込】${place}の${kind}(${oneLine(f.campaignName)})`].slice(0, SUBJECT_MAX).join("");
+  // 広告ページからの申込は物件が無い=件名は出どころだけ(「所在地不明の物件」とは書かない)。
+  const subjectBody = isPublic ? oneLine(f.campaignName) : `${place}の${kind}(${oneLine(f.campaignName)})`;
+  const subject = [...`【査定申込】${subjectBody}`].slice(0, SUBJECT_MAX).join("");
   const full = opts.detail === "full";
   const name = !full && NAME_CONTACT_LIKE_RE.test(f.name.normalize("NFKC")) ? HIDDEN_NAME_PLACEHOLDER : oneLine(f.name);
 
   const lines = [
-    "公開LPから査定のお申込みが届きました。",
+    isPublic ? "広告用のご案内ページから査定のお申込みが届きました。" : "公開LPから査定のお申込みが届きました。",
     "",
     `受付日時: ${formatJst(f.submittedAt)}`,
-    `キャンペーン: ${oneLine(f.campaignName)}`,
-    `DM型: ${oneLine(f.dmVariantLabel ?? "-")} / LP型: ${oneLine(f.lpVariantLabel ?? "-")}`,
-    `物件: ${place}の${kind}`,
-    `お名前: ${name}`,
   ];
+  if (isPublic) {
+    lines.push(`出どころ: ${oneLine(f.campaignName)}`);
+    // 所在地は本人の自由記述=PII と同じ扱い(minimal では有無だけ)。
+    const addr = f.propertyAddress ?? null;
+    lines.push(`物件の所在地: ${addr === null ? "記入なし" : full ? oneLine(addr) : "入力あり"}`);
+  } else {
+    lines.push(
+      `キャンペーン: ${oneLine(f.campaignName)}`,
+      `DM型: ${oneLine(f.dmVariantLabel ?? "-")} / LP型: ${oneLine(f.lpVariantLabel ?? "-")}`,
+      `物件: ${place}の${kind}`,
+    );
+  }
+  lines.push(`お名前: ${name}`);
   if (full) {
+    if (isPublic && f.ad && (f.ad.utmSource || f.ad.utmMedium || f.ad.utmCampaign)) {
+      lines.push(`経路: ${[f.ad.utmSource, f.ad.utmMedium, f.ad.utmCampaign].map((v) => (v ? oneLine(v) : "-")).join(" / ")}`);
+    }
     lines.push(`電話: ${f.phone}`);
     if (f.email) lines.push(`メール: ${f.email}`);
     if (f.contactPref) lines.push(`希望の連絡方法: ${PREF_LABEL[f.contactPref] ?? "-"}`);

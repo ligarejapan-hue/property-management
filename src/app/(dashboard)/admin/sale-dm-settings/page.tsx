@@ -33,6 +33,9 @@ export default function SaleDmSettingsPage() {
   const [senderName, setSenderName] = useState("");
   const [senderContact, setSenderContact] = useState("");
   const [privacyText, setPrivacyText] = useState("");
+  // 広告用の公開ページ(/lp/<公開名>)の Google のタグ(設計 2026-10-20)。DM 用のページには入らない。
+  const [googleTagId, setGoogleTagId] = useState("");
+  const [googleConvLabel, setGoogleConvLabel] = useState("");
 
   const applySettings = (data: SaleDmSettings) => {
     setTrackingBaseUrl(data.trackingBaseUrl ?? "");
@@ -40,6 +43,8 @@ export default function SaleDmSettingsPage() {
     setSenderName(data.senderName ?? "");
     setSenderContact(data.senderContact ?? "");
     setPrivacyText(data.privacyText ?? "");
+    setGoogleTagId(data.googleTagId ?? "");
+    setGoogleConvLabel(data.googleConvLabel ?? "");
   };
 
   useEffect(() => {
@@ -60,13 +65,15 @@ export default function SaleDmSettingsPage() {
     setSaving(true);
     setMessage(null);
     try {
-      // 送るのは残す4項目だけ(サーバー側は部分更新なので、送らない列は触られない)。
+      // 送るのは画面にある項目だけ(サーバー側は部分更新なので、送らない列は触られない)。
       const res = await updateSaleDmSettings({
         trackingBaseUrl,
         lpUrl,
         senderName,
         senderContact,
         privacyText,
+        googleTagId,
+        googleConvLabel,
       });
       applySettings(res.data);
       setMessage({ kind: "ok", text: "設定を保存しました" });
@@ -137,6 +144,14 @@ export default function SaleDmSettingsPage() {
         <Field label="個人情報の取扱い文(公開LPの申込フォームに表示)">
           <textarea value={privacyText} onChange={(e) => setPrivacyText(e.target.value)} placeholder={DEFAULT_PRIVACY_TEXT} maxLength={2000} rows={5} className="w-full rounded-md border border-gray-300 px-2 py-1.5 text-sm dark:border-gray-700 dark:bg-gray-900 dark:text-gray-100" />
           <span className="mt-1 block text-xs text-gray-500">空欄のときは、薄く表示している見本の文章をそのまま使います。</span>
+        </Field>
+        <Field label="Googleタグ ID(広告用ページだけに入れる計測タグ・任意)">
+          <input value={googleTagId} onChange={(e) => setGoogleTagId(e.target.value)} placeholder="例: AW-123456789 または G-XXXXXXXXXX" maxLength={40} autoCapitalize="characters" spellCheck={false} data-testid="sale-dm-google-tag-id" className="w-full rounded-md border border-gray-300 px-2 py-1.5 text-sm dark:border-gray-700 dark:bg-gray-900 dark:text-gray-100" />
+          <span className="mt-1 block text-xs text-gray-500">Google広告(AW-…)またはGoogleアナリティクス(G-…)の管理画面にある ID です。入れると、DMの種類に公開名を付けた広告用ページ(/lp/…)だけで Google の計測タグを読み込みます。手紙のQRから開くご案内ページには入りません。空欄なら何も読み込みません。</span>
+        </Field>
+        <Field label="申込完了のコンバージョン ラベル(Google広告・任意)">
+          <input value={googleConvLabel} onChange={(e) => setGoogleConvLabel(e.target.value)} placeholder="例: AbCdEfGhIjK-1234567" maxLength={80} spellCheck={false} data-testid="sale-dm-google-conv-label" className="w-full rounded-md border border-gray-300 px-2 py-1.5 text-sm dark:border-gray-700 dark:bg-gray-900 dark:text-gray-100" />
+          <span className="mt-1 block text-xs text-gray-500">Google広告の「コンバージョン」で作ったタグの「send_to」のスラッシュの後ろの部分です。入れると、広告用ページで申込が完了したときに Google広告へ成果を送ります(タグ ID が AW-… のとき)。</span>
         </Field>
       </div>
 

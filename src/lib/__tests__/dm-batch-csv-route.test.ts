@@ -457,7 +457,7 @@ describe("GET /api/properties/dm-batches/[id]/csv: 配信停止URLの列", () =>
     senderContact: null,
     trackingBaseUrl,
     lpPublicEnabled: true,
-    privacyText: null,
+    privacyText: null, google: null,
   });
   let savedSecret: string | undefined;
 

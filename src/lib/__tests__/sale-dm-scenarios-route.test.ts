@@ -33,6 +33,7 @@ vi.mock("@/lib/prisma", () => {
     dmCampaign: { count: vi.fn(async () => 0) },
     dmVariant: { count: vi.fn(async () => 0) },
     dmLpVariant: { count: vi.fn(async () => 0) },
+    dmInquiry: { count: vi.fn(async () => 0) },
     $queryRaw: vi.fn(async () => [{ id: "s1", deleted_at: null }]),
   };
   db.$transaction = vi.fn(async (fn: (tx: unknown) => unknown) => fn(db));
@@ -57,6 +58,7 @@ const pm = prismaMock as never as {
   dmCampaign: { count: Fn };
   dmVariant: { count: Fn };
   dmLpVariant: { count: Fn };
+  dmInquiry: { count: Fn };
   $queryRaw: Fn;
 };
 
@@ -111,6 +113,7 @@ beforeEach(() => {
   pm.dmCampaign.count.mockResolvedValue(0);
   pm.dmVariant.count.mockResolvedValue(0);
   pm.dmLpVariant.count.mockResolvedValue(0);
+  pm.dmInquiry.count.mockResolvedValue(0);
   pm.$queryRaw.mockResolvedValue([{ id: SID, deleted_at: null }]);
 });
 
@@ -338,6 +341,16 @@ describe("台帳 API(設計 §3.6・§4)", () => {
     const res = await DELETE(req("DELETE"), ctx);
     expect(res.status).toBe(409);
     expect((await res.json()).error.code).toBe("SCENARIO_IN_USE");
+    expect(pm.dmScenario.update).not.toHaveBeenCalled();
+  });
+
+  it("DELETE: 広告用ページからの申込(dmInquiry.scenarioId)だけでも 409 SCENARIO_IN_USE(論理削除なので RESTRICT は効かない=@codex #535 R2)", async () => {
+    pm.dmInquiry.count.mockResolvedValue(1);
+    const res = await DELETE(req("DELETE"), ctx);
+    expect(res.status).toBe(409);
+    const body = await res.json();
+    expect(body.error.code).toBe("SCENARIO_IN_USE");
+    expect(body.error.message).toContain("広告用ページからの申込");
     expect(pm.dmScenario.update).not.toHaveBeenCalled();
   });
 

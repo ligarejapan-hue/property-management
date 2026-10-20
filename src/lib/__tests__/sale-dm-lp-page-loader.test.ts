@@ -67,7 +67,7 @@ describe("loadLpPageData", () => {
     vi.mocked(loadSaleDmPublicPageConfig).mockResolvedValueOnce({
       senderName: "株式会社リガーレ", senderContact: "TEL 03-1234-5678",
       trackingBaseUrl: "https://lp.example.com", lpPublicEnabled: false,
-      privacyText: null,
+      privacyText: null, google: null,
     });
     const c = client(draft());
     const r = await loadLpPageData(c as never, "tok");

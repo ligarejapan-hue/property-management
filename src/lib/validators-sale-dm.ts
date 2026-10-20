@@ -196,6 +196,18 @@ export const saleDmScenarioPatchSchema = z
     lpLength: z.enum(scenarioOptionValues(LENGTH_OPTIONS)).optional(),
     lpAppeal: z.enum(scenarioOptionValues(APPEAL_OPTIONS)).optional(),
     lpStrength: z.enum(scenarioOptionValues(STRENGTH_OPTIONS)).optional(),
+    // 広告用の公開ページの公開名(/lp/<公開名>・設計 2026-10-20)。空=公開しない(null)。
+    // 規則は lp-public.ts の normalizePublicSlug と同じ(半角小文字英数字とハイフン 2〜40 字・大文字は小文字に)。
+    publicSlug: z
+      .string()
+      .trim()
+      .max(40)
+      .nullable()
+      .optional()
+      .transform((v) => (v === "" || v === null || v === undefined ? (v === undefined ? undefined : null) : v.toLowerCase()))
+      .refine((v) => v === undefined || v === null || /^[a-z0-9-]{2,40}$/.test(v), {
+        message: "公開名は半角の小文字英数字とハイフンで 2〜40 文字にしてください",
+      }),
   })
   .refine((v) => Object.keys(v).length > 0, { message: "更新する項目がありません" });
 export type SaleDmScenarioPatch = z.infer<typeof saleDmScenarioPatchSchema>;
