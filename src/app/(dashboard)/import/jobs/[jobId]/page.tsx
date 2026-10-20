@@ -31,6 +31,7 @@ import {
   Clock,
   ExternalLink,
 } from "lucide-react";
+import { Button } from "@/components/ui/button";
 import { Pagination } from "@/components/ui/pagination";
 import {
   fetchImportJobDetail,
@@ -723,14 +724,14 @@ export default function ImportJobDetailPage() {
         </div>
         {/* ロールバックボタン: 物件CSV かつ完了状態のみ。ロールバック済みはバッジ表示のみ */}
         {canMutate && job.jobType === "property_csv" && job.status === "completed" && (
-          <button
+          <Button
+            variant="danger"
             onClick={openRollbackDialog}
-            className="inline-flex items-center gap-1.5 rounded-md border border-red-300 bg-white px-3 py-1.5 text-sm font-medium text-red-700 hover:bg-red-50 dark:bg-gray-900 dark:border-red-700 dark:text-red-400 dark:hover:bg-red-900/20"
             title="この取込で作成された物件を削除します"
           >
             <RotateCcw className="h-4 w-4" />
             ロールバック
-          </button>
+          </Button>
         )}
         {/* Task 11: 所有者事項PDF一括ジョブの未処理(pending)行を再開するボタン。
             サーバ再起動でインプロセスワーカーの待機列が消えたときの復旧口。
@@ -742,8 +743,8 @@ export default function ImportJobDetailPage() {
           ((job?.pendingCount ?? 0) > 0 ||
             job?.status === "pending" ||
             job?.status === "processing") && (
-            <button
-              type="button"
+            <Button
+              variant="secondary"
               onClick={async () => {
                 setResuming(true);
                 try {
@@ -756,14 +757,13 @@ export default function ImportJobDetailPage() {
                 }
               }}
               disabled={resuming}
-              className="rounded-md border border-blue-300 bg-blue-50 px-3 py-1.5 text-sm text-blue-700 hover:bg-blue-100 disabled:opacity-50 dark:border-blue-800 dark:bg-blue-950 dark:text-blue-300 dark:hover:bg-blue-900"
+              loading={resuming}
+              loadingLabel="再開中"
             >
-              {resuming
-                ? "再開中..."
-                : (job?.pendingCount ?? 0) > 0
-                  ? `未処理 ${job?.pendingCount}件を再開`
-                  : "処理を再開(集計を確定)"}
-            </button>
+              {(job?.pendingCount ?? 0) > 0
+                ? `未処理 ${job?.pendingCount}件を再開`
+                : "処理を再開(集計を確定)"}
+            </Button>
           )}
         {job.status === "rolled_back" && (
           <span className="inline-flex items-center gap-1.5 rounded-md border border-purple-300 bg-purple-50 px-3 py-1.5 text-sm font-medium text-purple-700">
@@ -1049,6 +1049,7 @@ export default function ImportJobDetailPage() {
         ).map((tab) => (
           <button
             key={tab.key}
+            aria-pressed={filter === tab.key}
             onClick={() => changeFilter(tab.key)}
             // 再取得中はタブも押させない(ページ送り・理由セレクトと同じ抑止レベル)。
             // 全画面スピナーの早期 return を初回限定にした結果、これまで「画面ごと
@@ -1102,27 +1103,31 @@ export default function ImportJobDetailPage() {
               (filter === "needs_review" || filter === "error") &&
               counts[filter] > 0 && (
                 <>
-                  <button
+                  <Button
+                    variant="secondary"
+                    size="sm"
                     onClick={() => handleBatchResolve("skip")}
                     disabled={mutationLocked}
-                    className="flex items-center gap-1 rounded-md border border-gray-300 px-3 py-1 text-xs font-medium text-gray-600 hover:bg-gray-50 disabled:opacity-50 dark:border-gray-700 dark:text-gray-300 dark:hover:bg-gray-800"
                   >
                     <SkipForward className="h-3 w-3" />
                     全件スキップ
-                  </button>
-                  <button
+                  </Button>
+                  <Button
+                    variant="danger"
+                    size="sm"
                     onClick={() => handleBatchResolve("mark_error")}
                     disabled={mutationLocked}
-                    className="flex items-center gap-1 rounded-md border border-red-300 px-3 py-1 text-xs font-medium text-red-600 hover:bg-red-50 disabled:opacity-50 dark:border-red-700 dark:text-red-400 dark:hover:bg-red-900/20"
                   >
                     <Ban className="h-3 w-3" />
                     全件エラー確定
-                  </button>
+                  </Button>
                   {/* B4: 重複候補のみスキップ（needs_review の重複サブセット限定）。
                       「全件スキップ」と取り違えないよう amber 色＋件数を明示。 */}
                   {filter === "needs_review" &&
                     counts.duplicateActionable > 0 && (
+                      // data-ui=raw: 「全件スキップ」と取り違えないための琥珀色の専用ボタン(上のコメントのとおり)
                       <button
+                        data-ui="raw"
                         onClick={handleBulkResolveDuplicates}
                         disabled={mutationLocked}
                         title="取込時に検出された重複候補（要レビューの内数）だけをスキップします。非重複の要レビュー行は残ります。"
@@ -1207,13 +1212,14 @@ export default function ImportJobDetailPage() {
                   aria-label="移動先ページ番号"
                   className="w-16 rounded-md border border-gray-300 px-2 py-1 text-sm dark:border-gray-700 dark:bg-gray-900 dark:text-gray-100"
                 />
-                <button
+                <Button
                   type="submit"
+                  variant="secondary"
+                  size="sm"
                   disabled={loading || gotoPage === ""}
-                  className="rounded-md border border-gray-300 px-3 py-1 disabled:opacity-50 dark:border-gray-700 dark:text-gray-300"
                 >
                   移動
-                </button>
+                </Button>
               </form>
             )}
         </Pagination>
@@ -1247,7 +1253,9 @@ export default function ImportJobDetailPage() {
                 className={`rounded-lg border ${config.bg} overflow-hidden`}
               >
                 {/* Row header */}
+                {/* data-ui=raw: 行の見出し全体が開閉の押せる面 */}
                 <button
+                  data-ui="raw"
                   onClick={() =>
                     setExpandedRow(isExpanded ? null : row.id)
                   }
@@ -1452,20 +1460,24 @@ export default function ImportJobDetailPage() {
                           (row.status === "error" ||
                             row.status === "needs_review") &&
                           !isEditing && (
-                            <button
+                            <Button
+                              variant="ghost"
+                              size="sm"
                               onClick={() => startEdit(row)}
-                              className="flex items-center gap-1 text-xs text-indigo-600 hover:underline dark:text-indigo-400"
+                              className="text-indigo-600 dark:text-indigo-400"
                             >
                               編集
-                            </button>
+                            </Button>
                           )}
                         {isEditing && (
-                          <button
+                          <Button
+                            variant="ghost"
+                            size="sm"
                             onClick={cancelEdit}
-                            className="text-xs text-gray-500 hover:underline dark:text-gray-400"
+                            className="text-gray-500 dark:text-gray-400"
                           >
                             キャンセル
-                          </button>
+                          </Button>
                         )}
                       </div>
                       <div className="overflow-x-auto rounded border border-gray-200 dark:border-gray-700">
@@ -1601,8 +1613,10 @@ export default function ImportJobDetailPage() {
                             {searchResults.length > 0 && (
                               <div className="mt-2 max-h-[200px] overflow-y-auto rounded border border-gray-200 bg-white dark:border-gray-700 dark:bg-gray-900">
                                 {searchResults.map((result) => (
+                                  // data-ui=raw: 検索結果の一覧の行そのもの(行全体が押せる面)
                                   <button
                                     key={result.id}
+                                    data-ui="raw"
                                     onClick={() => {
                                       setSelectedTarget(result);
                                       setSearchResults([]);
@@ -1662,20 +1676,18 @@ export default function ImportJobDetailPage() {
                                     : selectedTarget.address}{" "}
                                   ({selectedTarget.id.slice(0, 8)}...)
                                 </div>
-                                <button
+                                <Button
+                                  variant="primary"
+                                  size="sm"
                                   onClick={() =>
                                     handleResolve(row.id, "link_existing")
                                   }
                                   disabled={mutationLocked}
-                                  className="flex items-center gap-1 rounded bg-indigo-600 px-3 py-1.5 text-xs font-medium text-white hover:bg-indigo-700 disabled:opacity-50"
+                                  loading={isLoading}
                                 >
-                                  {isLoading ? (
-                                    <Loader2 className="h-3 w-3 animate-spin" />
-                                  ) : (
-                                    <Link2 className="h-3 w-3" />
-                                  )}
+                                  <Link2 className="h-3 w-3" />
                                   {isRegistryPdfUploadBulkJob ? "この物件に添付" : "紐付け確定"}
-                                </button>
+                                </Button>
                               </div>
                             )}
                           </div>
@@ -1687,56 +1699,54 @@ export default function ImportJobDetailPage() {
                           {/* 所有者事項PDF一括ジョブは create_new/retry 未対応(サーバ側で
                               422になる)ため、検索&添付・スキップ・エラー確定のみを出す。 */}
                           {!isRegistryPdfBulkJob && (
-                            <button
+                            <Button
+                              variant="success"
+                              size="sm"
                               onClick={() =>
                                 handleResolve(row.id, "create_new")
                               }
                               disabled={mutationLocked}
-                              className="flex items-center gap-1 rounded-md bg-green-600 px-3 py-1.5 text-xs font-medium text-white hover:bg-green-700 disabled:opacity-50"
+                              loading={isLoading}
                             >
-                              {isLoading ? (
-                                <Loader2 className="h-3 w-3 animate-spin" />
-                              ) : (
-                                <Plus className="h-3 w-3" />
-                              )}
+                              <Plus className="h-3 w-3" />
                               {isEditing ? "修正して新規作成" : "新規作成"}
-                            </button>
+                            </Button>
                           )}
 
                           {row.status === "error" && !isRegistryPdfBulkJob && (
-                            <button
+                            <Button
+                              variant="primary"
+                              size="sm"
                               onClick={() => handleRetry(row.id)}
                               disabled={mutationLocked}
-                              className="flex items-center gap-1 rounded-md bg-indigo-600 px-3 py-1.5 text-xs font-medium text-white hover:bg-indigo-700 disabled:opacity-50"
+                              loading={isLoading}
                             >
-                              {isLoading ? (
-                                <Loader2 className="h-3 w-3 animate-spin" />
-                              ) : (
-                                <RefreshCw className="h-3 w-3" />
-                              )}
+                              <RefreshCw className="h-3 w-3" />
                               {isEditing ? "修正してリトライ" : "リトライ"}
-                            </button>
+                            </Button>
                           )}
 
-                          <button
+                          <Button
+                            variant="secondary"
+                            size="sm"
                             onClick={() => handleResolve(row.id, "skip")}
                             disabled={mutationLocked}
-                            className="flex items-center gap-1 rounded-md border border-gray-300 bg-white px-3 py-1.5 text-xs font-medium text-gray-600 hover:bg-gray-50 disabled:opacity-50 dark:border-gray-700 dark:bg-gray-900 dark:text-gray-300 dark:hover:bg-gray-800"
                           >
                             <SkipForward className="h-3 w-3" />
                             スキップ
-                          </button>
+                          </Button>
 
-                          <button
+                          <Button
+                            variant="danger"
+                            size="sm"
                             onClick={() =>
                               handleResolve(row.id, "mark_error")
                             }
                             disabled={mutationLocked}
-                            className="flex items-center gap-1 rounded-md border border-red-300 bg-white px-3 py-1.5 text-xs font-medium text-red-600 hover:bg-red-50 disabled:opacity-50 dark:border-red-700 dark:bg-gray-900 dark:text-red-400 dark:hover:bg-red-900/20"
                           >
                             <Ban className="h-3 w-3" />
                             エラー確定
-                          </button>
+                          </Button>
                         </div>
                         )}
                       </div>
@@ -1897,30 +1907,28 @@ export default function ImportJobDetailPage() {
               ) : null}
             </div>
             <div className="flex justify-end gap-2 border-t border-gray-200 px-5 py-3 dark:border-gray-800">
-              <button
+              <Button
+                variant="secondary"
                 onClick={closeRollbackDialog}
                 disabled={rollbackLoading}
-                className="rounded-md border border-gray-300 bg-white px-3 py-1.5 text-sm font-medium text-gray-700 hover:bg-gray-50 disabled:opacity-50 dark:border-gray-700 dark:bg-gray-900 dark:text-gray-200 dark:hover:bg-gray-800"
               >
                 {rollbackResult ? "閉じる" : "キャンセル"}
-              </button>
+              </Button>
               {!rollbackResult &&
                 rollbackPreview &&
                 rollbackPreview.eligible &&
                 (rollbackPreview.summary.deletable > 0 ||
                   rollbackPreview.summary.restorable > 0) && (
-                  <button
+                  <Button
+                    variant="danger"
                     onClick={executeRollback}
                     disabled={rollbackLoading}
-                    className="inline-flex items-center gap-1.5 rounded-md bg-red-600 px-3 py-1.5 text-sm font-medium text-white hover:bg-red-700 disabled:opacity-50"
+                    loading={rollbackLoading}
+                    loadingLabel="実行中"
                   >
-                    {rollbackLoading ? (
-                      <Loader2 className="h-4 w-4 animate-spin" />
-                    ) : (
-                      <RotateCcw className="h-4 w-4" />
-                    )}
+                    <RotateCcw className="h-4 w-4" />
                     実行する
-                  </button>
+                  </Button>
                 )}
             </div>
           </div>
@@ -1957,7 +1965,9 @@ function BuildingCandidates({
       </p>
       <div className="space-y-1">
         {candidates.map((c) => (
+          // data-ui=raw: 候補の一覧の行そのもの(行全体が押せる面)
           <button
+            data-ui="raw"
             key={c.id}
             type="button"
             onClick={() => onSelect(c.id)}

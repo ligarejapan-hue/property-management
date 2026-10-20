@@ -42,7 +42,8 @@ function StatusCell({
           登録の返事を受け取れませんでした（途中で画面を離れたか、通信・サーバーの問題）。物件一覧で確かめてください。
         </p>
         {onReturnUnknown && (
-          <button type="button" onClick={onReturnUnknown} className="text-xs text-indigo-600 underline dark:text-indigo-400">
+          // data-ui=raw: 状態の欄の下に添える下線の文字リンク(ボタンの形にしない・第3回と同じ扱い)
+          <button type="button" data-ui="raw" onClick={onReturnUnknown} className="text-xs text-indigo-600 underline dark:text-indigo-400">
             確かめたので登録の対象に戻す
           </button>
         )}

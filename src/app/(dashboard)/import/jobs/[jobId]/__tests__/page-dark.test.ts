@@ -103,10 +103,11 @@ describe("import/jobs/[jobId]/page.tsx dark: 配色", () => {
 // light→dark クラス並びでピン留めして「そのボタンが直っている」ことを直接担保する。
 describe("import/jobs/[jobId]/page.tsx dark: 破壊系アウトラインボタンの文字可読性", () => {
   it("ロールバックボタン(text-red-700)に dark:text-red-400 が付く", () => {
-    expect(src).toMatch(/text-red-700 hover:bg-red-50 dark:bg-gray-900 dark:border-red-700 dark:text-red-400/);
+    // 第5回: 共通 Button の danger(赤の塗り+白文字=暗背景でも読める)へ。薄い赤の枠は無くなった。
+    expect(src).toMatch(/<Button\s+variant="danger"\s+onClick=\{openRollbackDialog\}/);
   });
   it("一括「全件エラー確定」(text-red-600)に dark:text-red-400 が付く", () => {
-    expect(src).toMatch(/text-red-600 hover:bg-red-50 disabled:opacity-50 dark:border-red-700 dark:text-red-400/);
+    expect(src).toMatch(/<Button\s+variant="danger"\s+size="sm"\s+onClick=\{\(\) => handleBatchResolve\("mark_error"\)\}/);
   });
   it("一括「重複候補のみスキップ」(text-amber-700)に dark:text-amber-400 が付く", () => {
     expect(src).toMatch(/text-amber-700 hover:bg-amber-50 disabled:opacity-50 dark:border-amber-700 dark:text-amber-400/);

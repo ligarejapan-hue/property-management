@@ -99,7 +99,8 @@ describe("admin/change-password/page.tsx dark: 配色 (admin残)", () => {
   it("ライトモード bg-red-50 は残っている", () => {
     expect(src).toContain("bg-red-50");
   });
-  it("solid 送信ボタン bg-indigo-600 はそのまま残っている", () => {
-    expect(src).toContain("bg-indigo-600");
+  it("solid 送信ボタンは共通 Button の primary(藍の塗りは Button が持つ)", () => {
+    expect(src).toContain('from "@/components/ui/button"');
+    expect(src).toMatch(/<Button\s+type="submit"/);
   });
 });

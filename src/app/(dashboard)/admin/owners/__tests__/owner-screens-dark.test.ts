@@ -118,8 +118,8 @@ describe("owners/text-hygiene/page.tsx dark: 配色 (O1)", () => {
   it("テーブル行区切りに dark:divide-gray-800 がある", () => {
     expect(hygieneSrc).toContain("dark:divide-gray-800");
   });
-  it("入力欄枠線に dark:border-gray-700 がある（ボタン等）", () => {
-    expect(hygieneSrc).toContain("dark:border-gray-700");
+  it("ボタンは共通 Button(枠線の dark は部品側で担保・第5回)", () => {
+    expect(hygieneSrc).toContain('from "@/components/ui/button"');
   });
 
   // --- hover 可読化（フィルタボタン非選択状態） ---

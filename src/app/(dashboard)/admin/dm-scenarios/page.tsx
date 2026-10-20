@@ -117,9 +117,9 @@ export default function AdminDmScenariosPage() {
                   </td>
                   <td className="px-3 py-2 text-right">
                     {!s.autoKey && (
-                      <button type="button" onClick={() => setTarget(s)} disabled={busy} title="削除" aria-label={`「${s.name}」を削除`} className="text-red-600 disabled:opacity-40">
+                      <Button variant="ghost" size="sm" onClick={() => setTarget(s)} disabled={busy} title="削除" aria-label={`「${s.name}」を削除`} className="text-red-600">
                         <Trash2 className="h-4 w-4" />
-                      </button>
+                      </Button>
                     )}
                   </td>
                 </tr>

@@ -327,6 +327,8 @@ function ImportScreen({ draftEnabled }: { draftEnabled: boolean }) {
   const [roPreview, setRoPreview] = useState<ReceptionOwnerPreviewResponse | null>((s0?.ro?.roPreview as never) ?? null);
   const [roResult, setRoResult] = useState<ReceptionOwnerImportResponse | null>(null);
   const [roLoading, setRoLoading] = useState(false);
+  // どちらのボタンの処理中か(押した側だけに「処理中」の文言を出す)
+  const [roBusy, setRoBusy] = useState<"preview" | "import" | null>(null);
   const [roError, setRoError] = useState<string | null>(null);
   // 取込条件: 既定は「DLに〇がついている物件のみ」かつ「既存のみ」
   const [dlFilter, setDlFilter] = useState<"marked" | "unmarked" | "all">(s0?.ro?.dlFilter ?? s0?.rp?.rpDlFilter ?? "marked");
@@ -344,6 +346,8 @@ function ImportScreen({ draftEnabled }: { draftEnabled: boolean }) {
   const [rpPreview, setRpPreview] = useState<ReceptionPropertyPreviewResponse | null>((s0?.rp?.rpPreview as never) ?? null);
   const [rpResult, setRpResult] = useState<ReceptionPropertyImportResponse | null>(null);
   const [rpLoading, setRpLoading] = useState(false);
+  // どちらのボタンの処理中か(ボタンの「処理中」の文言を押した側だけに出す。押せない状態は rpLoading のまま)
+  const [rpBusy, setRpBusy] = useState<"preview" | "import" | null>(null);
   const [rpError, setRpError] = useState<string | null>(null);
   const [rpDlFilter, setRpDlFilter] = useState<"marked" | "unmarked" | "all">(s0?.rp?.rpDlFilter ?? s0?.ro?.dlFilter ?? "marked");
   const [rpShinkiFilter, setRpShinkiFilter] = useState<"existing" | "new" | "all">(s0?.rp?.rpShinkiFilter ?? s0?.ro?.shinkiFilter ?? "existing");
@@ -639,6 +643,7 @@ function ImportScreen({ draftEnabled }: { draftEnabled: boolean }) {
   const handleRoPreview = async () => {
     if (!receptionFile || !ownerFile) return;
     setRoLoading(true);
+    setRoBusy("preview");
     setRoError(null);
     setRoResult(null);
     try {
@@ -657,6 +662,7 @@ function ImportScreen({ draftEnabled }: { draftEnabled: boolean }) {
       setRoError(e instanceof Error ? e.message : "プレビューに失敗しました");
     } finally {
       setRoLoading(false);
+      setRoBusy(null);
     }
   };
 
@@ -665,6 +671,7 @@ function ImportScreen({ draftEnabled }: { draftEnabled: boolean }) {
     if (!receptionFile || !ownerFile) return;
     if (!window.confirm("一意特定できた行だけを既存物件に反映します。よろしいですか？")) return;
     setRoLoading(true);
+    setRoBusy("import");
     setRoError(null);
     applyCsvPending("start");
     try {
@@ -689,6 +696,7 @@ function ImportScreen({ draftEnabled }: { draftEnabled: boolean }) {
       setRoError(e instanceof Error ? e.message : "取込に失敗しました");
     } finally {
       setRoLoading(false);
+      setRoBusy(null);
     }
   };
 
@@ -706,6 +714,7 @@ function ImportScreen({ draftEnabled }: { draftEnabled: boolean }) {
   const handleRpPreview = async () => {
     if (!rpFile) return;
     setRpLoading(true);
+    setRpBusy("preview");
     setRpError(null);
     setRpResult(null);
     try {
@@ -721,6 +730,7 @@ function ImportScreen({ draftEnabled }: { draftEnabled: boolean }) {
       setRpError(e instanceof Error ? e.message : "プレビューに失敗しました");
     } finally {
       setRpLoading(false);
+      setRpBusy(null);
     }
   };
 
@@ -729,6 +739,7 @@ function ImportScreen({ draftEnabled }: { draftEnabled: boolean }) {
     if (!rpFile) return;
     if (!window.confirm("住所が既存物件と重複しない行を物件として新規作成します。よろしいですか？")) return;
     setRpLoading(true);
+    setRpBusy("import");
     setRpError(null);
     applyCsvPending("start");
     try {
@@ -750,6 +761,7 @@ function ImportScreen({ draftEnabled }: { draftEnabled: boolean }) {
       setRpError(e instanceof Error ? e.message : "取込に失敗しました");
     } finally {
       setRpLoading(false);
+      setRpBusy(null);
     }
   };
 
@@ -933,14 +945,14 @@ function ImportScreen({ draftEnabled }: { draftEnabled: boolean }) {
           />
         </div>
         {(rpFile || receptionFile || ownerFile || rpPreview || rpResult || roPreview || roResult) && (
-          <button
+          <Button
+            variant="secondary"
             onClick={handleReceptionReset}
             disabled={rpLoading || roLoading}
-            className="flex items-center gap-1.5 rounded-md border border-gray-300 dark:border-gray-700 px-3 py-2 text-sm text-gray-600 dark:text-gray-300 hover:bg-gray-50 dark:hover:bg-gray-800 disabled:opacity-50"
           >
             <RefreshCw className="h-4 w-4" />
             選択をクリア（①②とも）
-          </button>
+          </Button>
         )}
       </div>
 
@@ -974,23 +986,27 @@ function ImportScreen({ draftEnabled }: { draftEnabled: boolean }) {
 
         {/* ボタン */}
         <div className="mb-4 flex flex-wrap items-center gap-2">
-          <button
+          <Button
+            variant="secondary"
             onClick={handleRpPreview}
             disabled={!rpFile || rpLoading}
-            className="flex items-center gap-1.5 rounded-md bg-gray-100 dark:bg-gray-800 px-4 py-2 text-sm font-medium text-gray-700 dark:text-gray-200 hover:bg-gray-200 dark:hover:bg-gray-700 disabled:opacity-50"
+            loading={rpBusy === "preview"}
+            loadingLabel="プレビュー中"
           >
-            {rpLoading ? <Loader2 className="h-4 w-4 animate-spin" /> : <Eye className="h-4 w-4" />}
+            <Eye className="h-4 w-4" />
             プレビュー
-          </button>
-          <button
+          </Button>
+          {/* 0件のときは緑にしない(押せそうに見えないよう白の枠に。C-2) */}
+          <Button
+            variant={rpPreview && rpPreview.summary.toCreateCount > 0 ? "success" : "secondary"}
             onClick={handleRpImport}
             disabled={!rpPreview || rpPreview.summary.toCreateCount === 0 || rpLoading || importBlocked}
-            // C-2 UI総点検: 0件(取り込む対象なし)でも緑のままで「押せそう」に見えた。無効時はグレーにして非活性を明示。
-            className="flex items-center gap-1.5 rounded-md bg-green-600 px-4 py-2 text-sm font-medium text-white hover:bg-green-700 disabled:cursor-not-allowed disabled:bg-gray-200 disabled:text-gray-400 disabled:hover:bg-gray-200 dark:disabled:bg-gray-700 dark:disabled:text-gray-500 dark:disabled:hover:bg-gray-700"
+            loading={rpBusy === "import"}
+            loadingLabel="取り込み中"
           >
-            {rpLoading ? <Loader2 className="h-4 w-4 animate-spin" /> : <DownloadCloud className="h-4 w-4" />}
+            <DownloadCloud className="h-4 w-4" />
             取り込む（{rpPreview?.summary.toCreateCount ?? 0}件作成）
-          </button>
+          </Button>
         </div>
 
         {/* エラー */}
@@ -1149,30 +1165,34 @@ function ImportScreen({ draftEnabled }: { draftEnabled: boolean }) {
         </div>
 
         <div className="mb-4 flex flex-wrap items-center gap-2">
-          <button
+          <Button
+            variant="primary"
             onClick={handleRoPreview}
             disabled={!receptionFile || !ownerFile || roLoading}
-            className="flex items-center gap-2 rounded-md bg-indigo-600 px-4 py-2 text-sm font-medium text-white hover:bg-indigo-700 disabled:cursor-not-allowed disabled:bg-gray-300"
+            loading={roBusy === "preview"}
+            loadingLabel="突合中"
           >
-            {roLoading ? <Loader2 className="h-4 w-4 animate-spin" /> : <Eye className="h-4 w-4" />}
+            <Eye className="h-4 w-4" />
             突合結果をプレビュー
-          </button>
-          <button
+          </Button>
+          <Button
+            variant="success"
             onClick={handleRoImport}
             disabled={!roPreview || roLoading || importBlocked}
-            className="flex items-center gap-2 rounded-md bg-green-600 px-4 py-2 text-sm font-medium text-white hover:bg-green-700 disabled:cursor-not-allowed disabled:bg-gray-300"
+            loading={roBusy === "import"}
+            loadingLabel="取り込み中"
           >
-            {roLoading ? <Loader2 className="h-4 w-4 animate-spin" /> : <ArrowRight className="h-4 w-4" />}
+            <ArrowRight className="h-4 w-4" />
             確認済みデータを取り込む
-          </button>
-          <button
+          </Button>
+          <Button
+            variant="secondary"
             onClick={handleOwnerClear}
             disabled={roLoading}
-            className="flex items-center gap-2 rounded-md border border-gray-300 dark:border-gray-700 bg-white dark:bg-gray-900 px-3 py-2 text-sm text-gray-700 dark:text-gray-200 hover:bg-gray-50 dark:hover:bg-gray-800"
           >
             <RefreshCw className="h-4 w-4" />
             所有者ファイルをクリア
-          </button>
+          </Button>
         </div>
 
         {roError && (
@@ -1343,16 +1363,19 @@ function ImportScreen({ draftEnabled }: { draftEnabled: boolean }) {
                 のまま残っているジョブです。「失敗にする」を押して整理してください（自動修復はされません）。
               </p>
             </div>
-            <button
+            <Button
+              variant="ghost"
+              size="sm"
               onClick={fetchStuck}
               disabled={stuckLoading}
-              className="rounded p-1 text-amber-700 dark:text-amber-300 hover:bg-amber-100 dark:hover:bg-amber-500/20 disabled:opacity-50"
+              className="text-amber-700 dark:text-amber-300"
               title="再読み込み"
+              aria-label="再読み込み"
             >
               <RefreshCw
                 className={`h-4 w-4 ${stuckLoading ? "animate-spin" : ""}`}
               />
-            </button>
+            </Button>
           </div>
 
           <div className="overflow-x-auto rounded border border-amber-200 dark:border-amber-400/25 bg-white dark:bg-gray-900">
@@ -1398,18 +1421,16 @@ function ImportScreen({ draftEnabled }: { draftEnabled: boolean }) {
                       {/* 他人の取込は import:manage が無いと失敗にできない
                           (Codex #349 R10 P2: 押して確認してから 403 を防ぐ)。 */}
                       {job.canMutate !== false && (
-                      <button
+                      <Button
+                        variant="danger"
+                        size="sm"
                         onClick={() => handleMarkStuckFailed(job.jobId)}
                         disabled={markingJobId === job.jobId}
-                        className="inline-flex items-center gap-1 rounded border border-red-300 dark:border-red-400/40 bg-white dark:bg-gray-900 px-2 py-0.5 text-[11px] font-medium text-red-700 dark:text-red-300 hover:bg-red-50 dark:hover:bg-red-500/10 disabled:opacity-50"
+                        loading={markingJobId === job.jobId}
                       >
-                        {markingJobId === job.jobId ? (
-                          <Loader2 className="h-3 w-3 animate-spin" />
-                        ) : (
-                          <XCircle className="h-3 w-3" />
-                        )}
+                        <XCircle className="h-3 w-3" />
                         失敗にする
-                      </button>
+                      </Button>
                       )}
                     </td>
                   </tr>
@@ -1424,13 +1445,16 @@ function ImportScreen({ draftEnabled }: { draftEnabled: boolean }) {
       <div id={IMPORT_HISTORY_ID} className="scroll-mt-4 rounded-lg border border-gray-200 dark:border-gray-800 bg-white dark:bg-gray-900 p-6">
         <div className="mb-4 flex items-center justify-between">
           <h3 className="text-lg font-semibold text-gray-700 dark:text-gray-200">取込履歴</h3>
-          <button
+          <Button
+            variant="ghost"
+            size="sm"
             onClick={fetchJobs}
-            className="rounded p-1 text-gray-400 dark:text-gray-500 hover:text-gray-600 dark:hover:text-gray-300"
+            className="text-gray-400 hover:text-gray-600 dark:text-gray-500 dark:hover:text-gray-300"
             title="再読み込み"
+            aria-label="再読み込み"
           >
             <RefreshCw className="h-4 w-4" />
-          </button>
+          </Button>
         </div>
 
         {/* ---- フィルタ UI(第2弾⑥⑦: FilterPanel=よく使う+詳細条件▾) ---- */}

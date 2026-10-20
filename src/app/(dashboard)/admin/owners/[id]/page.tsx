@@ -15,6 +15,7 @@
 
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { PageHeader } from "@/components/ui/page-header";
+import { Button } from "@/components/ui/button";
 import { useParams } from "next/navigation";
 import Link from "next/link";
 import { ArrowLeft, AlertTriangle, Loader2 } from "lucide-react";
@@ -437,17 +438,18 @@ export default function AdminOwnerDetailPage() {
                     /^\d{13}$/.test(
                       candidate.candidateCorporateNumberMasked,
                     ) && (
-                      <button
-                        type="button"
+                      <Button
+                        variant="secondary"
+                        size="sm"
                         onClick={() =>
                           setCorporateInput(
                             candidate.candidateCorporateNumberMasked ?? "",
                           )
                         }
-                        className="mt-1 inline-flex rounded-md border border-blue-300 bg-blue-50 px-2 py-0.5 text-[11px] font-medium text-blue-700 hover:bg-blue-100 dark:border-blue-700 dark:bg-blue-950/40 dark:text-blue-300 dark:hover:bg-blue-900/40"
+                        className="mt-1"
                       >
                         法人番号欄に転記
-                      </button>
+                      </Button>
                     )}
                   {candidate.type === "conflict" && (
                     <div className="text-[11px] text-red-700">

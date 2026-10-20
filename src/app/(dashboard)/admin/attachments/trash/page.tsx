@@ -4,6 +4,7 @@ import { useCallback, useEffect, useState } from "react";
 import { PageHeader } from "@/components/ui/page-header";
 import Link from "next/link";
 import { Loader2 } from "lucide-react";
+import { Button } from "@/components/ui/button";
 
 /**
  * ゴミ箱画面（管理者限定）。
@@ -174,15 +175,15 @@ export default function AttachmentTrashPage() {
                   </td>
                   <td className="whitespace-nowrap px-4 py-3 text-sm">
                     {it.targetType === "property" ? (
-                      <button
-                        type="button"
+                      <Button
+                        variant="secondary"
                         disabled={busyId === it.id}
-                        aria-busy={busyId === it.id}
+                        loading={busyId === it.id}
+                        loadingLabel="復元中"
                         onClick={() => void restore(it)}
-                        className="inline-flex items-center gap-1.5 rounded-md border border-gray-300 dark:border-gray-700 bg-white dark:bg-gray-800 px-3 py-1.5 text-sm font-medium text-gray-700 dark:text-gray-200 shadow-sm hover:bg-gray-50 dark:hover:bg-gray-700 disabled:opacity-50"
                       >
-                        {busyId === it.id ? "復元中…" : "元に戻す"}
-                      </button>
+                        元に戻す
+                      </Button>
                     ) : (
                       <span className="text-xs text-gray-400 dark:text-gray-500">この画面では復元できません</span>
                     )}

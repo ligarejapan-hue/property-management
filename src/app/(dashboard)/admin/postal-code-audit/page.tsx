@@ -3,7 +3,8 @@
 import { useState, useCallback } from "react";
 import { Tabs, tabPanelProps } from "@/components/ui/tabs";
 import { PageHeader } from "@/components/ui/page-header";
-import { Loader2, Download, AlertTriangle } from "lucide-react";
+import { Button } from "@/components/ui/button";
+import { Download, AlertTriangle } from "lucide-react";
 import {
   fetchPostalCodeAudit,
   type PostalCodeAuditResponse,
@@ -90,22 +91,19 @@ export default function PostalCodeAuditPage() {
       />
 
       <div className="mb-4 flex flex-wrap items-center gap-3">
-        <button
+        <Button
           onClick={runAudit}
           disabled={loading}
-          className="inline-flex items-center gap-2 rounded-md bg-indigo-600 px-4 py-2 text-sm font-medium text-white hover:bg-indigo-700 disabled:opacity-50"
+          loading={loading}
+          loadingLabel="照合中"
         >
-          {loading ? <Loader2 className="h-4 w-4 animate-spin" /> : null}
-          {loading ? "照合中..." : "照合を実行"}
-        </button>
+          照合を実行
+        </Button>
         {data && (
-          <button
-            onClick={handleCsvDownload}
-            className="inline-flex items-center gap-2 rounded-md border border-gray-300 px-4 py-2 text-sm font-medium text-gray-700 hover:bg-gray-50 dark:border-gray-700 dark:text-gray-200 dark:hover:bg-gray-800"
-          >
+          <Button variant="secondary" onClick={handleCsvDownload}>
             <Download className="h-4 w-4" />
             CSV出力
-          </button>
+          </Button>
         )}
       </div>
 

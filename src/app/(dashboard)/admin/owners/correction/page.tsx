@@ -2,6 +2,7 @@
 
 import { useState, useEffect, useCallback, useRef, Suspense } from "react";
 import { Tabs, tabPanelProps } from "@/components/ui/tabs";
+import { Button } from "@/components/ui/button";
 import { PageHeader } from "@/components/ui/page-header";
 import { OwnerPropertyCountCell } from "@/components/owners/owner-property-count-cell";
 import Link from "next/link";
@@ -672,6 +673,7 @@ function DuplicateSubFilterBar({
         <button
           key={tab.key}
           type="button"
+          aria-pressed={value === tab.key}
           onClick={() => onChange(tab.key)}
           className={`rounded-full border px-3 py-1 text-xs font-medium ${
             value === tab.key
@@ -1201,6 +1203,7 @@ function CorporateNumberCandidatesPanel() {
           <button
             key={tab.key}
             type="button"
+            aria-pressed={subFilter === tab.key}
             onClick={() => setSubFilter(tab.key)}
             // Codex P2: 一括反映 POST 実行中はフィルタ切替を無効化。
             // 反映後の load(apiType, cursor) が、その間に切り替えた新しい表示を
@@ -1256,24 +1259,20 @@ function CorporateNumberCandidatesPanel() {
                     </span>
                   )}
                 </span>
-                <button
-                  type="button"
-                  onClick={toggleAllEligible}
-                  className="rounded-md border border-emerald-300 bg-white dark:bg-gray-900 px-2 py-1 text-emerald-700 dark:text-emerald-400 hover:bg-emerald-100 dark:hover:bg-emerald-500/20 dark:hover:text-emerald-300"
-                >
+                <Button variant="secondary" size="sm" onClick={toggleAllEligible}>
                   {allSelectableSelected
                     ? "このページの選択を全解除"
                     : `このページの未登録を全選択（最大 ${MAX_CORPORATE_BULK}）`}
-                </button>
+                </Button>
                 {bulkPhase === "idle" && (
-                  <button
-                    type="button"
+                  <Button
+                    variant="success"
+                    size="sm"
                     onClick={() => setBulkPhase("confirm")}
                     disabled={!canSubmitBulk(selectedCount) || bulkSubmitting}
-                    className="rounded-md border border-emerald-600 bg-emerald-600 px-3 py-1 font-medium text-white disabled:cursor-not-allowed disabled:opacity-50 hover:bg-emerald-700"
                   >
                     選択した {selectedCount} 件を一括反映
-                  </button>
+                  </Button>
                 )}
               </div>
 
@@ -1295,22 +1294,24 @@ function CorporateNumberCandidatesPanel() {
                     廃止法人・該当なし・競合・複数候補・既設定はスキップされます。
                   </p>
                   <div className="mt-2 flex gap-2">
-                    <button
-                      type="button"
+                    <Button
+                      variant="success"
+                      size="sm"
                       onClick={onConfirmBulk}
                       disabled={bulkSubmitting || !canSubmitBulk(selectedCount)}
-                      className="rounded-md border border-emerald-600 bg-emerald-600 px-3 py-1 font-medium text-white disabled:cursor-not-allowed disabled:opacity-50 hover:bg-emerald-700"
+                      loading={bulkSubmitting}
+                      loadingLabel="反映中"
                     >
-                      {bulkSubmitting ? "反映中..." : "実行する"}
-                    </button>
-                    <button
-                      type="button"
+                      実行する
+                    </Button>
+                    <Button
+                      variant="secondary"
+                      size="sm"
                       onClick={() => setBulkPhase("idle")}
                       disabled={bulkSubmitting}
-                      className="rounded-md border border-gray-300 dark:border-gray-700 bg-white dark:bg-gray-900 px-3 py-1 text-gray-700 dark:text-gray-200 disabled:opacity-50 hover:bg-gray-50 dark:hover:bg-gray-800"
                     >
                       キャンセル
-                    </button>
+                    </Button>
                   </div>
                 </div>
               )}
@@ -1449,8 +1450,9 @@ function CorporateNumberCandidatesPanel() {
           )}
 
           <div className="flex items-center justify-end gap-2 text-xs">
-            <button
-              type="button"
+            <Button
+              variant="secondary"
+              size="sm"
               onClick={() => {
                 if (cursorStack.length === 0) return;
                 const prev = cursorStack[cursorStack.length - 1] ?? null;
@@ -1463,12 +1465,12 @@ function CorporateNumberCandidatesPanel() {
               }}
               // Codex P2: 一括反映 POST 実行中はページ送りを無効化（race 防止）。
               disabled={cursorStack.length === 0 || bulkSubmitting}
-              className="rounded-md border border-gray-300 dark:border-gray-700 px-3 py-1 text-gray-700 dark:text-gray-200 disabled:cursor-not-allowed disabled:opacity-50 hover:bg-gray-50 dark:hover:bg-gray-800"
             >
               前へ
-            </button>
-            <button
-              type="button"
+            </Button>
+            <Button
+              variant="secondary"
+              size="sm"
               onClick={() => {
                 if (!data.hasNextPage || !data.nextCursor) return;
                 setCursorStack((s) => [...s, cursor]);
@@ -1477,10 +1479,9 @@ function CorporateNumberCandidatesPanel() {
                 load(apiType, data.nextCursor);
               }}
               disabled={!data.hasNextPage || !data.nextCursor || bulkSubmitting}
-              className="rounded-md border border-gray-300 dark:border-gray-700 px-3 py-1 text-gray-700 dark:text-gray-200 disabled:cursor-not-allowed disabled:opacity-50 hover:bg-gray-50 dark:hover:bg-gray-800"
             >
               次へ
-            </button>
+            </Button>
           </div>
         </>
       )}
@@ -1609,6 +1610,7 @@ function RegistryAddressCandidatesPanel() {
           <button
             key={tab.key}
             type="button"
+            aria-pressed={subFilter === tab.key}
             onClick={() => setSubFilter(tab.key)}
             className={`rounded-full border px-3 py-1 text-xs font-medium ${
               subFilter === tab.key
@@ -1705,14 +1707,16 @@ function RegistryAddressCandidatesPanel() {
                       <td className="px-3 py-2">
                         <div className="flex flex-col gap-1">
                           {c.action === "cleanup" ? (
-                            <button
-                              type="button"
+                            <Button
+                              variant="success"
+                              size="sm"
                               onClick={() => onApply(c)}
                               disabled={applyingId === c.ownerId}
-                              className="rounded-md border border-emerald-300 dark:border-emerald-500/40 bg-emerald-50 dark:bg-emerald-500/15 px-2 py-1 text-xs text-emerald-700 dark:text-emerald-300 disabled:cursor-not-allowed disabled:opacity-50 hover:bg-emerald-100 dark:hover:bg-emerald-500/20"
+                              loading={applyingId === c.ownerId}
+                              loadingLabel="適用中"
                             >
-                              {applyingId === c.ownerId ? "適用中..." : "適用"}
-                            </button>
+                              適用
+                            </Button>
                           ) : (
                             <span className="rounded-full bg-amber-100 dark:bg-amber-500/20 px-2 py-0.5 text-center text-[10px] text-amber-700 dark:text-amber-300">
                               監査専用（手動確認）
@@ -1741,8 +1745,9 @@ function RegistryAddressCandidatesPanel() {
           )}
 
           <div className="flex items-center justify-end gap-2 text-xs">
-            <button
-              type="button"
+            <Button
+              variant="secondary"
+              size="sm"
               onClick={() => {
                 if (cursorStack.length === 0) return;
                 const prev = cursorStack[cursorStack.length - 1] ?? null;
@@ -1751,12 +1756,12 @@ function RegistryAddressCandidatesPanel() {
                 load(subFilter, prev);
               }}
               disabled={cursorStack.length === 0}
-              className="rounded-md border border-gray-300 dark:border-gray-700 px-3 py-1 text-gray-700 dark:text-gray-200 disabled:cursor-not-allowed disabled:opacity-50 hover:bg-gray-50 dark:hover:bg-gray-800"
             >
               前へ
-            </button>
-            <button
-              type="button"
+            </Button>
+            <Button
+              variant="secondary"
+              size="sm"
               onClick={() => {
                 if (!data.hasNextPage || !data.nextCursor) return;
                 setCursorStack((s) => [...s, cursor]);
@@ -1764,10 +1769,9 @@ function RegistryAddressCandidatesPanel() {
                 load(subFilter, data.nextCursor);
               }}
               disabled={!data.hasNextPage || !data.nextCursor}
-              className="rounded-md border border-gray-300 dark:border-gray-700 px-3 py-1 text-gray-700 dark:text-gray-200 disabled:cursor-not-allowed disabled:opacity-50 hover:bg-gray-50 dark:hover:bg-gray-800"
             >
               次へ
-            </button>
+            </Button>
           </div>
         </>
       )}
@@ -1976,35 +1980,35 @@ function CorporateRestorePanel() {
                   選択中 {selectedCount} / {MAX_CORPORATE_RESTORE} 件
                 </span>
                 {phase === "idle" ? (
-                  <button
-                    type="button"
+                  <Button
+                    size="sm"
                     disabled={!canSubmitRestore(payload.length) || submitting}
                     onClick={() => setPhase("confirm")}
-                    className="rounded-md bg-indigo-600 px-3 py-1.5 text-xs font-medium text-white hover:bg-indigo-700 disabled:cursor-not-allowed disabled:bg-gray-300 dark:disabled:bg-gray-700"
                   >
                     選択した所有者を復元
-                  </button>
+                  </Button>
                 ) : (
                   <>
                     <span className="text-xs font-medium text-amber-700 dark:text-amber-400">
                       {payload.length} 件を復元します。よろしいですか？
                     </span>
-                    <button
-                      type="button"
+                    <Button
+                      size="sm"
                       disabled={submitting}
                       onClick={onConfirm}
-                      className="rounded-md bg-indigo-600 px-3 py-1.5 text-xs font-medium text-white hover:bg-indigo-700 disabled:opacity-50"
+                      loading={submitting}
+                      loadingLabel="復元中"
                     >
-                      {submitting ? "復元中..." : "実行"}
-                    </button>
-                    <button
-                      type="button"
+                      実行
+                    </Button>
+                    <Button
+                      variant="secondary"
+                      size="sm"
                       disabled={submitting}
                       onClick={() => setPhase("idle")}
-                      className="rounded-md border border-gray-300 dark:border-gray-700 px-3 py-1.5 text-xs text-gray-600 dark:text-gray-300 hover:bg-gray-50 dark:hover:bg-gray-800 disabled:opacity-50"
                     >
                       やめる
-                    </button>
+                    </Button>
                   </>
                 )}
               </div>

@@ -11,6 +11,7 @@ import {
   apiErrorSmtpCode,
   type MailSettings,
 } from "@/lib/api-client";
+import { Button } from "@/components/ui/button";
 
 // メール送信設定(管理者のみ)。査定申込が届いたときの通知メールを送る
 // Xserver のメールボックス(サーバー名・ポート・ユーザー名・パスワード・送信元アドレス)と、
@@ -417,26 +418,28 @@ export default function MailSettingsPage() {
           </span>
         </Field>
         <div className="flex flex-wrap items-center gap-3">
-          <button
-            type="button"
+          <Button
+            variant="secondary"
+            size="sm"
             onClick={() => {
               setAutoReplySubject(meta?.inquiryAutoReplyDefaultSubject ?? "");
               setAutoReplyBody(meta?.inquiryAutoReplyDefaultBody ?? "");
             }}
             disabled={!loaded}
-            className="rounded-md border border-gray-300 px-3 py-1.5 text-xs font-medium text-gray-700 hover:bg-gray-50 disabled:opacity-50 dark:border-gray-700 dark:text-gray-200 dark:hover:bg-gray-800"
           >
             既定の文面を入れて書き直す
-          </button>
-          <button
-            type="button"
+          </Button>
+          <Button
+            variant="secondary"
+            size="sm"
             onClick={() => void runTest("auto_reply")}
             disabled={testing || saving || !loaded}
-            className="inline-flex items-center gap-1.5 rounded-md border border-gray-300 px-3 py-1.5 text-xs font-medium text-gray-700 hover:bg-gray-50 disabled:opacity-50 dark:border-gray-700 dark:text-gray-200 dark:hover:bg-gray-800"
+            loading={testing}
+            loadingLabel="送信中"
           >
-            {testing ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <Send className="h-3.5 w-3.5" />}
+            <Send className="h-3.5 w-3.5" />
             この文面を自分あてに送ってみる
-          </button>
+          </Button>
         </div>
       </section>
 
@@ -467,51 +470,53 @@ export default function MailSettingsPage() {
             className="w-full rounded-md border border-gray-300 px-2 py-1.5 text-sm dark:border-gray-700 dark:bg-gray-900 dark:text-gray-100"
           />
         </Field>
-        <button
-          type="button"
+        <Button
+          variant="secondary"
+          size="sm"
           onClick={() => {
             setMaterialSubject(meta?.materialSendDefaultSubject ?? "");
             setMaterialBody(meta?.materialSendDefaultBody ?? "");
           }}
           disabled={!loaded}
-          className="rounded-md border border-gray-300 px-3 py-1.5 text-xs font-medium text-gray-700 hover:bg-gray-50 disabled:opacity-50 dark:border-gray-700 dark:text-gray-200 dark:hover:bg-gray-800"
         >
           既定の文面を入れて書き直す
-        </button>
+        </Button>
       </section>
 
       <div className="flex flex-wrap items-center gap-3">
-        <button
-          type="button"
+        <Button
           onClick={save}
           disabled={saving || !loaded}
-          className="inline-flex items-center gap-1.5 rounded-md bg-indigo-600 px-4 py-2 text-sm font-medium text-white hover:bg-indigo-700 disabled:opacity-50"
+          loading={saving}
+          loadingLabel="保存中"
         >
-          {saving ? <Loader2 className="h-4 w-4 animate-spin" /> : <Save className="h-4 w-4" />}
+          <Save className="h-4 w-4" />
           保存
-        </button>
-        <button
-          type="button"
+        </Button>
+        <Button
+          variant="secondary"
           onClick={() => void runTest("notify")}
           disabled={testing || saving || !loaded}
-          className="inline-flex items-center gap-1.5 rounded-md border border-gray-300 px-4 py-2 text-sm font-medium text-gray-700 hover:bg-gray-50 disabled:opacity-50 dark:border-gray-700 dark:text-gray-200 dark:hover:bg-gray-800"
+          loading={testing}
+          loadingLabel="送信中"
         >
-          {testing ? <Loader2 className="h-4 w-4 animate-spin" /> : <Send className="h-4 w-4" />}
+          <Send className="h-4 w-4" />
           テスト送信
-        </button>
+        </Button>
       </div>
 
       {!loaded && (
         <div className="flex flex-wrap items-center gap-2 rounded-md border border-red-300 bg-red-50 p-3 text-xs text-red-800 dark:border-red-700 dark:bg-red-950/40 dark:text-red-300">
           <ShieldAlert className="h-4 w-4 shrink-0" />
           <span>設定を読み込めませんでした。再読み込みしてください。保存・テスト送信は行えません。</span>
-          <button
-            type="button"
+          <Button
+            variant="secondary"
+            size="sm"
             onClick={loadSettings}
-            className="ml-auto inline-flex items-center gap-1 rounded-md border border-red-300 bg-white px-2 py-1 font-medium text-red-700 hover:bg-red-100 dark:border-red-700 dark:bg-gray-900 dark:text-red-300 dark:hover:bg-red-950"
+            className="ml-auto"
           >
             再読み込み
-          </button>
+          </Button>
         </div>
       )}
 

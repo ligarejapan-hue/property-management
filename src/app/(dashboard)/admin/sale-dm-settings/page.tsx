@@ -15,6 +15,7 @@ import {
   type SaleDmSettings,
 } from "@/lib/api-client";
 import { DEFAULT_PRIVACY_TEXT } from "@/lib/sale-dm-letter/privacy-text";
+import { Button } from "@/components/ui/button";
 
 // 売却促進DM の設定(管理者のみ)。
 // 設定するのは「追跡用URL・既定LP URL・差出人名・差出人連絡先」の4つだけ。
@@ -140,10 +141,10 @@ export default function SaleDmSettingsPage() {
         </Field>
       </div>
 
-      <button type="button" onClick={save} disabled={saving} className="inline-flex items-center gap-1.5 rounded-md bg-indigo-600 px-4 py-2 text-sm font-medium text-white hover:bg-indigo-700 disabled:opacity-50">
-        {saving ? <Loader2 className="h-4 w-4 animate-spin" /> : <Save className="h-4 w-4" />}
+      <Button onClick={save} disabled={saving} loading={saving} loadingLabel="保存中">
+        <Save className="h-4 w-4" />
         保存
-      </button>
+      </Button>
     </div>
   );
 }

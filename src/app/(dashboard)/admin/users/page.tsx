@@ -3,6 +3,7 @@
 import { useState, useEffect, useCallback } from "react";
 import { PageHeader } from "@/components/ui/page-header";
 import { SearchField } from "@/components/ui/search-field";
+import { Button } from "@/components/ui/button";
 import Link from "next/link";
 import { useSession } from "next-auth/react";
 import { formatJaDateTime } from "@/lib/format-datetime";
@@ -146,13 +147,10 @@ export default function UsersPage() {
       <PageHeader
         title="ユーザー管理"
         actions={
-          <button
-            onClick={() => setShowCreate(true)}
-            className="flex items-center gap-1.5 rounded-md bg-indigo-600 px-4 py-2 text-sm font-medium text-white hover:bg-indigo-700"
-          >
+          <Button onClick={() => setShowCreate(true)}>
             <Plus className="h-4 w-4" />
             新規ユーザー作成
-          </button>
+          </Button>
         }
       />
 
@@ -262,63 +260,72 @@ export default function UsersPage() {
                           <Shield className="h-3.5 w-3.5" />
                           <span className="text-xs">権限</span>
                         </Link>
-                        <button
-                          type="button"
+                        <Button
+                          variant="ghost"
+                          size="sm"
                           onClick={() => setNotifyUser(u)}
-                          className="flex items-center gap-0.5 text-gray-600 hover:text-gray-800 dark:text-gray-300 dark:hover:text-gray-100"
+                          className="text-gray-600 dark:text-gray-300"
                           title="査定申込の通知設定"
                         >
                           <Mail className="h-3.5 w-3.5" />
                           <span className="text-xs">通知</span>
-                        </button>
+                        </Button>
                         {u.isActive ? (
-                          <button
+                          <Button
+                            variant="ghost"
+                            size="sm"
                             onClick={() => {
                               setActionUser(u);
                               setActionType("deactivate");
                             }}
-                            className="flex items-center gap-0.5 text-amber-600 hover:text-amber-800 dark:text-amber-400 dark:hover:text-amber-300"
+                            className="text-amber-600 dark:text-amber-400"
                             title="無効化"
                           >
                             <UserX className="h-3.5 w-3.5" />
                             <span className="text-xs">無効化</span>
-                          </button>
+                          </Button>
                         ) : (
-                          <button
+                          <Button
+                            variant="ghost"
+                            size="sm"
                             onClick={() => {
                               setActionUser(u);
                               setActionType("activate");
                             }}
-                            className="flex items-center gap-0.5 text-emerald-600 hover:text-emerald-800 dark:text-emerald-400 dark:hover:text-emerald-300"
+                            className="text-emerald-600 dark:text-emerald-400"
                             title="有効化"
                           >
                             <UserCheck className="h-3.5 w-3.5" />
                             <span className="text-xs">有効化</span>
-                          </button>
+                          </Button>
                         )}
-                        <button
+                        <Button
+                          variant="ghost"
+                          size="sm"
                           onClick={() => {
                             setActionUser(u);
                             setActionType("resetPw");
                           }}
-                          className="flex items-center gap-0.5 text-gray-600 hover:text-gray-800 dark:text-gray-300 dark:hover:text-gray-100"
+                          className="text-gray-600 dark:text-gray-300"
                           title="パスワードリセット"
                         >
                           <KeyRound className="h-3.5 w-3.5" />
                           <span className="text-xs">PW</span>
-                        </button>
+                        </Button>
                         {isLocked && (
-                          <button
+                          <Button
+                            variant="ghost"
+                            size="sm"
                             onClick={() => {
                               setActionUser(u);
                               setActionType("unlock");
                             }}
-                            className="flex items-center gap-0.5 text-red-600 hover:text-red-800 dark:text-red-400 dark:hover:text-red-300"
+                            className="text-red-600 dark:text-red-400"
                             title="ロック解除"
                           >
                             <LockOpen className="h-3.5 w-3.5" />
                             <span className="text-xs">解除</span>
-                          </button>
+                          </Button>
                         )}
                         {selfId === u.id ? (
                           <span
@@ -329,17 +336,19 @@ export default function UsersPage() {
                             <span className="text-xs">削除不可</span>
                           </span>
                         ) : (
-                          <button
+                          <Button
+                            variant="ghost"
+                            size="sm"
                             onClick={() => {
                               setActionUser(u);
                               setActionType("delete");
                             }}
-                            className="flex items-center gap-0.5 text-red-600 hover:text-red-800 dark:text-red-400 dark:hover:text-red-300"
+                            className="text-red-600 dark:text-red-400"
                             title="削除"
                           >
                             <Trash2 className="h-3.5 w-3.5" />
                             <span className="text-xs">削除</span>
-                          </button>
+                          </Button>
                         )}
                         <Link
                           href={`/admin/users/${u.id}/permissions`}
@@ -383,27 +392,25 @@ export default function UsersPage() {
                 `${actionUser.name} を削除しますか？この操作は取り消せません。参照中のデータがある場合は削除できません。`}
             </p>
             <div className="flex justify-end gap-2">
-              <button
+              <Button
+                variant="secondary"
                 onClick={() => {
                   setActionUser(null);
                   setActionType(null);
                 }}
-                className="rounded-md border border-gray-300 px-4 py-2 text-sm text-gray-700 hover:bg-gray-50 dark:border-gray-700 dark:text-gray-200 dark:hover:bg-gray-800"
               >
                 キャンセル
-              </button>
-              <button
+              </Button>
+              <Button
+                variant={
+                  actionType === "delete" || actionType === "deactivate"
+                    ? "danger"
+                    : "primary"
+                }
                 onClick={handleAction}
-                className={`rounded-md px-4 py-2 text-sm font-medium text-white ${
-                  actionType === "delete"
-                    ? "bg-red-600 hover:bg-red-700"
-                    : actionType === "deactivate"
-                      ? "bg-amber-600 hover:bg-amber-700"
-                      : "bg-indigo-600 hover:bg-indigo-700"
-                }`}
               >
                 実行
-              </button>
+              </Button>
             </div>
           </div>
         </div>
@@ -547,21 +554,17 @@ function CreateUserModal({
             </p>
           </div>
           <div className="flex justify-end gap-2 pt-2">
-            <button
-              type="button"
-              onClick={onClose}
-              className="rounded-md border border-gray-300 px-4 py-2 text-sm text-gray-700 hover:bg-gray-50 dark:border-gray-700 dark:text-gray-200 dark:hover:bg-gray-800"
-            >
+            <Button variant="secondary" onClick={onClose}>
               キャンセル
-            </button>
-            <button
+            </Button>
+            <Button
               type="submit"
               disabled={saving}
-              className="flex items-center gap-1.5 rounded-md bg-indigo-600 px-4 py-2 text-sm font-medium text-white hover:bg-indigo-700 disabled:opacity-50"
+              loading={saving}
+              loadingLabel="作成中"
             >
-              {saving && <Loader2 className="h-4 w-4 animate-spin" />}
               作成
-            </button>
+            </Button>
           </div>
         </form>
       </div>

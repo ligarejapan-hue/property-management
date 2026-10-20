@@ -3,6 +3,7 @@
 import { useCallback, useState, type ChangeEvent } from "react";
 import Link from "next/link";
 import { FileText } from "lucide-react";
+import { Button } from "@/components/ui/button";
 import FileDropZone from "@/components/ui/file-drop-zone";
 import {
   uploadRegistryPdfBulk,
@@ -267,8 +268,10 @@ export default function BulkFolderUpload({
           </p>
           {plan.excluded.length > 0 && (
             <div>
+              {/* data-ui=raw: 説明文に添える下線の文字リンク(ボタンの形にしない・第3回と同じ扱い) */}
               <button
                 type="button"
+                data-ui="raw"
                 onClick={() => setShowExcluded((v) => !v)}
                 className="text-xs text-indigo-600 underline dark:text-indigo-400"
               >
@@ -310,18 +313,15 @@ export default function BulkFolderUpload({
       )}
 
       {plan && plan.batches.length > 0 && !summary && (
-        <button
-          type="button"
+        <Button
+          variant="success"
           disabled={uploading}
           onClick={start}
-          className="rounded-md bg-emerald-600 px-4 py-2 text-sm font-medium text-white hover:bg-emerald-700 disabled:opacity-50"
+          loading={uploading}
+          loadingLabel="アップロード中"
         >
-          {uploading
-            ? "アップロード中..."
-            : error
-              ? "再開する"
-              : "アップロード開始"}
-        </button>
+          {error ? "再開する" : "アップロード開始"}
+        </Button>
       )}
 
       {plan && plan.batches.length === 0 && !summary && files.length > 0 && (
@@ -330,13 +330,9 @@ export default function BulkFolderUpload({
             <p className="text-sm text-emerald-700 dark:text-emerald-400">
               選択したPDFはすべて送信済みです。
             </p>
-            <button
-              type="button"
-              onClick={resendAll}
-              className="rounded-md border border-gray-300 px-3 py-1.5 text-xs text-gray-500 dark:border-gray-600 dark:text-gray-400"
-            >
+            <Button variant="secondary" size="sm" onClick={resendAll}>
               送信記録をリセットして再送する
-            </button>
+            </Button>
           </div>
         ) : (
           <p className="text-sm text-amber-700 dark:text-amber-400">
@@ -370,20 +366,12 @@ export default function BulkFolderUpload({
             >
               取込履歴を見る
             </Link>
-            <button
-              type="button"
-              onClick={reset}
-              className="rounded-md border border-gray-300 px-3 py-1.5 text-xs text-gray-700 dark:border-gray-600 dark:text-gray-300"
-            >
+            <Button variant="secondary" size="sm" onClick={reset}>
               別のフォルダを送る
-            </button>
-            <button
-              type="button"
-              onClick={clearRecord}
-              className="rounded-md border border-gray-300 px-3 py-1.5 text-xs text-gray-500 dark:border-gray-600 dark:text-gray-400"
-            >
+            </Button>
+            <Button variant="secondary" size="sm" onClick={clearRecord}>
               送信記録をリセット
-            </button>
+            </Button>
           </div>
         </div>
       )}

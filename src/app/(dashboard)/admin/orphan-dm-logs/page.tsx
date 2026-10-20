@@ -309,8 +309,8 @@ function OrphanReactionEditor({
           取り消し・変更は管理者のみになります。もう一度押すと確定します。
         </span>
       )}
-      <button
-        type="button"
+      <Button
+        size="sm"
         onClick={() => {
           if (status === "refused" && log.reactionStatus !== "refused" && !refusalArmed) {
             setRefusalArmed(true);
@@ -318,17 +318,12 @@ function OrphanReactionEditor({
           }
           onSave(status, reactedAt, note, clearNote);
         }}
-        className="rounded-md bg-indigo-600 px-3 py-1 text-xs font-medium text-white hover:bg-indigo-700"
       >
         {refusalArmed ? "拒否として保存（確定）" : "保存"}
-      </button>
-      <button
-        type="button"
-        onClick={onCancel}
-        className="rounded-md border border-gray-300 dark:border-gray-700 px-3 py-1 text-xs text-gray-700 dark:text-gray-200"
-      >
+      </Button>
+      <Button variant="secondary" size="sm" onClick={onCancel}>
         やめる
-      </button>
+      </Button>
     </div>
   );
 }
@@ -407,23 +402,15 @@ function OrphanRow({
             エディタ側で種別selectを固定する。 */}
         {!editing && (
           <div className="flex items-center gap-2">
-            <button
-              type="button"
-              onClick={onEdit}
-              className="rounded-md border border-gray-300 dark:border-gray-700 px-3 py-1 text-xs text-gray-700 dark:text-gray-200 hover:bg-gray-50 dark:hover:bg-gray-800"
-            >
+            <Button variant="secondary" size="sm" onClick={onEdit}>
               反響を訂正
-            </button>
+            </Button>
             {(log.refusalLocked ?? log.reactionStatus === "refused") && !isAdmin ? (
               <span className="text-xs text-amber-700 dark:text-amber-300">取消は管理者のみ</span>
             ) : (
-              <button
-                type="button"
-                onClick={() => onDelete(log.id)}
-                className="rounded-md border border-red-300 dark:border-red-800 px-3 py-1 text-xs text-red-700 dark:text-red-300 hover:bg-red-50 dark:hover:bg-red-500/10"
-              >
+              <Button variant="danger" size="sm" onClick={() => onDelete(log.id)}>
                 記録を取消
-              </button>
+              </Button>
             )}
           </div>
         )}

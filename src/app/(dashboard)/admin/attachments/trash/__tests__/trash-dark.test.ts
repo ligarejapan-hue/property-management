@@ -63,17 +63,22 @@ describe("admin/attachments/trash/page.tsx dark: 配色 (admin残)", () => {
   });
 
   // --- 復元ボタン (outline button: border-gray-300 bg-white text-gray-700) ---
-  it("復元ボタン枠線に dark:border-gray-700 がある", () => {
-    expect(src).toContain("dark:border-gray-700");
+  // 復元ボタンは共通 Button の secondary(枠・暗色・ホバーは Button が持つ)
+  it("復元ボタンは共通 Button の secondary", () => {
+    expect(src).toContain('from "@/components/ui/button"');
+    expect(src).toMatch(/<Button\s+variant="secondary"/);
   });
-  it("復元ボタン背景に dark:bg-gray-800 がある", () => {
-    expect(src).toContain("dark:bg-gray-800");
+  // 復元ボタンの暗色は共通 Button の secondary が持つ(ページのソースではなく部品側を見る)
+  const secondary =
+    /secondary:\s*"([^"]+)"/.exec(
+      readFileSync(join(process.cwd(), "src/components/ui/button.tsx"), "utf8"),
+    )?.[1] ?? "";
+  it("復元ボタン(secondary)の背景に暗色(dark:bg-gray-900・ホバーで dark:bg-gray-800)がある", () => {
+    expect(secondary).toContain("dark:bg-gray-900");
+    expect(secondary).toContain("dark:hover:bg-gray-800");
   });
-  it("復元ボタン文字に dark:text-gray-200 がある", () => {
-    expect(src).toContain("dark:text-gray-200");
-  });
-  it("復元ボタンホバーに dark:hover:bg-gray-700 がある", () => {
-    expect(src).toContain("dark:hover:bg-gray-700");
+  it("復元ボタン(secondary)の文字に dark:text-gray-200 がある", () => {
+    expect(secondary).toContain("dark:text-gray-200");
   });
 
   // --- 復元不可テキスト (text-gray-400) ---
@@ -90,9 +95,6 @@ describe("admin/attachments/trash/page.tsx dark: 配色 (admin残)", () => {
   });
   it("ライトモード border-gray-200 は残っている", () => {
     expect(src).toContain("border-gray-200");
-  });
-  it("ライトモード border-gray-300 は残っている", () => {
-    expect(src).toContain("border-gray-300");
   });
   it("ライトモード hover:bg-gray-50 は残っている", () => {
     expect(src).toContain("hover:bg-gray-50");

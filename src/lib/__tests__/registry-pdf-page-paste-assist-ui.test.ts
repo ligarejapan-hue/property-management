@@ -48,7 +48,7 @@ describe("registry-pdf page Phase F-2a 強化 UI", () => {
 
   it("F-2a: 切替ボタンは paste タブに切り替え、text を空にする（不完全 embedded_text を投入しない）", () => {
     const buttonMatch = pageSrc.match(
-      /scanned-pdf-switch-to-paste[\s\S]{0,1200}<\/button>/,
+      /scanned-pdf-switch-to-paste[\s\S]{0,1200}<\/Button>/,
     );
     expect(buttonMatch).not.toBeNull();
     const body = buttonMatch?.[0] ?? "";

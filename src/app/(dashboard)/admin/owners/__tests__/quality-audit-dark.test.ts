@@ -45,8 +45,8 @@ describe("owners/quality-audit/page.tsx dark: 配色 (O2)", () => {
   it("テーブル行区切りに dark:divide-gray-800 がある", () => {
     expect(src).toContain("dark:divide-gray-800");
   });
-  it("入力欄系ボタン枠線に dark:border-gray-700 がある", () => {
-    expect(src).toContain("dark:border-gray-700");
+  it("入力欄系ボタンは共通 Button(枠線の dark は部品側で担保・第5回)", () => {
+    expect(src).toContain('from "@/components/ui/button"');
   });
 
   // --- 品質テーブル thead/tbody 対応 ---
@@ -133,7 +133,7 @@ describe("owners/quality-audit/page.tsx dark: 配色 (O2)", () => {
     const noDarkEmerald = ["dark:bg-emerald"].join("");
     expect(src).not.toContain(noDarkEmerald);
   });
-  it("accent ボタン（bg-emerald-600）は dark: 据え置き", () => {
-    expect(src).toContain("bg-emerald-600");
+  it("accent ボタン(緑)は共通 Button の success(第5回)", () => {
+    expect(src).toContain('variant="success"');
   });
 });

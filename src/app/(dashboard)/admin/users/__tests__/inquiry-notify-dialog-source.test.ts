@@ -78,12 +78,13 @@ describe("ユーザー一覧: 通知ボタン", () => {
     expect(between).not.toContain("無効化");
   });
 
-  it("通知ボタンは type=\"button\"(フォーム誤submit防止)", () => {
+  it("通知ボタンは type=\"button\"(フォーム誤submit防止=共通 Button は既定が button・submit にしない)", () => {
     const notifyBtnStart = page.indexOf("setNotifyUser(u)");
     expect(notifyBtnStart).toBeGreaterThan(-1);
-    const buttonTagStart = page.lastIndexOf("<button", notifyBtnStart);
+    const buttonTagStart = page.lastIndexOf("<Button", notifyBtnStart);
+    expect(buttonTagStart).toBeGreaterThan(-1);
     const snippet = page.slice(buttonTagStart, notifyBtnStart);
-    expect(snippet).toContain('type="button"');
+    expect(snippet).not.toContain('type="submit"');
   });
 
   it("InquiryNotifyDialog を組み込んでいる", () => {

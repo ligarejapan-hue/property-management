@@ -106,14 +106,10 @@ export default function TemplatesPage() {
       <PageHeader
         title="権限テンプレート"
         actions={
-          <button
-            type="button"
-            onClick={() => setShowCreate(true)}
-            className="inline-flex items-center gap-1.5 rounded-md bg-indigo-600 px-4 py-2 text-sm font-semibold text-white shadow-sm hover:bg-indigo-500"
-          >
+          <Button onClick={() => setShowCreate(true)}>
             <Plus className="h-4 w-4" />
             新規テンプレート作成
-          </button>
+          </Button>
         }
       />
 
@@ -230,14 +226,15 @@ export default function TemplatesPage() {
                         編集
                       </Link>
                       {!tpl.isDefault && (
-                        <button
-                          type="button"
+                        <Button
+                          variant="ghost"
+                          size="sm"
                           onClick={() => setDeleteTarget(tpl)}
-                          className="inline-flex items-center gap-1 text-red-600 hover:text-red-900 dark:text-red-400 dark:hover:text-red-300"
+                          className="text-red-600 dark:text-red-400"
                         >
                           <Trash2 className="h-3.5 w-3.5" />
                           削除
-                        </button>
+                        </Button>
                       )}
                     </div>
                   </td>
