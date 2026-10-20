@@ -2,6 +2,7 @@ import { lockPropertyRow } from "@/lib/property-record-guard";
 import { syncSaleDmReaction, type ReactionSyncTx } from "@/lib/dm-reaction/sync";
 import { hasRenderableLpVariant } from "./lp-render-input";
 import type { InquiryInput } from "./inquiry-input";
+import { autoAdvanceCaseStatus, type AutoCaseStatusTx } from "@/lib/case-status-auto";
 
 // ⚠この説明は関数の外に置く。dm-writer-lock-order の走査は関数本文(export async function recordInquiry 以降)の呼び出し順を見るため、本文内のコメントに呼び出し名を書くと順序判定を狂わせる
 /**
@@ -13,7 +14,8 @@ import type { InquiryInput } from "./inquiry-input";
  *   一度も表示されない draft への直接 POST で申込・初回時刻を作らせない)
  *   → 申込 INSERT → 初回時刻(条件付き updateMany の count で確定=同時の二重初回を防ぐ)
  *   → QR読み取り・アプリ内ページ表示の2つの初回時刻の補い(下記) → 申込回数 +1・outcome=inquiry
- *   → 送付記録への反響同期。
+ *   → 送付記録への反響同期 → 案件ステータスの自動の切り替え(未着手なら「所有者とやりとり中」・
+ *   履歴の記録者は手紙を作った人=画面では「自動」と出す。発注者決定 2026-10-20)。
  *
  * 2つの初回時刻の補い: 申込は必ずアプリ内LPページ(GET /t/<token>=QR読み取りの記録が先に走り、
  * ページが実際に返れば lp-page-view-record.ts の計測も走る)から送られるので lpFirstAccessAt と
@@ -35,6 +37,7 @@ export interface InquiryDraftRow {
   id: string;
   propertyId: string;
   status: string;
+  generatedBy: string;
 }
 
 export interface InquiryLockedRow {
@@ -42,7 +45,7 @@ export interface InquiryLockedRow {
   lpVariant: { headline: string | null; bodyText: string | null } | null;
 }
 
-export interface InquiryTx {
+export interface InquiryTx extends AutoCaseStatusTx {
   $queryRaw: <T>(query: TemplateStringsArray, ...values: unknown[]) => Promise<T>;
   dmRecipientDraft: {
     findUnique: (args: {
@@ -70,7 +73,7 @@ export interface InquiryClientLike {
   dmRecipientDraft: {
     findUnique: (args: {
       where: { trackingToken: string };
-      select: { id: true; propertyId: true; status: true };
+      select: { id: true; propertyId: true; status: true; generatedBy: true };
     }) => Promise<InquiryDraftRow | null>;
   };
   $transaction: <T>(fn: (tx: InquiryTx) => Promise<T>) => Promise<T>;
@@ -90,7 +93,7 @@ export async function recordInquiry(
 ): Promise<RecordInquiryResult> {
   const draft = await client.dmRecipientDraft.findUnique({
     where: { trackingToken: token },
-    select: { id: true, propertyId: true, status: true },
+    select: { id: true, propertyId: true, status: true, generatedBy: true },
   });
   if (!draft) return { kind: "unknown" };
   if (draft.status !== "sent") return { kind: "not_sent" };
@@ -136,6 +139,7 @@ export async function recordInquiry(
       data: { formInquiryCount: { increment: 1 }, outcome: "inquiry" },
     });
     await syncSaleDmReaction(tx as unknown as ReactionSyncTx, draft.id, { allowTerminal: false });
+    await autoAdvanceCaseStatus(tx, { propertyId: draft.propertyId, to: "contacting_owner", changedBy: draft.generatedBy });
     return { kind: "recorded", inquiryId: created.id, draftId: draft.id, first: claimed.count === 1 };
   });
 }

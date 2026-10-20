@@ -62,24 +62,29 @@ enum DmStatus {
   no_send
 }
 
+// 現役は12値(src/lib/property-types.ts の CASE_STATUS_VALUES)。2026-10-20 の整理で
+// owner_contacted / site_checked / confirming_owner / dm_target / dm_sent / response_received はやめた
+// (DB の値は残す=新規設定不可・古い履歴の表示用)。並びは DB の enum と同じ(=一覧の「案件ステータス順」)。
 enum CaseStatus {
   new_case
   contacting_owner
-  owner_contacted
-  site_checked
-  confirming_owner
-  dm_target
-  dm_sent
-  response_received
   appraisal
   negotiating
   brokerage_obtained
   on_sale
-  hold
-  other_brokerage
+  contract_planned
+  contracted
   sold
+  other_brokerage
+  hold
   closed
-  // deprecated — DB のみ保持、新規設定不可
+  // やめた値 — DB のみ保持、新規設定不可
+  owner_contacted
+  site_checked
+  confirming_owner
+  response_received
+  dm_target
+  dm_sent
   waiting_registry
   done
 }
@@ -138,6 +143,8 @@ enum ChangeSource {
   api
   csv_import
   pdf_import
+  // 人の操作ではなく、決まったきっかけで自動で変わった(案件ステータスの自動の切り替え 2026-10-20)
+  auto
 }
 
 enum InvestigationStatus {

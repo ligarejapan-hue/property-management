@@ -82,46 +82,46 @@ export const PROPERTY_TYPE_OPTIONS: { value: string; label: string }[] = [
 // 案件状況 (CaseStatus)
 // ════════════════════════════════════════════════════════════════════════════
 
-// アクティブな16値。deprecated (waiting_registry / done) はここに含めない。
+// 現役の12値(発注者決定 2026-10-20・上から順に進む)。並びは DB の enum の並び(並べ替え)と同じ。
+// やめた値(owner_contacted など)と古い値(waiting_registry / done)はここに含めない
+// =新しく保存できない。DB には enum として残る(戻すときに安全・古い記録の表示用)。
 export const CASE_STATUS_VALUES = [
   "new_case",
   "contacting_owner",
-  "owner_contacted",
-  "site_checked",
-  "confirming_owner",
-  "dm_target",
-  "dm_sent",
-  "response_received",
   "appraisal",
   "negotiating",
   "brokerage_obtained",
   "on_sale",
-  "hold",
-  "other_brokerage",
+  "contract_planned",
+  "contracted",
   "sold",
+  "other_brokerage",
+  "hold",
   "closed",
 ] as const;
 
 export type CaseStatusValue = (typeof CASE_STATUS_VALUES)[number];
 
 export const CASE_STATUS_LABELS: Record<string, string> = {
-  new_case:           "新規",
-  contacting_owner:   "所有者連絡中",
-  owner_contacted:    "所有者連絡済",
-  site_checked:       "現地確認済",
-  confirming_owner:   "所有者確認中",
-  dm_target:          "DM対象",
-  dm_sent:            "DM送付済",
-  response_received:  "反響あり",
+  new_case:           "未着手",
+  contacting_owner:   "所有者とやりとり中",
   appraisal:          "査定中",
   negotiating:        "商談中",
-  brokerage_obtained: "媒介取得済",
+  brokerage_obtained: "媒介取得",
   on_sale:            "販売中",
+  contract_planned:   "契約予定",
+  contracted:         "契約完了",
+  sold:               "決済完了",
+  other_brokerage:    "他社で決まった",
   hold:               "保留",
-  other_brokerage:    "他社媒介",
-  sold:               "売却完了",
-  closed:             "終了",
-  // deprecated — 既存データ表示のみ
+  closed:             "見送り・終了",
+  // やめた値 — 古い変更履歴などの表示だけに使う
+  owner_contacted:    "所有者連絡済（旧）",
+  site_checked:       "現地確認済（旧）",
+  confirming_owner:   "所有者確認中（旧）",
+  dm_target:          "DM対象（旧）",
+  dm_sent:            "DM送付済（旧）",
+  response_received:  "反響あり（旧）",
   waiting_registry:   "登記待ち（旧）",
   done:               "完了（旧）",
 };
@@ -130,33 +130,49 @@ export const CASE_STATUS_OPTIONS: { value: string; label: string }[] = CASE_STAT
   (v) => ({ value: v, label: CASE_STATUS_LABELS[v] }),
 );
 
+/** CSV などの日本語の名前 → 値。今の名前に加えて、整理前の名前も読めるようにする。 */
 export const CASE_STATUS_JP_TO_VALUE: Record<string, string> = {
-  "新規":         "new_case",
-  "所有者連絡中": "contacting_owner",
-  "所有者連絡済": "owner_contacted",
-  "現地確認済":   "site_checked",
-  "所有者確認中": "confirming_owner",
-  "DM対象":       "dm_target",
-  "DM送付済":     "dm_sent",
-  "反響あり":     "response_received",
-  "査定中":       "appraisal",
-  "商談中":       "negotiating",
-  "媒介取得済":   "brokerage_obtained",
-  "販売中":       "on_sale",
-  "保留":         "hold",
-  "他社媒介":     "other_brokerage",
-  "売却完了":     "sold",
-  "終了":         "closed",
-  // 旧ラベル → 新値（deprecated 値を DB に新規投入しないための正規化）
-  "登記待ち":     "confirming_owner",
-  "謄本待ち":     "confirming_owner",
-  "完了":         "closed",
+  "未着手":           "new_case",
+  "所有者とやりとり中": "contacting_owner",
+  "査定中":           "appraisal",
+  "商談中":           "negotiating",
+  "媒介取得":         "brokerage_obtained",
+  "販売中":           "on_sale",
+  "契約予定":         "contract_planned",
+  "契約完了":         "contracted",
+  "決済完了":         "sold",
+  "他社で決まった":   "other_brokerage",
+  "保留":             "hold",
+  "見送り・終了":     "closed",
+  // 整理前(2026-10-20 まで)の名前
+  "新規":             "new_case",
+  "DM対象":           "new_case",
+  "DM送付済":         "new_case",
+  "所有者連絡中":     "contacting_owner",
+  "所有者連絡済":     "contacting_owner",
+  "現地確認済":       "contacting_owner",
+  "所有者確認中":     "contacting_owner",
+  "反響あり":         "contacting_owner",
+  "媒介取得済":       "brokerage_obtained",
+  "他社媒介":         "other_brokerage",
+  "売却完了":         "sold",
+  "終了":             "closed",
+  // さらに古い名前
+  "登記待ち":         "contacting_owner",
+  "謄本待ち":         "contacting_owner",
+  "完了":             "closed",
 };
 
-// deprecated 旧 enum 値 → 新値
-const CASE_STATUS_DEPRECATED_MAP: Record<string, CaseStatusValue> = {
-  waiting_registry: "confirming_owner",
-  done:             "closed",
+/** やめた値 → 現役の値。DB の移し替え(migration)と同じ対応表。 */
+export const CASE_STATUS_DEPRECATED_MAP: Record<string, CaseStatusValue> = {
+  owner_contacted:   "contacting_owner",
+  site_checked:      "contacting_owner",
+  confirming_owner:  "contacting_owner",
+  response_received: "contacting_owner",
+  dm_target:         "new_case",
+  dm_sent:           "new_case",
+  waiting_registry:  "contacting_owner",
+  done:              "closed",
 };
 
 const CASE_STATUS_VALUE_SET = new Set<string>(CASE_STATUS_VALUES);
@@ -172,9 +188,9 @@ export function normalizeCaseStatusInput(value: unknown): CaseStatusValue | null
   // already a valid active value
   if (CASE_STATUS_VALUE_SET.has(v)) return v as CaseStatusValue;
   // deprecated enum value → new value
-  if (CASE_STATUS_DEPRECATED_MAP[v]) return CASE_STATUS_DEPRECATED_MAP[v];
+  if (Object.prototype.hasOwnProperty.call(CASE_STATUS_DEPRECATED_MAP, v)) return CASE_STATUS_DEPRECATED_MAP[v];
   // Japanese label → new value
-  const fromJp = CASE_STATUS_JP_TO_VALUE[v];
+  const fromJp = Object.prototype.hasOwnProperty.call(CASE_STATUS_JP_TO_VALUE, v) ? CASE_STATUS_JP_TO_VALUE[v] : undefined;
   if (fromJp && CASE_STATUS_VALUE_SET.has(fromJp)) return fromJp as CaseStatusValue;
   return null;
 }

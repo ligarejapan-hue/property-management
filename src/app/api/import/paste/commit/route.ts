@@ -579,7 +579,9 @@ export async function POST(request: NextRequest) {
             builtYear,
             note: p.note?.trim() || null,
             introductionRoute: introductionRouteForLeadSource(body.leadSource),
-            caseStatus: "new_case",
+            // 所有者からの反響(査定サイト・問い合わせ)で作る物件=最初から「所有者とやりとり中」
+            // (案件ステータスの自動の切り替え・発注者決定 2026-10-20)。
+            caseStatus: "contacting_owner",
             registryStatus: "unconfirmed",
             dmStatus: "hold",
             createdBy: session.id,

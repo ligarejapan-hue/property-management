@@ -368,7 +368,8 @@ describe("物件マーカー: 赤は据え置き・種別は1文字", () => {
   it("旧ステータス done も終わった案件として灰色にする(@codex #409 R2 P2)", () => {
     // done は廃止値だが既存データに残っており、地図APIは生値を返す。
     const MARKER = read("src/lib/field-survey-property-marker.ts");
-    expect(MARKER).toContain('new Set(["sold", "closed", "done"])');
+    // 他社で決まった(other_brokerage)も終わった案件(2026-10-20 の整理・@codex #538 P2)。
+    expect(MARKER).toContain('new Set(["sold", "other_brokerage", "closed", "done"])');
   });
 
   it("種別と案件の状態を渡す(見た目の判断を画面側で分岐しない)", () => {

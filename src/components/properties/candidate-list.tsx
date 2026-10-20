@@ -17,7 +17,7 @@ import {
 } from "lucide-react";
 import { fetchCandidates as apiFetchCandidates } from "@/lib/api-client";
 import { Button } from "@/components/ui/button";
-import { PROPERTY_TYPE_LABELS } from "@/lib/property-types";
+import { CASE_STATUS_LABELS, PROPERTY_TYPE_LABELS } from "@/lib/property-types";
 
 interface Candidate {
   id: string;
@@ -63,12 +63,6 @@ const matchTypeConfig: Record<
   address: { label: "住所", icon: Map },
   lot_number: { label: "地番", icon: Hash },
   real_estate_number: { label: "不動産番号", icon: FileText },
-};
-
-const CASE_STATUS_LABELS: Record<string, string> = {
-  active: "進行中",
-  closed: "完了",
-  pending: "保留",
 };
 
 const judgmentConfig: Record<

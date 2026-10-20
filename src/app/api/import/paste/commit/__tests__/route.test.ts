@@ -307,7 +307,8 @@ describe("POST /api/import/paste/commit", () => {
       lotNumber: "552-2",
       propertyType: "house",
       introductionRoute: "web_inquiry",
-      caseStatus: "new_case",
+      // 所有者からの反響で作る物件=最初から「所有者とやりとり中」(発注者決定 2026-10-20)
+      caseStatus: "contacting_owner",
       createdBy: "user-1",
     });
   });

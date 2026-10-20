@@ -784,6 +784,36 @@ sudo systemctl start property-management
 上書きされ得る手動値がそもそも存在しない。コード自体を旧版に戻す場合は反響列は読まれなく
 なるため、DB の巻き戻しは必須ではない。
 
+#### 案件ステータスの整理(2026-10-20): migration 2本+restart の後に移し直し
+
+migration `20261020120000_case_status_reorg_values`(enum の作り直し・`ChangeSource` に `auto`)と
+`20261020120001_case_status_reorg_migrate`(やめた6値の物件を移す)は、通常手順の `migrate deploy` で流れる。
+
+⚠**物件の表を書き直すので、その間(本番 約13万件・101MB で数秒の見込み。手元の 13.1万件で 1.3秒)は物件の読み書きが
+待たされる**(@codex #538 R7)。利用の少ない時間に反映する。1つ目の migration は全体を1つのトランザクションにして、
+表を押さえるまでの待ちを10秒まで(`lock_timeout`)にしてある。長い問い合わせのせいで10秒で押さえられなければ、
+migration は失敗して**何も変わらない**(旧コードのまま動き続ける・build へ進まない)。そのときは失敗の記録を片付けて、
+空いている時に流し直す(手元で「表を25秒押さえた状態→失敗・型は元のまま→片付けて流し直し→成功」を確認済み):
+
+```bash
+npx prisma migrate resolve --rolled-back 20261020120000_case_status_reorg_values
+npx prisma migrate deploy
+```
+
+⚠ただし `migrate deploy` から restart までの間(build の数分)は**旧コードが動いていて、やめた値でも保存できる**。
+その間に保存された物件は migration の移し替えを取りこぼす(@codex #538 R3 P2)。新コードはやめた値を受け付けない
+ので、**restart の後に1回**、同じ移し替えを流す(冪等=該当が無ければ0件)。restart からこの SQL までの間に申込や
+査定報告書が来ても、自動の切り替えはやめた値を移し先の値と同じに扱うので取りこぼさない(@codex #538 R6):
+
+```sql
+UPDATE properties SET case_status = 'contacting_owner', version = version + 1
+  WHERE case_status IN ('owner_contacted', 'site_checked', 'confirming_owner', 'response_received', 'waiting_registry');
+UPDATE properties SET case_status = 'new_case', version = version + 1
+  WHERE case_status IN ('dm_target', 'dm_sent');
+UPDATE properties SET case_status = 'closed', version = version + 1
+  WHERE case_status IN ('done');
+```
+
 ---
 
 ## 8. ロールバック手順
@@ -853,6 +883,57 @@ INSERT INTO dm_inquiries SELECT * FROM dm_inquiries_public_hold_<日付> ON CONF
 ```
 
 退避した申込は旧コードの間は画面に出ない(対応中の案件があれば退避表を直接見る)。通知メール・受付メールは退避前に送信済みの分は再送されない(`notify_status`/`auto_reply_status` も退避表にそのまま残る)。
+
+### 8.2 案件ステータスの整理(2026-10-20・migration `20261020120000_case_status_reorg_values` / `20261020120001_case_status_reorg_migrate`)より前へ戻すとき
+
+enum `CaseStatus` に `contract_planned`(契約予定)・`contracted`(契約完了)、enum `ChangeSource` に `auto`(自動)を足し、やめた6値の物件を近い値へ移した。PostgreSQL は enum の値を消せないので値は残してよい。**古い版はこの3値を知らず、その行を読むと失敗し得る**(物件一覧・物件の変更履歴)ため、**サービスを止めてから**その行を古い版が知っている値へ退避する。やめた6値からの移し替えは戻さない(古い版も移し先の値を知っている)。
+
+```bash
+sudo systemctl stop property-management
+```
+
+```sql
+-- 契約予定・契約完了の物件を、その時点の版(version)ごと控えて「商談中」へ(戻し先は控えから復元する)
+CREATE TABLE case_status_reorg_backup_<日付> AS
+  SELECT id, case_status::text AS case_status, version FROM properties WHERE case_status IN ('contract_planned', 'contracted');
+UPDATE properties SET case_status = 'negotiating', version = version + 1
+  WHERE case_status IN ('contract_planned', 'contracted');
+-- 自動で書いた変更履歴を控えて「api」へ
+CREATE TABLE change_logs_auto_backup_<日付> AS SELECT id FROM change_logs WHERE source = 'auto';
+UPDATE change_logs SET source = 'api' WHERE source = 'auto';
+```
+
+旧コードへの切り替えは 8.1 の手順 4 と同じ(古いタグへ戻して入れ直し・build・start)。⚠`prisma migrate resolve --rolled-back` は使わない(値を残したままなので、記録が実態とずれる)。
+
+再び新コードへ進めるときは、**旧版を止めてから**下の SQL を流し、そのあと新コードを start する(旧版は動いている間、やめた値でも保存できる=止めずに流すと取りこぼす)。
+
+```bash
+sudo systemctl stop property-management
+# 新コードへ切り替えて入れ直し・build(migration は適用済みの記録があるので流れない)
+```
+
+```sql
+-- 戻すのは「退避で版を1つ進めたあと、旧版の間に誰も保存していない行」
+-- (版がちょうど +1)だけ=途中で別の段階に変えてから「商談中」に戻した物件なども上書きしない(@codex #538 P2)。
+-- 版を進めずに書く経路は案件ステータスを書かない(版番号の走査の許可リスト)ので、版で見分けられる。
+UPDATE properties p SET case_status = b.case_status::"CaseStatus", version = p.version + 1
+  FROM case_status_reorg_backup_<日付> b WHERE p.id = b.id AND p.version = b.version + 1;
+-- 戻せなかった行(SELECT b.*, p.case_status FROM case_status_reorg_backup_<日付> b JOIN properties p ON p.id = b.id
+--   WHERE p.case_status::text <> b.case_status)は、旧版の間に保存された物件。画面で段階を確かめて必要なら手で直す。
+UPDATE change_logs c SET source = 'auto' FROM change_logs_auto_backup_<日付> b WHERE c.id = b.id;
+-- 旧版の間に、やめた値で保存された物件を移し直す(migration 20261020120001 と同じ対応表・@codex #538 R2 P2)。
+-- migration は適用済みの記録があるので、もう一度は流れない=ここで手で流す。
+UPDATE properties SET case_status = 'contacting_owner', version = version + 1
+  WHERE case_status IN ('owner_contacted', 'site_checked', 'confirming_owner', 'response_received', 'waiting_registry');
+UPDATE properties SET case_status = 'new_case', version = version + 1
+  WHERE case_status IN ('dm_target', 'dm_sent');
+UPDATE properties SET case_status = 'closed', version = version + 1
+  WHERE case_status IN ('done');
+```
+
+```bash
+sudo systemctl start property-management
+```
 
 ### 現況「賃貸中」(`20261014090000_occupancy_rented`)より前へ戻すとき
 
