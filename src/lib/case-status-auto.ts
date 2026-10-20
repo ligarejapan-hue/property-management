@@ -10,7 +10,7 @@
  *   動かさない。そのため「どこからなら動かしてよいか」を切り替え先ごとに許可リストで持つ。
  */
 import type { CaseStatus } from "@/generated/prisma";
-import type { CaseStatusValue } from "@/lib/property-types";
+import { CASE_STATUS_DEPRECATED_MAP, type CaseStatusValue } from "@/lib/property-types";
 
 export type AutoCaseStatusTarget = Extract<CaseStatusValue, "contacting_owner" | "appraisal">;
 
@@ -19,9 +19,16 @@ const AUTO_ALLOWED_FROM: Record<AutoCaseStatusTarget, ReadonlySet<string>> = {
   appraisal: new Set(["new_case", "contacting_owner"]),
 };
 
-/** いまの値から、自動で `to` に進めてよいか。 */
+/**
+ * いまの値から、自動で `to` に進めてよいか。
+ * やめた値(反映の直後に旧版が書いた dm_sent など)は、移し先の値と同じに扱う
+ * =移し直しの前に申込が来ても、自動の切り替えを取りこぼさない(@codex #538 R6)。
+ */
 export function canAutoAdvanceCaseStatus(current: string, to: AutoCaseStatusTarget): boolean {
-  return AUTO_ALLOWED_FROM[to].has(current);
+  const effective = Object.prototype.hasOwnProperty.call(CASE_STATUS_DEPRECATED_MAP, current)
+    ? CASE_STATUS_DEPRECATED_MAP[current]
+    : current;
+  return AUTO_ALLOWED_FROM[to].has(effective);
 }
 
 export interface AutoCaseStatusTx {

@@ -16,9 +16,19 @@ describe("canAutoAdvanceCaseStatus(前に進むときだけ)", () => {
     expect(canAutoAdvanceCaseStatus(v, "appraisal")).toBe(false);
   });
 
-  it("やめた古い値(DBに残っていても)は動かさない", () => {
-    expect(canAutoAdvanceCaseStatus("dm_sent", "contacting_owner")).toBe(false);
-    expect(canAutoAdvanceCaseStatus("owner_contacted", "appraisal")).toBe(false);
+  // 反映の直後(移し直しの前)に旧版が書いたやめた値が残っていても、移し先と同じに扱う
+  // =自動の切り替えを取りこぼさない(@codex #538 R6 P2)。
+  it.each([
+    ["dm_sent", "contacting_owner", true],
+    ["dm_target", "contacting_owner", true],
+    ["site_checked", "contacting_owner", false],
+    ["owner_contacted", "appraisal", true],
+    ["response_received", "appraisal", true],
+    ["waiting_registry", "appraisal", true],
+    ["done", "contacting_owner", false],
+    ["done", "appraisal", false],
+  ] as const)("やめた値 %s → %s: %s(移し先の値で判断)", (from, to, ok) => {
+    expect(canAutoAdvanceCaseStatus(from, to)).toBe(ok);
   });
 });
 

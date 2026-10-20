@@ -790,7 +790,8 @@ migration `20261020120000_case_status_reorg_values`(enum の作り直し・`Chan
 `20261020120001_case_status_reorg_migrate`(やめた6値の物件を移す)は、通常手順の `migrate deploy` で流れる。
 ⚠ただし `migrate deploy` から restart までの間(build の数分)は**旧コードが動いていて、やめた値でも保存できる**。
 その間に保存された物件は migration の移し替えを取りこぼす(@codex #538 R3 P2)。新コードはやめた値を受け付けない
-ので、**restart の後に1回**、同じ移し替えを流す(冪等=該当が無ければ0件):
+ので、**restart の後に1回**、同じ移し替えを流す(冪等=該当が無ければ0件)。restart からこの SQL までの間に申込や
+査定報告書が来ても、自動の切り替えはやめた値を移し先の値と同じに扱うので取りこぼさない(@codex #538 R6):
 
 ```sql
 UPDATE properties SET case_status = 'contacting_owner', version = version + 1

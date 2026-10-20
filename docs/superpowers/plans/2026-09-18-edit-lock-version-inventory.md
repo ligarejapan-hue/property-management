@@ -52,7 +52,7 @@ Task 7 が直した「謄本取込が所有者の法人番号を版番号を進�
 | `src/lib/registry-pdf/process.ts:361` | `owner.updatedAt` のみ | 既存所有者再利用時の行ロックtouch |
 | `src/lib/building-link/apply.ts:135` | `property.buildingId = null` のみ | (2026-10-05 棟の自動づけで追加)**編集画面で書けない項目ではない**が、`applyBuildingLink` は必ず物件の保存と同じトランザクションで、物件を作った直後(新しい行)か version を進める更新の直後に呼ばれる。版番号はその保存で1回だけ進む |
 | `src/lib/building-link/apply.ts:225` | `property.buildingId`/`buildingName` | 同上(棟へつなぎ、物件名を棟の正式な表記にそろえる) |
-| `src/lib/case-status-auto.ts:68` | `property.caseStatus` のみ | (2026-10-20 案件ステータスの自動の切り替えで追加)`caseStatus` は `property-edit-form.tsx` の FORM_FIELDS に無く、鍵を持つ人の保存が上書きしない。版を進めると、所有者の申込(公開の経路)や査定報告書の添付で、編集中の人の保存が409で負ける(D9 と同じ理由)ため進めない。物件詳細のプルダウンは版を送るが、自動は前に進めるだけなので人の選択が後勝ちでよい |
+| `src/lib/case-status-auto.ts:75` | `property.caseStatus` のみ | (2026-10-20 案件ステータスの自動の切り替えで追加)`caseStatus` は `property-edit-form.tsx` の FORM_FIELDS に無く、鍵を持つ人の保存が上書きしない。版を進めると、所有者の申込(公開の経路)や査定報告書の添付で、編集中の人の保存が409で負ける(D9 と同じ理由)ため進めない。物件詳細のプルダウンは版を送るが、自動は前に進めるだけなので人の選択が後勝ちでよい |
 
 `updatedAt` が編集画面から書けないことの根拠: `src/lib/validators.ts` の `updatePropertySchema`(200-241行)・`updateOwnerSchema`(266-283行)のどちらにも `updatedAt` フィールドが無く、`property-edit-form.tsx` の `FORM_FIELDS`(105-158行)にも該当キーが無い。`dmUndeliverableAt` も両スキーマ・両フォームどちらにも存在しない。
 
