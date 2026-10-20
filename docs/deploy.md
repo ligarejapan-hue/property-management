@@ -875,8 +875,15 @@ UPDATE change_logs SET source = 'api' WHERE source = 'auto';
 
 旧コードへの切り替えは 8.1 の手順 4 と同じ(古いタグへ戻して入れ直し・build・start)。⚠`prisma migrate resolve --rolled-back` は使わない(値を残したままなので、記録が実態とずれる)。
 
+再び新コードへ進めるときは、**旧版を止めてから**下の SQL を流し、そのあと新コードを start する(旧版は動いている間、やめた値でも保存できる=止めずに流すと取りこぼす)。
+
+```bash
+sudo systemctl stop property-management
+# 新コードへ切り替えて入れ直し・build(migration は適用済みの記録があるので流れない)
+```
+
 ```sql
--- 再び新コードへ進めたら戻す。戻すのは「退避で版を1つ進めたあと、旧版の間に誰も保存していない行」
+-- 戻すのは「退避で版を1つ進めたあと、旧版の間に誰も保存していない行」
 -- (版がちょうど +1)だけ=途中で別の段階に変えてから「商談中」に戻した物件なども上書きしない(@codex #538 P2)。
 -- 版を進めずに書く経路は案件ステータスを書かない(版番号の走査の許可リスト)ので、版で見分けられる。
 UPDATE properties p SET case_status = b.case_status::"CaseStatus", version = p.version + 1
@@ -884,6 +891,18 @@ UPDATE properties p SET case_status = b.case_status::"CaseStatus", version = p.v
 -- 戻せなかった行(SELECT b.*, p.case_status FROM case_status_reorg_backup_<日付> b JOIN properties p ON p.id = b.id
 --   WHERE p.case_status::text <> b.case_status)は、旧版の間に保存された物件。画面で段階を確かめて必要なら手で直す。
 UPDATE change_logs c SET source = 'auto' FROM change_logs_auto_backup_<日付> b WHERE c.id = b.id;
+-- 旧版の間に、やめた値で保存された物件を移し直す(migration 20261020120001 と同じ対応表・@codex #538 R2 P2)。
+-- migration は適用済みの記録があるので、もう一度は流れない=ここで手で流す。
+UPDATE properties SET case_status = 'contacting_owner', version = version + 1
+  WHERE case_status IN ('owner_contacted', 'site_checked', 'confirming_owner', 'response_received', 'waiting_registry');
+UPDATE properties SET case_status = 'new_case', version = version + 1
+  WHERE case_status IN ('dm_target', 'dm_sent');
+UPDATE properties SET case_status = 'closed', version = version + 1
+  WHERE case_status IN ('done');
+```
+
+```bash
+sudo systemctl start property-management
 ```
 
 ### 現況「賃貸中」(`20261014090000_occupancy_rented`)より前へ戻すとき
