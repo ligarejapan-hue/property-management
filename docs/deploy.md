@@ -839,7 +839,11 @@ DELETE FROM dm_inquiries WHERE source = 'public';
 # 4. 旧コードへ(上の手順の 1・3・4・5)。⚠**手順 2 の `prisma migrate resolve --rolled-back` はこの migration には使わない**:
 #    列は残したままなので「取り消し済み」と記録すると、次の `prisma migrate deploy` が同じ ADD COLUMN を
 #    やり直して失敗する(@codex #535 R3 P1)。列を本当に消すときだけ、先に DDL を手で戻してから resolve する。
-git checkout <previous-tag> && npm ci --include=dev && npx prisma generate && npm run build && npm prune --omit=dev
+git checkout <previous-tag>
+npm ci --include=dev
+npx prisma generate
+npm run build
+npm prune --omit=dev
 sudo systemctl start property-management
 ```
 
