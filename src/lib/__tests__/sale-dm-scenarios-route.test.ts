@@ -113,6 +113,7 @@ beforeEach(() => {
   pm.dmCampaign.count.mockResolvedValue(0);
   pm.dmVariant.count.mockResolvedValue(0);
   pm.dmLpVariant.count.mockResolvedValue(0);
+  pm.dmInquiry.count.mockResolvedValue(0);
   pm.$queryRaw.mockResolvedValue([{ id: SID, deleted_at: null }]);
 });
 
