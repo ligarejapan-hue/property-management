@@ -1,7 +1,8 @@
 "use client";
 
 import { useEffect, useRef, useState } from "react";
-import { X, Loader2, AlertTriangle, MapPin, ExternalLink } from "lucide-react";
+import { X, AlertTriangle, MapPin, ExternalLink } from "lucide-react";
+import { Button } from "@/components/ui/button";
 import { PROPERTY_TYPE_OPTIONS } from "@/lib/property-types";
 import {
   convertPinToProperty,
@@ -239,13 +240,16 @@ export default function ConvertPinToPropertyModal({ pinId, onClose, onSubmitting
       <div className="w-full max-w-[90vw] sm:max-w-md max-h-[85dvh] overflow-y-auto overscroll-contain rounded-xl bg-white dark:bg-gray-900 shadow-xl">
         <div className="flex items-center justify-between border-b border-gray-200 dark:border-gray-800 px-6 py-4">
           <h2 className="text-base font-semibold text-gray-800 dark:text-gray-100">この場所を物件にする</h2>
-          <button
+          <Button
+            variant="ghost"
+            size="sm"
             onClick={onClose}
             disabled={submitting}
-            className="rounded-md p-1 text-gray-400 dark:text-gray-500 hover:bg-gray-100 dark:hover:bg-gray-800 hover:text-gray-600 dark:hover:text-gray-300 disabled:opacity-50"
+            aria-label="閉じる"
+            className="text-gray-400 hover:text-gray-600"
           >
             <X className="h-5 w-5" />
-          </button>
+          </Button>
         </div>
 
         <form onSubmit={handleSubmit} className="space-y-4 px-6 py-5">
@@ -298,20 +302,18 @@ export default function ConvertPinToPropertyModal({ pinId, onClose, onSubmitting
               {(reverseGeocodeEnabled || externalMapUrl) && (
                 <div className="flex flex-wrap items-center gap-2">
                   {reverseGeocodeEnabled && (
-                    <button
-                      type="button"
+                    <Button
+                      variant="secondary"
+                      size="sm"
                       onClick={handleSuggestAddress}
                       disabled={submitting || suggesting}
-                      className="inline-flex items-center gap-1.5 rounded-md border border-indigo-300 dark:border-indigo-700 bg-white dark:bg-gray-900 px-2.5 py-1.5 text-xs font-medium text-indigo-600 dark:text-indigo-400 hover:bg-indigo-50 dark:hover:bg-gray-800 disabled:opacity-50"
+                      loading={suggesting}
+                      loadingLabel="ピンの位置から住所を入力"
                       title="ピンの位置から住所を自動入力します（無料）"
                     >
-                      {suggesting ? (
-                        <Loader2 className="h-3.5 w-3.5 animate-spin" />
-                      ) : (
-                        <MapPin className="h-3.5 w-3.5" />
-                      )}
+                      <MapPin className="h-3.5 w-3.5" />
                       ピンの位置から住所を入力
-                    </button>
+                    </Button>
                   )}
                   {/* ⚠**一般向け Google マップを別タブで開くだけ**なので課金されない
                       (アプリ内に地図を描く Maps Platform とは別物)。完成待ち一覧の
@@ -392,22 +394,18 @@ export default function ConvertPinToPropertyModal({ pinId, onClose, onSubmitting
               表示され、CSV 取込からは従来どおり入る(重複判定の第1キー)。 */}
 
           <div className="flex items-center justify-end gap-2 border-t border-gray-100 dark:border-gray-800 pt-4">
-            <button
-              type="button"
-              onClick={onClose}
-              disabled={submitting}
-              className="rounded-md border border-gray-300 dark:border-gray-700 px-4 py-2 text-sm text-gray-700 dark:text-gray-200 hover:bg-gray-50 dark:hover:bg-gray-800 disabled:opacity-50"
-            >
+            <Button variant="secondary" onClick={onClose} disabled={submitting}>
               キャンセル
-            </button>
-            <button
+            </Button>
+            <Button
+              variant="primary"
               type="submit"
               disabled={submitting}
-              className="flex items-center gap-2 rounded-md bg-indigo-600 px-4 py-2 text-sm font-medium text-white hover:bg-indigo-700 disabled:opacity-50"
+              loading={submitting}
+              loadingLabel="物件にする"
             >
-              {submitting && <Loader2 className="h-4 w-4 animate-spin" />}
               物件にする
-            </button>
+            </Button>
           </div>
         </form>
       </div>

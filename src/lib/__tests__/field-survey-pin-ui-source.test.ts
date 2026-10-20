@@ -1077,7 +1077,10 @@ describe("再マウント後も送信中の写真を取りこぼさない (@code
     expect(PHOTO_HOOK_SRC).toMatch(/markDeleteStarted\(pinId, photoId\)/);
     // 画面側: 進行中の photoId は disabled かつ「削除中…」表示
     expect(PANEL_SRC).toMatch(/pendingDeleteIds\.includes\(p\.id\)/);
-    expect(PANEL_SRC).toContain("削除中…");
+    // UIの統一 第4回: 文言の切り替えは共通 Button の loading に寄せた
+    expect(PANEL_SRC).toMatch(
+      /loading=\{pendingDeleteIds\.includes\(p\.id\)\}\s*loadingLabel="削除中"/,
+    );
     expect(PANEL_SRC).toMatch(/setPendingDeleteIds\(pendingPhotoDeleteIds\(pinId\)\)/);
   });
 

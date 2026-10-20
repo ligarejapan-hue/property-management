@@ -35,6 +35,7 @@ export default function PinWithoutPhotoButton({
     <div data-motion="off" className="pointer-events-none">
       <button
         type="button"
+        data-motion="off"
         onClick={onStart}
         disabled={disabled}
         data-testid="pin-without-photo-button"

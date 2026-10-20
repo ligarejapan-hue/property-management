@@ -1,6 +1,7 @@
 "use client";
 
 import { createPortal } from "react-dom";
+import { Button } from "@/components/ui/button";
 
 /**
  * 位置記録の説明文 (単一の正本)。
@@ -65,20 +66,12 @@ export function LocationConsentModal({
           <LocationConsentNotice />
         </div>
         <div className="flex justify-end gap-2">
-          <button
-            type="button"
-            onClick={onCancel}
-            className="rounded border border-gray-300 bg-white px-3 py-1 text-xs text-gray-700 hover:bg-gray-50 dark:border-gray-700 dark:bg-gray-900 dark:text-gray-200 dark:hover:bg-gray-800"
-          >
+          <Button variant="secondary" size="sm" onClick={onCancel}>
             キャンセル
-          </button>
-          <button
-            type="button"
-            onClick={onAgree}
-            className="rounded border border-indigo-600 bg-indigo-600 px-3 py-1 text-xs font-semibold text-white hover:bg-indigo-700"
-          >
+          </Button>
+          <Button variant="primary" size="sm" onClick={onAgree}>
             同意して記録開始
-          </button>
+          </Button>
         </div>
       </div>
     </div>,

@@ -19,6 +19,8 @@
  * 家を探すために現在地へ寄りたい瞬間にボタンを押せなくしていた。
  */
 
+import { Button } from "@/components/ui/button";
+
 interface CameraFirstBannerProps {
   onCancel: () => void;
   /** 「撮り直す」=写真を捨てて**カメラを直接開く**(第2弾。従来はFAB押し直し)。 */
@@ -50,23 +52,23 @@ export default function CameraFirstBanner({
         地図で<b>家の上をタップ</b>してください。そこにピンを立てます。
       </p>
       <div className="mt-2 flex justify-end gap-2">
-        <button
-          type="button"
+        <Button
+          variant="secondary"
+          size="sm"
           onClick={onCancel}
           data-testid="camera-first-cancel"
-          className="rounded border border-indigo-300 bg-white px-3 py-1 text-[11px] text-indigo-900 hover:bg-indigo-100 dark:border-indigo-500/40 dark:bg-gray-900 dark:text-indigo-200 dark:hover:bg-gray-800"
         >
           やめる
-        </button>
+        </Button>
         {hasPhoto && onRetake && (
-          <button
-            type="button"
+          <Button
+            variant="primary"
+            size="sm"
             onClick={onRetake}
             data-testid="camera-first-retake"
-            className="rounded border border-indigo-600 bg-indigo-600 px-3 py-1 text-[11px] font-semibold text-white hover:bg-indigo-700 dark:border-indigo-500"
           >
             撮り直す(カメラを開く)
-          </button>
+          </Button>
         )}
       </div>
     </div>

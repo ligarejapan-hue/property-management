@@ -139,6 +139,7 @@ export default function MapRecenterButton({
           title (PC のツールチップ) で必ず伝える。 */}
       <button
         type="button"
+        data-motion="off"
         onClick={handleClick}
         disabled={locating}
         data-testid="map-recenter-button"

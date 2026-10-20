@@ -13,6 +13,7 @@
 
 import { useCallback, useEffect, useRef, useState } from "react";
 import Link from "next/link";
+import { Button } from "@/components/ui/button";
 
 type Scope = "mine" | "all";
 type StatusFilter = "ended" | "active" | "cancelled" | "all";
@@ -215,22 +216,22 @@ export default function SessionHistoryClient({
           {loading ? "読み込み中…" : `ページ ${page} / ${totalPages}`}
         </span>
         <div className="flex gap-2">
-          <button
-            type="button"
+          <Button
+            variant="secondary"
+            size="sm"
             onClick={() => setPage((p) => Math.max(1, p - 1))}
             disabled={loading || page <= 1}
-            className="rounded border border-gray-300 bg-white px-3 py-1 disabled:opacity-50 dark:border-gray-700 dark:bg-gray-900 dark:text-gray-100"
           >
             前へ
-          </button>
-          <button
-            type="button"
+          </Button>
+          <Button
+            variant="secondary"
+            size="sm"
             onClick={() => setPage((p) => Math.min(totalPages, p + 1))}
             disabled={loading || page >= totalPages}
-            className="rounded border border-gray-300 bg-white px-3 py-1 disabled:opacity-50 dark:border-gray-700 dark:bg-gray-900 dark:text-gray-100"
           >
             次へ
-          </button>
+          </Button>
         </div>
       </div>
     </div>

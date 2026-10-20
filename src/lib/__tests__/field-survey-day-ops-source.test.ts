@@ -93,7 +93,7 @@ describe("2. 圏外時の巡回終了の脱出口", () => {
   it("終了ブロック時に「破棄して終了」ボタンを出し、PATCH 成功後に破棄する", () => {
     expect(TRIP_SRC).toMatch(/setEndBlockedByBuffer\(true\)/);
     const btn = TRIP_SRC.match(
-      /data-testid="trip-discard-and-end"[\s\S]{0,600}?<\/button>/,
+      /data-testid="trip-discard-and-end"[\s\S]{0,600}?<\/Button>/,
     );
     expect(btn).not.toBeNull();
     const m = btn?.[0] ?? "";
