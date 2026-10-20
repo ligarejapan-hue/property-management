@@ -14,6 +14,7 @@
  * Font options are a static allow-list verified against `isSafeFontFamily`.
  */
 
+import { Button } from "@/components/ui/button";
 import { isCssColor, isSafeFontFamily } from "@/lib/sales-sheet/css-safety";
 import type {
   EditTextPatch,
@@ -390,22 +391,24 @@ export function ElementPanel({ element, onChange, theme, onThemeChange }: Elemen
       <section className="p-3">
         <p className={sectionHeadCls}>重ね順</p>
         <div className="flex gap-2">
-          <button
-            type="button"
+          <Button
+            variant="secondary"
+            size="sm"
             onClick={() => onChange({ type: "bringToFront" })}
-            className="flex-1 rounded border border-neutral-300 dark:border-zinc-600 bg-white dark:bg-zinc-700 px-2 py-1 text-xs text-neutral-700 dark:text-zinc-200 hover:bg-neutral-50 dark:hover:bg-zinc-600 transition-colors"
+            className="flex-1"
             aria-label="前面に移動"
           >
             前面
-          </button>
-          <button
-            type="button"
+          </Button>
+          <Button
+            variant="secondary"
+            size="sm"
             onClick={() => onChange({ type: "sendToBack" })}
-            className="flex-1 rounded border border-neutral-300 dark:border-zinc-600 bg-white dark:bg-zinc-700 px-2 py-1 text-xs text-neutral-700 dark:text-zinc-200 hover:bg-neutral-50 dark:hover:bg-zinc-600 transition-colors"
+            className="flex-1"
             aria-label="背面に移動"
           >
             背面
-          </button>
+          </Button>
         </div>
       </section>
 
@@ -486,23 +489,25 @@ export function ElementPanel({ element, onChange, theme, onThemeChange }: Elemen
             )}
             {/* 間取り図/敷地図の指定・解除。間取り図も写真の仲間として写真枠に並ぶ。 */}
             {imageEl.id === "floor-plan" ? (
-              <button
-                type="button"
+              <Button
+                variant="secondary"
+                size="sm"
                 data-action="unset-floor-plan"
                 onClick={() => onChange({ type: "unsetFloorPlan" })}
-                className="w-full rounded border border-neutral-300 bg-white px-2 py-1.5 text-xs font-semibold text-neutral-700 hover:bg-neutral-50 dark:border-zinc-600 dark:bg-zinc-700 dark:text-zinc-200 dark:hover:bg-zinc-600"
+                className="w-full"
               >
                 写真に戻す（間取り図を解除）
-              </button>
+              </Button>
             ) : (
-              <button
-                type="button"
+              <Button
+                variant="secondary"
+                size="sm"
                 data-action="set-floor-plan"
                 onClick={() => onChange({ type: "setFloorPlan" })}
-                className="w-full rounded border border-blue-500 bg-blue-50 px-2 py-1.5 text-xs font-semibold text-blue-600 hover:bg-blue-100 dark:border-blue-400 dark:bg-blue-900/30 dark:text-blue-300"
+                className="w-full"
               >
                 間取り図にする
-              </button>
+              </Button>
             )}
             {/* Fit */}
             <label className="flex flex-col gap-0.5">
@@ -651,24 +656,25 @@ export function ElementPanel({ element, onChange, theme, onThemeChange }: Elemen
                   }
                   className={inputCls}
                 />
-                <button
-                  type="button"
+                <Button
+                  variant="ghost"
+                  size="sm"
                   aria-label={`行${i + 1} を削除`}
                   onClick={() => onChange({ type: "removeTableRow", index: i })}
-                  className="shrink-0 rounded border border-neutral-300 dark:border-zinc-600 px-1.5 py-1 text-xs text-red-600 dark:text-red-400 hover:bg-red-50 dark:hover:bg-red-900/20"
+                  className="shrink-0 text-red-600 dark:text-red-400"
                 >
                   ×
-                </button>
+                </Button>
               </div>
             ))}
-            <button
-              type="button"
+            <Button
+              variant="secondary"
+              size="sm"
               data-table-add-row
               onClick={() => onChange({ type: "addTableRow" })}
-              className="rounded border border-neutral-300 dark:border-zinc-600 bg-white dark:bg-zinc-700 px-2 py-1 text-xs text-neutral-700 dark:text-zinc-200 hover:bg-neutral-50 dark:hover:bg-zinc-600 transition-colors"
             >
               行を追加
-            </button>
+            </Button>
           </div>
         </section>
       )}
@@ -706,14 +712,15 @@ export function ElementPanel({ element, onChange, theme, onThemeChange }: Elemen
 
       {/* ── Delete ────────────────────────────────────────────────────── */}
       <section className="p-3">
-        <button
-          type="button"
+        <Button
+          variant="danger"
+          size="sm"
           onClick={() => onChange({ type: "delete" })}
-          className="w-full rounded border border-red-300 dark:border-red-700 bg-white dark:bg-zinc-700 px-2 py-1 text-xs text-red-600 dark:text-red-400 hover:bg-red-50 dark:hover:bg-red-900/20 transition-colors"
+          className="w-full"
           aria-label="要素を削除"
         >
           削除
-        </button>
+        </Button>
       </section>
     </div>
   );

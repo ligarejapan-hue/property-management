@@ -1,6 +1,7 @@
 "use client";
 
 import { useState } from "react";
+import { Button } from "@/components/ui/button";
 
 /** 旧ひな型の図面で自動機能を止めたときの説明。 */
 export const LEGACY_TEMPLATE_NOTE = "古いひな型の図面では使えません（新しいひな型で作り直すと使えます）";
@@ -110,123 +111,110 @@ export function EditorToolbar({ dirty, onSave, onExport, onDelete, onAddPhoto, o
         </span>
       )}
       {onUndo && (
-        <button
-          type="button"
+        <Button
+          variant="secondary"
           data-toolbar-undo
           onClick={onUndo}
           disabled={busy || !canUndo}
           title="元に戻す (Ctrl+Z)"
-          className="rounded px-3 py-1.5 text-sm border border-neutral-300 dark:border-zinc-600 hover:bg-neutral-100 dark:hover:bg-zinc-700 disabled:opacity-50 dark:text-neutral-200"
         >
           ← 元に戻す
-        </button>
+        </Button>
       )}
       {onRedo && (
-        <button
-          type="button"
+        <Button
+          variant="secondary"
           data-toolbar-redo
           onClick={onRedo}
           disabled={busy || !canRedo}
           title="やり直す (Ctrl+Y)"
-          className="rounded px-3 py-1.5 text-sm border border-neutral-300 dark:border-zinc-600 hover:bg-neutral-100 dark:hover:bg-zinc-700 disabled:opacity-50 dark:text-neutral-200"
         >
           やり直す →
-        </button>
+        </Button>
       )}
-      <button
-        type="button"
+      <Button
         data-toolbar-save
         onClick={handleSave}
         disabled={busy}
-        className="rounded px-3 py-1.5 text-sm bg-indigo-600 text-white hover:bg-indigo-700 disabled:opacity-50"
       >
         {saving ? "保存中…" : "保存"}
-      </button>
-      <button
-        type="button"
+      </Button>
+      <Button
+        variant="secondary"
         data-toolbar-add-photo
         onClick={onAddPhoto}
         disabled={busy}
-        className="rounded px-3 py-1.5 text-sm border border-neutral-300 dark:border-zinc-600 hover:bg-neutral-100 dark:hover:bg-zinc-700 disabled:opacity-50 dark:text-neutral-200"
       >
         写真を追加
-      </button>
-      <button
-        type="button"
+      </Button>
+      <Button
+        variant="secondary"
         data-toolbar-auto-arrange
         onClick={onAutoArrange}
         disabled={busy || !canAutoLayout}
         title={!canAutoLayout ? LEGACY_TEMPLATE_NOTE : "写真と間取り図を左の写真枠に並べ直します。文字・表・バッジ・QRは動きません"}
-        className="rounded px-3 py-1.5 text-sm border border-neutral-300 dark:border-zinc-600 hover:bg-neutral-100 dark:hover:bg-zinc-700 disabled:opacity-50 dark:text-neutral-200"
       >
         写真を自動整列
-      </button>
-      <button
-        type="button"
+      </Button>
+      <Button
+        variant="secondary"
         data-toolbar-auto-balance
         onClick={onAutoBalance}
         disabled={busy || !canAutoLayout}
         title={!canAutoLayout ? LEGACY_TEMPLATE_NOTE : "見出し・価格・キャッチコピー・表・写真・間取り図・地図QRなどの定型項目を標準の配置に戻します(手で動かしていても戻ります)。自分で追加した文字・バッジ・QR(地図QRを除く)は動きません"}
-        className="rounded px-3 py-1.5 text-sm border border-neutral-300 dark:border-zinc-600 hover:bg-neutral-100 dark:hover:bg-zinc-700 disabled:opacity-50 dark:text-neutral-200"
       >
         レイアウト自動調整
-      </button>
-      <button
-        type="button"
+      </Button>
+      <Button
+        variant="secondary"
         data-toolbar-add-badge
         onClick={onAddBadge}
         disabled={busy}
-        className="rounded px-3 py-1.5 text-sm border border-neutral-300 dark:border-zinc-600 hover:bg-neutral-100 dark:hover:bg-zinc-700 disabled:opacity-50 dark:text-neutral-200"
       >
         バッジを追加
-      </button>
-      <button
-        type="button"
+      </Button>
+      <Button
+        variant="secondary"
         data-toolbar-add-qr
         onClick={onAddQr}
         disabled={busy}
-        className="rounded px-3 py-1.5 text-sm border border-neutral-300 dark:border-zinc-600 hover:bg-neutral-100 dark:hover:bg-zinc-700 disabled:opacity-50 dark:text-neutral-200"
       >
         QRを追加
-      </button>
-      <button
-        type="button"
+      </Button>
+      <Button
+        variant="secondary"
         data-toolbar-add-map-qr
         onClick={onAddMapQr}
         disabled={busy || !canAddMapQr}
         title={!canAddMapQr ? (mapQrDisabledReason ?? "物件の住所が未登録です") : "物件の場所（Googleマップ）のQRを会社帯の右端に追加"}
-        className="rounded px-3 py-1.5 text-sm border border-neutral-300 dark:border-zinc-600 hover:bg-neutral-100 dark:hover:bg-zinc-700 disabled:opacity-50 dark:text-neutral-200"
       >
         地図QRを追加
-      </button>
-      <button
-        type="button"
+      </Button>
+      <Button
+        variant="secondary"
         data-toolbar-transaction-info
         onClick={onOpenTransactionInfo}
         disabled={busy || !canEditTransactionInfo}
         title={!canEditTransactionInfo ? (transactionInfoDisabledReason ?? "この図面には会社帯がありません（古い様式で作成された図面）") : undefined}
-        className="rounded px-3 py-1.5 text-sm border border-neutral-300 dark:border-zinc-600 hover:bg-neutral-100 dark:hover:bg-zinc-700 disabled:opacity-50 dark:text-neutral-200"
       >
         取引情報
-      </button>
-      <button
-        type="button"
+      </Button>
+      <Button
+        variant="secondary"
         data-toolbar-export="pdf"
         onClick={() => handleExport("pdf")}
         disabled={busy}
-        className="rounded px-3 py-1.5 text-sm border border-neutral-300 dark:border-zinc-600 hover:bg-neutral-100 dark:hover:bg-zinc-700 disabled:opacity-50 dark:text-neutral-200"
       >
         {exporting ? "出力中…" : "PDF出力"}
-      </button>
-      <button
-        type="button"
+      </Button>
+      <Button
+        variant="secondary"
         data-toolbar-export="png"
         onClick={() => handleExport("png")}
         disabled={busy}
-        className="rounded px-3 py-1.5 text-sm border border-neutral-300 dark:border-zinc-600 hover:bg-neutral-100 dark:hover:bg-zinc-700 disabled:opacity-50 dark:text-neutral-200"
       >
         PNG出力
-      </button>
+      </Button>
       <div className="flex-1" />
       {error && (
         <span
@@ -236,15 +224,14 @@ export function EditorToolbar({ dirty, onSave, onExport, onDelete, onAddPhoto, o
           {error}
         </span>
       )}
-      <button
-        type="button"
+      <Button
+        variant="danger"
         data-toolbar-delete
         onClick={handleDelete}
         disabled={busy}
-        className="rounded px-3 py-1.5 text-sm text-red-600 border border-red-300 hover:bg-red-50 dark:text-red-400 dark:border-red-700 dark:hover:bg-red-900/20 disabled:opacity-50"
       >
         {deleting ? "削除中…" : "削除"}
-      </button>
+      </Button>
     </div>
     {/* B-8: 文字・表の重なり注意はボタン行と競合しない独立行に全文表示する
         (@codex #310 R4/R6: flex 行内だと幅次第で折返し崩れ or 0 幅で消える)。
@@ -258,7 +245,9 @@ export function EditorToolbar({ dirty, onSave, onExport, onDelete, onAddPhoto, o
         {layoutWarning}
         {/* B-8 案A: 押したときだけ自動で直す(勝手には動かさない)。 */}
         {onAutoFixOverlaps && (
+          // data-ui=raw: 琥珀の注意枠の中の専用ボタン(枠の色に合わせた見た目)
           <button
+            data-ui="raw"
             type="button"
             onClick={onAutoFixOverlaps}
             disabled={busy}

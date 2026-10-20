@@ -2,6 +2,7 @@
 
 import { useState } from "react";
 import { Loader2, Plus, Trash2, Pencil, FileText, Copy } from "lucide-react";
+import { Button } from "@/components/ui/button";
 import type { SaleDmCampaign, SaleDmVariant, SaleDmVariantOptions } from "@/lib/api-client";
 import {
   createSaleDmVariant,
@@ -238,14 +239,9 @@ export default function SaleDmVariantManager({
       <div className="flex items-center justify-between">
         <h3 className="text-sm font-medium text-gray-700">{scenario ? "お手紙(DMの種類ごと)" : "A/Bの型"}</h3>
         {!scenario && (
-        <button
-          type="button"
-          onClick={startNew}
-          disabled={busy}
-          className="inline-flex items-center gap-1 rounded-md border border-gray-300 px-2 py-1 text-xs font-medium text-gray-700 hover:bg-gray-50 disabled:opacity-50"
-        >
+        <Button type="button" variant="secondary" size="sm" onClick={startNew} disabled={busy}>
           <Plus className="h-3.5 w-3.5" /> 型を追加
-        </button>
+        </Button>
         )}
       </div>
 
@@ -261,39 +257,45 @@ export default function SaleDmVariantManager({
               </span>
             </div>
             <div className="flex gap-1">
-              <button
+              <Button
                 type="button"
+                variant="ghost"
+                size="sm"
                 onClick={() => openLetter(v)}
                 disabled={busy}
                 // 手順の案内(step-guide)が光らせる目印。いま本文が要る型に付ける(先頭固定にしない・@codex #449 R1)。
                 data-guide={v.id === guideIds.dmVariantId ? "dm_body" : undefined}
                 aria-label={`型「${v.label}」の文面`}
                 title="プロンプトを表示して、手元のAIで作った本文を貼り付けます"
-                className="rounded p-1 text-indigo-600 hover:bg-indigo-50 disabled:opacity-50"
+                className="text-indigo-600"
               >
                 <FileText className="h-3.5 w-3.5" />
-              </button>
+              </Button>
               {!scenario && (
-              <button
+              <Button
                 type="button"
+                variant="ghost"
+                size="sm"
                 onClick={() => startEdit(v)}
                 disabled={busy}
                 aria-label={`型「${v.label}」を編集`}
-                className="rounded p-1 text-gray-500 hover:bg-gray-100 disabled:opacity-50"
+                className="text-gray-500"
               >
                 <Pencil className="h-3.5 w-3.5" />
-              </button>
+              </Button>
               )}
               {!scenario && (
-              <button
+              <Button
                 type="button"
+                variant="ghost"
+                size="sm"
                 onClick={() => remove(v)}
                 disabled={busy}
                 aria-label={`型「${v.label}」を削除`}
-                className="rounded p-1 text-red-500 hover:bg-red-50 disabled:opacity-50"
+                className="text-red-500"
               >
                 <Trash2 className="h-3.5 w-3.5" />
-              </button>
+              </Button>
               )}
             </div>
           </li>
@@ -307,17 +309,19 @@ export default function SaleDmVariantManager({
             <span className="font-medium text-gray-700">
               「{letterFor.label}」の文面
             </span>
-            <button
+            <Button
               type="button"
+              variant="ghost"
+              size="sm"
               onClick={() => {
                 setLetterFor(null);
                 setLetter(null);
                 setLetterNotice(null);
               }}
-              className="text-gray-500 hover:underline"
+              className="text-gray-500"
             >
               閉じる
-            </button>
+            </Button>
           </div>
 
           {/* ⚠凍結でも**原本がまだ無い型**は入力欄を出す（@codex #376 R3）。反映前からある型は
@@ -342,15 +346,10 @@ export default function SaleDmVariantManager({
                 <pre className="max-h-40 flex-1 overflow-auto whitespace-pre-wrap rounded border border-gray-200 bg-white p-2 text-[11px] leading-relaxed text-gray-700">
                   {letter.prompt}
                 </pre>
-                <button
-                  type="button"
-                  onClick={copyPrompt}
-                  disabled={busy}
-                  className="flex items-center gap-1 rounded border border-indigo-300 bg-white px-2 py-1 text-indigo-700 hover:bg-indigo-50 disabled:opacity-50"
-                >
+                <Button type="button" variant="secondary" size="sm" onClick={copyPrompt} disabled={busy}>
                   <Copy className="h-3.5 w-3.5" />
                   コピー
-                </button>
+                </Button>
               </div>
 
               <textarea
@@ -368,34 +367,36 @@ export default function SaleDmVariantManager({
               本文が空になるため、ここを隠すと1件ずつ手で書くしかなくなる。
               禁止すべきは「差し替え」であって「保存済みの文面の適用」ではない。 */}
             <div className="mt-1.5 flex flex-wrap gap-2">
-              <button
+              <Button
                 type="button"
+                size="sm"
                 onClick={saveTemplate}
                 disabled={busy}
                 // 開いている枠が、いま本文が要る型のときだけ目印を付ける(別の型の枠を光らせない・@codex #449 R2)。
                 data-guide={letterFor?.id === guideIds.dmVariantId ? "dm_body_save" : undefined}
-                className="rounded bg-indigo-600 px-2.5 py-1 text-white hover:bg-indigo-700 disabled:opacity-50"
               >
                 本文を保存
-              </button>
-              <button
+              </Button>
+              <Button
                 type="button"
+                variant="secondary"
+                size="sm"
                 onClick={() => applyTemplate(false)}
                 disabled={busy}
                 data-guide={letterFor?.id === guideIds.dmVariantId ? "apply" : undefined}
-                className="rounded border border-indigo-300 bg-white px-2.5 py-1 text-indigo-700 hover:bg-indigo-50 disabled:opacity-50"
               >
                 {scenario ? "差し込み(この種類の全宛先へ)" : "この型の全宛先に適用"}
-              </button>
-              <button
+              </Button>
+              <Button
                 type="button"
+                variant="secondary"
+                size="sm"
                 onClick={() => applyTemplate(true)}
                 disabled={busy}
                 title="手直しした本文も置き換えます"
-                className="rounded border border-gray-300 bg-white px-2.5 py-1 text-gray-600 hover:bg-gray-50 disabled:opacity-50"
               >
                 手直し分も置き換えて適用
-              </button>
+              </Button>
             </div>
 
           {letterNotice && (
@@ -428,16 +429,16 @@ export default function SaleDmVariantManager({
           <option value="sequential">順番に</option>
           <option value="random">ランダムに</option>
         </select>
-        <button
+        <Button
           type="button"
+          size="sm"
           onClick={autoAssign}
           disabled={busy || campaign.variants.length === 0}
           data-guide="assign"
-          className="inline-flex items-center gap-1 rounded-md bg-indigo-600 px-3 py-1.5 text-xs font-medium text-white hover:bg-indigo-700 disabled:opacity-50"
         >
           {busy ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : null}
           均等に割り当て
-        </button>
+        </Button>
       </div>
       )}
     </div>
@@ -496,23 +497,18 @@ function VariantForm({
         <p className="text-[11px] text-gray-400">空欄の型は既定のLPへ。型ごとに変えると LP の A/B（振り分け）ができます。</p>
       </div>
       <div className="flex gap-2">
-        <button
+        <Button
           type="button"
+          size="sm"
           onClick={onSubmit}
           disabled={busy || form.label.trim() === ""}
-          className="inline-flex items-center gap-1 rounded-md bg-indigo-600 px-3 py-1.5 text-xs font-medium text-white hover:bg-indigo-700 disabled:opacity-50"
         >
           {busy ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : null}
           {isNew ? "作成" : "保存"}
-        </button>
-        <button
-          type="button"
-          onClick={onCancel}
-          disabled={busy}
-          className="rounded-md border border-gray-300 px-3 py-1.5 text-xs font-medium text-gray-700 hover:bg-gray-50 disabled:opacity-50"
-        >
+        </Button>
+        <Button type="button" variant="secondary" size="sm" onClick={onCancel} disabled={busy}>
           キャンセル
-        </button>
+        </Button>
       </div>
     </div>
   );

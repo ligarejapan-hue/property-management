@@ -1,6 +1,7 @@
 "use client";
 
 import { useState } from "react";
+import { Button } from "@/components/ui/button";
 import type { FooterBandData } from "@/lib/sales-sheet/footer-band";
 import { TRANSACTION_TYPE, AD_TYPE, COMPENSATION } from "@/lib/sales-sheet/option-master";
 
@@ -136,20 +137,12 @@ export function TransactionInfoDialog({
         </div>
 
         <div className="mt-4 flex justify-end gap-2">
-          <button
-            type="button"
-            onClick={onClose}
-            className="rounded px-3 py-2 text-sm text-gray-600 hover:bg-gray-100 dark:text-gray-400 dark:hover:bg-neutral-700"
-          >
+          <Button variant="ghost" onClick={onClose} className="text-gray-600 dark:text-gray-400">
             キャンセル
-          </button>
-          <button
-            type="button"
-            onClick={() => onApply(values)}
-            className="rounded bg-indigo-600 px-3 py-2 text-sm font-semibold text-white hover:bg-indigo-700"
-          >
+          </Button>
+          <Button onClick={() => onApply(values)}>
             適用
-          </button>
+          </Button>
         </div>
       </div>
     </div>

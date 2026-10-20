@@ -4,6 +4,7 @@ import { useCallback, useEffect, useState, type ChangeEvent } from "react";
 import Link from "next/link";
 import { useSession } from "next-auth/react";
 import { Loader2 } from "lucide-react";
+import { Button } from "@/components/ui/button";
 import type { SaleDmCampaign, SaleDmDraft, SaleDmScenarioOption } from "@/lib/api-client";
 import {
   patchSaleDmDraft,
@@ -152,6 +153,7 @@ export default function SaleDmAdjustPanel({
         <button
           type="button"
           onClick={() => setTab("campaign")}
+          aria-pressed={tab === "campaign"}
           className={`flex-1 rounded px-2 py-1 ${tab === "campaign" ? "bg-indigo-600 text-white" : "text-gray-600"}`}
         >
           全体
@@ -159,6 +161,7 @@ export default function SaleDmAdjustPanel({
         <button
           type="button"
           onClick={() => setTab("draft")}
+          aria-pressed={tab === "draft"}
           className={`flex-1 rounded px-2 py-1 ${tab === "draft" ? "bg-indigo-600 text-white" : "text-gray-600"}`}
         >
           この通
@@ -216,7 +219,8 @@ export default function SaleDmAdjustPanel({
               {scenarioOptionsError && (
                 <span className="text-amber-700">
                   DMの種類を読み込めませんでした。{" "}
-                  <button type="button" onClick={() => loadScenarioOptions()} className="underline underline-offset-2">
+                  {/* data-ui=raw: 文中の下線リンク */}
+                  <button type="button" data-ui="raw" onClick={() => loadScenarioOptions()} className="underline underline-offset-2">
                     再読み込み
                   </button>
                 </span>
@@ -249,15 +253,15 @@ export default function SaleDmAdjustPanel({
             data-pii-surface="owner"
           />
           <div className="flex gap-2">
-            <button
+            <Button
               type="button"
+              size="sm"
               onClick={saveBody}
               disabled={busy || bodyDraft === selected.body}
-              className="inline-flex items-center gap-1 rounded-md bg-indigo-600 px-3 py-1.5 text-xs font-medium text-white hover:bg-indigo-700 disabled:opacity-50"
             >
               {busy ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : null}
               この通を保存
-            </button>
+            </Button>
             <span className="text-[11px] text-gray-500">
               文面を作り直すときは、型の管理から「文面」を開いてください
             </span>

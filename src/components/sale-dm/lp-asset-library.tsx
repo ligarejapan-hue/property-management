@@ -95,7 +95,8 @@ export default function LpAssetLibrary({ open, onClose, onPick, assets, onAssets
           <ul className="grid grid-cols-2 gap-2 sm:grid-cols-3">
             {assets.map((a) => (
               <li key={a.id}>
-                <button type="button" onClick={() => onPick(a)} className="block w-full overflow-hidden rounded-md border border-gray-200 text-left hover:border-indigo-400">
+                {/* data-ui=raw: 写真の縮小表示(カード全体が押せる面) */}
+                <button type="button" data-ui="raw" onClick={() => onPick(a)} className="block w-full overflow-hidden rounded-md border border-gray-200 text-left hover:border-indigo-400">
                   {a.referenced ? (
                     // eslint-disable-next-line @next/next/no-img-element
                     <img src={LP_ASSET_URL(a.publicId)} alt={a.label ?? "写真"} width={a.width} height={a.height} className="aspect-video w-full object-cover" loading="lazy" />
