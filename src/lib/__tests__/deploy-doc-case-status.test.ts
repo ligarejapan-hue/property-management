@@ -29,6 +29,19 @@ describe("deploy.md 一回限りの作業: 案件ステータスの整理の反�
     expect(got).toEqual(CASE_STATUS_DEPRECATED_MAP);
   });
 
+  it("物件の表を書き直す間は数秒止まること・10秒で押さえられなければ失敗→流し直しの手順を書いておく(@codex #538 R7)", () => {
+    expect(one).toMatch(/数秒/);
+    expect(one).toContain("npx prisma migrate resolve --rolled-back 20261020120000_case_status_reorg_values");
+    const mig = readFileSync(
+      resolve(process.cwd(), "prisma/migrations/20261020120000_case_status_reorg_values/migration.sql"),
+      "utf8",
+    );
+    const body = mig.replace(/--.*$/gm, "");
+    expect(body).toMatch(/^\s*BEGIN;/m);
+    expect(body).toMatch(/SET LOCAL lock_timeout = '10s';/);
+    expect(body.trim().endsWith("COMMIT;")).toBe(true);
+  });
+
   it("migration にも、この作業があることを書いておく", () => {
     const mig = readFileSync(
       resolve(process.cwd(), "prisma/migrations/20261020120001_case_status_reorg_migrate/migration.sql"),

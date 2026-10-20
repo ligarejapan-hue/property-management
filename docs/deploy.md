@@ -788,6 +788,18 @@ sudo systemctl start property-management
 
 migration `20261020120000_case_status_reorg_values`(enum の作り直し・`ChangeSource` に `auto`)と
 `20261020120001_case_status_reorg_migrate`(やめた6値の物件を移す)は、通常手順の `migrate deploy` で流れる。
+
+⚠**物件の表を書き直すので、その間(本番 約13万件・101MB で数秒の見込み。手元の 13.1万件で 1.3秒)は物件の読み書きが
+待たされる**(@codex #538 R7)。利用の少ない時間に反映する。1つ目の migration は全体を1つのトランザクションにして、
+表を押さえるまでの待ちを10秒まで(`lock_timeout`)にしてある。長い問い合わせのせいで10秒で押さえられなければ、
+migration は失敗して**何も変わらない**(旧コードのまま動き続ける・build へ進まない)。そのときは失敗の記録を片付けて、
+空いている時に流し直す(手元で「表を25秒押さえた状態→失敗・型は元のまま→片付けて流し直し→成功」を確認済み):
+
+```bash
+npx prisma migrate resolve --rolled-back 20261020120000_case_status_reorg_values
+npx prisma migrate deploy
+```
+
 ⚠ただし `migrate deploy` から restart までの間(build の数分)は**旧コードが動いていて、やめた値でも保存できる**。
 その間に保存された物件は migration の移し替えを取りこぼす(@codex #538 R3 P2)。新コードはやめた値を受け付けない
 ので、**restart の後に1回**、同じ移し替えを流す(冪等=該当が無ければ0件)。restart からこの SQL までの間に申込や
