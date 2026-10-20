@@ -42,6 +42,9 @@ export async function GET(req: NextRequest) {
           id: true, draftId: true, submittedAt: true, name: true, phone: true, email: true,
           contactPref: true, contactTime: true, message: true, handleStatus: true, handledAt: true, handleNote: true,
           notifyStatus: true, notifyLastError: true, autoReplyStatus: true,
+          // 広告用の公開ページからの申込(設計 2026-10-20): draft は null・scenario と所在地・広告の印を持つ。
+          source: true, propertyAddress: true, utmSource: true, utmMedium: true, utmCampaign: true,
+          scenario: { select: { id: true, name: true } },
           draft: {
             select: {
               campaign: { select: { id: true, name: true } },
@@ -60,13 +63,16 @@ export async function GET(req: NextRequest) {
     // 次のカーソルは DB が返した最後の行(担当範囲の多層防御で落とす前)で作る。
     const nextCursor = hasMore ? encodeInquiryCursor(page[page.length - 1]) : null;
     // filterDraftsByFieldStaffScope は SQL 側の絞り込みに対する多層防御として残す。
+    // 宛先の無い行(広告ページ)は property=null → 現地担当には出ない(field-staff-scope.ts)。
     const filtered = filterDraftsByFieldStaffScope(
-      page.map((r) => ({ ...r, property: r.draft.property })),
+      page.map((r) => ({ ...r, property: r.draft?.property ?? null })),
       session,
     );
     const sourceRows = filtered.map((r) => ({
       id: r.id,
       draftId: r.draftId,
+      source: r.source,
+      propertyAddress: r.propertyAddress,
       submittedAt: r.submittedAt,
       name: r.name,
       phone: r.phone,
@@ -87,20 +93,36 @@ export async function GET(req: NextRequest) {
     });
     // 表示用項目(campaignId/campaignName/location/propertyTypeLabel)を付与する。物件の住所
     // そのものは返さない=coarsePropertyLocation で市区町村+町名(丁目まで)に丸めたものだけ返す。
+    // 広告ページの行は campaign/location/種別が無く、代わりに DMの種類の名前と広告の経路(utm)を返す。
+    // 経路は訪問者の URL 由来の自由な文字列(200字まで)=連絡先を書き込めるので、自由記述と同じ条件でだけ返す(内部レビュー 2026-10-20)。
+    const freeTextVisible = isPlainOwnerLevel(ownerDisplayConfig.phone) && isPlainOwnerLevel(ownerDisplayConfig.email);
     const extraById = new Map(
       filtered.map((r) => [
         r.id,
-        {
-          campaignId: r.draft.campaign.id,
-          campaignName: r.draft.campaign.name,
-          location: coarsePropertyLocation(r.property.address),
-          propertyTypeLabel: propertyTypeLabel(r.property.propertyType),
-        },
+        r.draft && r.property
+          ? {
+              campaignId: r.draft.campaign.id,
+              campaignName: r.draft.campaign.name,
+              location: coarsePropertyLocation(r.property.address),
+              propertyTypeLabel: propertyTypeLabel(r.property.propertyType),
+              scenarioName: null as string | null,
+              adRoute: null as string | null,
+            }
+          : {
+              campaignId: null,
+              campaignName: null,
+              location: null,
+              propertyTypeLabel: null,
+              scenarioName: r.scenario?.name ?? null,
+              adRoute: freeTextVisible && [r.utmSource, r.utmMedium, r.utmCampaign].some((v) => v)
+                ? [r.utmSource, r.utmMedium, r.utmCampaign].map((v) => v ?? "-").join(" / ")
+                : null,
+            },
       ]),
     );
     const inquiries = maskedRows.map((row) => ({
       ...row,
-      ...(extraById.get(row.id) ?? { campaignId: null, campaignName: null, location: null, propertyTypeLabel: null }),
+      ...(extraById.get(row.id) ?? { campaignId: null, campaignName: null, location: null, propertyTypeLabel: null, scenarioName: null, adRoute: null }),
     }));
     await writeAuditLog({
       userId: session.id,

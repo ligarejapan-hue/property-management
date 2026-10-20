@@ -8,7 +8,7 @@ describe("parseInquiryForm", () => {
   it("必須だけで通る(任意は null)", () => {
     expect(parseInquiryForm(form(OK))).toEqual({
       kind: "ok",
-      value: { name: "山田 太郎", phone: "090-1234-5678", email: null, contactPref: null, contactTime: null, message: null },
+      value: { name: "山田 太郎", phone: "090-1234-5678", email: null, contactPref: null, contactTime: null, message: null, propertyAddress: null },
     });
   });
   it("全角の数字・ハイフンは半角にそろえる。前後の空白は落とす", () => {

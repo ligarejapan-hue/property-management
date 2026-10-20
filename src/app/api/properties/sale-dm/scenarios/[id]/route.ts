@@ -79,6 +79,10 @@ export async function PATCH(request: Request, { params }: Ctx) {
         await tx.dmScenario.update({ where: { id }, data });
       } catch (e) {
         if ((e as { code?: string }).code === "P2002") {
+          // どの一意に当たったかは meta.target(列名の配列)で見分ける(公開名は全種類で重複不可)。
+          const target = (e as { meta?: { target?: unknown } }).meta?.target;
+          const onSlug = Array.isArray(target) ? target.some((t) => String(t).includes("public_slug")) : String(target ?? "").includes("public_slug");
+          if (onSlug) throw new ApiError(409, "その公開名は別のDMの種類で使われています", "PUBLIC_SLUG_TAKEN");
           throw new ApiError(409, "同じ名前のDMの種類があります", "NAME_TAKEN");
         }
         throw e;

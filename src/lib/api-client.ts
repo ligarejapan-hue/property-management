@@ -428,7 +428,12 @@ export async function updateSaleDmOutcome(
 
 export interface SaleDmInquiry {
   id: string;
-  draftId: string;
+  /** 手紙の宛先。広告用の公開ページからの申込(source=public)は null。 */
+  draftId: string | null;
+  /** 申込の出どころ: dm(手紙のQR) | public(広告用の公開ページ・設計 2026-10-20)。 */
+  source: string;
+  /** 広告用の公開ページで本人が入力した物件の所在地(自由記述と同じく freeTextHidden なら null)。 */
+  propertyAddress: string | null;
   submittedAt: string;
   name: string;
   phone: string | null;
@@ -469,6 +474,10 @@ export interface SaleDmInquiryAcrossCampaigns extends SaleDmInquiry {
   /** 物件所在の粗い表示(coarsePropertyLocation)。物件の住所そのものは返らない。 */
   location: string | null;
   propertyTypeLabel: string | null;
+  /** 広告用の公開ページからの申込(source=public)だけ: 元になったDMの種類の名前。 */
+  scenarioName: string | null;
+  /** 広告用の公開ページからの申込だけ: 経路「utm_source / utm_medium / utm_campaign」(無ければ null・PII ではない)。 */
+  adRoute: string | null;
 }
 
 // 全キャンペーン横断の申込一覧。振り分け(状態)は画面側、カーソルは fetchSaleDmInquiries と同じ作法。
@@ -793,12 +802,14 @@ export type SaleDmScenario = {
   // 手紙のイラスト(設計 2026-10-05)。描画用(src は /lp-assets/<publicId>)。
   letterIllustrationAssetId: string | null;
   letterIllustration: { src: string; width: number; height: number } | null;
+  /** 広告用の公開ページの公開名(/lp/<公開名>・設計 2026-10-20)。null=公開しない。 */
+  publicSlug: string | null;
 };
 /** PATCH で変えられる項目(サーバーの saleDmScenarioPatchSchema と同じ)。 */
 export type SaleDmScenarioPatch = Partial<
   Pick<
     SaleDmScenario,
-    "name" | "sortOrder" | "active" | "designTemplate" | "tone" | "length" | "appeal" | "strength" | "extraInstruction" | "lpTone" | "lpLength" | "lpAppeal" | "lpStrength"
+    "name" | "sortOrder" | "active" | "designTemplate" | "tone" | "length" | "appeal" | "strength" | "extraInstruction" | "lpTone" | "lpLength" | "lpAppeal" | "lpStrength" | "publicSlug"
   >
 >;
 
@@ -838,7 +849,7 @@ export async function fetchSaleDmScenario(id: string): Promise<SaleDmScenario> {
       id, name: "モックの種類", autoKey: null, sortOrder: 10, active: true,
       designTemplate: null, tone: null, length: null, appeal: null, strength: null, extraInstruction: null, letterBodyTemplate: null,
       lpTone: null, lpLength: null, lpAppeal: null, lpStrength: null, lpRawTemplate: null, lpHeadline: null, lpBodyText: null,
-      letterIllustrationAssetId: null, letterIllustration: null,
+      letterIllustrationAssetId: null, letterIllustration: null, publicSlug: null,
     };
   }
   return (await apiFetch<{ scenario: SaleDmScenario }>(`${SCENARIO_BASE}/${id}`)).scenario;
@@ -1018,6 +1029,9 @@ export interface SaleDmSettings {
   senderName: string | null;
   senderContact: string | null;
   privacyText: string | null;
+  /** 広告用の公開ページだけに入れる Google のタグ ID(G-/AW-/GT-)と申込完了のコンバージョン ラベル(設計 2026-10-20)。 */
+  googleTagId: string | null;
+  googleConvLabel: string | null;
   hasAnthropicKey: boolean;
   hasOpenaiKey: boolean;
   encryptionConfigured: boolean;
@@ -1026,7 +1040,8 @@ export interface SaleDmSettings {
 
 const EMPTY_SALE_DM_SETTINGS: SaleDmSettings = {
   provider: null, model: null, trackingBaseUrl: null, lpUrl: null,
-  senderName: null, senderContact: null, privacyText: null, hasAnthropicKey: false, hasOpenaiKey: false,
+  senderName: null, senderContact: null, privacyText: null, googleTagId: null, googleConvLabel: null,
+  hasAnthropicKey: false, hasOpenaiKey: false,
   encryptionConfigured: false, updatedAt: null,
 };
 
@@ -1047,6 +1062,8 @@ export async function updateSaleDmSettings(body: {
   senderName?: string;
   senderContact?: string;
   privacyText?: string;
+  googleTagId?: string;
+  googleConvLabel?: string;
 }): Promise<{ data: SaleDmSettings }> {
   if (USE_MOCK) {
     await mockDelay();

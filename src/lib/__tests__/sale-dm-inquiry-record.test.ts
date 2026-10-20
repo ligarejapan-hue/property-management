@@ -7,7 +7,7 @@ import { recordInquiry } from "@/lib/sale-dm-letter/inquiry-record";
 import { lockPropertyRow } from "@/lib/property-record-guard";
 import { syncSaleDmReaction } from "@/lib/dm-reaction/sync";
 
-const INPUT = { name: "山田", phone: "090-1234-5678", email: null, contactPref: null, contactTime: null, message: "相談したい" };
+const INPUT = { name: "山田", phone: "090-1234-5678", email: null, contactPref: null, contactTime: null, message: "相談したい", propertyAddress: null };
 const NOW = new Date("2026-09-20T01:00:00.000Z");
 
 const RENDERABLE_LP_VARIANT = { headline: "見出し", bodyText: "本文" };
@@ -97,7 +97,7 @@ describe("recordInquiry", () => {
       "tx.update",
     ]);
     expect(tx.dmInquiry.create).toHaveBeenCalledWith({
-      data: { draftId: "d1", submittedAt: NOW, name: "山田", phone: "090-1234-5678", email: null, contactPref: null, contactTime: null, message: "相談したい" },
+      data: { draftId: "d1", submittedAt: NOW, name: "山田", phone: "090-1234-5678", email: null, contactPref: null, contactTime: null, message: "相談したい", propertyAddress: null },
       select: { id: true },
     });
     expect(tx.dmRecipientDraft.updateMany).toHaveBeenNthCalledWith(1, {

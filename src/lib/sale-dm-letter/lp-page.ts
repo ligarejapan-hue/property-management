@@ -11,7 +11,7 @@ import { escapeHtml } from "./templates/index";
 import { renderFigureHtml } from "./lp-figures";
 import { LP_BRAND, type LpBrandImage } from "./lp-brand";
 import { formatPhoneJp } from "../phone-format-jp";
-import type { LpRenderInput, LpImage, LpFormInput } from "./lp-render-input";
+import type { LpRenderInput, LpImage, LpFormInput, LpPublicInput } from "./lp-render-input";
 import { PUBLIC_PAGE_HEADERS } from "./unsubscribe-page";
 import { INQUIRY_LIMITS, HONEYPOT_FIELD, INQUIRY_ERROR_MESSAGES } from "./inquiry-input";
 export { PUBLIC_PAGE_HEADERS } from "./unsubscribe-page";
@@ -531,7 +531,9 @@ const INQUIRY_SUBMIT_SCRIPT = [
     'var same=f.querySelectorAll(\'[name="\'+k+\'"]\');for(var i=0;i<same.length;i++){same[i].classList.remove("invalid");same[i].removeAttribute("aria-invalid")}}',
   'function onEdit(e){var t=e.target;if(!t||!t.name)return;clearField(t.name);if(DEP[t.name]){clearField(DEP[t.name])}}',
   'f.addEventListener("input",onEdit);f.addEventListener("change",onEdit);',
-  'function done(){while(f.firstChild){f.removeChild(f.firstChild)}var p=document.createElement("p");p.className="inq-done";p.setAttribute("role","status");p.textContent=M.done;f.appendChild(p)}',
+  // 申込完了の合図(広告用の公開ページの Google のタグが受けてコンバージョンを送る・値は含めない・DM 用のページでは誰も受けない)。
+  'function done(){while(f.firstChild){f.removeChild(f.firstChild)}var p=document.createElement("p");p.className="inq-done";p.setAttribute("role","status");p.textContent=M.done;f.appendChild(p);' +
+    'try{document.dispatchEvent(new CustomEvent("lp:inquiry-done"))}catch(_){}}',
   "function handle(d){var k=d&&d.result;" +
     'if(k==="done"){done();return}' +
     'if(k==="invalid"){var ms=[];if(d.messages&&d.messages.length){for(var i=0;i<d.messages.length;i++){if(typeof d.messages[i]==="string"){ms.push(d.messages[i])}}}' +
@@ -579,10 +581,26 @@ const BAR_SCRIPT = [
   "})();",
 ].join("");
 
-function formSection(form: LpFormInput, telHref: string | null, phone: string | null): string {
+/** 広告の印の隠し欄(フォーム名は readAdParams が読む URL の鍵と同じ)。空の印は出さない。 */
+const AD_HIDDEN_FIELDS = [
+  ["utmSource", "utm_source"], ["utmMedium", "utm_medium"], ["utmCampaign", "utm_campaign"],
+  ["utmTerm", "utm_term"], ["utmContent", "utm_content"], ["gclid", "gclid"],
+] as const;
+
+function formSection(form: LpFormInput, telHref: string | null, phone: string | null, pub: LpPublicInput | null): string {
   const privacy = escapeHtml(form.privacyText).replace(/\n/g, "<br />");
   const pref = (value: string, label: string) =>
     `<label><input type="radio" name="contactPref" value="${value}" />${label}</label>`;
+  // 広告用の公開ページだけ: 物件が分からないので所在地の欄(任意)と、どの広告から来たかの隠し欄(設計 2026-10-20)。
+  const addressField = pub
+    ? `<label>物件の所在地<span class="opt">任意</span><input name="propertyAddress" type="text" maxlength="${INQUIRY_LIMITS.propertyAddress}" autocomplete="off" placeholder="例: 世田谷区○○ 1-2-3(分かる範囲で)" /></label>${fieldError("propertyAddress")}`
+    : "";
+  const adHidden = pub
+    ? AD_HIDDEN_FIELDS.map(([field, name]) => {
+        const v = pub.adParams[field];
+        return v ? `<input type="hidden" name="${name}" value="${escapeHtml(v)}" />` : "";
+      }).join("")
+    : "";
   // 申込欄の頭に安心の一言(お名前と電話だけで送れる=必須が2つだけなのは parseInquiryForm の規則どおり)と電話の案内(2026-10-19 見本)。
   const lead = `<p class="inq-lead"><b>お名前と電話番号だけ</b>でお送りいただけます(ほかは任意)。査定・ご相談は無料で、売却を前提にしません。</p>`;
   const tel = telHref && phone
@@ -595,10 +613,12 @@ function formSection(form: LpFormInput, telHref: string | null, phone: string | 
     `<fieldset${form.disabled ? " disabled" : ""}>` +
     `<label>お名前<span class="req">必須</span><input name="name" type="text" required maxlength="${INQUIRY_LIMITS.name}" autocomplete="name" /></label>${fieldError("name")}` +
     `<label>電話番号<span class="req">必須</span><input name="phone" type="tel" required maxlength="${INQUIRY_LIMITS.phone}" inputmode="tel" autocomplete="tel" placeholder="例: 09012345678(ハイフンなしでも可)" /></label>${fieldError("phone")}` +
+    addressField +
     `<label>メールアドレス<span class="opt">任意</span><input name="email" type="email" maxlength="${INQUIRY_LIMITS.email}" autocomplete="email" /></label>${fieldError("email")}` +
     `<div><strong>ご希望の連絡方法</strong><span class="opt">任意</span><div class="pref">${pref("phone", "電話")}${pref("email", "メール")}${pref("either", "どちらでも")}</div></div>` +
     `<label>連絡のつきやすい時間帯<span class="opt">任意</span><input name="contactTime" type="text" maxlength="${INQUIRY_LIMITS.contactTime}" placeholder="例: 平日18時以降" /></label>` +
     `<label>ご要望・ご質問<span class="opt">任意</span><textarea name="message" maxlength="${INQUIRY_LIMITS.message}" rows="4"></textarea></label>` +
+    adHidden +
     `<div class="hp" aria-hidden="true"><label>この欄は空のままにしてください<input name="${HONEYPOT_FIELD}" type="text" tabindex="-1" autocomplete="off" /></label></div>` +
     // 同意文は畳む(2026-10-19 見本)。同意のチェックは畳まない。
     `<details class="more privacy-more"><summary>個人情報の取り扱いについて</summary><div class="privacy">${privacy}</div></details>` +
@@ -685,7 +705,10 @@ export function renderLpPage(input: LpRenderInput): string {
       ? `<div class="top-tel">お電話でのご相談(${escapeHtml(LP_BRAND.phoneHours)})<a href="${telHref}" data-phone-tap="1">${escapeHtml(formatTel(input.company.phone))}</a></div>`
       : "") +
     `</div></header>`;
-  const heroCopy = `<p class="eyebrow">${escapeHtml(LP_BRAND.heroEyebrow)}</p><h1>${escapeHtml(input.headline)}</h1>` +
+  const pub = input.mode === "public" ? (input.public ?? null) : null;
+  // 広告用の公開ページは手紙を受け取っていない人が開く=冒頭の一言を一般向けに。
+  const eyebrow = input.mode === "public" ? LP_BRAND.publicEyebrow : LP_BRAND.heroEyebrow;
+  const heroCopy = `<p class="eyebrow">${escapeHtml(eyebrow)}</p><h1>${escapeHtml(input.headline)}</h1>` +
     (input.lead ? `<p class="lead">${escapeHtml(input.lead)}</p>` : "") +
     `<ul class="promises">${LP_BRAND.promises.map((p) => `<li>${escapeHtml(p)}</li>`).join("")}</ul>` +
     `<div class="cta-row">${cta}${telHref ? `<a class="cta secondary" href="${telHref}" data-phone-tap="1">電話で相談する</a>` : ""}</div>`;
@@ -726,11 +749,50 @@ export function renderLpPage(input: LpRenderInput): string {
   const submitGuard = input.form && !input.form.disabled
     ? `<script>${INQUIRY_SUBMIT_SCRIPT}</script>`
     : "";
-  // チェック札の数の表示・申込欄への写し(live のみ。preview は script を出さない=見た目だけ CSS で切り替わる)。
-  const checklistScript = input.mode === "live" && hasChecks ? `<script>${CHECKLIST_SCRIPT}</script>` : "";
-  return `<!doctype html><html lang="ja"><head><meta charset="utf-8" /><meta name="viewport" content="width=device-width,initial-scale=1" /><meta name="robots" content="noindex,nofollow" /><meta name="referrer" content="strict-origin" /><title>${escapeHtml(input.headline)}</title><style>${CSS}</style></head><body>${band}${header}<main>` +
+  // チェック札の数の表示・申込欄への写し(live と public。preview は script を出さない=見た目だけ CSS で切り替わる)。
+  const checklistScript = input.mode !== "preview" && hasChecks ? `<script>${CHECKLIST_SCRIPT}</script>` : "";
+  // 広告用の公開ページ: 検索に載せる・見出し情報(OGP)・Google のタグ(設定があるときだけ)。DM 用は今までどおり noindex・外部読み込みなし。
+  const robots = input.mode === "public" ? "index,follow" : "noindex,nofollow";
+  const ogMeta = pub ? ogMetaTags(input, pub) : "";
+  const googleTag = pub?.google ? googleTagScripts(pub.google) : "";
+  return `<!doctype html><html lang="ja"><head><meta charset="utf-8" /><meta name="viewport" content="width=device-width,initial-scale=1" /><meta name="robots" content="${robots}" /><meta name="referrer" content="strict-origin" /><title>${escapeHtml(input.headline)}</title>${ogMeta}<style>${CSS}</style>${googleTag}</head><body>${band}${header}<main>` +
     (input.hero ? img(input.hero, "hero", "", true) : "") +
     `<div class="wrap">${heroCopy}` +
-    introHtml + sections + faq + (input.form ? formSection(input.form, telHref, input.company.phone) : "") + company + unsub +
+    introHtml + sections + faq + (input.form ? formSection(input.form, telHref, input.company.phone, pub) : "") + company + unsub +
     `</div></main>${bar}<script data-lp-bar="1">${BAR_SCRIPT}</script>${script}${submitGuard}${checklistScript}<script>${MOTION_SCRIPT}${sections.includes('<div class="cases">') ? CASES_SCRIPT : ""}</script></body></html>`;
+}
+
+const OG_DESCRIPTION_MAX = 120;
+
+/** 見出し情報(OGP・設計 2026-10-20 §1)。説明はリード文、無ければ本文の最初の段落(120字まで)。写真が無ければ og:image と twitter:card は出さない。 */
+function ogMetaTags(input: LpRenderInput, pub: LpPublicInput): string {
+  const descSource = input.lead ?? input.intro.find((p) => p.trim() !== "") ?? input.sections[0]?.paragraphs[0] ?? "";
+  const description = [...descSource.replace(/\s+/g, " ").trim()].slice(0, OG_DESCRIPTION_MAX).join("");
+  const tags = [
+    `<meta property="og:type" content="website" />`,
+    `<meta property="og:title" content="${escapeHtml(input.headline)}" />`,
+    `<meta property="og:description" content="${escapeHtml(description)}" />`,
+    `<meta property="og:url" content="${escapeHtml(pub.og.url)}" />`,
+    `<meta name="description" content="${escapeHtml(description)}" />`,
+  ];
+  if (pub.og.imageUrl) {
+    tags.push(`<meta property="og:image" content="${escapeHtml(pub.og.imageUrl)}" />`);
+    tags.push(`<meta name="twitter:card" content="summary_large_image" />`);
+  }
+  return tags.join("");
+}
+
+/**
+ * Google のタグ(gtag.js)。広告用の公開ページでタグ ID が設定されているときだけ出す。
+ *  - ID・ラベルは lp-public.ts の許可リスト(英数字と - _ のみ)を通った値だけ=jsString で埋めるが、そもそも記号は入らない。
+ *  - gtag.js は Google が随時差し替える配信物なので integrity(SRI)は付けられない。CSP の script-src で配信元だけを許す。
+ *  - 申込完了は送信スクリプトが出す lp:inquiry-done の合図で送る(Google広告のコンバージョン=ラベルがあるとき・GA4 の generate_lead=常に)。
+ */
+function googleTagScripts(google: { tagId: string; convLabel: string | null }): string {
+  // 許可リスト([A-Z0-9-] / [A-Za-z0-9_-])を通った値だけを受け取る前提。念のためここでも合わなければ出さない。
+  if (!/^[A-Z0-9-]+$/.test(google.tagId) || (google.convLabel !== null && !/^[A-Za-z0-9_-]+$/.test(google.convLabel))) return "";
+  const conv = google.convLabel ? `gtag('event','conversion',{send_to:'${google.tagId}/${google.convLabel}'});` : "";
+  return `<script async src="https://www.googletagmanager.com/gtag/js?id=${google.tagId}"></script>` +
+    `<script>window.dataLayer=window.dataLayer||[];function gtag(){dataLayer.push(arguments)}gtag('js',new Date());gtag('config','${google.tagId}');` +
+    `document.addEventListener("lp:inquiry-done",function(){try{${conv}gtag('event','generate_lead')}catch(_){}});</script>`;
 }

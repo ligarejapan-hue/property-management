@@ -114,6 +114,8 @@ export async function recordInquiry(
         contactPref: input.contactPref,
         contactTime: input.contactTime,
         message: input.message,
+        // DM 用のフォームには所在地の欄が無い(常に null)。列は広告用の公開ページ(設計 2026-10-20)と共用。
+        propertyAddress: input.propertyAddress,
       },
       select: { id: true },
     });

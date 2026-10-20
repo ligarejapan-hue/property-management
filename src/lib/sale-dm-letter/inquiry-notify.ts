@@ -42,6 +42,13 @@ async function loadFacts(inquiryId: string) {
       // P2修正(Finding2): 過去のrun(手動再送ボタン/サーバー再起動後の再開)で既に送信できた
       // 宛先を、この run の succeeded の初期値として使う(seed)。二度と同じ宛先へ送らない。
       notifySentUserIds: true,
+      // 広告用の公開ページからの申込(設計 2026-10-20): draft は無く、scenario(DMの種類)と所在地・広告の印を持つ。
+      source: true,
+      propertyAddress: true,
+      utmSource: true,
+      utmMedium: true,
+      utmCampaign: true,
+      scenario: { select: { name: true } },
       draft: {
         select: {
           campaign: { select: { name: true } },
@@ -67,6 +74,9 @@ async function loadFacts(inquiryId: string) {
 // (設計どおり=担当範囲の判定だけを新鮮にする)。
 // ⚠物件がすでに読めない(削除済み等)場合は null を返す。呼び出し側は「この試行は誰も適格
 // でない」として扱う(既存の no_recipients 相当の分岐に合流させる。例外にはしない)。
+/** 宛先の無い申込(広告ページ)の担当範囲=「作成者も担当者も居ない物件」と同じ扱い(現地担当には送らない)。 */
+const NO_PROPERTY_SCOPE = { createdBy: null, assignedTo: null } as const;
+
 async function loadPropertyScope(
   propertyId: string,
 ): Promise<{ createdBy: string | null; assignedTo: string | null } | null> {
@@ -131,7 +141,7 @@ async function resolveRecipients(
 // ⚠field_staff でない利用者にはスコープの読み直しは不要(判定に使わない)ので省く。
 async function recheckRecipientBeforeSend(
   userId: string,
-  propertyId: string,
+  propertyId: string | null,
   config: MailSendConfig,
 ): Promise<Recipient | null> {
   const u = await prisma.user.findUnique({
@@ -141,6 +151,8 @@ async function recheckRecipientBeforeSend(
   if (!u || !u.isActive || !u.inquiryNotifyEnabled) return null;
   let scope: { createdBy: string | null; assignedTo: string | null } = { createdBy: null, assignedTo: null };
   if (u.role === "field_staff") {
+    // 物件の無い申込(広告ページ)は現地担当の範囲に入らない。
+    if (propertyId === null) return null;
     const freshScope = await loadPropertyScope(propertyId);
     if (!freshScope) return null;
     scope = freshScope;
@@ -223,21 +235,28 @@ export async function notifyInquiry(inquiryId: string, opts: { now?: () => Date 
     if (!row) return "skipped";
     for (const id of row.notifySentUserIds) succeeded.add(id);
 
+    // 宛先(draft)が無い=広告用の公開ページからの申込。出どころは「広告ページ(DMの種類名)」で、物件・DM型・LP型は無い。
+    const draft = row.draft;
+    const isPublic = !draft;
     const facts: InquiryNotifyFacts = {
       inquiryId: row.id,
       submittedAt: row.submittedAt,
-      campaignName: row.draft.campaign.name,
-      dmVariantLabel: row.draft.variant.label,
-      lpVariantLabel: row.draft.lpVariant?.label ?? null,
-      location: coarsePropertyLocation(row.draft.property.address),
-      propertyTypeLabel: propertyTypeLabel(row.draft.property.propertyType),
+      campaignName: draft ? draft.campaign.name : `広告ページ(${row.scenario?.name ?? "-"})`,
+      dmVariantLabel: draft ? draft.variant.label : null,
+      lpVariantLabel: draft?.lpVariant?.label ?? null,
+      location: draft ? coarsePropertyLocation(draft.property.address) : null,
+      propertyTypeLabel: draft ? propertyTypeLabel(draft.property.propertyType) : null,
       name: row.name,
       phone: row.phone,
       email: row.email,
       contactPref: row.contactPref,
       contactTime: row.contactTime,
       message: row.message,
+      source: isPublic ? "public" : "dm",
+      propertyAddress: isPublic ? (row.propertyAddress ?? null) : null,
+      ad: isPublic ? { utmSource: row.utmSource ?? null, utmMedium: row.utmMedium ?? null, utmCampaign: row.utmCampaign ?? null } : null,
     };
+    const propertyId: string | null = draft ? draft.propertyId : null;
 
     // ⚠宛先1件あたり SMTP タイムアウトまで長くて~35秒かかり得る。宛先が多いと、ラウンド間の
     // sleep 後の更新だけでは 15分の保有期限(NOTIFY_STALE_CLAIM_MS)内に収まらないことがある
@@ -288,7 +307,7 @@ export async function notifyInquiry(inquiryId: string, opts: { now?: () => Date 
       // ないものとして扱う(例外にしない・追加クエリはこの1回だけ)。
       // ⚠succeeded(userId基準)はラウンドをまたいで保持するので、既に成功した宛先は
       // 再解決後の一覧に再び現れても二度と送らない。
-      const scope = await loadPropertyScope(row.draft.propertyId);
+      const scope = propertyId === null ? NO_PROPERTY_SCOPE : await loadPropertyScope(propertyId);
       const recipients = scope ? await resolveRecipients(scope, config) : [];
       const toSend = recipients.filter((r) => !succeeded.has(r.userId));
 
@@ -336,7 +355,7 @@ export async function notifyInquiry(inquiryId: string, opts: { now?: () => Date 
         // 1人ずつのfault isolationをここでも踏襲)。
         let fresh: Recipient | null;
         try {
-          fresh = await recheckRecipientBeforeSend(r.userId, row.draft.propertyId, freshConfig);
+          fresh = await recheckRecipientBeforeSend(r.userId, propertyId, freshConfig);
         } catch {
           fresh = null;
         }

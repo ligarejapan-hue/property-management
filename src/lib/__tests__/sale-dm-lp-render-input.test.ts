@@ -116,7 +116,7 @@ describe("buildLpRenderInput", () => {
   it("入力型のキー集合は固定(氏名・番地・所有者住所・token 以外の識別子が増えたら落ちる)", () => {
     const out = buildLpRenderInput(rows(), { mode: "live", unsubscribeUrl: null, phoneTapToken: "t", form: null });
     expect(Object.keys(out).sort()).toEqual([...LP_RENDER_INPUT_KEYS].sort());
-    expect(LP_RENDER_INPUT_KEYS).toEqual(["mode", "headline", "lead", "intro", "sections", "faq", "hero", "company", "unsubscribeUrl", "phoneTapToken", "form"]);
+    expect(LP_RENDER_INPUT_KEYS).toEqual(["mode", "headline", "lead", "intro", "sections", "faq", "hero", "company", "unsubscribeUrl", "phoneTapToken", "form", "public"]);
     for (const k of LP_RENDER_INPUT_KEYS) expect(/name|zip|address|owner|recipient/i.test(k) && k !== "company").toBe(false);
   });
   it("form は opts から素通しで渡る(PII を足さない)", () => {

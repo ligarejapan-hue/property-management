@@ -28,6 +28,8 @@ export default function AdminDmScenarioDetailPage({ params }: { params: Promise<
   const [error, setError] = useState<string | null>(null);
   const [name, setName] = useState("");
   const [sortOrder, setSortOrder] = useState("");
+  // 広告用の公開ページの公開名(/lp/<公開名>・設計 2026-10-20)。空=公開しない。
+  const [publicSlug, setPublicSlug] = useState("");
   const [busy, setBusy] = useState(false);
   const [notice, setNotice] = useState<string | null>(null);
   const [panel, setPanel] = useState<"media" | "preview" | null>(null);
@@ -40,6 +42,7 @@ export default function AdminDmScenarioDetailPage({ params }: { params: Promise<
       setScenario(s);
       setName(s.name);
       setSortOrder(String(s.sortOrder));
+      setPublicSlug(s.publicSlug ?? "");
     } catch (e) {
       setError(e instanceof Error ? e.message : "読み込みに失敗しました");
     }
@@ -65,9 +68,14 @@ export default function AdminDmScenarioDetailPage({ params }: { params: Promise<
       setError("並び順は 0〜9999 の整数で入れてください");
       return;
     }
+    const slug = publicSlug.trim().toLowerCase();
+    if (slug !== "" && !/^[a-z0-9-]{2,40}$/.test(slug)) {
+      setError("公開名は半角の小文字英数字とハイフンで 2〜40 文字にしてください(例: souzoku)");
+      return;
+    }
     setBusy(true); setError(null); setNotice(null);
     try {
-      const r = await updateSaleDmScenario(scenario.id, { name: name.trim(), sortOrder: n });
+      const r = await updateSaleDmScenario(scenario.id, { name: name.trim(), sortOrder: n, publicSlug: slug === "" ? null : slug });
       setNotice(r.changedFields.length > 0 ? "保存しました" : "変更はありません");
       await load();
     } catch (e) {
@@ -86,7 +94,13 @@ export default function AdminDmScenarioDetailPage({ params }: { params: Promise<
     );
   }
 
-  const basicsDirty = name.trim() !== scenario.name || sortOrder !== String(scenario.sortOrder);
+  const basicsDirty =
+    name.trim() !== scenario.name || sortOrder !== String(scenario.sortOrder) || publicSlug.trim().toLowerCase() !== (scenario.publicSlug ?? "");
+  // 公開の条件(設計 2026-10-20 §1): 公開名あり・「使う」・LPの文章あり。足りないものを案内する。
+  const publicMissing = [
+    ...(scenario.active ? [] : ["「使わない」になっている"]),
+    ...(scenario.lpBodyText ? [] : ["LPの文章が未登録"]),
+  ];
 
   return (
     <div className="space-y-4">
@@ -107,10 +121,35 @@ export default function AdminDmScenarioDetailPage({ params }: { params: Promise<
             並び順(小さいほど上)
             <input value={sortOrder} onChange={(e) => setSortOrder(e.target.value)} inputMode="numeric" className="w-24 rounded-md border border-gray-300 px-2 py-1 text-sm text-gray-900 dark:border-gray-700 dark:bg-gray-900 dark:text-gray-100" />
           </label>
+          <label className="flex flex-col gap-1 text-xs text-gray-600 dark:text-gray-400">
+            広告用ページの公開名(URLの末尾・空なら公開しない)
+            <input
+              value={publicSlug}
+              onChange={(e) => setPublicSlug(e.target.value)}
+              maxLength={40}
+              placeholder="例: souzoku"
+              inputMode="url"
+              autoCapitalize="none"
+              spellCheck={false}
+              data-testid="scenario-public-slug"
+              className="w-56 rounded-md border border-gray-300 px-2 py-1 text-sm text-gray-900 dark:border-gray-700 dark:bg-gray-900 dark:text-gray-100"
+            />
+          </label>
           <Button size="sm" onClick={() => void saveBasics()} disabled={busy || !basicsDirty || name.trim() === ""}>
             {busy && <Loader2 className="h-3 w-3 animate-spin" />}保存
           </Button>
         </div>
+        {scenario.publicSlug ? (
+          <p className="mt-2 text-xs text-gray-600 dark:text-gray-400" data-testid="scenario-public-url">
+            お客さまに見せるURL: <code className="rounded bg-gray-100 px-1 py-0.5 dark:bg-gray-800">{`<追跡用URL>/lp/${scenario.publicSlug}`}</code>
+            (追跡用URLは <Link href="/admin/sale-dm-settings" className="font-semibold underline underline-offset-2">LPの設定</Link> の値。例: https://app.ligarejapan.com/lp/{scenario.publicSlug})
+            {publicMissing.length > 0 && (
+              <span className="ml-1 text-amber-700 dark:text-amber-300">⚠まだ公開されていません: {publicMissing.join("・")}</span>
+            )}
+          </p>
+        ) : (
+          <p className="mt-2 text-xs text-gray-500 dark:text-gray-400">公開名を付けて保存すると、手紙の宛先に関係なく誰にでも見せられるご案内ページ(広告用)のURLができます。</p>
+        )}
         {notice && <p className="mt-2 text-sm text-gray-700 dark:text-gray-200">{notice}</p>}
         {error && <p className="mt-2 text-sm text-red-600 dark:text-red-400">{error}</p>}
       </section>

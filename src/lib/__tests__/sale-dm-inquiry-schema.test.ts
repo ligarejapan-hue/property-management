@@ -14,7 +14,11 @@ describe("査定申込のスキーマ", () => {
   it("DmInquiry の列(設計 §2.5)", () => {
     const m = block("DmInquiry");
     for (const re of [
-      /draftId\s+String\s+@map\("draft_id"\) @db\.Uuid/,
+      // 2026-10-20: 広告用の公開ページからの申込は宛先が無い=draftId は NULL 可(DB の CHECK で scenario_id とどちらか必須)。
+      /draftId\s+String\?\s+@map\("draft_id"\) @db\.Uuid/,
+      /source\s+String\s+@default\("dm"\)/,
+      /scenarioId\s+String\?\s+@map\("scenario_id"\) @db\.Uuid/,
+      /propertyAddress\s+String\?\s+@map\("property_address"\)/,
       /submittedAt\s+DateTime\s+@default\(now\(\)\) @map\("submitted_at"\)/,
       /name\s+String\n/,
       /phone\s+String\n/,

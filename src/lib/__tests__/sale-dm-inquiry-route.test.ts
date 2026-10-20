@@ -76,7 +76,7 @@ describe("POST /t/[token]/inquiry", () => {
     expect(res.headers.get("referrer-policy")).toBe("strict-origin");
     expect(await res.text()).toContain("受け付けました");
     expect(rec).toHaveBeenCalledWith(expect.anything(), expect.stringMatching(/^tok_/), {
-      name: "山田", phone: "090-1234-5678", email: null, contactPref: null, contactTime: null, message: null,
+      name: "山田", phone: "090-1234-5678", email: null, contactPref: null, contactTime: null, message: null, propertyAddress: null,
     });
     const audit = (writeAuditLog as unknown as ReturnType<typeof vi.fn>).mock.calls[0][0];
     expect(audit).toMatchObject({ action: "sale_dm_inquiry_submit", targetTable: "dm_recipient_drafts", targetId: "d1" });

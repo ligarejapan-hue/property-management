@@ -7,12 +7,23 @@
 import { expandLetterTags, hasUnresolvedTag, coarsePropertyLocation, propertyTypeLabel } from "./tags";
 import type { LpFaqItem } from "./lp-template";
 import { isFigureKind, type FigureKind } from "./lp-figures";
+import type { AdParams, GoogleTagConfig } from "./lp-public";
 
-export type LpMode = "live" | "preview";
+/** live=送付済みの宛先 / preview=送付前・社内確認 / public=広告用の公開ページ(宛先なし・設計 2026-10-20) */
+export type LpMode = "live" | "preview" | "public";
 export interface LpImage { publicId: string; width: number; height: number }
 export type LpSectionMedia = { kind: "asset"; image: LpImage } | { kind: "figure"; figureKind: FigureKind } | null;
-/** 申込フォームの描画入力。action=送信先(/t/<token>/inquiry・社内プレビューは "#")。disabled=送付前(送信不可)。 */
+/** 申込フォームの描画入力。action=送信先(/t/<token>/inquiry・社内プレビューは "#"・公開ページは /lp/<公開名>/inquiry)。disabled=送付前(送信不可)。 */
 export interface LpFormInput { action: string; privacyText: string; disabled: boolean }
+/** 広告用の公開ページだけが持つ描画入力(mode=public のときだけ)。 */
+export interface LpPublicInput {
+  /** ページを開いた URL の広告の印(フォームの隠し欄に写す)。 */
+  adParams: AdParams;
+  /** Google のタグ(設定があるときだけ読み込む)。 */
+  google: GoogleTagConfig | null;
+  /** 見出し情報(OGP)。url=このページの絶対URL(追跡用URL未設定なら相対)・imageUrl=一番上の写真の絶対URL(無ければ null)。 */
+  og: { url: string; imageUrl: string | null };
+}
 export interface LpRenderInput {
   mode: LpMode;
   headline: string;
@@ -25,8 +36,10 @@ export interface LpRenderInput {
   unsubscribeUrl: string | null;
   phoneTapToken: string | null;
   form: LpFormInput | null;
+  /** 広告用の公開ページの入力(mode=public のときだけ)。省略・null=DM 用。 */
+  public?: LpPublicInput | null;
 }
-export const LP_RENDER_INPUT_KEYS = ["mode", "headline", "lead", "intro", "sections", "faq", "hero", "company", "unsubscribeUrl", "phoneTapToken", "form"] as const satisfies readonly (keyof LpRenderInput)[];
+export const LP_RENDER_INPUT_KEYS = ["mode", "headline", "lead", "intro", "sections", "faq", "hero", "company", "unsubscribeUrl", "phoneTapToken", "form", "public"] as const satisfies readonly (keyof LpRenderInput)[];
 
 /**
  * LP型が実際にフォームを描画できるか(見出し・本文の両方が空白以外)の唯一の判定。
@@ -103,7 +116,7 @@ function toImage(asset: LpSourceRows["media"][number]["asset"]): LpImage | null 
   return { publicId: asset.publicId, width: asset.width, height: asset.height };
 }
 
-export function buildLpRenderInput(rows: LpSourceRows, opts: { mode: LpMode; unsubscribeUrl: string | null; phoneTapToken: string | null; form: LpFormInput | null }): LpRenderInput {
+export function buildLpRenderInput(rows: LpSourceRows, opts: { mode: LpMode; unsubscribeUrl: string | null; phoneTapToken: string | null; form: LpFormInput | null; public?: LpPublicInput | null }): LpRenderInput {
   const values = { location: coarsePropertyLocation(rows.property.address), propertyType: propertyTypeLabel(rows.property.propertyType) };
   const { intro, sections } = splitBodyIntoSections(rows.variant.bodyText);
   const heroRow = rows.media.find((m) => m.slot === "hero");
@@ -129,5 +142,6 @@ export function buildLpRenderInput(rows: LpSourceRows, opts: { mode: LpMode; uns
     unsubscribeUrl: opts.unsubscribeUrl,
     phoneTapToken: opts.phoneTapToken,
     form: opts.form,
+    public: opts.public ?? null,
   };
 }

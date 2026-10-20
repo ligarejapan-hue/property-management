@@ -1408,7 +1408,24 @@ model DmLpVariant {
 /// 状態(handleStatus / notifyStatus)は enum を使わず文字列(rollback で enum ADD VALUE を残さない・§2.9)。
 model DmInquiry {
   id                String    @id @default(uuid()) @db.Uuid
-  draftId           String    @map("draft_id") @db.Uuid
+  /// 手紙の宛先(QRから開いたご案内ページの申込)。広告用の公開ページ(設計 2026-10-20)からの申込は無い(NULL)。
+  /// DB の CHECK 制約 dm_inquiries_origin_check で「draft_id か scenario_id のどちらかは必ずある」。
+  draftId           String?   @map("draft_id") @db.Uuid
+  /// 申込の出どころ: dm(手紙のQR) | public(広告用の公開ページ /lp/<公開名>)。
+  source            String    @default("dm")
+  /// 公開ページの元になったDMの種類(source=public のときだけ)。
+  scenarioId        String?   @map("scenario_id") @db.Uuid
+  /// 申込時点の公開名(/lp/<public_slug>・あとで公開名を変えても申込の記録は残す)。
+  publicSlug        String?   @map("public_slug")
+  /// 公開ページの申込で本人が入力した物件の所在地(任意・分かる範囲)。
+  propertyAddress   String?   @map("property_address")
+  /// どの広告から来たか(ページを開いたURLの utm_* / gclid をそのまま保存・各200字まで)。
+  utmSource         String?   @map("utm_source")
+  utmMedium         String?   @map("utm_medium")
+  utmCampaign       String?   @map("utm_campaign")
+  utmTerm           String?   @map("utm_term")
+  utmContent        String?   @map("utm_content")
+  gclid             String?
   submittedAt       DateTime  @default(now()) @map("submitted_at")
   name              String
   phone             String
@@ -1438,10 +1455,12 @@ model DmInquiry {
   autoReplyStatus   String    @default("none") @map("auto_reply_status")
   createdAt         DateTime  @default(now()) @map("created_at")
 
-  draft     DmRecipientDraft @relation(fields: [draftId], references: [id], onDelete: Restrict)
-  handledBy User?            @relation("DmInquiryHandler", fields: [handledById], references: [id])
+  draft     DmRecipientDraft? @relation(fields: [draftId], references: [id], onDelete: Restrict)
+  scenario  DmScenario?       @relation(fields: [scenarioId], references: [id], onDelete: Restrict)
+  handledBy User?             @relation("DmInquiryHandler", fields: [handledById], references: [id])
 
   @@index([draftId])
+  @@index([scenarioId])
   @@index([handleStatus])
   // 受付メールの重複確認(直近24時間の申込だけを見る)と、一覧の新しい順の読み出しに使う。
   @@index([submittedAt])
@@ -1499,6 +1518,8 @@ model DmScenario {
   id                 String    @id @default(uuid()) @db.Uuid
   name               String
   autoKey            String?   @unique @map("auto_key")
+  /// 広告用の公開ページの公開名(/lp/<public_slug>・設計 2026-10-20)。半角小文字英数字とハイフン 2〜40字。空=公開しない。
+  publicSlug         String?   @unique @map("public_slug")
   sortOrder          Int       @default(0) @map("sort_order")
   active             Boolean   @default(true)
   designTemplate     String?   @map("design_template")
@@ -1530,6 +1551,8 @@ model DmScenario {
   campaigns  DmCampaign[]
   variants   DmVariant[]
   lpVariants DmLpVariant[]
+  /// 広告用の公開ページからの申込(source=public)。申込がある種類は削除できない(Restrict)。
+  publicInquiries DmInquiry[]
   letterIllustrationAsset DmLpAsset? @relation("ScenarioLetterIllustration", fields: [letterIllustrationAssetId], references: [id], onDelete: Restrict)
 
   @@index([letterIllustrationAssetId])
@@ -1598,6 +1621,10 @@ model SaleDmConfig {
   senderContact      String?  @map("sender_contact")
   // 公開LPの申込フォームに出す個人情報の取扱い文。未設定なら DEFAULT_PRIVACY_TEXT。凍結の対象外(§0-12)。
   privacyText        String?  @map("privacy_text")
+  // 広告用の公開ページ(/lp/<公開名>)だけに入れる Google のタグ(設計 2026-10-20)。
+  // googleTagId=G-/AW-/GT- の ID・googleConvLabel=申込完了のコンバージョン ラベル。空なら何も読み込まない。
+  googleTagId        String?  @map("google_tag_id")
+  googleConvLabel    String?  @map("google_conv_label")
   anthropicApiKeyEnc String?  @map("anthropic_api_key_enc")
   openaiApiKeyEnc    String?  @map("openai_api_key_enc")
   updatedAt          DateTime @updatedAt @map("updated_at")

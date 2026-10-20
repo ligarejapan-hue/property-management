@@ -34,7 +34,8 @@ export async function POST(_request: NextRequest, { params }: { params: Promise<
         draft: { select: { property: { select: { createdBy: true, assignedTo: true } } } },
       },
     });
-    if (!found || filterDraftsByFieldStaffScope([{ property: found.draft.property }], session).length === 0) {
+    // 宛先の無い申込(広告ページ・draft=null)は物件が無い=現地担当には見えない(property=null は除外)。
+    if (!found || filterDraftsByFieldStaffScope([{ property: found.draft?.property ?? null }], session).length === 0) {
       throw new ApiError(404, "申込が見つかりません", "NOT_FOUND");
     }
 

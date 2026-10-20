@@ -10,7 +10,10 @@ import type { NextRequest } from "next/server";
 // "/lp-assets/" = LP用写真の公開口(設計 2026-09-08 §2.3)。publicId(32hex乱数)だけで1枚を返し、
 // 一覧は取れない。どこかのLP型が参照している資産だけを返す(route 側で判定)。
 // "/icons/" = ホーム画面に追加したときのアイコン(通知 段階1)。静的な画像のみ・PII なし。
-const PUBLIC_PATHS = ["/login", "/api/auth", "/_next", "/favicon.ico", "/uploads", "/t/", "/u/", "/lp-assets/", "/icons/"];
+// "/lp/" = 広告用の公開ページ(DMの種類ごとの公開名・設計 2026-10-20)とその申込の受け口。宛先を持たない。
+//   ⚠管理画面の LPメニューは "/lp"(完全一致)=前方一致 "/lp/" には当たらない。(dashboard)/lp の下に
+//   画面を増やすと公開されてしまうため、lp-public-scan.test.ts が「直下は page.tsx だけ」を守る。
+const PUBLIC_PATHS = ["/login", "/api/auth", "/_next", "/favicon.ico", "/uploads", "/t/", "/u/", "/lp-assets/", "/icons/", "/lp/"];
 
 // 完全一致で公開するパス。前方一致（startsWith）だと /api/health-xxx 等まで認証免除が
 // 広がってしまうため、必要最小の範囲（完全一致）でのみ公開する。

@@ -64,8 +64,9 @@ export async function GET(req: NextRequest, { params }: { params: Promise<{ id: 
     // Ruling P2: 「...rest」での未使用変数化(draft/property を捨てて destructure)は eslint の
     // unused-vars に引っかかるため、返す項目を明示的に列挙して組み立てる(出力は同じ)。
     // filterDraftsByFieldStaffScope は SQL 側の絞り込みに対する多層防御として残す。
+    // この一覧は campaignId で絞るので draft は常にあるが、型の上では任意(広告ページの申込は draft=null)。
     const visible = filterDraftsByFieldStaffScope(
-      page.map((r) => ({ ...r, property: r.draft.property })),
+      page.map((r) => ({ ...r, property: r.draft?.property ?? null })),
       session,
     ).map((r) => ({
       id: r.id,

@@ -8,6 +8,7 @@ import {
   type SaleDmResolvedConfig,
 } from "./config";
 import { resolveLpUrl, resolveTrackingBaseUrl } from "./tracking";
+import { normalizeGoogleConvLabel, normalizeGoogleTagId, type GoogleTagConfig } from "./lp-public";
 
 // 設定は1行のみ(singleton)。管理画面の GET/PUT もこの id を使う。
 export const SALE_DM_CONFIG_ID = "singleton";
@@ -72,17 +73,19 @@ export async function loadSaleDmPublicPageConfig(): Promise<{
   trackingBaseUrl: string | undefined;
   lpPublicEnabled: boolean;
   privacyText: string | null;
+  /** 広告用の公開ページ(/lp/<公開名>)だけが使う Google のタグ(設計 2026-10-20 §3)。未設定・規則外は null=読み込まない。 */
+  google: GoogleTagConfig | null;
 }> {
   let db: {
     senderName: string | null; senderContact: string | null; trackingBaseUrl: string | null;
-    privacyText: string | null;
+    privacyText: string | null; googleTagId: string | null; googleConvLabel: string | null;
   } | null = null;
   try {
     db = await prisma.saleDmConfig.findUnique({
       where: { id: SALE_DM_CONFIG_ID },
-      // ← 送付元表示/追跡base/同意文の列のみ。秘匿(キー)列は取得しない。lpPublicEnabled は DB列を持たない
+      // ← 送付元表示/追跡base/同意文/Google のタグの列のみ。秘匿(キー)列は取得しない。lpPublicEnabled は DB列を持たない
       // (env 専用のロールアウトゲート)ため select にも含めない。
-      select: { senderName: true, senderContact: true, trackingBaseUrl: true, privacyText: true },
+      select: { senderName: true, senderContact: true, trackingBaseUrl: true, privacyText: true, googleTagId: true, googleConvLabel: true },
     });
   } catch {
     db = null; // DB未接続/テーブル無等は env フォールバック(fail-safe)。
@@ -90,6 +93,11 @@ export async function loadSaleDmPublicPageConfig(): Promise<{
   const env = saleDmPublicPageConfigFromEnv();
   const pick = (dbv: string | null | undefined, envv: string | null): string | null =>
     dbv && dbv.trim().length > 0 ? dbv : envv;
+  // Google のタグは保存時に検証済みだが、描画の直前にも許可リストを通す(規則外の値は無かったことにする)。
+  const tagId = normalizeGoogleTagId(db?.googleTagId);
+  const convLabel = normalizeGoogleConvLabel(db?.googleConvLabel);
+  const google: GoogleTagConfig | null =
+    tagId && tagId !== "invalid" ? { tagId, convLabel: convLabel === "invalid" ? null : convLabel } : null;
   return {
     senderName: pick(db?.senderName, env.senderName),
     senderContact: pick(db?.senderContact, env.senderContact),
@@ -98,5 +106,6 @@ export async function loadSaleDmPublicPageConfig(): Promise<{
     lpPublicEnabled: env.lpPublicEnabled,
     // env フォールバックは持たない=同意文は画面から設定する。
     privacyText: db?.privacyText && db.privacyText.trim().length > 0 ? db.privacyText : null,
+    google,
   };
 }

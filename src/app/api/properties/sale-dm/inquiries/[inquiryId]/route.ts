@@ -38,16 +38,19 @@ export async function PATCH(request: NextRequest, { params }: { params: Promise<
         draft: { select: { propertyId: true, property: { select: { createdBy: true, assignedTo: true } } } },
       },
     });
+    // 宛先の無い申込(広告ページ・draft=null)は物件が無い=現地担当には見えない(property=null は除外)。
     if (
       !found ||
-      filterDraftsByFieldStaffScope([{ property: found.draft.property }], session).length === 0
+      filterDraftsByFieldStaffScope([{ property: found.draft?.property ?? null }], session).length === 0
     ) {
       throw new ApiError(404, "申込が見つかりません", "NOT_FOUND");
     }
+    const foundPropertyId = found.draft?.propertyId ?? null;
 
     const now = new Date();
     const updated = await prisma.$transaction(async (tx) => {
-      await lockPropertyRow(tx, found.draft.propertyId);
+      // 物件配下の申込は親の物件行をロックする(R50)。宛先の無い申込はロックする物件が無い。
+      if (foundPropertyId !== null) await lockPropertyRow(tx, foundPropertyId);
       // ロック取得後に再読取して再判定する(@codex P2): 先の読み取りと lockPropertyRow の
       // 間に物件の担当替えが挟まると、権限を失った field_staff がそれでも更新できてしまう
       // 窓が残るため。
@@ -59,8 +62,8 @@ export async function PATCH(request: NextRequest, { params }: { params: Promise<
       });
       if (
         !locked ||
-        locked.draft.propertyId !== found.draft.propertyId ||
-        filterDraftsByFieldStaffScope([{ property: locked.draft.property }], session).length === 0
+        (locked.draft?.propertyId ?? null) !== foundPropertyId ||
+        filterDraftsByFieldStaffScope([{ property: locked.draft?.property ?? null }], session).length === 0
       ) {
         throw new ApiError(404, "申込が見つかりません", "NOT_FOUND");
       }
