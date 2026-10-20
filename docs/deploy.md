@@ -630,7 +630,7 @@ npx tsx scripts/reconcile-sale-dm-template-freeze.ts --apply   # 実書込
 
 公開経路の設定読み出しは新設の `loadSaleDmPublicPageConfig`(会社案内・電話番号・公開ゲートの有無など表示判定に要る列/envだけを読み、謄本取得等の課金用APIキー列には触れない)。**⚠nginx のアクセスログ除外は `/u/` だけでなく `/t/` と `/lp-assets/` にも必須**(@codex PR#434 P1是正: 以前の版はここで `/t/` をアクセスログ除外の対象外としていたが誤りだった)。`/t/<token>` は査定申込フォーム(`POST /t/<token>/inquiry`)を送信できる権限そのものであり、URL を読めた者はトークンを再生して申込を送信できてしまう(`/t/` のアクセスログ除外はこれだけで必須=リクエスト行そのものに token が載る)。公開ページの `Referrer-Policy` は `strict-origin`(Referer はオリジンのみ・パスは送らない)に変更済みで、同一オリジンの自動サブリクエスト(favicon・`/lp-assets/<publicId>` の画像読み込みなど)が `Referer` に `/t/<token>` を載せて運ぶことは無くなった(@codex R10 是正)。それでも **`/lp-assets/` のアクセスログ除外は多層防御として維持する**(`publicId` 自体はPIIではないが、nginx の版差やログ形式の変更・将来のブラウザ挙動の変化など単一の仕組みに守りを委ねない)。したがって **`/t/` を中継する nginx の server ブロック全て**(公開ホスト `app.ligarejapan.com` の vhost・`deploy/nginx/property-management.conf.example` を元にした既定の `property-management` server・今後 `/t/` を中継する他の vhost を含む)で、`location ^~ /t/` と `location ^~ /lp-assets/` の両方に `/u/` と同じ `access_log off;` と `error_log /dev/null crit;` を設定すること(`deploy/nginx/property-management.conf.example` は反映済み・本番の `/etc/nginx/sites-available/app.ligarejapan.com` にも同じ location を足すこと)。
 
-**広告用の公開ページ(`/lp/<公開名>`・設計 `docs/superpowers/specs/2026-10-20-lp-public-page-design.md`)**: DMの種類ごとに管理者が付けた公開名で開く、宛先を持たないご案内ページ(`GET /lp/<公開名>`)と、その申込の受け口(`POST /lp/<公開名>/inquiry`)。`src/proxy.ts` の `PUBLIC_PATHS` に `"/lp/"` を追加済み。**公開ホストの nginx(`/etc/nginx/sites-available/app.ligarejapan.com`)に `location ^~ /lp/` を足すこと**(`deploy/nginx/property-management.conf.example` の同名ブロックをそのまま写す。`/t/` と違って URL に資格情報は載らないので `access_log off` は不要)。反映は `nginx -t` → `systemctl reload nginx` → `curl -s -o /dev/null -w '%{http_code}' https://app.ligarejapan.com/lp/<公開名>` が 200(公開名未設定なら 404)で確認する。公開ゲートは `/t/` と同じ `SALE_DM_LP_PUBLIC_ENABLED`。Google のタグ(gtag.js)はこのページだけ、LPの設定の「Googleタグ ID」が入っているときだけ読み込む(CSP の `script-src`/`connect-src`/`img-src`/`frame-src` を Google の配信元に限って広げる・DM 用の `/t/` は今までどおり外部読み込みなし)。
+**広告用の公開ページ(`/lp/<公開名>`・設計 `docs/superpowers/specs/2026-10-20-lp-public-page-design.md`)**: DMの種類ごとに管理者が付けた公開名で開く、宛先を持たないご案内ページ(`GET /lp/<公開名>`)と、その申込の受け口(`POST /lp/<公開名>/inquiry`)。`src/proxy.ts` の `PUBLIC_PATHS` に `"/lp/"` を追加済み。**公開ホストの nginx(`/etc/nginx/sites-available/app.ligarejapan.com`)に `location ^~ /lp/` を足すこと**(`deploy/nginx/property-management.conf.example` の同名ブロックをそのまま写す。URL に資格情報は載らないが、query の `utm_*`/`gclid` は訪問者が自由に書ける文字列で既定のログ形式は query まで記録するため、`/t/` と同じく `access_log off;` と `error_log /dev/null crit;` を付ける=@codex #535 P2)。反映は `nginx -t` → `systemctl reload nginx` → `curl -s -o /dev/null -w '%{http_code}' https://app.ligarejapan.com/lp/<公開名>` が 200(公開名未設定なら 404)で確認する。公開ゲートは `/t/` と同じ `SALE_DM_LP_PUBLIC_ENABLED`。Google のタグ(gtag.js)はこのページだけ、LPの設定の「Googleタグ ID」が入っているときだけ読み込む(CSP の `script-src`/`connect-src`/`img-src`/`frame-src` を Google の配信元に限って広げる・DM 用の `/t/` は今までどおり外部読み込みなし)。
 
 反映後の確認: `grep -c " /t/" /var/log/nginx/<vhost名>.access.log` を reload の前後で実行し、reload 後にカウントが増え続けていないことを確認する(増え続けていれば location の適用漏れ)。⚠**既存ログの点検も必要**: 本番は2026-09-16に点検済みで、ローテーション済みの古いログに実在のトークンが1行だけ記録されていたが、その時点までそのトークン宛の手紙は未送付(`status` が `sent` でない)だったため申込は記録され得ない状態だった(実害なし)。新たに `/t/` を公開ホストへ足す環境では反映前に同様の点検を行うこと。
 
@@ -816,6 +816,24 @@ sudo systemctl status property-management --no-pager
 
 > スキーマ変更がない場合はステップ 2 不要。  
 > デプロイ前に `pg_dump` でバックアップを取っておくこと。
+
+### 8.1 広告用のご案内ページ(2026-10-20・migration `20261020090000_lp_public_page`)より前へ戻すとき
+
+⚠この反映より前のコードは、申込(`dm_inquiries`)の宛先(`draft_id`)が必ずあるものとして読む(申込一覧の横断・通知メールの処理)。公開ページからの申込(`source='public'`・`draft_id IS NULL`)が1件でも入ったあとに旧コードへ戻すと、申込一覧が 500・その申込の通知の処理が落ちる(@codex #535 P1)。列を消す必要は無い(足した列はすべて任意)が、**旧コードを動かす前に公開ページからの申込の行を退避する**。
+
+```sql
+-- 0. (任意)新しい申込を止める: 公開名を外すと /lp/<公開名> は 404 になる(値は控えておき、戻すときに付け直す)
+SELECT id, name, public_slug FROM dm_scenarios WHERE public_slug IS NOT NULL;
+UPDATE dm_scenarios SET public_slug = NULL WHERE public_slug IS NOT NULL;
+-- 1. 公開ページからの申込を退避表へ(消さない・全列そのまま)
+CREATE TABLE dm_inquiries_public_hold_<日付> AS SELECT * FROM dm_inquiries WHERE source = 'public';
+DELETE FROM dm_inquiries WHERE source = 'public';
+-- 2. ここで旧コードへ戻す(上の手順 1〜5)。
+-- 3. 再び新コードへ進めたら戻す(id が同じなので二重にならない):
+INSERT INTO dm_inquiries SELECT * FROM dm_inquiries_public_hold_<日付> ON CONFLICT (id) DO NOTHING;
+```
+
+退避した申込は旧コードの間は画面に出ない(対応中の案件があれば退避表を直接見る)。通知メール・受付メールは退避前に送信済みの分は再送されない(`notify_status`/`auto_reply_status` も退避表にそのまま残る)。
 
 ### 現況「賃貸中」(`20261014090000_occupancy_rented`)より前へ戻すとき
 

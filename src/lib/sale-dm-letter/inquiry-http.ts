@@ -45,9 +45,14 @@ export function renderReplyPage(kind: ReplyKind, messages: readonly string[], ba
 /** 結果の返し方を1か所に。JS 送信(accept: application/json)は画面を離れないよう JSON、
  *  それ以外(JS なしの通常送信)は従来どおり HTML ページ。状態コードは両方同じ。 */
 export function createResponder(wantsJson: boolean, backHref: string) {
-  return (kind: ReplyKind, status: number, messages: readonly string[] = []): NextResponse => {
+  /**
+   * @param silent honeypot(機械送信)への「受け付けました」。人には同じ画面・JSON の result も "done" だが、
+   *   silent:true を添えて、ページ側が申込完了の合図(lp:inquiry-done=Google のコンバージョン)を出さないようにする
+   *   (@codex #535 P2: 記録していない機械送信を広告の成果に数えない)。
+   */
+  return (kind: ReplyKind, status: number, messages: readonly string[] = [], opts: { silent?: boolean } = {}): NextResponse => {
     if (wantsJson) {
-      const payload = kind === "invalid" ? { result: kind, messages } : { result: kind };
+      const payload = kind === "invalid" ? { result: kind, messages } : opts.silent ? { result: kind, silent: true } : { result: kind };
       return new NextResponse(JSON.stringify(payload), { status, headers: { ...JSON_HEADERS } });
     }
     return new NextResponse(renderReplyPage(kind, messages, backHref), {

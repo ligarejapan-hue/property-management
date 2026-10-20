@@ -400,9 +400,9 @@ describe("POST /t/[token]/inquiry accept: application/json(画面を離れずに
     return text;
   }
 
-  it("完了は {result:done}(200)。honeypot でも同じ", async () => {
+  it("完了は {result:done}(200)。honeypot は同じ画面だが silent:true を添える(申込完了の合図を出さない・@codex #535 P2)", async () => {
     await expectJson(await call(VALID, JSON_ACCEPT), 200, { result: "done" });
-    await expectJson(await call({ ...VALID, [HONEYPOT_FIELD]: "http://spam" }, JSON_ACCEPT), 200, { result: "done" });
+    await expectJson(await call({ ...VALID, [HONEYPOT_FIELD]: "http://spam" }, JSON_ACCEPT), 200, { result: "done", silent: true });
     expect(rec).toHaveBeenCalledTimes(1);
   });
 

@@ -58,7 +58,8 @@ export async function POST(req: NextRequest, { params }: { params: Promise<{ slu
   const get = (key: string): string | null => body.fields.get(key);
 
   const parsed = parseInquiryForm(get);
-  if (parsed.kind === "bot") return reply("done", 200);
+  // 機械送信は人と同じ「受け付けました」を返すが、silent=ページが申込完了の合図(Google のコンバージョン)を出さない。
+  if (parsed.kind === "bot") return reply("done", 200, [], { silent: true });
   if (parsed.kind === "invalid") return reply("invalid", 422, parsed.errors.map((e) => INQUIRY_ERROR_MESSAGES[e]));
 
   let scenario: { id: string; lpHeadline: string | null; lpBodyText: string | null } | null;

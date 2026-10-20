@@ -121,7 +121,8 @@ export async function POST(
 
   const parsed = parseInquiryForm(get);
   if (parsed.kind === "bot") {
-    return reply("done", 200);
+    // 人と同じ「受け付けました」。silent=ページが申込完了の合図を出さない(広告用の公開ページと同じ作法・@codex #535 P2)。
+    return reply("done", 200, [], { silent: true });
   }
   if (parsed.kind === "invalid") {
     const messages = parsed.errors.map((e) => INQUIRY_ERROR_MESSAGES[e]);

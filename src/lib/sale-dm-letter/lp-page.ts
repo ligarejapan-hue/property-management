@@ -532,10 +532,11 @@ const INQUIRY_SUBMIT_SCRIPT = [
   'function onEdit(e){var t=e.target;if(!t||!t.name)return;clearField(t.name);if(DEP[t.name]){clearField(DEP[t.name])}}',
   'f.addEventListener("input",onEdit);f.addEventListener("change",onEdit);',
   // 申込完了の合図(広告用の公開ページの Google のタグが受けてコンバージョンを送る・値は含めない・DM 用のページでは誰も受けない)。
-  'function done(){while(f.firstChild){f.removeChild(f.firstChild)}var p=document.createElement("p");p.className="inq-done";p.setAttribute("role","status");p.textContent=M.done;f.appendChild(p);' +
-    'try{document.dispatchEvent(new CustomEvent("lp:inquiry-done"))}catch(_){}}',
+  // silent(=サーバーが機械送信とみなして記録しなかった)のときは合図を出さない(@codex #535 P2)。
+  'function done(silent){while(f.firstChild){f.removeChild(f.firstChild)}var p=document.createElement("p");p.className="inq-done";p.setAttribute("role","status");p.textContent=M.done;f.appendChild(p);' +
+    'if(!silent){try{document.dispatchEvent(new CustomEvent("lp:inquiry-done"))}catch(_){}}}',
   "function handle(d){var k=d&&d.result;" +
-    'if(k==="done"){done();return}' +
+    'if(k==="done"){done(d.silent===true);return}' +
     'if(k==="invalid"){var ms=[];if(d.messages&&d.messages.length){for(var i=0;i<d.messages.length;i++){if(typeof d.messages[i]==="string"){ms.push(d.messages[i])}}}' +
     "if(ms.length){show(ms,true);enable();return}}" +
     'if(k==="preview"){show([M.preview]);enable();return}' +

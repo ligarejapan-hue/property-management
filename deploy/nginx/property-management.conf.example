@@ -140,9 +140,14 @@ server {
     }
 
     # 広告用の公開ページ(/lp/<公開名> とその申込の受け口 /lp/<公開名>/inquiry・設計 2026-10-20)。
-    # URL に資格情報は載らない(公開名は公開のもの・utm_* は広告の印)ので、アクセスログは通常どおり残す。
+    # URL に資格情報は載らないが、query の utm_* / gclid は訪問者が自由に書ける文字列(アプリ側では連絡先が
+    # 紛れ得るものとして権限で伏せる)で、既定の combined ログは query まで記録する。/t/ と同じく
+    # アクセスログ・エラーログに残さない(@codex #535 P2)。
     # ⚠公開ホスト(app.ligarejapan.com)の vhost にもこの location を足すこと(無いと 404)。
     location ^~ /lp/ {
+        access_log off;
+        error_log /dev/null crit;
+
         proxy_pass         http://127.0.0.1:3000;
         proxy_http_version 1.1;
         proxy_set_header   Host              $host;

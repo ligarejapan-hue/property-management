@@ -50,7 +50,9 @@
 
 - nginx(`/etc/nginx/sites-available/app.ligarejapan.com` と `deploy/nginx/property-management.conf.example`)に `location ^~ /lp/` を足す。URL に資格情報は載らない(utm は広告の印)ので、アクセスログは通常どおり残す。
 - アプリの公開パス(`src/proxy.ts` の `PUBLIC_PATHS`)に `"/lp/"` を足す。管理画面の `/lp`(LPメニュー)は完全一致の別物。**`src/app/(dashboard)/lp/` の下に画面を増やすと公開されてしまう**ため、走査テストで「`(dashboard)/lp` 直下は `page.tsx` だけ」を守る。
-- migration 1本(追加・NULL可への緩和・CHECK 制約)。コードだけ戻しても DB はそのままで動く(列は任意)。
+- migration 1本(追加・NULL可への緩和・CHECK 制約)。列は任意なので DB はそのままでよいが、**公開ページからの申込(draft_id が NULL の行)が入ったあとに旧コードへ戻すと旧コードが落ちる**(宛先を必ずあるものとして読むため・@codex #535 P1)。戻し方は docs/deploy.md「8.1」(公開名を外す→公開ページの申込の行を退避表へ→旧コード→再開時に戻す)。
+- nginx の `/lp/` は `/t/` と同じくアクセスログ・エラーログに残さない(query の utm_* は訪問者が自由に書ける文字列・@codex #535 P2)。
+- 機械送信(honeypot)への「受け付けました」は JSON に `silent:true` を添え、ページは申込完了の合図(Google のコンバージョン)を出さない(@codex #535 P2)。
 
 ## 5. 今回入れないもの(次の回)
 

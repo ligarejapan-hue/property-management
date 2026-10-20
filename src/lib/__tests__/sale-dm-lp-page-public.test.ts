@@ -91,10 +91,11 @@ describe("renderLpPage(public=広告用の公開ページ)", () => {
     expect(g2).not.toContain("'event','conversion'");
     expect(g2).toContain("gtag('event','generate_lead')");
   });
-  it("送信スクリプトは申込完了(done)のときに document へ lp:inquiry-done を出す(値は含めない)", () => {
+  it("送信スクリプトは申込完了(done)のときに document へ lp:inquiry-done を出す(値は含めない)。サーバーが silent(機械送信)と返したときは出さない", () => {
     expect(html).toContain('new CustomEvent("lp:inquiry-done")');
-    const i = html.indexOf("function done(){");
+    const i = html.indexOf("function done(silent){");
     expect(i).toBeGreaterThan(-1);
-    expect(html.slice(i, i + 400)).toContain('dispatchEvent(new CustomEvent("lp:inquiry-done"))');
+    expect(html.slice(i, i + 400)).toContain('if(!silent){try{document.dispatchEvent(new CustomEvent("lp:inquiry-done"))}');
+    expect(html).toContain('if(k==="done"){done(d.silent===true);return}');
   });
 });

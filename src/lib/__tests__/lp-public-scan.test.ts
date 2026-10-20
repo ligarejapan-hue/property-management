@@ -56,6 +56,13 @@ describe("nginx の設定例(公開ホストは公開の道だけを出す)", ()
     expect(https).toMatch(/location \^~ \/lp\/ \{/);
     expect(https).toMatch(/location \^~ \/lp\/ \{[\s\S]*?proxy_pass\s+http:\/\/127\.0\.0\.1:3000;/);
   });
+  it("/lp/ も /t/ と同じくアクセスログ・エラーログに残さない(query の utm_* は訪問者が自由に書ける文字列=@codex #535 P2)", () => {
+    const https = conf.slice(conf.indexOf("# HTTPS"));
+    const start = https.indexOf("location ^~ /lp/ {");
+    const block = https.slice(start, https.indexOf("\n    }", start));
+    expect(block).toMatch(/access_log off;/);
+    expect(block).toMatch(/error_log \/dev\/null crit;/);
+  });
   it("docs/deploy.md に公開ホストへ /lp/ を足す手順がある", () => {
     expect(read("docs/deploy.md")).toContain("location ^~ /lp/");
   });

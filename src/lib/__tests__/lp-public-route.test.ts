@@ -133,11 +133,17 @@ describe("POST /lp/[slug]/inquiry(広告用の公開ページの申込)", () => 
     expect(JSON.parse(text)).toEqual({ result: "done" });
     expect(text).not.toContain("秘密の住所");
   });
-  it("honeypot が埋まっていれば「受け付けました」を返して何も記録しない", async () => {
+  it("honeypot が埋まっていれば「受け付けました」を返して何も記録しない。JS 送信には silent を添える(コンバージョンを送らせない)", async () => {
     const res = await post({ ...VALID, [HONEYPOT_FIELD]: "x" });
     expect(res.status).toBe(200);
+    expect(await res.text()).toContain("受け付けました");
     expect(rec).not.toHaveBeenCalled();
     expect(findFirst).not.toHaveBeenCalled();
+    const j = await post({ ...VALID, [HONEYPOT_FIELD]: "x" }, { accept: "application/json" });
+    expect(JSON.parse(await j.text())).toEqual({ result: "done", silent: true });
+    // 本物の申込には silent を付けない
+    const real = await post(VALID, { accept: "application/json" });
+    expect(JSON.parse(await real.text())).toEqual({ result: "done" });
   });
   it("入力の不備は 422(所在地が長すぎる)で、入力値は返さない", async () => {
     const res = await post({ ...VALID, propertyAddress: "あ".repeat(201) }, { accept: "application/json" });
