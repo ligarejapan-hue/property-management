@@ -23,8 +23,10 @@ export async function GET(req: NextRequest, { params }: { params: Promise<{ slug
   let page: Awaited<ReturnType<typeof loadPublicLpPage>>;
   try {
     page = await loadPublicLpPage(prisma, slug, (k) => query.get(k));
-  } catch {
-    page = { kind: "none" };
+  } catch (err) {
+    // DB 障害などの一時的な失敗は 404 にしない(検索に載せるページ=404 を返すと消されたと解釈され得る・@codex #535 R3 P2)。
+    console.error("[lp_public_page] load failed", { name: err instanceof Error ? err.name : "Unknown" });
+    return new NextResponse(null, { status: 503, headers: { "Cache-Control": "no-store", "Retry-After": "60" } });
   }
   if (page.kind !== "page") {
     return new NextResponse(null, { status: 404, headers: { "Cache-Control": "no-store" } });

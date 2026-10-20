@@ -819,17 +819,32 @@ sudo systemctl status property-management --no-pager
 
 ### 8.1 広告用のご案内ページ(2026-10-20・migration `20261020090000_lp_public_page`)より前へ戻すとき
 
-⚠この反映より前のコードは、申込(`dm_inquiries`)の宛先(`draft_id`)が必ずあるものとして読む(申込一覧の横断・通知メールの処理)。公開ページからの申込(`source='public'`・`draft_id IS NULL`)が1件でも入ったあとに旧コードへ戻すと、申込一覧が 500・その申込の通知の処理が落ちる(@codex #535 P1)。列を消す必要は無い(足した列はすべて任意)が、**旧コードを動かす前に公開ページからの申込の行を退避する**。
+⚠この反映より前のコードは、申込(`dm_inquiries`)の宛先(`draft_id`)が必ずあるものとして読む(申込一覧の横断・通知メールの処理)。公開ページからの申込(`source='public'`・`draft_id IS NULL`)が1件でも入ったあとに旧コードへ戻すと、申込一覧が 500・その申込の通知の処理が落ちる(@codex #535 P1)。列を消す必要は無い(足した列はすべて任意)が、**旧コードを動かす前に公開ページからの申込の行を退避する**。順番が大事: **先にサービスを止めてから**退避する(動いたままだと、公開名を外す直前に受け付けた申込が退避のあとに入り得る=@codex #535 R3 P1)。
+
+```bash
+# 1. サービスを止める(受け口も止まる=この後は新しい申込が入らない)
+sudo systemctl stop property-management
+```
 
 ```sql
--- 0. (任意)新しい申込を止める: 公開名を外すと /lp/<公開名> は 404 になる(値は控えておき、戻すときに付け直す)
+-- 2. (任意)公開名を外す(旧コードは public_slug を読まないので必須ではない。値は控えておき、再開時に付け直す)
 SELECT id, name, public_slug FROM dm_scenarios WHERE public_slug IS NOT NULL;
 UPDATE dm_scenarios SET public_slug = NULL WHERE public_slug IS NOT NULL;
--- 1. 公開ページからの申込を退避表へ(消さない・全列そのまま)
+-- 3. 公開ページからの申込を退避表へ(消さない・全列そのまま)
 CREATE TABLE dm_inquiries_public_hold_<日付> AS SELECT * FROM dm_inquiries WHERE source = 'public';
 DELETE FROM dm_inquiries WHERE source = 'public';
--- 2. ここで旧コードへ戻す(上の手順 1〜5)。
--- 3. 再び新コードへ進めたら戻す(id が同じなので二重にならない):
+```
+
+```bash
+# 4. 旧コードへ(上の手順の 1・3・4・5)。⚠**手順 2 の `prisma migrate resolve --rolled-back` はこの migration には使わない**:
+#    列は残したままなので「取り消し済み」と記録すると、次の `prisma migrate deploy` が同じ ADD COLUMN を
+#    やり直して失敗する(@codex #535 R3 P1)。列を本当に消すときだけ、先に DDL を手で戻してから resolve する。
+git checkout <previous-tag> && npm ci --include=dev && npx prisma generate && npm run build && npm prune --omit=dev
+sudo systemctl start property-management
+```
+
+```sql
+-- 5. 再び新コードへ進めたら戻す(id が同じなので二重にならない)。公開名も付け直す。
 INSERT INTO dm_inquiries SELECT * FROM dm_inquiries_public_hold_<日付> ON CONFLICT (id) DO NOTHING;
 ```
 

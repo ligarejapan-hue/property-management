@@ -103,9 +103,12 @@ describe("GET /lp/[slug](広告用の公開ページ)", () => {
     expect(r.status).toBe(404);
     expect(await r.text()).toBe("");
   });
-  it("DB が落ちていても 500 を出さず 404", async () => {
+  it("DB が落ちているときは 404 ではなく 503(検索に載せるページ=404 だと消されたと解釈される・@codex #535 R3)", async () => {
     findFirst.mockRejectedValueOnce(new Error("db down"));
-    expect((await get("souzoku")).status).toBe(404);
+    const r = await get("souzoku");
+    expect(r.status).toBe(503);
+    expect(r.headers.get("retry-after")).toBe("60");
+    expect(await r.text()).toBe("");
   });
 });
 
