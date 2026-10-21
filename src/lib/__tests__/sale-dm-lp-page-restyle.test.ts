@@ -119,7 +119,7 @@ describe("公開LPの新しい作り(2026-10 見本)", () => {
   });
 
   it("よくある質問は Q/A の印つき", () => {
-    expect(html).toContain('<summary><span class="q">Q</span><span>費用は？</span></summary><div class="a"><b>A</b><p>無料です。</p></div>');
+    expect(html).toContain('<summary><span class="q">Q</span><span class="qt">費用は？</span></summary><div class="a"><b>A</b><p>無料です。</p></div>');
   });
 
   it("所有者の氏名などを持ち込まない(固定文にも敬称を含めない)", () => {
@@ -142,10 +142,11 @@ describe("ご相談の例(実例)は押すと広がる", () => {
   const h = renderLpPage(caseInput);
 
   it("見出しの()の中が札、本文の1行目が題、残りは開くと読める", () => {
-    expect(h).toContain('<section class="case"><details><summary><span class="case-tag">ご相談の例 世田谷区・戸建て・築35年</span><strong>権利書も見つからない状態から売却</strong><span class="case-more" aria-hidden="true">続きを読む</span></summary><div class="case-body"><p>相続人であるお子様たちは…</p><p>二段落目。</p></div></details></section>');
+    // 札と題は文節の切れ目に <wbr>(言葉の途中で折らない・2026-10-21)
+    expect(h).toContain('<section class="case"><details><summary><span class="case-tag">ご相談の<wbr>例 <wbr>世田谷区・<wbr>戸建て・<wbr>築35年</span><strong>権利書も<wbr>見つからない<wbr>状態から<wbr>売却</strong><span class="case-more" aria-hidden="true">続きを読む</span></summary><div class="case-body"><p>相続人であるお子様たちは…</p><p>二段落目。</p></div></details></section>');
   });
   it("1行目しか無い本文は、見出しを題にして本文を中に入れる", () => {
-    expect(h).toContain('<span class="case-tag">実例 東京都・マンション</span><strong>実例:東京都・マンション</strong>');
+    expect(h).toContain('<span class="case-tag">実例 <wbr>東京都・<wbr>マンション</span><strong>実例:<wbr>東京都・<wbr>マンション</strong>');
     expect(h).toContain('<div class="case-body"><p>一行だけの本文。</p></div>');
   });
   it("実例の節に付けた写真・図も、開いたときの本文に出す(@codex #488 R1 P2)", () => {
@@ -160,7 +161,7 @@ describe("ご相談の例(実例)は押すと広がる", () => {
     const sep = renderLpPage(input({ sections: [
       { heading: "ご相談の例(C)", paragraphs: ["空行の前の題", "本文の段落。"], media: null },
     ] }));
-    expect(sep).toContain('<strong>空行の前の題</strong>');
+    expect(sep).toContain('<strong>空行の<wbr>前の<wbr>題</strong>');
     expect(sep).toContain('<div class="case-body"><p>本文の段落。</p></div>');
     expect(sep).not.toContain("<p>空行の前の題</p>");
   });
@@ -185,16 +186,16 @@ describe("ご相談の例(実例)は押すと広がる", () => {
       { heading: "ご相談の例1", paragraphs: ["題\n本文"], media: null },
       { heading: "実例", paragraphs: ["題\n本文"], media: null },
     ] }));
-    expect(k).toContain("<section><h2>実例集のご紹介</h2>");
+    expect(k).toContain("<section><h2>実例集の<wbr>ご紹介</h2>");
     expect((k.match(/<section class="case">/g) ?? []).length).toBe(2);
   });
   it("ふつうの節は今までどおり", () => {
-    expect(h).toContain("<section><h2>ふつうの節</h2><p>x</p></section>");
+    expect(h).toContain("<section><h2>ふつうの<wbr>節</h2><p>x</p></section>");
     expect((h.match(/<section class="case">/g) ?? []).length).toBe(2);
   });
   it("続く実例は1つの枠(.cases)にまとめる=PC では左右2列", () => {
     expect(h).toContain('<h2 class="cases-head">これまでのご相談から</h2><div class="cases"><section class="case">');
-    expect(h).toContain('</details></section></div><section><h2>ふつうの節</h2>');
+    expect(h).toContain('</details></section></div><section><h2>ふつうの<wbr>節</h2>');
     expect(h).toMatch(/.cases{grid-template-columns:1fr 1fr/);
   });
   it("売る・貸す・持つ・住み続けて売るの4枚: スマホは1列の一覧、PC は2列(3枚版は PC で横に3つ)", () => {

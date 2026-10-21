@@ -9,6 +9,7 @@
  */
 import { escapeHtml } from "./templates/index";
 import { renderFigureHtml, type FigureOptions } from "./lp-figures";
+import { jaHeadingHtml, jaWrapHtml } from "./ja-line-break";
 import { LP_BRAND, type LpBrandImage } from "./lp-brand";
 import { formatPhoneJp } from "../phone-format-jp";
 import type { LpRenderInput, LpImage, LpFormInput, LpPublicInput } from "./lp-render-input";
@@ -50,6 +51,8 @@ const CSS = [
   "h2::before{content:\"\";display:block;width:28px;height:3px;background:#0e6b5c;border-radius:2px;margin-bottom:10px}",
   // 見出しの折り返しは行の長さをそろえる(スマホで1〜2文字だけ次の行に落ちるのを防ぐ。2026-10-21 見本 B)
   "h1,h2{text-wrap:balance}",
+  // 見出し・実例の題と札・質問は、文節の切れ目(<wbr>)でだけ折る。1文節が1行に収まらないときだけ字の途中で折る。
+  "h1,h2,.case summary strong,.case-tag,.faq .qt{word-break:keep-all;overflow-wrap:anywhere}",
   "h3{font-size:18px;margin:4px 0 4px}",
   "p{margin:0 0 12px}",
   "a{color:#0a5246}",
@@ -688,7 +691,7 @@ function renderCaseSection(s: LpRenderInput["sections"][number], prefix: string,
   const inner = isGuide
     ? `<div class="guide">${renderFigureHtml("consult_guide")}<div><p class="guide-name">${escapeHtml(LP_BRAND.guideName)}</p>${text}</div></div>`
     : `${photo}${text}${figure}`;
-  return `<section class="case"><details><summary><span class="case-tag">${escapeHtml(tag)}</span><strong>${escapeHtml(title)}</strong>` +
+  return `<section class="case"><details><summary><span class="case-tag">${jaHeadingHtml(tag)}</span><strong>${jaHeadingHtml(title)}</strong>` +
     `<span class="case-more" aria-hidden="true">続きを読む</span></summary><div class="case-body">${inner}</div></details></section>`;
 }
 
@@ -698,7 +701,8 @@ const FOLD_TEXT_MIN = 200;
 function renderSection(s: LpRenderInput["sections"][number], cta: string, fig: FigureOptions): string {
   const casePrefix = casePrefixOf(s.heading);
   if (casePrefix) return renderCaseSection(s, casePrefix, cta, fig);
-  const h2 = `<h2>${escapeHtml(s.heading)}</h2>`;
+  // 見出しは文節の切れ目でだけ折り(<wbr>+keep-all)、読点は表示から抜く(2026-10-21 発注者)。写真の alt は元の文のまま。
+  const h2 = `<h2>${jaHeadingHtml(s.heading)}</h2>`;
   const body = paragraphs(s.paragraphs, cta);
   if (s.media?.kind === "asset") {
     // 写真つきの節: PC は写真と文章の2列(スマホは縦に積む)。写真は元の比率のまま。
@@ -731,7 +735,7 @@ export function renderLpPage(input: LpRenderInput): string {
   const pub = input.mode === "public" ? (input.public ?? null) : null;
   // 広告用の公開ページは手紙を受け取っていない人が開く=冒頭の一言を一般向けに。
   const eyebrow = input.mode === "public" ? LP_BRAND.publicEyebrow : LP_BRAND.heroEyebrow;
-  const heroCopy = `<p class="eyebrow">${escapeHtml(eyebrow)}</p><h1>${escapeHtml(input.headline)}</h1>` +
+  const heroCopy = `<p class="eyebrow">${escapeHtml(eyebrow)}</p><h1>${jaHeadingHtml(input.headline)}</h1>` +
     (input.lead ? `<p class="lead">${escapeHtml(input.lead)}</p>` : "") +
     `<ul class="promises">${LP_BRAND.promises.map((p) => `<li>${escapeHtml(p)}</li>`).join("")}</ul>` +
     `<div class="cta-row">${cta}${telHref ? `<a class="cta secondary" href="${telHref}" data-phone-tap="1">電話で相談する</a>` : ""}</div>`;
@@ -750,7 +754,7 @@ export function renderLpPage(input: LpRenderInput): string {
   // チェック札を実際に描いたかで判定する(元の段落で判定すると、実例の題を切り分けた後にできた札を見落とす=@codex #488 R4 P2)。
   const hasChecks = /data-check="1"/.test(introHtml + sections);
   const faq = input.faq.length === 0 ? "" : `<section><h2>よくあるご質問</h2><div class="faq">${input.faq.map((f) =>
-    `<details><summary><span class="q">Q</span><span>${escapeHtml(f.q)}</span></summary><div class="a"><b>A</b><p>${escapeHtml(f.a).replace(/\n/g, "<br />")}</p></div></details>`,
+    `<details><summary><span class="q">Q</span><span class="qt">${jaWrapHtml(f.q)}</span></summary><div class="a"><b>A</b><p>${escapeHtml(f.a).replace(/\n/g, "<br />")}</p></div></details>`,
   ).join("")}</div></section>`;
   const company = `<section class="company" id="${CONTACT_ID}">` +
     brandImg(LP_BRAND.logo, "co-logo") +
