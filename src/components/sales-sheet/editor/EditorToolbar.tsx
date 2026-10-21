@@ -51,9 +51,16 @@ export interface EditorToolbarProps {
   autoFixNotice?: string | null;
 }
 
+type ExportFormat = "pdf" | "png";
+
+/** その形式のボタンが出力中か。PDF と PNG は別々に判定する(押したほうだけ「出力中…」にする)。 */
+export function isExportingFormat(exporting: ExportFormat | null, format: ExportFormat): boolean {
+  return exporting === format;
+}
+
 export function EditorToolbar({ dirty, onSave, onExport, onDelete, onAddPhoto, onAutoArrange, onAutoBalance, onAddBadge, onAddQr, onAddMapQr, canAddMapQr = false, mapQrDisabledReason, onOpenTransactionInfo, canEditTransactionInfo = true, transactionInfoDisabledReason, canAutoLayout = true, onUndo, canUndo = false, onRedo, canRedo = false, layoutWarning = null, onAutoFixOverlaps, autoFixNotice = null }: EditorToolbarProps) {
   const [saving, setSaving] = useState(false);
-  const [exporting, setExporting] = useState(false);
+  const [exporting, setExporting] = useState<ExportFormat | null>(null);
   const [deleting, setDeleting] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
@@ -69,15 +76,15 @@ export function EditorToolbar({ dirty, onSave, onExport, onDelete, onAddPhoto, o
     }
   }
 
-  async function handleExport(format: "pdf" | "png") {
-    setExporting(true);
+  async function handleExport(format: ExportFormat) {
+    setExporting(format);
     setError(null);
     try {
       await onExport(format);
     } catch (e) {
       setError(e instanceof Error ? e.message : "出力に失敗しました");
     } finally {
-      setExporting(false);
+      setExporting(null);
     }
   }
 
@@ -94,7 +101,7 @@ export function EditorToolbar({ dirty, onSave, onExport, onDelete, onAddPhoto, o
     }
   }
 
-  const busy = saving || exporting || deleting;
+  const busy = saving || exporting !== null || deleting;
 
   return (
     <div
@@ -204,14 +211,18 @@ export function EditorToolbar({ dirty, onSave, onExport, onDelete, onAddPhoto, o
         data-toolbar-export="pdf"
         onClick={() => handleExport("pdf")}
         disabled={busy}
+        loading={isExportingFormat(exporting, "pdf")}
+        loadingLabel="出力中…"
       >
-        {exporting ? "出力中…" : "PDF出力"}
+        PDF出力
       </Button>
       <Button
         variant="secondary"
         data-toolbar-export="png"
         onClick={() => handleExport("png")}
         disabled={busy}
+        loading={isExportingFormat(exporting, "png")}
+        loadingLabel="出力中…"
       >
         PNG出力
       </Button>
