@@ -1,5 +1,6 @@
 "use client";
 
+import { Button } from "@/components/ui/button";
 import { useState, useEffect, useCallback, useMemo, useRef } from "react";
 import { PageHeader } from "@/components/ui/page-header";
 import { SearchField } from "@/components/ui/search-field";
@@ -99,13 +100,10 @@ export default function BuildingsPage() {
       <PageHeader
         title="マンション棟"
         actions={
-          <button
-            onClick={() => setShowCreate(true)}
-            className="flex items-center gap-1.5 rounded-md bg-indigo-600 px-4 py-2 text-sm font-medium text-white hover:bg-indigo-700"
-          >
+          <Button onClick={() => setShowCreate(true)}>
             <Plus className="h-4 w-4" />
             新規棟登録
-          </button>
+          </Button>
         }
       />
 
@@ -140,13 +138,10 @@ export default function BuildingsPage() {
             // 本当に0件(未登録)のときだけ登録CTAで次の操作へ導く(B-12 UI総点検)。
             <>
               <p className="text-sm text-gray-500 dark:text-gray-400">マンション棟がまだ登録されていません</p>
-              <button
-                onClick={() => setShowCreate(true)}
-                className="mt-4 inline-flex items-center gap-1.5 rounded-md bg-indigo-600 px-4 py-2 text-sm font-medium text-white hover:bg-indigo-700"
-              >
+              <Button onClick={() => setShowCreate(true)} className="mt-4">
                 <Plus className="h-4 w-4" />
                 最初のマンション棟を登録
-              </button>
+              </Button>
             </>
           )}
         </div>
@@ -377,21 +372,13 @@ function CreateBuildingModal({
             />
           </div>
           <div className="flex justify-end gap-2 pt-2">
-            <button
-              type="button"
-              onClick={onClose}
-              className="rounded-md border border-gray-300 px-4 py-2 text-sm text-gray-700 hover:bg-gray-50 dark:border-gray-700 dark:text-gray-200 dark:hover:bg-gray-800"
-            >
+            <Button variant="ghost" onClick={onClose}>
               キャンセル
-            </button>
-            <button
-              type="submit"
-              disabled={saving}
-              className="flex items-center gap-1.5 rounded-md bg-indigo-600 px-4 py-2 text-sm font-medium text-white hover:bg-indigo-700 disabled:opacity-50"
-            >
+            </Button>
+            <Button type="submit" disabled={saving}>
               {saving && <Loader2 className="h-4 w-4 animate-spin" />}
               登録
-            </button>
+            </Button>
           </div>
         </form>
       </div>

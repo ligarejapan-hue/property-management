@@ -22,7 +22,8 @@ export function BuildingLinkNotice({ outcome, onClose }: { outcome: BuildingLink
           </li>
         ))}
       </ul>
-      <button type="button" onClick={onClose} aria-label="閉じる" className="text-gray-500 hover:text-gray-700 dark:text-gray-400 dark:hover:text-gray-200">
+      {/* data-ui=raw: アイコンだけの閉じる× */}
+      <button data-ui="raw" type="button" onClick={onClose} aria-label="閉じる" className="text-gray-500 hover:text-gray-700 dark:text-gray-400 dark:hover:text-gray-200">
         <X className="h-4 w-4" />
       </button>
     </div>

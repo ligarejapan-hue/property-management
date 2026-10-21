@@ -1,4 +1,5 @@
 "use client";
+import { Button } from "@/components/ui/button";
 import { useState } from "react";
 import {
   fetchCorporateCleanupPreview,
@@ -87,14 +88,9 @@ export default function CorporateCleanupPanel({ ownerId, onApplied }: Props) {
       data-pii-protected
       data-pii-surface="owner"
     >
-      <button
-        type="button"
-        onClick={onCheck}
-        disabled={loading}
-        className="rounded bg-slate-100 px-3 py-1 text-slate-700 hover:bg-slate-200 dark:bg-gray-800 dark:text-gray-200 dark:hover:bg-gray-700"
-      >
+      <Button variant="secondary" size="sm" onClick={onCheck} disabled={loading}>
         {loading ? "確認中…" : "法人番号の混入をチェック"}
-      </button>
+      </Button>
 
       {done && <p className="mt-2 text-emerald-700 dark:text-emerald-400">混入を除去しました</p>}
       {error && <p className="mt-2 text-red-600 dark:text-red-400">{error}</p>}
@@ -145,14 +141,9 @@ export default function CorporateCleanupPanel({ ownerId, onApplied }: Props) {
               <span className="ml-1">{FIELD_LABEL[f as Field]}</span>
             </label>
           ))}
-          <button
-            type="button"
-            onClick={onApply}
-            disabled={applying || !anyChecked}
-            className="rounded bg-indigo-600 px-3 py-1 text-white"
-          >
+          <Button variant="primary" size="sm" onClick={onApply} disabled={applying || !anyChecked}>
             {applying ? "反映中…" : "選択した項目を反映"}
-          </button>
+          </Button>
         </div>
       )}
     </div>

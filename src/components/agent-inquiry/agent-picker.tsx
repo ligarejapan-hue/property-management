@@ -13,7 +13,9 @@ export function AgentResults({ hits, onPick }: { hits: AgentHit[]; onPick: (a: A
     <ul className="divide-y divide-gray-100 rounded-md border border-gray-200 bg-white dark:divide-gray-800 dark:border-gray-700 dark:bg-gray-900">
       {hits.map((h) => (
         <li key={h.id}>
+          {/* data-ui=raw: 候補リストの1行(行全体が押せる面) */}
           <button
+            data-ui="raw"
             type="button"
             onClick={() => onPick(h)}
             className="block w-full px-3 py-2 text-left hover:bg-teal-50 dark:hover:bg-gray-800"
@@ -55,7 +57,9 @@ export function RegistryResults({
       <ul className="divide-y divide-gray-100 rounded-md border border-dashed border-gray-300 bg-white dark:divide-gray-800 dark:border-gray-600 dark:bg-gray-900">
         {hits.map((h) => (
           <li key={h.id}>
+            {/* data-ui=raw: 候補リストの1行(行全体が押せる面) */}
             <button
+              data-ui="raw"
               type="button"
               onClick={() => onPick(h)}
               disabled={busyId !== null}
@@ -180,12 +184,14 @@ export function AgentPicker({
       {searching && shown?.failed && <p className="text-xs text-rose-600">検索できませんでした(通信を確かめてください)</p>}
       {/* 探し終えてから出す=候補を見ずに押して、名簿にある業者を二重に作らない(@codex #459 R21)。 */}
       {createAction === "empty" && (
-        <button type="button" onClick={createNew} className="text-sm text-teal-700 underline dark:text-teal-300">
+        // data-ui=raw: 文中の下線リンク風
+        <button data-ui="raw" type="button" onClick={createNew} className="text-sm text-teal-700 underline dark:text-teal-300">
           ＋ 名簿にない業者を新しく登録
         </button>
       )}
       {createAction === "hasHits" && (
-        <button type="button" onClick={createNew} className="text-xs text-gray-500 underline">
+        // data-ui=raw: 文中の下線リンク風
+        <button data-ui="raw" type="button" onClick={createNew} className="text-xs text-gray-500 underline">
           上の候補に無い(別の支店など)ときだけ、新しく登録
         </button>
       )}

@@ -14,6 +14,7 @@
  * - 座標や秘匿情報を console に出さない。
  */
 
+import { Button } from "@/components/ui/button";
 import { useEffect, useRef, useState } from "react";
 import {
   cancelRegistryLiveView,
@@ -321,7 +322,9 @@ export default function RegistryLivePanel({
             ⚠呼び出し側の cancelable=false は「この経路では出さない」の明示指定
             として引き続き尊重する(AND 条件)。 */}
         {cancelable && !searchSettled && cancelView !== "hidden" && (
+          // data-motion=off: 中止は専用の見た目が仕様(受け付けた中止は必ず効く・動きは足さない)
           <button
+            data-motion="off"
             type="button"
             onClick={() => void handleCancel()}
             disabled={cancelView === "pending"}
@@ -347,7 +350,9 @@ export default function RegistryLivePanel({
 
       {/* 最新スクショ (viewport 全体の縮小表示)。クリックで拡大。 */}
       {latestShotStep ? (
+        // data-ui=raw: 写真の縮小表示(画像全体が押せる面)
         <button
+          data-ui="raw"
           type="button"
           onClick={() => setEnlarged(true)}
           data-testid="registry-live-shot-thumb"
@@ -401,13 +406,12 @@ export default function RegistryLivePanel({
             alt="自動操作画面のスクリーンショット (拡大)"
             className="max-h-full max-w-full rounded shadow-lg"
           />
-          <button
-            type="button"
-            onClick={() => setEnlarged(false)}
-            className="absolute right-4 top-4 rounded bg-white/90 px-3 py-1 text-sm text-gray-800 shadow"
-          >
-            閉じる
-          </button>
+          {/* 右上に置く枠は外側の div で持つ(Button は relative を持つので absolute を渡すと負ける) */}
+          <div className="absolute right-4 top-4">
+            <Button variant="secondary" size="sm" onClick={() => setEnlarged(false)}>
+              閉じる
+            </Button>
+          </div>
         </div>
       )}
     </div>

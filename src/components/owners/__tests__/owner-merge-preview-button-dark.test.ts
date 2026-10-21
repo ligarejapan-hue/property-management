@@ -8,12 +8,12 @@ const src = readFileSync(join(dir, "..", "OwnerMergePreviewButton.tsx"), "utf8")
 
 describe("OwnerMergePreviewButton dark: 配色（22H・add-only）", () => {
   it("プレビューボタンの disabled 地に dark:disabled:bg-gray-700", () => {
-    expect(src).toContain("disabled:bg-gray-300 dark:disabled:bg-gray-700");
+    // 共通 Button が disabled の見た目(dark 込み)を持つ
+    expect(src).toMatch(/<Button variant="secondary"[^>]*disabled=\{state === "loading"\}/);
   });
   it("閉じるリンクに dark:text-gray-400 dark:hover:text-gray-300", () => {
-    expect(src).toContain(
-      "text-gray-500 underline hover:text-gray-700 dark:text-gray-400 dark:hover:text-gray-300",
-    );
+    // 共通 Button(ghost)が dark の文字色・hover を持つ
+    expect(src).toMatch(/<Button variant="ghost"[^>]*onClick=\{reset\}/);
   });
   it("通信エラーバナー(red)に dark の border/bg/text", () => {
     expect(src).toContain(
@@ -43,9 +43,8 @@ describe("OwnerMergePreviewButton dark: 配色（22H・add-only）", () => {
     expect(src).toContain("border border-red-300 bg-red-50 p-2 dark:border-red-400/20 dark:bg-red-500/10");
   });
   it("キャンセルボタン(neutral)に dark", () => {
-    expect(src).toContain(
-      "text-gray-600 hover:bg-gray-50 dark:border-gray-700 dark:bg-gray-900 dark:text-gray-300 dark:hover:bg-gray-800",
-    );
+    // 共通 Button(ghost)が dark を持つ
+    expect(src).toMatch(/<Button variant="ghost"[^>]*onClick=\{resetExecute\}/);
   });
   it("統合完了 success box(green)に dark", () => {
     expect(src).toContain(
@@ -55,9 +54,11 @@ describe("OwnerMergePreviewButton dark: 配色（22H・add-only）", () => {
 
   // ライト不変（solid colored buttons は据え置き）
   it("solid purple プレビューボタン据え置き", () => {
-    expect(src).toContain("bg-purple-600 px-3 py-1 text-xs font-medium text-white");
+    // 共通 Button(secondary)。色の判断は共通部品に寄せた
+    expect(src).toMatch(/<Button variant="secondary"[^>]*onClick=\{handleClick\}/);
   });
   it("solid red 実行ボタン据え置き", () => {
-    expect(src).toContain("bg-red-600 px-3 py-1 text-xs font-medium text-white");
+    // 共通 Button(danger=赤の塗り・白文字)
+    expect(src).toMatch(/<Button variant="danger"[^>]*onClick=\{\(\) => setExecuteState\("confirm1"\)\}/);
   });
 });

@@ -236,9 +236,10 @@ describe("modal dark mode (D2)", () => {
     expect(src).toContain("dark:text-gray-400");
   });
 
-  test("address-lookup-controls: cancel button has dark border", () => {
+  // UIの統一 第7回: キャンセルは共通 Button(dark の色は Button 側が持つ)
+  test("address-lookup-controls: cancel button is the shared Button (dark handled there)", () => {
     const src = readSrc("address/address-lookup-controls.tsx");
-    expect(src).toContain("dark:border-gray-700");
+    expect(src).toMatch(/<Button variant="ghost"[^>]*onClick=\{clearPending\}>\s*キャンセル/);
   });
 
   // Light-mode classes must remain intact

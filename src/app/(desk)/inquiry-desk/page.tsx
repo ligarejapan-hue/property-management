@@ -28,6 +28,7 @@ import { DeskAccessContext, makeDeskAccess } from "@/components/agent-inquiry/de
 import { useScreenProtection } from "@/components/screen-protection/screen-protection-provider";
 import { hasPermission } from "@/lib/permissions";
 import { notifyInquiryChanged } from "@/lib/agent-inquiry/desk-sync";
+import { Button } from "@/components/ui/button";
 
 /** 受付の窓(設計 2026-09-28 §2.1)。上から 今日・明日の内見 → 登録フォーム → 一覧(広い画面は右列)。 */
 export default function InquiryDeskPage() {
@@ -198,9 +199,9 @@ export default function InquiryDeskPage() {
         {permissionsSettled && permissionsError ? (
           <>
             <p className="mb-2">権限を確かめられませんでした。</p>
-            <button type="button" onClick={() => void refetchPermissions()} className="rounded border border-gray-300 px-3 py-1 text-xs dark:border-gray-700">
+            <Button variant="secondary" size="sm" onClick={() => void refetchPermissions()}>
               もう一度確かめる
-            </button>
+            </Button>
           </>
         ) : (
           <p>権限を確かめています…</p>
@@ -213,9 +214,9 @@ export default function InquiryDeskPage() {
       <div className="rounded-md bg-white p-6 text-center text-sm dark:bg-gray-900">
         <p className="mb-2">反響の受付の権限がありません。管理者にお問い合わせください。</p>
         {/* 権限を戻してもらったら、ここで確かめ直せる(読み直すと表示が戻る)。 */}
-        <button type="button" onClick={() => void refetchPermissions()} className="rounded border border-gray-300 px-3 py-1 text-xs dark:border-gray-700">
+        <Button variant="secondary" size="sm" onClick={() => void refetchPermissions()}>
           もう一度確かめる
-        </button>
+        </Button>
       </div>
     );
   }
@@ -226,9 +227,9 @@ export default function InquiryDeskPage() {
         {loadError && (
           <div role="alert" className="flex items-center justify-between gap-2 rounded-md bg-rose-50 px-3 py-2 text-sm text-rose-700 lg:col-span-2 dark:bg-rose-950 dark:text-rose-200">
             <span>読み込めませんでした。一覧と今日・明日の内見が最新ではありません。</span>
-            <button type="button" onClick={reloadAll} className="shrink-0 rounded border border-rose-300 px-2 py-0.5 text-xs">
+            <Button variant="secondary" size="sm" className="shrink-0" onClick={reloadAll}>
               もう一度読む
-            </button>
+            </Button>
           </div>
         )}
         <div className="space-y-3">

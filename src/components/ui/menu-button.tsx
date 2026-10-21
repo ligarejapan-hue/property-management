@@ -12,6 +12,7 @@
 import { useEffect, useRef, useState, type ComponentType } from "react";
 import Link from "next/link";
 import { ChevronDown, Loader2 } from "lucide-react";
+import { Button } from "@/components/ui/button";
 
 export interface MenuItem {
   key: string;
@@ -67,17 +68,17 @@ export function MenuButton({ label, items, icon: Icon, alignRight = true, classN
 
   return (
     <div ref={wrapRef} className={`relative${className ? ` ${className}` : ""}`}>
-      <button
-        type="button"
+      <Button
+        variant="secondary"
         aria-haspopup="menu"
         aria-expanded={open}
         onClick={() => setOpen((v) => !v)}
-        className="flex items-center gap-1.5 whitespace-nowrap rounded-md border border-gray-300 px-3 py-2 text-sm text-gray-700 hover:bg-gray-50 dark:border-gray-700 dark:text-gray-200 dark:hover:bg-gray-800"
+        className="whitespace-nowrap"
       >
         {Icon && <Icon className="h-4 w-4" />}
         {label}
         <ChevronDown className="h-4 w-4" />
-      </button>
+      </Button>
       {open && (
         <div
           role="menu"
@@ -107,7 +108,9 @@ export function MenuButton({ label, items, icon: Icon, alignRight = true, classN
               );
             }
             return (
+              // data-ui=raw: メニューの1項目(行全体が押せる面)
               <button
+                data-ui="raw"
                 key={item.key}
                 type="button"
                 role="menuitem"

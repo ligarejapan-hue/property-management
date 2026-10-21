@@ -1,4 +1,5 @@
 import type { InquiryStatusKey, InquiryView } from "@/lib/api-client";
+import { Button } from "@/components/ui/button";
 import { Tabs, tabPanelProps } from "@/components/ui/tabs";
 import {
   CHANNEL_LABEL,
@@ -73,7 +74,9 @@ export function InquiryListView({
       <ul className="space-y-1" {...tabPanelProps("agent-inquiry-status", tab)}>
         {items.map((q) => (
           <li key={q.id}>
+            {/* data-ui=raw: 一覧の行全体が押せる面 */}
             <button
+              data-ui="raw"
               type="button"
               onClick={() => onOpen(q.id)}
               className="block w-full rounded-md border border-gray-200 bg-white px-3 py-2 text-left hover:border-teal-600 dark:border-gray-800 dark:bg-gray-900"
@@ -98,9 +101,9 @@ export function InquiryListView({
         {items.length === 0 && <li className="text-sm text-gray-500">ありません</li>}
       </ul>
       {hasMore && (
-        <button type="button" onClick={onMore} className="w-full rounded-md border border-gray-300 py-2 text-sm dark:border-gray-700">
+        <Button variant="secondary" onClick={onMore} className="w-full">
           もっと見る
-        </button>
+        </Button>
       )}
     </section>
   );

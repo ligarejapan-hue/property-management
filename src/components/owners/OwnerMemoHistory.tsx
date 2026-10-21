@@ -1,5 +1,6 @@
 "use client";
 
+import { Button } from "@/components/ui/button";
 import { useCallback, useEffect, useState } from "react";
 import Link from "next/link";
 import { Loader2 } from "lucide-react";
@@ -134,14 +135,9 @@ export function OwnerMemoHistory({
             >
               {trimmed.length} / {OWNER_MEMO_BODY_MAX_LENGTH}
             </span>
-            <button
-              type="button"
-              onClick={handleSubmit}
-              disabled={!canSubmit}
-              className="rounded-md bg-indigo-600 px-3 py-1.5 text-xs font-medium text-white hover:bg-indigo-700 disabled:cursor-not-allowed disabled:bg-gray-300 dark:disabled:bg-gray-700"
-            >
+            <Button variant="primary" size="sm" onClick={handleSubmit} disabled={!canSubmit}>
               {submitting ? "保存中..." : "メモを追加"}
-            </button>
+            </Button>
           </div>
           {submitError && (
             <p className="mt-1 text-xs text-red-600 dark:text-red-400">{submitError}</p>

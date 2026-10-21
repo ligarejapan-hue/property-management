@@ -27,7 +27,7 @@ const pageSrc = fs.readFileSync(
 describe("corporate-lookup-panel.tsx", () => {
   it("「法人情報を検索」ボタンを描画する", () => {
     expect(panelSrc).toMatch(/法人情報を検索/);
-    expect(panelSrc).toMatch(/<button[\s\S]*?onClick=\{handleSearch\}/);
+    expect(panelSrc).toMatch(/<[Bb]utton[\s\S]*?onClick=\{handleSearch\}/);
   });
 
   it("検索中表示「検索中...」がある", () => {

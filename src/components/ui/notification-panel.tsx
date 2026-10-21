@@ -9,6 +9,7 @@
  * - 判断・保存はしない(`components/notifications/header-bell.tsx` が結線する)。
  */
 import { Bell, BellOff, CalendarClock, Check, Clock, FileCheck, Inbox, LockOpen, LogOut, Smartphone } from "lucide-react";
+import { Button } from "@/components/ui/button";
 
 export type NotificationPermissionView = "unsupported" | "default" | "granted" | "denied";
 
@@ -38,7 +39,9 @@ export function BellButton({
 }) {
   const label = unreadCount > 0 ? `お知らせ(未確認 ${unreadCount} 件)` : "お知らせ";
   return (
+    // data-ui=raw: アイコンだけのベル(丸い件数つきの小さな面)
     <button
+      data-ui="raw"
       type="button"
       onClick={onClick}
       aria-label={label}
@@ -128,13 +131,9 @@ export function NotificationPanel({
       <div className="flex items-center justify-between border-b border-gray-200 px-3.5 py-3 dark:border-gray-800">
         <p className="text-sm font-bold text-gray-900 dark:text-gray-100">お知らせ</p>
         {items.some((i) => i.unread) && (
-          <button
-            type="button"
-            onClick={onMarkAllRead}
-            className="text-xs text-indigo-600 hover:underline dark:text-indigo-400"
-          >
+          <Button variant="ghost" size="sm" onClick={onMarkAllRead} className="text-indigo-600 dark:text-indigo-400">
             すべて確認済みにする
-          </button>
+          </Button>
         )}
       </div>
 
@@ -146,7 +145,9 @@ export function NotificationPanel({
             const Icon = ITEM_ICON[item.icon];
             return (
               <li key={item.id} className="border-b border-gray-200 last:border-b-0 dark:border-gray-800">
+                {/* data-ui=raw: 通知1件(行全体が押せる面) */}
                 <button
+                  data-ui="raw"
                   type="button"
                   onClick={() => onItemClick(item)}
                   className={`flex w-full gap-2.5 px-3.5 py-3 text-left text-sm leading-relaxed hover:bg-gray-50 dark:hover:bg-gray-800/60 ${
@@ -178,14 +179,9 @@ export function NotificationPanel({
         {permission === "default" && (
           <>
             <p>別の画面を見ているときも、{deviceLabel}の通知欄に知らせます。</p>
-            <button
-              type="button"
-              onClick={onRequestPermission}
-              disabled={requesting}
-              className="mt-2 inline-flex items-center justify-center gap-1.5 rounded-md bg-indigo-600 px-3 py-1.5 text-xs font-medium text-white hover:bg-indigo-700 disabled:cursor-not-allowed disabled:opacity-60"
-            >
+            <Button size="sm" onClick={onRequestPermission} disabled={requesting} className="mt-2">
               通知を許可する
-            </button>
+            </Button>
           </>
         )}
         {permission === "granted" && (
