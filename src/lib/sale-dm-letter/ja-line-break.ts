@@ -15,6 +15,7 @@ const PARTICLES_1 = new Set(["の", "を", "に", "は", "が", "と", "で", "�
 const HONORIFIC = new Set(["ご", "お"]);
 const CLOSE_PUNCT = new Set(["、", "。", "，", "．", "！", "？", "!", "?", "」", "』", "）", ")", "〕", "】", "］", "]", "…", "・", "：", "；", ":", ";"]);
 const OPEN_PUNCT = new Set(["「", "『", "（", "(", "〔", "【", "［", "["]);
+const DIGIT = /[0-9０-９]/;
 
 type Kind = "h" | "c" | "close" | "open" | "space" | "other";
 
@@ -50,7 +51,8 @@ export function jaChunks(text: string): string[] {
     } else if (k === "space" || k === "close") {
       brk = false;
     } else if (prev === "close" || prev === "space") {
-      brk = true;
+      // 数字の間の「，」(1，000)は桁区切りなので切らない
+      brk = !(chars[i - 1] === "，" && i >= 2 && DIGIT.test(chars[i - 2]) && DIGIT.test(chars[i]));
     } else if (k === "c" && prev === "h") {
       // ひらがなの並びの長さ(直前の連続ひらがな)
       let j = i - 1;
@@ -88,12 +90,28 @@ export function jaWrapHtml(text: string): string {
 }
 
 /**
- * 見出し用: 読点「、」「，」を表示から抜き、あった場所は折り返しの余地(<wbr>)として残す
+ * 見出し用: 文の切れ目の読点「、」「，」を表示から抜き、あった場所は折り返しの余地(<wbr>)として残す
  * (発注者 2026-10-21「みだしに、はいらないのでは」)。句点・疑問符・括弧・中黒はそのまま。
+ * ただし、ものを並べる読点(「税金、片付け」「1，000」= 直前が漢字・カタカナ・英数)は抜くと意味が変わるので残す
+ * (発注者 2026-10-22 案1)。直前がひらがな(「家でも、」「売却し、」)・記号・文頭なら抜く。
  */
+function stripClauseCommas(chunk: string): string {
+  const chars = Array.from(chunk);
+  let out = "";
+  for (let i = 0; i < chars.length; i++) {
+    const ch = chars[i];
+    if (ch === "、" || ch === "，") {
+      const keep = i > 0 && kindOf(chars[i - 1]) === "c";
+      if (!keep) continue;
+    }
+    out += ch;
+  }
+  return out;
+}
+
 export function jaHeadingHtml(text: string): string {
   return jaChunks(text)
-    .map((c) => c.replace(/[、，]/g, ""))
+    .map(stripClauseCommas)
     .filter((c) => c.length > 0)
     .map(esc)
     .join("<wbr>");
