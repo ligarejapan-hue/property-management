@@ -222,8 +222,17 @@ const DEADLINE_ITEMS: Array<{ when: string; title: string; notes: string[]; key?
 ];
 const DEADLINE_FOOTNOTE = "※空き家の特例には、1981年5月31日以前に建てられた家であること、相続前後の使い方、売却額、耐震基準に合わせる工事または解体などの条件があり、使うには確定申告が必要です。2026年10月時点の制度にもとづいています。";
 
+/** 図を誰に見せるか。letter=手紙を受け取った方(/t/・プレビュー)/ public=広告用の公開ページ(手紙を受け取っていない方)。 */
+export type FigureAudience = "letter" | "public";
+export interface FigureOptions { audience?: FigureAudience }
+
+/** 流れの1段目: 手紙のページは「お手紙の物件」、公開ページは手紙が無いので「ご相談の物件」(発注者 2026-10-21)。 */
+const FLOW_FIRST_STEP_DESC: Record<FigureAudience, string> = {
+  letter: "お手紙の物件について、おおよその価格の目安をお伝えします",
+  public: "ご相談の物件について、おおよその価格の目安をお伝えします",
+};
 const FLOW_STEPS: Array<[string, string]> = [
-  ["ご相談・無料査定", "お手紙の物件について、おおよその価格の目安をお伝えします"],
+  ["ご相談・無料査定", FLOW_FIRST_STEP_DESC.letter],
   ["ご家族での話し合い", "査定の結果を材料に、売るかどうかを決めていただきます。急かしません"],
   ["販売のご依頼", "売ると決めた場合に、販売をお任せいただく契約を結びます"],
   ["販売活動・ご契約", "買主を探し、条件がまとまれば売買契約を結びます"],
@@ -292,7 +301,8 @@ function optionCardsHtml(cards: readonly OptionCard[], cls: string): string {
 }
 
 /** 公開LPに埋める図の HTML。consult_guide は節の本文と組むため lp-page.ts 側で並べる(ここは絵の部分だけ)。 */
-export function renderFigureHtml(kind: FigureKind): string {
+export function renderFigureHtml(kind: FigureKind, opts: FigureOptions = {}): string {
+  const audience: FigureAudience = opts.audience ?? "letter";
   switch (kind) {
     case "inheritance_deadlines":
       return `<div class="deadline" role="group" aria-label="${esc(FIGURE_LABELS.inheritance_deadlines)}"><ol class="dl-list">` +
@@ -307,7 +317,7 @@ export function renderFigureHtml(kind: FigureKind): string {
         `</ol><details class="more"><summary>特例の条件について</summary><div class="more-body"><p class="small-note">${esc(DEADLINE_FOOTNOTE)}</p></div></details></div>`;
     case "sale_flow":
       return `<div class="flow-box"><ol class="flow">` +
-        FLOW_STEPS.map(([t, s]) => `<li><div><strong>${esc(t)}</strong><span>${esc(s)}</span></div></li>`).join("") +
+        FLOW_STEPS.map(([t, s], i) => `<li><div><strong>${esc(t)}</strong><span>${esc(i === 0 ? FLOW_FIRST_STEP_DESC[audience] : s)}</span></div></li>`).join("") +
         `</ol><p class="flow-total">ご相談からお引き渡しまで、3〜6か月ほどが目安です</p><p class="small-note">期間は物件やご希望の条件によって変わります。</p></div>`;
     case "sell_rent_keep":
       return optionCardsHtml(LP_BRAND.options, "options");
