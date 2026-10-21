@@ -34,7 +34,7 @@ describe("公開LPの新しい作り(2026-10 見本)", () => {
   });
 
   it("上部に電話番号(区切りつき)と受付時間。押すと電話・計測の印つき", () => {
-    expect(html).toMatch(/<div class="top-tel">お電話でのご相談\(平日 10:00〜19:00\)<a href="tel:0368232760" data-phone-tap="1">03-6823-2760<\/a><\/div>/);
+    expect(html).toMatch(/<div class="top-tel"><span class="hours">お電話でのご相談<\/span><span class="hours">平日 10:00〜19:00<\/span><a href="tel:0368232760" data-phone-tap="1">03-6823-2760<\/a><\/div>/);
   });
 
   it("電話番号が無ければ上部の電話は出さない", () => {

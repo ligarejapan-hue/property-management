@@ -8,7 +8,7 @@
  *    </script>-safe にしたもの)で埋める。
  */
 import { escapeHtml } from "./templates/index";
-import { renderFigureHtml } from "./lp-figures";
+import { renderFigureHtml, type FigureOptions } from "./lp-figures";
 import { LP_BRAND, type LpBrandImage } from "./lp-brand";
 import { formatPhoneJp } from "../phone-format-jp";
 import type { LpRenderInput, LpImage, LpFormInput, LpPublicInput } from "./lp-render-input";
@@ -48,6 +48,8 @@ const CSS = [
   "h1{font-size:25px;line-height:1.5;margin:0 0 12px;letter-spacing:.02em}",
   "h2{font-size:21px;line-height:1.55;margin:0 0 12px;letter-spacing:.02em}",
   "h2::before{content:\"\";display:block;width:28px;height:3px;background:#0e6b5c;border-radius:2px;margin-bottom:10px}",
+  // 見出しの折り返しは行の長さをそろえる(スマホで1〜2文字だけ次の行に落ちるのを防ぐ。2026-10-21 見本 B)
+  "h1,h2{text-wrap:balance}",
   "h3{font-size:18px;margin:4px 0 4px}",
   "p{margin:0 0 12px}",
   "a{color:#0a5246}",
@@ -55,10 +57,14 @@ const CSS = [
   // ── 上部(ロゴ・電話) ──
   ".top{background:#fffdf8;border-bottom:1px solid #ddd3bf;border-top:3px solid #0e6b5c}",
   ".top-in{max-width:760px;margin:0 auto;padding:10px 16px;display:flex;align-items:center;justify-content:space-between;gap:12px}",
+  // ロゴ側が縮み、電話側は折り返さない(2026-10-21 見本 A)。受付時間は「お電話でのご相談」と時間の2行(.hours)。
+  // ロゴ下の一言は 375px 以上なら1行に収まる。それより狭い端末では切らずに折り返す(内部レビュー 2026-10-21)。
+  ".brand{min-width:0;flex:1 1 auto}",
   ".brand-link{display:block;line-height:0}",
   ".brand img{display:block;width:150px;max-width:40vw;height:auto}",
   ".brand small{display:block;margin-top:4px;font-size:11px;color:#5d594f;line-height:1.4}",
-  ".top-tel{text-align:right;font-size:12px;color:#5d594f;line-height:1.4}",
+  ".top-tel{flex:none;text-align:right;font-size:12px;color:#5d594f;line-height:1.4}",
+  ".top-tel .hours{display:block}",
   ".top-tel a{display:block;font-size:19px;font-weight:700;color:#0e6b5c;text-decoration:none;letter-spacing:.04em;font-variant-numeric:tabular-nums}",
   // ── ヒーロー(画像は元の縦横比のまま=height:auto・切り落としなし。発注者ルール 2026-10-06) ──
   ".hero{display:block;width:100%;height:auto;background:#ece4d3}",
@@ -203,7 +209,8 @@ const CSS = [
   ".inq-lead{margin:-4px 0 12px;color:#5d594f;font-size:14px}",
   ".inq-lead b{color:#0e6b5c}",
   ".inq-tel{font-size:14px;color:#5d594f;margin:0 0 12px;padding:10px 12px;background:#f6f1e7;border-radius:8px}",
-  ".inq-tel a{font-weight:700;color:#0e6b5c;text-decoration:none;font-size:17px}",
+  // 電話番号は途中(「03-」など)で折り返さない(2026-10-21 見本 E)
+  ".inq-tel a{font-weight:700;color:#0e6b5c;text-decoration:none;font-size:17px;white-space:nowrap;display:inline-block}",
   ".inquiry .consent{display:flex;align-items:center;gap:8px;font-weight:700;min-height:44px}",
   ".inquiry button{margin-top:12px;width:100%;border:0;cursor:pointer;font:inherit;font-size:17px;font-weight:700}",
   ".inquiry fieldset:disabled button{background:#9fb3ae;cursor:not-allowed}",
@@ -239,6 +246,21 @@ const CSS = [
   ".bar .cta.secondary{padding:12px 16px;white-space:nowrap}",
   "@media (max-width: 767px){",
   "  .bar .cta{font-size:16px}",
+  // 絵つきの節(2026-10-21 見本 C): スマホでは絵の横に見出しだけを置き、本文(段落・箇条書き・ボタン)は絵の下いっぱいに広げる。
+  // .sec-body を display:contents にして中身を直接の格子の子にする(PC は 768px 以上の指定のまま=2列)。
+  "  .split{align-items:center}",
+  "  .split .media{margin:0}",
+  "  .split .sec-body{display:contents}",
+  "  .split h2{margin:0}",
+  "  .split .sec-body>:not(h2){grid-column:1/-1;margin:2px 0 0}",
+  // 案内役の札(見本 D): 絵の横に名乗りと見出し、本文は絵の下いっぱいに。
+  "  .guide{align-items:center;gap:10px 14px}",
+  "  .guide>div{display:contents}",
+  "  .guide-fig{grid-row:1/3;align-self:center}",
+  "  .guide .guide-name,.guide h2{grid-column:2;margin:0}",
+  "  .guide .guide-name{align-self:end}",
+  "  .guide h2{align-self:start}",
+  "  .guide>div>:not(.guide-name):not(h2){grid-column:1/-1;margin:4px 0 0}",
   "}",
   "@media (min-width: 768px){",
   "  main{max-width:760px;padding:24px 0 calc(110px + env(safe-area-inset-bottom))}",
@@ -647,7 +669,7 @@ function casePrefixOf(heading: string): string | undefined {
  * 本文全体の1行目を題に、残りを開いたときの本文にする(題のあとに空行があっても同じ=@codex #488 R2 P2)。
  * 本文が1行しか無いときは見出しを題にして、その1行を中に入れる。
  */
-function renderCaseSection(s: LpRenderInput["sections"][number], prefix: string, cta: string): string {
+function renderCaseSection(s: LpRenderInput["sections"][number], prefix: string, cta: string, fig: FigureOptions): string {
   const rest = s.heading.slice(prefix.length).replace(/^[\s:：・|｜（(]+|[\s）)]+$/g, "");
   const tag = rest ? `${prefix} ${rest}` : prefix; // 区切りはスペース(発注者指定 2026-10-07)
   const [first = "", ...others] = s.paragraphs;
@@ -661,7 +683,7 @@ function renderCaseSection(s: LpRenderInput["sections"][number], prefix: string,
   // 案内役は絵だけでなく、名乗り+本文と組んだ形のまま札の中に置く(@codex #488 R5 P2)。
   const isGuide = s.media?.kind === "figure" && s.media.figureKind === "consult_guide";
   const photo = s.media?.kind === "asset" ? `<div class="media">${img(s.media.image, "fig", s.heading)}</div>` : "";
-  const figure = s.media?.kind === "figure" && !isGuide ? `<div class="figure">${renderFigureHtml(s.media.figureKind)}</div>` : "";
+  const figure = s.media?.kind === "figure" && !isGuide ? `<div class="figure">${renderFigureHtml(s.media.figureKind, fig)}</div>` : "";
   const text = paragraphs(bodyParas, cta);
   const inner = isGuide
     ? `<div class="guide">${renderFigureHtml("consult_guide")}<div><p class="guide-name">${escapeHtml(LP_BRAND.guideName)}</p>${text}</div></div>`
@@ -673,9 +695,9 @@ function renderCaseSection(s: LpRenderInput["sections"][number], prefix: string,
 /** 文章だけの節をこの字数(空白を除く)以上なら畳む。見本の「税の特例」(約330字)は畳み、2〜3行の節は畳まない。 */
 const FOLD_TEXT_MIN = 200;
 
-function renderSection(s: LpRenderInput["sections"][number], cta: string): string {
+function renderSection(s: LpRenderInput["sections"][number], cta: string, fig: FigureOptions): string {
   const casePrefix = casePrefixOf(s.heading);
-  if (casePrefix) return renderCaseSection(s, casePrefix, cta);
+  if (casePrefix) return renderCaseSection(s, casePrefix, cta, fig);
   const h2 = `<h2>${escapeHtml(s.heading)}</h2>`;
   const body = paragraphs(s.paragraphs, cta);
   if (s.media?.kind === "asset") {
@@ -686,7 +708,7 @@ function renderSection(s: LpRenderInput["sections"][number], cta: string): strin
     // 案内役: イメージイラストの横に、名乗り+この節の見出しと文章。
     return `<section><div class="guide">${renderFigureHtml("consult_guide")}<div><p class="guide-name">${escapeHtml(LP_BRAND.guideName)}</p>${h2}${body}</div></div></section>`;
   }
-  const figure = s.media?.kind === "figure" ? `<div class="figure">${renderFigureHtml(s.media.figureKind)}</div>` : "";
+  const figure = s.media?.kind === "figure" ? `<div class="figure">${renderFigureHtml(s.media.figureKind, fig)}</div>` : "";
   // 文章だけの長い節(写真・図・チェック札なし)は、見出しを残して中身を「くわしく読む」に畳む(2026-10-19 見本)。
   if (!s.media && !s.paragraphs.some((p) => isLineList(p, "□")) && s.paragraphs.join("").replace(/\s/g, "").length >= FOLD_TEXT_MIN) {
     return `<section>${h2}<details class="more"><summary>くわしく読む</summary><div class="more-body">${body}</div></details></section>`;
@@ -703,7 +725,7 @@ export function renderLpPage(input: LpRenderInput): string {
     `<a class="brand-link" href="${escapeHtml(LP_BRAND.homepageUrl)}" target="_blank" rel="noopener">${brandImg(LP_BRAND.logo, "logo", true)}</a>` +
     `<small>${escapeHtml(LP_BRAND.tagline)}</small></div>` +
     (telHref && input.company.phone
-      ? `<div class="top-tel">お電話でのご相談(${escapeHtml(LP_BRAND.phoneHours)})<a href="${telHref}" data-phone-tap="1">${escapeHtml(formatTel(input.company.phone))}</a></div>`
+      ? `<div class="top-tel"><span class="hours">お電話でのご相談</span><span class="hours">${escapeHtml(LP_BRAND.phoneHours)}</span><a href="${telHref}" data-phone-tap="1">${escapeHtml(formatTel(input.company.phone))}</a></div>`
       : "") +
     `</div></header>`;
   const pub = input.mode === "public" ? (input.public ?? null) : null;
@@ -715,8 +737,10 @@ export function renderLpPage(input: LpRenderInput): string {
     `<div class="cta-row">${cta}${telHref ? `<a class="cta secondary" href="${telHref}" data-phone-tap="1">電話で相談する</a>` : ""}</div>`;
   // 実例の札が続く並びは1つの枠(.cases=PC では左右2列)にまとめ、先頭にまとめの見出しを1つ置く。
   const isCase = (h: string) => casePrefixOf(h) !== undefined;
+  // 図の文言も、公開ページは手紙を受け取っていない人向け(流れの「お手紙の物件」→「ご相談の物件」)。
+  const fig: FigureOptions = { audience: input.mode === "public" ? "public" : "letter" };
   const sections = input.sections.map((s, i) => {
-    const html = renderSection(s, cta);
+    const html = renderSection(s, cta, fig);
     if (!isCase(s.heading)) return html;
     const first = !(i > 0 && isCase(input.sections[i - 1].heading));
     const last = !(i + 1 < input.sections.length && isCase(input.sections[i + 1].heading));
