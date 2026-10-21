@@ -279,7 +279,8 @@ export function MaterialSendHistoryView({
       <ul className="space-y-1">
         {items.map((s) => (
           <li key={s.id} className="rounded border border-gray-200 px-2 py-1 dark:border-gray-700">
-            <button type="button" className="w-full text-left text-xs" onClick={() => onToggle(s.id)}>
+            {/* data-ui=raw: 記録1件の行全体が押せる面(開閉) */}
+            <button data-ui="raw" type="button" className="w-full text-left text-xs" onClick={() => onToggle(s.id)}>
               {`${jst(s.createdAt)} ・ ${s.sentBy.name} ・ `}
               {/* ボタンの中は画面の保護の対象外=宛先は保護の印つきの span に入れる(@codex 16巡目 P2) */}
               <span data-pii-protected="true" data-pii-surface="dashboard">{s.toAddress}</span>

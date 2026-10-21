@@ -24,6 +24,7 @@ import { PropertyPicker } from "./property-picker";
 import { AdPermissionChips } from "./ad-permission-chips";
 import { AgentCreateModal } from "./agent-create-modal";
 import { useDeskAccess } from "./desk-access";
+import { Button } from "@/components/ui/button";
 
 const inputCls = "w-full rounded-md border border-gray-300 px-3 py-2 text-base dark:border-gray-700 dark:bg-gray-900";
 const segCls = (on: boolean) =>
@@ -248,14 +249,9 @@ export function InquiryFormView({
           保存できませんでした:{saveError}
         </p>
       )}
-      <button
-        type="submit"
-        disabled={submitting}
-        data-guide="save"
-        className="w-full rounded-lg bg-teal-700 py-3 text-base font-bold text-white disabled:opacity-60"
-      >
+      <Button type="submit" size="lg" disabled={submitting} data-guide="save" className="w-full">
         {submitting ? "保存中…" : "保存する"}
-      </button>
+      </Button>
       </fieldset>
     </form>
   );

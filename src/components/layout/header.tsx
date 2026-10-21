@@ -1,5 +1,6 @@
 "use client";
 
+import { Button } from "@/components/ui/button";
 import Link from "next/link";
 import { KeyRound, LogOut } from "lucide-react";
 import StatusBadge, { USER_ROLE_INTENT, type BadgeIntent } from "@/components/ui/status-badge";
@@ -60,14 +61,16 @@ export default function Header({ userName, userRole, onLogout }: HeaderProps) {
         >
           <KeyRound className="h-4 w-4" />
         </Link>
-        <button
+        <Button
+          variant="ghost"
+          size="sm"
           onClick={onLogout}
-          className="flex items-center gap-1.5 rounded-md px-3 py-1.5 text-sm text-gray-600 dark:text-gray-300 transition-colors hover:bg-gray-100 dark:hover:bg-gray-800 hover:text-gray-900 dark:hover:text-gray-100"
+          className="text-gray-600 dark:text-gray-300"
           title="ログアウト"
         >
           <LogOut className="h-4 w-4" />
           <span className="hidden sm:inline">ログアウト</span>
-        </button>
+        </Button>
       </div>
     </header>
   );

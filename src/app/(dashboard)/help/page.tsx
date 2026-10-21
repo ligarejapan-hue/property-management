@@ -69,7 +69,9 @@ function AccordionItem({
 }) {
   return (
     <div className="border-b border-gray-200 last:border-b-0 dark:border-gray-800">
+      {/* data-ui=raw: 開閉する見出しの行(行全体が押せる面) */}
       <button
+        data-ui="raw"
         onClick={onToggle}
         className="flex w-full items-center justify-between px-5 py-4 text-left transition-colors hover:bg-gray-50 dark:hover:bg-gray-800"
       >

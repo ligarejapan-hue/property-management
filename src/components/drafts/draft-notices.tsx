@@ -1,4 +1,5 @@
 /** 作業中の入力の控えに関する帯(設計書 §3・§5)。見た目だけ=SSRで試せる。 */
+import { Button } from "@/components/ui/button";
 import { AlertTriangle, History } from "lucide-react";
 import { isSameFileName } from "@/lib/drafts/reselect";
 
@@ -20,17 +21,16 @@ export function formatDraftTime(ms: number): string {
 const BOX = "flex flex-wrap items-center gap-2 rounded-md border px-3 py-2 text-sm";
 const INFO = `${BOX} border-indigo-200 bg-indigo-50 text-indigo-800 dark:border-indigo-800 dark:bg-indigo-950/40 dark:text-indigo-200`;
 const WARN = `${BOX} border-amber-300 bg-amber-50 text-amber-900 dark:border-amber-700 dark:bg-amber-950/40 dark:text-amber-200`;
-const BTN =
-  "ml-auto rounded-md border border-current px-2 py-0.5 text-xs font-medium hover:bg-white/60 dark:hover:bg-black/20";
+const BTN = "ml-auto";
 
 export function DraftRestoredNotice({ savedAt, onDiscard }: { savedAt: number; onDiscard: () => void }) {
   return (
     <div role="status" data-testid="draft-restored-notice" className={INFO}>
       <History className="h-4 w-4 shrink-0" />
       <span>前回の続きを表示しています（{formatDraftTime(savedAt)}の入力）</span>
-      <button type="button" onClick={onDiscard} className={BTN}>
+      <Button variant="secondary" size="sm" onClick={onDiscard} className={BTN}>
         最初からやり直す
-      </button>
+      </Button>
     </div>
   );
 }
@@ -40,9 +40,9 @@ export function DraftPendingNotice({ onConfirm }: { onConfirm: () => void }) {
     <div role="alert" data-testid="draft-pending-notice" className={WARN}>
       <AlertTriangle className="h-4 w-4 shrink-0" />
       <span>前回、登録の途中で画面を離れました。登録されたかどうかを物件一覧で確かめてください。</span>
-      <button type="button" onClick={onConfirm} className={BTN}>
+      <Button variant="secondary" size="sm" onClick={onConfirm} className={BTN}>
         確かめたので続ける
-      </button>
+      </Button>
     </div>
   );
 }
@@ -52,9 +52,9 @@ export function DraftStaleNotice({ onDismiss }: { onDismiss: () => void }) {
     <div role="status" data-testid="draft-stale-notice" className={WARN}>
       <AlertTriangle className="h-4 w-4 shrink-0" />
       <span>ほかの方が保存したため、入力途中の内容は使えませんでした。</span>
-      <button type="button" onClick={onDismiss} className={BTN}>
+      <Button variant="secondary" size="sm" onClick={onDismiss} className={BTN}>
         閉じる
-      </button>
+      </Button>
     </div>
   );
 }
@@ -134,9 +134,9 @@ export function DraftImportPendingNotice({
       <a href={`#${IMPORT_HISTORY_ID}`} className="font-medium underline underline-offset-2 hover:no-underline">
         取込履歴を見る
       </a>
-      <button type="button" onClick={onDismiss} disabled={confirmDisabled} className={`${BTN} disabled:opacity-50`}>
+      <Button variant="secondary" size="sm" onClick={onDismiss} disabled={confirmDisabled} className={BTN}>
         {reason === "left" ? "確かめたので閉じる" : "確かめたので続ける"}
-      </button>
+      </Button>
     </div>
   );
 }

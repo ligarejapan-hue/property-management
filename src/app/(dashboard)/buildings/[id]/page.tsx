@@ -1,5 +1,6 @@
 "use client";
 
+import { Button } from "@/components/ui/button";
 import { useState, useEffect, useCallback, useRef, use } from "react";
 import { BackLink } from "@/components/ui/back-link";
 import Link from "next/link";
@@ -295,15 +296,13 @@ export default function BuildingDetailPage({
         <div className="ml-auto flex items-center gap-2">
           {!editing && (
             <>
-              <button
-                onClick={startEdit}
-                className="flex items-center gap-1.5 rounded-md border border-gray-300 px-3 py-2 text-sm text-gray-700 hover:bg-gray-50 dark:border-gray-700 dark:text-gray-200 dark:hover:bg-gray-800"
-              >
+              <Button variant="secondary" onClick={startEdit}>
                 <Edit className="h-4 w-4" />
                 編集
-              </button>
+              </Button>
               {canDeleteBuilding && (
-                <button
+                <Button
+                  variant="danger"
                   onClick={handleDelete}
                   disabled={deleting || building._count.properties > 0}
                   title={
@@ -311,7 +310,6 @@ export default function BuildingDetailPage({
                       ? "紐づく部屋があるため削除できません"
                       : undefined
                   }
-                  className="flex items-center gap-1.5 rounded-md border border-red-300 px-3 py-2 text-sm text-red-700 hover:bg-red-50 disabled:cursor-not-allowed disabled:opacity-50"
                 >
                   {deleting ? (
                     <Loader2 className="h-4 w-4 animate-spin" />
@@ -319,7 +317,7 @@ export default function BuildingDetailPage({
                     <Trash2 className="h-4 w-4" />
                   )}
                   削除
-                </button>
+                </Button>
               )}
             </>
           )}
@@ -392,25 +390,18 @@ export default function BuildingDetailPage({
               />
             </div>
             <div className="flex gap-2 pt-2">
-              <button
-                onClick={handleSave}
-                disabled={saving}
-                className="flex items-center gap-1.5 rounded-md bg-indigo-600 px-4 py-2 text-sm font-medium text-white hover:bg-indigo-700 disabled:opacity-50"
-              >
+              <Button onClick={handleSave} disabled={saving}>
                 {saving ? (
                   <Loader2 className="h-4 w-4 animate-spin" />
                 ) : (
                   <Save className="h-4 w-4" />
                 )}
                 保存
-              </button>
-              <button
-                onClick={() => setEditing(false)}
-                className="flex items-center gap-1.5 rounded-md border border-gray-300 px-4 py-2 text-sm text-gray-700 hover:bg-gray-50 dark:border-gray-700 dark:text-gray-200 dark:hover:bg-gray-800"
-              >
+              </Button>
+              <Button variant="ghost" onClick={() => setEditing(false)}>
                 <X className="h-4 w-4" />
                 キャンセル
-              </button>
+              </Button>
             </div>
           </div>
         ) : (
@@ -463,13 +454,10 @@ export default function BuildingDetailPage({
             ({units.length}戸)
           </span>
         </h3>
-        <button
-          onClick={() => setShowAddUnit(true)}
-          className="flex items-center gap-1.5 rounded-md bg-green-600 px-3 py-2 text-sm font-medium text-white hover:bg-green-700"
-        >
+        <Button variant="secondary" size="sm" onClick={() => setShowAddUnit(true)}>
           <Plus className="h-4 w-4" />
           部屋を追加
-        </button>
+        </Button>
       </div>
 
       {units.length === 0 ? (
@@ -797,21 +785,13 @@ function AddUnitModal({
             />
           </div>
           <div className="flex justify-end gap-2 pt-2">
-            <button
-              type="button"
-              onClick={onClose}
-              className="rounded-md border border-gray-300 px-4 py-2 text-sm text-gray-700 hover:bg-gray-50 dark:border-gray-700 dark:text-gray-200 dark:hover:bg-gray-800"
-            >
+            <Button variant="ghost" onClick={onClose}>
               キャンセル
-            </button>
-            <button
-              type="submit"
-              disabled={saving}
-              className="flex items-center gap-1.5 rounded-md bg-green-600 px-4 py-2 text-sm font-medium text-white hover:bg-green-700 disabled:opacity-50"
-            >
+            </Button>
+            <Button type="submit" disabled={saving}>
               {saving && <Loader2 className="h-4 w-4 animate-spin" />}
               追加
-            </button>
+            </Button>
           </div>
         </form>
       </div>

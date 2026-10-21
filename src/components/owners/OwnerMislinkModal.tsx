@@ -1,5 +1,6 @@
 "use client";
 
+import { Button } from "@/components/ui/button";
 import { useEffect, useState } from "react";
 
 // blockReason enum → 日本語ラベル（owner-mislink.ts と整合）
@@ -294,13 +295,9 @@ export function OwnerMislinkModal({
           <h3 className="text-sm font-semibold text-gray-900 dark:text-gray-100">
             別の所有者に付け替える
           </h3>
-          <button
-            type="button"
-            onClick={onClose}
-            className="text-xs text-gray-500 dark:text-gray-400 hover:text-gray-700 dark:hover:text-gray-200"
-          >
+          <Button variant="ghost" size="sm" onClick={onClose}>
             閉じる
-          </button>
+          </Button>
         </div>
 
         <div className="mb-3 text-xs text-gray-600 dark:text-gray-300">
@@ -375,16 +372,16 @@ export function OwnerMislinkModal({
 
         {/* プレビュー */}
         <div className="mb-3 flex gap-2">
-          <button
-            type="button"
+          <Button
+            variant="secondary"
+            size="sm"
             onClick={handlePreview}
             disabled={!canPreview || previewState === "preview_loading"}
-            className="rounded bg-purple-600 px-3 py-1 text-xs font-medium text-white hover:bg-purple-700 disabled:cursor-not-allowed disabled:bg-gray-300"
           >
             {previewState === "preview_loading"
               ? "判定中..."
               : "修正プレビュー"}
-          </button>
+          </Button>
         </div>
 
         {previewState === "preview_error" && previewErrorMsg && (
@@ -479,13 +476,9 @@ export function OwnerMislinkModal({
               </p>
 
               {executeState === "idle" && (
-                <button
-                  type="button"
-                  onClick={() => setExecuteState("confirm1")}
-                  className="rounded bg-red-600 px-3 py-1 text-xs font-medium text-white hover:bg-red-700"
-                >
+                <Button variant="danger" size="sm" onClick={() => setExecuteState("confirm1")}>
                   付け替えを実行
-                </button>
+                </Button>
               )}
 
               {executeState === "confirm1" && (
@@ -505,20 +498,12 @@ export function OwnerMislinkModal({
                     </p>
                   )}
                   <div className="mt-1 flex gap-1">
-                    <button
-                      type="button"
-                      onClick={() => setExecuteState("confirm2")}
-                      className="rounded bg-red-600 px-2 py-1 font-medium text-white hover:bg-red-700"
-                    >
+                    <Button variant="danger" size="sm" onClick={() => setExecuteState("confirm2")}>
                       次へ
-                    </button>
-                    <button
-                      type="button"
-                      onClick={() => setExecuteState("idle")}
-                      className="rounded border border-gray-300 dark:border-gray-700 bg-white dark:bg-gray-900 px-2 py-1 text-gray-600 dark:text-gray-300 hover:bg-gray-50 dark:hover:bg-gray-800"
-                    >
+                    </Button>
+                    <Button variant="ghost" size="sm" onClick={() => setExecuteState("idle")}>
                       キャンセル
-                    </button>
+                    </Button>
                   </div>
                 </div>
               )}
@@ -529,20 +514,12 @@ export function OwnerMislinkModal({
                     ⚠ この操作は元に戻せません。本当に修正しますか？
                   </p>
                   <div className="mt-1 flex gap-1">
-                    <button
-                      type="button"
-                      onClick={handleExecute}
-                      className="rounded bg-red-700 px-2 py-1 font-medium text-white hover:bg-red-800"
-                    >
+                    <Button variant="danger" size="sm" onClick={handleExecute}>
                       実行する
-                    </button>
-                    <button
-                      type="button"
-                      onClick={() => setExecuteState("idle")}
-                      className="rounded border border-gray-300 dark:border-gray-700 bg-white dark:bg-gray-900 px-2 py-1 text-gray-600 dark:text-gray-300 hover:bg-gray-50 dark:hover:bg-gray-800"
-                    >
+                    </Button>
+                    <Button variant="ghost" size="sm" onClick={() => setExecuteState("idle")}>
                       キャンセル
-                    </button>
+                    </Button>
                   </div>
                 </div>
               )}
@@ -561,7 +538,9 @@ export function OwnerMislinkModal({
                       ))}
                     </ul>
                   )}
+                  {/* data-ui=raw: 赤い注意の枠の中の小さな文字リンク */}
                   <button
+                    data-ui="raw"
                     type="button"
                     onClick={() => setExecuteState("idle")}
                     className="mt-1 self-start text-[11px] text-red-600 underline"
@@ -595,13 +574,9 @@ export function OwnerMislinkModal({
               <dt>property version</dt>
               <dd className="font-mono">{executeResult.propertyVersion}</dd>
             </dl>
-            <button
-              type="button"
-              onClick={onClose}
-              className="mt-2 rounded bg-gray-600 px-2 py-1 text-xs font-medium text-white hover:bg-gray-700"
-            >
+            <Button variant="secondary" size="sm" onClick={onClose} className="mt-2">
               閉じる
-            </button>
+            </Button>
           </div>
         )}
       </div>

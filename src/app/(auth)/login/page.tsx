@@ -1,5 +1,6 @@
 "use client";
 
+import { Button } from "@/components/ui/button";
 import { useEffect, useState, useSyncExternalStore } from "react";
 import { useForm } from "react-hook-form";
 import { z } from "zod/v4";
@@ -179,7 +180,9 @@ export default function LoginPage() {
                 placeholder="パスワードを入力"
               />
               {/* C-1 UI総点検: 入力値を確認できるよう表示/非表示を切り替えられるように。 */}
+              {/* data-ui=raw: 入力欄の中のアイコンだけの目玉ボタン */}
               <button
+                data-ui="raw"
                 type="button"
                 onClick={() => setShowPassword((v) => !v)}
                 aria-label={showPassword ? "パスワードを隠す" : "パスワードを表示"}
@@ -201,13 +204,9 @@ export default function LoginPage() {
             </div>
           )}
 
-          <button
-            type="submit"
-            disabled={isLoading}
-            className="w-full rounded-md bg-indigo-600 px-4 py-2 text-sm font-medium text-white shadow-sm transition-colors hover:bg-indigo-700 focus:ring-2 focus:ring-indigo-500 focus:ring-offset-2 focus:outline-none disabled:cursor-not-allowed disabled:opacity-50"
-          >
+          <Button type="submit" disabled={isLoading} className="w-full">
             {isLoading ? "ログイン中..." : "ログイン"}
-          </button>
+          </Button>
         </form>
       </div>
     </div>

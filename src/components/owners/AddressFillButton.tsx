@@ -1,5 +1,6 @@
 "use client";
 
+import { Button } from "@/components/ui/button";
 import { useState } from "react";
 
 interface AddressFillButtonProps {
@@ -65,13 +66,9 @@ export function AddressFillButton({
   return (
     <div className="flex flex-col gap-1">
       {state === "idle" || state === "error" ? (
-        <button
-          type="button"
-          onClick={handleClick}
-          className="rounded bg-indigo-600 px-2 py-1 text-xs font-medium text-white hover:bg-indigo-700"
-        >
+        <Button variant="primary" size="sm" onClick={handleClick}>
           住所を補完
-        </button>
+        </Button>
       ) : null}
 
       {state === "error" && errorMsg && (
@@ -87,20 +84,12 @@ export function AddressFillButton({
             <p className="text-blue-600 dark:text-blue-300">取込元の CSV データから住所を補完します</p>
           )}
           <div className="mt-1 flex gap-1">
-            <button
-              type="button"
-              onClick={handleConfirm}
-              className="rounded bg-indigo-600 px-2 py-1 font-medium text-white hover:bg-indigo-700"
-            >
+            <Button variant="primary" size="sm" onClick={handleConfirm}>
               実行
-            </button>
-            <button
-              type="button"
-              onClick={handleCancel}
-              className="rounded border border-gray-300 bg-white px-2 py-1 text-gray-600 hover:bg-gray-50 dark:border-gray-700 dark:bg-gray-900 dark:text-gray-300 dark:hover:bg-gray-800"
-            >
+            </Button>
+            <Button variant="ghost" size="sm" onClick={handleCancel}>
               キャンセル
-            </button>
+            </Button>
           </div>
         </div>
       )}

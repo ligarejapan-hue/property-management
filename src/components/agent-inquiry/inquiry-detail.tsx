@@ -157,17 +157,12 @@ function ViewingRow({
       )}
       {warn && <p className="text-xs text-amber-700 dark:text-amber-300">{warn}</p>}
       <div className="flex flex-wrap gap-1">
-        <button type="button" disabled={busy} onClick={save} className="rounded bg-teal-700 px-3 py-1 text-xs text-white disabled:opacity-60">
+        <Button size="sm" disabled={busy} onClick={save}>
           日時・立ち会い・結果を保存
-        </button>
-        <button
-          type="button"
-          disabled={busy}
-          onClick={() => onSave({ canceled: !canceled })}
-          className="rounded border border-gray-300 px-3 py-1 text-xs dark:border-gray-700"
-        >
+        </Button>
+        <Button variant="secondary" size="sm" disabled={busy} onClick={() => onSave({ canceled: !canceled })}>
           {canceled ? "取り消しを戻す" : "この内見を取り消す"}
-        </button>
+        </Button>
       </div>
     </li>
   );
@@ -315,14 +310,9 @@ export function InquiryDetailView({
           ) : (
             <textarea value={note} readOnly={busy} onChange={(e) => setNote(e.target.value)} rows={3} className={inputCls} />
           )}
-          <button
-            type="button"
-            disabled={busy}
-            onClick={saveNote}
-            className="mt-1 rounded bg-teal-700 px-3 py-1 text-xs text-white disabled:opacity-60"
-          >
+          <Button size="sm" disabled={busy} onClick={saveNote} className="mt-1">
             メモを保存
-          </button>
+          </Button>
           {noteWarn && <p className="mt-1 text-xs text-amber-700 dark:text-amber-300">{noteWarn}</p>}
         </label>
         {q.kind === "viewing" && (
@@ -334,29 +324,19 @@ export function InquiryDetailView({
               ))}
             </ul>
             <div className="flex gap-1">
-              <button
-                type="button"
-                disabled={busy || addLocked}
-                onClick={() => onAddViewing("guided")}
-                className="rounded border border-gray-300 px-3 py-1 text-xs dark:border-gray-700"
-              >
+              <Button variant="secondary" size="sm" disabled={busy || addLocked} onClick={() => onAddViewing("guided")}>
                 内見を足す(案内)
-              </button>
-              <button
-                type="button"
-                disabled={busy || addLocked}
-                onClick={() => onAddViewing("preview")}
-                className="rounded border border-gray-300 px-3 py-1 text-xs dark:border-gray-700"
-              >
+              </Button>
+              <Button variant="secondary" size="sm" disabled={busy || addLocked} onClick={() => onAddViewing("preview")}>
                 内見を足す(下見)
-              </button>
+              </Button>
             </div>
             {addLocked && (
               <div className="flex items-center gap-2 rounded bg-amber-50 px-2 py-1 text-xs text-amber-800 dark:bg-amber-950 dark:text-amber-200">
                 <p>上の一覧で内見が増えていないか確かめてから押してください(増えていれば足し直さない)。</p>
-                <button type="button" disabled={busy} onClick={onConfirmAdd} className="shrink-0 rounded border border-amber-300 px-2 py-0.5">
+                <Button variant="secondary" size="sm" disabled={busy} onClick={onConfirmAdd} className="shrink-0">
                   確かめた
-                </button>
+                </Button>
               </div>
             )}
           </div>
@@ -364,17 +344,16 @@ export function InquiryDetailView({
         {q.kind === "material_request" && (
           <div className="space-y-1">
             {canSendMaterial && (
-              <button
-                type="button"
+              <Button
+                size="sm"
                 disabled={busy}
                 onClick={() => {
                   setMaterialOpen(true);
                   setMaterialHidden(false);
                 }}
-                className="rounded bg-teal-700 px-3 py-1 text-xs text-white disabled:opacity-60"
               >
                 資料を送る
-              </button>
+              </Button>
             )}
             <MaterialSendHistory inquiryId={q.id} reloadKey={materialReload} onApplied={() => onMaterialSent?.()} />
           </div>
@@ -383,9 +362,9 @@ export function InquiryDetailView({
           <div className="flex items-center justify-between gap-2 rounded bg-rose-50 px-2 py-1 text-rose-700 dark:bg-rose-950 dark:text-rose-200">
             <p>{error}</p>
             {onReload && (
-              <button type="button" onClick={onReload} className="shrink-0 rounded border border-rose-300 px-2 py-0.5 text-xs">
+              <Button variant="secondary" size="sm" onClick={onReload} className="shrink-0">
                 読み直す
-              </button>
+              </Button>
             )}
           </div>
         )}

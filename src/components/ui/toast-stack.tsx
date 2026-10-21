@@ -63,7 +63,9 @@ export function ToastStack({ toasts, onDismiss }: { toasts: ToastItem[]; onDismi
               {t.body && <p className="mt-0.5 text-gray-700 dark:text-gray-300">{t.body}</p>}
               {t.action && <div className="mt-2 flex gap-2">{t.action}</div>}
             </div>
+            {/* data-ui=raw: アイコンだけの閉じる× */}
             <button
+              data-ui="raw"
               type="button"
               onClick={() => onDismiss(t.id)}
               aria-label="閉じる"

@@ -11,7 +11,9 @@ export function PropertyResults({ hits, onPick }: { hits: DeskProperty[]; onPick
     <ul className="divide-y divide-gray-100 rounded-md border border-gray-200 bg-white dark:divide-gray-800 dark:border-gray-700 dark:bg-gray-900">
       {hits.map((p) => (
         <li key={p.id}>
+          {/* data-ui=raw: 候補リストの1行(行全体が押せる面) */}
           <button
+            data-ui="raw"
             type="button"
             onClick={() => onPick(p)}
             className="block w-full px-3 py-2 text-left hover:bg-teal-50 dark:hover:bg-gray-800"

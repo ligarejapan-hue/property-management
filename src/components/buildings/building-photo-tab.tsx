@@ -1,5 +1,6 @@
 "use client";
 
+import { Button } from "@/components/ui/button";
 import { useState, useEffect, useCallback, useRef } from "react";
 import { ConfirmDialog } from "@/components/ui/confirm-dialog";
 import FileDropZone from "@/components/ui/file-drop-zone";
@@ -200,7 +201,8 @@ export default function BuildingPhotoTab({
     return (
       <div className="rounded-md border border-red-200 bg-red-50 p-4 text-sm text-red-700 dark:border-red-500/20 dark:bg-red-500/10 dark:text-red-300">
         {error}
-        <button onClick={load} className="ml-3 underline hover:no-underline">
+        {/* data-ui=raw: 注意の枠の中の小さな文字リンク */}
+        <button data-ui="raw" onClick={load} className="ml-3 underline hover:no-underline">
           再読み込み
         </button>
       </div>
@@ -232,6 +234,7 @@ export default function BuildingPhotoTab({
         <div className="flex items-center gap-2">
           {photos.length > 1 && (
             <button
+              aria-pressed={reorderMode}
               onClick={() => setReorderMode((v) => !v)}
               className={`inline-flex items-center gap-1.5 rounded-md border px-3 py-1.5 text-sm font-medium transition-colors ${
                 reorderMode
@@ -243,10 +246,10 @@ export default function BuildingPhotoTab({
               並び替え
             </button>
           )}
-          <button
+          <Button
+            size="sm"
             onClick={() => fileInputRef.current?.click()}
             disabled={uploading}
-            className="inline-flex items-center gap-1.5 rounded-md bg-indigo-600 px-3 py-1.5 text-sm font-medium text-white transition-colors hover:bg-indigo-700 disabled:opacity-50"
           >
             {uploading ? (
               <Loader2 className="h-4 w-4 animate-spin" />
@@ -254,7 +257,7 @@ export default function BuildingPhotoTab({
               <Upload className="h-4 w-4" />
             )}
             アップロード
-          </button>
+          </Button>
         </div>
       </div>
 
@@ -278,7 +281,9 @@ export default function BuildingPhotoTab({
               className="group relative overflow-hidden rounded-lg border border-gray-200 bg-white shadow-sm transition-shadow hover:shadow-md dark:border-gray-800 dark:bg-gray-900"
             >
               {/* Thumbnail */}
+              {/* data-ui=raw: 写真の縮小表示(画像全体が押せる面) */}
               <button
+                data-ui="raw"
                 type="button"
                 onClick={() => {
                   if (!reorderMode) setLightboxPhoto(photo);
@@ -317,7 +322,9 @@ export default function BuildingPhotoTab({
                       className="min-w-0 flex-1 rounded border border-blue-400 px-1 py-0.5 text-xs focus:outline-none dark:bg-gray-900 dark:text-gray-100"
                       placeholder="キャプション"
                     />
+                    {/* data-ui=raw: アイコンだけの小さな確定ボタン */}
                     <button
+                      data-ui="raw"
                       onClick={() => saveCaptionEdit(photo.id)}
                       className="rounded bg-indigo-600 p-0.5 text-white"
                     >
@@ -335,7 +342,9 @@ export default function BuildingPhotoTab({
                       )}
                     </p>
                     {!reorderMode && (
+                      // data-ui=raw: アイコンだけの小さな編集ボタン
                       <button
+                        data-ui="raw"
                         onClick={() => startCaptionEdit(photo)}
                         className="shrink-0 text-gray-300 hover:text-gray-600 dark:text-gray-600 dark:hover:text-gray-300"
                         title="キャプション編集"
@@ -353,7 +362,9 @@ export default function BuildingPhotoTab({
               {/* Reorder controls */}
               {reorderMode && (
                 <div className="absolute left-1 top-1 flex flex-col gap-1">
+                  {/* data-ui=raw: 写真の上に重ねた▲▼だけの小さな操作 */}
                   <button
+                    data-ui="raw"
                     onClick={() => handleMove(index, "up")}
                     disabled={index === 0}
                     className="rounded bg-white/80 p-1 text-xs font-bold text-gray-600 shadow backdrop-blur hover:bg-white disabled:opacity-30 dark:bg-gray-800/80 dark:text-gray-300 dark:hover:bg-gray-700"
@@ -361,7 +372,9 @@ export default function BuildingPhotoTab({
                   >
                     ▲
                   </button>
+                  {/* data-ui=raw: 写真の上に重ねた▲▼だけの小さな操作 */}
                   <button
+                    data-ui="raw"
                     onClick={() => handleMove(index, "down")}
                     disabled={index === photos.length - 1}
                     className="rounded bg-white/80 p-1 text-xs font-bold text-gray-600 shadow backdrop-blur hover:bg-white disabled:opacity-30 dark:bg-gray-800/80 dark:text-gray-300 dark:hover:bg-gray-700"
@@ -375,7 +388,9 @@ export default function BuildingPhotoTab({
               {/* Action buttons (not in reorder mode) */}
               {!reorderMode && (
                 <div className="absolute right-1 top-1 flex flex-col gap-1 opacity-0 transition-opacity group-hover:opacity-100">
+                  {/* data-ui=raw: 写真の上に重ねた丸いアイコンだけの操作(星) */}
                   <button
+                    data-ui="raw"
                     onClick={() => handleTogglePrimary(photo)}
                     className={`rounded-full p-1 shadow backdrop-blur transition-colors ${
                       photo.isPrimary
@@ -386,7 +401,9 @@ export default function BuildingPhotoTab({
                   >
                     <Star className="h-3.5 w-3.5" />
                   </button>
+                  {/* data-ui=raw: 写真の上に重ねた丸いアイコンだけの操作(削除) */}
                   <button
+                    data-ui="raw"
                     onClick={() => setDeleteTargetId(photo.id)}
                     className="rounded-full bg-white/80 p-1 text-gray-400 shadow backdrop-blur hover:bg-white hover:text-red-600 dark:bg-gray-800/80 dark:text-gray-500 dark:hover:bg-gray-700"
                     title="削除"
@@ -419,7 +436,9 @@ export default function BuildingPhotoTab({
             className="relative mx-4 w-full max-w-3xl"
             onClick={(e) => e.stopPropagation()}
           >
+            {/* data-ui=raw: アイコンだけの閉じる× */}
             <button
+              data-ui="raw"
               onClick={() => setLightboxPhoto(null)}
               className="absolute -right-2 -top-2 z-10 rounded-full bg-white p-1.5 text-gray-600 shadow-lg hover:text-gray-900 dark:bg-gray-800 dark:text-gray-300 dark:hover:text-gray-100"
             >

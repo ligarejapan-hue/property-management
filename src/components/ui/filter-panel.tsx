@@ -13,6 +13,7 @@
  */
 import { useState, type ReactNode } from "react";
 import { ChevronDown, ChevronUp } from "lucide-react";
+import { Button } from "@/components/ui/button";
 
 export interface FilterPanelProps {
   /** 常時表示の行(検索窓・よく使う選択・リセット等)。 */
@@ -42,11 +43,10 @@ export function FilterPanel({
       <div className="flex flex-wrap items-center gap-3">
         {primary}
         {hasAdvanced && (
-          <button
-            type="button"
+          <Button
+            variant="ghost"
             onClick={() => setOpen((v) => !v)}
             aria-expanded={open}
-            className="inline-flex items-center gap-1 rounded-md px-2 py-1.5 text-sm text-gray-600 hover:bg-gray-50 hover:text-gray-800 dark:text-gray-300 dark:hover:bg-gray-800 dark:hover:text-gray-100"
           >
             詳細条件
             {advancedCount > 0 ? `（${advancedCount}件適用中）` : ""}
@@ -55,7 +55,7 @@ export function FilterPanel({
             ) : (
               <ChevronDown className="h-4 w-4" />
             )}
-          </button>
+          </Button>
         )}
       </div>
       {hasAdvanced && open && (

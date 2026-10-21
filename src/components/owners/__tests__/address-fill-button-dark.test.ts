@@ -20,9 +20,8 @@ describe("AddressFillButton dark: 配色（22H・add-only）", () => {
     expect(src).toContain("text-blue-800 dark:text-blue-300");
   });
   it("キャンセルボタン(neutral)に dark の border/bg/text/hover", () => {
-    expect(src).toContain(
-      "text-gray-600 hover:bg-gray-50 dark:border-gray-700 dark:bg-gray-900 dark:text-gray-300 dark:hover:bg-gray-800",
-    );
+    // UIの統一 第7回: 色は共通 Button(ghost)が持つ(dark 対応込み)
+    expect(src).toMatch(/<Button variant="ghost"[^>]*onClick=\{handleCancel\}/);
   });
   it("補完中の薄文字に dark:text-gray-400", () => {
     expect(src).toContain("text-gray-500 dark:text-gray-400");
@@ -30,7 +29,8 @@ describe("AddressFillButton dark: 配色（22H・add-only）", () => {
 
   // ライト不変ガード
   it("solid indigo ボタン(bg-indigo-600 text-white)は据え置き", () => {
-    expect(src).toContain("bg-indigo-600 px-2 py-1 text-xs font-medium text-white");
+    // 共通 Button(primary=藍の塗り・白文字)
+    expect(src).toMatch(/<Button variant="primary"[^>]*onClick=\{handleConfirm\}/);
   });
   it("ライト bg-blue-50 が残っている", () => {
     expect(src).toContain("bg-blue-50");

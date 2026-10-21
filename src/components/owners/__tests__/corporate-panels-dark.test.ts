@@ -43,14 +43,14 @@ describe("CorporateLookupPanel dark: 配色 (P2-1)", () => {
     expect(lookupSrc).toContain("text-gray-500");
   });
   it("純 accent ボタン（bg-indigo-600）は dark: 据え置き", () => {
-    expect(lookupSrc).toContain("bg-indigo-600");
+    // 共通 Button(primary=藍の塗り)
+    expect(lookupSrc).toMatch(/<Button\s+variant="primary"[^>]*onClick=\{handleApply\}/);
   });
 
   // --- T4 追加: 取りこぼし darken（generic error/success/neutral）---
   it("検索ボタン(blue outline)に dark の bg/border/text/hover", () => {
-    expect(lookupSrc).toContain(
-      "text-blue-700 hover:bg-blue-100 dark:border-blue-400/20 dark:bg-blue-500/10 dark:text-blue-300 dark:hover:bg-blue-500/20",
-    );
+    // 共通 Button(secondary)が dark の bg/border/text/hover を持つ
+    expect(lookupSrc).toMatch(/<Button\s+variant="secondary"[^>]*onClick=\{handleSearch\}/);
   });
   it("検索エラーパネル(red)に dark", () => {
     expect(lookupSrc).toContain(
@@ -104,27 +104,29 @@ describe("CorporateCleanupPanel dark: 配色 (P2-1)", () => {
   });
   it("純 accent ボタンは藍(bg-indigo-600)・dark: 据え置き", () => {
     // UI一貫性 第1弾(4)で青(blue)→藍(indigo)へ統一した。
-    expect(cleanupSrc).toContain("bg-indigo-600");
+    // UIの統一 第7回: 共通 Button(primary=藍)に寄せた
+    expect(cleanupSrc).toMatch(/<Button variant="primary"[^>]*onClick=\{onApply\}/);
     expect(cleanupSrc).not.toContain("bg-blue-600");
   });
   // --- P2 追加: 清掃チェックボタンの dark 可読化 ---
   it("清掃チェックボタンに dark:bg-gray-800 がある（暗背景地）", () => {
-    expect(cleanupSrc).toContain("dark:bg-gray-800");
+    expect(cleanupSrc).toMatch(/<Button variant="secondary"[^>]*onClick=\{onCheck\}/);
   });
   it("清掃チェックボタンに dark:text-gray-200 がある（暗背景文字）", () => {
-    expect(cleanupSrc).toContain("dark:text-gray-200");
+    expect(cleanupSrc).toMatch(/<Button variant="secondary"[^>]*onClick=\{onCheck\}/);
   });
   it("清掃チェックボタンに dark:hover:bg-gray-700 がある（hover 可読化）", () => {
-    expect(cleanupSrc).toContain("dark:hover:bg-gray-700");
+    expect(cleanupSrc).toMatch(/<Button variant="secondary"[^>]*onClick=\{onCheck\}/);
   });
   it("完了メッセージ（混入除去）に dark:text-emerald-400 がある", () => {
     expect(cleanupSrc).toContain("dark:text-emerald-400");
   });
   it("ライトモード bg-slate-100 は残っている", () => {
-    expect(cleanupSrc).toContain("bg-slate-100");
+    // 共通 Button(secondary)の白地+灰枠に統一(light も共通部品が持つ)
+    expect(cleanupSrc).toMatch(/<Button variant="secondary"[^>]*onClick=\{onCheck\}/);
   });
   it("ライトモード text-slate-700 は残っている", () => {
-    expect(cleanupSrc).toContain("text-slate-700");
+    expect(cleanupSrc).toMatch(/<Button variant="secondary"[^>]*onClick=\{onCheck\}/);
   });
 
   // --- T4 追加: 取りこぼし darken ---

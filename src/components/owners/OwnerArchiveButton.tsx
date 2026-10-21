@@ -1,5 +1,6 @@
 "use client";
 
+import { Button } from "@/components/ui/button";
 import { useState } from "react";
 
 interface OwnerArchiveButtonProps {
@@ -121,13 +122,9 @@ export function OwnerArchiveButton({
   return (
     <div className="flex flex-col gap-1">
       {(state === "idle" || state === "error") && (
-        <button
-          type="button"
-          onClick={handleClick}
-          className="rounded bg-amber-600 px-2 py-1 text-xs font-medium text-white hover:bg-amber-700"
-        >
+        <Button variant="secondary" size="sm" onClick={handleClick}>
           所有者をアーカイブ
-        </button>
+        </Button>
       )}
 
       {state === "previewing" && (
@@ -144,7 +141,9 @@ export function OwnerArchiveButton({
               ))}
             </ul>
           )}
+          {/* data-ui=raw: 赤い注意の枠の中の小さな文字リンク */}
           <button
+            data-ui="raw"
             type="button"
             onClick={reset}
             className="mt-0.5 self-start text-[11px] text-red-600 underline dark:text-red-300"
@@ -163,20 +162,12 @@ export function OwnerArchiveButton({
             通常の一覧・検索・所有者選択から除外されます。
           </p>
           <div className="mt-1 flex gap-1">
-            <button
-              type="button"
-              onClick={handleConfirm}
-              className="rounded bg-amber-600 px-2 py-1 font-medium text-white hover:bg-amber-700"
-            >
+            <Button variant="primary" size="sm" onClick={handleConfirm}>
               アーカイブ実行
-            </button>
-            <button
-              type="button"
-              onClick={reset}
-              className="rounded border border-gray-300 bg-white px-2 py-1 text-gray-600 hover:bg-gray-50 dark:border-gray-700 dark:bg-gray-900 dark:text-gray-300 dark:hover:bg-gray-800"
-            >
+            </Button>
+            <Button variant="ghost" size="sm" onClick={reset}>
               キャンセル
-            </button>
+            </Button>
           </div>
         </div>
       )}

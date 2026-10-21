@@ -39,7 +39,8 @@ function subscribe(l: () => void) {
 export function DeskStepGuideView({ step, off, onToggle }: { step: DeskGuideStep; off: boolean; onToggle: () => void }) {
   if (off) {
     return (
-      <button type="button" onClick={onToggle} className="text-xs text-teal-700 underline dark:text-teal-300">
+      // data-ui=raw: 案内の下線リンク風(文字だけ)
+      <button data-ui="raw" type="button" onClick={onToggle} className="text-xs text-teal-700 underline dark:text-teal-300">
         案内を出す
       </button>
     );
@@ -50,7 +51,8 @@ export function DeskStepGuideView({ step, off, onToggle }: { step: DeskGuideStep
       className="flex items-center justify-between gap-2 rounded-md bg-gray-900 px-3 py-2 text-sm text-white dark:bg-gray-100 dark:text-gray-900"
     >
       <span>{DESK_GUIDE_TIPS[step]}</span>
-      <button type="button" onClick={onToggle} className="shrink-0 text-xs underline">
+      {/* data-ui=raw: 案内の枠の中の下線リンク風(文字だけ) */}
+      <button data-ui="raw" type="button" onClick={onToggle} className="shrink-0 text-xs underline">
         案内を消す
       </button>
     </div>

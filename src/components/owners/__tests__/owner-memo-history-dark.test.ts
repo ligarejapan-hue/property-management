@@ -35,7 +35,8 @@ describe("OwnerMemoHistory dark: 配色（22H・add-only）", () => {
 
   // ライト不変
   it("solid indigo ボタン(bg-indigo-600 text-white)は据え置き", () => {
-    expect(src).toContain("bg-indigo-600 px-3 py-1.5 text-xs font-medium text-white");
+    // 共通 Button(primary=藍の塗り・白文字)
+    expect(src).toMatch(/<Button variant="primary"[^>]*onClick=\{handleSubmit\}/);
   });
   it("ライト bg-gray-50 が残っている", () => {
     expect(src).toContain("bg-gray-50");

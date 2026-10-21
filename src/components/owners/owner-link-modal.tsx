@@ -1,5 +1,6 @@
 "use client";
 
+import { Button } from "@/components/ui/button";
 import { useCallback, useEffect, useRef, useState } from "react";
 import { Loader2, Search, UserPlus, X } from "lucide-react";
 import {
@@ -202,7 +203,9 @@ export function OwnerLinkModal({
             <UserPlus className="h-4 w-4" />
             所有者を追加
           </h3>
+          {/* data-ui=raw: アイコンだけの閉じる× */}
           <button
+            data-ui="raw"
             type="button"
             onClick={onClose}
             aria-label="閉じる"
@@ -217,6 +220,7 @@ export function OwnerLinkModal({
           <button
             type="button"
             onClick={() => setMode("search")}
+            aria-pressed={mode === "search"}
             className={`flex-1 rounded px-2 py-1 font-medium ${
               mode === "search"
                 ? "bg-indigo-600 text-white"
@@ -228,6 +232,7 @@ export function OwnerLinkModal({
           <button
             type="button"
             onClick={() => setMode("create")}
+            aria-pressed={mode === "create"}
             className={`flex-1 rounded px-2 py-1 font-medium ${
               mode === "create"
                 ? "bg-indigo-600 text-white"
@@ -425,8 +430,9 @@ export function OwnerLinkModal({
               <div className="flex items-center gap-2">
                 <label className="text-xs font-medium text-gray-700 dark:text-gray-200">現住所</label>
                 {!addressSplit && (
-                  <button
-                    type="button"
+                  <Button
+                    variant="secondary"
+                    size="sm"
                     // ⚠ホバーで理由を出す（発注者指定の文言）。
                     title="登記上の住所と現在の所在が違う場合はクリックしてください"
                     onClick={() => {
@@ -438,10 +444,9 @@ export function OwnerLinkModal({
                       }));
                       setAddressSplit(true);
                     }}
-                    className="rounded-md border border-gray-300 px-2 py-0.5 text-[11px] text-gray-600 hover:bg-gray-50 dark:border-gray-700 dark:text-gray-300 dark:hover:bg-gray-800"
                   >
                     ⇅ 現住所を分ける
-                  </button>
+                  </Button>
                 )}
               </div>
               <input
@@ -517,35 +522,30 @@ export function OwnerLinkModal({
         {error && <p className="mt-2 text-xs text-red-600 dark:text-red-400">{error}</p>}
 
         <div className="mt-4 flex justify-end gap-2">
-          <button
-            type="button"
-            onClick={onClose}
-            disabled={submitting}
-            className="rounded border border-gray-300 dark:border-gray-700 px-3 py-1.5 text-xs font-medium text-gray-600 dark:text-gray-300 hover:bg-gray-50 dark:hover:bg-gray-800 disabled:opacity-50"
-          >
+          <Button variant="ghost" size="sm" onClick={onClose} disabled={submitting}>
             キャンセル
-          </button>
+          </Button>
           {mode === "search" ? (
-            <button
-              type="button"
+            <Button
+              variant="primary"
+              size="sm"
               onClick={handleLinkExisting}
               disabled={
                 submitting ||
                 !isSelectedOwnerSubmittable(selected, searchHits, existingOwnerIds)
               }
-              className="rounded bg-indigo-600 px-4 py-1.5 text-xs font-medium text-white hover:bg-indigo-700 disabled:cursor-not-allowed disabled:bg-gray-300"
             >
               {submitting ? "紐付け中..." : "この所有者を紐付け"}
-            </button>
+            </Button>
           ) : (
-            <button
-              type="button"
+            <Button
+              variant="primary"
+              size="sm"
               onClick={handleCreateAndLink}
               disabled={submitting || !createReady}
-              className="rounded bg-indigo-600 px-4 py-1.5 text-xs font-medium text-white hover:bg-indigo-700 disabled:cursor-not-allowed disabled:bg-gray-300"
             >
               {submitting ? "作成中..." : "作成して紐付け"}
-            </button>
+            </Button>
           )}
         </div>
       </div>

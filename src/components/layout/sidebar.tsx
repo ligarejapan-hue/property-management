@@ -96,7 +96,9 @@ export default function Sidebar({ userRole, currentPath }: SidebarProps) {
       const here = g.items.some((i) => isActive(i.href));
       return (
         <div key={g.key}>
+          {/* data-ui=raw: メニューの開閉見出し(幅いっぱいの行・ボタンの形ではない) */}
           <button
+            data-ui="raw"
             type="button"
             onClick={() => setOpenMap((m) => ({ ...m, [g.key]: !open }))}
             aria-expanded={open}
@@ -130,7 +132,9 @@ export default function Sidebar({ userRole, currentPath }: SidebarProps) {
       return (
         <div key={g.key}>
           <div className="mt-4 mb-1">
+            {/* data-ui=raw: メニューの開閉見出し(文字だけの行・ボタンの形ではない) */}
             <button
+              data-ui="raw"
               onClick={() => setOpenMap((m) => ({ ...m, [g.key]: !open }))}
               aria-expanded={open}
               className="flex w-full items-center gap-2 px-3 py-1 text-xs font-semibold uppercase tracking-wider text-gray-500 hover:text-gray-700 dark:text-gray-400 dark:hover:text-gray-200"
@@ -187,7 +191,9 @@ export default function Sidebar({ userRole, currentPath }: SidebarProps) {
   return (
     <>
       {/* Mobile toggle button */}
+      {/* data-ui=raw: スマホのメニュー開閉(アイコンだけの浮いたボタン) */}
       <button
+        data-ui="raw"
         onClick={() => setMobileOpen(!mobileOpen)}
         className="fixed top-3 left-3 z-50 rounded-md bg-white dark:bg-gray-900 p-2 shadow-md lg:hidden"
         aria-label="メニューを開く"

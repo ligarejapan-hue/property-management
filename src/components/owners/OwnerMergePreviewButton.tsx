@@ -1,5 +1,6 @@
 "use client";
 
+import { Button } from "@/components/ui/button";
 import { useEffect, useState } from "react";
 
 // blockReason enum → 日本語ラベル（owner-merge.ts の OwnerMergeBlockReason と一致）
@@ -216,22 +217,13 @@ export function OwnerMergePreviewButton({
   return (
     <div className="flex flex-col gap-2">
       <div className="flex items-center gap-2">
-        <button
-          type="button"
-          onClick={handleClick}
-          disabled={state === "loading"}
-          className="rounded bg-purple-600 px-3 py-1 text-xs font-medium text-white hover:bg-purple-700 disabled:cursor-not-allowed disabled:bg-gray-300 dark:disabled:bg-gray-700"
-        >
+        <Button variant="secondary" size="sm" onClick={handleClick} disabled={state === "loading"}>
           {state === "loading" ? "判定中..." : "統合プレビュー"}
-        </button>
+        </Button>
         {state !== "idle" && (
-          <button
-            type="button"
-            onClick={reset}
-            className="text-xs text-gray-500 underline hover:text-gray-700 dark:text-gray-400 dark:hover:text-gray-300"
-          >
+          <Button variant="ghost" size="sm" onClick={reset}>
             閉じる
-          </button>
+          </Button>
         )}
       </div>
 
@@ -349,13 +341,9 @@ export function OwnerMergePreviewButton({
                 </p>
 
                 {executeState === "idle" && (
-                  <button
-                    type="button"
-                    onClick={() => setExecuteState("confirm1")}
-                    className="rounded bg-red-600 px-3 py-1 text-xs font-medium text-white hover:bg-red-700"
-                  >
+                  <Button variant="danger" size="sm" onClick={() => setExecuteState("confirm1")}>
                     統合を実行
-                  </button>
+                  </Button>
                 )}
 
                 {executeState === "confirm1" && (
@@ -374,20 +362,12 @@ export function OwnerMergePreviewButton({
                       source はアーカイブされ通常検索から除外されます。
                     </p>
                     <div className="mt-1 flex gap-1">
-                      <button
-                        type="button"
-                        onClick={() => setExecuteState("confirm2")}
-                        className="rounded bg-red-600 px-2 py-1 font-medium text-white hover:bg-red-700"
-                      >
+                      <Button variant="danger" size="sm" onClick={() => setExecuteState("confirm2")}>
                         次へ
-                      </button>
-                      <button
-                        type="button"
-                        onClick={resetExecute}
-                        className="rounded border border-gray-300 bg-white px-2 py-1 text-gray-600 hover:bg-gray-50 dark:border-gray-700 dark:bg-gray-900 dark:text-gray-300 dark:hover:bg-gray-800"
-                      >
+                      </Button>
+                      <Button variant="ghost" size="sm" onClick={resetExecute}>
                         キャンセル
-                      </button>
+                      </Button>
                     </div>
                   </div>
                 )}
@@ -398,20 +378,12 @@ export function OwnerMergePreviewButton({
                       ⚠ この操作は元に戻せません。本当に統合しますか？
                     </p>
                     <div className="mt-1 flex gap-1">
-                      <button
-                        type="button"
-                        onClick={handleExecute}
-                        className="rounded bg-red-700 px-2 py-1 font-medium text-white hover:bg-red-800"
-                      >
+                      <Button variant="danger" size="sm" onClick={handleExecute}>
                         実行する
-                      </button>
-                      <button
-                        type="button"
-                        onClick={resetExecute}
-                        className="rounded border border-gray-300 bg-white px-2 py-1 text-gray-600 hover:bg-gray-50 dark:border-gray-700 dark:bg-gray-900 dark:text-gray-300 dark:hover:bg-gray-800"
-                      >
+                      </Button>
+                      <Button variant="ghost" size="sm" onClick={resetExecute}>
                         キャンセル
-                      </button>
+                      </Button>
                     </div>
                   </div>
                 )}
@@ -430,7 +402,9 @@ export function OwnerMergePreviewButton({
                         ))}
                       </ul>
                     )}
+                    {/* data-ui=raw: 赤い注意の枠の中の小さな文字リンク */}
                     <button
+                      data-ui="raw"
                       type="button"
                       onClick={resetExecute}
                       className="mt-1 self-start text-[11px] text-red-600 underline dark:text-red-300"

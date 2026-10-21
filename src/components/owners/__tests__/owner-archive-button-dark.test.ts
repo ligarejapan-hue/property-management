@@ -27,9 +27,8 @@ describe("OwnerArchiveButton dark: 配色（22H・add-only）", () => {
     expect(src).toContain("text-amber-800 dark:text-amber-300");
   });
   it("キャンセルボタン(neutral)に dark の border/bg/text/hover", () => {
-    expect(src).toContain(
-      "text-gray-600 hover:bg-gray-50 dark:border-gray-700 dark:bg-gray-900 dark:text-gray-300 dark:hover:bg-gray-800",
-    );
+    // UIの統一 第7回: 色は共通 Button(ghost)が持つ(dark 対応込み)
+    expect(src).toMatch(/<Button variant="ghost"[^>]*onClick=\{reset\}/);
   });
   it("判定中/アーカイブ中の薄文字に dark:text-gray-400", () => {
     expect(src).toContain("text-[11px] text-gray-500 dark:text-gray-400");
@@ -37,6 +36,7 @@ describe("OwnerArchiveButton dark: 配色（22H・add-only）", () => {
 
   // ライト不変
   it("solid amber ボタン(bg-amber-600 text-white)は据え置き", () => {
-    expect(src).toContain("bg-amber-600 px-2 py-1 text-xs font-medium text-white");
+    // 共通 Button(primary)。色の判断は共通部品に寄せた
+    expect(src).toMatch(/<Button variant="primary"[^>]*onClick=\{handleConfirm\}/);
   });
 });

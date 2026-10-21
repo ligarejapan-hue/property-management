@@ -19,6 +19,7 @@
  * 「空→保存済み住所」と prop が変化しても provider へ送らない（Codex P2-G）。
  * 取得は hook（api-client wrapper 経由）＝社内 route のみ・APIキーには触れない。
  */
+import { Button } from "@/components/ui/button";
 import { useEffect, useRef, useState } from "react";
 import { Loader2 } from "lucide-react";
 import type { AddressLookupCandidate } from "@/lib/address-lookup/types";
@@ -71,9 +72,6 @@ export interface AddressLookupControlsProps {
    */
   addressEdited?: boolean;
 }
-
-const linkBtn =
-  "rounded border border-indigo-200 px-2 py-1 font-medium text-indigo-700 hover:bg-indigo-50 disabled:cursor-not-allowed disabled:opacity-50";
 
 export function AddressLookupControls({
   zip,
@@ -252,14 +250,14 @@ export function AddressLookupControls({
   return (
     <div className="space-y-1.5 text-xs">
       {showPostal && (
-        <button
-          type="button"
+        <Button
+          variant="secondary"
+          size="sm"
           onClick={handlePostalLookup}
           disabled={disabled || loading || zip.trim() === ""}
-          className={linkBtn}
         >
           郵便番号から住所を自動入力
-        </button>
+        </Button>
       )}
 
       {showSearch && !disabled && (
@@ -290,7 +288,9 @@ export function AddressLookupControls({
               key={`${candidate.source}-${candidate.postalCode ?? ""}-${i}`}
               className="border-b border-gray-100 dark:border-gray-800 last:border-b-0"
             >
+              {/* data-ui=raw: 候補リストの1行(行全体が押せる面) */}
               <button
+                data-ui="raw"
                 type="button"
                 onClick={() => applyCandidate(candidate)}
                 disabled={disabled}
@@ -317,21 +317,12 @@ export function AddressLookupControls({
             」で上書きしますか?
           </p>
           <div className="flex gap-2">
-            <button
-              type="button"
-              onClick={confirmOverwrite}
-              disabled={disabled}
-              className="rounded bg-amber-600 px-2 py-0.5 font-medium text-white hover:bg-amber-700 disabled:opacity-50"
-            >
+            <Button variant="primary" size="sm" onClick={confirmOverwrite} disabled={disabled}>
               上書きする
-            </button>
-            <button
-              type="button"
-              onClick={clearPending}
-              className="rounded border border-gray-300 dark:border-gray-700 px-2 py-0.5 text-gray-600 dark:text-gray-300 hover:bg-gray-50 dark:hover:bg-gray-800"
-            >
+            </Button>
+            <Button variant="ghost" size="sm" onClick={clearPending}>
               キャンセル
-            </button>
+            </Button>
           </div>
         </div>
       )}

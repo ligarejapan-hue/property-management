@@ -145,7 +145,9 @@ export default function BuildingLinkDialog({
           {suggestions.map((s) => {
             const c: BuildingChoice = { kind: "existing", buildingId: s.id };
             return (
+              // data-ui=raw: 候補リストの1行(行全体が押せる面・role="radio")
               <button
+                data-ui="raw"
                 key={s.id}
                 type="button"
                 role="radio"
@@ -173,7 +175,9 @@ export default function BuildingLinkDialog({
             );
           })}
           {allowNew && (
+            // data-ui=raw: 候補リストの1行(行全体が押せる面・role="radio")
             <button
+              data-ui="raw"
               type="button"
               role="radio"
               aria-checked={isChosen({ kind: "new" })}
@@ -188,7 +192,9 @@ export default function BuildingLinkDialog({
           )}
           {allowsAutoLink(state, area) && (
             <>
+              {/* data-ui=raw: 候補リストの1行(行全体が押せる面・role="radio") */}
               <button
+                data-ui="raw"
                 type="button"
                 role="radio"
                 aria-checked={isChosen({ kind: "auto" })}

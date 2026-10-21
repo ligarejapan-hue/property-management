@@ -1,4 +1,5 @@
 /** 「マンション棟」の検索の2段目=名簿にあるマンション(設計 2026-10-18 §6.3)。表示専用(SSR テストのため切り出す)。 */
+import { Button } from "@/components/ui/button";
 import { catalogSearchLine, type CatalogSearchItem } from "@/lib/mansion-catalog/search";
 
 export type { CatalogSearchItem };
@@ -30,14 +31,14 @@ export function CatalogSearchResults({
               <p className="text-xs text-gray-500 dark:text-gray-400">{catalogSearchLine(i)}</p>
             </div>
             {canAdopt && (
-              <button
-                type="button"
+              <Button
+                variant="secondary"
+                size="sm"
                 onClick={() => onAdopt(i.id)}
                 disabled={adoptingId !== null}
-                className="rounded-md border border-indigo-300 px-3 py-1.5 text-sm text-indigo-700 hover:bg-indigo-50 disabled:opacity-50 dark:border-indigo-700 dark:text-indigo-300 dark:hover:bg-indigo-950/40"
               >
                 {adoptingId === i.id ? "登録しています…" : "マンション棟に登録"}
-              </button>
+              </Button>
             )}
           </li>
         ))}

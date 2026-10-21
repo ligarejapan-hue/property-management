@@ -13,6 +13,7 @@
 // raw XML / API レスポンス本文を画面外に持ち出すことはしない。
 // 検索結果は React state のみで保持し、自動保存・自動 lookup はしない。
 
+import { Button } from "@/components/ui/button";
 import { useState, useRef, type Dispatch, type SetStateAction } from "react";
 import { AlertTriangle, Search, Loader2, CheckCircle2 } from "lucide-react";
 import {
@@ -432,12 +433,12 @@ export default function CorporateLookupPanel({
   return (
     <div className="space-y-2">
       <div className="flex items-center gap-2">
-        <button
-          type="button"
+        <Button
+          variant="secondary"
+          size="sm"
           onClick={handleSearch}
           disabled={!canSearch}
           aria-label="法人情報を検索"
-          className="inline-flex items-center gap-1.5 rounded-md border border-blue-300 bg-blue-50 px-2.5 py-1 text-xs font-medium text-blue-700 hover:bg-blue-100 dark:border-blue-400/20 dark:bg-blue-500/10 dark:text-blue-300 dark:hover:bg-blue-500/20 disabled:cursor-not-allowed disabled:border-gray-200 disabled:bg-gray-50 disabled:text-gray-400 dark:disabled:border-gray-700 dark:disabled:bg-gray-800 dark:disabled:text-gray-500"
         >
           {loading ? (
             <>
@@ -450,7 +451,7 @@ export default function CorporateLookupPanel({
               法人情報を検索
             </>
           )}
-        </button>
+        </Button>
         {!configured && (
           <span className="text-xs text-gray-500 dark:text-gray-400">
             法人番号の自動検索は現在利用できません（システム管理者にお問い合わせください）
@@ -609,11 +610,11 @@ export default function CorporateLookupPanel({
                   </div>
                 )}
 
-                <button
-                  type="button"
+                <Button
+                  variant="primary"
+                  size="sm"
                   onClick={handleApply}
                   disabled={!applyButtonEnabled}
-                  className="inline-flex items-center gap-1.5 rounded-md border border-indigo-400 bg-indigo-600 px-2.5 py-1 text-[11px] font-medium text-white hover:bg-indigo-700 disabled:cursor-not-allowed disabled:border-gray-200 disabled:bg-gray-300 dark:disabled:border-gray-700 dark:disabled:bg-gray-700"
                 >
                   {applying ? (
                     <>
@@ -623,7 +624,7 @@ export default function CorporateLookupPanel({
                   ) : (
                     "選択した項目を所有者に反映"
                   )}
-                </button>
+                </Button>
                 {typeof ownerVersion !== "number" && (
                   <p className="text-[10px] text-gray-500 dark:text-gray-400">
                     所有者バージョンが取得できていないため反映できません
