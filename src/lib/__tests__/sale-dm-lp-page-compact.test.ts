@@ -114,13 +114,13 @@ describe("見せ方の圧縮(節は全部残す)", () => {
   });
 
   it("文章だけの長い節は、見出しを残して中身を「くわしく読む」に畳む", () => {
-    expect(html).toContain('<section><h2>売るときに使えるかもしれない、税金の特例</h2><details class="more"><summary>くわしく読む</summary><div class="more-body"><p>');
+    expect(html).toContain('<section><h2>売るときに<wbr>使えるかもしれない<wbr>税金の<wbr>特例</h2><details class="more"><summary>くわしく読む</summary><div class="more-body"><p>');
   });
 
   it("短い節・写真や図のある節・チェック札の節は畳まない", () => {
     expect(html).toContain("<section><h2>短い節</h2><p>短い文章です。</p></section>");
-    expect(html).toMatch(/<div class="sec-body"><h2>荷物が残ったままでも<\/h2><p>/);
-    expect(html).toMatch(/<h2>こんなお困りごとはありませんか<\/h2><ul class="checks">/);
+    expect(html).toMatch(/<div class="sec-body"><h2>荷物が<wbr>残ったままでも<\/h2><p>/);
+    expect(html).toMatch(/<h2>こんな<wbr>お困りごとはありませんか<\/h2><ul class="checks">/);
     expect(html.split("くわしく読む").length - 1).toBe(1);
   });
 

@@ -33,7 +33,7 @@ describe("renderLpPage", () => {
   it("段の順番: 上部(ロゴ・電話)→ヒーロー→見出し→リード→申込ボタン→本文→よくある質問→会社案内+電話→配信停止", () => {
     const idx = (s: string, from = 0) => { const i = html.indexOf(s, from); expect(i, s).toBeGreaterThan(-1); return i; };
     const companyAt = idx('id="contact"');
-    const order = [idx('<header class="top"'), idx(`/lp-assets/${"a".repeat(32)}`), idx("<h1"), idx("売却をご検討の方へ"), idx(LP_CTA_LABEL), idx("売却の進め方"), idx("<details"), companyAt, idx("株式会社リガーレ", companyAt), idx("tel:0312345678", companyAt), idx("/u/tok.sig")];
+    const order = [idx('<header class="top"'), idx(`/lp-assets/${"a".repeat(32)}`), idx("<h1"), idx("売却をご検討の方へ"), idx(LP_CTA_LABEL), idx("<h2>売却の<wbr>進め方</h2>"), idx("<details"), companyAt, idx("株式会社リガーレ", companyAt), idx("tel:0312345678", companyAt), idx("/u/tok.sig")];
     expect([...order].sort((a, b) => a - b)).toEqual(order);
   });
   it("動的文字列は escape される", () => {
