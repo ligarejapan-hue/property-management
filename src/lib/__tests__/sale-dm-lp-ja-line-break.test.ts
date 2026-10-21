@@ -15,6 +15,8 @@ describe("jaChunks(文節の切れ目)", () => {
     expect(jaChunks("売るときに使えるかもしれない、税金の特例")).toEqual(["売るときに", "使えるかもしれない、", "税金の", "特例"]);
     // 「古い家」は漢字+ひらがな1字+漢字(送り仮名)なので1語扱い=切らない
     expect(jaChunks("古い家でも、売り方はいくつかあります")).toEqual(["古い家でも、", "売り方はいくつかあります"]);
+    // 数字の間の全角「，」は桁区切り=切らない(文の読点としての「，」は切る)
+    expect(jaChunks("1，000万円で，売却")).toEqual(["1，000万円で，", "売却"]);
     expect(jaChunks("リースバックで住み続けながら資金を用意し、数年後にご自宅を買い戻し")).toEqual([
       "リースバックで", "住み続けながら", "資金を", "用意し、", "数年後に", "ご自宅を", "買い戻し",
     ]);
@@ -59,10 +61,21 @@ describe("jaHeadingHtml(見出し用: 読点を表示から抜く)", () => {
     expect(jaHeadingHtml("築年数を重ねたお住まいのことで、お困りではありませんか？")).toBe("築年数を<wbr>重ねた<wbr>お住まいのことで<wbr>お困りではありませんか？");
     expect(jaHeadingHtml("売る・貸す・持ち続ける。それぞれの見通し")).toBe("売る・<wbr>貸す・<wbr>持ち続ける。<wbr>それぞれの<wbr>見通し");
     expect(jaHeadingHtml("防いだ(成年後見人の弁護士からのご依頼)")).toBe("防いだ<wbr>(成年後見人の<wbr>弁護士からの<wbr>ご依頼)");
-    expect(jaHeadingHtml("a，b <i>")).toBe("a<wbr>b <wbr>&lt;i&gt;");
+    expect(jaHeadingHtml("そのままで，<i>")).toBe("そのままで<wbr>&lt;i&gt;");
     // 読点だけの文節は消えて、余分な <wbr> も残らない
     expect(jaHeadingHtml("、")).toBe("");
     expect(jaHeadingHtml("")).toBe("");
+  });
+  it("ものを並べる読点(前が漢字・カタカナ・英数)は残す。前がひらがなの読点(文の切れ目)だけ抜く(発注者 2026-10-22 案1)", () => {
+    expect(jaHeadingHtml("登記や税金、片付けのことも当社に、まとめてご相談ください")).toBe(
+      "登記や<wbr>税金、<wbr>片付けのことも<wbr>当社に<wbr>まとめて<wbr>ご相談ください",
+    );
+    expect(jaHeadingHtml("売却、賃貸、管理のご相談")).toBe("売却、<wbr>賃貸、<wbr>管理の<wbr>ご相談");
+    expect(jaHeadingHtml("マンション、アパート、戸建て")).toBe("マンション、<wbr>アパート、<wbr>戸建て");
+    expect(jaHeadingHtml("1，000万円、2，000万円")).toBe("1，000万円、<wbr>2，000万円");
+    expect(jaHeadingHtml("2件まとめて売却し、資産の目減りを防いだ")).toBe("2件まとめて<wbr>売却し<wbr>資産の<wbr>目減りを<wbr>防いだ");
+    // 前が記号や文頭の読点は抜く
+    expect(jaHeadingHtml("（築古）、売り方")).toBe("（築古）<wbr>売り方");
   });
 });
 
@@ -75,6 +88,7 @@ const input = (over: Partial<LpRenderInput> = {}): LpRenderInput => ({
     { heading: "古くなった家でも、売り方はいくつかあります", paragraphs: ["本文。"], media: null },
     { heading: "修繕や耐震工事を始める前に、ご相談ください", paragraphs: ["本文。"], media: { kind: "asset", image: { publicId: "b".repeat(32), width: 1456, height: 1088 } } },
     { heading: "ご相談の例(目黒区・アパートと駐車場・築50年超)", paragraphs: ["駐車場とアパートを2件まとめて売却し、資産の目減りを防いだ(成年後見人の弁護士からのご依頼)\n本文です。"], media: null },
+    { heading: "登記や税金、片付けのことも当社に、まとめてご相談ください", paragraphs: ["本文。"], media: null },
   ],
   faq: [{ q: "古くて傷んでいる家でも売れますか？", a: "はい。" }],
   hero: null,
@@ -91,6 +105,7 @@ describe("renderLpPage: 見出し・実例の題・札・よくある質問に�
     expect(html).toContain("<h1>築年数を<wbr>重ねた<wbr>お住まいのことで<wbr>お困りではありませんか？</h1>");
     expect(html).toContain("<h2>古くなった<wbr>家でも<wbr>売り方はいくつかあります</h2>");
     expect(html).toContain("<h2>修繕や<wbr>耐震工事を<wbr>始める<wbr>前に<wbr>ご相談ください</h2>");
+    expect(html).toContain("<h2>登記や<wbr>税金、<wbr>片付けのことも<wbr>当社に<wbr>まとめて<wbr>ご相談ください</h2>");
     expect(html).toContain('<span class="case-tag">ご相談の<wbr>例 <wbr>目黒区・<wbr>アパートと<wbr>駐車場・<wbr>築50年超</span>');
     expect(html).toContain("<strong>駐車場と<wbr>アパートを<wbr>2件まとめて<wbr>売却し<wbr>資産の<wbr>目減りを<wbr>防いだ<wbr>(成年後見人の<wbr>弁護士からの<wbr>ご依頼)</strong>");
     expect(html).toContain('<span class="q">Q</span><span class="qt">古くて<wbr>傷んでいる<wbr>家でも<wbr>売れますか？</span>');
