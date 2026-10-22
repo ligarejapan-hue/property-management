@@ -120,7 +120,8 @@ export default function SessionHistoryClient({
   };
 
   return (
-    <div className="p-4">
+    // 余白は dashboard-layout の <main> が持つ(ここで p-4 を足すと題名と左端がずれる)。
+    <div>
       <div className="mb-3 flex flex-wrap items-center gap-3 text-xs">
         {canSeeAll && (
           <label className="flex items-center gap-1">

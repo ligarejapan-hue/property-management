@@ -244,7 +244,7 @@ export default function MailSettingsPage() {
         : null;
 
   return (
-    <div className="mx-auto max-w-2xl space-y-5 p-4 sm:p-6">
+    <div className="mx-auto max-w-2xl space-y-5">
       <PageHeader
         title="メール送信設定"
         description="査定申込が届いたときの通知メールを送る、Xserver のメールボックスを設定します。ここで設定したメールアドレスから、通知を受け取る利用者へ届きます。"

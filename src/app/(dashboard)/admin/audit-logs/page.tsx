@@ -197,6 +197,68 @@ const ACTION_LABELS: Record<string, string> = {
   pii_cut_attempt: "保護画面での切り取り操作",
   pii_contextmenu_attempt: "保護画面での右クリック",
   pii_print_attempt: "保護画面での印刷操作",
+  // --- 実機確認 2026-10-22: 本番で英字のまま出ていた分+コードが記録する未収載分 ---
+  //     (走査テスト audit-action-labels-scan が、書き込み箇所の action をここと突き合わせる)
+  // 業者からの反響の受付
+  agent_create: "業者を登録",
+  agent_update: "業者を更新",
+  agent_archive: "業者を保管(非表示)",
+  agent_inquiry_create: "業者からの反響を登録",
+  agent_inquiry_update: "業者からの反響を更新",
+  agent_inquiry_material_send: "反響へ資料を送付",
+  agent_inquiry_material_apply: "資料送付の結果を反響へ反映",
+  agent_viewing_create: "内見予定を登録",
+  agent_viewing_update: "内見予定を更新",
+  property_ad_permissions_update: "物件の広告可否を変更",
+  // 棟の自動作成・マンション名簿
+  "building.auto_create": "棟を自動作成",
+  "building.catalog_adopt": "マンション名簿から棟を作成",
+  "building.rename_propagate": "棟名の変更を部屋へ反映",
+  "property.building_link": "物件を棟につなぐ",
+  "property.building_relink": "物件を別の棟へつなぎ直す",
+  "property.building_unlink": "物件と棟のつながりを外す",
+  // 貼り付けて物件化
+  paste_import_property_create: "貼り付けから物件作成",
+  // 編集中の鍵
+  edit_lock_acquire: "編集の鍵を取得",
+  edit_lock_release: "編集の鍵を解放",
+  edit_lock_force_release: "編集の鍵を強制解放",
+  edit_lock_takeover_expired: "期限切れの編集の鍵を引き継ぎ",
+  // 宛名CSV・DM送付記録・反響
+  dm_batch_create: "宛名CSVの発送を作成",
+  dm_sent_confirm: "宛名CSVの送付を確定",
+  dm_sent_record: "DM送付を記録",
+  dm_sent_record_delete: "DM送付記録を削除",
+  dm_reaction_update: "DM反響を記録",
+  // 通知(ベル・プッシュ)
+  push_subscription_register: "通知の受信を登録",
+  push_subscription_revoke: "通知の受信を解除",
+  // 売却DM 型(文面)・LP型・外部AI
+  sale_dm_prompt_view: "売却DM 外部AI用プロンプト表示",
+  sale_dm_body_paste: "売却DM 文面の貼り付け保存",
+  sale_dm_template_apply: "売却DM 文面を宛先へ適用",
+  sale_dm_lp_variant_create: "売却DM LP型を作成",
+  sale_dm_lp_variant_update: "売却DM LP型を更新",
+  sale_dm_lp_variant_delete: "売却DM LP型を削除",
+  sale_dm_lp_prompt_view: "売却DM LP 外部AI用プロンプト表示",
+  sale_dm_lp_body_paste: "売却DM LP文面の貼り付け保存",
+  sale_dm_lp_image_prompt_view: "売却DM LP 絵のプロンプト表示",
+  sale_dm_lp_media_update: "売却DM LPの絵を更新",
+  sale_dm_lp_asset_upload: "売却DM LP画像の登録",
+  sale_dm_lp_asset_delete: "売却DM LP画像の削除",
+  // DMの種類(台帳)
+  sale_dm_scenario_create: "DMの種類を作成",
+  sale_dm_scenario_update: "DMの種類を更新",
+  sale_dm_scenario_delete: "DMの種類を削除",
+  sale_dm_scenario_change: "宛先のDMの種類を変更",
+  sale_dm_scenario_letter_template: "DMの種類 手紙の文面を保存",
+  sale_dm_scenario_letter_illustration_update: "DMの種類 手紙のイラストを更新",
+  sale_dm_scenario_lp_template: "DMの種類 LP文面を保存",
+  sale_dm_scenario_lp_image_prompt_view: "DMの種類 LP 絵のプロンプト表示",
+  sale_dm_scenario_lp_preview_view: "DMの種類 LPプレビュー表示",
+  sale_dm_scenario_media_update: "DMの種類の絵を更新",
+  // 旧コードが記録した分(案件ステータスの拡張で経路は消えた・記録は残る)
+  "action:advance_case_status": "案件ステータスを進める(旧)",
 };
 
 const TARGET_TABLE_LABELS: Record<string, string> = {
@@ -323,7 +385,7 @@ export default function AuditLogsPage() {
   const totalPages = Math.ceil(total / limit);
 
   return (
-    <div className="min-h-screen bg-gray-50 dark:bg-gray-900 p-6">
+    <div className="min-h-screen bg-gray-50 dark:bg-gray-900">
       <nav className="mb-4 text-sm text-gray-500 dark:text-gray-400">
         <Link href="/admin" className="hover:text-gray-700 dark:hover:text-gray-300">管理</Link>
         <span className="mx-2">/</span>

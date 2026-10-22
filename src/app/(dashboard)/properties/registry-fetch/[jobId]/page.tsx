@@ -188,7 +188,7 @@ export default function RegistryBulkFetchProgressPage() {
   };
 
   return (
-    <div className="mx-auto max-w-2xl p-6">
+    <div className="mx-auto max-w-2xl">
       {/* 第2弾⑧⑩: PageHeader+BackLink(「← 物件一覧へ戻る」)に統一 */}
       <PageHeader
         back={{ href: "/properties", to: "物件一覧" }}

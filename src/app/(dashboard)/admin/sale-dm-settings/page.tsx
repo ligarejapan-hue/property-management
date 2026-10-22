@@ -102,7 +102,7 @@ export default function SaleDmSettingsPage() {
   const missingRequirements = missingSaleDmPrintRequirements(printReadyInput);
 
   return (
-    <div className="mx-auto max-w-2xl space-y-5 p-4 sm:p-6">
+    <div className="mx-auto max-w-2xl space-y-5">
       <BackLink href="/lp" to="LPメニュー" />
       <PageHeader
         title="売却DM設定"

@@ -1259,7 +1259,10 @@ function BasicTab({
       )}
       <Field label="地番" value={property.lotNumber} />
       <Field label="家屋番号" value={property.buildingNumber} />
-      <Field label="不動産番号" value={property.realEstateNumber} mono />
+      {/* 不動産番号は「今後も作らない」運用(本番は0件)。空なら行ごと出さない(実機確認 2026-10-22)。 */}
+      {property.realEstateNumber && (
+        <Field label="不動産番号" value={property.realEstateNumber} mono />
+      )}
 
       {/* Unit-specific fields */}
       {isUnit && (

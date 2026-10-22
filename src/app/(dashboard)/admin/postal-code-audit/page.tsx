@@ -84,7 +84,7 @@ export default function PostalCodeAuditPage() {
           : rows.filter((r) => r.verdict === filter);
 
   return (
-    <div className="p-6">
+    <div>
       <PageHeader
         title="郵便番号×住所チェック"
         description="所有者の保存済み郵便番号を住所APIと突き合わせ、保存住所と整合しているかを点検します。このレポートは閲覧のみで、データの自動修正は行いません。外部APIへ送信するのは郵便番号のみです。"

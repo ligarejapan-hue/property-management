@@ -24,22 +24,20 @@ export default async function FieldSurveySessionsPage() {
 
   if (!canRead) {
     return (
-      <div className="p-6">
-        <div className="rounded-md border border-amber-300 bg-amber-50 p-4 text-sm text-amber-900 dark:border-amber-500/40 dark:bg-amber-500/15 dark:text-amber-300">
-          巡回履歴を閲覧する権限がありません。
-        </div>
+      <div className="rounded-md border border-amber-300 bg-amber-50 p-4 text-sm text-amber-900 dark:border-amber-500/40 dark:bg-amber-500/15 dark:text-amber-300">
+        巡回履歴を閲覧する権限がありません。
       </div>
     );
   }
 
+  // 余白は dashboard-layout の <main> が持つ。ここで足すと題名が他の画面より下がる
+  // (実機確認 2026-10-22: 帯(px-4 py-3)の分だけ題名が12pxずれていた)。
   return (
     <div className="flex flex-col">
-      <header className="border-b border-gray-200 bg-white px-4 py-3 dark:border-gray-800 dark:bg-gray-900">
-        <PageHeader
-          title="巡回履歴"
-          description="過去の巡回セッションを一覧で確認し、地図で過去ルートを閲覧します。"
-        />
-      </header>
+      <PageHeader
+        title="巡回履歴"
+        description="過去の巡回セッションを一覧で確認し、地図で過去ルートを閲覧します。"
+      />
       <SessionHistoryClient canSeeAll={canSeeAll} />
     </div>
   );

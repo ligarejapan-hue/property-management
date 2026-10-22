@@ -1015,7 +1015,7 @@ function PropertiesPageInner() {
   };
 
   return (
-    <div className="pt-2">
+    <div>
       <PageHeader title="物件一覧" />
 
       {ownerFilter && (

@@ -123,7 +123,7 @@ export default function OrphanDmLogsPage() {
     <div
       data-pii-protected
       data-pii-surface="owner"
-      className="min-h-screen bg-gray-50 dark:bg-gray-900 p-6"
+      className="min-h-screen bg-gray-50 dark:bg-gray-900"
     >
       <nav className="mb-4 text-sm text-gray-500 dark:text-gray-400">
         <Link href="/admin" className="hover:text-gray-700 dark:hover:text-gray-300">管理</Link>

@@ -164,7 +164,7 @@ export default function SalesSheetNewEntryPage() {
   return (
     <div className="mx-auto max-w-3xl">
       <PageHeader
-        title="販売図面を作成"
+        title="販売図面"
         description="図面を作成する物件を選択してください（対象: 土地・区分マンション・戸建・一棟）"
       />
       {/* 棟を新しく作った/つないだ知らせ(「正式な表記か確認してください」+棟の画面へのリンク)。 */}

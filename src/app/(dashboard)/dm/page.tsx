@@ -141,7 +141,7 @@ export default function DmMenuPage() {
     recent.state === "ok" ? recent.data.campaigns.slice(0, RECENT_CAMPAIGNS) : [];
 
   return (
-    <div className="p-6">
+    <div>
       <PageHeader
         title="DMメニュー"
         description="売却DMの準備の状態と最近の発送、送る流れの順のDMの道具を並べています。各道具はこれまでの場所でもそのまま使えます。"

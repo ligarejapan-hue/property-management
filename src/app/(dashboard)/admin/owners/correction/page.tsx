@@ -336,7 +336,7 @@ function OwnerCorrectionPageInner() {
   ];
 
   return (
-    <div className="p-6">
+    <div>
       <PageHeader title="所有者補正候補" />
       <p className="mb-6 text-sm text-amber-700 bg-amber-50 border border-amber-200 rounded-md px-3 py-2 dark:text-amber-300 dark:bg-amber-950/40 dark:border-amber-800">
         「住所なし」タブの候補には住所補完、「孤立」タブの削除候補にはアーカイブ（一覧・検索から除外されます）、「重複候補」タブの同一キーグループには統合のプレビューと実行（確認のうえ）を個別に行えます。

@@ -419,7 +419,7 @@ export default function QualityAuditPage() {
     !loading && viewMatches && currentRowCount === 0 && !meta.hasNextPage;
 
   return (
-    <div className="min-h-screen bg-gray-50 p-6 dark:bg-gray-900">
+    <div className="min-h-screen bg-gray-50 dark:bg-gray-900">
       <nav className="mb-4 text-sm text-gray-500 dark:text-gray-400">
         <Link href="/admin/users" className="hover:text-gray-700 dark:hover:text-gray-200">
           管理

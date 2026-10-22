@@ -60,7 +60,7 @@ export default function SaleDmCampaignsPage() {
   };
 
   return (
-    <div className="mx-auto max-w-4xl space-y-4 p-4">
+    <div className="mx-auto max-w-4xl space-y-4">
       <PageHeader
         title="売却DMの発送一覧"
         description="自分が作った売却DMの発送です。押すと、その発送の画面(文面・印刷・送付の記録)を開きます。"

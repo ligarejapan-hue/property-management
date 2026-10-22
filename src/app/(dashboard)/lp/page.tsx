@@ -88,7 +88,7 @@ export default function LpMenuPage() {
     : ((session?.user as { role?: string } | undefined)?.role ?? "VIEWER");
 
   return (
-    <div className="p-6">
+    <div>
       <PageHeader
         title="LPメニュー"
         description="LP(ご案内ページ)を用意する順に、道具を並べています。各道具はこれまでの場所でもそのまま使えます。"
