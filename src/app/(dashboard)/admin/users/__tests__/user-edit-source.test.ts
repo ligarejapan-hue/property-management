@@ -27,6 +27,13 @@ describe("ユーザー管理の一覧(削除ボタンを外す・編集を足す
     expect(page).toContain("有効に戻す");
   });
 
+  it("メール欄を変えたら有効に戻す相手を忘れ、押す前にも今のメールと一致するか確かめる(@codex #554 P2)", () => {
+    const setField = page.slice(page.indexOf("function CreateUserModal"), page.indexOf("function EditUserModal"));
+    expect(setField).toMatch(/if \(key === "email"\) setInactive\(null\)/);
+    const fn = page.slice(page.indexOf("const handleReactivate"), page.indexOf("const setField"));
+    expect(fn).toMatch(/form\.email\.trim\(\) !== inactive\.email/);
+  });
+
   it("有効に戻すのは1回の書き込み(PATCH に newPassword)で、reset-password を別に呼ばない", () => {
     const fn = page.slice(page.indexOf("const handleReactivate"), page.indexOf("const setField"));
     expect(fn).toContain("newPassword: form.password");

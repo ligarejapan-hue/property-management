@@ -456,7 +456,8 @@ function CreateUserModal({
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState<string | null>(null);
   // 無効にした人と同じメールだったとき、その人(有効に戻す相手)
-  const [inactive, setInactive] = useState<{ id: string; name: string } | null>(null);
+  // email=見つけたときに入っていたメール(欄を変えたら別の人の可能性があるので忘れる・@codex #554 P2)
+  const [inactive, setInactive] = useState<{ id: string; name: string; email: string } | null>(null);
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -472,7 +473,7 @@ function CreateUserModal({
       if (!res.ok) {
         const data = await res.json().catch(() => null);
         if (data?.error?.code === "INACTIVE_USER_EXISTS" && data.error.user) {
-          setInactive(data.error.user);
+          setInactive({ ...data.error.user, email: form.email.trim() });
         }
         throw new Error(apiErrorMessage(data, "作成に失敗しました"));
       }
@@ -487,6 +488,12 @@ function CreateUserModal({
   // 無効にした人を、いま入力した名前・ロール・初期パスワードで有効に戻す(過去の記録もつながったまま)
   const handleReactivate = async () => {
     if (!inactive) return;
+    if (form.email.trim() !== inactive.email) {
+      // 念のため(欄を変えると setField で忘れる)。違う人を戻さない
+      setInactive(null);
+      setError("メールアドレスが変わったため、もう一度「作成」を押してください");
+      return;
+    }
     if (form.name.trim() === "" || form.password.length < 8) {
       setError("名前と初期パスワード(8文字以上)を入れてから押してください");
       return;
@@ -512,8 +519,11 @@ function CreateUserModal({
     }
   };
 
-  const setField = (key: string, value: string) =>
+  const setField = (key: string, value: string) => {
+    // メールを変えたら、さっき見つけた「無効にした人」とは別の人かもしれない=有効に戻すボタンを消す
+    if (key === "email") setInactive(null);
     setForm((prev) => ({ ...prev, [key]: value }));
+  };
 
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50">
