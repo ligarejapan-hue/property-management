@@ -93,6 +93,14 @@ if [ -n "$EXPECT_SHA" ]; then
 fi
 step "コードの更新（fast-forward のみ）" asw git merge --ff-only "$TARGET"
 AFTER=$(asw git rev-parse HEAD)
+if [ -n "$EXPECT_SHA" ] && [ "$AFTER" != "$EXPECT_SHA" ]; then
+  # 古い版を指定して再実行した場合など: --ff-only は後ろへは戻さず「Already up to date」で成功するため、
+  # CI を確認した版と実際に build する版がずれる。依存の入れ直し・DB に触る前に止める。
+  trap - ERR
+  echo "NG: VPS の版（${AFTER}）が指定の版（${EXPECT_SHA}）と一致しません。" >&2
+  echo "    VPS がすでに新しい版です。最新の main で反映し直してください。何も変更していません。" >&2
+  exit 8
+fi
 
 mkdir -p /var/www/.npm
 chown www-data:www-data /var/www/.npm
