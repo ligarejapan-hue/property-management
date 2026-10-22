@@ -144,6 +144,7 @@ Codex出力 → 分類確認（Blocker / Important / Nice to have）
 
 - **具体値（VPSパス・systemd名・env配置・実行ユーザー等）は `CLAUDE.md` §13 を正とする。** 本書には再掲しない。
 - 手順詳細は `docs/deploy.md` を参照する。
+- 反映は §6（手作業）か §6.1（GitHub Actions `Deploy (production)` の手動起動）で行う。§6.1 はユーザーの明示指示があれば Claude Code が起動してよい（`CLAUDE.md` §13）。
 
 **スマホからVPS操作を避けるべき理由**
 

@@ -210,6 +210,8 @@ docs-only の場合:
 - VPS反映時は HOME=/var/www と npm_config_cache=/var/www/.npm を使う
 - migration がある場合のみ prisma migrate deploy / prisma generate を行う
 - ドキュメント更新のみの PR は VPS反映不要
+- ユーザーが本番反映を明示指示した場合、Claude Code は GitHub Actions の `Deploy (production)`（`.github/workflows/deploy.yml`）を REST API の workflow_dispatch で起動してよい（手順は `docs/deploy.md` §6.1）。起動前に PR が merge 済みで main の CI が green であることを確認し、migration がある場合は `migrate` を有効にする。起動後は実行結果を確認して報告する
+- Claude Code は VPS へ直接 SSH しない。deploy ユーザーの鍵・GitHub の Environment secrets・Tailscale の設定を作成・変更しない（いずれもユーザー作業）
 
 ## 14. 実装後の報告フォーマット
 
