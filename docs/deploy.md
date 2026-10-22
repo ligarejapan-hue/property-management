@@ -577,7 +577,7 @@ sudo systemctl status property-management --no-pager
   → GitHub の実行環境が一時的に Tailscale に参加（tag:ci）
   → tailnet 経由で VPS の反映専用ユーザー deploy に SSH
   → 強制コマンド pm-deploy-ssh が引数を検査し、sudo で pm-deploy だけを実行
-  → git fetch → fast-forward → npm ci --include=dev → prisma generate →（migration 確認 or 実行）→ build → prune → 再起動 → 応答確認
+  → git fetch → fast-forward → npm ci --include=dev → prisma generate →（migration 確認 or 実行）→ build → prune → 再起動 → 応答確認（`/api/health` が 200）
 ```
 
 - **起動してよいのはユーザーが本番反映を明示指示したときだけ**（CLAUDE.md §13）。push・PR では動かない。

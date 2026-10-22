@@ -15,7 +15,8 @@ set -euo pipefail
 APP_DIR=/opt/property-management
 ENV_FILE=/etc/property-management/app.env
 SERVICE=property-management
-HEALTH_URL=http://127.0.0.1:3000/
+# 認証なしの死活確認（DB 疎通込み・成功 200 / 失敗 503）。/ はログイン画面へのリダイレクトで成功扱いになるため使わない。
+HEALTH_URL=http://127.0.0.1:3000/api/health
 LOG_DIR=/var/log/pm-deploy
 
 usage() { echo "usage: pm-deploy [--migrate] [--expect-sha <40桁>] | --status" >&2; exit 2; }
@@ -146,11 +147,11 @@ echo "==> ${CURRENT_STEP}"
 CODE=000
 for _ in $(seq 1 24); do
   CODE=$(curl -s -o /dev/null -w '%{http_code}' --max-time 5 "$HEALTH_URL" || true)
-  if [ "$CODE" -ge 200 ] 2>/dev/null && [ "$CODE" -lt 500 ]; then break; fi
+  if [ "$CODE" = "200" ]; then break; fi
   sleep 5
 done
-if ! { [ "$CODE" -ge 200 ] 2>/dev/null && [ "$CODE" -lt 500 ]; }; then
-  echo "NG: 再起動後にアプリが応答しません（HTTP ${CODE}）。詳細: ${LOG}" >&2
+if [ "$CODE" != "200" ]; then
+  echo "NG: 再起動後の死活確認（/api/health）が 200 になりません（HTTP ${CODE}。503 は DB に届いていない）。詳細: ${LOG}" >&2
   exit 7
 fi
 
