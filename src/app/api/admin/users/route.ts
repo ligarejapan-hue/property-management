@@ -66,8 +66,8 @@ export async function GET(request: NextRequest) {
 // ---------- POST /api/admin/users ----------
 
 const createUserSchema = z.object({
-  email: z.string().email("有効なメールアドレスを入力してください"),
-  name: z.string().min(1, "名前は必須です"),
+  email: z.string().trim().email("有効なメールアドレスを入力してください"),
+  name: z.string().trim().min(1, "名前は必須です"),
   role: z.enum(["admin", "office_staff", "field_staff"]),
   password: z
     .string()
@@ -90,8 +90,22 @@ export async function POST(request: NextRequest) {
     // Check duplicate email
     const existing = await prisma.user.findUnique({
       where: { email: data.email },
-      select: { id: true },
+      select: { id: true, name: true, isActive: true },
     });
+    // 無効にした人のメールなら、作らずにその人を知らせる=画面で「有効に戻す」を出す
+    // (ユーザーは記録が残るため削除できない運用・2026-10-23)。
+    if (existing && !existing.isActive) {
+      return apiResponse(
+        {
+          error: {
+            message: `このメールアドレスは無効化したユーザー「${existing.name}」が使っています。有効に戻しますか？`,
+            code: "INACTIVE_USER_EXISTS",
+            user: { id: existing.id, name: existing.name },
+          },
+        },
+        409,
+      );
+    }
     if (existing) {
       throw new ApiError(
         409,
