@@ -295,6 +295,21 @@ const TARGET_TABLE_LABELS: Record<string, string> = {
   sale_dm_config: "売却DM設定",
   sales_sheet_designs: "販売図面",
   screen_protection: "画面保護",
+  // 実機確認 2026-10-23: 「対象」欄に dm_inquiries などの英字が残っていた。コードが記録する
+  // targetTable はすべてここに載せる(走査テスト audit-target-labels-scan で固定)。
+  agent_inquiries: "業者からの反響",
+  agent_viewings: "内見",
+  agents: "業者",
+  dm_export_batch_items: "宛名CSVの控えの明細",
+  dm_export_batches: "宛名CSVの控え",
+  dm_inquiries: "査定の申込",
+  dm_lp_assets: "LPの写真",
+  dm_lp_variants: "LP型",
+  dm_scenarios: "DMの種類",
+  edit_locks: "編集の鍵",
+  mail_config: "メール送信設定",
+  push_subscriptions: "通知の登録",
+  report_inbox_items: "査定報告書の受け取り箱",
 };
 
 export default function AuditLogsPage() {
