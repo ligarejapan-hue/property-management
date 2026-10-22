@@ -1635,9 +1635,22 @@ export default function FieldSurveyMap({
             右に横並びで置く (両方 bottom-14 left-1/2 だと完全に重なるため、
             ここでは行レイアウトにして CameraFirstButton を inline で描画する)。
             「写真なしでピン」も同じ権限条件で撮影の隣に置く (2026-08-17)。
-            権限が無ければ従来どおり「巡回を開始」だけを中央に出す。 */}
+            権限が無ければ従来どおり「巡回を開始」だけを中央に出す。
+            実機確認 2026-10-22(46): 3つ並ぶと幅約258pxの行が中央寄せになり、幅390pxでは
+            左端(66px)が左下の現在地ボタン(〜76px)に約10px重なる。狭い画面(sm未満)で
+            3つ並ぶときだけ中央寄せをやめ、現在地ボタンの右隣(left-[4.25rem]=68px)から
+            右端(right-3)までの幅に左詰めで並べる。入り切らない幅(320px など)では
+            折り返す(bottom 基準なので上へ伸びる)。提出前レビュー指摘=「右へ20pxずらす」
+            だけでは 360px 以下でまだ重なり、320px では右にはみ出すため、この形にした。
+            ボタンの大きさ・順番は変えない。「巡回を開始」だけのときは中央のまま。 */}
         {!activeSession && !panelOpen && (
-          <div className="pointer-events-none absolute bottom-14 left-1/2 z-10 flex -translate-x-1/2 items-start gap-2">
+          <div
+            className={`pointer-events-none absolute bottom-14 left-1/2 z-10 flex -translate-x-1/2 items-start gap-2${
+              cameraButton.visible
+                ? " max-sm:left-[4.25rem] max-sm:right-3 max-sm:translate-x-0 max-sm:flex-wrap"
+                : ""
+            }`}
+          >
             {cameraButton.visible && (
               <CameraFirstButton
                 inline
