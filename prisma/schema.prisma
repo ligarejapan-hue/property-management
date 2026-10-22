@@ -62,11 +62,12 @@ enum DmStatus {
   no_send
 }
 
-// 現役は12値(src/lib/property-types.ts の CASE_STATUS_VALUES)。2026-10-20 の整理で
+// 現役は13値(src/lib/property-types.ts の CASE_STATUS_VALUES・contact_attempting=コンタクト中は 2026-10-22 追加)。2026-10-20 の整理で
 // owner_contacted / site_checked / confirming_owner / dm_target / dm_sent / response_received はやめた
 // (DB の値は残す=新規設定不可・古い履歴の表示用)。並びは DB の enum と同じ(=一覧の「案件ステータス順」)。
 enum CaseStatus {
   new_case
+  contact_attempting
   contacting_owner
   appraisal
   negotiating

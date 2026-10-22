@@ -232,7 +232,7 @@ const ALLOWED_WITHOUT_VERSION: Record<string, AllowedEntry> = {
       "理由は上と同じ=同じトランザクションの保存が版番号を進める)",
     keys: ["buildingId", "buildingName"],
   },
-  "src/lib/case-status-auto.ts:75": {
+  "src/lib/case-status-auto.ts:77": {
     reason:
       "property.caseStatus のみ(案件ステータスの自動の切り替え 2026-10-20)。caseStatus は編集ウィンドウ" +
       "(FORM_FIELDS)に無い=鍵を持つ人の保存が上書きしない。版を進めると、所有者の申込などで編集中の人の保存が" +

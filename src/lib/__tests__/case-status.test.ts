@@ -130,16 +130,16 @@ describe("normalizeCaseStatusInput", () => {
 });
 
 describe("案件ステータスの整理(2026-10-20・12段階)", () => {
-  it("現役は12値で、この順に並ぶ", () => {
+  it("現役は13値で、この順に並ぶ(コンタクト中=2026-10-22 追加)", () => {
     expect([...CASE_STATUS_VALUES]).toEqual([
-      "new_case", "contacting_owner", "appraisal", "negotiating", "brokerage_obtained", "on_sale",
+      "new_case", "contact_attempting", "contacting_owner", "appraisal", "negotiating", "brokerage_obtained", "on_sale",
       "contract_planned", "contracted", "sold", "other_brokerage", "hold", "closed",
     ]);
   });
 
   it("画面の名前は決めたとおり", () => {
     expect(CASE_STATUS_VALUES.map((v) => CASE_STATUS_LABELS[v])).toEqual([
-      "未着手", "所有者とやりとり中", "査定中", "商談中", "媒介取得", "販売中",
+      "未着手", "コンタクト中", "所有者とやりとり中", "査定中", "商談中", "媒介取得", "販売中",
       "契約予定", "契約完了", "決済完了", "他社で決まった", "保留", "見送り・終了",
     ]);
   });
@@ -159,6 +159,7 @@ describe("案件ステータスの整理(2026-10-20・12段階)", () => {
     ["新規", "new_case"], ["未着手", "new_case"], ["DM対象", "new_case"], ["DM送付済", "new_case"],
     ["所有者連絡中", "contacting_owner"], ["所有者連絡済", "contacting_owner"], ["現地確認済", "contacting_owner"],
     ["所有者確認中", "contacting_owner"], ["反響あり", "contacting_owner"], ["所有者とやりとり中", "contacting_owner"],
+    ["コンタクト中", "contact_attempting"],
     ["媒介取得済", "brokerage_obtained"], ["媒介取得", "brokerage_obtained"],
     ["契約予定", "contract_planned"], ["契約完了", "contracted"],
     ["売却完了", "sold"], ["決済完了", "sold"],
@@ -292,13 +293,28 @@ describe("migration ファイル分割の確認", () => {
     const m = /CREATE TYPE "CaseStatus" AS ENUM \(([^)]*)\)/.exec(add);
     expect(m).not.toBeNull();
     const order = [...m![1].matchAll(/'(\w+)'/g)].map((x) => x[1]);
-    expect(order.slice(0, CASE_STATUS_VALUES.length)).toEqual([...CASE_STATUS_VALUES]);
-    expect(order.slice(CASE_STATUS_VALUES.length).sort()).toEqual(Object.keys(CASE_STATUS_DEPRECATED_MAP).sort());
+    // 10-20 時点の現役12値(コンタクト中は 10-22 の migration で足す=下のテスト)
+    const active1020 = CASE_STATUS_VALUES.filter((v) => v !== "contact_attempting");
+    expect(order.slice(0, active1020.length)).toEqual(active1020);
+    expect(order.slice(active1020.length).sort()).toEqual(Object.keys(CASE_STATUS_DEPRECATED_MAP).sort());
     // 列の型を新しい enum へ付け替え、既定値を付け直し、古い型を消す
     expect(add).toMatch(/ALTER COLUMN "case_status" TYPE "CaseStatus" USING "case_status"::text::"CaseStatus"/);
     expect(add).toMatch(/SET DEFAULT 'new_case'/);
     expect(add).toMatch(/DROP TYPE "CaseStatus_old"/);
     expect(add).not.toMatch(/^\s*UPDATE/im);
+  });
+
+  it("2026-10-22 コンタクト中: 10-20 の並びに、未着手と所有者とやりとり中の間へ足す=現役13値の順になる", () => {
+    const add = fs.readFileSync(path.join(migDir, "20261020120000_case_status_reorg_values", "migration.sql"), "utf8");
+    const before = [.../CREATE TYPE "CaseStatus" AS ENUM \(([^)]*)\)/.exec(add)![1].matchAll(/'(\w+)'/g)].map((x) => x[1]);
+    const sql = fs.readFileSync(path.join(migDir, "20261022120000_case_status_contact_attempting", "migration.sql"), "utf8");
+    const m = /ADD VALUE IF NOT EXISTS '(\w+)' BEFORE '(\w+)'/.exec(sql);
+    expect(m).not.toBeNull();
+    const after = [...before];
+    after.splice(after.indexOf(m![2]), 0, m![1]);
+    expect(after.slice(0, CASE_STATUS_VALUES.length)).toEqual([...CASE_STATUS_VALUES]);
+    // 表を書き換えない(値の移し替え・型の作り直しをしない)
+    expect(sql).not.toMatch(/^\s*(UPDATE|CREATE TYPE|DROP TYPE|ALTER TABLE)/im);
   });
 
   it("2026-10-20 整理: schema.prisma の enum の並びも同じ", () => {

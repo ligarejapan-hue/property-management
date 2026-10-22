@@ -82,11 +82,12 @@ export const PROPERTY_TYPE_OPTIONS: { value: string; label: string }[] = [
 // 案件状況 (CaseStatus)
 // ════════════════════════════════════════════════════════════════════════════
 
-// 現役の12値(発注者決定 2026-10-20・上から順に進む)。並びは DB の enum の並び(並べ替え)と同じ。
+// 現役の13値(発注者決定 2026-10-20・「コンタクト中」は 2026-10-22 追加・上から順に進む)。並びは DB の enum の並び(並べ替え)と同じ。
 // やめた値(owner_contacted など)と古い値(waiting_registry / done)はここに含めない
 // =新しく保存できない。DB には enum として残る(戻すときに安全・古い記録の表示用)。
 export const CASE_STATUS_VALUES = [
   "new_case",
+  "contact_attempting",
   "contacting_owner",
   "appraisal",
   "negotiating",
@@ -104,6 +105,7 @@ export type CaseStatusValue = (typeof CASE_STATUS_VALUES)[number];
 
 export const CASE_STATUS_LABELS: Record<string, string> = {
   new_case:           "未着手",
+  contact_attempting: "コンタクト中",
   contacting_owner:   "所有者とやりとり中",
   appraisal:          "査定中",
   negotiating:        "商談中",
@@ -133,6 +135,7 @@ export const CASE_STATUS_OPTIONS: { value: string; label: string }[] = CASE_STAT
 /** CSV などの日本語の名前 → 値。今の名前に加えて、整理前の名前も読めるようにする。 */
 export const CASE_STATUS_JP_TO_VALUE: Record<string, string> = {
   "未着手":           "new_case",
+  "コンタクト中":     "contact_attempting",
   "所有者とやりとり中": "contacting_owner",
   "査定中":           "appraisal",
   "商談中":           "negotiating",
