@@ -4,11 +4,11 @@ import { autoAdvanceCaseStatus, canAutoAdvanceCaseStatus, type AutoCaseStatusTx 
 
 describe("canAutoAdvanceCaseStatus(前に進むときだけ)", () => {
   it.each(CASE_STATUS_VALUES)("所有者とやりとり中へ: いまが %s", (v) => {
-    expect(canAutoAdvanceCaseStatus(v, "contacting_owner")).toBe(v === "new_case");
+    expect(canAutoAdvanceCaseStatus(v, "contacting_owner")).toBe(v === "new_case" || v === "contact_attempting");
   });
 
   it.each(CASE_STATUS_VALUES)("査定中へ: いまが %s", (v) => {
-    expect(canAutoAdvanceCaseStatus(v, "appraisal")).toBe(v === "new_case" || v === "contacting_owner");
+    expect(canAutoAdvanceCaseStatus(v, "appraisal")).toBe(v === "new_case" || v === "contact_attempting" || v === "contacting_owner");
   });
 
   it.each(["hold", "closed", "other_brokerage", "negotiating", "sold"])("%s は自動では動かさない", (v) => {

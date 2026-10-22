@@ -999,6 +999,28 @@ INSERT INTO dm_inquiries SELECT * FROM dm_inquiries_public_hold_<日付> ON CONF
 
 退避した申込は旧コードの間は画面に出ない(対応中の案件があれば退避表を直接見る)。通知メール・受付メールは退避前に送信済みの分は再送されない(`notify_status`/`auto_reply_status` も退避表にそのまま残る)。
 
+### 8.1b 案件ステータス「コンタクト中」(2026-10-22・migration `20261022120000_case_status_contact_attempting`)より前へ戻すとき
+
+enum `CaseStatus` に `contact_attempting`(コンタクト中)を足しただけ(表は書き換えない)。値は残してよいが、**古い版はこの値を知らず、その行を読むと失敗し得る**(物件一覧・物件の画面)。**サービスを止めてから**、その物件を版ごと控えて「未着手」へ退避する。⚠`prisma migrate resolve --rolled-back` は使わない(値を残したままなので、記録が実態とずれる)。
+
+```bash
+sudo systemctl stop property-management
+```
+
+```sql
+CREATE TABLE case_status_contact_backup_<日付> AS
+  SELECT id, version FROM properties WHERE case_status = 'contact_attempting';
+UPDATE properties SET case_status = 'new_case', version = version + 1 WHERE case_status = 'contact_attempting';
+-- 変更履歴の値(old_value / new_value)は文字の列なので、古い版でも英字のまま出るだけ=直さない
+```
+
+旧コードへの切り替えは 8.1 の手順 4 と同じ。再び新コードへ進めるときは、旧版を止めてから下を流し、そのあと start する(版がちょうど +1 の=旧版の間に誰も保存していない物件だけ戻す)。
+
+```sql
+UPDATE properties p SET case_status = 'contact_attempting', version = p.version + 1
+  FROM case_status_contact_backup_<日付> b WHERE p.id = b.id AND p.version = b.version + 1 AND p.case_status = 'new_case';
+```
+
 ### 8.2 案件ステータスの整理(2026-10-20・migration `20261020120000_case_status_reorg_values` / `20261020120001_case_status_reorg_migrate`)より前へ戻すとき
 
 enum `CaseStatus` に `contract_planned`(契約予定)・`contracted`(契約完了)、enum `ChangeSource` に `auto`(自動)を足し、やめた6値の物件を近い値へ移した。PostgreSQL は enum の値を消せないので値は残してよい。**古い版はこの3値を知らず、その行を読むと失敗し得る**(物件一覧・物件の変更履歴)ため、**サービスを止めてから**その行を古い版が知っている値へ退避する。やめた6値からの移し替えは戻さない(古い版も移し先の値を知っている)。

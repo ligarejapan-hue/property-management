@@ -6,6 +6,8 @@
  * (一括査定などの反響を貼り付け・Excel で新しく物件にしたときは、作るときの値を
  *  「所有者とやりとり中」にする=ここは通らない。paste/commit を参照)
  *
+ * 「コンタクト中」(連絡を試みている・まだ返事がない)へは自動ではしない=手で選ぶだけ(2026-10-22 発注者決定)。
+ *
  * ⚠自動は**前に進むときだけ**。人が手で進めた物件・保留・見送り・他社で決まった物件は
  *   動かさない。そのため「どこからなら動かしてよいか」を切り替え先ごとに許可リストで持つ。
  */
@@ -15,8 +17,8 @@ import { CASE_STATUS_DEPRECATED_MAP, type CaseStatusValue } from "@/lib/property
 export type AutoCaseStatusTarget = Extract<CaseStatusValue, "contacting_owner" | "appraisal">;
 
 const AUTO_ALLOWED_FROM: Record<AutoCaseStatusTarget, ReadonlySet<string>> = {
-  contacting_owner: new Set(["new_case"]),
-  appraisal: new Set(["new_case", "contacting_owner"]),
+  contacting_owner: new Set(["new_case", "contact_attempting"]),
+  appraisal: new Set(["new_case", "contact_attempting", "contacting_owner"]),
 };
 
 /**
