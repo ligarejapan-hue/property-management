@@ -71,16 +71,29 @@ jobs:
           oauth-secret: ${{ secrets.TS_OAUTH_SECRET }}
           tags: tag:ci
 
+      # tailscale/github-action は参加に失敗しても成功扱いで終わることがあるため、ここで確かめる。
+      - name: Tailscale への参加を確認
+        run: |
+          if ! tailscale status --self --peers=false >/dev/null 2>&1; then
+            echo "Tailscale に参加できていません（OAuth クライアントの権限 Keys → Auth Keys: Write と tag:ci、secrets の値を確認）" >&2
+            exit 1
+          fi
+
       - name: SSH の準備
         env:
           DEPLOY_SSH_KEY: ${{ secrets.DEPLOY_SSH_KEY }}
           DEPLOY_KNOWN_HOSTS: ${{ secrets.DEPLOY_KNOWN_HOSTS }}
         run: |
           install -m 700 -d ~/.ssh
-          printf '%s\n' "$DEPLOY_SSH_KEY" > ~/.ssh/deploy_key
+          # Windows でコピーした値の CR（\r）を取り除く（鍵の読み込みが「error in libcrypto」で失敗するため）
+          printf '%s\n' "$DEPLOY_SSH_KEY" | tr -d '\r' > ~/.ssh/deploy_key
           chmod 600 ~/.ssh/deploy_key
-          printf '%s\n' "$DEPLOY_KNOWN_HOSTS" > ~/.ssh/known_hosts
+          printf '%s\n' "$DEPLOY_KNOWN_HOSTS" | tr -d '\r' > ~/.ssh/known_hosts
           chmod 600 ~/.ssh/known_hosts
+          if ! ssh-keygen -y -f ~/.ssh/deploy_key >/dev/null 2>&1; then
+            echo "DEPLOY_SSH_KEY を秘密鍵として読み込めません（BEGIN〜END の行まで全部入っているか確認）" >&2
+            exit 1
+          fi
 
       - name: 反映
         env:
