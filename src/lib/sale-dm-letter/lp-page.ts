@@ -780,8 +780,9 @@ export function renderLpPage(input: LpRenderInput): string {
     : "";
   // チェック札の数の表示・申込欄への写し(live と public。preview は script を出さない=見た目だけ CSS で切り替わる)。
   const checklistScript = input.mode !== "preview" && hasChecks ? `<script>${CHECKLIST_SCRIPT}</script>` : "";
-  // 広告用の公開ページ: 検索に載せる・見出し情報(OGP)・Google のタグ(設定があるときだけ)。DM 用は今までどおり noindex・外部読み込みなし。
-  const robots = input.mode === "public" ? "index,follow" : "noindex,nofollow";
+  // 広告用の公開ページ: 見出し情報(OGP)・Google のタグ(設定があるときだけ)。検索結果には載せない(自社HPの売却ページと検索順位を食い合わないため。広告からの流入は noindex でも影響なし)。
+  // DM 用は今までどおり noindex・外部読み込みなし。
+  const robots = "noindex,nofollow";
   const ogMeta = pub ? ogMetaTags(input, pub) : "";
   const googleTag = pub?.google ? googleTagScripts(pub.google, pub.safeQuery) : "";
   return `<!doctype html><html lang="ja"><head><meta charset="utf-8" /><meta name="viewport" content="width=device-width,initial-scale=1" /><meta name="robots" content="${robots}" /><meta name="referrer" content="strict-origin" /><title>${escapeHtml(input.headline)}</title>${ogMeta}<style>${CSS}</style>${googleTag}</head><body>${band}${header}<main>` +

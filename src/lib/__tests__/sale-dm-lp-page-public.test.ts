@@ -32,9 +32,9 @@ const publicInput = (over: Partial<LpRenderInput> = {}): LpRenderInput => ({
 describe("renderLpPage(public=広告用の公開ページ)", () => {
   const html = renderLpPage(publicInput());
 
-  it("検索に載せる(index,follow)・見出し情報(OGP)を出す・動的な値は escape", () => {
-    expect(html).toContain('name="robots" content="index,follow"');
-    expect(html).not.toContain("noindex");
+  it("検索に載せない(noindex,nofollow)・見出し情報(OGP)を出す・動的な値は escape", () => {
+    expect(html).toContain('name="robots" content="noindex,nofollow"');
+    expect(html).not.toContain('content="index,follow"');
     expect(html).toContain('property="og:type" content="website"');
     expect(html).toContain('property="og:title" content="相続した家、どうする? &lt;b&gt;"');
     expect(html).toContain('property="og:description" content="売る・貸す・持つ、まず整理 &amp; 比較"');

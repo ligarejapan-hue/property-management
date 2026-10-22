@@ -35,7 +35,7 @@ describe("loadPublicLpPage(/lp/<公開名>)", () => {
     expect(r.scenarioName).toBe("相続");
     // 物件を差し込まない=一般形に落ちる
     expect(r.html).toContain("相続した不動産の売却");
-    expect(r.html).toContain('name="robots" content="index,follow"');
+    expect(r.html).toContain('name="robots" content="noindex,nofollow"');
     expect(r.html).toContain('property="og:url" content="https://app.example.com/lp/souzoku"');
     expect(r.html).toContain(`property="og:image" content="https://app.example.com/lp-assets/${"a".repeat(32)}"`);
     expect(r.html).toContain('<input type="hidden" name="utm_source" value="google" />');
