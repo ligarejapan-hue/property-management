@@ -538,8 +538,8 @@ sudo -E -u www-data env HOME=/var/www npm_config_cache=/var/www/.npm npx prisma 
 # 4. マイグレーション（スキーマ変更がある場合）
 sudo -E -u www-data env HOME=/var/www npm_config_cache=/var/www/.npm npx prisma migrate deploy
 
-# 5. 再ビルド
-sudo -E -u www-data env HOME=/var/www npm_config_cache=/var/www/.npm npm run build
+# 5. 再ビルド（メモリ 4GB の VPS では既定のヒープ上限だと型チェックで「heap out of memory」になるため 3GB を指定）
+sudo -E -u www-data env HOME=/var/www npm_config_cache=/var/www/.npm NODE_OPTIONS=--max-old-space-size=3072 npm run build
 
 # 6. devDependencies を落として本番依存へ戻す（next / @prisma/client は dependencies のため残る）
 sudo -u www-data env HOME=/var/www npm_config_cache=/var/www/.npm npm prune --omit=dev

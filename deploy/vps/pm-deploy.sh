@@ -10,7 +10,8 @@
 # 使い方:
 #   pm-deploy [--migrate] [--expect-sha <40桁>]   反映する
 #   pm-deploy --status                            今の版とサービス状態を表示する
-set -euo pipefail
+# -E: 関数（step）の中で失敗したときも ERR トラップ（NG の表示）を動かす
+set -Eeuo pipefail
 
 APP_DIR=/opt/property-management
 ENV_FILE=/etc/property-management/app.env
@@ -128,7 +129,9 @@ else
   fi
 fi
 
-step "ビルド" aswe npm run build
+# VPS（メモリ 4GB）では Node.js の既定のヒープ上限（約 2GB）だと型チェックで落ちる
+# （2026-10-23・Next.js 16.4.2 で「JavaScript heap out of memory」）。build のときだけ 3GB にする。
+step "ビルド" aswe env NODE_OPTIONS=--max-old-space-size=3072 npm run build
 step "本番依存へ戻す（devDependencies を削除）" asw npm prune --omit=dev
 
 CURRENT_STEP="PDF 圧縮の自己診断"
