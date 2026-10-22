@@ -246,7 +246,8 @@ export function InquiryDetailView({
       // 保存中は閉じない(閉じて開き直すと古い内容のまま「内見を足す」を押せて二重登録になる・@codex #459 R8)。
       onClose={closeLocked ? undefined : onClose}
       footer={
-        <Button variant="secondary" onClick={onClose} disabled={closeLocked}>
+        // 閉じるは枠なし(UIの統一の決まり・実機確認 2026-10-22 の気づき)
+        <Button variant="ghost" onClick={onClose} disabled={closeLocked}>
           閉じる
         </Button>
       }
@@ -509,12 +510,12 @@ export default function InquiryDetail({
   };
   if (!data) {
     return error ? (
-      <ModalShell size="sm" title="反響" onClose={onClose} footer={<Button onClick={onClose}>閉じる</Button>}>
+      <ModalShell size="sm" title="反響" onClose={onClose} footer={<Button variant="ghost" onClick={onClose}>閉じる</Button>}>
         <p className="text-sm text-rose-600">{error}</p>
       </ModalShell>
     ) : (
       // 読み込み中も小窓を出す(押してから開くまでの間、何も起きないように見せない)。
-      <ModalShell size="sm" title="反響" onClose={onClose} footer={<Button variant="secondary" onClick={onClose}>閉じる</Button>}>
+      <ModalShell size="sm" title="反響" onClose={onClose} footer={<Button variant="ghost" onClick={onClose}>閉じる</Button>}>
         <p className="text-sm text-gray-500 dark:text-gray-400">読み込み中…</p>
       </ModalShell>
     );

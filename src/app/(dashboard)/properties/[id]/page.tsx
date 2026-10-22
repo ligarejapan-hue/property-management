@@ -1884,16 +1884,15 @@ function OwnerCard({
             (本番の監査ログで利用 0 件)、発注者から「削除ができない」と報告された。
             名前は**やることそのもの**にする。 */}
         {canWrite && !editing && (
-          // data-ui=raw: 琥珀の付け替えボタン(誤リンクの注意色・合う variant が無い)
-          <button data-ui="raw"
-            type="button"
+          // 実機確認 2026-10-22(220): 第7回の置き換え漏れ(琥珀の手書きボタン)。補助の操作=secondary。
+          <Button variant="secondary" size="sm"
             onClick={() => setMislinkOpen(true)}
             title="この所有者を、別の所有者に付け替える"
             aria-label={`所有者${idx + 1}/${total} ${po.owner.name ?? "（氏名未登録）"}を別の所有者に付け替える`}
-            className={`${editAllowed ? "" : "ml-auto"} flex items-center gap-1 rounded-md border border-amber-300 bg-amber-50 px-2.5 py-1 text-xs font-medium text-amber-700 hover:bg-amber-100 dark:border-amber-700 dark:bg-amber-950/40 dark:text-amber-300 dark:hover:bg-amber-900/40`}
+            className={editAllowed ? "" : "ml-auto"}
           >
             別の所有者に付け替える
-          </button>
+          </Button>
         )}
         {/* 外す: **管理者だけ**(発注者判断 2026-08-21「事務担当は付け替えだけに」)。
             条件は server (DELETE /api/properties/[id]/owners/[ownerId]) と同一。 */}
