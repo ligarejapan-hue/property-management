@@ -5,6 +5,7 @@ import { ModalShell } from "@/components/ui/modal-shell";
 import { ConfirmDialog } from "@/components/ui/confirm-dialog";
 import { Button } from "@/components/ui/button";
 import { PageHeader } from "@/components/ui/page-header";
+import { apiErrorMessage } from "@/lib/api-error-message";
 import Link from "next/link";
 import { Loader2, Plus, Trash2 } from "lucide-react";
 
@@ -59,8 +60,9 @@ export default function TemplatesPage() {
         }),
       });
       if (!res.ok) {
-        const json = await res.json();
-        alert(json.error ?? "作成に失敗しました");
+        // 実機確認 2026-10-23: サーバーは { error: { message, code } } を返す=そのまま出すと「[object Object]」
+        const json = await res.json().catch(() => null);
+        alert(apiErrorMessage(json, "作成に失敗しました"));
         return;
       }
       setShowCreate(false);
@@ -82,8 +84,8 @@ export default function TemplatesPage() {
         method: "DELETE",
       });
       if (!res.ok) {
-        const json = await res.json();
-        alert(json.error ?? "削除に失敗しました");
+        const json = await res.json().catch(() => null);
+        alert(apiErrorMessage(json, "削除に失敗しました"));
         return;
       }
       setDeleteTarget(null);
