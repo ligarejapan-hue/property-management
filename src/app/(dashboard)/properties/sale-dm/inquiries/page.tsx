@@ -23,7 +23,7 @@ function SaleDmInquiriesPageInner() {
   const focusId = searchParams.get("focus");
 
   return (
-    <div className="space-y-4 p-4">
+    <div className="space-y-4">
       <PageHeader
         title="査定の申込"
         description="公開LPから届いた査定のお申込みです。売却DMを使える人は誰でも対応できます。"

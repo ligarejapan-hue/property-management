@@ -1481,8 +1481,54 @@ export default function FieldSurveyMap({
         />
         {/* 画面上部中央の通知スタック(第1弾 A3/A4/A5)。タップ待ちバナーは以前
             下端(bottom-14)にあり、現在地ボタンを完全に覆っていた(A5)。下端の帯
-            (現在地/撮影/巡回開始)と住み分けるため、通知類はここへ集約する。 */}
-        <div className="pointer-events-none absolute left-1/2 top-3 z-10 flex w-[calc(100%-1.5rem)] max-w-sm -translate-x-1/2 flex-col items-stretch gap-1.5">
+            (現在地/撮影/巡回開始)と住み分けるため、通知類はここへ集約する。
+            ⚠top-14: Google の「地図／航空写真」の切替(左上・上から10px・高さ40px)の下に
+            置く。top-3 だとスマホの幅で戻るチップが切替の右端に重なった(実機確認 2026-10-22)。 */}
+        <div className="pointer-events-none absolute left-1/2 top-14 z-10 flex w-[calc(100%-1.5rem)] max-w-sm -translate-x-1/2 flex-col items-stretch gap-1.5">
+          {/* 位置記録の状態チップ (巡回中のみ)。撮影でタブが再読込されると記録が
+              静かに止まる・開始し忘れに気づけない問題への可視化。位置記録は任意
+              機能 (撮って登録だけの巡回では使わない) なので、意図的な「オフ」は
+              警告色にせず中立の灰色にする (常時オフの巡回で警告が鳴りっぱなしに
+              なるのを防ぐ)。一方、権限拒否・取得不可などの「エラー」で予期せず
+              止まった場合 (@codex P2) は琥珀色で明示し、意図的オフと区別する。
+              記録中は緑・準備中は青。タップでパネルへ。
+              ⚠以前は地図に直接 absolute left-3 top-14 で置いていた。スタックを top-14 へ
+              下げた(2026-10-22)ので、同じ高さで重ならないようスタックの先頭へ入れる
+              (チップは常設・戻りチップや案内はその下に積まれる)。 */}
+          {activeSession && (
+            <button
+              type="button"
+              data-testid="location-recording-chip"
+              data-motion="off"
+              onClick={() => setPanelOpen(true)}
+              className={
+                recorder.status === "recording"
+                  ? "pointer-events-auto self-start rounded-full border border-emerald-300 bg-emerald-50 px-2.5 py-1 text-[10px] font-semibold text-emerald-800 shadow dark:border-emerald-500/40 dark:bg-emerald-500/15 dark:text-emerald-300"
+                  : recorder.status === "preparing"
+                    ? "pointer-events-auto self-start rounded-full border border-sky-300 bg-sky-50 px-2.5 py-1 text-[10px] font-semibold text-sky-800 shadow dark:border-sky-500/40 dark:bg-sky-500/15 dark:text-sky-300"
+                    : recorder.status === "error"
+                      ? "pointer-events-auto self-start rounded-full border border-amber-400 bg-amber-50 px-2.5 py-1 text-[10px] font-semibold text-amber-900 shadow dark:border-amber-500/50 dark:bg-amber-500/15 dark:text-amber-300"
+                      : "pointer-events-auto self-start rounded-full border border-gray-300 bg-white px-2.5 py-1 text-[10px] font-semibold text-gray-500 shadow dark:border-gray-600 dark:bg-gray-800 dark:text-gray-400"
+              }
+            >
+              {recorder.status === "recording" ? (
+                <>
+                  <span aria-hidden="true" className="animate-pulse">
+                    ●
+                  </span>{" "}
+                  位置記録中
+                </>
+              ) : recorder.status === "preparing" ? (
+                "位置記録の準備中…"
+              ) : recorder.status === "error" ? (
+                <>
+                  <span aria-hidden="true">⚠</span> 位置記録エラー
+                </>
+              ) : (
+                "位置記録オフ"
+              )}
+            </button>
+          )}
           {/* 第2弾 C4: 一覧から来たときだけ戻り道を出す(従来は片道だった)。
               ⚠作業中(詳細パネル busy / 撮影後のタップ待ち)は無効表示に切替
               (@codex #408 R3 P1)。素の <a> のままだと踏んだ瞬間に地図ごと
@@ -1631,47 +1677,6 @@ export default function FieldSurveyMap({
           </div>
         )}
 
-        {/* 位置記録の状態チップ (巡回中のみ)。撮影でタブが再読込されると記録が
-            静かに止まる・開始し忘れに気づけない問題への可視化。位置記録は任意
-            機能 (撮って登録だけの巡回では使わない) なので、意図的な「オフ」は
-            警告色にせず中立の灰色にする (常時オフの巡回で警告が鳴りっぱなしに
-            なるのを防ぐ)。一方、権限拒否・取得不可などの「エラー」で予期せず
-            止まった場合 (@codex P2) は琥珀色で明示し、意図的オフと区別する。
-            記録中は緑・準備中は青。タップでパネルへ。 */}
-        {activeSession && (
-          <button
-            type="button"
-            data-testid="location-recording-chip"
-            data-motion="off"
-            onClick={() => setPanelOpen(true)}
-            className={
-              recorder.status === "recording"
-                ? "absolute left-3 top-14 z-10 rounded-full border border-emerald-300 bg-emerald-50 px-2.5 py-1 text-[10px] font-semibold text-emerald-800 shadow dark:border-emerald-500/40 dark:bg-emerald-500/15 dark:text-emerald-300"
-                : recorder.status === "preparing"
-                  ? "absolute left-3 top-14 z-10 rounded-full border border-sky-300 bg-sky-50 px-2.5 py-1 text-[10px] font-semibold text-sky-800 shadow dark:border-sky-500/40 dark:bg-sky-500/15 dark:text-sky-300"
-                  : recorder.status === "error"
-                    ? "absolute left-3 top-14 z-10 rounded-full border border-amber-400 bg-amber-50 px-2.5 py-1 text-[10px] font-semibold text-amber-900 shadow dark:border-amber-500/50 dark:bg-amber-500/15 dark:text-amber-300"
-                    : "absolute left-3 top-14 z-10 rounded-full border border-gray-300 bg-white px-2.5 py-1 text-[10px] font-semibold text-gray-500 shadow dark:border-gray-600 dark:bg-gray-800 dark:text-gray-400"
-            }
-          >
-            {recorder.status === "recording" ? (
-              <>
-                <span aria-hidden="true" className="animate-pulse">
-                  ●
-                </span>{" "}
-                位置記録中
-              </>
-            ) : recorder.status === "preparing" ? (
-              "位置記録の準備中…"
-            ) : recorder.status === "error" ? (
-              <>
-                <span aria-hidden="true">⚠</span> 位置記録エラー
-              </>
-            ) : (
-              "位置記録オフ"
-            )}
-          </button>
-        )}
         {savedToastPinId && (
           <div
             role="status"

@@ -189,7 +189,9 @@ export const SIDEBAR_GROUPS: NavGroup[] = [
     pillar: true,
     icon: ic(Newspaper),
     items: [
-      { label: "販売図面を作成", href: "/sales-sheets/new", icon: ic(Newspaper), minRole: "office_staff" },
+      // 柱に項目が1つなので、左メニューには柱の名前「販売図面」で出る。開いた先の題名も同じ名前に
+      // 揃える(実機確認 2026-10-22: 「販売図面を作成」だけメニューと題名が食い違っていた)。
+      { label: "販売図面", href: "/sales-sheets/new", icon: ic(Newspaper), minRole: "office_staff" },
       // ⚠会社情報(販売図面の差出人)は「システム管理」へ移した(発注者指示 2026-08-25:
       //   常用しないため)。図面の差出人を変えたい人はそちらから。
     ],

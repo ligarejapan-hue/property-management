@@ -59,8 +59,10 @@ describe("properties/page.tsx モバイル UI (M1)", () => {
   });
 
   // §8-7 上下余白
-  it("§8-7: ページ上部に pt-2 がある", () => {
-    expect(src).toContain("pt-2");
+  // 上の余白は dashboard-layout の <main>(p-4 / lg:p-6)が持つ。ページ側で pt-2 を足すと
+  // 題名が他の画面より 8px 下がる(実機確認 2026-10-22)ので、ページ上部には余白を足さない。
+  it("§8-7: ページ上部に余白を足していない(pt-N の包みが無い)", () => {
+    expect(src).not.toMatch(/<div className="pt-\d+">/);
   });
   it("§8-7: ページネーション/下部に pb-8 以上の余白がある", () => {
     const hasPb = src.includes("pb-8") || src.includes("pb-9") || src.includes("pb-10") || src.includes("pb-12");

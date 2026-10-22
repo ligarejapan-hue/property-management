@@ -424,7 +424,7 @@ export default function CandidateQueue({
   }, [ageBase]);
 
   return (
-    <div className="p-4 sm:p-6">
+    <div>
       <PageHeader
         title="物件化の完成待ち"
         actions={

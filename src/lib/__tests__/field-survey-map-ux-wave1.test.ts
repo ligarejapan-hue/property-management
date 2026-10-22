@@ -129,20 +129,22 @@ describe("A5: バナーは上部スタック(現在地ボタンを覆わない)"
   it("地図側の上部スタックにバナー・読み込み中・断り・踏破状態が同居する", () => {
     const at = MAP.indexOf("画面上部中央の通知スタック");
     expect(at).toBeGreaterThan(-1);
-    // 窓は 6200: 戻りチップの二枝(#408 R3)に加え、位置直しの案内(決定8)が
-    // スタックへ入り後続要素が押し出されたため広げた(同居の検証は変わらず)。
-    const stack = MAP.slice(at, at + 6200);
+    // 窓は 9500: 戻りチップの二枝(#408 R3)・位置直しの案内(決定8)に加え、位置記録の
+    // 状態チップ(2026-10-22 にスタックの先頭へ移した)が入ったため広げた(同居の検証は変わらず)。
+    const stack = MAP.slice(at, at + 9500);
+    expect(stack).toContain('data-testid="location-recording-chip"');
     expect(stack).toContain("<CameraFirstBanner");
     expect(stack).toContain("読み込み中…");
     expect(stack).toContain("map-truncation-notice");
     expect(stack).toContain("map-coverage-notice");
-    expect(stack).toContain("top-3");
+    // top-14: Google の地図／航空写真の切替(左上)の下に置く(実機確認 2026-10-22)
+    expect(stack).toContain("top-14");
   });
 
   it("バナーはスタック容器(flex-col)の中にある(下端の帯へ戻す変異はここで落ちる)", () => {
     // ⚠経緯コメントに旧クラス名(bottom-14)が載るため、判定は className で行う。
     const container = MAP.match(
-      /className="pointer-events-none absolute left-1\/2 top-3[^"]*flex-col[^"]*"/,
+      /className="pointer-events-none absolute left-1\/2 top-14[^"]*flex-col[^"]*"/,
     );
     expect(container).not.toBeNull();
     const at = MAP.indexOf(container![0]);
@@ -151,9 +153,10 @@ describe("A5: バナーは上部スタック(現在地ボタンを覆わない)"
     // バナーが容器の中(直後2,000文字以内)にあり、その区間の className に
     // bottom-14 が無い。
     const between = MAP.slice(at, bannerAt);
-    // 位置直しの案内(決定8)がスタックの手前に入ったぶん距離が伸びた。
-    // 見ているのは「バナーがスタック容器の中にある」ことで、距離は近さの目安。
-    expect(bannerAt - at).toBeLessThan(4000);
+    // 位置直しの案内(決定8)と位置記録の状態チップ(2026-10-22)がスタックの手前に
+    // 入ったぶん距離が伸びた。見ているのは「バナーがスタック容器の中にある」ことで、
+    // 距離は近さの目安。
+    expect(bannerAt - at).toBeLessThan(7000);
     const classesBetween = between.match(/className="[^"]*"/g) ?? [];
     for (const c of classesBetween) expect(c).not.toContain("bottom-14");
   });

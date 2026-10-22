@@ -275,7 +275,7 @@ export default function AdminOwnerDetailPage() {
   const candidate = data?.candidate;
 
   return (
-    <div className="p-6">
+    <div>
       {/* Header(第2弾⑧⑩: PageHeader+「← ◯◯一覧へ戻る」に統一) */}
       <PageHeader
         back={{

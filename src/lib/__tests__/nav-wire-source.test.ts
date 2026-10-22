@@ -50,10 +50,9 @@ describe("properties/[id]/page.tsx — dm-logs 導線（既存ページへのリ
   });
 });
 
-describe("sidebar.tsx — 販売図面を作成 nav エントリ（メニュー化）", () => {
-  it("販売図面を作成 → /sales-sheets/new の nav item がある", () => {
-    expect(SIDEBAR_SRC).toMatch(/href:\s*"\/sales-sheets\/new"/);
-    expect(SIDEBAR_SRC).toMatch(/販売図面を作成/);
+describe("sidebar.tsx — 販売図面 nav エントリ（メニュー化）", () => {
+  it("販売図面 → /sales-sheets/new の nav item がある(項目名はメニューに出る柱の名前と同じ「販売図面」・2026-10-22)", () => {
+    expect(SIDEBAR_SRC).toMatch(/label:\s*"販売図面",\s*href:\s*"\/sales-sheets\/new"/);
   });
 
   it("重複追加しない（/sales-sheets/new は 1 回のみ）", () => {

@@ -100,7 +100,7 @@ export default function CompanySettingsPage() {
   }
 
   return (
-    <div className="mx-auto max-w-2xl space-y-5 p-4 sm:p-6">
+    <div className="mx-auto max-w-2xl space-y-5">
       <PageHeader
         title="会社情報（販売図面の差出人）"
         description="販売図面(マイソク)の下部に表示される自社情報です。空欄の項目は初期値が使われます。"
