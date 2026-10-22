@@ -1,0 +1,106 @@
+# 本番反映（VPS）
+#
+# - 手動起動専用（workflow_dispatch）。push や PR では動かない。
+# - 起動してよいのは、ユーザーが本番反映を明示指示したときだけ（CLAUDE.md §13）。
+#   Claude Code は、ユーザーの明示指示があれば REST API でこのワークフローを起動してよい。
+# - main の最新 commit で、CI（ci / db-integration）が成功しているときだけ反映する。
+# - GitHub の実行環境を一時的に Tailscale に参加させ、tailnet 経由で VPS に SSH する
+#   （SSH をインターネットに開けない）。VPS 側は反映専用ユーザー deploy の強制コマンドで、
+#   pm-deploy（deploy/vps/pm-deploy.sh）以外は実行できない。
+# - 準備と運用の手順は docs/deploy.md §6.1。
+name: Deploy (production)
+
+on:
+  workflow_dispatch:
+    inputs:
+      migrate:
+        description: "migration を流す（prisma migrate deploy）"
+        type: boolean
+        default: false
+      confirm:
+        description: '確認のため "deploy" と入力'
+        type: string
+        required: true
+
+permissions:
+  contents: read
+  checks: read
+
+concurrency:
+  group: production-deploy
+  cancel-in-progress: false
+
+jobs:
+  deploy:
+    if: github.ref == 'refs/heads/main'
+    runs-on: ubuntu-latest
+    environment: production
+    timeout-minutes: 40
+
+    steps:
+      - name: 入力の確認
+        env:
+          CONFIRM: ${{ inputs.confirm }}
+        run: |
+          if [ "$CONFIRM" != "deploy" ]; then
+            echo "confirm に deploy と入力してください" >&2
+            exit 1
+          fi
+
+      - name: CI が成功しているか確認
+        env:
+          GH_TOKEN: ${{ github.token }}
+          REPO: ${{ github.repository }}
+          SHA: ${{ github.sha }}
+        run: |
+          runs=$(gh api "repos/$REPO/commits/$SHA/check-runs?per_page=100" \
+            --jq '[.check_runs[] | select(.name == "ci" or .name == "db-integration") | {name, status, conclusion}]')
+          echo "$runs"
+          for name in ci db-integration; do
+            ok=$(echo "$runs" | jq --arg n "$name" '[.[] | select(.name == $n and .status == "completed" and .conclusion == "success")] | length')
+            if [ "$ok" -lt 1 ]; then
+              echo "$SHA の CI（$name）が成功していません（実行中・失敗・未実行）。反映を中止します。" >&2
+              exit 1
+            fi
+          done
+
+      - name: Tailscale に接続
+        uses: tailscale/github-action@v3
+        with:
+          oauth-client-id: ${{ secrets.TS_OAUTH_CLIENT_ID }}
+          oauth-secret: ${{ secrets.TS_OAUTH_SECRET }}
+          tags: tag:ci
+
+      - name: SSH の準備
+        env:
+          DEPLOY_SSH_KEY: ${{ secrets.DEPLOY_SSH_KEY }}
+          DEPLOY_KNOWN_HOSTS: ${{ secrets.DEPLOY_KNOWN_HOSTS }}
+        run: |
+          install -m 700 -d ~/.ssh
+          printf '%s\n' "$DEPLOY_SSH_KEY" > ~/.ssh/deploy_key
+          chmod 600 ~/.ssh/deploy_key
+          printf '%s\n' "$DEPLOY_KNOWN_HOSTS" > ~/.ssh/known_hosts
+          chmod 600 ~/.ssh/known_hosts
+
+      - name: 反映
+        env:
+          DEPLOY_HOST: ${{ secrets.DEPLOY_HOST }}
+          SHA: ${{ github.sha }}
+          MIGRATE: ${{ inputs.migrate }}
+        run: |
+          cmd="deploy --expect-sha $SHA"
+          if [ "$MIGRATE" = "true" ]; then
+            cmd="$cmd --migrate"
+          fi
+          ssh -i ~/.ssh/deploy_key \
+            -o IdentitiesOnly=yes \
+            -o BatchMode=yes \
+            -o StrictHostKeyChecking=yes \
+            -o UserKnownHostsFile="$HOME/.ssh/known_hosts" \
+            -o ConnectTimeout=20 \
+            -o ServerAliveInterval=30 \
+            "deploy@$DEPLOY_HOST" "$cmd"
+
+      - name: 後始末
+        if: always()
+        run: rm -f ~/.ssh/deploy_key

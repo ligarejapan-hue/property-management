@@ -565,6 +565,104 @@ sudo systemctl status property-management --no-pager
 > `next` / `@prisma/client` は `dependencies` のため prune 後も残る。
 > （`@tailwindcss/postcss` / `tailwindcss` も build 時必須だが `dependencies` 側にあるため prune の影響を受けない。）
 
+### 6.1 GitHub Actions からの反映（`.github/workflows/deploy.yml`）
+
+§6 の手順を 1 本のスクリプト（`deploy/vps/pm-deploy.sh`）にまとめ、GitHub Actions の手動起動から実行できるようにしたもの。§6 を手で流す方法もそのまま使える。
+
+**しくみ**
+
+```
+起動（Actions の画面 or Claude Code が REST API で起動）
+  → main の最新 commit の CI（ci / db-integration）が成功しているか確認（未成功なら中止）
+  → GitHub の実行環境が一時的に Tailscale に参加（tag:ci）
+  → tailnet 経由で VPS の反映専用ユーザー deploy に SSH
+  → 強制コマンド pm-deploy-ssh が引数を検査し、sudo で pm-deploy だけを実行
+  → git fetch → fast-forward → npm ci → prisma generate →（migration 確認 or 実行）→ build → prune → 再起動 → 応答確認
+```
+
+- **起動してよいのはユーザーが本番反映を明示指示したときだけ**（CLAUDE.md §13）。push・PR では動かない。
+- SSH をインターネットに開けない（Tailscale 内だけで接続）。
+- deploy ユーザーは `pm-deploy` 以外を実行できない（authorized_keys の `command=` と sudoers で二重に制限）。
+- migration は既定で流さない。未適用の migration があると、build と再起動の前に止まる（`migrate` を有効にして起動し直す）。
+- **リポジトリが公開のため Actions のログは誰でも読める。** ログには工程名と結果だけを出し、各コマンドの出力は VPS の `/var/log/pm-deploy/<日時>.log`（root のみ）に残す。失敗時はそのファイルを見る。
+- 失敗時はサービスを再起動しない。ただし build 後（再起動・応答確認）で失敗した場合は、§6・§8 を見て手で確認する。
+
+#### 一回だけの準備
+
+**A. Tailscale（管理画面）**
+
+1. Access controls（ポリシー）に、CI 用のタグと、CI から VPS の SSH への接続許可を足す。`<VPS のタグ or ホスト>` は今の VPS の指定に合わせる。
+   ```jsonc
+   "tagOwners": {
+     "tag:ci": ["autogroup:admin"]
+   },
+   "grants": [
+     { "src": ["tag:ci"], "dst": ["<VPS のタグ or ホスト>"], "ip": ["tcp:22"] }
+   ]
+   ```
+   （ポリシーが `acls` 形式なら `{ "action": "accept", "src": ["tag:ci"], "dst": ["<VPS のタグ or ホスト>:22"] }`）
+2. Settings → OAuth clients（Trust credentials）で OAuth クライアントを作る。権限は **Devices: Core（write）**、タグは **tag:ci**。表示される Client ID と Secret を控える（Secret は一度しか表示されない）。
+
+**B. VPS**
+
+```bash
+# 反映専用ユーザー（ログインシェルあり・パスワードなし）
+sudo adduser --disabled-password --gecos "" deploy
+
+# スクリプトを root 所有で置く（リポジトリ内のファイルは直接 sudo で実行しない）
+sudo install -o root -g root -m 755 /opt/property-management/deploy/vps/pm-deploy.sh     /usr/local/sbin/pm-deploy
+sudo install -o root -g root -m 755 /opt/property-management/deploy/vps/pm-deploy-ssh.sh /usr/local/sbin/pm-deploy-ssh
+
+# sudo で許すのは pm-deploy だけ
+echo 'deploy ALL=(root) NOPASSWD: /usr/local/sbin/pm-deploy' | sudo tee /etc/sudoers.d/pm-deploy
+sudo chmod 440 /etc/sudoers.d/pm-deploy
+sudo visudo -cf /etc/sudoers.d/pm-deploy   # 期待: parsed OK
+
+# 反映専用の鍵を作る（VPS 上で作り、秘密鍵は GitHub の Secret に入れたら消す）
+sudo -u deploy ssh-keygen -t ed25519 -N "" -C "github-actions-deploy" -f /home/deploy/deploy_key
+sudo -u deploy install -m 700 -d /home/deploy/.ssh
+echo "command=\"/usr/local/sbin/pm-deploy-ssh\",no-port-forwarding,no-agent-forwarding,no-X11-forwarding,no-pty $(sudo cat /home/deploy/deploy_key.pub)" \
+  | sudo -u deploy tee /home/deploy/.ssh/authorized_keys
+sudo chmod 600 /home/deploy/.ssh/authorized_keys
+
+# GitHub の Secret に入れる値を表示（このあと C で登録）
+sudo cat /home/deploy/deploy_key                                   # → DEPLOY_SSH_KEY
+ssh-keyscan -t ed25519 <tailnet のホスト名> 2>/dev/null           # → DEPLOY_KNOWN_HOSTS
+
+# 登録が済んだら秘密鍵を VPS から消す
+sudo rm /home/deploy/deploy_key /home/deploy/deploy_key.pub
+```
+
+- sshd で `AllowUsers` / `AllowGroups` を使っている場合は deploy を足して `sudo systemctl reload ssh`。
+- 動作確認（VPS 上で）: `sudo -u deploy sudo -n /usr/local/sbin/pm-deploy --status` → `version: <hash>` と `service: active`。
+
+**C. GitHub（Settings → Environments）**
+
+1. Environment `production` を作る（保護ルールは付けない。付けると承認待ちで止まり、Claude Code から起動できない）。
+2. `production` の Environment secrets に 5 つ登録する:
+
+| 名前 | 値 |
+|------|-----|
+| `TS_OAUTH_CLIENT_ID` | A-2 の Client ID |
+| `TS_OAUTH_SECRET` | A-2 の Secret |
+| `DEPLOY_HOST` | VPS の tailnet ホスト名（例: `property-management.<tailnet>.ts.net`） |
+| `DEPLOY_SSH_KEY` | B の秘密鍵（`-----BEGIN OPENSSH PRIVATE KEY-----` から末尾まで） |
+| `DEPLOY_KNOWN_HOSTS` | B の `ssh-keyscan` の出力 1 行 |
+
+#### 反映のしかた
+
+- 画面から: Actions → **Deploy (production)** → Run workflow（branch は `main`）→ confirm に `deploy`、migration があるときだけ `migrate` にチェック → Run。
+- Claude Code から（ユーザーの明示指示があるときだけ）:
+  ```bash
+  gh api repos/ligarejapan-hue/property-management/actions/workflows/deploy.yml/dispatches \
+    -X POST -f ref=main -f 'inputs[confirm]=deploy' -F 'inputs[migrate]=false'
+  ```
+  起動後は実行結果（各工程の OK/NG・反映前後の版・HTTP 応答）を確認して報告する。
+
+#### スクリプトを変えたとき
+
+`deploy/vps/` を変えた PR を反映したら、B の `install` 2 行を流し直して `/usr/local/sbin/` を置き直す（置き直すまでは古いスクリプトで動く）。
+
 ### リリース同梱の一回限り作業（one-shot）
 
 #### 売却DM 外部AI方式リリース（PR-D2）: 型の凍結印の照合
