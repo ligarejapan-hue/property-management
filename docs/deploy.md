@@ -10,7 +10,7 @@
 
 - [ ] Node.js のバージョンが CI と揃っていること（CI では **Node.js 24** で検証。本番・検証環境は CI の Node 版数に合わせることを推奨。Next.js 16 の正確な最小要件は本ガイドでは断定しない）
   ```bash
-  node --version   # CI 検証版数（Node.js 24）に合わせることを推奨
+  node --version   # CI 検証版数（Node.js 24）に合わせることを推奨。2026-10-21 のセキュリティリリース以降は v24.22.1 以上（§6.2）
   npm --version
   ```
 - [ ] PostgreSQL **15 以上**であること
@@ -662,6 +662,23 @@ sudo rm /home/deploy/deploy_key /home/deploy/deploy_key.pub
 #### スクリプトを変えたとき
 
 `deploy/vps/` を変えた PR を反映したら、B の `install` 2 行を流し直して `/usr/local/sbin/` を置き直す（置き直すまでは古いスクリプトで動く）。
+
+### 6.2 Node.js 本体のセキュリティ更新（VPS）
+
+npm の依存とは別に、VPS に入っている Node.js 本体も更新が要る。反映（pm-deploy）では更新されない。
+
+- 2026-10-21 の Node.js セキュリティリリース（Brotli の境界外書き込み CVE-2026-111497、TLS のホスト名確認の抜け CVE-2026-105483 / 106069 / 106072、`dns.resolve` の NUL 切り詰め CVE-2026-105482 ほか計10件）の修正版は **v24.22.1 / v22.23.4 / v26.12.1**。この系統（24.x）では **v24.22.1 以上**にする。
+- 確認: `node --version`（`/usr/bin/node` か `which node` の先を見る）
+- NodeSource（apt）で入れている場合:
+  ```bash
+  sudo apt-get update
+  sudo apt-get install -y nodejs   # 24.x の最新パッチに上がる
+  node --version                   # v24.22.1 以上になったか
+  sudo systemctl restart property-management
+  ```
+  （nvm で入れている場合は `nvm install 24 && nvm alias default 24` のあと、systemd の ExecStart のパスを新しい版に直して `daemon-reload` → restart）
+- 補助のタイマー（pm-push-notify / pm-trip-auto-end / pm-agent-registry）も同じ node を使うので、上の更新で一緒に新しくなる。
+- 再起動後は `/api/health` が 200 を返すことを確かめる。
 
 ### リリース同梱の一回限り作業（one-shot）
 
