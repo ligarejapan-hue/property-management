@@ -601,7 +601,7 @@ sudo systemctl status property-management --no-pager
    ]
    ```
    （ポリシーが `acls` 形式なら `{ "action": "accept", "src": ["tag:ci"], "dst": ["<VPS のタグ or ホスト>:22"] }`）
-2. Settings → OAuth clients（Trust credentials）で OAuth クライアントを作る。権限は **Devices: Core（write）**、タグは **tag:ci**。表示される Client ID と Secret を控える（Secret は一度しか表示されない）。
+2. Settings → OAuth clients（Trust credentials）で OAuth クライアントを作る。権限は **Keys → Auth Keys（write）** と **Devices → Core（write）**、どちらもタグは **tag:ci**（Auth Keys が無いと参加用の鍵を作れず、Actions のログに `404 not found` が出る）。OAuth クライアントは後から権限を変えられないので、足りなければ作り直して secrets を差し替え、古い方を Revoke する。表示される Client ID と Secret を控える（Secret は一度しか表示されない）。
 
 **B. VPS**
 
@@ -627,7 +627,7 @@ sudo chmod 600 /home/deploy/.ssh/authorized_keys
 
 # GitHub の Secret に入れる値を表示（このあと C で登録）
 sudo cat /home/deploy/deploy_key                                   # → DEPLOY_SSH_KEY
-ssh-keyscan -t ed25519 <tailnet のホスト名> 2>/dev/null           # → DEPLOY_KNOWN_HOSTS
+ssh-keyscan -t ed25519 <VPS の Tailscale IP（100.x.y.z）> 2>/dev/null   # → DEPLOY_KNOWN_HOSTS
 
 # 登録が済んだら秘密鍵を VPS から消す
 sudo rm /home/deploy/deploy_key /home/deploy/deploy_key.pub
@@ -645,9 +645,9 @@ sudo rm /home/deploy/deploy_key /home/deploy/deploy_key.pub
 |------|-----|
 | `TS_OAUTH_CLIENT_ID` | A-2 の Client ID |
 | `TS_OAUTH_SECRET` | A-2 の Secret |
-| `DEPLOY_HOST` | VPS の tailnet ホスト名（例: `property-management.<tailnet>.ts.net`） |
+| `DEPLOY_HOST` | VPS の Tailscale IP（`100.x.y.z`。管理画面の Machines で確認。Actions の実行環境では `….ts.net` の名前が引けず `Could not resolve hostname` になるため IP を使う） |
 | `DEPLOY_SSH_KEY` | B の秘密鍵（`-----BEGIN OPENSSH PRIVATE KEY-----` から末尾まで） |
-| `DEPLOY_KNOWN_HOSTS` | B の `ssh-keyscan` の出力 1 行 |
+| `DEPLOY_KNOWN_HOSTS` | B の `ssh-keyscan` の出力 1 行（先頭が `DEPLOY_HOST` と同じ IP であること） |
 
 #### 反映のしかた
 
