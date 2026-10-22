@@ -35,7 +35,7 @@ const helpSections: HelpSection[] = [
   {
     title: "CSV出力ルール",
     description: (
-      <>CSV出力は<RoleLink href="/properties" minRole="office_staff">物件一覧画面</RoleLink>の「CSV出力」ボタンから、出力する列を選んで実行します。出力されるデータは、ログインユーザーの権限に応じて絞り込まれ、個人情報を含む項目は権限に応じて伏せられます。</>
+      <>CSV出力は<RoleLink href="/properties" minRole="office_staff">物件一覧画面</RoleLink>の右上「出力 ▾」の中の「CSV出力」から、出力する列を選んで実行します。出力されるデータは、ログインユーザーの権限に応じて絞り込まれ、個人情報を含む項目は権限に応じて伏せられます。</>
     ),
   },
   {
