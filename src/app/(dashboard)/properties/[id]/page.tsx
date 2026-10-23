@@ -187,7 +187,8 @@ interface ApiOwner {
    * owner_address と同じ表示レベルでマスク/非表示になる。
    */
   currentAddress?: string | null;
-  note: string | null;
+  /** 所有者の備考。owner_note が hidden ならキーが無い(undefined)。 */
+  note?: string | null;
   /** hidden 時は API レスポンスにキーが存在しない（undefined）。null は「空値」と区別する。 */
   email?: string | null;
   /** 法人番号（13桁数字、display-level に応じて masked/hidden される）。 */
@@ -2429,6 +2430,10 @@ function OwnerCard({
           <CorporateNumberSuspectBanner owner={po.owner} />
           {/* 会社法人等番号(12桁) の候補検出（ラベル付きのみ）。値は表示しない。 */}
           <CompanyRegistrySuspectBanner owner={po.owner} />
+          {/* 所有者の備考(Owner.note)。Excel取込のコメント・見込度・担当などはここに入る
+              (従業員の指摘 2026-10-24「コメントが引き継がれていない」=保存はされていたが画面に出ていなかった)。
+              owner_note の表示レベルで API がマスク/非表示にした値をそのまま出す。 */}
+          <OwnerNoteField note={po.owner.note} />
         </dl>
       )}
 
@@ -2873,6 +2878,20 @@ function OwnerField({
         }`}
       >
         {hasValue ? value : "未登録"}
+      </dd>
+    </div>
+  );
+}
+
+function OwnerNoteField({ note }: { note: string | null | undefined }) {
+  if (note == null || note.trim() === "") return null;
+  return (
+    <div className="md:col-span-2">
+      <dt className="mb-1 text-xs font-medium uppercase tracking-wider text-gray-500 dark:text-gray-400">
+        所有者の備考
+      </dt>
+      <dd className="whitespace-pre-wrap break-words text-sm text-gray-900 dark:text-gray-100">
+        {note}
       </dd>
     </div>
   );

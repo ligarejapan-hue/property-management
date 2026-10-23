@@ -113,6 +113,8 @@ export async function buildPropertyListWhere(
       { lotNumber: { contains: keyword, mode: "insensitive" } },
       { realEstateNumber: { contains: keyword, mode: "insensitive" } },
       { buildingNumber: { contains: keyword, mode: "insensitive" } },
+      // 物件名(マンション名)で覚えていることが多い(従業員の指摘 2026-10-24)。
+      { buildingName: { contains: keyword, mode: "insensitive" } },
     ];
   }
 

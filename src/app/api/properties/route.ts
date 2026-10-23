@@ -66,6 +66,8 @@ export async function GET(request: NextRequest) {
             id: true,
             propertyType: true,
             address: true,
+            // 一覧で住所の上に出す物件名(マンション名)。
+            buildingName: true,
             lotNumber: true,
             buildingNumber: true,
             realEstateNumber: true,
@@ -78,6 +80,8 @@ export async function GET(request: NextRequest) {
             settlementPlannedOn: true,
             introductionRoute: true,
             isArchived: true,
+            // 一覧の「登録日」列(既定の並びも登録日の新しい順)。
+            createdAt: true,
             updatedAt: true,
             assignedTo: true,
             gpsLat: true,
