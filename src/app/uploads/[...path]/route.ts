@@ -10,6 +10,7 @@ import { writeAuditLog } from "@/lib/audit";
 import { registryContentDisposition } from "@/lib/attachments/registry-display-name";
 import { referralContentDisposition } from "@/lib/attachments/referral-display-name";
 import { reportContentDisposition } from "@/lib/attachments/report-display-name";
+import { identityContentDisposition } from "@/lib/attachments/identity-display-name";
 
 /**
  * /uploads/[...path] 配信 proxy。
@@ -175,10 +176,17 @@ export async function GET(
               downloadIntent,
               createdAt: serveMeta.createdAt,
             })
-          : referralContentDisposition({
-              downloadIntent,
-              createdAt: serveMeta.createdAt,
-            });
+          : serveMeta.kind === "identity"
+            ? identityContentDisposition({
+                downloadIntent,
+                createdAt: serveMeta.createdAt,
+                // 本人確認書類は画像のことが多い。拡張子だけ置き場所の名前から(名前そのものは使わない)。
+                ext: key.split(".").pop() ?? null,
+              })
+            : referralContentDisposition({
+                downloadIntent,
+                createdAt: serveMeta.createdAt,
+              });
   }
 
   if (registryMeta) {

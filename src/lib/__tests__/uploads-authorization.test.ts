@@ -14,6 +14,7 @@ import {
   isEveryOwnerFieldMaskFree,
   referralGatedOwnerFields,
   isOwnerPiiDocumentType,
+  isOwnerPiiDocument,
 } from "@/lib/uploads-authorization";
 import { __resetStorageForTest } from "@/lib/storage";
 import type { ApiSession, PermissionEntry } from "@/lib/api-helpers";
@@ -32,6 +33,8 @@ type Att = {
   // 保存名の材料。実テーブルと同じく「無ければ null」を取り得る。
   registryCertificateType?: string | null;
   createdAt?: Date | null;
+  /** 書類の種類(2026-10-24)。本人確認書類(identity_document)は type が general でも守る。 */
+  docKind?: string | null;
 };
 type Prop = { id: string; createdBy: string; assignedTo: string | null };
 
@@ -1530,6 +1533,82 @@ describe("resolveProtectedServeMeta", () => {
 // ⚠報告書には依頼者の氏名が載る。general のままだと物件を読めるだけの利用者全員が開ける。
 //   開ける人(所有者の項目をすべて素通しで見られる人)・キャッシュさせない、を referral と揃える。
 // ============================================================
+// ============================================================
+// 本人確認書類(種類 docKind=identity_document・type は general)の守り(2026-10-24 発注者決定)。
+//   開ける人(所有者の項目をすべて素通しで見られる人)・キャッシュさせない・手元に落ちる名前は定型、を
+//   反響資料・査定報告書と揃える。削除済みでも守りは外れない。
+// ============================================================
+describe("本人確認書類(docKind=identity_document)の守り", () => {
+  const KEY = "properties/p1/attachments/9-id.jpg";
+  const att = (over: Partial<Att> = {}): Att => ({
+    id: "att-id-1",
+    fileUrl: `/uploads/${KEY}`,
+    isDeleted: false,
+    targetType: "property",
+    targetId: "p1",
+    propertyId: "p1",
+    type: "general",
+    docKind: "identity_document",
+    ...over,
+  });
+  const prop: Prop = { id: "p1", createdBy: "u-office", assignedTo: null };
+  const propertyReadOnly: PermissionEntry[] = [{ resource: "property", action: "read", granted: true }];
+  const allPiiVisible: PermissionEntry[] = [
+    ...propertyReadOnly,
+    { resource: "owner", action: "read", granted: true },
+    ...["owner_name", "owner_name_kana", "owner_address", "owner_phone", "owner_email", "owner_zip", "owner_note", "owner_corporate_number"].map(
+      (resource) => ({ resource, action: "full", granted: true }),
+    ),
+  ];
+
+  it("行の判定: type が general でも docKind が identity_document なら対象。ほかの種類の general は対象外", () => {
+    expect(isOwnerPiiDocument({ type: "general", docKind: "identity_document" })).toBe(true);
+    expect(isOwnerPiiDocument({ type: "general", docKind: "sales_contract" })).toBe(false);
+    expect(isOwnerPiiDocument({ type: "general", docKind: null })).toBe(false);
+    expect(isOwnerPiiDocument({ type: "report" })).toBe(true);
+  });
+
+  it("★物件を読めるだけの人には開けない(forbidden)", async () => {
+    const prisma = makeDb({ attachments: [att()], properties: [prop] });
+    expect(
+      await authorizeUploadAccess({ key: KEY, session: officeStaff, permissions: propertyReadOnly, prisma }),
+    ).toBe("forbidden");
+  });
+
+  it("所有者の項目をすべて素通しで見られる人は開ける", async () => {
+    const prisma = makeDb({ attachments: [att()], properties: [prop] });
+    expect(
+      await authorizeUploadAccess({ key: KEY, session: officeStaff, permissions: allPiiVisible, prisma }),
+    ).toBe("ok");
+  });
+
+  it("★削除済みの本人確認書類と同じファイルを指す通常の添付でも、守りに当たる人は開けない(404)", async () => {
+    const prisma = makeDb({
+      attachments: [att({ isDeleted: true }), att({ id: "att-g", type: "general", docKind: null })],
+      properties: [prop],
+    });
+    expect(
+      await authorizeUploadAccess({ key: KEY, session: officeStaff, permissions: propertyReadOnly, prisma }),
+    ).toBe("not_found");
+  });
+
+  it("★配信は kind:'identity'(キャッシュさせない・保存名の材料は登録日だけ)", async () => {
+    const created = new Date("2026-10-24T01:00:00.000Z");
+    const prisma = makeDb({ attachments: [att({ createdAt: created })] });
+    expect(await resolveProtectedServeMeta(KEY, prisma)).toEqual({
+      kind: "identity",
+      attachmentId: "att-id-1",
+      propertyId: "p1",
+      createdAt: created,
+    });
+  });
+
+  it("種類が本人確認書類でない general は、配信も今までどおり(保護なし=null)", async () => {
+    const prisma = makeDb({ attachments: [att({ docKind: "sales_contract" })] });
+    expect(await resolveProtectedServeMeta(KEY, prisma)).toBeNull();
+  });
+});
+
 describe("査定報告書(report)の守り", () => {
   const KEY = "report-inbox/1-abc.pdf";
   const att = (over: Partial<Att> = {}): Att => ({

@@ -17,7 +17,7 @@ const PID = "11111111-1111-4111-8111-111111111111";
 const row = (o: Partial<MaterialAttachmentRow> = {}): MaterialAttachmentRow => ({
   id: "a1", targetType: "property", targetId: PID, type: "general", isDeleted: false,
   fileName: "図面.pdf", fileSize: 1000, fileUrl: "/uploads/attachments/x.pdf", mimeType: "application/pdf",
-  createdAt: new Date("2026-10-01T00:00:00Z"), ...o,
+  createdAt: new Date("2026-10-01T00:00:00Z"), docKind: null, ...o,
 });
 const perm = (...pairs: [string, string][]) => pairs.map(([resource, action]) => ({ resource, action, granted: true }));
 const REG = perm(["registry_pdf", "preview"], ["registry_pdf", "download"]);
@@ -29,6 +29,10 @@ describe("送ってよい添付(spec §3)", () => {
     expect(selectableForMaterialSend(row({ type: "report" }), PID, REG)).toBe(false);
   });
   it("知らない種類は送れない(許可リスト)", () => expect(selectableForMaterialSend(row({ type: "photo" }), PID, REG)).toBe(false));
+  it("★本人確認書類(general でも docKind=identity_document)は送れない(2026-10-24)", () => {
+    expect(selectableForMaterialSend(row({ docKind: "identity_document" }), PID, REG)).toBe(false);
+    expect(selectableForMaterialSend(row({ docKind: "sales_contract" }), PID, REG)).toBe(true);
+  });
   it("削除済み・別の物件・物件以外は送れない", () => {
     expect(selectableForMaterialSend(row({ isDeleted: true }), PID, [])).toBe(false);
     expect(selectableForMaterialSend(row({ targetId: "other" }), PID, [])).toBe(false);
