@@ -138,13 +138,19 @@ export interface LeadExclusionFields {
  * PATCH で送られた除外申請の値を、保存する値にそろえる(送られていなければ {} を返す)。
  * - 状態を「なし」(null)にしたら、2つの日付も消す。
  * - 申請中にしたのに申請した日が無ければ今日(JST)にする。結果の日は消す(申請し直し)。
+ *   今が申請中でない(なし/除外された/認められなかった)ところからの申請は、日付を送られなければ
+ *   前の申請日を引き継がず今日にする(引き継ぐと、出し直した直後から「7日以上」の赤になる)。
  * - 除外された/認められなかったにしたのに結果の日が無ければ今日にする。
  *   申請した日が無ければ(申請中を経ずに結果を入れた)そのまま空でよい。
  * - 日付だけを直す送り方(状態は送らない)は、そのまま通す。
  * ⚠today は呼び出し側で1回だけ決めた JST の暦日。
  */
 export function normalizeLeadExclusionPatch(
-  current: { leadExclusionRequestedAt: Date | null; leadExclusionDecidedAt: Date | null },
+  current: {
+    leadExclusionStatus?: string | null;
+    leadExclusionRequestedAt: Date | null;
+    leadExclusionDecidedAt: Date | null;
+  },
   patch: LeadExclusionFields,
   today: string,
 ): LeadExclusionFields {
@@ -163,7 +169,8 @@ export function normalizeLeadExclusionPatch(
     return out;
   }
   if (status === "requested") {
-    const requested = has("leadExclusionRequestedAt") ? out.leadExclusionRequestedAt : current.leadExclusionRequestedAt;
+    const carried = current.leadExclusionStatus === "requested" ? current.leadExclusionRequestedAt : null;
+    const requested = has("leadExclusionRequestedAt") ? out.leadExclusionRequestedAt : carried;
     if (requested == null) out.leadExclusionRequestedAt = todayDate;
     out.leadExclusionDecidedAt = null;
     return out;

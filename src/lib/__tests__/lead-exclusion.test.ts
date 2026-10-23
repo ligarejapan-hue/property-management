@@ -155,6 +155,23 @@ describe("normalizeLeadExclusionPatch(保存する値)", () => {
       normalizeLeadExclusionPatch(cur, { leadExclusionStatus: "rejected", leadExclusionDecidedAt: D("2026-10-22") }, today),
     ).toEqual({ leadExclusionStatus: "rejected", leadExclusionDecidedAt: D("2026-10-22") });
   });
+  it("認められなかった/除外されたから申請し直すと、日付を送らなければ申請した日は今日", () => {
+    for (const st of ["rejected", "approved"] as const) {
+      const cur = { leadExclusionStatus: st, leadExclusionRequestedAt: D("2026-10-01"), leadExclusionDecidedAt: D("2026-10-10") };
+      expect(normalizeLeadExclusionPatch(cur, { leadExclusionStatus: "requested" }, today)).toEqual({
+        leadExclusionStatus: "requested",
+        leadExclusionRequestedAt: D(today),
+        leadExclusionDecidedAt: null,
+      });
+    }
+  });
+  it("申請中のまま状態だけ送り直しても、申請した日は変えない", () => {
+    const cur = { leadExclusionStatus: "requested", leadExclusionRequestedAt: D("2026-10-01"), leadExclusionDecidedAt: null };
+    expect(normalizeLeadExclusionPatch(cur, { leadExclusionStatus: "requested" }, today)).toEqual({
+      leadExclusionStatus: "requested",
+      leadExclusionDecidedAt: null,
+    });
+  });
   it("なしに戻したら2つの日付も消す", () => {
     const cur = { leadExclusionRequestedAt: D("2026-10-15"), leadExclusionDecidedAt: D("2026-10-20") };
     expect(normalizeLeadExclusionPatch(cur, { leadExclusionStatus: null }, today)).toEqual({

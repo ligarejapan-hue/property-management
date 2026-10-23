@@ -1515,14 +1515,16 @@ describe("問い合わせ者(反響の申込者の氏名・2026-10-24)", () => {
     expect(created.property?.[0]).toMatchObject({ inquirerName: null });
   });
 
-  it("★owner:read または owner_name の書き込みが無ければ403(何も作らない)", async () => {
+  it("★owner:read または owner_name の書き込みが無ければ、問い合わせ者だけ残さず取込は通す", async () => {
     mockPerms = FULL_PERMS; // owner:read なし
     const res = await POST(req({ ...baseBody, property: { ...baseBody.property, inquirerName: "山田花子" } }));
-    expect(res.status).toBe(403);
-    expect(created.property).toBeUndefined();
+    expect(res.status).toBe(200);
+    expect(created.property?.[0]).toMatchObject({ inquirerName: null });
+    created.property = undefined;
     mockPerms = [...FULL_PERMS.filter((p) => p.resource !== "owner_name"), READ_OWNER];
     const res2 = await POST(req({ ...baseBody, property: { ...baseBody.property, inquirerName: "山田花子" } }));
-    expect(res2.status).toBe(403);
+    expect(res2.status).toBe(200);
+    expect(created.property?.[0]).toMatchObject({ inquirerName: null });
   });
 
   it("★上限を超えたら400・文字列以外も400", async () => {

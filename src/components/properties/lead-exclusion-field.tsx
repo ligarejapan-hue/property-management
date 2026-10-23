@@ -102,7 +102,8 @@ export default function LeadExclusionField({
                 ref={requestedRef}
                 type="date"
                 aria-label="申請した日"
-                defaultValue={property.leadExclusionRequestedAt ?? today}
+                // 申請し直し(今が申請中でない)のときは前の申請日を出さず今日から(出し直した直後に「7日以上」にしない)。
+                defaultValue={(status === "requested" ? property.leadExclusionRequestedAt : null) ?? today}
                 disabled={disabled}
                 className={inputClass}
               />

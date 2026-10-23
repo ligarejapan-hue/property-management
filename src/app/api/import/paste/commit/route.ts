@@ -349,7 +349,9 @@ export async function POST(request: NextRequest) {
 
     // ---- 問い合わせ者（反響の申込者の氏名・2026-10-24） ----
     // ⚠所有者の氏名と同じ個人情報。書けるのは読めて(owner:read)氏名を書ける(owner_name)人だけ
-    //   (所有者の項目ごとの書き込み権限と同じ考え方)。黙って捨てず断る。
+    //   (所有者の項目ごとの書き込み権限と同じ考え方)。
+    // ⚠書けない人のときは**問い合わせ者だけ残さない**(取込そのものは止めない)。画面は権限を見ずに
+    //   申込者の氏名を必ず送るので、ここで断ると、今まで取り込めていた役割の取込がすべて止まる(内部レビュー P2)。
     // ⚠長さは整えてから測る(切り詰めない)。
     if (typeof p.inquirerName !== "undefined" && p.inquirerName !== null && typeof p.inquirerName !== "string") {
       throw new ApiError(400, "問い合わせ者の形式が正しくありません", "BAD_REQUEST");
@@ -357,13 +359,8 @@ export async function POST(request: NextRequest) {
     if (isInquirerNameTooLong(p.inquirerName)) {
       throw new ApiError(400, INQUIRER_NAME_TOO_LONG_MESSAGE, "BAD_REQUEST");
     }
-    const inquirerName = normalizeInquirerName(p.inquirerName);
-    if (
-      inquirerName !== null &&
-      !(hasPermission(perms, "owner", "read") && hasExplicitWritePerm(perms, "owner_name"))
-    ) {
-      throw new ApiError(403, "問い合わせ者を書き込む権限がありません", "FORBIDDEN");
-    }
+    const canWriteInquirer = hasPermission(perms, "owner", "read") && hasExplicitWritePerm(perms, "owner_name");
+    const inquirerName = canWriteInquirer ? normalizeInquirerName(p.inquirerName) : null;
 
     // ---- 値の検査（全体レビュー I-3）。Prisma に渡す前に、欄の名前つきで断る ----
     const exclusiveArea = parseAreaInput(p.exclusiveArea, "専有面積");
