@@ -31,6 +31,8 @@ describe("確定した並び(仕事の流れ順)", () => {
       "home",
       "inquiry",
       "prop",
+      // 取引(2026-10-24 全員が使う)。
+      "deal",
       "field",
       "dm",
       "imp",
@@ -317,11 +319,13 @@ describe("⚠変えないもの", () => {
     // + 反響の受付(業者からの電話は誰が取るか分からない=全員が使う・2026-09-28 設計 方針10)。
     // 業者の名簿は受付の窓の中のタブへ移した(2026-10-15)。査定の申込は反響受付へ(2026-10-15)。
     const staff = visibleSidebar("field_staff");
-    expect(staff.map((g) => g.key)).toEqual(["home", "inquiry", "field", "doc"]);
+    // + 取引(2026-10-24 全員が使う)。
+    expect(staff.map((g) => g.key)).toEqual(["home", "inquiry", "deal", "field", "doc"]);
     expect(staff.flatMap((g) => g.items).map((i) => i.href)).toEqual([
       "/home",
       "/inquiry-desk",
       "/properties/sale-dm/inquiries",
+      "/deals",
       "/field-survey/map",
       "/field-survey/sessions",
       "/field-survey/candidates",
@@ -385,6 +389,7 @@ describe("左メニューの柱(発注者決定 2026-10-15)", () => {
     expect(SIDEBAR_GROUPS.filter((g) => g.pillar).map((g) => g.key)).toEqual([
       "inquiry",
       "prop",
+      "deal",
       "field",
       "dm",
       "imp",

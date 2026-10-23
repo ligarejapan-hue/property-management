@@ -15,6 +15,7 @@ import {
   Building2,
   Edit,
   FileCheck,
+  Handshake,
   Loader2,
   Mail,
   MapPinned,
@@ -647,6 +648,7 @@ export default function PropertyDetailPage({
   const {
     canWriteProperty,
     canSendInquiryMaterial,
+    canCreateDeal,
     canDeleteProperty,
     canWriteOwner,
     canImportWrite,
@@ -761,9 +763,14 @@ export default function PropertyDetailPage({
     const canSendInquiryMaterial = effectivePermissions.some(
       (p) => p.resource === "agent_inquiry" && p.action === "write" && p.granted,
     );
+    // 「この物件で取引を作る」。作成 API も deal:write(+物件を見られること)を要求する=見た目のため。
+    const canCreateDeal = effectivePermissions.some(
+      (p) => p.resource === "deal" && p.action === "write" && p.granted,
+    );
     return {
       canWriteProperty,
       canSendInquiryMaterial,
+      canCreateDeal,
       canDeleteProperty,
       canWriteOwner,
       canReadOwner,
@@ -821,6 +828,9 @@ export default function PropertyDetailPage({
 
   // 「その他 ▾」の中身(画面すっきり化 第3回)。出す条件は表に置いていたときと同じ。
   const moreMenuItems: MenuItem[] = [
+    ...(canCreateDeal
+      ? [{ key: "new-deal", label: "この物件で取引を作る", icon: Handshake, href: `/deals/new?propertyId=${property.id}` }]
+      : []),
     // DM 送付履歴ページは property:read + owner:read + record-scope を要するため canReadOwner で出し分ける(403 の行き止まりを避ける)。
     ...(canReadOwner
       ? [{ key: "dm-logs", label: "DM送付履歴", icon: Mail, href: `/properties/${property.id}/dm-logs`, title: "この物件の DM 送付履歴" }]

@@ -27,6 +27,7 @@ import {
   Inbox,
   ListChecks,
   Globe,
+  Handshake,
 } from "lucide-react";
 import { canSee, type AppRole } from "@/lib/nav/roles";
 
@@ -117,6 +118,14 @@ export const SIDEBAR_GROUPS: NavGroup[] = [
       //   権限は据え置き=管理者だけに見える。
       { label: "添付ファイル検索", href: "/admin/attachments", icon: ic(FileSearch), minRole: "admin" },
     ],
+  },
+  {
+    // 取引(設計 2026-10-23 §5)。全員が使う(発注者決定)。項目が1つなので見出しがそのままリンクになる。
+    key: "deal",
+    label: "取引",
+    pillar: true,
+    icon: ic(Handshake),
+    items: [{ label: "取引", href: "/deals", icon: ic(Handshake), minRole: "field_staff" }],
   },
   {
     key: "field",
@@ -231,6 +240,8 @@ export const SIDEBAR_GROUPS: NavGroup[] = [
       //   「図面・DMの差出人」と名乗ると、DMの差出人を直しに来た人が**変わらない
       //   設定をいじって古い差出人のまま郵送してしまう**。
       { label: "会社情報（販売図面の差出人）", href: "/admin/company-settings", icon: ic(Building2), minRole: "admin" },
+      // 取引の設定(設計 2026-10-23 §5)。会社名・住所などは上の会社情報を使う。
+      { label: "取引の設定", href: "/admin/deal-settings", icon: ic(Handshake), minRole: "admin" },
       // ⚠添付ファイル検索は「物件」グループへ移した(日々の道具のため)。
     ],
   },

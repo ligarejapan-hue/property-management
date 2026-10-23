@@ -259,9 +259,19 @@ const ACTION_LABELS: Record<string, string> = {
   sale_dm_scenario_media_update: "DMの種類の絵を更新",
   // 旧コードが記録した分(案件ステータスの拡張で経路は消えた・記録は残る)
   "action:advance_case_status": "案件ステータスを進める(旧)",
+  // 取引(設計 2026-10-23)。detail は変えた項目の名前だけ。
+  deal_create: "取引を作成",
+  deal_update: "取引を更新",
+  deal_property_refresh: "取引の物件を取り直し",
+  deal_party_create: "取引の当事者を追加",
+  deal_party_update: "取引の当事者を更新",
+  deal_party_delete: "取引の当事者を削除",
+  deal_settings_update: "取引の設定を変更",
 };
 
 const TARGET_TABLE_LABELS: Record<string, string> = {
+  deals: "取引",
+  deal_settings: "取引の設定",
   properties: "物件",
   owners: "オーナー",
   buildings: "棟",

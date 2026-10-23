@@ -46,6 +46,8 @@ const RESOURCES = [
   // 反響の受付(業者からの内見・広告の許可・資料請求)。全員に既定付与。
   // ⚠ もう一方の権限画面の RESOURCES と必ず同内容にすること。
   { key: "agent_inquiry", label: "反響の受付", actions: ["read", "write"] },
+  // 取引(設計 2026-10-23)。全員に既定付与。⚠ もう一方の権限画面の RESOURCES と必ず同内容にすること。
+  { key: "deal", label: "取引", actions: ["read", "write"] },
   // 現地調査。quick_capture(巡回なしで撮影) は移動軌跡が残らないため既定 admin のみ。
   // ⚠ templates 画面の RESOURCES と必ず同内容にすること(片方だけだとテンプレ運用環境で
   //   付与できず必ず 403 になる。sale_dm で実際に起きた事故)。

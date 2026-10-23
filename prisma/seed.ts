@@ -273,6 +273,13 @@ async function main() {
     { templateId: fieldStaffTemplate.id, resource: "agent_inquiry", action: "write", granted: true },
     { templateId: officeStaffTemplate.id, resource: "agent_inquiry", action: "write", granted: true },
     { templateId: adminTemplate.id, resource: "agent_inquiry", action: "write", granted: true },
+    // 取引(設計 2026-10-23 §2.6)。全員が閲覧・編集。
+    { templateId: fieldStaffTemplate.id, resource: "deal", action: "read", granted: true },
+    { templateId: officeStaffTemplate.id, resource: "deal", action: "read", granted: true },
+    { templateId: adminTemplate.id, resource: "deal", action: "read", granted: true },
+    { templateId: fieldStaffTemplate.id, resource: "deal", action: "write", granted: true },
+    { templateId: officeStaffTemplate.id, resource: "deal", action: "write", granted: true },
+    { templateId: adminTemplate.id, resource: "deal", action: "write", granted: true },
   ];
 
   for (const entry of templateEntries) {
