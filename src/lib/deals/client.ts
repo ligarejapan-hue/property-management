@@ -31,6 +31,10 @@ export interface DealOptions {
 }
 export interface UserOption { id: string; name: string; role: string }
 export interface RateTableView { id: string; kind: string; validFrom: string; validTo: string | null; content: unknown; updatedAt: string }
+export interface DealDocumentView {
+  id: string; docType: string; variant: string; version: number; title: string;
+  issuedAt: string; issuedByName: string; fileBaseName: string; hasPdf: boolean; hasXlsx: boolean;
+}
 
 export const dealsApi = {
   list: (params: Record<string, string>) =>
@@ -54,10 +58,17 @@ export const dealsApi = {
   calc: (id: string) => call<{ calc: DealCalc }>(`/api/deals/${id}/calc`),
   fundingPreview: (id: string, fundingPlan: FundingInputs) =>
     call<{ calc: FundingPlanCalc; html: string }>(`/api/deals/${id}/funding-plan/preview`, { method: "POST", body: { fundingPlan } }),
+  documents: (id: string) => call<{ documents: DealDocumentView[] }>(`/api/deals/${id}/documents`),
+  issueDocument: (id: string, docType: string, version: number) =>
+    call<{ id: string; version: number; title: string; fileBaseName: string }>(`/api/deals/${id}/documents`, { method: "POST", body: { docType, version } }),
   createRateTable: (body: Record<string, unknown>) => call<{ id: string }>("/api/admin/deal-settings/rate-tables", { method: "POST", body }),
   updateRateTable: (id: string, body: Record<string, unknown>) => call<{ ok: true }>(`/api/admin/deal-settings/rate-tables/${id}`, { method: "PUT", body }),
   deleteRateTable: (id: string, updatedAt: string) =>
     call<{ ok: true }>(`/api/admin/deal-settings/rate-tables/${id}?updatedAt=${encodeURIComponent(updatedAt)}`, { method: "DELETE" }),
 };
+
+/** 発行した書類のファイルを開く道(取引の権限で配る)。 */
+export const dealDocumentFileUrl = (dealId: string, docId: string, format: "pdf" | "xlsx") =>
+  `/api/deals/${dealId}/documents/${docId}/file?format=${format}`;
 
 export const errorText = (e: unknown) => (e instanceof Error ? e.message : "通信に失敗しました。もう一度お試しください。");

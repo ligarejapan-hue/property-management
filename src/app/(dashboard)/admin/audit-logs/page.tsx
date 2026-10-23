@@ -270,6 +270,7 @@ const ACTION_LABELS: Record<string, string> = {
   deal_rate_table_create: "取引の税率の表を追加",
   deal_rate_table_update: "取引の税率の表を変更",
   deal_rate_table_delete: "取引の税率の表を削除",
+  deal_document_issue: "取引の書類を発行",
 };
 
 const TARGET_TABLE_LABELS: Record<string, string> = {

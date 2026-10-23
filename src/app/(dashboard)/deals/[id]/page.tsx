@@ -11,6 +11,7 @@ import DealPartiesPanel from "@/components/deals/deal-parties-panel";
 import DealMoneyPanel from "@/components/deals/deal-money-panel";
 import DealSettlementPanel from "@/components/deals/deal-settlement-panel";
 import DealOcPanel from "@/components/deals/deal-oc-panel";
+import DealDocumentsPanel from "@/components/deals/deal-documents-panel";
 import { dealsApi, errorText, type DealOptions, type UserOption } from "@/lib/deals/client";
 import type { DealView } from "@/lib/deals/view";
 import type { DealCalc } from "@/lib/deals/calc/deal-calc";
@@ -18,7 +19,7 @@ import { basicFormFromDeal } from "@/lib/deals/forms";
 import { MONEY_OVERRIDE_KEYS, SETTLEMENT_OVERRIDE_KEYS, pickOverrides } from "@/lib/deals/money-forms";
 import { DEAL_BUSINESS_TYPE_LABELS, DEAL_STATUS_LABELS } from "@/lib/deals/constants";
 
-// 段5で「書類」を足す(設計 §5)。
+// 「書類」=発行した書類の履歴(設計 §5・段3で追加)。
 const DEAL_TABS = [
   { key: "basic", label: "基本" },
   { key: "property", label: "物件" },
@@ -26,6 +27,7 @@ const DEAL_TABS = [
   { key: "money", label: "金額・費用" },
   { key: "settlement", label: "精算" },
   { key: "oc", label: "OC" },
+  { key: "documents", label: "書類" },
 ] as const;
 const HEADER_LINK_CLS =
   "inline-flex items-center gap-1.5 rounded-md border border-gray-300 bg-white px-3 py-1.5 text-sm font-medium text-gray-700 hover:bg-gray-50 dark:border-gray-700 dark:bg-gray-900 dark:text-gray-200 dark:hover:bg-gray-800";
@@ -124,6 +126,9 @@ export default function DealDetailPage({ params }: { params: Promise<{ id: strin
             <DealOcPanel key={k([deal.leases, deal.settlementTerms.depositMode])} deal={deal} calc={calc} onSaved={reload} />
           </div>
         )}
+        <div hidden={tab !== "documents"}>
+          <DealDocumentsPanel dealId={deal.id} active={tab === "documents"} />
+        </div>
       </div>
     </div>
   );
