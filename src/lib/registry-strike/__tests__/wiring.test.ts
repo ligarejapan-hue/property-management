@@ -38,3 +38,11 @@ describe("registry-strike: 氏名・住所・本文をログに出さない", ()
     expect(index).toMatch(/catch \{\s*\n\s*\/\/[^\n]*\n\s*return null;/);
   });
 });
+
+describe("registry-strike: ページ上限", () => {
+  it("上限を超えるPDFは途中までで判定せず、失敗（null）にする", () => {
+    const extract = read("src/lib/registry-strike/extract.ts");
+    expect(extract).toMatch(/if \(doc\.numPages > MAX_PAGES\) \{\s*\n\s*throw/);
+    expect(extract).not.toMatch(/Math\.min\(doc\.numPages, MAX_PAGES\)/);
+  });
+});

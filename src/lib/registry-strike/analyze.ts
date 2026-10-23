@@ -218,12 +218,19 @@ function purposeStruck(e: Entry): boolean {
   return isFullyStruck(joined);
 }
 
-/** 「N番(付記M号)…抹消」の登記なら、対象の番号を返す。 */
-function cancellationTarget(purpose: string): { rank: string; annotation: string | null } | null {
-  if (/回復$/.test(purpose)) return null;
-  const m = purpose.match(/^(\d+)番(?:付記(\d+)号)?.*抹消$/);
-  if (!m) return null;
-  return { rank: m[1], annotation: m[2] ?? null };
+/**
+ * 「N番(付記M号)…抹消」の登記なら、対象の番号をすべて返す。
+ * 1つの登記で複数の順位をまとめて抹消することがある（例:「1番、2番抵当権抹消」）。
+ */
+function cancellationTargets(purpose: string): { rank: string; annotation: string | null }[] | null {
+  if (/回復$/.test(purpose) || !/抹消$/.test(purpose)) return null;
+  const head = purpose.match(/^((?:\d+番(?:付記\d+号)?[、，,・]?)+)/);
+  if (!head) return null;
+  const out: { rank: string; annotation: string | null }[] = [];
+  for (const m of head[1].matchAll(/(\d+)番(?:付記(\d+)号)?/g)) {
+    out.push({ rank: m[1], annotation: m[2] ?? null });
+  }
+  return out.length > 0 ? out : null;
 }
 
 interface Judged {
@@ -242,16 +249,17 @@ function judge(entries: Entry[]): Judged[] {
       entry,
       purpose,
       cancelled: purposeStruck(entry),
-      isCancellation: cancellationTarget(purpose) !== null,
+      isCancellation: cancellationTargets(purpose) !== null,
     };
   });
   // 抹消の登記（それ自体が効力を保っているもの）が指す対象を抹消扱いにする
   for (const j of judged) {
     if (j.cancelled || !j.isCancellation) continue;
-    const t = cancellationTarget(j.purpose)!;
-    for (const k of judged) {
-      if (k === j || k.entry.mainRank !== t.rank) continue;
-      if (t.annotation === null || k.entry.annotation === t.annotation) k.cancelled = true;
+    for (const t of cancellationTargets(j.purpose)!) {
+      for (const k of judged) {
+        if (k === j || k.entry.mainRank !== t.rank) continue;
+        if (t.annotation === null || k.entry.annotation === t.annotation) k.cancelled = true;
+      }
     }
   }
   // 主登記が抹消なら、その付記・余白の本登記も効力を失う
@@ -327,6 +335,12 @@ function blocks(lines: Cell[], labels: string[]): Map<string, Cell[]> {
   let curLabel: string | null = null;
   for (const line of lines) {
     const chars = Array.from(line.text);
+    // 「順位4番の登記を移記」「昭和63年法務省令…の規定により移記」など、欄の終わりに付く
+    // 記載は、直前のラベル（所有者など）の続きではない。ここで欄を区切る。
+    if (/^[^ 　]/.test(line.text) && /移記|規定により/.test(compact(line.text))) {
+      curLabel = null;
+      continue;
+    }
     const label = labels
       .filter((l) => {
         if (line.text.slice(0, l.length) !== l) return false;
@@ -683,18 +697,20 @@ function firstBlock(b: Map<string, Cell[]>, labels: string[]): Cell[] | undefine
   return undefined;
 }
 
-function lastName(lines: string[]): string | null {
-  return lines.length > 0 ? clean(lines[lines.length - 1]) : null;
-}
-
 /**
  * 権利者欄の名前。欄は「住所（複数行のこともある）→ 名前」で、名前は最後の行。
  * 「（取扱店 ○○支店）」の行は名前ではないので除く。
  */
 function holderNames(cells: Cell[] | undefined): string[] {
-  const live = liveLines(cells).filter((l) => !/^（?取扱店/.test(compact(l)));
-  const name = lastName(live);
-  return name ? [name] : [];
+  // ⚠ 下線の付いた行も落とさず「並び」で読む（名前に下線＝名称変更でも住所と取り違えない）
+  const rows = rowsOf(cells ?? []).filter((r) => !/^（?取扱店/.test(compact(r.raw)));
+  return rows.length > 0 ? [clean(rows[rows.length - 1].raw)] : [];
+}
+
+/** 債務者欄の名前（最後の行）。並びで読む。 */
+function debtorName(cells: Cell[] | undefined): string | null {
+  const rows = rowsOf(cells ?? []);
+  return rows.length > 0 ? clean(rows[rows.length - 1].raw) : null;
 }
 
 const CAUTION_RE = /差押|仮差押|仮処分|仮登記|買戻|競売|破産|処分禁止|請求権/;
@@ -755,7 +771,7 @@ export function analyzeRegistryRights(lines: StrikeLine[]): RegistryRightsSummar
     const amountLines = liveLines(firstBlock(bb, ["債権額", "極度額"]) ?? firstBlock(b, ["債権額", "極度額"]));
     let amount = amountLines.length > 0 ? clean(amountLines.join("")) : null;
     let holders = holderNames(firstBlock(bb, HOLDER_LABELS) ?? firstBlock(b, HOLDER_LABELS));
-    let debtor = lastName(liveLines(firstBlock(bb, ["債務者", "連帯債務者"]) ?? firstBlock(b, ["債務者", "連帯債務者"])));
+    let debtor = debtorName(firstBlock(bb, ["債務者", "連帯債務者"]) ?? firstBlock(b, ["債務者", "連帯債務者"]));
 
     const anns = liveOtsu.filter((k) => k.entry.kind === "annotation" && k.entry.mainRank === rank);
     for (const a of anns) {
@@ -768,11 +784,32 @@ export function analyzeRegistryRights(lines: StrikeLine[]): RegistryRightsSummar
         const to = holderNames(firstBlock(ab, HOLDER_LABELS));
         if (to.length === 0) notes.push(`乙区${rank}番の移転後の権利者を読み取れません。目視で確認してください。`);
         else holders = to;
+      } else if (NAME_ADDRESS_CHANGE.test(a.purpose)) {
+        // 権利者（抵当権者など）の名称・住所の変更/更正。住所は表示しないので名称だけ反映する
+        const nb = blocks(a.entry.detailCells, KOU_LABELS);
+        const newName = liveLines(firstBlock(nb, ["名称", "氏名", "商号"]));
+        if (newName.length > 0) {
+          if (holders.length === 1) holders = [clean(newName.join(""))];
+          else notes.push(`乙区${rank}番の権利者の名称変更の当て先を特定できません。目視で確認してください。`);
+        } else if (!firstBlock(nb, ["住所", "本店"])) {
+          notes.push(`乙区${rank}番に付記「${a.purpose}」があります。内容は目視で確認してください。`);
+        }
       } else if (/(変更|更正)$/.test(a.purpose)) {
+        let applied = false;
         const am = liveLines(firstBlock(ab, ["債権額", "極度額"]));
-        if (am.length > 0) amount = clean(am.join(""));
-        const db = liveLines(firstBlock(ab, ["債務者", "連帯債務者", "指定債務者"]));
-        if (db.length > 0) debtor = lastName(db);
+        if (am.length > 0) {
+          amount = clean(am.join(""));
+          applied = true;
+        }
+        const db = debtorName(firstBlock(ab, ["債務者", "連帯債務者", "指定債務者"]));
+        if (db) {
+          debtor = db;
+          applied = true;
+        }
+        // 利息・債権の範囲など、表示していない項目だけの変更は「反映済み」と言わずに知らせる
+        if (!applied && !firstBlock(ab, ["債権の範囲", "利息", "損害金"])) {
+          notes.push(`乙区${rank}番に付記「${a.purpose}」があります。内容は目視で確認してください。`);
+        }
       } else if (/順位|元本確定/.test(a.purpose)) {
         // 順位の変更・譲渡、元本確定は、権利者・金額を変えない
       } else {

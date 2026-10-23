@@ -25,8 +25,13 @@ export async function extractStrikeLinesFromPdf(buffer: Buffer): Promise<StrikeL
   }).promise;
 
   try {
+    // 上限を超えるPDFは途中までしか読めない。途中までの履歴で「今の内容」を出すと、
+    // 後ろのページの移転・抹消・差押えが抜けた誤った結果になるので、判定しない（呼び出し側で null）。
+    if (doc.numPages > MAX_PAGES) {
+      throw new Error("registry pdf exceeds page limit");
+    }
     const lines: StrikeLine[] = [];
-    const pages = Math.min(doc.numPages, MAX_PAGES);
+    const pages = doc.numPages;
     for (let pageNo = 1; pageNo <= pages; pageNo++) {
       const page = await doc.getPage(pageNo);
 
