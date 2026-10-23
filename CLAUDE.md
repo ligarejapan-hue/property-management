@@ -187,6 +187,13 @@ docs-only の場合:
 - Codexへの返信文案は標準報告に含めない
 - Codex review が必要な理由だけ簡潔に報告する
 
+Codex 指摘への対応後の再レビュー依頼（ユーザー指示 2026-10-23）:
+
+- Claude Code が Codex review の指摘に対応して修正を push したら、**同じ PR に `@codex review` とコメントして再レビューを依頼する**（ユーザーの都度確認は不要）
+- 依頼の前に、対応内容（指摘ごとの修正・追加テスト）を PR コメントで簡潔に報告する
+- 再レビューで新たな指摘が出たら、同じ手順（修正 → push → 報告コメント → `@codex review`）を繰り返す
+- 対象は Codex（`@codex review`）のみ。Claude GitHub Code Review / `@claude review` は §17 のとおり禁止のまま
+
 ## 12. Issue / PR / GitHub Actions での参照方針
 
 - CLAUDE.md を AI 運用ルールの基準文書として扱う
