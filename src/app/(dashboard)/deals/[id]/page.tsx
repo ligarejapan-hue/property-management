@@ -48,6 +48,8 @@ export default function DealDetailPage({ params }: { params: Promise<{ id: strin
       setCalc((await dealsApi.calc(id)).calc);
       setCalcError(null);
     } catch (e) {
+      // 古い計算(前の金額・お支払額)を今の結果として出さない(@codex 3巡目)。
+      setCalc(null);
       setCalcError(`計算を読み込めませんでした: ${errorText(e)}`);
     }
   }, [id]);

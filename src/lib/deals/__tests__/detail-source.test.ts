@@ -122,3 +122,9 @@ describe("@codex 2巡目: 手で直す欄が読めなければ保存しない", 
     }
   });
 });
+
+describe("@codex 3巡目: 計算の読み直しに失敗したら、古い計算を出さない", () => {
+  it("loadCalc の失敗で calc を消す", () => {
+    expect(read(PAGE)).toMatch(/catch \(e\) \{\s*(\/\/[^\n]*\n\s*)?setCalc\(null\);/);
+  });
+});

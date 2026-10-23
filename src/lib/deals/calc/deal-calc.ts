@@ -12,7 +12,8 @@ import { settlementResult, type SettlementResult } from "./settlement";
 export interface DealCalc {
   baseDate: string;
   kindBase: BasePropertyKind | null;
-  brokerage: { computedExcl: number; excl: number; incl: number; overridden: boolean; specialApplied: boolean } | null;
+  /** computedExcl は表が当たらないとき null(手で直した値だけで出す)。 */
+  brokerage: { computedExcl: number | null; excl: number; incl: number; overridden: boolean; specialApplied: boolean } | null;
   building: {
     computedPrice: number | null; price: number | null; priceOverridden: boolean;
     computedTax: number | null; tax: number | null; taxOverridden: boolean;
@@ -44,12 +45,15 @@ export function computeDealCalc(deal: DealView, rateRows: RateTableRow[], kinds:
 
   let brokerage: DealCalc["brokerage"] = null;
   const tiers = table(rateRows, "brokerage_tiers", baseDate);
-  if (deal.price !== null && tiers) {
-    const b = brokerageFee(deal.price, tiers, { lowCostSpecial: deal.costs.lowCostSpecial, taxRateBp: deal.taxRateBp });
-    const excl = o.brokerageFee ?? b.excl;
+  // 手で直した手数料は、表が当たらない(契約日が表の期間より前・表を消した)ときも使う(@codex 3巡目)。
+  const b = deal.price !== null && tiers
+    ? brokerageFee(deal.price, tiers, { lowCostSpecial: deal.costs.lowCostSpecial, taxRateBp: deal.taxRateBp })
+    : null;
+  const excl = o.brokerageFee ?? b?.excl;
+  if (excl !== undefined) {
     brokerage = {
-      computedExcl: b.excl, excl, incl: Math.floor((excl * (10000 + deal.taxRateBp)) / 10000),
-      overridden: o.brokerageFee !== undefined, specialApplied: b.specialApplied,
+      computedExcl: b?.excl ?? null, excl, incl: Math.floor((excl * (10000 + deal.taxRateBp)) / 10000),
+      overridden: o.brokerageFee !== undefined, specialApplied: b?.specialApplied ?? false,
     };
   }
 

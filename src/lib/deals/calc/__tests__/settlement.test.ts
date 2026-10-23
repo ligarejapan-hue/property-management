@@ -107,3 +107,12 @@ describe("@codex: 元の金額が無くても、手で直した値は精算に�
     expect(land.rows).toEqual([]);
   });
 });
+
+describe("@codex 3巡目: 手数料の表が無くても、手で直した手数料は使う", () => {
+  it("表が当たらない日付でも上書きがあれば excl/incl を出す(計算の値は null)", () => {
+    const noTiers = rateRows.filter((r) => r.kind !== "brokerage_tiers");
+    const c = computeDealCalc({ ...deal, overrides: { brokerageFee: 900_000 } }, noTiers, DEFAULT_PROPERTY_KINDS, "2026-10-24");
+    expect(c.brokerage).toMatchObject({ computedExcl: null, excl: 900_000, incl: 990_000, overridden: true });
+    expect(computeDealCalc(deal, noTiers, DEFAULT_PROPERTY_KINDS, "2026-10-24").brokerage).toBeNull();
+  });
+});
