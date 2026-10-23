@@ -32,6 +32,10 @@ export default function DealSettlementPanel({ deal, calc, onSaved }: { deal: Dea
   );
   const [overrides, setOverrides] = useState<Overrides>(deal.overrides);
   const [saving, setSaving] = useState(false);
+  // 手で直す欄で読めない文字が入っている欄の名前(@codex 2巡目)。1つでもあれば保存しない。
+  const [badOverrides, setBadOverrides] = useState<string[]>([]);
+  const validity = (label: string) => (ok: boolean) =>
+    setBadOverrides((xs) => (ok ? xs.filter((x) => x !== label) : xs.includes(label) ? xs : [...xs, label]));
   const [error, setError] = useState<string | null>(null);
   const kindBase = calc?.kindBase ?? null;
   const st = calc?.settlement ?? null;
@@ -45,7 +49,7 @@ export default function DealSettlementPanel({ deal, calc, onSaved }: { deal: Dea
 
   const save = async () => {
     const parsedOthers = others.map((o, i) => untextify(o, OTHER_KEYS, (k) => `その他の精算${i + 1}行目の${k === "sellerToBuyer" ? "売主→買主" : "買主→売主"}`));
-    const bad = [...invalidYenLabels(MONEY_KEYS.map((k) => [MONEY_LABELS[k], money[k]])), ...parsedOthers.flatMap((p) => p.bad)];
+    const bad = [...invalidYenLabels(MONEY_KEYS.map((k) => [MONEY_LABELS[k], money[k]])), ...parsedOthers.flatMap((p) => p.bad), ...badOverrides];
     if (bad.length > 0) {
       setError(`${bad.join("・")}は数字で入れてください(例 120000)。保存していません。`);
       return;
@@ -134,12 +138,12 @@ export default function DealSettlementPanel({ deal, calc, onSaved }: { deal: Dea
 
       <section className="space-y-3">
         <h3 className="text-sm font-semibold text-gray-700 dark:text-gray-300">手で直す(計算の値を変えるときだけ)</h3>
-        <OverrideField label="固都税(買主→売主)" computed={st?.rows.find((r) => r.key === "propertyTax")?.computed ?? null} override={overrides["settlement.propertyTax"]} onChange={(v) => setOverride("settlement.propertyTax", v)} />
+        <OverrideField label="固都税(買主→売主)" onValidity={validity("固都税(買主→売主)")} computed={st?.rows.find((r) => r.key === "propertyTax")?.computed ?? null} override={overrides["settlement.propertyTax"]} onChange={(v) => setOverride("settlement.propertyTax", v)} />
         {kindBase === "unit" && (
-          <OverrideField label="管理費等(買主→売主)" computed={st?.rows.find((r) => r.key === "management")?.computed ?? null} override={overrides["settlement.management"]} onChange={(v) => setOverride("settlement.management", v)} />
+          <OverrideField label="管理費等(買主→売主)" onValidity={validity("管理費等(買主→売主)")} computed={st?.rows.find((r) => r.key === "management")?.computed ?? null} override={overrides["settlement.management"]} onChange={(v) => setOverride("settlement.management", v)} />
         )}
         {deal.hasOc && (
-          <OverrideField label="賃料等(売主→買主)" computed={st?.rows.find((r) => r.key === "rent")?.computed ?? null} override={overrides["settlement.rent"]} onChange={(v) => setOverride("settlement.rent", v)} />
+          <OverrideField label="賃料等(売主→買主)" onValidity={validity("賃料等(売主→買主)")} computed={st?.rows.find((r) => r.key === "rent")?.computed ?? null} override={overrides["settlement.rent"]} onChange={(v) => setOverride("settlement.rent", v)} />
         )}
       </section>
 

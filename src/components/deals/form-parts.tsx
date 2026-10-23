@@ -1,7 +1,7 @@
-import type { ReactNode } from "react";
+import { useState, type ReactNode } from "react";
 import { RotateCcw } from "lucide-react";
 import { Button } from "@/components/ui/button";
-import { parseYen, yenText } from "@/lib/deals/money-forms";
+import { overrideInput, parseYen, yenText } from "@/lib/deals/money-forms";
 
 export const inputCls =
   "w-full rounded-md border border-gray-300 px-2 py-1.5 text-sm dark:border-gray-700 dark:bg-gray-900 dark:text-gray-100";
@@ -60,11 +60,26 @@ export function YenInput({ label, value, onChange }: { label: string; value: str
 
 /**
  * 自動計算だが手で直せる欄(設計 §3)。表示 = 上書き ?? 計算。上書きしたら印を付け、「計算に戻す」で消せる。
+ * 打った文字はそのまま持つ。読めない文字のときは上書きを消さず、onValidity(false) で親に保存を止めさせる(@codex 2巡目)。
  */
 export function OverrideField({
-  label, computed, override, onChange,
-}: { label: string; computed: number | null; override: number | undefined; onChange: (v: number | undefined) => void }) {
+  label, computed, override, onChange, onValidity,
+}: {
+  label: string;
+  computed: number | null;
+  override: number | undefined;
+  onChange: (v: number | undefined) => void;
+  onValidity?: (ok: boolean) => void;
+}) {
   const overridden = override !== undefined;
+  const [text, setText] = useState(overridden ? String(override) : "");
+  const [seen, setSeen] = useState(override);
+  // 外から上書きが変わった(計算に戻す・読み込み直し)ときだけ、表示の文字を合わせる。
+  if (override !== seen) {
+    setSeen(override);
+    setText(override === undefined ? "" : String(override));
+  }
+  const invalid = overrideInput(text).kind === "invalid";
   return (
     <div className="space-y-1">
       <div className="flex flex-wrap items-center gap-2 text-sm">
@@ -75,17 +90,21 @@ export function OverrideField({
       <div className="flex items-center gap-2">
         <input
           inputMode="numeric"
-          value={overridden ? String(override) : ""}
+          value={text}
           placeholder={computed === null ? "" : yenText(computed)}
           onChange={(e) => {
-            const v = parseYen(e.target.value);
-            onChange(e.target.value.trim() === "" || v === null ? undefined : v);
+            const r = overrideInput(e.target.value);
+            setText(e.target.value);
+            onValidity?.(r.kind !== "invalid");
+            if (r.kind === "clear") onChange(undefined);
+            else if (r.kind === "set") onChange(r.value);
           }}
           aria-label={`${label}(手で直す)`}
           className={inputCls}
         />
-        {overridden && (
-          <Button variant="ghost" size="sm" onClick={() => onChange(undefined)}>
+        {invalid && <span className="shrink-0 text-xs text-red-600 dark:text-red-400">数字で入れてください</span>}
+        {(overridden || invalid) && (
+          <Button variant="ghost" size="sm" onClick={() => { setText(""); onValidity?.(true); onChange(undefined); }}>
             <RotateCcw className="h-4 w-4" />
             計算に戻す
           </Button>

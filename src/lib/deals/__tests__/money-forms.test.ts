@@ -52,3 +52,12 @@ describe("@codex: 行の金額は入力の文字のまま持ち、保存のと�
     expect(untextify({ ...form, rent: "8万" }, ["rent", "deposit"] as const, (k) => `1行目の${k}`).bad).toEqual(["1行目のrent"]);
   });
 });
+
+describe("@codex 2巡目: 手で直す欄の打ち間違いで上書きを消さない", () => {
+  it("空=消す・読める=その値・読めない=そのまま(消さない)", async () => {
+    const { overrideInput } = await import("../money-forms");
+    expect(overrideInput("")).toEqual({ kind: "clear" });
+    expect(overrideInput("９０００００")).toEqual({ kind: "set", value: 900_000 });
+    expect(overrideInput("90万")).toEqual({ kind: "invalid" });
+  });
+});

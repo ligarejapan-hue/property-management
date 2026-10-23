@@ -3,14 +3,17 @@ vi.mock("next/server", async () => (await import("./route-mocks")).nextServerMoc
 vi.mock("@/lib/api-helpers", async () => (await import("./route-mocks")).apiHelpersMock());
 const { writeAuditLog } = vi.hoisted(() => ({ writeAuditLog: vi.fn() }));
 vi.mock("@/lib/audit", () => ({ writeAuditLog }));
-vi.mock("@/lib/prisma", () => ({
-  default: {
+vi.mock("@/lib/prisma", () => {
+  const db: Record<string, unknown> = {
     dealRateTable: {
       findMany: vi.fn(async () => []), findUnique: vi.fn(async () => null), create: vi.fn(async () => ({ id: "33333333-3333-4333-8333-333333333333" })),
       updateMany: vi.fn(async () => ({ count: 1 })), deleteMany: vi.fn(async () => ({ count: 1 })),
     },
-  },
-}));
+    $executeRaw: vi.fn(async () => 1),
+  };
+  db.$transaction = vi.fn(async (fn: (tx: unknown) => unknown) => fn(db));
+  return { default: db };
+});
 
 import prismaMock from "@/lib/prisma";
 import { getApiSession, getUserPermissions } from "@/lib/api-helpers";
@@ -19,7 +22,7 @@ import { POST } from "../../../app/api/admin/deal-settings/rate-tables/route";
 import { PUT, DELETE } from "../../../app/api/admin/deal-settings/rate-tables/[id]/route";
 
 type Fn = ReturnType<typeof vi.fn>;
-const pm = prismaMock as never as { dealRateTable: { findMany: Fn; findUnique: Fn; create: Fn; updateMany: Fn; deleteMany: Fn } };
+const pm = prismaMock as never as { dealRateTable: { findMany: Fn; findUnique: Fn; create: Fn; updateMany: Fn; deleteMany: Fn }; $executeRaw: Fn };
 const ID = "33333333-3333-4333-8333-333333333333";
 const ctx = { params: Promise.resolve({ id: ID }) };
 const ADMIN = [{ resource: "user_management", action: "write", granted: true }];
@@ -66,5 +69,17 @@ describe("税率の表を足す・直す・消す(管理者)", () => {
     expect(pm.dealRateTable.deleteMany).toHaveBeenCalledWith({ where: { id: ID, updatedAt: new Date(AT) } });
     (getUserPermissions as Fn).mockResolvedValue([]);
     expect((await DELETE(new Request(`http://x/api?updatedAt=${encodeURIComponent(AT)}`, { method: "DELETE" }), ctx)).status).toBe(403);
+  });
+});
+
+describe("@codex 2巡目: 期間の確かめと書き込みを種類ごとに1つずつ", () => {
+  it("足す・直すは、種類の鍵を取ってから重なりを確かめる", async () => {
+    pm.dealRateTable.findMany.mockResolvedValue([]);
+    await POST(json("POST", { kind: "consumption_tax", validFrom: "2030-01-01", validTo: null, content: { rateBp: 1200 } }));
+    expect(pm.$executeRaw).toHaveBeenCalledTimes(1);
+    expect(pm.$executeRaw.mock.invocationCallOrder[0]).toBeLessThan(pm.dealRateTable.findMany.mock.invocationCallOrder[0]);
+    pm.dealRateTable.findUnique.mockResolvedValue({ ...existing("2019-10-01", null, ID), updatedAt: new Date(AT) });
+    await PUT(json("PUT", { validFrom: "2019-10-01", validTo: null, content: { rateBp: 1000 }, updatedAt: AT }), ctx);
+    expect(pm.$executeRaw).toHaveBeenCalledTimes(2);
   });
 });

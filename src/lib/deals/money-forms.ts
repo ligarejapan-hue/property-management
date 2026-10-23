@@ -77,3 +77,10 @@ export function untextify<T extends object, K extends keyof T>(
   }
   return { value: out as T, bad };
 }
+
+/** 手で直す欄の入力の読み方(@codex 2巡目)。空=上書きを消す・読める=その値・読めない=上書きはそのまま(保存を止める)。 */
+export function overrideInput(text: string): { kind: "clear" } | { kind: "set"; value: number } | { kind: "invalid" } {
+  if (text.trim() === "") return { kind: "clear" };
+  const n = parseYen(text);
+  return n === null ? { kind: "invalid" } : { kind: "set", value: n };
+}

@@ -51,3 +51,6 @@ export function periodsOverlap(
   const end = (v: string | null) => v ?? "9999-12-31";
   return a.validFrom <= end(b.validTo) && b.validFrom <= end(a.validTo);
 }
+
+/** 税率の表の追加・変更を種類ごとに1つずつにする鍵(pg_advisory_xact_lock 用)。 */
+export const rateTableLockKey = (kind: string) => `deal_rate_tables:${kind}`;

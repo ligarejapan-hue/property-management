@@ -113,3 +113,12 @@ describe("@codex: 行の金額の打ち間違いを 0 に置き換えない", ()
     }
   });
 });
+
+describe("@codex 2巡目: 手で直す欄が読めなければ保存しない", () => {
+  it("OverrideField は読めない入力を親に知らせ、金額・精算タブは保存を止める", () => {
+    expect(read("src/components/deals/form-parts.tsx")).toContain("onValidity");
+    for (const p of ["src/components/deals/deal-money-panel.tsx", "src/components/deals/deal-settlement-panel.tsx"]) {
+      expect(read(p), p).toContain("badOverrides");
+    }
+  });
+});
