@@ -170,3 +170,17 @@ describe("最終レビュー: OC の敷金・買取再販の手数料", () => {
     expect(r.sale.lines.map((l) => l.key)).not.toContain("brokerage");
   });
 });
+
+describe("@codex: 印紙税の表が当たらないときは知らせる", () => {
+  it("表が無ければ購入・売却の両方に注記を出す(黙って 0 にしない)", () => {
+    const noStamp = rateRows.filter((r) => r.kind !== "stamp_contract");
+    const d = deal;
+    const r = fundingPlanCalc(d, computeDealCalc(d, noStamp, DEFAULT_PROPERTY_KINDS, "2026-10-24"), purchase({}), noStamp);
+    expect(amount(r.purchase.lines, "stamp")).toBeNull();
+    expect(r.purchase.notes.join()).toContain("印紙税の表");
+    expect(r.sale.notes.join()).toContain("印紙税の表");
+  });
+  it("表があれば注記は出さない", () => {
+    expect(run(deal, purchase({})).purchase.notes.join()).not.toContain("印紙税の表");
+  });
+});

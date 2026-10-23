@@ -83,6 +83,8 @@ export function fundingPlanCalc(deal: DealView, dc: DealCalc, inputs: FundingInp
   const commonNotes: string[] = [];
   if (isBrokerage && brokerage === null) commonNotes.push("仲介手数料は、売買価格と手数料の表がそろうと入ります。");
   if (!s.ready) commonNotes.push("精算金は、取引の基本タブで決済日時を入れると入ります。");
+  // 印紙の表が契約日に当たらないとき、黙って 0 円にしない(@codex)。
+  if (price !== null && !stampTable) commonNotes.push("印紙税の表が契約日に当たらないため、印紙を入れていません(取引の設定で表を確かめてください)。");
 
   // ---- 購入 ----
   const p = inputs.purchase;
