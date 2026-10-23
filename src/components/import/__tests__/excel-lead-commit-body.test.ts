@@ -51,6 +51,19 @@ describe("excelLeadCommitBody — 1行を登録APIの形にする", () => {
     expect(body.property.note ?? "").not.toContain("見込度");
   });
 
+  it("★申込者の氏名を物件の問い合わせ者として送る(2026-10-24)", () => {
+    expect(body.property.inquirerName).toBe("田中　次郎");
+  });
+
+  it("★ご所有者様名が別にあっても、問い合わせ者は申込者(お名前)のまま", () => {
+    const d = buildPasteDraft(
+      ["お名前：佐藤　花子", "ご所有者様名：佐藤　一郎", "物件所在地：東京都港区1-1", "物件種別：土地"].join("\n"),
+    );
+    const b = excelLeadCommitBody({ draft: d, ownerNote: "" });
+    expect(b.property.inquirerName).toBe("佐藤　花子");
+    expect(b.owner?.name).toBe("佐藤　一郎");
+  });
+
   it("氏名が無ければ所有者は送らない", () => {
     const d = buildPasteDraft("物件所在地：東京都港区1-1\n物件種別：土地");
     expect(excelLeadCommitBody({ draft: d, ownerNote: "x" }).owner).toBeNull();

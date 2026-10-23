@@ -9,6 +9,8 @@ import {
 } from "@/lib/api-helpers";
 import { hasPermission } from "@/lib/permissions";
 import { canAccessPropertyRecord } from "@/lib/property-access";
+import { redactPropertyChangeValue } from "@/lib/inquirer-name";
+import { inquirerNameLevelFor } from "@/lib/inquirer-name-server";
 
 // ---------- GET /api/properties/:id/change-logs ----------
 
@@ -133,8 +135,21 @@ export async function GET(
       }),
     ]);
 
+    // 物件の欄のうち問い合わせ者(個人情報)の値は、所有者の氏名と同じ扱いで伏せる
+    // (owner:read が無ければ「（非表示）」・ある人は表示レベルどおり)。
+    const inquirerLevel = await inquirerNameLevelFor(session.id, perms);
+    const visibleLogs = logs.map((log) =>
+      log.targetTable === "properties"
+        ? {
+            ...log,
+            oldValue: redactPropertyChangeValue(log.fieldName, log.oldValue, inquirerLevel),
+            newValue: redactPropertyChangeValue(log.fieldName, log.newValue, inquirerLevel),
+          }
+        : log,
+    );
+
     return apiResponse({
-      data: logs,
+      data: visibleLogs,
       pagination: {
         page,
         limit,

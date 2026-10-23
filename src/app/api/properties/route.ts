@@ -22,6 +22,7 @@ import {
   buildPropertyListOrderBy,
 } from "@/lib/property-list-query";
 import { dateOnlyString } from "@/lib/case-dates";
+import { applyInquirerNameVisibility } from "@/lib/inquirer-name";
 
 // ---------- GET /api/properties ----------
 
@@ -79,6 +80,11 @@ export async function GET(request: NextRequest) {
             contractPlannedOn: true,
             settlementPlannedOn: true,
             introductionRoute: true,
+            // 一覧の「問い合わせ者／所有者」の列(個人情報=下で owner:read と表示レベルを通す)。
+            inquirerName: true,
+            // 一覧の案件ステータスの横の「除外申請中 N日」の札。
+            leadExclusionStatus: true,
+            leadExclusionRequestedAt: true,
             isArchived: true,
             // 一覧の「登録日」列(既定の並びも登録日の新しい順)。
             createdAt: true,
@@ -114,7 +120,9 @@ export async function GET(request: NextRequest) {
     const data = properties.map((p) => {
       const { propertyOwners, _count, ...property } = p;
       return {
-        ...property,
+        // 問い合わせ者は owner:read がある人にだけ・所有者の氏名と同じ表示レベル(maskValue)で返す。
+        ...applyInquirerNameVisibility(property, hasOwnerRead && ownerDisplayConfig ? ownerDisplayConfig.name : null),
+        leadExclusionRequestedAt: dateOnlyString(property.leadExclusionRequestedAt),
         // DATE 列は "YYYY-MM-DD" で返す(モックの行に無ければ null)。
         contractPlannedOn: dateOnlyString(property.contractPlannedOn),
         settlementPlannedOn: dateOnlyString(property.settlementPlannedOn),
@@ -215,7 +223,8 @@ export async function POST(request: NextRequest) {
     });
     await writeBuildingLinkAudit(session.id, property.id, buildingLink);
 
-    return apiResponse({ ...property, buildingLink }, 201);
+    // 手で作る物件に問い合わせ者は無いが、キーも返さない(行を丸ごと返す route の約束)。
+    return apiResponse({ ...applyInquirerNameVisibility(property, null), buildingLink }, 201);
   } catch (error) {
     return handleApiError(error);
   }

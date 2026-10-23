@@ -20,6 +20,8 @@ vi.mock("@/lib/api-helpers", () => ({
   },
   getApiSession: vi.fn(),
   getUserPermissions: vi.fn(),
+  // 問い合わせ者の値を伏せる表示レベル(owner:read があるときだけ引く・2026-10-24)。
+  getOwnerDisplayConfig: vi.fn(async () => ({ name: "full" })),
   apiResponse: vi.fn((body: unknown, status = 200) =>
     Response.json(body as object, { status }),
   ),

@@ -109,6 +109,7 @@ const ALWAYS_SAFE_KEYS: ReadonlySet<string> = new Set([
   "resendOnly", // 再送候補フィルタ("1" のみ・非PIIのフラグ)。⚠route の AUDIT_FILTER_KEYS に足すだけでは表示で [REDACTED] になる(PR-C)。
   "caseStatus",
   "introductionRoute",
+  "leadExclusion", // 除外申請の絞り込み(固定の4値・非PII)。
   "assignedTo",
   "updatedFrom",
   "updatedTo",
@@ -484,10 +485,11 @@ const ACTION_EXTRA_KEYS: Readonly<Record<string, ReadonlySet<string>>> = {
   // (社内の恒久ルール「ログに外部由来の文字を出すときは許可リスト」)。
   //   attachmentCreated = 取込元PDFを添付として保存したか
   //   hasExternalKey    = 査定ナンバー等の外部キーがあったか
+  //   inquirerSaved     = 問い合わせ者(申込者の氏名)を物件に残したか(真偽だけ・氏名は載せない)
   // ⚠ownerCreated / ownerLinked は /owner/i の denylist に当たるため
   //   force-safe 側で保持する(値は boolean ゆえ PII 流入余地なし)。
   // ⚠ここに氏名・住所・原文のキーは**足さない**(安全なものだけを並べる方式)。
-  paste_import_property_create: new Set(["attachmentCreated", "hasExternalKey"]),
+  paste_import_property_create: new Set(["attachmentCreated", "hasExternalKey", "inquirerSaved"]),
   // 編集中の鍵(設計 2026-09-17)。detail は UUID と enum のみ。
   // 氏名・画面の合言葉(生値もハッシュも)は載せない。
   edit_lock_acquire: new Set(["resourceType", "resourceId"]),

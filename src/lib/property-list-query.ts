@@ -15,6 +15,7 @@ import {
 } from "@/lib/dm-resend/candidacy";
 import prisma from "@/lib/prisma";
 import { resolveMgmtIdMatches } from "@/lib/property-mgmt-id-search";
+import { buildLeadExclusionWhere, jstTodayDateOnly } from "@/lib/lead-exclusion";
 import { propertyListQuerySchema } from "@/lib/validators";
 import type { z } from "zod";
 
@@ -79,6 +80,7 @@ export async function buildPropertyListWhere(
     dmSentMax,
     caseStatus,
     introductionRoute,
+    leadExclusion,
     assignedTo,
     ownerId,
     updatedFrom,
@@ -105,6 +107,13 @@ export async function buildPropertyListWhere(
   if (undeliverable === "1") where.dmUndeliverableAt = { not: null };
   if (caseStatus) where.caseStatus = caseStatus;
   if (introductionRoute) where.introductionRoute = introductionRoute;
+  // 除外申請(申請中 / 申請中で7日以上 / 除外された / 認められなかった)。
+  // ⚠「7日以上」の今日(JST)はここで1回だけ決める(1つの判定で時計を2回読まない)。
+  // ⚠AND に足す(keyword の OR と混ぜない)。
+  if (leadExclusion) {
+    const leadWhere = buildLeadExclusionWhere(leadExclusion, jstTodayDateOnly(new Date()));
+    if (leadWhere) where.AND = [...(where.AND ?? []), leadWhere];
+  }
   if (assignedTo) where.assignedTo = assignedTo;
 
   if (keyword) {

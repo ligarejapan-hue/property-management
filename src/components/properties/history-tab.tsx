@@ -40,6 +40,11 @@ const FIELD_LABELS: Record<string, string> = {
   // 案件ステータス 8〜10 の日付の欄(値は YYYY-MM-DD で残る)。
   contractPlannedOn: "契約予定日",
   settlementPlannedOn: "決済予定日",
+  // 問い合わせ者(値は所有者の氏名と同じ扱いで API が伏せて返す)・除外申請(2026-10-24)。
+  inquirerName: "問い合わせ者",
+  leadExclusionStatus: "除外申請",
+  leadExclusionRequestedAt: "除外申請日",
+  leadExclusionDecidedAt: "除外申請の結果の日",
   propertyType: "種別",
   assignedTo: "担当者",
   zoningDistrict: "用途地域",

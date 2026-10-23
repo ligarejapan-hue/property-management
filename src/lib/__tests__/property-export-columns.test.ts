@@ -26,6 +26,7 @@ const ALL_KEYS = [
   "introductionRoute",
   "assigneeName",
   "ownerNames",
+  "inquirerName",
   "updatedAt",
   "createdAt",
   "postalCode",
@@ -46,13 +47,14 @@ const ALL_HEADERS = [
   "導入ルート",
   "担当者名",
   "所有者名",
+  "問い合わせ者",
   "更新日時",
   "作成日時",
   "郵便番号",
 ];
 
 describe("EXPORT_COLUMNS", () => {
-  it("現行17列を安定キー↔日本語ヘッダで定義順に保持する", () => {
+  it("現行18列(2026-10-24 問い合わせ者を追加)を安定キー↔日本語ヘッダで定義順に保持する", () => {
     expect(EXPORT_COLUMNS.map((c) => c.key)).toEqual(ALL_KEYS);
     expect(EXPORT_COLUMNS.map((c) => c.header)).toEqual(ALL_HEADERS);
   });

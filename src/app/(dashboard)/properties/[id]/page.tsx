@@ -102,6 +102,8 @@ import { AddressLookupControls } from "@/components/address/address-lookup-contr
 import { useScreenProtection } from "@/components/screen-protection/screen-protection-provider";
 import { SalesSheetCreateButton } from "@/components/sales-sheet/SalesSheetCreateButton";
 import CaseDatesField from "@/components/properties/case-dates-field";
+import InquirerNameField from "@/components/properties/inquirer-name-field";
+import LeadExclusionField from "@/components/properties/lead-exclusion-field";
 import { SalesSheetList } from "@/components/sales-sheet/SalesSheetList";
 import { salesSheetTemplateKindFor } from "@/lib/sales-sheet/template-kind";
 import { formatPhoneJp, isValidPhoneJp } from "@/lib/phone-format-jp";
@@ -295,6 +297,12 @@ interface ApiProperty {
   occupancyStatus: string | null;
   ownershipShareNote: string | null;
   introductionRoute: string | null;
+  /** 問い合わせ者(反響の申込者の氏名)。owner:read が無いと API が返さない(undefined)。 */
+  inquirerName?: string | null;
+  /** 除外申請(requested/approved/rejected・null=なし)と日付("YYYY-MM-DD")。 */
+  leadExclusionStatus: string | null;
+  leadExclusionRequestedAt: string | null;
+  leadExclusionDecidedAt: string | null;
   /** DMの種類(台帳の id)。null=自動(導入ルートから決まる・設計 2026-09-27 §3.6)。 */
   dmScenarioId: string | null;
   importSource: string | null;
@@ -1120,6 +1128,9 @@ export default function PropertyDetailPage({
       {showEditForm && (
         <PropertyEditForm
           property={property}
+          // 問い合わせ者の欄は、読めて(owner:read・API が値を返した)氏名を書ける人にだけ出す
+          // (PATCH も同じ条件で 403)。
+          canEditInquirer={canReadOwner && canWriteOwnerName && property.inquirerName !== undefined}
           onClose={() => setShowEditForm(false)}
           onSaved={(r) => {
             setShowEditForm(false);
@@ -1362,6 +1373,15 @@ function BasicTab({
         editLockHeld={editLockHeld}
       />
       <IntroductionRouteField
+        property={property}
+        onRefresh={onRefresh}
+        canWrite={canWrite}
+        editLockHeld={editLockHeld}
+      />
+      {/* 問い合わせ者(反響の申込者・2026-10-24)。owner:read が無いと行ごと出ない。 */}
+      <InquirerNameField value={property.inquirerName} />
+      {/* 除外申請(一括査定の物件・状態がある物件だけ開いて出す・2026-10-24)。 */}
+      <LeadExclusionField
         property={property}
         onRefresh={onRefresh}
         canWrite={canWrite}

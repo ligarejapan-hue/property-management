@@ -13,6 +13,7 @@ import {
 } from "@/lib/api-helpers";
 import { writeAuditLog } from "@/lib/audit";
 import { hasPermission, maskValue } from "@/lib/permissions";
+import { applyInquirerNameVisibility } from "@/lib/inquirer-name";
 import { canAccessPropertyRecord } from "@/lib/property-access";
 import { applyBuildingLink, writeBuildingLinkAudit } from "@/lib/building-link/apply";
 
@@ -93,7 +94,8 @@ export async function GET(
     const data = visible.map((p) => {
       const { propertyOwners, ...rest } = p;
       return {
-        ...rest,
+        // 問い合わせ者(個人情報)は所有者の氏名と同じ扱い(owner:read が無ければ出さない)。
+        ...applyInquirerNameVisibility(rest, ownerDisplayConfig?.name ?? null),
         propertyOwners:
           hasOwnerRead && ownerDisplayConfig
             ? propertyOwners
@@ -199,7 +201,8 @@ export async function POST(
     await writeBuildingLinkAudit(session.id, property.id, buildingLink);
 
     // 作った直後の行は buildingId が空なので、つないだ値を載せる。
-    return apiResponse({ ...property, buildingId: id }, 201);
+    // 作ったばかりの部屋に問い合わせ者は無いが、キーも返さない(行を丸ごと返す route の約束)。
+    return apiResponse({ ...applyInquirerNameVisibility(property, null), buildingId: id }, 201);
   } catch (error) {
     return handleApiError(error);
   }

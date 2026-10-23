@@ -205,10 +205,11 @@ describe("S1b-3: PII マーカ付与（実レンダリング面）", () => {
   // 17-A: source-assertion は「実際に描画される画面」を対象にする。
   // 未配線の dead code（owner-detail-panel.tsx）だけを見て安心しないこと。
   it("実画面で表示される所有者 PII 面に owner surface を付与（物件一覧 / 管理 Owner 詳細）", () => {
-    // 物件一覧の所有者名セル（17-A 追加）
-    expect(read("src/app/(dashboard)/properties/page.tsx")).toMatch(
-      /data-pii-protected data-pii-surface="owner"/,
-    );
+    // 物件一覧の所有者名セル（17-A 追加）。2026-10-24 から「問い合わせ者／所有者」の列は
+    // 部品(InquirerOrOwnerNames)が描き、owner surface も部品の中で付ける。
+    expect(read("src/app/(dashboard)/properties/page.tsx")).toMatch(/<InquirerOrOwnerNames/);
+    const cells = read("src/components/properties/property-list-cells.tsx");
+    expect(cells.match(/data-pii-protected data-pii-surface="owner"/g)?.length).toBe(2);
     // 管理 Owner 詳細（masked 値でも owner surface として扱う・17-A 追加）
     expect(read("src/app/(dashboard)/admin/owners/[id]/page.tsx")).toMatch(
       /data-pii-protected[\s\S]*?data-pii-surface="owner"/,

@@ -39,6 +39,7 @@ import { canSubmitSave, shouldShowLockUnavailableNotice } from "@/lib/edit-lock/
 // helper を通す(横断レビュー I2)。窓口の423は氏名・時刻を返さないため、状態の窓口へ
 // 1回だけ問い合わせて差し替える。
 import { showComposedEditLockedMessage } from "@/lib/edit-lock/locked-message";
+import { INQUIRER_NAME_MAX_LENGTH } from "@/lib/inquirer-name";
 
 interface AssigneeOption {
   id: string;
@@ -73,6 +74,8 @@ interface PropertyData {
   rebuildPermission: string | null;
   architectureNote: string | null;
   note: string | null;
+  /** 問い合わせ者。API が返さない(owner:read が無い)ときは undefined。 */
+  inquirerName?: string | null;
   assignedTo: string | null;
   version: number;
   // ── 「販売」区分(F3 Task7) ─────────────────────────────────────────────
@@ -115,6 +118,8 @@ interface PropertyData {
 
 interface PropertyEditFormProps {
   property: PropertyData;
+  /** 問い合わせ者の欄を出すか(owner:read と owner_name の書き込み権限がある人だけ)。 */
+  canEditInquirer?: boolean;
   onClose: () => void;
   /** 保存できたら呼ぶ。棟へつないだ結果(buildingLink)があれば渡す(物件詳細の上に知らせを出す)。 */
   onSaved: (result?: { buildingLink?: BuildingLinkOutcome | null }) => void;
@@ -397,6 +402,9 @@ const FORM_FIELDS: FormField[] = [
   { key: "assignedTo", label: "担当者", type: "select", section: "基本", options: [] },
   { key: "gpsLat", label: "緯度", type: "number", section: "基本" },
   { key: "gpsLng", label: "経度", type: "number", section: "基本" },
+  // 問い合わせ者(反響の申込者の氏名・2026-10-24)。⚠個人情報=書ける人にだけ出す
+  //   (canEditInquirer。出さないときは allFields から外す=送らない)。
+  { key: "inquirerName", label: "問い合わせ者", type: "text", section: "基本", maxLength: INQUIRER_NAME_MAX_LENGTH },
   { key: "note", label: "備考", type: "textarea", section: "基本" },
   // Investigation
   { key: "zoningDistrict", label: "用途地域", type: "text", section: "調査" },
@@ -415,6 +423,7 @@ const FORM_FIELDS: FormField[] = [
 
 export default function PropertyEditForm({
   property,
+  canEditInquirer = false,
   onClose,
   onSaved,
 }: PropertyEditFormProps) {
@@ -520,7 +529,10 @@ export default function PropertyEditForm({
   const salesFields = salesFieldsFor(values.propertyType ?? property.propertyType, {
     hasBuilding: property.building != null,
   });
-  const allFields = [...FORM_FIELDS, ...salesFields];
+  const allFields = [
+    ...FORM_FIELDS.filter((f) => f.key !== "inquirerName" || canEditInquirer),
+    ...salesFields,
+  ];
   const isMansion = isMansionUnit(values.propertyType ?? property.propertyType);
 
   const editDraftData = useMemo<PropertyEditDraft>(

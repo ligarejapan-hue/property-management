@@ -1104,12 +1104,13 @@ describe("監査ログが管理画面で「物件」として拾え、中身も�
     }, pdfFile()));
 
     const call = auditCalls[0] as { action: string; detail: Record<string, unknown> };
-    // 記録した4つの真偽値が、まず route 側で正しい値になっている。
+    // 記録した5つの真偽値が、まず route 側で正しい値になっている(問い合わせ者=2026-10-24 追加)。
     expect(call.detail).toEqual({
       ownerCreated: true,
       ownerLinked: true,
       attachmentCreated: true,
       hasExternalKey: true,
+      inquirerSaved: false,
     });
     // その**同じ detail** を管理画面と同じ関数に通しても、1つも伏せ字にならない。
     const shown = sanitizeAuditDetail(call.action, call.detail) as Record<string, unknown>;
@@ -1493,5 +1494,53 @@ describe("反響PDFの自動圧縮(2026-10-10)", () => {
     const res = await POST(await multipartReq(baseBody, pdfFile()));
     expect(res.status).toBe(200);
     expect(created.attachment?.[0]).toMatchObject({ originalSize: null });
+  });
+});
+
+describe("問い合わせ者(反響の申込者の氏名・2026-10-24)", () => {
+  const READ_OWNER = { resource: "owner", action: "read", granted: true };
+
+  it("★申込者の氏名を物件の問い合わせ者に残す(前後の空白は除く)", async () => {
+    mockPerms = [...FULL_PERMS, READ_OWNER];
+    const res = await POST(req({ ...baseBody, property: { ...baseBody.property, inquirerName: "  山田花子  " } }));
+    expect(res.status).toBe(200);
+    expect(created.property?.[0]).toMatchObject({ inquirerName: "山田花子" });
+  });
+
+  it("送らない・空なら null(今までどおり)", async () => {
+    await POST(req(baseBody));
+    expect(created.property?.[0]).toMatchObject({ inquirerName: null });
+    for (const k of Object.keys(created)) delete created[k];
+    await POST(req({ ...baseBody, property: { ...baseBody.property, inquirerName: "   " } }));
+    expect(created.property?.[0]).toMatchObject({ inquirerName: null });
+  });
+
+  it("★owner:read または owner_name の書き込みが無ければ、問い合わせ者だけ残さず取込は通す", async () => {
+    mockPerms = FULL_PERMS; // owner:read なし
+    const res = await POST(req({ ...baseBody, property: { ...baseBody.property, inquirerName: "山田花子" } }));
+    expect(res.status).toBe(200);
+    expect(created.property?.[0]).toMatchObject({ inquirerName: null });
+    delete created.property;
+    mockPerms = [...FULL_PERMS.filter((p) => p.resource !== "owner_name"), READ_OWNER];
+    const res2 = await POST(req({ ...baseBody, property: { ...baseBody.property, inquirerName: "山田花子" } }));
+    expect(res2.status).toBe(200);
+    expect(created.property?.[0]).toMatchObject({ inquirerName: null });
+  });
+
+  it("★上限を超えたら400・文字列以外も400", async () => {
+    mockPerms = [...FULL_PERMS, READ_OWNER];
+    const res = await POST(req({ ...baseBody, property: { ...baseBody.property, inquirerName: "あ".repeat(101) } }));
+    expect(res.status).toBe(400);
+    const res2 = await POST(req({ ...baseBody, property: { ...baseBody.property, inquirerName: 123 } }));
+    expect(res2.status).toBe(400);
+    expect(created.property).toBeUndefined();
+  });
+
+  it("★監査ログには氏名を入れない(残したかどうかだけ)", async () => {
+    mockPerms = [...FULL_PERMS, READ_OWNER];
+    await POST(req({ ...baseBody, property: { ...baseBody.property, inquirerName: "山田花子" } }));
+    const dumped = JSON.stringify(auditCalls);
+    expect(dumped).not.toContain("山田花子");
+    expect(dumped).toContain("inquirerSaved");
   });
 });

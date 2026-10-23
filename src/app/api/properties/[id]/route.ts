@@ -9,7 +9,7 @@ import {
   ApiError,
 } from "@/lib/api-helpers";
 import { writeAuditLog } from "@/lib/audit";
-import { hasPermission } from "@/lib/permissions";
+import { hasPermission, hasExplicitWritePerm } from "@/lib/permissions";
 import { lockPropertyRow } from "@/lib/property-record-guard";
 import { assertNotEditLockedByOther, deleteEditLocksFor } from "@/lib/edit-lock/service";
 import { readScreenTokenHash, readLockId } from "@/lib/edit-lock/screen-token";
@@ -33,6 +33,8 @@ import { AUTO_CHOICE } from "@/lib/building-link/resolve";
 import { getStorage } from "@/lib/storage";
 import { extractStorageKeyFromUrl } from "@/lib/storage/url-to-key";
 import { CASE_DATE_FIELDS, dateOnlyString } from "@/lib/case-dates";
+import { applyInquirerNameVisibility } from "@/lib/inquirer-name";
+import { LEAD_EXCLUSION_DATE_FIELDS, jstTodayDateOnly, normalizeLeadExclusionPatch } from "@/lib/lead-exclusion";
 
 // ---------- GET /api/properties/[id] ----------
 
@@ -194,10 +196,13 @@ export async function GET(
     }
 
     return apiResponse({
-      ...property,
+      // 問い合わせ者(個人情報)は owner:read がある人にだけ・所有者の氏名と同じ表示レベルで返す。
+      ...applyInquirerNameVisibility(property, ownerDisplayConfig?.name ?? null),
       // DATE 列は "YYYY-MM-DD" で返す(JSON の ISO 文字列 "…T00:00:00.000Z" を画面に持ち込まない)。
       contractPlannedOn: dateOnlyString(property.contractPlannedOn),
       settlementPlannedOn: dateOnlyString(property.settlementPlannedOn),
+      leadExclusionRequestedAt: dateOnlyString(property.leadExclusionRequestedAt),
+      leadExclusionDecidedAt: dateOnlyString(property.leadExclusionDecidedAt),
       propertyOwners: maskedPropertyOwners,
       importSource,
       registryAttachmentCounts,
@@ -227,6 +232,15 @@ export async function PATCH(
     // buildingChoice は列ではない(棟の選び方)。保存する値から外す。
     const { version, buildingChoice, ...updateFields } = data;
 
+    // 問い合わせ者は所有者の氏名と同じ個人情報。読めて(owner:read)氏名を書ける(owner_name の
+    // full/edit)人だけが書ける。⚠読めない人が上書き・消去できる口にしない。
+    if (
+      updateFields.inquirerName !== undefined &&
+      !(hasPermission(permissions, "owner", "read") && hasExplicitWritePerm(permissions, "owner_name"))
+    ) {
+      throw new ApiError(403, "問い合わせ者を編集する権限がありません", "FORBIDDEN");
+    }
+
     // Optimistic locking: only update if version matches
     const current = await prisma.property.findUnique({
       where: { id },
@@ -253,6 +267,11 @@ export async function PATCH(
         contractPlannedOn: true,
         settlementPlannedOn: true,
         introductionRoute: true,
+        // 問い合わせ者・除外申請(変更履歴の「変更前」・除外申請の日付の補いに使う)。
+        inquirerName: true,
+        leadExclusionStatus: true,
+        leadExclusionRequestedAt: true,
+        leadExclusionDecidedAt: true,
         // DMの種類(変更履歴の「変更前」に使う。選ばないと自動→手動切替の履歴の
         // oldValue が常に空になる)。
         dmScenarioId: true,
@@ -382,7 +401,18 @@ export async function PATCH(
       else if (updateFields.propertyType !== undefined && !supportsUnitFields(effectiveType)) unitOnlySent[k] = null;
     }
     const unitOnlyPatch = normalizeUnitOnlyFields(effectiveType, unitOnlySent) as Partial<typeof updateFields>;
-    const persistedFields = { ...updateFields, ...unitOnlyPatch, ...buildingNamePatch };
+    // 除外申請: 申請中にしたら申請した日(無ければ今日)・結果を入れたら結果の日(無ければ今日)・
+    // なしに戻したら日付も消す。今日(JST)はこの保存で1回だけ決める。
+    const leadExclusionPatch = normalizeLeadExclusionPatch(
+      current,
+      {
+        leadExclusionStatus: updateFields.leadExclusionStatus,
+        leadExclusionRequestedAt: updateFields.leadExclusionRequestedAt,
+        leadExclusionDecidedAt: updateFields.leadExclusionDecidedAt,
+      },
+      jstTodayDateOnly(new Date()),
+    );
+    const persistedFields = { ...updateFields, ...unitOnlyPatch, ...buildingNamePatch, ...leadExclusionPatch };
 
     // 棟へのつなぎ直しが要るか(設計 2026-10-04 §4.4)。物件名・種別・住所のどれかが変わったとき、
     // または画面が棟を選んで送ってきたときだけ。⚠メモだけの保存で棟を触らない。
@@ -416,7 +446,9 @@ export async function PATCH(
       if (newVal === undefined) continue;
       const oldVal = (current as Record<string, unknown>)[key];
       // 日付だけの列は "YYYY-MM-DD" で履歴に残す(Date の String() は曜日入りの英語になる)。
-      const isDateOnly = (CASE_DATE_FIELDS as readonly string[]).includes(key);
+      const isDateOnly =
+        (CASE_DATE_FIELDS as readonly string[]).includes(key) ||
+        (LEAD_EXCLUSION_DATE_FIELDS as readonly string[]).includes(key);
       const oldStr = isDateOnly
         ? dateOnlyString(oldVal as Date | null)
         : oldVal != null ? String(oldVal) : null;
@@ -619,7 +651,7 @@ export async function PATCH(
     }));
 
     return apiResponse({
-      ...updated,
+      ...applyInquirerNameVisibility(updated, ownerDisplayConfig?.name ?? null),
       propertyOwners: maskedUpdatedPropertyOwners,
       buildingLink: buildingLink ?? null,
     });
