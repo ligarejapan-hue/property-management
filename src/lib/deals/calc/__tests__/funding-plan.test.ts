@@ -145,3 +145,28 @@ describe("資金計画表(売却)", () => {
     expect(run(deal, sale({ demolitionFee: 2_000_000 })).sale.lines.map((l) => l.key)).not.toContain("demolitionFee");
   });
 });
+
+describe("最終レビュー: OC の敷金・買取再販の手数料", () => {
+  const oc: DealView = {
+    ...deal, hasOc: true, settlementTerms: { ...deal.settlementTerms, depositMode: "offset" },
+    leases: [{ room: "101", tenant: null, contractType: "ordinary", period: null, rent: 80_000, commonFee: 0, parking: 0, other: 0, deposit: 160_000, arrears: false, arrearsAmount: 0, manager: null }],
+  };
+  it("敷金を残代金と相殺するときは、購入の必要資金から引き、売却の手取りからも引く", () => {
+    const r = run(oc, purchase({}));
+    expect(amount(r.purchase.lines, "depositOffset")).toBe(-160_000);
+    const s = run(oc, sale({})).sale;
+    expect(s.depositOffset).toBe(160_000);
+    const noDeposit = run({ ...oc, leases: [{ ...oc.leases[0], deposit: 0 }] }, sale({})).sale;
+    expect(noDeposit.netBeforeTax! - s.netBeforeTax!).toBe(160_000);
+  });
+  it("別途授受のときは資金計画に入れない", () => {
+    const sep = { ...oc, settlementTerms: { ...oc.settlementTerms, depositMode: "separate" as const } };
+    expect(run(sep, purchase({})).purchase.lines.map((l) => l.key)).not.toContain("depositOffset");
+    expect(run(sep, sale({})).sale.depositOffset).toBe(0);
+  });
+  it("買取再販の取引では仲介手数料の行を出さない", () => {
+    const r = run({ ...deal, businessType: "resale", tradeSide: null }, purchase({}));
+    expect(r.purchase.lines.map((l) => l.key)).not.toContain("brokerage");
+    expect(r.sale.lines.map((l) => l.key)).not.toContain("brokerage");
+  });
+});

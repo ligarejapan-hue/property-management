@@ -32,7 +32,8 @@ describe("資金計画表の画面", () => {
     expect(src).toContain("if (!parsed.value) {");
     expect(src).toContain("保存していません");
     expect(src).toContain("VERSION_CONFLICT");
-    expect(src).toContain("version: deal.version, fundingPlan: parsed.value");
+    expect(src).toContain("version: Math.max(deal.version, savedVersion), fundingPlan: parsed.value");
+    expect(src).toContain("<fieldset disabled={saving}");
   });
 
   it("古いプレビューの応答で新しいものを上書きしない", () => {

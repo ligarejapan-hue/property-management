@@ -38,6 +38,8 @@ export interface FundingSaleResult {
   loanBalance: number;
   /** 精算金(売主が受け取る向きを+)。決済日が無ければ 0。 */
   settlementReceive: number;
+  /** 預り敷金の承継で残代金から差し引く額(相殺のときだけ・OC)。 */
+  depositOffset: number;
   /** 手取り(税引前)。価格が無ければ null。 */
   netBeforeTax: number | null;
   tax: ReturnType<typeof capitalGainsEstimate> | null;
@@ -70,11 +72,16 @@ export function fundingPlanCalc(deal: DealView, dc: DealCalc, inputs: FundingInp
   const missing = price === null ? ["売買価格"] : [];
   const stampTable = pickRateContent(rateRows, "stamp_contract", dc.baseDate);
   const stamp = price !== null && stampTable ? contractStamp(price, stampTable, inputs.stampShare) : null;
-  const brokerage = dc.brokerage?.incl ?? null;
+  // 買取再販(自社が売主・買主)では仲介手数料はかからない(最終レビュー)。
+  const isBrokerage = deal.businessType === "brokerage";
+  const brokerage = isBrokerage ? dc.brokerage?.incl ?? null : null;
+  const brokerageLines: FundingLine[] = isBrokerage ? [{ key: "brokerage", label: "仲介手数料(税込)", amount: brokerage }] : [];
   const s = dc.settlement;
   const settlementNet = s.ready ? s.totalBuyerToSeller - s.totalSellerToBuyer : null;
+  // OC の預り敷金を残代金と相殺するときは、買主の払う額・売主の受け取る額がその分だけ減る(別途授受なら入れない)。
+  const depositOffset = s.ready ? s.depositOffset : 0;
   const commonNotes: string[] = [];
-  if (brokerage === null) commonNotes.push("仲介手数料は、売買価格と手数料の表がそろうと入ります。");
+  if (isBrokerage && brokerage === null) commonNotes.push("仲介手数料は、売買価格と手数料の表がそろうと入ります。");
   if (!s.ready) commonNotes.push("精算金は、取引の基本タブで決済日時を入れると入ります。");
 
   // ---- 購入 ----
@@ -82,7 +89,7 @@ export function fundingPlanCalc(deal: DealView, dc: DealCalc, inputs: FundingInp
   const building = kind !== "land";
   const pNotes = [...commonNotes];
   const linesBeforeFee: FundingLine[] = [
-    { key: "brokerage", label: "仲介手数料(税込)", amount: brokerage },
+    ...brokerageLines,
     { key: "stamp", label: "印紙(売買契約書)", amount: stamp },
     { key: "registrationTransfer", label: "登記費用(所有権移転)", amount: p.registrationTransfer ?? deal.costs.registrationFee },
     ...(building ? [{ key: "registrationPreservation", label: "登記費用(保存)", amount: p.registrationPreservation }] : []),
@@ -93,6 +100,7 @@ export function fundingPlanCalc(deal: DealView, dc: DealCalc, inputs: FundingInp
     { key: "loanGuarantee", label: "ローン保証料", amount: p.loanGuarantee },
     ...(building ? [{ key: "fireInsurance", label: "火災保険", amount: p.fireInsurance }] : []),
     ...(settlementNet !== null ? [{ key: "settlement", label: "精算金(固都税・管理費など)", amount: settlementNet }] : []),
+    ...(depositOffset > 0 ? [{ key: "depositOffset", label: "預り敷金の承継(残代金と相殺)", amount: -depositOffset }] : []),
     { key: "acquisitionTax", label: "不動産取得税(目安)", amount: p.acquisitionTax },
     ...otherLines(p.others),
   ];
@@ -134,7 +142,7 @@ export function fundingPlanCalc(deal: DealView, dc: DealCalc, inputs: FundingInp
   const surveyFee = v.surveyFee ?? deal.costs.surveyFee;
   const demolition = kind !== "unit" ? v.demolitionFee : null;
   const sLines: FundingLine[] = [
-    { key: "brokerage", label: "仲介手数料(税込)", amount: brokerage },
+    ...brokerageLines,
     { key: "stamp", label: "印紙(売買契約書)", amount: stamp },
     { key: "mortgageCancellation", label: "抵当権抹消費用", amount: v.mortgageCancellation ?? deal.costs.cancellationFee },
     { key: "surveyFee", label: "測量費", amount: surveyFee },
@@ -144,7 +152,7 @@ export function fundingPlanCalc(deal: DealView, dc: DealCalc, inputs: FundingInp
   const sCostsTotal = sum(sLines.map((l) => l.amount));
   const loanBalance = v.loanBalance ?? 0;
   const settlementReceive = settlementNet ?? 0;
-  const netBeforeTax = price === null ? null : price - sCostsTotal - loanBalance + settlementReceive;
+  const netBeforeTax = price === null ? null : price - sCostsTotal - loanBalance + settlementReceive - depositOffset;
   const cg = pickRateContent(rateRows, "capital_gains", dc.baseDate);
   let tax: FundingSaleResult["tax"] = null;
   if (price === null) {
@@ -166,7 +174,7 @@ export function fundingPlanCalc(deal: DealView, dc: DealCalc, inputs: FundingInp
     mode: inputs.mode, kindBase: kind, price, missing,
     purchase: { lines, costsTotal, total, loanAmount, loanSource, ownFunds, loans, monthlyHousing, notes: pNotes },
     sale: {
-      lines: sLines, costsTotal: sCostsTotal, loanBalance, settlementReceive, netBeforeTax, tax,
+      lines: sLines, costsTotal: sCostsTotal, loanBalance, settlementReceive, depositOffset, netBeforeTax, tax,
       netAfterTax: tax && netBeforeTax !== null ? netBeforeTax - tax.total : null, taxNote: CAPITAL_GAINS_NOTE, notes: sNotes,
     },
   };

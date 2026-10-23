@@ -56,11 +56,31 @@ describe("資金計画表の画面の形", () => {
     expect(r.bad).toEqual(expect.arrayContaining(["パターン1の金利(0〜30%)", "パターン1の年数(1〜50年)", "取得日"]));
   });
 
-  it("名前が空のその他の行は捨てる・名前があって金額が読めない行は知らせる", () => {
+  it("名前も金額も空のその他の行は捨てる・名前があって金額が読めない行は知らせる", () => {
     const form = fundingFormFromInputs(filled);
-    form.purchase.others = [{ label: " ", amount: "x" }, { label: "家具", amount: "abc" }];
-    expect(fundingInputsFromForm(form).bad).toEqual(["購入のその他の費用1行目の金額"]);
-    form.purchase.others = [{ label: " ", amount: "x" }, { label: "家具", amount: "300000" }];
+    form.purchase.others = [{ label: " ", amount: "" }, { label: "家具", amount: "abc" }];
+    expect(fundingInputsFromForm(form).bad).toEqual(["購入のその他の費用2行目の金額"]);
+    form.purchase.others = [{ label: " ", amount: " " }, { label: "家具", amount: "300000" }];
     expect(fundingInputsFromForm(form).value?.purchase.others).toEqual([{ label: "家具", amount: 300_000 }]);
+  });
+});
+
+describe("最終レビュー: その他の行・大きすぎる金額", () => {
+  it("名前が空で金額だけある行は捨てずに知らせる(合計から黙って落とさない)", () => {
+    const form = fundingFormFromInputs(filled);
+    form.purchase.others = [{ label: "", amount: "50000" }];
+    const r = fundingInputsFromForm(form);
+    expect(r.value).toBeNull();
+    expect(r.bad).toEqual(["購入のその他の費用1行目の名前"]);
+  });
+  it("行の番号は画面の並びのまま(空の行を数えて飛ばさない)", () => {
+    const form = fundingFormFromInputs(filled);
+    form.sale.others = [{ label: "", amount: "" }, { label: "残置物", amount: "abc" }];
+    expect(fundingInputsFromForm(form).bad).toEqual(["売却のその他の費用2行目の金額"]);
+  });
+  it("1兆円を超える金額は欄の名前で知らせる", () => {
+    const form = fundingFormFromInputs(filled);
+    form.purchase.loanAmount = "2000000000000";
+    expect(fundingInputsFromForm(form).bad).toEqual(["借入額(1兆円まで)"]);
   });
 });

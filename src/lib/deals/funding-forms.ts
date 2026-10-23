@@ -77,11 +77,15 @@ export function fundingInputsFromForm(f: FundingForm): { value: FundingInputs | 
   ];
   const loanFeeRateBp = p.loanFeeRate.trim() === "" ? null : percentTextToBp(p.loanFeeRate.normalize("NFKC"));
   if (p.loanFeeRate.trim() !== "" && loanFeeRateBp === null) bad.push("事務手数料の率");
+  // 名前も金額も空の行だけを捨てる。金額だけの行は黙って落とさず知らせる(最終レビュー)。行の番号は画面の並びのまま。
   const others = (rows: { label: string; amount: string }[], name: string) =>
-    rows.filter((o) => o.label.trim() !== "").map((o, i) => {
+    rows.flatMap((o, i) => {
+      const label = o.label.trim();
+      if (label === "" && o.amount.trim() === "") return [];
+      if (label === "") bad.push(`${name}${i + 1}行目の名前`);
       const amount = parseYen(o.amount);
       if (amount === null) bad.push(`${name}${i + 1}行目の金額`);
-      return { label: o.label.trim(), amount: amount ?? 0 };
+      return [{ label, amount: amount ?? 0 }];
     });
   const pOthers = others(p.others, "購入のその他の費用");
   const sOthers = others(s.others, "売却のその他の費用");
@@ -117,6 +121,8 @@ function issueLabel(path: PropertyKey[]): string {
   if (b === "loans") return d === "years" ? `パターン${Number(c) + 1}の年数(1〜50年)` : `パターン${Number(c) + 1}の金利(0〜30%)`;
   if (b === "acquiredOn") return "取得日";
   if (b === "loanFeeRateBp") return "事務手数料の率";
-  if (b === "others") return "その他の費用(名前は50文字まで)";
+  if (b === "others") return "その他の費用(名前は50文字まで・金額は1兆円まで)";
+  if (a === "purchase" && b in PURCHASE_YEN_LABELS) return `${PURCHASE_YEN_LABELS[b as keyof typeof PURCHASE_YEN_LABELS]}(1兆円まで)`;
+  if (a === "sale" && b in SALE_YEN_LABELS) return `${SALE_YEN_LABELS[b as keyof typeof SALE_YEN_LABELS]}(1兆円まで)`;
   return "入力";
 }

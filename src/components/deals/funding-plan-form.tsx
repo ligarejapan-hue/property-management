@@ -35,6 +35,8 @@ export default function FundingPlanForm({ deal, kindBase, onSaved }: {
   const [previewError, setPreviewError] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [saving, setSaving] = useState(false);
+  // 保存で返った版の番号。保存のあとの読み直しに失敗しても、次の保存を「ほかの人が更新」にしない(最終レビュー)。
+  const [savedVersion, setSavedVersion] = useState(0);
   const seq = useRef(0);
 
   const parsed = fundingInputsFromForm(form);
@@ -71,7 +73,8 @@ export default function FundingPlanForm({ deal, kindBase, onSaved }: {
     setSaving(true);
     setError(null);
     try {
-      await dealsApi.update(deal.id, { version: deal.version, fundingPlan: parsed.value });
+      const r = await dealsApi.update(deal.id, { version: Math.max(deal.version, savedVersion), fundingPlan: parsed.value });
+      setSavedVersion(r.version);
       await onSaved();
     } catch (e) {
       setError(conflictText(e));
@@ -89,18 +92,13 @@ export default function FundingPlanForm({ deal, kindBase, onSaved }: {
 
   return (
     <div className="grid gap-6 lg:grid-cols-[minmax(0,26rem)_minmax(0,1fr)]">
-      <div className="space-y-6">
-        <div role="group" aria-label="購入・売却の切り替え" className="inline-flex rounded-md border border-gray-300 p-0.5 dark:border-gray-700">
+      {/* 保存中は打てなくする(保存のあとの作り直しで、その間の入力が消えないように)。 */}
+      <fieldset disabled={saving} className="min-w-0 space-y-6">
+        <div role="group" aria-label="購入・売却の切り替え" className="inline-flex gap-1">
           {(["purchase", "sale"] as const).map((m) => (
-            <button
-              key={m}
-              type="button"
-              aria-pressed={form.mode === m}
-              onClick={() => setForm((f) => ({ ...f, mode: m }))}
-              className={`rounded px-4 py-1.5 text-sm ${form.mode === m ? "bg-blue-600 text-white" : "text-gray-700 hover:bg-gray-100 dark:text-gray-300 dark:hover:bg-gray-800"}`}
-            >
+            <Button key={m} size="sm" variant={form.mode === m ? "primary" : "secondary"} aria-pressed={form.mode === m} onClick={() => setForm((f) => ({ ...f, mode: m }))}>
               {m === "purchase" ? "購入" : "売却"}
-            </button>
+            </Button>
           ))}
         </div>
 
@@ -226,7 +224,7 @@ export default function FundingPlanForm({ deal, kindBase, onSaved }: {
           <Save className="h-4 w-4" />
           保存
         </Button>
-      </div>
+      </fieldset>
 
       <div className="space-y-2">
         <h3 className="text-sm font-semibold text-gray-700 dark:text-gray-300">プレビュー</h3>

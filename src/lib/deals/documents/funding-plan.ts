@@ -76,6 +76,7 @@ ${lineRows(s.lines)}
 <tr class="total"><th>費用の合計</th><td class="num">${money(s.costsTotal)}</td></tr>
 ${s.loanBalance ? html`<tr><th>ローン残債</th><td class="num">${money(s.loanBalance)}</td></tr>` : null}
 ${s.settlementReceive ? html`<tr><th>精算金(固都税・管理費など)</th><td class="num">${money(s.settlementReceive)}</td></tr>` : null}
+${s.depositOffset ? html`<tr><th>預り敷金の承継(残代金と相殺)</th><td class="num">${money(-s.depositOffset)}</td></tr>` : null}
 <tr class="total"><th>手取り額(税引前)</th><td class="num">${money(s.netBeforeTax)}</td></tr>
 </table>
 <h2>譲渡所得税の目安</h2>
