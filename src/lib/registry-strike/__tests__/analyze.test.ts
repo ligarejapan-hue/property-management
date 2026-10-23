@@ -1,43 +1,13 @@
 import { describe, it, expect } from "vitest";
 import { analyzeRegistryRights } from "../analyze";
-import { linesFromPlainText, type StrikeLine } from "../lines";
+import { HEADER, kouWith, marked, plain } from "./helpers";
 
 /**
  * 全部事項の「権利部」を読み、今も効力のある登記だけを取り出す判定のテスト。
  *
  * ⚠ 実物の謄本はリポジトリに入れない。ここの表は、実物（2026-10 区分建物の全部事項）の
  *   **罫線の並びと下線の付き方だけ**をまねた架空のもの（氏名・住所・番号はすべて架空）。
- *
- * 書き方: 【…】で囲んだ文字＝下線あり（抹消事項）。PDF から読んだときと同じ形の行にする。
  */
-function marked(src: string): StrikeLine[] {
-  return src
-    .trim()
-    .split("\n")
-    .map((raw) => {
-      const text: string[] = [];
-      const struck: boolean[] = [];
-      let on = false;
-      for (const ch of Array.from(raw)) {
-        if (ch === "【") on = true;
-        else if (ch === "】") on = false;
-        else {
-          text.push(ch);
-          struck.push(on && ch.trim() !== "");
-        }
-      }
-      return { page: 1, text: text.join(""), struck };
-    });
-}
-
-/** 下線を落とした（テキスト貼り付けと同じ）形 */
-function plain(src: string): StrikeLine[] {
-  return linesFromPlainText(src.trim().replace(/[【】]/g, ""));
-}
-
-const HEADER = `
-┃順位番号 │ 登 記 の 目 的 │受付年月日・受付番号 │ 権 利 者 そ の 他 の 事 項 ┃
-┠─────┼────────────────┼───────────┼─────────────────────┨`;
 
 const KOU = `
 ┏━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━┓
@@ -160,12 +130,6 @@ describe("analyzeRegistryRights: 下線が無い入力（テキスト貼り付�
 });
 
 describe("analyzeRegistryRights: 共有・注意登記・判断できない形", () => {
-  const kouWith = (rows: string) => `
-┃ 権 利 部 （ 甲 区 ） （所 有 権 に 関 す る 事 項） ┃
-┠─────┬────────────────┬───────────┬─────────────────────┨${HEADER}
-${rows.trim()}
-┗━━━━━┷━━━━━━━━━━━━━━━━┷━━━━━━━━━━━┷━━━━━━━━━━━━━━━━━━━━━┛`;
-
   it("共有者は 住所→持分→氏名 の繰り返しで読む", () => {
     const r = analyzeRegistryRights(
       marked(
@@ -203,7 +167,7 @@ ${rows.trim()}
     expect(r.currentOwners.map((o) => o.name)).toEqual(["丁田三郎"]);
   });
 
-  it("持分の移転が残っているときは所有者を推測せず、目視確認を促す", () => {
+  it("持分の移転の割合が前の持分と合わないときは推測せず、目視確認を促す", () => {
     const rows = `
 ┃１ │所有権移転 │平成１０年１月５日 │原因 平成１０年１月５日売買 ┃
 ┃ │ │第１号 │所有者 世田谷区架空一丁目２番３号 ┃

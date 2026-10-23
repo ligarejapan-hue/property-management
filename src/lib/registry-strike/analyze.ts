@@ -1,20 +1,27 @@
 /**
  * 全部事項証明書の「権利部」を読み、**今も効力のある登記**だけを取り出す。
  *
- * 謄本の読み方（登記事項証明書の決まり）:
+ * 謄本の読み方（登記事項証明書の決まり。法務省「不動産登記記録例」の形に合わせる）:
  *   - 下線のある事項は抹消事項（＝もう効力がない）。証明書の欄外に
  *     「下線のあるものは抹消事項であることを示す。」と印字される。
  *   - 「N番○○抹消」の登記がされると、N番の事項に下線が引かれる
  *     （例: 乙区「2 1番根抵当権抹消」→ 乙区1番に下線）。抹消の登記そのものには下線は無い。
- *   - 付記登記（付記1号…）は、その順位番号の主登記にぶら下がる。
- *     「N番登記名義人住所変更」が入ると、N番の所有者の古い住所に下線が引かれ、
- *     今の住所は付記の「住所」欄になる。主登記が抹消されれば付記も効力を失う。
+ *   - 付記登記（付記1号…）は、その順位番号の主登記にぶら下がり、主登記の内容を書き換える
+ *     （登記名義人の住所・氏名の変更/更正、所有権更正、抵当権の移転・変更 など）。
+ *     書き換えられた古い値には下線が引かれ、今の値は付記の欄にある。
+ *     主登記が抹消されれば付記も効力を失う。
+ *   - 仮登記の下の「余白」に本登記が記録されると、その順位で本登記の効力が生じる。
+ *   - 共有の持分は「A持分全部移転」「A持分一部移転」「所有権一部移転」で動く。記録される
+ *     「持分○分の○」は物件全体に対する割合。
  *   - 甲区＝所有権に関する事項、乙区＝所有権以外の権利（抵当権・根抵当権・賃借権など）。
+ *   - 「相続人申告」は権利関係を公示するものではない（証明書の欄外の注記）。
  *
  * 下線の情報が無い入力（テキスト貼り付け）でも、「N番…抹消」の登記から対象を判定する。
  *
- * ⚠ 判断がつかない形（持分の移転が残っている、共有者の付記変更 など）は**推測で埋めず**、
- *   `notes` に「目視で確認してください」を出して所有者を返さない。
+ * ⚠ 判断がつかない形（持分の合計が1にならない、名前が一致しない、抹消回復 など）は
+ *   **推測で埋めず**、`notes` に「目視で確認してください」を出して所有者を返さない。
+ * ⚠ 実物の謄本で確かめた形は「登記名義人住所変更」「根抵当権・仮登記の抹消」だけ（2026-10）。
+ *   それ以外は登記記録例の形で組み立てている。
  * ⚠ 結果には氏名・住所が入る（画面の確認表示用）。ログ・AuditLog には出さないこと。
  */
 import { joinSpacedKanji, toHalfWidthDigits } from "../registry-text-normalize";
@@ -23,6 +30,7 @@ import { hasAnyStrike, isFullyStruck, type StrikeLine } from "./lines";
 export interface RegistryCurrentOwner {
   name: string;
   address: string | null;
+  /** 共有のときの持分（例: "2分の1"）。単独所有は null */
   share: string | null;
 }
 
@@ -31,11 +39,11 @@ export interface RegistryActiveRight {
   rank: string;
   /** 登記の目的（例: 抵当権設定 / 根抵当権設定） */
   purpose: string;
-  /** 債権額 または 極度額（例: 金4,500万円） */
+  /** 債権額 または 極度額（変更の付記があれば変更後） */
   amount: string | null;
-  /** 抵当権者・根抵当権者・権利者など */
+  /** 抵当権者・根抵当権者・権利者など（移転の付記があれば移転後。一部移転は「、」区切り） */
   holder: string | null;
-  /** 債務者 */
+  /** 債務者（変更の付記があれば変更後） */
   debtor: string | null;
   /** この権利にぶら下がる、効力のある付記登記の件数 */
   activeAnnotations: number;
@@ -78,21 +86,29 @@ interface Cell {
   struck: boolean[];
 }
 
+type EntryKind = "main" | "annotation" | "margin";
+
 interface Entry {
-  /** 順位番号の欄（例: "3" / "付記1号" / ""） */
-  rankCell: string;
+  kind: EntryKind;
+  /** 主登記の順位番号（付記・余白なら親の番号） */
+  mainRank: string | null;
+  /** 付記の番号（付記のときだけ） */
+  annotation: string | null;
   purposeCells: Cell[];
   detailCells: Cell[];
-  /** 主登記の順位番号（付記なら親の番号） */
-  mainRank: string | null;
-  /** 付記の番号（主登記なら null） */
-  annotation: string | null;
+  /** 表の中での並び順 */
+  order: number;
 }
 
 const VERTICAL = new Set(["┃", "│"]);
 
 function compact(s: string): string {
   return s.replace(/[\s　]/g, "");
+}
+
+/** 外字（私用領域）。実物では「余白」の枠がこの文字で描かれていた。 */
+function stripPrivateUse(s: string): string {
+  return s.replace(/[-]/g, "");
 }
 
 function sectionOf(line: string): Section | null {
@@ -124,7 +140,7 @@ function splitRow(line: StrikeLine): Cell[] | null {
 function isSeparator(line: string): "full" | "sub" | null {
   const t = line.trim();
   if (/^[┠┏┗┣]/.test(t)) return "full";
-  // ┃ ├────… : 順位番号の欄は続き、その右から新しい登記（付記）が始まる
+  // ┃ ├────… : 順位番号の欄は続き、その右から新しい登記（付記・余白）が始まる
   if (/^┃[\s　]*[├┝]/.test(t)) return "sub";
   return null;
 }
@@ -164,6 +180,7 @@ function parseEntries(rows: StrikeLine[]): Entry[] {
 
     if (!cur) {
       const rankCell = toHalfWidthDigits(compact(rankC.text));
+      let kind: EntryKind = "main";
       let mainRank: string | null = null;
       let annotation: string | null = null;
       const ann = rankCell.match(/^付記(\d+)号$/);
@@ -171,14 +188,15 @@ function parseEntries(rows: StrikeLine[]): Entry[] {
         mainRank = rankCell;
         lastMainRank = rankCell;
       } else if (ann) {
+        kind = "annotation";
         mainRank = lastMainRank;
         annotation = ann[1];
       } else if (pendingSub && rankCell === "") {
-        // 順位番号の欄が空の付記（実物で、空欄の付記の枠が出ることがある）
+        // 順位番号の欄が空で、主登記の下に区切られた枠 = 余白（仮登記の本登記を書く欄）
+        kind = "margin";
         mainRank = lastMainRank;
-        annotation = "";
       }
-      cur = { rankCell, purposeCells: [], detailCells: [], mainRank, annotation };
+      cur = { kind, mainRank, annotation, purposeCells: [], detailCells: [], order: entries.length };
     }
     cur.purposeCells.push(purposeC);
     cur.detailCells.push(detailC);
@@ -188,7 +206,8 @@ function parseEntries(rows: StrikeLine[]): Entry[] {
 }
 
 function purposeOf(e: Entry): string {
-  return toHalfWidthDigits(compact(e.purposeCells.map((c) => c.text).join("")));
+  const p = toHalfWidthDigits(compact(stripPrivateUse(e.purposeCells.map((c) => c.text).join(""))));
+  return p === "余白" ? "" : p;
 }
 
 function purposeStruck(e: Entry): boolean {
@@ -201,6 +220,7 @@ function purposeStruck(e: Entry): boolean {
 
 /** 「N番(付記M号)…抹消」の登記なら、対象の番号を返す。 */
 function cancellationTarget(purpose: string): { rank: string; annotation: string | null } | null {
+  if (/回復$/.test(purpose)) return null;
   const m = purpose.match(/^(\d+)番(?:付記(\d+)号)?.*抹消$/);
   if (!m) return null;
   return { rank: m[1], annotation: m[2] ?? null };
@@ -234,12 +254,10 @@ function judge(entries: Entry[]): Judged[] {
       if (t.annotation === null || k.entry.annotation === t.annotation) k.cancelled = true;
     }
   }
-  // 主登記が抹消なら、その付記も効力を失う
+  // 主登記が抹消なら、その付記・余白の本登記も効力を失う
   for (const k of judged) {
-    if (k.entry.annotation === null) continue;
-    const main = judged.find(
-      (m) => m.entry.annotation === null && m.entry.mainRank === k.entry.mainRank,
-    );
+    if (k.entry.kind === "main") continue;
+    const main = judged.find((m) => m.entry.kind === "main" && m.entry.mainRank === k.entry.mainRank);
     if (main?.cancelled) k.cancelled = true;
   }
   return judged;
@@ -249,7 +267,26 @@ function judge(entries: Entry[]): Judged[] {
 // 欄の中身（「所有者」「債権額」などのラベル付きの行）
 // ---------------------------------------------------------------------------
 
-const KOU_LABELS = ["所有者", "共有者", "原因", "住所", "氏名", "名称", "順位", "目的", "権利者", "義務者", "債権者", "差押債権者"];
+const KOU_LABELS = [
+  "所有者",
+  "共有者",
+  "原因",
+  "住所",
+  "氏名",
+  "名称",
+  "本店",
+  "商号",
+  "順位",
+  "目的",
+  "権利者",
+  "義務者",
+  "債権者",
+  "差押債権者",
+  "買戻権者",
+  "売買代金",
+  "契約費用",
+  "期間",
+];
 const OTSU_LABELS = [
   "原因",
   "債権額",
@@ -259,6 +296,7 @@ const OTSU_LABELS = [
   "損害金",
   "債務者",
   "連帯債務者",
+  "指定債務者",
   "抵当権者",
   "根抵当権者",
   "権利者",
@@ -268,6 +306,14 @@ const OTSU_LABELS = [
   "共同担保",
   "順位",
   "取扱店",
+  "弁済額",
+  "譲渡額",
+  "目的",
+  "賃料",
+  "支払時期",
+  "存続期間",
+  "地代",
+  "特約",
 ];
 
 /**
@@ -316,43 +362,340 @@ function joinAddress(parts: string[]): string | null {
   return clean(parts.join(""));
 }
 
-/** 「所有者」欄: 住所（複数行）→ 氏名（最終行）。 */
-function parseSoleOwner(cells: Cell[]): { owner: RegistryCurrentOwner | null; addressStruck: boolean } {
-  const addressStruck = cells.some((c) => hasAnyStrike(c));
-  const live = liveLines(cells);
-  if (live.length === 0) return { owner: null, addressStruck };
-  const name = clean(live[live.length - 1]);
-  const address = joinAddress(live.slice(0, -1));
-  return { owner: { name, address, share: null }, addressStruck };
+// ---------------------------------------------------------------------------
+// 持分（分数）
+// ---------------------------------------------------------------------------
+
+interface Frac {
+  n: number;
+  d: number;
 }
 
-/** 「共有者」欄: 住所 → 持分 → 氏名 の繰り返し。 */
-function parseCoOwners(cells: Cell[]): RegistryCurrentOwner[] | null {
-  const live = liveLines(cells);
-  const owners: RegistryCurrentOwner[] = [];
+function gcd(a: number, b: number): number {
+  return b === 0 ? Math.abs(a) : gcd(b, a % b);
+}
+function frac(n: number, d: number): Frac {
+  const g = gcd(n, d) || 1;
+  return { n: n / g, d: d / g };
+}
+function add(a: Frac, b: Frac): Frac {
+  return frac(a.n * b.d + b.n * a.d, a.d * b.d);
+}
+function sub(a: Frac, b: Frac): Frac {
+  return frac(a.n * b.d - b.n * a.d, a.d * b.d);
+}
+function isOne(a: Frac): boolean {
+  return a.n === a.d;
+}
+function parseShare(s: string): Frac | null {
+  const m = toHalfWidthDigits(compact(s)).match(/^持分(\d+)分の(\d+)$/);
+  if (!m) return null;
+  const d = Number(m[1]);
+  const n = Number(m[2]);
+  if (!d || n > d) return null;
+  return frac(n, d);
+}
+function shareText(f: Frac): string {
+  return `${f.d}分の${f.n}`;
+}
+
+// ---------------------------------------------------------------------------
+// 甲区: 名義人の一覧
+// ---------------------------------------------------------------------------
+
+interface Person {
+  name: string;
+  address: string | null;
+  share: Frac | null;
+}
+
+/**
+ * 欄の行を「並び」で読むための形にする。
+ * ⚠ 下線の付いた行も**落とさない**。氏名に下線（氏名変更）があると、落とした瞬間に
+ *   住所の行を氏名と取り違える。並びで役割を決め、住所だけ下線の無い行を使う。
+ */
+function rowsOf(cells: Cell[]): { raw: string; live: string; struck: boolean }[] {
+  return cells
+    .map((c) => ({
+      raw: c.text.replace(/　/g, " ").trim(),
+      live: currentText(c).replace(/　/g, " ").trim(),
+      struck: isFullyStruck(c),
+    }))
+    .filter((r) => r.raw !== "");
+}
+
+/** 「所有者」欄: 住所（複数行）→ 氏名（最終行）。 */
+function parseSole(cells: Cell[]): Person | null {
+  const rows = rowsOf(cells);
+  if (rows.length === 0) return null;
+  const nameRow = rows[rows.length - 1];
+  const addr = rows.slice(0, -1).filter((r) => !r.struck).map((r) => r.live);
+  return { name: clean(nameRow.raw), address: joinAddress(addr), share: null };
+}
+
+/** 「共有者」欄: 住所 → 持分 → 氏名 の繰り返し。崩れていれば null（推測しない）。 */
+function parseCo(cells: Cell[]): Person[] | null {
+  const out: Person[] = [];
   let addr: string[] = [];
-  let share: string | null = null;
-  for (const l of live) {
-    const m = toHalfWidthDigits(compact(l)).match(/^持分(\d+分の\d+)$/);
-    if (m) {
-      share = m[1];
+  let share: Frac | null = null;
+  for (const r of rowsOf(cells)) {
+    const f = parseShare(r.raw);
+    if (f) {
+      share = f;
       continue;
     }
     if (share !== null) {
-      owners.push({ name: clean(l), address: joinAddress(addr), share });
+      out.push({ name: clean(r.raw), address: joinAddress(addr), share });
       addr = [];
       share = null;
-    } else {
-      addr.push(l);
+    } else if (!r.struck) {
+      addr.push(r.live);
     }
   }
-  if (addr.length > 0 || share !== null) return null; // 途中で崩れた → 推測しない
-  return owners;
+  if (addr.length > 0 || share !== null || out.length === 0) return null;
+  return out;
+}
+
+/** 欄から名義人を読む（所有者 または 共有者）。読めなければ null。 */
+function personsOf(detail: Cell[]): Person[] | null {
+  const b = blocks(detail, KOU_LABELS);
+  const sole = b.get("所有者");
+  if (sole) {
+    const p = parseSole(sole);
+    return p ? [p] : null;
+  }
+  const co = b.get("共有者");
+  if (co) return parseCo(co);
+  return null;
+}
+
+interface Holder {
+  name: string;
+  /** 旧氏名など、同じ人として扱う名前（持分移転の「A持分」の照合に使う） */
+  aliases: Set<string>;
+  address: string | null;
+  share: Frac;
+  /** どの順位番号の登記で名義人になったか（付記の住所変更などの当て先） */
+  fromRank: string;
+}
+
+const key = (s: string) => compact(s);
+
+function findHolder(state: Holder[], name: string): Holder[] {
+  const k = key(name);
+  return state.filter((h) => h.aliases.has(k));
+}
+
+function addHolder(state: Holder[], p: Person, share: Frac, rank: string): void {
+  const same = state.find(
+    (h) => h.aliases.has(key(p.name)) && (h.address ?? "") === (p.address ?? ""),
+  );
+  if (same) {
+    same.share = add(same.share, share);
+    same.fromRank = rank;
+    return;
+  }
+  state.push({ name: p.name, aliases: new Set([key(p.name)]), address: p.address, share, fromRank: rank });
+}
+
+/** 名義人の住所・氏名の変更/更正の付記を当てはめる。当て先が分からなければ false。 */
+function applyNameAddressChange(state: Holder[], detail: Cell[], targetRank: string): boolean {
+  // 共有者ごと:「共有者Aの住所 X」/「Aの氏名 X」（続きの行を含む）
+  const lines = detail.map((c) => ({ c, t: currentText(c).replace(/　/g, " ") }));
+  const per: { who: string; field: string; parts: string[] }[] = [];
+  let cur: { who: string; field: string; parts: string[] } | null = null;
+  for (const { c, t } of lines) {
+    if (isFullyStruck(c)) continue;
+    const m = t.match(/^(?:共有者)?(.+?)の(住所|氏名|名称|本店|商号)[ 　]*(.*)$/);
+    if (m && !/^[ 　]/.test(t)) {
+      cur = { who: clean(m[1]), field: m[2], parts: m[3].trim() ? [m[3].trim()] : [] };
+      per.push(cur);
+      continue;
+    }
+    if (/^(原因|住所|氏名|名称|本店|商号)[ 　]/.test(t) || /^(原因|住所|氏名|名称|本店|商号)$/.test(t.trim())) {
+      cur = null;
+      continue;
+    }
+    if (cur && t.trim()) cur.parts.push(t.trim());
+  }
+  if (per.length > 0) {
+    for (const p of per) {
+      const hit = findHolder(state, p.who);
+      if (hit.length !== 1) return false;
+      applyField(hit[0], p.field, p.parts);
+    }
+    return true;
+  }
+  // 名義人が1人の登記:「住所 X」/「氏名 X」
+  const b = blocks(detail, KOU_LABELS);
+  const targets = state.filter((h) => h.fromRank === targetRank);
+  if (targets.length !== 1) return false;
+  let applied = false;
+  for (const field of ["住所", "本店", "氏名", "名称", "商号"]) {
+    const v = liveLines(b.get(field));
+    if (v.length > 0) {
+      applyField(targets[0], field, v);
+      applied = true;
+    }
+  }
+  return applied;
+}
+
+function applyField(h: Holder, field: string, parts: string[]): void {
+  if (field === "住所" || field === "本店") {
+    h.address = joinAddress(parts);
+  } else {
+    const name = clean(parts.join(""));
+    h.name = name;
+    h.aliases.add(key(name));
+  }
+}
+
+function ownerBlockHasStrike(detail: Cell[]): boolean {
+  const b = blocks(detail, KOU_LABELS);
+  return [...(b.get("所有者") ?? []), ...(b.get("共有者") ?? [])].some((c) => hasAnyStrike(c));
+}
+
+const FULL_TRANSFER = /^(所有権保存|所有権移転|共有者全員持分全部移転)$/;
+const PART_TRANSFER = /^(所有権一部移転|(.+)持分全部移転|(.+)持分一部移転)$/;
+const NAME_ADDRESS_CHANGE = /登記名義人.*(住所|氏名|名称|本店|商号).*(変更|更正)$/;
+
+/**
+ * 甲区を古い順に当てはめて、今の名義人と持分を出す。
+ * 判断できない形に当たったら理由を返す（所有者は返さない）。
+ */
+function replayOwners(kou: Judged[], notes: string[]): RegistryCurrentOwner[] {
+  const live = kou.filter((j) => !j.cancelled && !j.isCancellation);
+  const annotationsOf = (rank: string) =>
+    live.filter((j) => j.entry.kind === "annotation" && j.entry.mainRank === rank);
+
+  if (live.some((j) => /回復$/.test(j.purpose))) {
+    notes.push("甲区に抹消回復の登記があります。所有者は目視で確認してください。");
+    return [];
+  }
+
+  let state: Holder[] | null = null;
+  const fail = (msg: string): RegistryCurrentOwner[] => {
+    notes.push(msg);
+    return [];
+  };
+
+  // 名義が動く登記（主登記と、仮登記の余白に書かれた本登記）
+  const moves = live.filter(
+    (j) =>
+      (j.entry.kind === "main" || j.entry.kind === "margin") &&
+      (FULL_TRANSFER.test(j.purpose) || PART_TRANSFER.test(j.purpose)),
+  );
+  for (const j of moves) {
+    const rank = j.entry.mainRank!;
+    // 所有権更正の付記があれば、名義人はそちらで読む（最後のものを使う）
+    const corrections = annotationsOf(rank).filter((a) => /^\d+番(所有権|.+持分)更正$/.test(a.purpose));
+    const source = corrections.length > 0 ? corrections[corrections.length - 1].entry : j.entry;
+    const persons = personsOf(source.detailCells);
+    if (!persons) return fail("所有者の欄を読み取れませんでした。目視で確認してください。");
+
+    if (FULL_TRANSFER.test(j.purpose)) {
+      state = [];
+      if (persons.length === 1 && persons[0].share === null) {
+        addHolder(state, persons[0], frac(1, 1), rank);
+      } else {
+        for (const p of persons) {
+          if (!p.share) return fail("共有者の持分を読み取れませんでした。目視で確認してください。");
+          addHolder(state, p, p.share, rank);
+        }
+      }
+    } else {
+      if (!state) return fail("持分の移転より前の所有者が分かりません。目視で確認してください。");
+      const m = j.purpose.match(/^(.+)持分(全部|一部)移転$/);
+      let from: Holder | null = null;
+      if (m) {
+        const hit = findHolder(state, m[1]);
+        if (hit.length !== 1) {
+          return fail(`「${j.purpose}」の名義人を特定できません。所有者と持分は目視で確認してください。`);
+        }
+        from = hit[0];
+      } else {
+        // 所有権一部移転: 名義人が1人のときだけ（複数なら誰の持分が動いたか書かれない）
+        if (state.length !== 1) {
+          return fail("所有権一部移転の対象を特定できません。所有者と持分は目視で確認してください。");
+        }
+        from = state[0];
+      }
+      let moved = frac(0, 1);
+      for (const p of persons) {
+        if (!p.share) return fail("移転した持分を読み取れませんでした。目視で確認してください。");
+        moved = add(moved, p.share);
+      }
+      if (m && m[2] === "全部") {
+        if (moved.n * from.share.d !== from.share.n * moved.d) {
+          return fail("持分の移転の割合が合いません。所有者と持分は目視で確認してください。");
+        }
+        state = state.filter((h) => h !== from);
+      } else {
+        const rest = sub(from.share, moved);
+        if (rest.n <= 0) {
+          return fail("持分の移転の割合が合いません。所有者と持分は目視で確認してください。");
+        }
+        from.share = rest;
+      }
+      for (const p of persons) addHolder(state, p, p.share!, rank);
+    }
+
+    // 住所・氏名の変更/更正の付記
+    const changes = annotationsOf(rank).filter((a) => NAME_ADDRESS_CHANGE.test(a.purpose));
+    if (changes.length === 0 && ownerBlockHasStrike(source.detailCells)) {
+      // 古い住所・氏名に下線があるのに、変更後を書いた付記が見当たらない
+      notes.push("名義人の住所・氏名に変更の跡（下線）があります。今の住所・氏名は目視で確認してください。");
+    }
+    for (const a of changes) {
+      if (!applyNameAddressChange(state, a.entry.detailCells, rank)) {
+        return fail("名義人の住所・氏名の変更の当て先を特定できません。目視で確認してください。");
+      }
+    }
+  }
+
+  if (!state || state.length === 0) {
+    return fail("甲区から今の所有者を判定できませんでした。目視で確認してください。");
+  }
+  const total = state.reduce((s, h) => add(s, h.share), frac(0, 1));
+  if (!isOne(total)) {
+    return fail("持分の合計が1になりません。所有者と持分は目視で確認してください。");
+  }
+  const out = state.map((h) => ({
+    name: h.name,
+    address: h.address,
+    share: state!.length === 1 && isOne(h.share) ? null : shareText(h.share),
+  }));
+  return out;
 }
 
 // ---------------------------------------------------------------------------
-// 本体
+// 乙区: 残っている権利と、付記による書き換え
 // ---------------------------------------------------------------------------
+
+const HOLDER_LABELS = ["抵当権者", "根抵当権者", "権利者", "地上権者", "賃借権者", "質権者"];
+
+function firstBlock(b: Map<string, Cell[]>, labels: string[]): Cell[] | undefined {
+  for (const l of labels) {
+    const v = b.get(l);
+    if (v) return v;
+  }
+  return undefined;
+}
+
+function lastName(lines: string[]): string | null {
+  return lines.length > 0 ? clean(lines[lines.length - 1]) : null;
+}
+
+/**
+ * 権利者欄の名前。欄は「住所（複数行のこともある）→ 名前」で、名前は最後の行。
+ * 「（取扱店 ○○支店）」の行は名前ではないので除く。
+ */
+function holderNames(cells: Cell[] | undefined): string[] {
+  const live = liveLines(cells).filter((l) => !/^（?取扱店/.test(compact(l)));
+  const name = lastName(live);
+  return name ? [name] : [];
+}
 
 const CAUTION_RE = /差押|仮差押|仮処分|仮登記|買戻|競売|破産|処分禁止|請求権/;
 
@@ -379,97 +722,74 @@ export function analyzeRegistryRights(lines: StrikeLine[]): RegistryRightsSummar
   const hasOtsuku = bySection.otsuku.length > 0;
 
   const cautions: RegistryCaution[] = [];
+  const hasMarginRegistration = (list: Judged[], rank: string) =>
+    list.some((j) => !j.cancelled && j.entry.kind === "margin" && j.entry.mainRank === rank);
 
-  // --- 甲区: 今の所有者 ---
-  let currentOwners: RegistryCurrentOwner[] = [];
+  // --- 甲区 ---
   const liveKou = kou.filter((j) => !j.cancelled && !j.isCancellation);
   for (const j of liveKou) {
-    if (j.entry.annotation === null && CAUTION_RE.test(j.purpose)) {
-      cautions.push({ section: "甲区", rank: j.entry.mainRank!, purpose: j.purpose });
-    }
+    if (j.entry.kind === "margin") continue;
+    if (!CAUTION_RE.test(j.purpose)) continue;
+    // 仮登記の下に本登記が入っていれば、もう仮登記ではない
+    if (/仮登記/.test(j.purpose) && hasMarginRegistration(kou, j.entry.mainRank!)) continue;
+    cautions.push({ section: "甲区", rank: j.entry.mainRank!, purpose: j.purpose });
   }
-  const ownership = liveKou.filter(
-    (j) =>
-      j.entry.annotation === null &&
-      /所有権(保存|移転)/.test(j.purpose) &&
-      !/仮登記|請求権/.test(j.purpose),
-  );
-  const last = ownership[ownership.length - 1];
-  if (!hasKouku) {
-    // 所有者事項など、権利部の無い謄本。ここでは何もしない。
-  } else if (!last) {
-    notes.push("甲区から今の所有者を判定できませんでした。目視で確認してください。");
-  } else if (
-    // 「○○持分全部移転」「所有権一部移転」など、持分が動く登記が残っている
-    liveKou.some((j) => j.entry.annotation === null && /持分.*移転|一部移転/.test(j.purpose))
-  ) {
-    notes.push("持分の移転登記が残っています。所有者と持分は目視で確認してください。");
-  } else {
-    const b = blocks(last.entry.detailCells, KOU_LABELS);
-    const sole = b.get("所有者");
-    const co = b.get("共有者");
-    if (sole) {
-      const { owner, addressStruck } = parseSoleOwner(sole);
-      if (owner) currentOwners = [owner];
-      // 付記（登記名義人の住所・氏名の変更）を反映
-      const changes = liveKou.filter(
-        (j) =>
-          j.entry.annotation !== null &&
-          j.entry.mainRank === last.entry.mainRank &&
-          /登記名義人.*(住所|氏名|名称)/.test(j.purpose),
-      );
-      for (const c of changes) {
-        const cb = blocks(c.entry.detailCells, KOU_LABELS);
-        const addr = joinAddress(liveLines(cb.get("住所")));
-        const name = liveLines(cb.get("氏名") ?? cb.get("名称"));
-        if (currentOwners[0] && addr) currentOwners[0].address = addr;
-        if (currentOwners[0] && name.length > 0) currentOwners[0].name = clean(name.join(""));
-      }
-      if (addressStruck && changes.length === 0 && currentOwners[0]) {
-        // 下線で古い住所が消えたのに、変更後の住所の付記が見当たらない
-        currentOwners[0].address = null;
-        notes.push("所有者の住所に変更があります。今の住所は目視で確認してください。");
-      }
-    } else if (co) {
-      const owners = parseCoOwners(co);
-      const hasChange = liveKou.some(
-        (j) => j.entry.annotation !== null && j.entry.mainRank === last.entry.mainRank,
-      );
-      if (!owners || owners.length === 0) {
-        notes.push("共有者の欄を読み取れませんでした。目視で確認してください。");
-      } else if (hasChange || co.some((c) => hasAnyStrike(c))) {
-        notes.push("共有者の住所・氏名に変更の登記があります。目視で確認してください。");
-      } else {
-        currentOwners = owners;
-      }
-    } else {
-      notes.push("所有者の欄を読み取れませんでした。目視で確認してください。");
-    }
+  if (liveKou.some((j) => /相続人申告/.test(j.purpose))) {
+    notes.push("相続人申告の登記があります（所有者の相続人からの申出の記録で、権利関係を示すものではありません）。");
   }
+  const currentOwners = hasKouku ? replayOwners(kou, notes) : [];
 
-  // --- 乙区: 残っている権利 ---
+  // --- 乙区 ---
   const activeRights: RegistryActiveRight[] = [];
   const liveOtsu = otsu.filter((j) => !j.cancelled && !j.isCancellation);
+  if (liveOtsu.some((j) => /回復$/.test(j.purpose))) {
+    notes.push("乙区に抹消回復の登記があります。残っている権利は目視で確認してください。");
+  }
   for (const j of liveOtsu) {
-    if (j.entry.annotation !== null) continue;
+    if (j.entry.kind !== "main" || /回復$/.test(j.purpose)) continue;
+    const rank = j.entry.mainRank!;
+    const margin = liveOtsu.find((k) => k.entry.kind === "margin" && k.entry.mainRank === rank);
+    const base = margin ?? j; // 仮登記の本登記があれば本登記の内容
     const b = blocks(j.entry.detailCells, OTSU_LABELS);
-    const amount = liveLines(b.get("債権額") ?? b.get("極度額"));
-    const holderCells =
-      b.get("抵当権者") ?? b.get("根抵当権者") ?? b.get("権利者") ?? b.get("地上権者") ?? b.get("賃借権者") ?? b.get("質権者");
-    const holder = liveLines(holderCells);
-    const debtor = liveLines(b.get("債務者") ?? b.get("連帯債務者"));
+    const bb = margin ? blocks(margin.entry.detailCells, OTSU_LABELS) : b;
+    const amountLines = liveLines(firstBlock(bb, ["債権額", "極度額"]) ?? firstBlock(b, ["債権額", "極度額"]));
+    let amount = amountLines.length > 0 ? clean(amountLines.join("")) : null;
+    let holders = holderNames(firstBlock(bb, HOLDER_LABELS) ?? firstBlock(b, HOLDER_LABELS));
+    let debtor = lastName(liveLines(firstBlock(bb, ["債務者", "連帯債務者"]) ?? firstBlock(b, ["債務者", "連帯債務者"])));
+
+    const anns = liveOtsu.filter((k) => k.entry.kind === "annotation" && k.entry.mainRank === rank);
+    for (const a of anns) {
+      const ab = blocks(a.entry.detailCells, OTSU_LABELS);
+      if (/権?一部移転$/.test(a.purpose)) {
+        const add = holderNames(firstBlock(ab, HOLDER_LABELS));
+        if (add.length === 0) notes.push(`乙区${rank}番の一部移転の権利者を読み取れません。目視で確認してください。`);
+        holders = [...holders, ...add];
+      } else if (/権移転$/.test(a.purpose)) {
+        const to = holderNames(firstBlock(ab, HOLDER_LABELS));
+        if (to.length === 0) notes.push(`乙区${rank}番の移転後の権利者を読み取れません。目視で確認してください。`);
+        else holders = to;
+      } else if (/(変更|更正)$/.test(a.purpose)) {
+        const am = liveLines(firstBlock(ab, ["債権額", "極度額"]));
+        if (am.length > 0) amount = clean(am.join(""));
+        const db = liveLines(firstBlock(ab, ["債務者", "連帯債務者", "指定債務者"]));
+        if (db.length > 0) debtor = lastName(db);
+      } else if (/順位|元本確定/.test(a.purpose)) {
+        // 順位の変更・譲渡、元本確定は、権利者・金額を変えない
+      } else {
+        notes.push(`乙区${rank}番に付記「${a.purpose}」があります。内容は目視で確認してください。`);
+      }
+    }
+
     activeRights.push({
-      rank: j.entry.mainRank!,
-      purpose: j.purpose,
-      amount: amount.length > 0 ? clean(amount.join("")) : null,
-      holder: holder.length > 0 ? clean(holder[holder.length - 1]) : null,
-      debtor: debtor.length > 0 ? clean(debtor[debtor.length - 1]) : null,
-      activeAnnotations: liveOtsu.filter(
-        (k) => k.entry.annotation !== null && k.entry.mainRank === j.entry.mainRank,
-      ).length,
+      rank,
+      purpose: base.purpose,
+      amount,
+      holder: holders.length > 0 ? holders.join("、") : null,
+      debtor,
+      activeAnnotations: anns.length,
     });
-    if (CAUTION_RE.test(j.purpose)) {
-      cautions.push({ section: "乙区", rank: j.entry.mainRank!, purpose: j.purpose });
+    if (CAUTION_RE.test(j.purpose) && !(/仮登記/.test(j.purpose) && margin)) {
+      cautions.push({ section: "乙区", rank, purpose: j.purpose });
     }
   }
 
@@ -488,4 +808,3 @@ export function analyzeRegistryRights(lines: StrikeLine[]): RegistryRightsSummar
     notes,
   };
 }
-
