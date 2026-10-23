@@ -21,6 +21,8 @@ const ALL_KEYS = [
   "registryStatus",
   "dmStatus",
   "caseStatus",
+  "contractPlannedOn",
+  "settlementPlannedOn",
   "introductionRoute",
   "assigneeName",
   "ownerNames",
@@ -39,6 +41,8 @@ const ALL_HEADERS = [
   "登記状況",
   "DM判断",
   "案件ステータス",
+  "契約予定日",
+  "決済予定日",
   "導入ルート",
   "担当者名",
   "所有者名",
@@ -48,7 +52,7 @@ const ALL_HEADERS = [
 ];
 
 describe("EXPORT_COLUMNS", () => {
-  it("現行15列を安定キー↔日本語ヘッダで定義順に保持する", () => {
+  it("現行17列を安定キー↔日本語ヘッダで定義順に保持する", () => {
     expect(EXPORT_COLUMNS.map((c) => c.key)).toEqual(ALL_KEYS);
     expect(EXPORT_COLUMNS.map((c) => c.header)).toEqual(ALL_HEADERS);
   });

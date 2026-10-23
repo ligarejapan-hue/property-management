@@ -37,6 +37,9 @@ const FIELD_LABELS: Record<string, string> = {
   registryStatus: "登記状況",
   dmStatus: "DM判断",
   caseStatus: "案件ステータス",
+  // 案件ステータス 8〜10 の日付の欄(値は YYYY-MM-DD で残る)。
+  contractPlannedOn: "契約予定日",
+  settlementPlannedOn: "決済予定日",
   propertyType: "種別",
   assignedTo: "担当者",
   zoningDistrict: "用途地域",

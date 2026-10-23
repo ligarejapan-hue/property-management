@@ -32,6 +32,7 @@ import {
 import { AUTO_CHOICE } from "@/lib/building-link/resolve";
 import { getStorage } from "@/lib/storage";
 import { extractStorageKeyFromUrl } from "@/lib/storage/url-to-key";
+import { CASE_DATE_FIELDS, dateOnlyString } from "@/lib/case-dates";
 
 // ---------- GET /api/properties/[id] ----------
 
@@ -194,6 +195,9 @@ export async function GET(
 
     return apiResponse({
       ...property,
+      // DATE 列は "YYYY-MM-DD" で返す(JSON の ISO 文字列 "…T00:00:00.000Z" を画面に持ち込まない)。
+      contractPlannedOn: dateOnlyString(property.contractPlannedOn),
+      settlementPlannedOn: dateOnlyString(property.settlementPlannedOn),
       propertyOwners: maskedPropertyOwners,
       importSource,
       registryAttachmentCounts,
@@ -245,6 +249,9 @@ export async function PATCH(
         registryStatus: true,
         dmStatus: true,
         caseStatus: true,
+        // 契約予定日・決済予定日(変更履歴の「変更前」に使う)。
+        contractPlannedOn: true,
+        settlementPlannedOn: true,
         introductionRoute: true,
         // DMの種類(変更履歴の「変更前」に使う。選ばないと自動→手動切替の履歴の
         // oldValue が常に空になる)。
@@ -408,8 +415,14 @@ export async function PATCH(
     for (const [key, newVal] of Object.entries(persistedFields)) {
       if (newVal === undefined) continue;
       const oldVal = (current as Record<string, unknown>)[key];
-      const oldStr = oldVal != null ? String(oldVal) : null;
-      const newStr = newVal != null ? String(newVal) : null;
+      // 日付だけの列は "YYYY-MM-DD" で履歴に残す(Date の String() は曜日入りの英語になる)。
+      const isDateOnly = (CASE_DATE_FIELDS as readonly string[]).includes(key);
+      const oldStr = isDateOnly
+        ? dateOnlyString(oldVal as Date | null)
+        : oldVal != null ? String(oldVal) : null;
+      const newStr = isDateOnly
+        ? dateOnlyString(newVal as Date | null)
+        : newVal != null ? String(newVal) : null;
       if (oldStr !== newStr) {
         changeLogs.push({
           targetTable: "properties",

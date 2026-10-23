@@ -21,6 +21,7 @@ import {
   buildPropertyListWhere,
   buildPropertyListOrderBy,
 } from "@/lib/property-list-query";
+import { dateOnlyString } from "@/lib/case-dates";
 
 // ---------- GET /api/properties ----------
 
@@ -72,6 +73,9 @@ export async function GET(request: NextRequest) {
             dmStatus: true,
             dmUndeliverableAt: true,
             caseStatus: true,
+            // 一覧の案件ステータスの2行目(契約 11/15 ・ 決済 未定)に使う。
+            contractPlannedOn: true,
+            settlementPlannedOn: true,
             introductionRoute: true,
             isArchived: true,
             updatedAt: true,
@@ -107,6 +111,9 @@ export async function GET(request: NextRequest) {
       const { propertyOwners, _count, ...property } = p;
       return {
         ...property,
+        // DATE 列は "YYYY-MM-DD" で返す(モックの行に無ければ null)。
+        contractPlannedOn: dateOnlyString(property.contractPlannedOn),
+        settlementPlannedOn: dateOnlyString(property.settlementPlannedOn),
         // _count は select 指定で実クエリでは常に付くが、テストの findMany モックには無いことがあるため null 安全に。
         dmSentCount: _count?.dmLogs ?? 0,
         ownerNames: hasOwnerRead && ownerDisplayConfig

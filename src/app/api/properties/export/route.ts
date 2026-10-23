@@ -30,6 +30,7 @@ import {
 import { formatPostalCode, isValidPostalCode } from "@/lib/address-lookup/normalize";
 import { selectGroupRepresentative, type DmRowPropertyOwner } from "@/lib/dm-export";
 import { resolveExportColumns } from "@/lib/property-export-columns";
+import { dateOnlyString } from "@/lib/case-dates";
 
 // 郵便番号を CSV セル用に整形する。
 // 住所補完フローは 7 桁（ハイフン無し）で保存し得るため、妥当な 7 桁は NNN-NNNN へ整形して
@@ -150,6 +151,8 @@ export async function GET(request: NextRequest) {
             registryStatus: true,
             dmStatus: true,
             caseStatus: true,
+            contractPlannedOn: true,
+            settlementPlannedOn: true,
             introductionRoute: true,
             updatedAt: true,
             createdAt: true,
@@ -221,6 +224,9 @@ export async function GET(request: NextRequest) {
           REGISTRY_STATUS_LABELS[p.registryStatus] ?? p.registryStatus,
         DM判断: DM_STATUS_LABELS[p.dmStatus] ?? p.dmStatus,
         案件ステータス: CASE_STATUS_LABELS[p.caseStatus] ?? p.caseStatus,
+        // 案件ステータス 8〜10 の日付。未定(NULL)は空欄。YYYY-MM-DD。
+        契約予定日: dateOnlyString(p.contractPlannedOn) ?? "",
+        決済予定日: dateOnlyString(p.settlementPlannedOn) ?? "",
         導入ルート: p.introductionRoute
           ? INTRODUCTION_ROUTE_LABELS[p.introductionRoute] ?? p.introductionRoute
           : "",

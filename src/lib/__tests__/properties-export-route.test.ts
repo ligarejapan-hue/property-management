@@ -578,6 +578,8 @@ describe("GET /api/properties/export — 郵便番号列（代表所有者 Owner
       "登記状況",
       "DM判断",
       "案件ステータス",
+      "契約予定日",
+      "決済予定日",
       "導入ルート",
       "担当者名",
       "所有者名",
@@ -585,6 +587,16 @@ describe("GET /api/properties/export — 郵便番号列（代表所有者 Owner
       "作成日時",
       "郵便番号",
     ]);
+  });
+
+  it("契約予定日・決済予定日は YYYY-MM-DD・未定(null)は空欄", async () => {
+    pm.property.findMany.mockResolvedValue([
+      makeProp({ caseStatus: "contract_planned", contractPlannedOn: new Date(Date.UTC(2026, 10, 15)), settlementPlannedOn: null }),
+    ]);
+    const res = await GET(makeRequest("?columns=contractPlannedOn,settlementPlannedOn"));
+    const csv = await res.text();
+    expect(headerCols(csv)).toEqual(["契約予定日", "決済予定日"]);
+    expect(csv.split("\r\n")[1].split(",")).toEqual(["2026-11-15", ""]);
   });
 
   it("代表所有者の Owner.zip が郵便番号列（末尾）に出力される", async () => {
@@ -706,11 +718,11 @@ describe("GET /api/properties/export — 出力項目選択（?columns=）", () 
     return csv.split("\r\n")[0].split(",");
   }
 
-  it("?columns 無指定は全15列（後方互換）", async () => {
+  it("?columns 無指定は全17列（後方互換・契約予定日/決済予定日を含む）", async () => {
     pm.property.findMany.mockResolvedValue([makeProp()]);
     const res = await GET(makeRequest());
     const csv = await res.text();
-    expect(headerCols(csv)).toHaveLength(15);
+    expect(headerCols(csv)).toHaveLength(17);
   });
 
   it("?columns 指定で選択列のみ・定義順に出力", async () => {
@@ -737,7 +749,7 @@ describe("GET /api/properties/export — 出力項目選択（?columns=）", () 
     pm.property.findMany.mockResolvedValue([makeProp()]);
     const res = await GET(makeRequest("?columns=__x,__y"));
     const csv = await res.text();
-    expect(headerCols(csv)).toHaveLength(15);
+    expect(headerCols(csv)).toHaveLength(17);
   });
 
   it("列選択時も BOM + CRLF を維持する", async () => {

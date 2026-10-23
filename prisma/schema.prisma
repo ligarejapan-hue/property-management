@@ -408,6 +408,10 @@ model Property {
   registryStatus           RegistryStatus    @map("registry_status")
   dmStatus                 DmStatus          @map("dm_status")
   caseStatus               CaseStatus        @default(new_case) @map("case_status")
+  // 契約予定日・決済予定日(案件ステータスが 契約予定/契約完了/決済完了 のときだけ画面に出る欄・
+  // 2026-10-23 発注者指示)。NULL=未定。ステータスを戻しても値は消さない(欄が隠れるだけ)。
+  contractPlannedOn        DateTime?         @map("contract_planned_on") @db.Date
+  settlementPlannedOn      DateTime?         @map("settlement_planned_on") @db.Date
   introductionRoute        String?           @map("introduction_route")
   dmScenarioId             String?           @map("dm_scenario_id") @db.Uuid
   gpsLat                   Decimal?          @map("gps_lat") @db.Decimal(10, 7)

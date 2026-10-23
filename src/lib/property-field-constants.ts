@@ -20,6 +20,9 @@ export const PROPERTY_TRACKED_FIELDS = [
   "registryStatus",
   "dmStatus",
   "caseStatus",
+  // 契約予定日・決済予定日(案件ステータス 8〜10 の欄・2026-10-23)。
+  "contractPlannedOn",
+  "settlementPlannedOn",
   "introductionRoute",
   "gpsLat",
   "gpsLng",
