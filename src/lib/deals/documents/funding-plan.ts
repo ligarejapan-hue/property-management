@@ -1,5 +1,8 @@
 import type { CompanyProfile } from "@/lib/sales-sheet/company-profile-store";
-import type { FundingLine, FundingPlanCalc } from "../calc/funding-plan";
+import { fundingPlanCalc, type FundingLine, type FundingPlanCalc } from "../calc/funding-plan";
+import { computeDealCalc } from "../calc/deal-calc";
+import type { PropertyKindDef } from "../constants";
+import type { RateTableRow } from "../rate-tables";
 import { yen } from "../calc/format";
 import type { FundingInputs } from "../funding-schema";
 import type { DealView } from "../view";
@@ -106,4 +109,12 @@ ${propertyRows(i.deal)}
 ${purchase ? purchaseBody(i.calc) : saleBody(i.calc)}
 ${companyBlock(i.company)}`,
   });
+}
+
+/** 取引・税率の表・入力から、資金計画表の計算と HTML をまとめて作る(プレビュー・PDF・Excel で共通)。 */
+export function buildFundingPlan(a: {
+  deal: DealView; rateRows: RateTableRow[]; kinds: PropertyKindDef[]; inputs: FundingInputs; company: CompanyProfile; today: string;
+}): { calc: FundingPlanCalc; html: string } {
+  const calc = fundingPlanCalc(a.deal, computeDealCalc(a.deal, a.rateRows, a.kinds, a.today), a.inputs, a.rateRows);
+  return { calc, html: renderFundingPlanHtml({ deal: a.deal, inputs: a.inputs, calc, company: a.company, issuedOn: a.today }) };
 }
