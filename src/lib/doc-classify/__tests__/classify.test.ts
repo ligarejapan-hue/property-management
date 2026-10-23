@@ -9,12 +9,14 @@ import {
 } from "../classify";
 
 describe("種類の表", () => {
-  it("段階は ①契約前 ②契約関係 ③決済関係 ④本人確認 の順", () => {
-    expect(DOC_STAGES.map((s) => s.code)).toEqual([
-      "pre_contract",
-      "contract",
-      "settlement",
-      "identity",
+  it("段階は ①調査資料等 ②管理関係 ③契約関係 ④決済関係 ⑤賃貸関係 本人確認(番号なし) の順", () => {
+    expect(DOC_STAGES.map((s) => [s.code, s.label, s.short])).toEqual([
+      ["pre_contract", "調査資料等", "①"],
+      ["management", "管理関係", "②"],
+      ["contract", "契約関係", "③"],
+      ["settlement", "決済関係", "④"],
+      ["rental", "賃貸関係", "⑤"],
+      ["identity", "本人確認", ""],
     ]);
   });
 
@@ -48,9 +50,24 @@ describe("classifyDocument: ファイル名", () => {
     ["付帯設備表　ハマイハイライズ305号室.xlsx", "fixtures_list", "contract"],
     ["物件状況告知書.pdf", "condition_report", "contract"],
     ["ハマイハイライズ　媒介契約書.pdf", "brokerage_agreement", "pre_contract"],
-    ["管理に係る重要事項調査報告書.pdf", "mgmt_report", "pre_contract"],
-    ["管理規約.pdf", "bylaws", "pre_contract"],
     ["査定報告書_2026.pdf", "appraisal_report", "pre_contract"],
+    ["公図.pdf", "drawings", "pre_contract"],
+    ["地積測量図_123-4.pdf", "drawings", "pre_contract"],
+    ["固定資産評価証明書.pdf", "tax_certificate", "pre_contract"],
+    ["管理に係る重要事項調査報告書.pdf", "mgmt_report", "management"],
+    ["管理規約.pdf", "bylaws", "management"],
+    ["長期修繕計画書.pdf", "repair_plan", "management"],
+    ["第30期総会議事録.pdf", "assembly_minutes", "management"],
+    ["管理費等のご案内.pdf", "mgmt_fees", "management"],
+    ["賃貸借契約書・管理委託契約書.pdf", "lease_contract", "rental"],
+    ["レントロール.xlsx", "rent_roll", "rental"],
+    ["管理委託契約書.pdf", "pm_agreement", "rental"],
+    ["入居者一覧.xlsx", "tenant_info", "rental"],
+    ["敷金預り証.pdf", "security_deposit", "rental"],
+    ["150417　賃貸借契約の更新に関する覚書（タラ様）.pdf", "renewal_memo", "rental"],
+    ["管理費等精算書.pdf", "settlement_statement", "settlement"],
+    ["解約通知書.pdf", "termination_notice", "rental"],
+    ["所有者変更のお知らせ.pdf", "owner_change_notice", "rental"],
     ["決済ご案内（ハマイハイライズ305）.pdf", "settlement_notice", "settlement"],
     ["精算金（ハマイハイライズ３０５）.pdf", "settlement_statement", "settlement"],
     ["取引完了確認書.docx", "completion_confirmation", "settlement"],
@@ -77,6 +94,12 @@ describe("classifyDocument: ファイル名", () => {
     expect(byName("手付金領収書.pdf")?.kind).toBe("deposit_receipt");
     expect(byName("残代金領収書.pdf")?.kind).toBe("settlement_receipt");
     expect(byName("株式会社A御中_媒介契約に基づく仲介手数料として_領収書_REC-18.pdf")?.kind).toBe("settlement_receipt");
+  });
+
+  it("敷金・保証金の預り証は売買の領収書にしない(⑤賃貸関係)", () => {
+    expect(byName("敷金預り証.pdf")?.kind).toBe("security_deposit");
+    expect(byName("保証金領収書.pdf")?.kind).toBe("security_deposit");
+    expect(classifyDocument({ fileName: "x.pdf", text: "預り証 … 敷金として" })?.kind).toBe("security_deposit");
   });
 
   it("名前だけの「領収書」は決済の領収書・low", () => {
@@ -119,6 +142,15 @@ describe("classifyDocument: 本文", () => {
       text: "決済のご案内 … 添付: 精算書 …",
     });
     expect(r?.kind).toBe("settlement_notice");
+  });
+
+  it("見出しの種類は、後ろに出る「入居者」「敷金」「議事録」に負けない", () => {
+    const r = classifyDocument({
+      fileName: "x.pdf",
+      text: "重要事項説明書\n\n… 入居者の有無 … 敷金の承継 … 総会議事録の写しを別添 …",
+    });
+    expect(r?.kind).toBe("disclosure");
+    expect(r?.confidence).toBe("high");
   });
 
   it("本文は先頭 3,000 文字だけ見る", () => {

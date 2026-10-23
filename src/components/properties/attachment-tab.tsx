@@ -30,7 +30,7 @@ import {
 } from "@/lib/api-client";
 import { DOC_KINDS, DOC_STAGES, docKindByCode } from "@/lib/doc-classify/classify";
 import { defaultOpenStage } from "@/lib/doc-classify/stage";
-import { displayTitle, groupAttachmentsByStage, needsKindCheck } from "@/lib/attachments/doc-folders";
+import { displayTitle, groupAttachmentsByStage, needsKindCheck, visibleFolders } from "@/lib/attachments/doc-folders";
 import { normalizeFileUrl } from "@/lib/url-normalize";
 import { sendsDownloadIntent } from "@/lib/attachments/download-intent";
 import {
@@ -126,7 +126,10 @@ export default function AttachmentTab({
   refreshToken = 0,
   onRegistryMutated,
   caseStatus = null,
+  occupancyStatus = null,
 }: {
+  /** 現況。賃貸中(rented)のときだけ「⑤ 賃貸関係」のフォルダを空でも出す。 */
+  occupancyStatus?: string | null;
   propertyId: string;
   /** 案件ステータス。最初に開いておく段階のフォルダを決める(契約予定→②・契約完了以降→③)。 */
   caseStatus?: string | null;
@@ -356,10 +359,10 @@ export default function AttachmentTab({
             <p className="text-sm">添付ファイルはまだありません</p>
           </div>
         ) : (
-          // 段階ごとのフォルダ(①契約前 ②契約関係 ③決済関係 ④本人確認 その他)。
+          // 段階ごとのフォルダ(①調査資料等 ②管理関係 ③契約関係 ④決済関係 ⑤賃貸関係[賃貸中のときだけ] 本人確認 その他)。
           // 案件ステータスに合う段階を開いた状態にし、ほかは件数だけ見せる。
           <div className="space-y-2">
-            {groupAttachmentsByStage(generalAttachments).map((folder) => (
+            {visibleFolders(groupAttachmentsByStage(generalAttachments), { occupancyStatus }).map((folder) => (
               <details
                 key={folder.code}
                 open={folder.code === openStage || (folder.code === "other" && folder.items.length > 0 && openStageEmpty)}
@@ -545,7 +548,7 @@ function AttachmentRow({
             >
               <option value="">その他</option>
               {DOC_STAGES.map((stage) => (
-                <optgroup key={stage.code} label={`${stage.short} ${stage.label}`}>
+                <optgroup key={stage.code} label={stage.short ? `${stage.short} ${stage.label}` : stage.label}>
                   {DOC_KINDS.filter((k) => k.stage === stage.code).map((k) => (
                     <option key={k.code} value={k.code}>{k.label}</option>
                   ))}
