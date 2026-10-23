@@ -2,6 +2,8 @@ import type { DealListItem, DealPartyView, DealView } from "./view";
 import type { DealSettingsView } from "./settings";
 import type { PropertyKindDef } from "./constants";
 import type { DealCalc } from "./calc/deal-calc";
+import type { FundingPlanCalc } from "./calc/funding-plan";
+import type { FundingInputs } from "./funding-schema";
 
 /** 取引の画面から API を呼ぶ。失敗はサーバーの文言とコードを持った DealApiError にする。 */
 export class DealApiError extends Error {
@@ -50,6 +52,8 @@ export const dealsApi = {
   rateTables: () => call<{ tables: RateTableView[] }>("/api/admin/deal-settings/rate-tables"),
   users: () => call<{ data: UserOption[] }>("/api/users"),
   calc: (id: string) => call<{ calc: DealCalc }>(`/api/deals/${id}/calc`),
+  fundingPreview: (id: string, fundingPlan: FundingInputs) =>
+    call<{ calc: FundingPlanCalc; html: string }>(`/api/deals/${id}/funding-plan/preview`, { method: "POST", body: { fundingPlan } }),
   createRateTable: (body: Record<string, unknown>) => call<{ id: string }>("/api/admin/deal-settings/rate-tables", { method: "POST", body }),
   updateRateTable: (id: string, body: Record<string, unknown>) => call<{ ok: true }>(`/api/admin/deal-settings/rate-tables/${id}`, { method: "PUT", body }),
   deleteRateTable: (id: string, updatedAt: string) =>
