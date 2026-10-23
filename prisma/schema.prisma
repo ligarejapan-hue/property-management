@@ -223,6 +223,12 @@ model User {
   materialSends           AgentInquiryMaterialSend[] @relation("AgentInquiryMaterialSendSentBy")
   agentViewingsAttended   AgentViewing[]          @relation("AgentViewingAttendant")
   adPermissionsUpdated    PropertyAdPermission[]  @relation("PropertyAdPermissionUpdatedBy")
+  dealsAssigned           Deal[]                  @relation("DealAssignee")
+  dealsLicensed           Deal[]                  @relation("DealLicensedAgent")
+  dealsSales              Deal[]                  @relation("DealSalesStaff")
+  dealsOps                Deal[]                  @relation("DealOpsStaff")
+  dealsCreated            Deal[]                  @relation("DealCreatedBy")
+  dealDocumentsIssued     DealDocument[]          @relation("DealDocumentIssuedBy")
 
   @@map("users")
 }
@@ -476,6 +482,7 @@ model Property {
   dmExportBatchItems DmExportBatchItem[]
   agentInquiries     AgentInquiry[]
   adPermissions      PropertyAdPermission[]
+  deals              Deal[]
 
   @@index([caseStatus])
   @@index([introductionRoute])
@@ -2224,4 +2231,147 @@ model NotificationSourceEvent {
   @@id([source, eventId])
   @@index([firstSeenAt])
   @@map("notification_source_events")
+}
+
+// 取引(設計 docs/superpowers/specs/2026-10-23-deals-documents-design.md §2)。画面の名前は「取引」。
+// 選択肢は TEXT + アプリの許可リスト(src/lib/deals/constants.ts)。金額は円の整数(BigInt)。
+model Deal {
+  id                 String    @id @default(uuid()) @db.Uuid
+  /// 年+4桁(例 2026-0001)。src/lib/deals/deal-no.ts。
+  dealNo             String    @unique @map("deal_no")
+  name               String
+  businessType       String    @map("business_type")
+  /// 売主側/買主側/両手。買取再販では null。
+  tradeSide          String?   @map("trade_side")
+  status             String    @default("considering")
+  assigneeId         String?   @map("assignee_id") @db.Uuid
+  licensedAgentId    String?   @map("licensed_agent_id") @db.Uuid
+  salesStaffId       String?   @map("sales_staff_id") @db.Uuid
+  opsStaffId         String?   @map("ops_staff_id") @db.Uuid
+  /// 既存物件。手入力の物件は null で、写し(propertySnapshot)だけを持つ。
+  propertyId         String?   @map("property_id") @db.Uuid
+  propertyKind       String?   @map("property_kind")
+  hasOc              Boolean   @default(false) @map("has_oc")
+  contractAt         DateTime? @map("contract_at")
+  contractPlace      String?   @map("contract_place")
+  settlementAt       DateTime? @map("settlement_at")
+  settlementPlace    String?   @map("settlement_place")
+  price              BigInt?
+  buildingTax        BigInt?   @map("building_tax")
+  deposit            BigInt?
+  /// 1/100 %(10% = 1000)。作成時に税率の表から入れる。
+  taxRateBp          Int       @default(1000) @map("tax_rate_bp")
+  propertySnapshot   Json      @default("{}") @map("property_snapshot") @db.JsonB
+  assessments        Json      @default("[]") @db.JsonB
+  costs              Json      @default("{}") @db.JsonB
+  counterpartyBroker Json      @default("{}") @map("counterparty_broker") @db.JsonB
+  settlementTerms    Json      @default("{}") @map("settlement_terms") @db.JsonB
+  leases             Json      @default("[]") @db.JsonB
+  planInputs         Json      @default("{}") @map("plan_inputs") @db.JsonB
+  checklistState     Json      @default("{}") @map("checklist_state") @db.JsonB
+  overrides          Json      @default("{}") @db.JsonB
+  version            Int       @default(1)
+  createdById        String    @map("created_by_id") @db.Uuid
+  createdAt          DateTime  @default(now()) @map("created_at")
+  updatedAt          DateTime  @updatedAt @map("updated_at")
+
+  assignee      User?          @relation("DealAssignee", fields: [assigneeId], references: [id], onDelete: SetNull)
+  licensedAgent User?          @relation("DealLicensedAgent", fields: [licensedAgentId], references: [id], onDelete: SetNull)
+  salesStaff    User?          @relation("DealSalesStaff", fields: [salesStaffId], references: [id], onDelete: SetNull)
+  opsStaff      User?          @relation("DealOpsStaff", fields: [opsStaffId], references: [id], onDelete: SetNull)
+  createdBy     User           @relation("DealCreatedBy", fields: [createdById], references: [id])
+  property      Property?      @relation(fields: [propertyId], references: [id], onDelete: SetNull)
+  parties       DealParty[]
+  documents     DealDocument[]
+
+  @@index([status, settlementAt])
+  @@index([businessType])
+  @@index([assigneeId])
+  @@index([propertyId])
+  @@index([createdAt])
+  @@map("deals")
+}
+
+model DealParty {
+  id             String   @id @default(uuid()) @db.Uuid
+  dealId         String   @map("deal_id") @db.Uuid
+  /// seller/buyer/agent/tenant
+  role           String
+  /// individual/corporation
+  partyType      String   @map("party_type")
+  name           String
+  representative String?
+  address        String?
+  phone          String?
+  shareNum       Int?     @map("share_num")
+  shareDen       Int?     @map("share_den")
+  isSelf         Boolean  @default(false) @map("is_self")
+  sortOrder      Int      @default(0) @map("sort_order")
+  version        Int      @default(1)
+  createdAt      DateTime @default(now()) @map("created_at")
+  updatedAt      DateTime @updatedAt @map("updated_at")
+
+  deal Deal @relation(fields: [dealId], references: [id], onDelete: Cascade)
+
+  @@index([dealId, role, sortOrder])
+  @@map("deal_parties")
+}
+
+/// 書類の発行履歴(段3から使う)。再発行しても前の版は消さない。
+model DealDocument {
+  id            String   @id @default(uuid()) @db.Uuid
+  dealId        String   @map("deal_id") @db.Uuid
+  docType       String   @map("doc_type")
+  /// 購入/売却・社内用/銀行向け など。無いときは空文字(一意の鍵に null を入れない)。
+  variant       String   @default("")
+  version       Int
+  issuedAt      DateTime @default(now()) @map("issued_at")
+  issuedById    String   @map("issued_by_id") @db.Uuid
+  inputSnapshot Json     @map("input_snapshot") @db.JsonB
+  calcSnapshot  Json     @map("calc_snapshot") @db.JsonB
+  pdfKey        String?  @map("pdf_key")
+  xlsxKey       String?  @map("xlsx_key")
+  fileBaseName  String   @map("file_base_name")
+
+  deal     Deal @relation(fields: [dealId], references: [id], onDelete: Restrict)
+  issuedBy User @relation("DealDocumentIssuedBy", fields: [issuedById], references: [id])
+
+  @@unique([dealId, docType, variant, version])
+  @@index([dealId, issuedAt])
+  @@map("deal_documents")
+}
+
+/// 取引の設定(1行だけ・id=singleton)。会社名・免許・電話・住所は company_profile を使う。
+model DealSettings {
+  id                  String   @id @default("singleton")
+  representativeTitle String?  @map("representative_title")
+  representativeName  String?  @map("representative_name")
+  bankAccount         Json     @default("{}") @map("bank_account") @db.JsonB
+  logoKey             String?  @map("logo_key")
+  sealKey             String?  @map("seal_key")
+  texts               Json     @default("{}") @db.JsonB
+  checklistItems      Json     @default("[]") @map("checklist_items") @db.JsonB
+  propertyKinds       Json     @default("[]") @map("property_kinds") @db.JsonB
+  sectionMatrix       Json     @default("{}") @map("section_matrix") @db.JsonB
+  /// cap=上限で計算 / manual=手入力
+  brokerageMethod     String   @default("cap") @map("brokerage_method")
+  version             Int      @default(1)
+  updatedAt           DateTime @updatedAt @map("updated_at")
+  updatedById         String?  @map("updated_by_id") @db.Uuid
+
+  @@map("deal_settings")
+}
+
+/// 税率・税額の表(適用期間つき)。src/lib/deals/rate-tables.ts。
+model DealRateTable {
+  id          String    @id @default(uuid()) @db.Uuid
+  kind        String
+  validFrom   DateTime  @map("valid_from") @db.Date
+  validTo     DateTime? @map("valid_to") @db.Date
+  content     Json      @db.JsonB
+  updatedById String?   @map("updated_by_id") @db.Uuid
+  updatedAt   DateTime  @default(now()) @updatedAt @map("updated_at")
+
+  @@index([kind, validFrom])
+  @@map("deal_rate_tables")
 }

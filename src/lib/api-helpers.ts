@@ -120,6 +120,9 @@ export async function getUserPermissions(userId: string): Promise<PermissionEntr
       // 反響の受付(agent_inquiry)。mock は admin 相当のため付与。
       { resource: "agent_inquiry", action: "read", granted: true },
       { resource: "agent_inquiry", action: "write", granted: true },
+      // 取引(deal)。mock は admin 相当のため付与。
+      { resource: "deal", action: "read", granted: true },
+      { resource: "deal", action: "write", granted: true },
     ];
   }
 
