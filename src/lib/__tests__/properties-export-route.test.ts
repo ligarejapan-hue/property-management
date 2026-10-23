@@ -911,7 +911,7 @@ describe("buildPropertyListWhere（一覧 API と共有・従来挙動の固定�
     expect(where.isArchived).toBeUndefined();
   });
 
-  it("keyword は address/lotNumber/realEstateNumber/buildingNumber の OR", async () => {
+  it("keyword は address/lotNumber/realEstateNumber/buildingNumber/buildingName の OR", async () => {
     const { where } = await buildPropertyListWhere(
       { ...baseQuery, keyword: "東京" },
       adminSession,
@@ -921,6 +921,7 @@ describe("buildPropertyListWhere（一覧 API と共有・従来挙動の固定�
       { lotNumber: { contains: "東京", mode: "insensitive" } },
       { realEstateNumber: { contains: "東京", mode: "insensitive" } },
       { buildingNumber: { contains: "東京", mode: "insensitive" } },
+      { buildingName: { contains: "東京", mode: "insensitive" } },
     ]);
   });
 
@@ -935,15 +936,15 @@ describe("buildPropertyListWhere（一覧 API と共有・従来挙動の固定�
     ).toBe(true);
   });
 
-  it("buildPropertyListOrderBy は { [sortBy]: sortOrder } を返す", () => {
-    expect(buildPropertyListOrderBy(baseQuery)).toEqual({ updatedAt: "desc" });
+  it("buildPropertyListOrderBy は [{ [sortBy]: sortOrder }, { id: \"asc\" }] を返す(同じ日時でもページ送りがぶれない)", () => {
+    expect(buildPropertyListOrderBy(baseQuery)).toEqual([{ updatedAt: "desc" }, { id: "asc" }]);
     expect(
       buildPropertyListOrderBy({
         ...baseQuery,
         sortBy: "createdAt",
         sortOrder: "asc",
       }),
-    ).toEqual({ createdAt: "asc" });
+    ).toEqual([{ createdAt: "asc" }, { id: "asc" }]);
   });
 });
 

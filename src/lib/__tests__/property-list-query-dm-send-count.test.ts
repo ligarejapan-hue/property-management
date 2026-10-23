@@ -10,12 +10,12 @@ const session = { id: "u1", role: "admin" };
 describe("property-list-query: DM送信回数の並べ替え/抽出", () => {
   it("sortBy=dmSendCount → dmLogs の件数で並べ替える", () => {
     const q = propertyListQuerySchema.parse({ sortBy: "dmSendCount", sortOrder: "asc" });
-    expect(buildPropertyListOrderBy(q)).toEqual({ dmLogs: { _count: "asc" } });
+    expect(buildPropertyListOrderBy(q)).toEqual([{ dmLogs: { _count: "asc" } }, { id: "asc" }]);
   });
 
   it("従来の sortBy はそのまま列で並べ替える", () => {
     const q = propertyListQuerySchema.parse({ sortBy: "address", sortOrder: "desc" });
-    expect(buildPropertyListOrderBy(q)).toEqual({ address: "desc" });
+    expect(buildPropertyListOrderBy(q)).toEqual([{ address: "desc" }, { id: "asc" }]);
   });
 
   it("dmSentMax=0 → 未送信のみ(dmLogs none)。groupBy は呼ばない", async () => {

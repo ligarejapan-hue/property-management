@@ -57,6 +57,8 @@ interface ApiProperty {
   id: string;
   propertyType: string;
   address: string;
+  /** 物件名(マンション名)。集合住宅以外はふつう null。 */
+  buildingName?: string | null;
   lotNumber: string | null;
   buildingNumber: string | null;
   realEstateNumber: string | null;
@@ -69,6 +71,7 @@ interface ApiProperty {
   settlementPlannedOn?: string | null;
   introductionRoute?: string | null;
   isArchived: boolean;
+  createdAt?: string;
   updatedAt: string;
   assignedTo: string | null;
   assignee: { id: string; name: string } | null;
@@ -102,6 +105,10 @@ interface Pagination {
 
 // Next.js 16 では useSearchParams を使うクライアントコンポーネントを Suspense で
 // 包む必要がある。インナーに本体を置き、default export 側で Suspense ラップする。
+// 既定の並び=登録日の新しい順(従業員の指摘 2026-10-24: 更新日順だと触った物件が上に来て管理しにくい)。
+// リセット・URL・件数バッジがすべてこの1か所を見る。
+const DEFAULT_SORT = "createdAt:desc";
+
 export default function PropertiesPage() {
   return (
     <Suspense fallback={<div className="p-6 text-sm text-gray-500 dark:text-gray-400">読み込み中...</div>}>
@@ -175,7 +182,7 @@ function PropertiesPageInner() {
   // DM送信回数「N回以下」で絞り込む(空=絞らない)。
   const [sendCountMaxFilter, setSendCountMaxFilter] = useState(() => sp.get("dmSentMax") ?? "");
   // 並び替え。 "<sortBy>:<sortOrder>" を1つの値として保持する。
-  const [sort, setSort] = useState<string>(() => sp.get("sort") ?? "updatedAt:desc");
+  const [sort, setSort] = useState<string>(() => sp.get("sort") ?? DEFAULT_SORT);
   const [page, setPageState] = useState(() => Math.max(1, parseInt(sp.get("page") ?? "1") || 1));
 
   // UI一貫性 第1弾(5): 詳細条件の折りたたみ(PC/モバイル共通)。
@@ -195,7 +202,7 @@ function PropertiesPageInner() {
         sp.get("hasWarning") === "true" ||
         sp.get("undeliverable") === "1" ||
         sp.get("resendOnly") === "1" ||
-        (sp.get("sort") && sp.get("sort") !== "updatedAt:desc"),
+        (sp.get("sort") && sp.get("sort") !== DEFAULT_SORT),
     ),
   );
 
@@ -652,7 +659,7 @@ function PropertiesPageInner() {
     if (undeliverableOnly) params.set("undeliverable", "1");
     if (resendOnly) params.set("resendOnly", "1");
     if (sendCountMaxFilter) params.set("dmSentMax", sendCountMaxFilter);
-    if (sort !== "updatedAt:desc") params.set("sort", sort);
+    if (sort !== DEFAULT_SORT) params.set("sort", sort);
     if (page > 1) params.set("page", String(page));
     const qs = params.toString();
     router.replace(qs ? `${pathname}?${qs}` : pathname, { scroll: false });
@@ -871,7 +878,7 @@ function PropertiesPageInner() {
     setUndeliverableOnly(false);
     setResendOnly(false);
     setSendCountMaxFilter("");
-    setSort("updatedAt:desc");
+    setSort(DEFAULT_SORT);
     setPage(1);
   };
 
@@ -879,7 +886,7 @@ function PropertiesPageInner() {
   const hasActiveFilter =
     !!searchInput || !!searchText || !!searchAllDraft || !!mgmtIdText || !!typeFilter || !!registryFilter || !!dmFilter ||
     !!caseFilter || !!introductionRouteFilter || !!assigneeFilter || !!ownerFilter || !!updatedFromFilter || !!updatedToFilter ||
-    warningOnly || undeliverableOnly || resendOnly || !!sendCountMaxFilter || sort !== "updatedAt:desc";
+    warningOnly || undeliverableOnly || resendOnly || !!sendCountMaxFilter || sort !== DEFAULT_SORT;
 
   // 更新日の開始>終了(逆転)は結果が必ず0件になるので警告する(UI総点検 B-9)。YYYY-MM-DD は文字列比較で日付順になる。
   const dateRangeInvalid = !!updatedFromFilter && !!updatedToFilter && updatedFromFilter > updatedToFilter;
@@ -888,7 +895,7 @@ function PropertiesPageInner() {
   const activeFilterCount = [
     searchText, mgmtIdText, typeFilter, registryFilter, dmFilter, caseFilter,
     introductionRouteFilter, assigneeFilter, ownerFilter, updatedFromFilter, updatedToFilter, sendCountMaxFilter,
-  ].filter(Boolean).length + (warningOnly ? 1 : 0) + (sort !== "updatedAt:desc" ? 1 : 0);
+  ].filter(Boolean).length + (warningOnly ? 1 : 0) + (sort !== DEFAULT_SORT ? 1 : 0);
 
   // 折りたたみ内(詳細条件)に適用されている件数。畳んでいても見落とさないよう
   // トグルに「(N件適用中)」と出す(UI一貫性 第1弾(5))。
@@ -902,7 +909,7 @@ function PropertiesPageInner() {
     (warningOnly ? 1 : 0) +
     (undeliverableOnly ? 1 : 0) +
     (resendOnly ? 1 : 0) +
-    (sort !== "updatedAt:desc" ? 1 : 0);
+    (sort !== DEFAULT_SORT ? 1 : 0);
 
   const toggleSelect = (id: string) => {
     setSelectedIds((prev) => {
@@ -1185,7 +1192,7 @@ function PropertiesPageInner() {
           <Search className="absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-gray-400 dark:text-gray-500" />
           <input
             type="text"
-            placeholder="住所・地番・管理ID(例: id:120行)で一覧を絞り込み"
+            placeholder="住所・物件名・地番・管理ID(例: id:120行)で一覧を絞り込み"
             title="管理IDの書き方: 「id:120行」(取込行)・「id:」+コピーした管理ID / ファイル単位は「受付帳.xlsx」「受付帳.xlsx:120」"
             value={searchAllDraft}
             onChange={(e) => handleUnifiedSearchChange(e.target.value)}
@@ -1497,6 +1504,8 @@ function PropertiesPageInner() {
           className="rounded-md border border-gray-300 px-3 py-2 text-sm focus:border-indigo-500 focus:ring-1 focus:ring-indigo-500 focus:outline-none dark:border-gray-700 dark:bg-gray-900 dark:text-gray-100"
           title="並び替え"
         >
+          <option value="createdAt:desc">登録日 新しい順</option>
+          <option value="createdAt:asc">登録日 古い順</option>
           <option value="updatedAt:desc">更新日 新しい順</option>
           <option value="updatedAt:asc">更新日 古い順</option>
           <option value="caseStatus:asc">案件ステータス順</option>
@@ -1721,7 +1730,7 @@ function PropertiesPageInner() {
                   担当者
                 </th>
                 <th className="whitespace-nowrap px-4 py-3 font-medium text-gray-600 dark:text-gray-300">
-                  更新日
+                  登録日
                 </th>
                 <th className="whitespace-nowrap px-2 py-3 font-medium text-gray-600 dark:text-gray-300">
                   操作
@@ -1788,6 +1797,11 @@ function PropertiesPageInner() {
                       href={`/properties/${property.id}`}
                       className="hover:text-indigo-600"
                     >
+                      {property.buildingName && (
+                        <span className="block font-medium text-gray-900 dark:text-gray-100">
+                          {property.buildingName}
+                        </span>
+                      )}
                       {property.address}
                     </Link>
                   </td>
@@ -1848,7 +1862,11 @@ function PropertiesPageInner() {
                     {property.assignee?.name ?? "-"}
                   </td>
                   <td className="whitespace-nowrap px-4 py-3 text-gray-500 dark:text-gray-400">
-                    {new Date(property.updatedAt).toLocaleDateString("ja-JP")}
+                    {property.createdAt ? new Date(property.createdAt).toLocaleDateString("ja-JP") : "-"}
+                    {/* 更新日は2行目に小さく残す(更新日での絞り込み・並べ替えも残っている)。 */}
+                    <span className="block text-[11px] text-gray-400 dark:text-gray-500">
+                      更新 {new Date(property.updatedAt).toLocaleDateString("ja-JP")}
+                    </span>
                   </td>
                   <td className="whitespace-nowrap px-2 py-3" onClick={(e) => e.stopPropagation()}>
                     {canDeleteProperty && (
@@ -1933,6 +1951,11 @@ function PropertiesPageInner() {
                           {PROPERTY_TYPE_LABELS[property.propertyType] ?? property.propertyType}
                         </span>
                       </div>
+                      {property.buildingName && (
+                        <p className="text-sm font-medium text-gray-900 dark:text-gray-100 break-all">
+                          {property.buildingName}
+                        </p>
+                      )}
                       <p className="text-sm text-gray-900 dark:text-gray-100 break-all">
                         {property.address}
                       </p>

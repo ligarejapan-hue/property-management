@@ -27,7 +27,7 @@ describe("properties page: 管理ID 検索欄", () => {
     // 管理ID扱いは「120行」等の明確な構文のみ(placeholder で例示して教える)。
     // R4 で所有者検索を専用の小窓に分離したため、絞り込み窓の placeholder は
     // 住所・地番・管理ID の3用途になった。
-    expect(pageSrc).toMatch(/placeholder="住所・地番・管理ID/);
+    expect(pageSrc).toMatch(/placeholder="住所・物件名・地番・管理ID/);
     expect(pageSrc).toMatch(/例: id:120行/);
   });
 

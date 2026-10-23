@@ -178,7 +178,7 @@ describe("所有者検索の構造分離(@codex #404 R1〜R4 P1 の最終形)", 
   it("絞り込み窓の placeholder は所有者・電話を案内しない", () => {
     // ⚠例示は id: 形式のみ(@codex #404 R14 P2: 「120行」を案内すると数字の
     //   途中が keyword 確定を通る。id: 形式は全打鍵が保留/mgmtId)。
-    expect(pageSrc).toMatch(/placeholder="住所・地番・管理ID\(例: id:120行\)で一覧を絞り込み"/);
+    expect(pageSrc).toMatch(/placeholder="住所・物件名・地番・管理ID\(例: id:120行\)で一覧を絞り込み"/);
     expect(pageSrc).not.toMatch(/placeholder="[^"]*例: 120行/);
     expect(pageSrc).not.toMatch(/placeholder="[^"]*所有者[^"]*絞り込み/);
   });
