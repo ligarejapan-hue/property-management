@@ -29,6 +29,8 @@ import {
 const SCANNED_PDF_WARNING =
   "PDF本文を十分に抽出できませんでした。画像化された謄本PDFの可能性があります。読み取れた内容が不足している場合は、本文をテキストにして貼り付けてください。";
 
+const FULL_CERTIFICATE_REVIEW_WARNING =
+  "全部事項の謄本から読んだ所有者に、確認が必要な点があります（「登記の現況」の注記を参照）。謄本を見て確かめてから登録してください。";
 const FULL_CERTIFICATE_PREVIEW_WARNING =
   "全部事項の謄本から今の所有者を判定できませんでした。謄本を見て所有者を入力してください。";
 
@@ -125,6 +127,10 @@ export async function POST(request: NextRequest) {
     if (isFullCertificateText(text)) {
       if (hasDeterminedOwners(rights)) {
         parsed.owners = ownersFromRights(rights);
+      } else if (rights && rights.currentOwners.length > 0) {
+        // 判定は出たが確認の要る注記がある（旧氏名が残る等）。下書きとして見せ、人に確かめてもらう
+        parsed.owners = ownersFromRights(rights);
+        parsed.warnings = [...parsed.warnings, FULL_CERTIFICATE_REVIEW_WARNING];
       } else {
         parsed.owners = [];
         parsed.warnings = [...parsed.warnings, FULL_CERTIFICATE_PREVIEW_WARNING];

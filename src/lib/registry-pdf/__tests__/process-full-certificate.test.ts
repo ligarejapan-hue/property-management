@@ -129,6 +129,7 @@ const rights = (owners: RegistryRightsSummary["currentOwners"]): RegistryRightsS
   hasKouku: true,
   hasOtsuku: false,
   currentOwners: owners,
+  ownersConfirmed: owners.length > 0,
   activeRights: [],
   cautions: [],
   cancelled: { kouku: 0, otsuku: 0 },
@@ -176,6 +177,19 @@ describe("全部事項: 下線（抹消事項）を読んだ判定結果の所�
     expect(pm.propertyOwner.create).not.toHaveBeenCalled();
     expect(String(r.warning)).toContain("判定できなかった");
     expect(pm.attachment.create).toHaveBeenCalledTimes(1);
+  });
+
+  it("所有者は出ていても確認の要る注記があれば（旧氏名が残る等）、自動では反映しない", async () => {
+    const r = await run({
+      certificateType: "all",
+      rights: {
+        ...rights([CURRENT]),
+        ownersConfirmed: false,
+        notes: ["名義人の住所・氏名に変更の跡（下線）があります。今の住所・氏名は目視で確認してください。"],
+      },
+    });
+    expect(pm.propertyOwner.create).not.toHaveBeenCalled();
+    expect(String(r.warning)).toContain("判定できなかった");
   });
 
   it("all で判定できなければ、従来どおり反映しない", async () => {

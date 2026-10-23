@@ -85,6 +85,7 @@ describe("analyzeRegistryRights: 全部事項（下線つき）", () => {
   });
 
   it("今の所有者は最後の所有権移転の所有者。古い住所（下線）は捨て、付記の住所変更を使う", () => {
+    expect(r.ownersConfirmed).toBe(true);
     expect(r.currentOwners).toEqual([
       { name: "乙川二郎", address: "東京都品川区架空五丁目５番２－３０５号", share: null },
     ]);
@@ -190,6 +191,8 @@ describe("analyzeRegistryRights: 共有・注意登記・判断できない形",
     const r = analyzeRegistryRights(marked(kouWith(rows)));
     expect(r.currentOwners).toEqual([{ name: "丁田三郎", address: null, share: null }]);
     expect(r.notes.join()).toContain("住所");
+    // 確認の要る注記が付くので、自動反映してよい「確定」ではない
+    expect(r.ownersConfirmed).toBe(false);
   });
 });
 

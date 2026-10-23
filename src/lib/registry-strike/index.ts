@@ -33,9 +33,13 @@ export function ownersFromRights(
   return rights.currentOwners.map((o) => ({ name: o.name, address: o.address, share: o.share }));
 }
 
-/** 判定結果から今の所有者を使えるか（甲区を読めて、1人以上判定できた）。 */
+/**
+ * 判定結果の今の所有者を、**自動で**反映してよいか。
+ * 甲区を読めて、1人以上を、確認の要る注記なしで判定できたときだけ true。
+ * （例: 古い氏名に下線があるのに変更の付記を読めない → 旧氏名が残るので false）
+ */
 export function hasDeterminedOwners(rights: RegistryRightsSummary | null | undefined): rights is RegistryRightsSummary {
-  return !!rights && rights.hasKouku && rights.currentOwners.length > 0;
+  return !!rights && rights.hasKouku && rights.currentOwners.length > 0 && rights.ownersConfirmed;
 }
 
 export async function summarizeRegistryRights(input: {
