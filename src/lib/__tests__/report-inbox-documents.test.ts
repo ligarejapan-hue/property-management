@@ -270,6 +270,16 @@ describe("添付(通常の書類)", () => {
     expect(db.attachment.create).not.toHaveBeenCalled();
   });
 
+  it("★写しの保存が失敗したら、置きかけの写しを消して失敗を返す(記録は未処理のまま・@codex #565)", async () => {
+    storage.upload.mockRejectedValueOnce(new Error("storage down"));
+    const res = await attachPOST(jsonReq({ propertyId: PID }), ctx());
+    expect(res.status).toBe(500);
+    const attempted = (storage.upload.mock.calls[0] as unknown as [Buffer, { key: string }])[1].key;
+    expect(storage.delete).toHaveBeenCalledWith(attempted);
+    expect(db.reportInboxItem.updateMany).not.toHaveBeenCalled();
+    expect(db.attachment.create).not.toHaveBeenCalled();
+  });
+
   it("すでに添付済み・削除済みの行は 409(写す前)", async () => {
     db.reportInboxItem.findUnique.mockResolvedValueOnce({ ...generalPending, status: "attached" });
     const res = await attachPOST(jsonReq({ propertyId: PID }), ctx());

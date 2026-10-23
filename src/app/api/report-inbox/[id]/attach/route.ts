@@ -91,12 +91,19 @@ export async function POST(request: NextRequest, { params }: { params: Promise<{
       if (!file) throw new ApiError(404, "ファイルが見つかりません", "NOT_FOUND");
       const ext = fileExtension(item.fileName) ?? fileExtension(srcKey ?? "") ?? "bin";
       copiedKey = `properties/${propertyId}/attachments/${Date.now()}-${randomUUID()}.${ext}`;
-      const uploaded = await storage.upload(Buffer.from(file.body as Uint8Array), {
-        key: copiedKey,
-        mimeType: item.mimeType ?? "application/pdf",
-        fileName: item.fileName,
-      });
-      copiedUrl = uploaded.url;
+      try {
+        const uploaded = await storage.upload(Buffer.from(file.body as Uint8Array), {
+          key: copiedKey,
+          mimeType: item.mimeType ?? "application/pdf",
+          fileName: item.fileName,
+        });
+        copiedUrl = uploaded.url;
+      } catch (e) {
+        // 途中まで書けているかもしれない(置けたのに応答だけ失った等)。どの記録も指さない写しを残さない
+        // (@codex #565 P2)。消せなくても受け取り箱の記録は未処理のままなので、押し直し・削除で回収できる。
+        await removeFileAndVerify(storage, copiedKey);
+        throw e;
+      }
     }
 
     let attachmentId: string;
