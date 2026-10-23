@@ -18,8 +18,8 @@ export function AssessmentsEditor({ value, onChange }: { value: Assessments; onC
           <li key={i} className="grid items-end gap-2 sm:grid-cols-[1fr_1fr_5rem_5rem_auto]">
             <Field label="家屋評価額"><YenInput label="家屋評価額" value={String(r.building)} onChange={(v) => setRow(i, { building: parseYen(v) ?? 0 })} /></Field>
             <Field label="土地評価額"><YenInput label="土地評価額" value={String(r.land)} onChange={(v) => setRow(i, { land: parseYen(v) ?? 0 })} /></Field>
-            <Field label="持分(分子)"><input inputMode="numeric" value={r.shareNum} onChange={(e) => setRow(i, { shareNum: Math.max(1, parseYen(e.target.value) ?? 1) })} aria-label="持分(分子)" className={inputCls} /></Field>
-            <Field label="持分(分母)"><input inputMode="numeric" value={r.shareDen} onChange={(e) => setRow(i, { shareDen: Math.max(1, parseYen(e.target.value) ?? 1) })} aria-label="持分(分母)" className={inputCls} /></Field>
+            <Field label="持分(分子)"><ShareInput label="持分(分子)" value={r.shareNum} onCommit={(n) => setRow(i, { shareNum: n })} /></Field>
+            <Field label="持分(分母)"><ShareInput label="持分(分母)" value={r.shareDen} onCommit={(n) => setRow(i, { shareDen: n })} /></Field>
             <Button variant="ghost" size="sm" onClick={() => onChange({ ...value, rows: value.rows.filter((_, j) => j !== i) })}><Trash2 className="h-4 w-4" />消す</Button>
           </li>
         ))}
@@ -44,5 +44,26 @@ export function AssessmentsEditor({ value, onChange }: { value: Assessments; onC
         </Field>
       </div>
     </section>
+  );
+}
+
+/**
+ * 持分の入力。打ちかけ(空・途中)で値を書き換えないよう、欄を離れたときに読む(最終レビュー M-4)。
+ * 1以上の整数でなければ元の値に戻す。
+ */
+function ShareInput({ label, value, onCommit }: { label: string; value: number; onCommit: (n: number) => void }) {
+  return (
+    <input
+      key={value}
+      inputMode="numeric"
+      defaultValue={value}
+      onBlur={(e) => {
+        const n = parseYen(e.target.value);
+        if (n !== null && n >= 1) onCommit(n);
+        else e.target.value = String(value);
+      }}
+      aria-label={label}
+      className={inputCls}
+    />
   );
 }

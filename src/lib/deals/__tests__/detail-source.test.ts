@@ -75,3 +75,30 @@ describe("保存のあとの読み込みに失敗しても「保存中」のま�
     expect(read(PANELS[1])).toMatch(/finally \{\s*setBusy\(false\);/);
   });
 });
+
+describe("最終レビューの直し", () => {
+  it("I-1: 金額の欄が読めなければ保存しない", () => {
+    for (const p of ["src/components/deals/deal-money-panel.tsx", "src/components/deals/deal-settlement-panel.tsx"]) {
+      expect(read(p), p).toContain("invalidYenLabels(");
+    }
+  });
+  it("I-2: パネルの key は自分の上書きの鍵だけ・保存は今の値と合わせる", () => {
+    const page = read(PAGE);
+    expect(page).not.toContain("deal.costs, deal.overrides])");
+    expect(page).not.toContain("[deal.settlementTerms, deal.overrides]");
+    expect(read("src/components/deals/deal-money-panel.tsx")).toContain("mergeOverrides(deal.overrides");
+    expect(read("src/components/deals/deal-settlement-panel.tsx")).toContain("mergeOverrides(deal.overrides");
+    expect(read("src/components/deals/deal-settlement-panel.tsx")).toContain("depositMode: deal.settlementTerms.depositMode");
+  });
+  it("M-3: 計算の読み込みに失敗しても取引は読み直し、失敗を知らせる", () => {
+    const page = read(PAGE);
+    expect(page).not.toMatch(/Promise\.all\(\[dealsApi\.get\(id\), dealsApi\.calc\(id\)\]\)/);
+    expect(page).toContain("calcError");
+  });
+  it("M-4: 持分は打ち終わってから読む(打ちかけで 1 に戻さない)", () => {
+    const ed = read("src/components/deals/assessments-editor.tsx");
+    expect(ed).not.toContain("Math.max(1, parseYen(e.target.value) ?? 1)");
+    expect(ed).toMatch(/function ShareInput[\s\S]*onBlur=/);
+    expect((ed.match(/<ShareInput /g) ?? []).length).toBe(2);
+  });
+});

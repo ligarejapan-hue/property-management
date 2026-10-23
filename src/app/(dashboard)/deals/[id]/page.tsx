@@ -14,6 +14,7 @@ import { dealsApi, errorText, type DealOptions, type UserOption } from "@/lib/de
 import type { DealView } from "@/lib/deals/view";
 import type { DealCalc } from "@/lib/deals/calc/deal-calc";
 import { basicFormFromDeal } from "@/lib/deals/forms";
+import { MONEY_OVERRIDE_KEYS, SETTLEMENT_OVERRIDE_KEYS, pickOverrides } from "@/lib/deals/money-forms";
 import { DEAL_BUSINESS_TYPE_LABELS, DEAL_STATUS_LABELS } from "@/lib/deals/constants";
 
 // 段5で「書類」を足す(設計 §5)。
@@ -39,21 +40,31 @@ export default function DealDetailPage({ params }: { params: Promise<{ id: strin
   const [users, setUsers] = useState<UserOption[]>([]);
   const [selected, setSelected] = useState<DealTabKey>("basic");
   const [error, setError] = useState<string | null>(null);
+  const [calcError, setCalcError] = useState<string | null>(null);
+
+  /** 取引と計算は別々に読み直す。計算だけ失敗しても取引(版の番号)は新しくする(最終レビュー M-3)。 */
+  const loadCalc = useCallback(async () => {
+    try {
+      setCalc((await dealsApi.calc(id)).calc);
+      setCalcError(null);
+    } catch (e) {
+      setCalcError(`計算を読み込めませんでした: ${errorText(e)}`);
+    }
+  }, [id]);
 
   const reload = useCallback(async () => {
     try {
-      const [d, c] = await Promise.all([dealsApi.get(id), dealsApi.calc(id)]);
-      setData(d);
-      setCalc(c.calc);
+      setData(await dealsApi.get(id));
       setError(null);
     } catch (e) {
       setError(errorText(e));
     }
-  }, [id]);
+    await loadCalc();
+  }, [id, loadCalc]);
 
   useEffect(() => {
     dealsApi.get(id).then(setData).catch((e) => setError(errorText(e)));
-    dealsApi.calc(id).then((c) => setCalc(c.calc)).catch(() => {});
+    dealsApi.calc(id).then((c) => setCalc(c.calc)).catch((e) => setCalcError(`計算を読み込めませんでした: ${errorText(e)}`));
     dealsApi.options().then(setOptions).catch(() => {});
     dealsApi.users().then((r) => setUsers(r.data)).catch(() => {});
   }, [id]);
@@ -79,6 +90,7 @@ export default function DealDetailPage({ params }: { params: Promise<{ id: strin
         description={`${deal.dealNo} ・ ${DEAL_BUSINESS_TYPE_LABELS[deal.businessType as keyof typeof DEAL_BUSINESS_TYPE_LABELS] ?? deal.businessType} ・ ${DEAL_STATUS_LABELS[deal.status as keyof typeof DEAL_STATUS_LABELS] ?? deal.status}`}
       />
       {error && <p className="text-sm text-red-600 dark:text-red-400" role="alert">{error}</p>}
+      {calcError && <p className="text-sm text-red-600 dark:text-red-400" role="alert">{calcError}</p>}
       <Tabs tabs={tabs} active={tab} onChange={setSelected} idBase="deal-detail" />
       <div {...tabPanelProps("deal-detail", tab)}>
         <div hidden={tab !== "basic"}>
@@ -91,10 +103,10 @@ export default function DealDetailPage({ params }: { params: Promise<{ id: strin
           <DealPartiesPanel deal={deal} selfParty={options?.selfParty ?? null} onSaved={reload} />
         </div>
         <div hidden={tab !== "money"}>
-          <DealMoneyPanel key={k([deal.price, deal.deposit, deal.taxRateBp, deal.costs, deal.overrides])} deal={deal} calc={calc} onSaved={reload} />
+          <DealMoneyPanel key={k([deal.price, deal.deposit, deal.taxRateBp, deal.costs, pickOverrides(deal.overrides, MONEY_OVERRIDE_KEYS)])} deal={deal} calc={calc} onSaved={reload} />
         </div>
         <div hidden={tab !== "settlement"}>
-          <DealSettlementPanel key={k([deal.settlementTerms, deal.overrides])} deal={deal} calc={calc} onSaved={reload} />
+          <DealSettlementPanel key={k([{ ...deal.settlementTerms, depositMode: null }, pickOverrides(deal.overrides, SETTLEMENT_OVERRIDE_KEYS)])} deal={deal} calc={calc} onSaved={reload} />
         </div>
         {deal.hasOc && (
           <div hidden={tab !== "oc"}>

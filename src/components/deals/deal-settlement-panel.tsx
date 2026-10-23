@@ -5,7 +5,7 @@ import { Plus, Save, Trash2 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Field, OverrideField, SelectBox, YenInput, inputCls } from "./form-parts";
 import { dealsApi, DealApiError, errorText } from "@/lib/deals/client";
-import { parseYen, yenText } from "@/lib/deals/money-forms";
+import { SETTLEMENT_OVERRIDE_KEYS, invalidYenLabels, mergeOverrides, parseYen, yenText } from "@/lib/deals/money-forms";
 import type { DealView } from "@/lib/deals/view";
 import type { DealCalc } from "@/lib/deals/calc/deal-calc";
 import type { Overrides, SettlementTerms } from "@/lib/deals/schemas";
@@ -16,6 +16,9 @@ const conflictText = (e: unknown) =>
     : errorText(e);
 const s = (n: number | null) => (n === null ? "" : String(n));
 const MONEY_KEYS = ["fixedAssetTax", "cityPlanningTax", "managementFee", "repairReserve", "otherMonthly"] as const;
+const MONEY_LABELS: Record<(typeof MONEY_KEYS)[number], string> = {
+  fixedAssetTax: "固定資産税", cityPlanningTax: "都市計画税", managementFee: "管理費", repairReserve: "修繕積立金", otherMonthly: "その他の月額",
+};
 type MoneyKey = (typeof MONEY_KEYS)[number];
 
 /** 精算(依頼書 3.2・4.4)。条件を入れて保存すると、サーバーの決済の計算の結果を表で出す。 */
@@ -38,15 +41,26 @@ export default function DealSettlementPanel({ deal, calc, onSaved }: { deal: Dea
     });
 
   const save = async () => {
+    const bad = invalidYenLabels(MONEY_KEYS.map((k) => [MONEY_LABELS[k], money[k]]));
+    if (bad.length > 0) {
+      setError(`${bad.join("・")}は数字で入れてください(例 120000)。保存していません。`);
+      return;
+    }
     setSaving(true);
     setError(null);
     try {
       const next: SettlementTerms = {
         ...terms,
+        // 敷金の扱いは OC タブのもの。今の保存済みの値を使う(最終レビュー I-2)。
+        depositMode: deal.settlementTerms.depositMode,
         ...(Object.fromEntries(MONEY_KEYS.map((k) => [k, parseYen(money[k])])) as Record<MoneyKey, number | null>),
         others: terms.others.filter((o) => o.label.trim() !== ""),
       };
-      await dealsApi.update(deal.id, { version: deal.version, settlementTerms: next, overrides });
+      await dealsApi.update(deal.id, {
+        version: deal.version, settlementTerms: next,
+        // ほかのタブ(金額・費用)の上書きは、今の保存済みの値を残す(最終レビュー I-2)。
+        overrides: mergeOverrides(deal.overrides, overrides, SETTLEMENT_OVERRIDE_KEYS),
+      });
       await onSaved();
     } catch (e) {
       setError(conflictText(e));

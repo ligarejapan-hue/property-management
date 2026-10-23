@@ -20,3 +20,22 @@ describe("金額・率の入力", () => {
     expect(percentTextToBp("x")).toBeNull();
   });
 });
+
+describe("最終レビュー I-1: 読めない金額で保存済みの値を消さない", () => {
+  it("全角の数字も読む", async () => {
+    const { parseYen } = await import("../money-forms");
+    expect(parseYen("３０，０００，０００円")).toBe(30_000_000);
+  });
+  it("空でないのに読めない欄を名前で返す", async () => {
+    const { invalidYenLabels } = await import("../money-forms");
+    expect(invalidYenLabels([["売買価格", "3000万"], ["手付金", ""], ["測量費", "120000"]])).toEqual(["売買価格"]);
+  });
+});
+
+describe("最終レビュー I-2: 上書きはそのパネルの鍵だけを差し替える", () => {
+  it("ほかのパネルの鍵は保存済みの値を残す", async () => {
+    const { mergeOverrides } = await import("../money-forms");
+    const saved = { brokerageFee: 900_000, "settlement.propertyTax": 60_000 };
+    expect(mergeOverrides(saved, { buildingPrice: 1 }, ["brokerageFee", "buildingPrice", "buildingTax"])).toEqual({ buildingPrice: 1, "settlement.propertyTax": 60_000 });
+  });
+});

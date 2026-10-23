@@ -1,8 +1,10 @@
 import { yen } from "./calc/format";
+import type { OverrideKey, Overrides } from "./schemas";
 
 /** 金額の入力 → 円の整数。カンマ・円・空白は無視。空・小数・マイナス・数字以外は null。 */
 export function parseYen(s: string): number | null {
-  const t = s.replace(/[,，円\s]/g, "");
+  // 全角の数字・カンマも読む(日本語入力のまま打たれることが多い)。
+  const t = s.normalize("NFKC").replace(/[,円\s]/g, "");
   if (!/^\d+$/.test(t)) return null;
   const n = Number(t);
   return Number.isSafeInteger(n) ? n : null;
@@ -18,4 +20,34 @@ export function percentTextToBp(s: string): number | null {
   const t = s.trim();
   if (!/^\d+(\.\d{1,2})?$/.test(t)) return null;
   return Math.round(Number(t) * 100);
+}
+
+/**
+ * 空でないのに金額として読めない欄の名前(最終レビュー I-1)。読めない値を null で送ると保存済みの金額が消えるため、
+ * 1つでもあれば保存しない。
+ */
+export function invalidYenLabels(fields: [label: string, value: string][]): string[] {
+  return fields.filter(([, v]) => v.trim() !== "" && parseYen(v) === null).map(([label]) => label);
+}
+
+/**
+ * 上書きの保存用の map(最終レビュー I-2)。自分のパネルの鍵だけを差し替え、ほかのパネルの鍵は今の保存済みの値を残す。
+ */
+export function mergeOverrides(saved: Overrides, mine: Overrides, myKeys: readonly OverrideKey[]): Overrides {
+  const out: Overrides = { ...saved };
+  for (const k of myKeys) {
+    if (mine[k] === undefined) delete out[k];
+    else out[k] = mine[k];
+  }
+  return out;
+}
+
+export const MONEY_OVERRIDE_KEYS = ["brokerageFee", "buildingPrice", "buildingTax"] as const satisfies readonly OverrideKey[];
+export const SETTLEMENT_OVERRIDE_KEYS = ["settlement.propertyTax", "settlement.management", "settlement.rent"] as const satisfies readonly OverrideKey[];
+
+/** そのパネルの鍵だけを取り出す(パネルの key 用)。 */
+export function pickOverrides(o: Overrides, keys: readonly OverrideKey[]): Overrides {
+  const out: Overrides = {};
+  for (const k of keys) if (o[k] !== undefined) out[k] = o[k];
+  return out;
 }

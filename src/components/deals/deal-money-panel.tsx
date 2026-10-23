@@ -5,7 +5,7 @@ import { Plus, Save, Trash2 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Field, OverrideField, YenInput, inputCls } from "./form-parts";
 import { dealsApi, DealApiError, errorText } from "@/lib/deals/client";
-import { bpToPercentText, parseYen, percentTextToBp, yenText } from "@/lib/deals/money-forms";
+import { MONEY_OVERRIDE_KEYS, bpToPercentText, invalidYenLabels, mergeOverrides, parseYen, percentTextToBp, yenText } from "@/lib/deals/money-forms";
 import type { DealView } from "@/lib/deals/view";
 import type { DealCalc } from "@/lib/deals/calc/deal-calc";
 import type { Costs, Overrides } from "@/lib/deals/schemas";
@@ -41,6 +41,13 @@ export default function DealMoneyPanel({ deal, calc, onSaved }: { deal: DealView
       setError("消費税率は数字で入れてください(例 10)");
       return;
     }
+    const bad = invalidYenLabels([
+      ["売買価格", price], ["手付金", deposit], ["登記費用", fees.registrationFee], ["抹消費用", fees.cancellationFee], ["測量費", fees.surveyFee],
+    ]);
+    if (bad.length > 0) {
+      setError(`${bad.join("・")}は数字で入れてください(例 30000000)。保存していません。`);
+      return;
+    }
     setSaving(true);
     setError(null);
     try {
@@ -52,7 +59,8 @@ export default function DealMoneyPanel({ deal, calc, onSaved }: { deal: DealView
           registrationFee: parseYen(fees.registrationFee), cancellationFee: parseYen(fees.cancellationFee), surveyFee: parseYen(fees.surveyFee),
           others: costs.others.filter((o) => o.label.trim() !== ""),
         },
-        overrides,
+        // ほかのタブ(精算)の上書きは、今の保存済みの値を残す(最終レビュー I-2)。
+        overrides: mergeOverrides(deal.overrides, overrides, MONEY_OVERRIDE_KEYS),
       });
       await onSaved();
     } catch (e) {
