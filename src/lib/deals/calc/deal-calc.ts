@@ -28,7 +28,7 @@ const jstDate = (iso: string | null) => (iso ? jstDateString(new Date(iso)) : nu
 /** 表を期間で選び、中身を検証してから使う(壊れていれば「無い」扱い)。 */
 type RateContent<K extends keyof typeof RATE_CONTENT_SCHEMAS> = z.output<(typeof RATE_CONTENT_SCHEMAS)[K]>;
 
-function table<K extends keyof typeof RATE_CONTENT_SCHEMAS>(rows: RateTableRow[], kind: K, date: string): RateContent<K> | null {
+export function pickRateContent<K extends keyof typeof RATE_CONTENT_SCHEMAS>(rows: RateTableRow[], kind: K, date: string): RateContent<K> | null {
   const hit = pickRateTable(rows, kind, date);
   const r = hit ? RATE_CONTENT_SCHEMAS[kind].safeParse(hit.content) : null;
   return r?.success ? (r.data as RateContent<K>) : null;
@@ -44,7 +44,7 @@ export function computeDealCalc(deal: DealView, rateRows: RateTableRow[], kinds:
   if (deal.price === null) missing.push("売買価格");
 
   let brokerage: DealCalc["brokerage"] = null;
-  const tiers = table(rateRows, "brokerage_tiers", baseDate);
+  const tiers = pickRateContent(rateRows, "brokerage_tiers", baseDate);
   // 手で直した手数料は、表が当たらない(契約日が表の期間より前・表を消した)ときも使う(@codex 3巡目)。
   const b = deal.price !== null && tiers
     ? brokerageFee(deal.price, tiers, { lowCostSpecial: deal.costs.lowCostSpecial, taxRateBp: deal.taxRateBp })
@@ -65,7 +65,7 @@ export function computeDealCalc(deal: DealView, rateRows: RateTableRow[], kinds:
     computedTax, tax: o.buildingTax ?? computedTax, taxOverridden: o.buildingTax !== undefined,
   };
 
-  const stampTable = table(rateRows, "stamp_contract", baseDate);
+  const stampTable = pickRateContent(rateRows, "stamp_contract", baseDate);
   const stamp = deal.price !== null && stampTable ? contractStamp(deal.price, stampTable, "full") : null;
 
   const settlement = settlementResult({
