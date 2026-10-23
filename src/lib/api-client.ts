@@ -1330,6 +1330,23 @@ export async function deleteAttachment(propertyId: string, attachmentId: string)
   });
 }
 
+/** 書類の種類を人が決め直す(null=その他)。段階とそろえた名前はサーバーが種類から作り直す。 */
+export async function updateAttachmentKind(
+  propertyId: string,
+  attachmentId: string,
+  docKind: string | null,
+) {
+  if (USE_MOCK) {
+    await mockDelay();
+    return { data: { id: attachmentId, docKind } };
+  }
+  return apiFetch(`/api/properties/${propertyId}/attachments/${attachmentId}`, {
+    method: "PATCH",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ docKind }),
+  });
+}
+
 // ---------- Change Logs ----------
 
 export async function fetchChangeLogs(

@@ -25,8 +25,12 @@ import {
 import {
   fetchAttachments as apiFetchAttachments,
   deleteAttachment,
+  updateAttachmentKind,
   uploadFile,
 } from "@/lib/api-client";
+import { DOC_KINDS, DOC_STAGES, docKindByCode } from "@/lib/doc-classify/classify";
+import { defaultOpenStage } from "@/lib/doc-classify/stage";
+import { displayTitle, groupAttachmentsByStage, needsKindCheck } from "@/lib/attachments/doc-folders";
 import { normalizeFileUrl } from "@/lib/url-normalize";
 import { sendsDownloadIntent } from "@/lib/attachments/download-intent";
 import {
@@ -54,6 +58,11 @@ interface AttachmentData {
   mimeType: string;
   createdAt: string;
   uploader: { id: string; name: string };
+  /** 書類の自動整理(2026-10-23): 段階・種類・そろえた名前・確からしさ(high|low|manual)。null=その他・元の名前。 */
+  docStage?: string | null;
+  docKind?: string | null;
+  docTitle?: string | null;
+  docConfidence?: string | null;
 }
 
 /** 保存してよい上限(20MB・2026-10-19 発注者決定・謄本も同じ)。値はサーバーと同じ定数から。 */
@@ -116,8 +125,11 @@ export default function AttachmentTab({
   propertyId,
   refreshToken = 0,
   onRegistryMutated,
+  caseStatus = null,
 }: {
   propertyId: string;
+  /** 案件ステータス。最初に開いておく段階のフォルダを決める(契約予定→②・契約完了以降→③)。 */
+  caseStatus?: string | null;
   /**
    * 外から「一覧を読み直して」と伝える合図。値が変わったときだけ読み直す。
    * ⚠このタブは**開いた瞬間に一度だけ**読み込む作りなので、タブを開いたまま
@@ -147,6 +159,8 @@ export default function AttachmentTab({
   const [uploadErrorRegistry, setUploadErrorRegistry] = useState<string | null>(null);
   const [deleteTargetId, setDeleteTargetId] = useState<string | null>(null);
   const [previewTarget, setPreviewTarget] = useState<AttachmentData | null>(null);
+  // 種類を直している最中の添付(二重送信を防ぐ)。
+  const [kindSavingId, setKindSavingId] = useState<string | null>(null);
   // 一覧の取り直しの交通整理は、物件ページと**同じ純関数**に委ねる
   // （@codex #395 R7 P2）。独自の世代ガードだと、**新しい取り直しが失敗しただけ**で
   // 先に届いていた使える一覧を捨て、タブが空/古いままエラーになる。
@@ -271,6 +285,20 @@ export default function AttachmentTab({
     }
   };
 
+  /** 種類を人が決め直す。段階とそろえた名前はサーバーが作り直すので、一覧を静かに読み直す。 */
+  const handleKindChange = async (id: string, docKind: string | null) => {
+    if (kindSavingId !== null) return;
+    setKindSavingId(id);
+    try {
+      await updateAttachmentKind(propertyId, id, docKind);
+      await fetchAttachmentsData({ silent: true });
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "種類の変更に失敗しました");
+    } finally {
+      setKindSavingId(null);
+    }
+  };
+
   if (loading) {
     return (
       <div className="flex items-center justify-center py-12">
@@ -282,6 +310,9 @@ export default function AttachmentTab({
 
   const registryAttachments = attachments.filter((a) => a.type === "registry");
   const generalAttachments = attachments.filter((a) => a.type !== "registry");
+  // 最初に開いておく段階。その段階が空のときは「その他」に中身があればそちらも開く(古い添付が隠れないように)。
+  const openStage = defaultOpenStage(caseStatus);
+  const openStageEmpty = !generalAttachments.some((a) => a.docStage === openStage);
 
   return (
     <div className="space-y-8">
@@ -325,14 +356,43 @@ export default function AttachmentTab({
             <p className="text-sm">添付ファイルはまだありません</p>
           </div>
         ) : (
+          // 段階ごとのフォルダ(①契約前 ②契約関係 ③決済関係 ④本人確認 その他)。
+          // 案件ステータスに合う段階を開いた状態にし、ほかは件数だけ見せる。
           <div className="space-y-2">
-            {generalAttachments.map((att) => (
-              <AttachmentRow
-                key={att.id}
-                att={att}
-                onPreviewClick={() => setPreviewTarget(att)}
-                onDeleteClick={() => setDeleteTargetId(att.id)}
-              />
+            {groupAttachmentsByStage(generalAttachments).map((folder) => (
+              <details
+                key={folder.code}
+                open={folder.code === openStage || (folder.code === "other" && folder.items.length > 0 && openStageEmpty)}
+                className="rounded-md border border-gray-200 dark:border-gray-800"
+              >
+                <summary className="flex cursor-pointer items-center gap-2 px-3 py-2 text-sm font-medium text-gray-700 dark:text-gray-200">
+                  <span>{folder.short ? `${folder.short} ${folder.label}` : folder.label}</span>
+                  <span className="rounded-full bg-gray-100 px-2 text-xs text-gray-600 dark:bg-gray-800 dark:text-gray-300">
+                    {folder.items.length}
+                  </span>
+                  {folder.items.some((it) => (it.type === undefined || it.type === "general") && needsKindCheck(it)) && (
+                    <span className="rounded-full bg-amber-50 px-2 text-xs text-amber-700 dark:bg-amber-950/40 dark:text-amber-300">
+                      種類を確認
+                    </span>
+                  )}
+                </summary>
+                {folder.items.length === 0 ? (
+                  <p className="px-3 pb-2 text-xs text-gray-400 dark:text-gray-500">まだありません</p>
+                ) : (
+                  <div className="space-y-2 px-2 pb-2">
+                    {folder.items.map((att) => (
+                      <AttachmentRow
+                        key={att.id}
+                        att={att}
+                        onPreviewClick={() => setPreviewTarget(att)}
+                        onDeleteClick={() => setDeleteTargetId(att.id)}
+                        onKindChange={(kind) => void handleKindChange(att.id, kind)}
+                        kindSaving={kindSavingId === att.id}
+                      />
+                    ))}
+                  </div>
+                )}
+              </details>
             ))}
           </div>
         )}
@@ -416,10 +476,15 @@ function AttachmentRow({
   att,
   onPreviewClick,
   onDeleteClick,
+  onKindChange,
+  kindSaving = false,
 }: {
   att: AttachmentData;
   onPreviewClick: () => void;
   onDeleteClick: () => void;
+  /** 通常添付だけ: 種類を人が決め直す(null=その他)。謄本の行では渡さない。 */
+  onKindChange?: (docKind: string | null) => void;
+  kindSaving?: boolean;
 }) {
   const Icon = getFileIcon(att.mimeType);
   const previewable = getPreviewKind(att) !== null;
@@ -427,9 +492,16 @@ function AttachmentRow({
   const normalizedUrl = normalizeFileUrl(att.fileUrl);
   const downloadHref = sendsDownloadIntent(att.type) ? withDownloadIntent(normalizedUrl) : normalizedUrl;
   // registry は表示名・保存名ともに generic（att.fileName の PII を client 表示にも出さない）。
+  // 通常添付は、そろえた名前(docTitle)があればそれを出し、元の名前は小さく添える。
   const displayName = isRegistry
     ? registryDisplayName(att.registryCertificateType, att.createdAt)
-    : att.fileName;
+    : displayTitle(att);
+  // 元の名前を添えるのは通常添付だけ(registry の生ファイル名は出さない)。
+  const originalName = !isRegistry && displayName !== att.fileName ? att.fileName : null;
+  // 種類の選択は type=general だけ(反響資料・査定報告書は配信の守りがあり、サーバーも 422 にする)。
+  const canEditKind = onKindChange !== undefined && (att.type === undefined || att.type === "general");
+  const kindCheck = canEditKind && needsKindCheck(att);
+  const kindLabel = docKindByCode(att.docKind)?.label ?? null;
   return (
     <div className="flex items-center gap-3 rounded-md border border-gray-200 dark:border-gray-800 bg-white dark:bg-gray-900 p-3">
       <Icon className="h-5 w-5 shrink-0 text-gray-500 dark:text-gray-400" />
@@ -450,12 +522,56 @@ function AttachmentRow({
             {displayName}
           </p>
         )}
-        <p className="text-xs text-gray-500 dark:text-gray-400">
+        <p className="truncate text-xs text-gray-500 dark:text-gray-400">
+          {originalName !== null ? `元: ${originalName} · ` : ""}
           {formatFileSize(att.fileSize)}
           {att.originalSize ? `（自動で圧縮・元 ${formatFileSize(att.originalSize)}）` : ""} ·{" "}
           {att.uploader.name} ·{" "}
           {new Date(att.createdAt).toLocaleDateString("ja-JP")}
         </p>
+        {canEditKind && onKindChange && (
+          <label className="mt-1 flex flex-wrap items-center gap-1 text-xs text-gray-500 dark:text-gray-400">
+            <span>種類:</span>
+            <select
+              aria-label="書類の種類"
+              value={att.docKind ?? ""}
+              disabled={kindSaving}
+              onChange={(e) => onKindChange(e.target.value === "" ? null : e.target.value)}
+              className={`rounded border px-1 py-0.5 text-xs ${
+                kindCheck
+                  ? "border-amber-300 bg-amber-50 text-amber-800 dark:border-amber-700 dark:bg-amber-950/40 dark:text-amber-200"
+                  : "border-gray-200 bg-white text-gray-700 dark:border-gray-700 dark:bg-gray-900 dark:text-gray-200"
+              }`}
+            >
+              <option value="">その他</option>
+              {DOC_STAGES.map((stage) => (
+                <optgroup key={stage.code} label={`${stage.short} ${stage.label}`}>
+                  {DOC_KINDS.filter((k) => k.stage === stage.code).map((k) => (
+                    <option key={k.code} value={k.code}>{k.label}</option>
+                  ))}
+                </optgroup>
+              ))}
+            </select>
+            {kindCheck && (
+              <span className="text-amber-700 dark:text-amber-300">
+                {kindLabel ? "自動で当てました。確かめてください" : "種類を選んでください"}
+              </span>
+            )}
+            {kindCheck && att.docKind && (
+              // 自動で当てた種類が合っているとき、同じ選択肢は onChange が走らないので「確定」を置く
+              // (同じ種類で保存すると確からしさが manual になり、確認の表示が消える・@codex #556 P2)。
+              <Button
+                variant="ghost"
+                size="sm"
+                disabled={kindSaving}
+                onClick={() => onKindChange(att.docKind ?? null)}
+                className="h-6 px-2 text-xs text-indigo-600 dark:text-indigo-400"
+              >
+                この種類で確定
+              </Button>
+            )}
+          </label>
+        )}
       </div>
       {previewable && (
         <Button
@@ -509,7 +625,7 @@ function PreviewModal({
   // registry は表示名・保存名ともに generic（att.fileName の PII を client 表示にも出さない）。
   const displayName = isRegistry
     ? registryDisplayName(att.registryCertificateType, att.createdAt)
-    : att.fileName;
+    : displayTitle(att);
   return (
     <div
       className="fixed inset-0 z-50 flex items-center justify-center bg-black/70 p-4"
