@@ -40,6 +40,16 @@ describe("取引の詳しい画面", () => {
       expect(src, s).toContain(s);
     }
   });
+  it("物件タブ: 評価額(筆ごと・持分・土地の割合)を入れて一緒に保存する", () => {
+    const src = read(PANELS[1]);
+    expect(src).toContain("<AssessmentsEditor");
+    expect(src).toMatch(/assessments,/);
+    const ed = read("src/components/deals/assessments-editor.tsx");
+    for (const s of ["家屋評価額", "土地評価額", "持分", "土地の割合"]) expect(ed, s).toContain(s);
+  });
+  it("「物件から取り直す」は物件を見られる人にだけ出す(M4)", () => {
+    expect(read(PANELS[1])).toMatch(/\{canOpenProperty && \(\s*<>[\s\S]*物件から取り直す/);
+  });
   it("ほかの人が先に保存したら、読み込み直すよう知らせる", () => {
     for (const p of PANELS) expect(read(p), p).toContain("VERSION_CONFLICT");
   });
