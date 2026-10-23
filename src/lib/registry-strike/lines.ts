@@ -33,6 +33,79 @@ export interface StrikeSegment {
   y: number;
 }
 
+/**
+ * pdfjs（v5）のパスデータから、水平な線分を1本ずつ取り出す。
+ * データは [命令, 座標…] の並び（DrawOPS: 0=moveTo x y / 1=lineTo x y /
+ * 2=curveTo x1 y1 x2 y2 x y / 3=closePath）。
+ *
+ * - 開いた折れ線: 水平な lineTo を1本ずつ線分にする（離れた下線を1本にまとめない）。
+ * - 閉じた図形（細い塗りの四角で下線を描く場合）: 高さが 1.5pt 以下なら中央の1本にする。
+ *   それより高い四角（枠・セル）は下線ではないので捨てる。
+ * - 曲線を含む部分パスは下線ではないので捨てる。
+ */
+export function segmentsFromPath(
+  data: ArrayLike<number>,
+  toPage: (x: number, y: number) => [number, number],
+): StrikeSegment[] {
+  const out: StrikeSegment[] = [];
+  let pts: [number, number][] = [];
+  let curved = false;
+
+  const finishOpen = () => {
+    if (!curved) {
+      for (let i = 1; i < pts.length; i++) {
+        const [ax, ay] = pts[i - 1];
+        const [bx, by] = pts[i];
+        if (Math.abs(by - ay) <= 0.5 && Math.abs(bx - ax) >= 1) {
+          out.push({ x1: Math.min(ax, bx), x2: Math.max(ax, bx), y: (ay + by) / 2 });
+        }
+      }
+    }
+    pts = [];
+    curved = false;
+  };
+  const finishClosed = () => {
+    if (!curved && pts.length >= 2) {
+      const xs = pts.map((p) => p[0]);
+      const ys = pts.map((p) => p[1]);
+      const minX = Math.min(...xs);
+      const maxX = Math.max(...xs);
+      const minY = Math.min(...ys);
+      const maxY = Math.max(...ys);
+      if (maxY - minY <= 1.5 && maxX - minX >= 1) {
+        out.push({ x1: minX, x2: maxX, y: (minY + maxY) / 2 });
+      }
+    }
+    pts = [];
+    curved = false;
+  };
+
+  let i = 0;
+  while (i < data.length) {
+    const op = data[i];
+    if (op === 0) {
+      finishOpen();
+      pts.push(toPage(data[i + 1], data[i + 2]));
+      i += 3;
+    } else if (op === 1) {
+      pts.push(toPage(data[i + 1], data[i + 2]));
+      i += 3;
+    } else if (op === 2) {
+      curved = true;
+      pts.push(toPage(data[i + 5], data[i + 6]));
+      i += 7;
+    } else if (op === 3) {
+      finishClosed();
+      i += 1;
+    } else {
+      // 知らない命令: 以降は読めないので、ここまでの分だけ使う
+      break;
+    }
+  }
+  finishOpen();
+  return out;
+}
+
 /** 1行分の文字と、文字ごとの「下線あり」印。 */
 export interface StrikeLine {
   page: number;

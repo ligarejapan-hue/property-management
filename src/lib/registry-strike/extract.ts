@@ -8,7 +8,13 @@
  *   ここで読めなくても、従来の文字抽出（pdf-parse）による取込はそのまま動く。
  * ⚠ 本文・氏名・住所をログに出さない。
  */
-import { buildStrikeLines, type StrikeLine, type StrikeSegment, type StrikeTextItem } from "./lines";
+import {
+  buildStrikeLines,
+  segmentsFromPath,
+  type StrikeLine,
+  type StrikeSegment,
+  type StrikeTextItem,
+} from "./lines";
 
 /** 読むページの上限（全部事項でも通常は数ページ。異常に大きいPDFで時間を使わない）。 */
 const MAX_PAGES = 30;
@@ -51,14 +57,14 @@ export async function extractStrikeLinesFromPdf(buffer: Buffer): Promise<StrikeL
         } else if (fn === OPS.transform) {
           ctm = multiply(ctm, args as unknown as Matrix);
         } else if (fn === OPS.constructPath) {
-          // pdfjs v5: args = [op, [pathData], minMax]。minMax = [minX, minY, maxX, maxY]
-          const minMax = args?.[2] as ArrayLike<number> | null | undefined;
-          if (!minMax || minMax.length < 4) continue;
-          const [ax, ay] = apply(ctm, minMax[0], minMax[1]);
-          const [bx, by] = apply(ctm, minMax[2], minMax[3]);
-          // 水平線だけを拾う（高さがほぼ 0、幅がある）
-          if (Math.abs(by - ay) > 0.5 || Math.abs(bx - ax) < 1) continue;
-          segments.push({ x1: Math.min(ax, bx), x2: Math.max(ax, bx), y: (ay + by) / 2 });
+          // pdfjs v5: args = [paintOp, [pathData], minMax]。
+          // ⚠ 1つのパスに複数の線が入ることがある。外接矩形（minMax）でまとめて扱うと、
+          //   離れた下線の間まで埋めたり、行をまたぐパスの下線を全部落としたりするので、
+          //   パスの中身を1本ずつたどる（`segmentsFromPath`）。
+          const data = (args?.[1] as unknown[] | undefined)?.[0] as ArrayLike<number> | undefined;
+          if (!data || typeof data.length !== "number") continue;
+          const m = ctm;
+          segments.push(...segmentsFromPath(data, (x, y) => apply(m, x, y)));
         }
       }
 

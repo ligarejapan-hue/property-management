@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest";
-import { buildStrikeLines, isFullyStruck, hasAnyStrike } from "../lines";
+import { buildStrikeLines, isFullyStruck, hasAnyStrike, segmentsFromPath } from "../lines";
 
 /**
  * 下線（抹消）の検出。座標は実物（登記情報提供サービスの全部事項PDF）で測った値に合わせる:
@@ -60,5 +60,37 @@ describe("buildStrikeLines", () => {
     const lines = buildStrikeLines(1, [item("甲 野", 70, 500)], underline(70, 3, 500));
     expect(lines[0].struck).toEqual([true, false, true]);
     expect(isFullyStruck(lines[0])).toBe(true);
+  });
+});
+
+describe("segmentsFromPath", () => {
+  const id = (x: number, y: number): [number, number] => [x, y];
+
+  it("1つのパスに離れた下線が2本あれば、2本の線分にする（間を埋めない）", () => {
+    // A の下 (70〜78.4) と C の下 (86.8〜95.2) だけ。B (78.4〜86.8) には無い
+    const segs = segmentsFromPath([0, 70, 499, 1, 78.4, 499, 0, 86.8, 499, 1, 95.2, 499], id);
+    expect(segs).toEqual([
+      { x1: 70, x2: 78.4, y: 499 },
+      { x1: 86.8, x2: 95.2, y: 499 },
+    ]);
+    const lines = buildStrikeLines(1, [item("ABC", 70, 500)], segs);
+    expect(lines[0].struck).toEqual([true, false, true]);
+  });
+
+  it("行をまたぐパスでも、各行の下線を取り出す", () => {
+    const segs = segmentsFromPath([0, 70, 499, 1, 78.4, 499, 0, 70, 490.6, 1, 78.4, 490.6], id);
+    const lines = buildStrikeLines(1, [item("上", 70, 500), item("下", 70, 491.6)], segs);
+    expect(lines.map((l) => l.struck[0])).toEqual([true, true]);
+  });
+
+  it("細い塗りの四角は1本の下線、高い四角（枠）は捨てる", () => {
+    const thin = [0, 70, 498.8, 1, 78.4, 498.8, 1, 78.4, 499.2, 1, 70, 499.2, 3];
+    const box = [0, 60, 480, 1, 200, 480, 1, 200, 510, 1, 60, 510, 3];
+    expect(segmentsFromPath([...thin, ...box], id)).toEqual([{ x1: 70, x2: 78.4, y: 499 }]);
+  });
+
+  it("変換行列を当てた座標で返す", () => {
+    const segs = segmentsFromPath([0, 0, 0, 1, 10, 0], (x, y) => [x + 70, y + 499]);
+    expect(segs).toEqual([{ x1: 70, x2: 80, y: 499 }]);
   });
 });
