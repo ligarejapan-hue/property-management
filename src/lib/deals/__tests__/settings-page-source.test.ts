@@ -23,4 +23,16 @@ describe("取引の設定の画面", () => {
   it("基本の4種別は消せない(消すボタンを出さない)", () => {
     expect(read(PAGE)).toMatch(/\(BASE_PROPERTY_KINDS as readonly string\[\]\)\.includes\(k\.key\)/);
   });
+  it("税率の表を直せる: 直す・期間を足す・消す(確認つき)", () => {
+    const src = read(PAGE);
+    expect(src).toContain("<RateTableEditor");
+    expect(src).toContain("期間を足す");
+    expect(src).toContain("<ConfirmDialog");
+    expect(src).not.toContain("表を直す画面は、計算を入れるときに足します");
+    const ed = read("src/components/deals/rate-table-editor.tsx");
+    for (const s of ["適用開始", "適用終了", "上限なし", "VERSION_CONFLICT", "PERIOD_OVERLAP"]) expect(ed, s).toContain(s);
+  });
+  it("基本の4種別は元の種別も変えられない(M1)", () => {
+    expect(read(PAGE)).toMatch(/label="元の種別"[^>]*disabled=\{isBase\}/);
+  });
 });

@@ -2,23 +2,25 @@
 
 import { useEffect, useState } from "react";
 import Link from "next/link";
-import { Loader2, Plus, Save, Trash2 } from "lucide-react";
+import { Loader2, Pencil, Plus, Save, Trash2 } from "lucide-react";
 import { PageHeader } from "@/components/ui/page-header";
 import { Button } from "@/components/ui/button";
+import { ConfirmDialog } from "@/components/ui/confirm-dialog";
+import { RateTableEditor } from "@/components/deals/rate-table-editor";
 import { Field, SelectBox, inputCls, optionsOf } from "@/components/deals/form-parts";
 import { dealsApi, DealApiError, errorText, type RateTableView } from "@/lib/deals/client";
 import type { DealSettingsView } from "@/lib/deals/settings";
 import {
   BANK_ACCOUNT_TYPE_LABELS, BASE_PROPERTY_KINDS, BASE_PROPERTY_KIND_LABELS, type PropertyKindDef,
 } from "@/lib/deals/constants";
-import { RATE_TABLE_KIND_LABELS } from "@/lib/deals/rate-tables";
+import { RATE_TABLE_KINDS, RATE_TABLE_KIND_LABELS, type RateTableKind } from "@/lib/deals/rate-tables";
 
 type Bank = DealSettingsView["bankAccount"];
 const BANK_FIELDS: [Exclude<keyof Bank, "accountType">, string, number][] = [
   ["bankName", "銀行名", 100], ["branchName", "支店名", 100], ["accountNumber", "口座番号(7桁まで)", 7], ["accountHolder", "名義", 100],
 ];
 
-/** 取引の設定(管理者だけ)。段1は代表者・口座・物件種別。税率・税額の表は見るだけ(編集は段2)。 */
+/** 取引の設定(管理者だけ)。代表者・口座・物件種別と、税率・税額の表(期間つき)を直す。 */
 export default function DealSettingsPage() {
   const [settings, setSettings] = useState<DealSettingsView | null>(null);
   const [tables, setTables] = useState<RateTableView[]>([]);
@@ -28,6 +30,9 @@ export default function DealSettingsPage() {
   const [kinds, setKinds] = useState<PropertyKindDef[]>([]);
   const [saving, setSaving] = useState(false);
   const [message, setMessage] = useState<{ kind: "ok" | "err"; text: string } | null>(null);
+  const [editing, setEditing] = useState<{ table: RateTableView | null; kind: RateTableKind } | null>(null);
+  const [deleting, setDeleting] = useState<RateTableView | null>(null);
+  const reloadTables = () => dealsApi.rateTables().then((r) => setTables(r.tables)).catch((e) => setMessage({ kind: "err", text: errorText(e) }));
 
   const apply = (s: DealSettingsView) => {
     setSettings(s);
@@ -130,7 +135,7 @@ export default function DealSettingsPage() {
                 </Field>
                 <Field label="名前"><input value={k.label} onChange={(e) => setKind(i, { label: e.target.value })} maxLength={30} aria-label="種別の名前" className={inputCls} /></Field>
                 <Field label="元の種別">
-                  <SelectBox label="元の種別" value={k.base} onChange={(v) => setKind(i, { base: v as PropertyKindDef["base"] })} options={optionsOf(BASE_PROPERTY_KIND_LABELS)} />
+                  <SelectBox label="元の種別" disabled={isBase} value={k.base} onChange={(v) => setKind(i, { base: v as PropertyKindDef["base"] })} options={optionsOf(BASE_PROPERTY_KIND_LABELS)} />
                 </Field>
                 {isBase ? <span /> : (
                   <Button variant="ghost" size="sm" onClick={() => setKinds((ks) => ks.filter((_, j) => j !== i))}>
@@ -155,11 +160,19 @@ export default function DealSettingsPage() {
 
       <section className="space-y-3">
         <h2 className="text-sm font-semibold text-gray-700 dark:text-gray-300">税率・税額の表</h2>
-        <p className="text-xs text-gray-500">計算では、契約日(なければ決済日)が期間に入る表を使います。表を直す画面は、計算を入れるときに足します。</p>
+        <p className="text-xs text-gray-500">計算では、契約日(なければ決済日)が期間に入る表を使います。制度が変わるときは「期間を足す」で新しい期間の表を足し、古い表には終わりの日を入れます。</p>
+        {editing && (
+          <RateTableEditor
+            table={editing.table}
+            kind={editing.kind}
+            onDone={() => { setEditing(null); void reloadTables(); }}
+            onCancel={() => setEditing(null)}
+          />
+        )}
         <div className="overflow-x-auto rounded-lg border border-gray-200 dark:border-gray-800">
           <table className="w-full text-sm">
             <thead className="bg-gray-50 text-left text-xs text-gray-500 dark:bg-gray-900 dark:text-gray-400">
-              <tr><th className="px-3 py-2">表</th><th className="px-3 py-2">適用開始</th><th className="px-3 py-2">適用終了</th></tr>
+              <tr><th className="px-3 py-2">表</th><th className="px-3 py-2">適用開始</th><th className="px-3 py-2">適用終了</th><th className="px-3 py-2" /></tr>
             </thead>
             <tbody>
               {tables.map((t) => (
@@ -167,11 +180,38 @@ export default function DealSettingsPage() {
                   <td className="px-3 py-2">{RATE_TABLE_KIND_LABELS[t.kind as keyof typeof RATE_TABLE_KIND_LABELS] ?? t.kind}</td>
                   <td className="px-3 py-2 tabular-nums">{t.validFrom}</td>
                   <td className="px-3 py-2 tabular-nums">{t.validTo ?? "期限なし"}</td>
+                  <td className="px-3 py-2 text-right">
+                    <Button variant="ghost" size="sm" onClick={() => setEditing({ table: t, kind: t.kind as RateTableKind })}><Pencil className="h-4 w-4" />直す</Button>
+                    <Button variant="ghost" size="sm" onClick={() => setDeleting(t)}><Trash2 className="h-4 w-4" />消す</Button>
+                  </td>
                 </tr>
               ))}
             </tbody>
           </table>
         </div>
+        <div className="flex flex-wrap gap-2">
+          {RATE_TABLE_KINDS.map((kind) => (
+            <Button key={kind} variant="secondary" size="sm" onClick={() => {
+              const latest = [...tables].filter((t) => t.kind === kind).sort((a, b) => (a.validFrom < b.validFrom ? 1 : -1))[0];
+              setEditing({ table: latest ? { ...latest, id: "", validFrom: "", validTo: null } : null, kind });
+            }}>
+              <Plus className="h-4 w-4" />
+              {RATE_TABLE_KIND_LABELS[kind]}の期間を足す
+            </Button>
+          ))}
+        </div>
+        {deleting && (
+          <ConfirmDialog
+            title="この表を消しますか？"
+            message={`${RATE_TABLE_KIND_LABELS[deleting.kind as keyof typeof RATE_TABLE_KIND_LABELS] ?? deleting.kind}(${deleting.validFrom}〜${deleting.validTo ?? "期限なし"})を消します。この期間の計算は表が無い扱いになります。`}
+            onConfirm={() => {
+              const t = deleting;
+              setDeleting(null);
+              dealsApi.deleteRateTable(t.id, t.updatedAt).then(() => reloadTables()).catch((e) => setMessage({ kind: "err", text: errorText(e) }));
+            }}
+            onCancel={() => setDeleting(null)}
+          />
+        )}
       </section>
     </div>
   );
