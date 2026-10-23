@@ -28,6 +28,8 @@ import {
   searchProperties,
 } from "@/lib/api-client";
 import ImportSwitcher from "@/components/import/import-switcher";
+import { RegistryRightsCard, shouldShowRegistryRights } from "@/components/import/registry-rights-card";
+import type { RegistryRightsSummary } from "@/lib/registry-strike/analyze";
 import FileDropZone from "@/components/ui/file-drop-zone";
 import { draftKey } from "@/lib/drafts/draft-store";
 import { isDefiniteSubmitFailure } from "@/lib/drafts/submit-outcome";
@@ -130,6 +132,11 @@ interface ParseResponse {
     source: ExtractionSource;
     embeddedTextLength: number;
   };
+  /**
+   * 全部事項の「今も効力のある登記」の要約（下線＝抹消事項を読んだ結果）。表示専用。
+   * 古いサーバー・画像だけのPDF・判定失敗では無い/null。
+   */
+  rights?: RegistryRightsSummary | null;
 }
 
 type Step = "upload" | "extract" | "confirm" | "result";
@@ -355,6 +362,8 @@ function RegistryPdfScreen({ draftEnabled }: { draftEnabled: boolean }) {
   const [fields, setFields] = useState<Record<string, ExtractedField>>(r0?.fields ?? {});
   const [owners, setOwners] = useState<ExtractedOwner[]>(r0?.owners ?? []);
   const [warnings, setWarnings] = useState<string[]>(r0?.warnings ?? []);
+  // 登記の現況（表示専用）。⚠控え（下書き）には入れない: 読み直せば作れ、氏名・住所を余計に残さない。
+  const [rights, setRights] = useState<RegistryRightsSummary | null>(null);
   const [parsing, setParsing] = useState(false);
   const [isLikelyScanned, setIsLikelyScanned] = useState(r0?.isLikelyScanned ?? false);
   // Phase F-2a: parse response の extraction.embeddedTextLength を保持する。
@@ -489,6 +498,7 @@ function RegistryPdfScreen({ draftEnabled }: { draftEnabled: boolean }) {
         })),
       );
       setWarnings(parsed.warnings);
+      setRights(result.rights ?? null);
       // 読み直したら選び直しの帯は不要。
       setFromFile(uploadTab === "file" && selectedFile !== null);
       setReselectExpected(null);
@@ -625,6 +635,7 @@ function RegistryPdfScreen({ draftEnabled }: { draftEnabled: boolean }) {
     setFields({});
     setOwners([]);
     setWarnings([]);
+    setRights(null);
     setIsLikelyScanned(false);
     setTarget("auto");
     setExistingPropertyId("");
@@ -986,6 +997,9 @@ function RegistryPdfScreen({ draftEnabled }: { draftEnabled: boolean }) {
               所有者を追加
             </Button>
           </div>
+
+          {/* 登記の現況（全部事項の下線＝抹消事項を読んだ結果。表示専用） */}
+          {shouldShowRegistryRights(rights) && <RegistryRightsCard rights={rights} />}
 
           {/* Registration target */}
           <div className="rounded-lg border border-gray-200 dark:border-gray-800 bg-white dark:bg-gray-900 p-6">

@@ -15,6 +15,7 @@ import {
   type PdfExtractionSource,
 } from "@/lib/pdf-extract";
 import { assertImportJsonBodySize } from "@/lib/import-body-size";
+import { summarizeRegistryRights } from "@/lib/registry-strike";
 
 // ⚠**断定しない・貼り直しを命じない**(@codex #421 P2)。
 //   判定は「取り出せた文字が50字未満」だけで、画像だけのPDFである証明ではない。
@@ -44,6 +45,7 @@ export async function POST(request: NextRequest) {
     let text = "";
     let fileName = "registry.pdf";
     let isPdfUpload = false;
+    let pdfBuffer: Buffer | null = null;
 
     if (contentType.includes("multipart/form-data")) {
       isPdfUpload = true;
@@ -67,6 +69,7 @@ export async function POST(request: NextRequest) {
         );
       }
 
+      pdfBuffer = buffer;
       try {
         text = await extractTextFromPdf(buffer);
       } catch (err) {
@@ -101,6 +104,13 @@ export async function POST(request: NextRequest) {
       parsed.warnings = [SCANNED_PDF_WARNING, ...parsed.warnings];
     }
 
+    // 全部事項の「今も効力のある登記」の要約（下線＝抹消事項を読む）。表示専用で、
+    // 物件・所有者への反映には使わない（反映は別PR）。失敗しても null で続ける。
+    // 画像だけのPDFは文字も下線も読めないので作らない。
+    const rights = isLikelyScanned
+      ? null
+      : await summarizeRegistryRights({ pdf: pdfBuffer, text });
+
     return apiResponse({
       fileName,
       extractedTextLength: text.length,
@@ -115,6 +125,7 @@ export async function POST(request: NextRequest) {
         embeddedTextLength: text.length,
       },
       parsed,
+      rights,
     });
   } catch (error) {
     return handleApiError(error);
