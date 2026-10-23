@@ -30,6 +30,8 @@ export const EXPORT_COLUMNS: readonly ExportColumn[] = [
   { key: "introductionRoute", header: "導入ルート" },
   { key: "assigneeName", header: "担当者名" },
   { key: "ownerNames", header: "所有者名" },
+  // 反響の申込者の氏名(個人情報=所有者名と同じく owner:read と表示レベルで出す)。
+  { key: "inquirerName", header: "問い合わせ者" },
   { key: "updatedAt", header: "更新日時" },
   { key: "createdAt", header: "作成日時" },
   { key: "postalCode", header: "郵便番号" },

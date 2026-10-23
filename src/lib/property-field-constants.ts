@@ -24,6 +24,11 @@ export const PROPERTY_TRACKED_FIELDS = [
   "contractPlannedOn",
   "settlementPlannedOn",
   "introductionRoute",
+  // 問い合わせ者・除外申請(2026-10-24)。⚠問い合わせ者の値は変更履歴の窓口が伏せて返す。
+  "inquirerName",
+  "leadExclusionStatus",
+  "leadExclusionRequestedAt",
+  "leadExclusionDecidedAt",
   "gpsLat",
   "gpsLng",
   "zoningDistrict",

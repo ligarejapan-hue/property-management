@@ -17,6 +17,8 @@ import {
 import { BUILDING_NAME_MAX_LENGTH } from "@/lib/property-building-name";
 import { fitsDecimalScale } from "@/lib/decimal-scale";
 import { parseDateOnly } from "@/lib/case-dates";
+import { LEAD_EXCLUSION_FILTER_VALUES, LEAD_EXCLUSION_STATUS_VALUES } from "@/lib/lead-exclusion";
+import { INQUIRER_NAME_MAX_LENGTH, INQUIRER_NAME_TOO_LONG_MESSAGE } from "@/lib/inquirer-name";
 
 /**
  * 日付だけの列(DATE)。画面は "YYYY-MM-DD" か空(未定)を送る。暦にある日だけ受け付け、
@@ -138,6 +140,11 @@ export const propertyListQuerySchema = z.object({
   ),
   caseStatus: z.enum(CASE_STATUS_VALUES).optional(),
   introductionRoute: z.enum(INTRODUCTION_ROUTE_VALUES).optional(),
+  // 除外申請で絞り込む(申請中 / 申請中で7日以上 / 除外された / 認められなかった)。空=すべて。
+  leadExclusion: z.preprocess(
+    (v) => (v === "" ? undefined : v),
+    z.enum(LEAD_EXCLUSION_FILTER_VALUES).optional(),
+  ),
   assignedTo: z.string().uuid().optional(),
   // 所有者で絞り込む。所有者詳細・所有者補正候補からのリンク専用で、一覧画面に入力欄は無い。
   // ⚠UUID 以外は schema で弾く＝where に入るのは検証済みの値だけ。空文字は
@@ -276,6 +283,20 @@ export const updatePropertySchema = z.object({
   // ⚠ステータスとの整合は見ない(欄は画面が出し分ける・値は戻しても残す)。
   contractPlannedOn: dateOnlyColumn,
   settlementPlannedOn: dateOnlyColumn,
+  // 問い合わせ者(反響の申込者の氏名・2026-10-24)。⚠個人情報=書けるのは owner:read と
+  //   owner_name の書き込み権限がある人だけ(route で確かめる)。空は null(消す)。
+  //   長さは整えてから測る(切り詰めない)。
+  inquirerName: z
+    .string()
+    .optional()
+    .nullable()
+    .transform((v) => (v == null ? v : v.trim() === "" ? null : v.trim()))
+    .refine((v) => v == null || v.length <= INQUIRER_NAME_MAX_LENGTH, INQUIRER_NAME_TOO_LONG_MESSAGE),
+  // 除外申請(2026-10-24)。null=申請していない。日付の補い(申請中→今日 等)は route が
+  // normalizeLeadExclusionPatch で行う。
+  leadExclusionStatus: z.enum(LEAD_EXCLUSION_STATUS_VALUES).optional().nullable(),
+  leadExclusionRequestedAt: dateOnlyColumn,
+  leadExclusionDecidedAt: dateOnlyColumn,
   introductionRoute: z.enum(INTRODUCTION_ROUTE_VALUES).optional().nullable(),
   // DMの種類(台帳を指す・設計 2026-09-27 §3.6)。null=自動判定に戻す。
   // ⚠作成時(createPropertySchema)には足さない=作成時は自動で決める。

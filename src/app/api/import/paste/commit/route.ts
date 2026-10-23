@@ -43,6 +43,11 @@ import { phoneForStore } from "@/lib/phone-format-jp";
 import { buildingChoiceSchema } from "@/lib/validators";
 import { applyBuildingLink, writeBuildingLinkAudit } from "@/lib/building-link/apply";
 import { AUTO_CHOICE } from "@/lib/building-link/resolve";
+import {
+  INQUIRER_NAME_TOO_LONG_MESSAGE,
+  isInquirerNameTooLong,
+  normalizeInquirerName,
+} from "@/lib/inquirer-name";
 
 // ---------------------------------------------------------------------------
 // 入力の検査（全体レビュー I-3）
@@ -139,6 +144,12 @@ interface CommitBody {
     landArea?: string | null;
     totalFloorArea?: string | null;
     builtYear?: string | number | null;
+    /**
+     * 問い合わせ者(反響の申込者の氏名=下書きの applicantName)。所有者の氏名とは別に残す
+     * (ご所有者様名が別にあると所有者はそちらになるため)。省略可。
+     * ⚠個人情報=所有者の氏名と同じ権限(owner:read+owner_name の書き込み)が要る。
+     */
+    inquirerName?: string | null;
   };
   owner: {
     name: string;
@@ -335,6 +346,24 @@ export async function POST(request: NextRequest) {
     }
 
     const p = body.property;
+
+    // ---- 問い合わせ者（反響の申込者の氏名・2026-10-24） ----
+    // ⚠所有者の氏名と同じ個人情報。書けるのは読めて(owner:read)氏名を書ける(owner_name)人だけ
+    //   (所有者の項目ごとの書き込み権限と同じ考え方)。黙って捨てず断る。
+    // ⚠長さは整えてから測る(切り詰めない)。
+    if (typeof p.inquirerName !== "undefined" && p.inquirerName !== null && typeof p.inquirerName !== "string") {
+      throw new ApiError(400, "問い合わせ者の形式が正しくありません", "BAD_REQUEST");
+    }
+    if (isInquirerNameTooLong(p.inquirerName)) {
+      throw new ApiError(400, INQUIRER_NAME_TOO_LONG_MESSAGE, "BAD_REQUEST");
+    }
+    const inquirerName = normalizeInquirerName(p.inquirerName);
+    if (
+      inquirerName !== null &&
+      !(hasPermission(perms, "owner", "read") && hasExplicitWritePerm(perms, "owner_name"))
+    ) {
+      throw new ApiError(403, "問い合わせ者を書き込む権限がありません", "FORBIDDEN");
+    }
 
     // ---- 値の検査（全体レビュー I-3）。Prisma に渡す前に、欄の名前つきで断る ----
     const exclusiveArea = parseAreaInput(p.exclusiveArea, "専有面積");
@@ -578,6 +607,7 @@ export async function POST(request: NextRequest) {
             totalFloorArea,
             builtYear,
             note: p.note?.trim() || null,
+            inquirerName,
             introductionRoute: introductionRouteForLeadSource(body.leadSource),
             // 所有者からの反響(査定サイト・問い合わせ)で作る物件=最初から「所有者とやりとり中」
             // (案件ステータスの自動の切り替え・発注者決定 2026-10-20)。
@@ -688,6 +718,8 @@ export async function POST(request: NextRequest) {
         ownerLinked: result.ownerId !== null,
         attachmentCreated: result.attachmentId !== null,
         hasExternalKey: externalLinkKey !== null,
+        // 問い合わせ者を残したか(有無だけ・氏名は入れない)。
+        inquirerSaved: inquirerName !== null,
       },
     });
 

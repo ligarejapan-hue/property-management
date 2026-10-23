@@ -419,7 +419,16 @@ model Property {
   contractPlannedOn        DateTime?         @map("contract_planned_on") @db.Date
   settlementPlannedOn      DateTime?         @map("settlement_planned_on") @db.Date
   introductionRoute        String?           @map("introduction_route")
-  dmScenarioId             String?           @map("dm_scenario_id") @db.Uuid
+  // 問い合わせ者(反響で申し込んできた人の氏名・2026-10-24)。貼り付け/Excel の反響取込が入れる。
+  // ⚠個人情報=所有者の氏名と同じ扱い(owner:read がある人にだけ・同じ表示レベルで返す)。
+  inquirerName             String?           @map("inquirer_name")
+  // 除外申請(査定サイトへ無効な反響の課金を外してもらう申し出・2026-10-24)。
+  // requested=申請中 / approved=除外された / rejected=認められなかった / NULL=なし。
+  // 値の検査はアプリ(zod・src/lib/lead-exclusion.ts)。introductionRoute と同じく文字列で持つ。
+  leadExclusionStatus      String?           @map("lead_exclusion_status")
+  leadExclusionRequestedAt DateTime?         @map("lead_exclusion_requested_at") @db.Date
+  leadExclusionDecidedAt   DateTime?         @map("lead_exclusion_decided_at") @db.Date
+  dmScenarioId            String?           @map("dm_scenario_id") @db.Uuid
   gpsLat                   Decimal?          @map("gps_lat") @db.Decimal(10, 7)
   gpsLng                   Decimal?          @map("gps_lng") @db.Decimal(10, 7)
 
@@ -486,6 +495,7 @@ model Property {
 
   @@index([caseStatus])
   @@index([introductionRoute])
+  @@index([leadExclusionStatus])
   @@index([dmStatus])
   @@index([registryStatus])
   @@index([assignedTo])

@@ -308,6 +308,33 @@ describe("GET /api/properties/export", () => {
     expect(getOwnerDisplayConfig).not.toHaveBeenCalled();
   });
 
+  it("問い合わせ者は owner:read ありで出力・なしなら空欄(所有者名と同じ扱い・2026-10-24)", async () => {
+    pm.property.findMany.mockResolvedValue([makeProp({ inquirerName: "問合 一郎" })]);
+    const csv = await (await GET(makeRequest("?columns=inquirerName"))).text();
+    expect(csv.split("\r\n")[0]).toBe("問い合わせ者");
+    expect(csv).toContain("問合 一郎");
+    expect(pm.property.findMany.mock.calls[0][0].select.inquirerName).toBe(true);
+
+    vi.mocked(getUserPermissions).mockResolvedValue(PERMS_NO_OWNER as any);
+    pm.property.findMany.mockResolvedValue([makeProp({ inquirerName: "問合 一郎" })]);
+    const csv2 = await (await GET(makeRequest("?columns=inquirerName"))).text();
+    expect(csv2).not.toContain("問合 一郎");
+  });
+
+  it("問い合わせ者も表示レベル masked なら伏せる", async () => {
+    vi.mocked(getOwnerDisplayConfig).mockResolvedValue({ ...FULL_DISPLAY, name: "masked" } as any);
+    pm.property.findMany.mockResolvedValue([makeProp({ inquirerName: "山田一郎太" })]);
+    const csv = await (await GET(makeRequest("?columns=inquirerName"))).text();
+    expect(csv).not.toContain("山田一郎太");
+    expect(csv).toContain("***");
+  });
+
+  it("除外申請の絞り込みは監査ログの filters に残す(固定値・非PII)", async () => {
+    pm.property.findMany.mockResolvedValue([makeProp()]);
+    await GET(makeRequest("?leadExclusion=requested_overdue"));
+    expect(JSON.stringify(vi.mocked(writeAuditLog).mock.calls.at(-1)?.[0])).toContain("requested_overdue");
+  });
+
   it("owner_name の display-level が masked なら maskValue 準拠でマスクされる", async () => {
     vi.mocked(getOwnerDisplayConfig).mockResolvedValue({
       ...FULL_DISPLAY,
@@ -583,6 +610,7 @@ describe("GET /api/properties/export — 郵便番号列（代表所有者 Owner
       "導入ルート",
       "担当者名",
       "所有者名",
+      "問い合わせ者",
       "更新日時",
       "作成日時",
       "郵便番号",
@@ -718,11 +746,11 @@ describe("GET /api/properties/export — 出力項目選択（?columns=）", () 
     return csv.split("\r\n")[0].split(",");
   }
 
-  it("?columns 無指定は全17列（後方互換・契約予定日/決済予定日を含む）", async () => {
+  it("?columns 無指定は全18列（後方互換・契約予定日/決済予定日・問い合わせ者を含む）", async () => {
     pm.property.findMany.mockResolvedValue([makeProp()]);
     const res = await GET(makeRequest());
     const csv = await res.text();
-    expect(headerCols(csv)).toHaveLength(17);
+    expect(headerCols(csv)).toHaveLength(18);
   });
 
   it("?columns 指定で選択列のみ・定義順に出力", async () => {
@@ -749,7 +777,7 @@ describe("GET /api/properties/export — 出力項目選択（?columns=）", () 
     pm.property.findMany.mockResolvedValue([makeProp()]);
     const res = await GET(makeRequest("?columns=__x,__y"));
     const csv = await res.text();
-    expect(headerCols(csv)).toHaveLength(17);
+    expect(headerCols(csv)).toHaveLength(18);
   });
 
   it("列選択時も BOM + CRLF を維持する", async () => {

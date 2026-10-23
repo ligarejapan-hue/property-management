@@ -54,6 +54,8 @@ export interface ExcelLeadCommitBody {
     landArea: string | null;
     totalFloorArea: string | null;
     builtYear: number | null;
+    /** 問い合わせ者(申込者の氏名・下書きの applicantName)。所有者の氏名とは別に物件へ残す。 */
+    inquirerName: string | null;
   };
   owner: {
     name: string;
@@ -110,6 +112,7 @@ export function excelLeadCommitBody(row: { draft: PasteDraft; ownerNote: string 
       landArea: landArea || null,
       totalFloorArea: totalFloorArea || null,
       builtYear,
+      inquirerName: row.draft.applicantName?.trim() || null,
     },
     owner:
       ov.name.trim() === ""

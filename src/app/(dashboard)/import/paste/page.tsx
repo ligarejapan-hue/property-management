@@ -448,6 +448,9 @@ function PasteImportScreen({ draftEnabled }: { draftEnabled: boolean }) {
           layoutType: propertyValues.layoutType || null,
           occupancyStatus: propertyValues.occupancyStatus || null,
           note: finalNote || null,
+          // 問い合わせ者(申込者の氏名)。ご所有者様名が別にあると所有者はそちらになるので、
+          // 申込者の氏名は物件の「問い合わせ者」に残す(2026-10-24)。
+          inquirerName: draft.applicantName?.trim() || null,
         },
         owner:
           ownerMode === "new" && ownerValues.name.trim() !== ""

@@ -219,7 +219,7 @@ describe("配線 — 同じ判定を UI と API の両方が通る", () => {
     // 履歴は正規化後の値を混ぜた persistedFields から作る。
     // 区分専用の欄も同じ判定(normalizeUnitOnlyFields)を通した値を混ぜる(@codex #505 P2)。
     expect(src).toMatch(
-      /const persistedFields = \{ \.\.\.updateFields, \.\.\.unitOnlyPatch, \.\.\.buildingNamePatch \}/,
+      /const persistedFields = \{ \.\.\.updateFields, \.\.\.unitOnlyPatch, \.\.\.buildingNamePatch, \.\.\.leadExclusionPatch \}/,
     );
     expect(src).toMatch(/const unitOnlyPatch = normalizeUnitOnlyFields\(effectiveType, unitOnlySent\)/);
     expect(src).toMatch(/Object\.entries\(persistedFields\)/);

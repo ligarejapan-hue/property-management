@@ -154,6 +154,8 @@ export async function GET(request: NextRequest) {
             contractPlannedOn: true,
             settlementPlannedOn: true,
             introductionRoute: true,
+            // 問い合わせ者(個人情報)。所有者名と同じく owner:read + 表示レベルで出す。
+            inquirerName: true,
             updatedAt: true,
             createdAt: true,
             assignee: { select: { name: true } },
@@ -232,6 +234,11 @@ export async function GET(request: NextRequest) {
           : "",
         担当者名: p.assignee?.name ?? "",
         所有者名: ownerNames.join("、"),
+        // 問い合わせ者は所有者名と同じ扱い(owner:read が無ければ空欄・表示レベルで伏せる)。
+        問い合わせ者:
+          hasOwnerRead && ownerDisplayConfig
+            ? maskValue(p.inquirerName, ownerDisplayConfig.name) ?? ""
+            : "",
         更新日時: toCsvDateTime(p.updatedAt),
         作成日時: toCsvDateTime(p.createdAt),
         // 代表所有者の Owner.zip（非PII扱い）。妥当な 7 桁は NNN-NNNN へテキスト化
@@ -277,6 +284,8 @@ export async function GET(request: NextRequest) {
       "dmStatus",
       "caseStatus",
       "introductionRoute",
+      // 除外申請の絞り込み(非PIIの固定値)。
+      "leadExclusion",
       "assignedTo",
       "updatedFrom",
       "updatedTo",

@@ -11,6 +11,8 @@ import {
 import { writeAuditLog } from "@/lib/audit";
 import { recordChanges, PROPERTY_TRACKED_FIELDS } from "@/lib/change-log";
 import { hasPermission } from "@/lib/permissions";
+import { applyInquirerNameVisibility } from "@/lib/inquirer-name";
+import { inquirerNameLevelFor } from "@/lib/inquirer-name-server";
 import { canAccessPropertyRecord } from "@/lib/property-access";
 
 /**
@@ -198,7 +200,12 @@ export async function POST(
       },
     });
 
-    return apiResponse({ property: updated, message });
+    // 問い合わせ者(個人情報)は owner:read がある人にだけ・所有者の氏名と同じ表示レベルで返す。
+    const inquirerLevel = await inquirerNameLevelFor(session.id, perms);
+    return apiResponse({
+      property: updated ? applyInquirerNameVisibility(updated, inquirerLevel) : updated,
+      message,
+    });
   } catch (error) {
     return handleApiError(error);
   }

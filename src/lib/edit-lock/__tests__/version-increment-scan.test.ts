@@ -77,7 +77,7 @@ const VERSIONED: Record<string, string> = {
     "owner.name/address/note/corporateNumber(クリーンアップ適用)+version increment",
   "src/app/api/owners/[id]/route.ts:213":
     "owner の編集画面フィールド一式(編集画面の本体保存窓口)+version increment",
-  "src/app/api/properties/[id]/actions/route.ts:157":
+  "src/app/api/properties/[id]/actions/route.ts:159":
     "property のアクション実行結果フィールド(assign_to_me等)+version increment",
   "src/app/api/properties/[id]/clear-dm-undeliverable/route.ts:64":
     "restoreDmStatus 指定時のみ property.dmStatus+version increment" +
@@ -86,7 +86,7 @@ const VERSIONED: Record<string, string> = {
   "src/app/api/properties/[id]/dm-logs/[logId]/reaction/route.ts:276":
     "property.dmStatus(undeliverable連動のno_send昇格)+version increment" +
     "(Task 9で修正: 元は進めていなかった)",
-  "src/app/api/properties/[id]/route.ts:476":
+  "src/app/api/properties/[id]/route.ts:508":
     "property の編集画面フィールド一式(編集画面の本体保存窓口)+version increment",
   "src/app/api/properties/bulk-update/route.ts:87":
     "property.caseStatus/registryStatus/dmStatus/assignedTo(一括更新)+version increment",
@@ -161,7 +161,7 @@ const ALLOWED_WITHOUT_VERSION: Record<string, AllowedEntry> = {
     reason: "owner.updatedAt のみ(行ロック獲得のための touch)",
     keys: ["updatedAt"],
   },
-  "src/app/api/import/paste/commit/route.ts:552": {
+  "src/app/api/import/paste/commit/route.ts:581": {
     reason: "owner.updatedAt のみ(既存所有者へのリンク可否確認のための touch)",
     keys: ["updatedAt"],
   },
