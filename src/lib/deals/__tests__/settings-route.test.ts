@@ -65,9 +65,9 @@ describe("取引の設定", () => {
 describe("税率の表", () => {
   it("日付は YYYY-MM-DD で返す", async () => {
     pm.dealRateTable.findMany.mockResolvedValue([
-      { id: "r1", kind: "consumption_tax", validFrom: new Date("2019-10-01T00:00:00Z"), validTo: null, content: { rateBp: 1000 } },
+      { id: "r1", kind: "consumption_tax", validFrom: new Date("2019-10-01T00:00:00Z"), validTo: null, content: { rateBp: 1000 }, updatedAt: new Date("2026-10-24T00:00:00Z") },
     ]);
     const body = await (await RATES()).json();
-    expect(body.tables).toEqual([{ id: "r1", kind: "consumption_tax", validFrom: "2019-10-01", validTo: null, content: { rateBp: 1000 } }]);
+    expect(body.tables).toEqual([{ id: "r1", kind: "consumption_tax", validFrom: "2019-10-01", validTo: null, content: { rateBp: 1000 }, updatedAt: "2026-10-24T00:00:00.000Z" }]);
   });
 });

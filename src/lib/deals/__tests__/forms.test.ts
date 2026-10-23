@@ -3,7 +3,7 @@ import {
   basicFormFromDeal, basicPatch, snapshotFormFromDeal, snapshotFromForm,
   EMPTY_PARTY_FORM, partyBodyFromForm, partyFormFromView,
 } from "../forms";
-import { EMPTY_SNAPSHOT, EMPTY_BROKER } from "../schemas";
+import { EMPTY_SNAPSHOT, EMPTY_BROKER, DEFAULT_ASSESSMENTS, DEFAULT_COSTS, DEFAULT_TERMS } from "../schemas";
 import type { DealView } from "../view";
 
 const deal: DealView = {
@@ -12,6 +12,7 @@ const deal: DealView = {
   contractAt: "2026-07-01T01:30:00.000Z", contractPlace: null, settlementAt: null, settlementPlace: null,
   price: null, buildingTax: null, deposit: null, taxRateBp: 1000,
   propertySnapshot: { ...EMPTY_SNAPSHOT, roomNo: "201", floorArea: 65.4 }, counterpartyBroker: EMPTY_BROKER,
+  assessments: DEFAULT_ASSESSMENTS, costs: DEFAULT_COSTS, settlementTerms: DEFAULT_TERMS, leases: [], overrides: {},
   version: 3, createdAt: "", updatedAt: "", parties: [],
 };
 

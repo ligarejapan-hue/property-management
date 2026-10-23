@@ -34,12 +34,21 @@ describe("更新データ", () => {
 describe("変更履歴の値", () => {
   it("追跡する項目だけ・日時は ISO 文字列", () => {
     const v = dealChangeValues({ name: "a", contractAt: new Date("2026-07-01T01:30:00.000Z"), price: BigInt(1), propertySnapshot: {} });
-    expect(v).toEqual({ name: "a", contractAt: "2026-07-01T01:30:00.000Z" });
+    expect(v).toEqual({ name: "a", contractAt: "2026-07-01T01:30:00.000Z", price: BigInt(1) });
   });
   it("変わった項目だけが履歴の行になる", () => {
     const old = dealChangeValues({ name: "a", status: "considering", contractAt: null });
     const neu = dealChangeValues({ name: "a", status: "contracted", contractAt: null });
     const rows = buildChangeLogEntries({ targetTable: "deals", targetId: "d", changedBy: "u", oldValues: old, newValues: neu, trackedFields: DEAL_TRACKED_FIELDS });
     expect(rows.map((r) => [r.fieldName, r.oldValue, r.newValue])).toEqual([["status", "considering", "contracted"]]);
+  });
+});
+
+describe("段2の項目", () => {
+  it("金額は BigInt・空は null・JSON はそのまま", () => {
+    expect(toDealUpdateData({ price: 1000, deposit: null, leases: [] }, "brokerage")).toEqual({ price: BigInt(1000), deposit: null, leases: [] });
+  });
+  it("金額と税率も変更履歴に残す", () => {
+    expect(DEAL_TRACKED_FIELDS).toEqual(expect.arrayContaining(["price", "deposit", "taxRateBp"]));
   });
 });

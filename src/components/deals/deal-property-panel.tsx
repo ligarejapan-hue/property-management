@@ -10,6 +10,8 @@ import { dealsApi, DealApiError, errorText } from "@/lib/deals/client";
 import { snapshotFormFromDeal, snapshotFromForm, type SnapshotForm } from "@/lib/deals/forms";
 import type { DealView } from "@/lib/deals/view";
 import { LAND_RIGHT_LABELS } from "@/lib/deals/constants";
+import { ASSESSMENT_MONEY_KEYS, AssessmentsEditor, type AssessmentsForm } from "./assessments-editor";
+import { textify, untextify } from "@/lib/deals/money-forms";
 
 const TEXT_FIELDS: [keyof SnapshotForm, string, number][] = [
   ["buildingName", "物件名", 200], ["roomNo", "号室", 50], ["address", "住居表示", 300], ["lotNumber", "所在・地番", 300],
@@ -32,8 +34,16 @@ export default function DealPropertyPanel({
   const [busy, setBusy] = useState(false);
   const [confirming, setConfirming] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [assessments, setAssessments] = useState<AssessmentsForm>(() => ({
+    ...deal.assessments, rows: deal.assessments.rows.map((r) => textify(r, ASSESSMENT_MONEY_KEYS)),
+  }));
+  const parsedRows = assessments.rows.map((r, i) => untextify(r, ASSESSMENT_MONEY_KEYS, (k) => `評価額${i + 1}行目の${k === "building" ? "家屋評価額" : "土地評価額"}`));
+  const badAssessments = parsedRows.flatMap((p) => p.bad);
+  const assessmentsValue = { ...assessments, rows: parsedRows.map((p) => p.value) };
   const set = (k: keyof SnapshotForm, v: string) => setForm((f) => ({ ...f, [k]: v }));
-  const dirty = JSON.stringify(snapshotFromForm(form)) !== JSON.stringify(deal.propertySnapshot);
+  const dirty =
+    JSON.stringify(snapshotFromForm(form)) !== JSON.stringify(deal.propertySnapshot) ||
+    badAssessments.length > 0 || JSON.stringify(assessmentsValue) !== JSON.stringify(deal.assessments);
 
   const run = async (fn: () => Promise<unknown>) => {
     if (busy) return;
@@ -55,12 +65,14 @@ export default function DealPropertyPanel({
         <div className="flex flex-wrap items-center gap-3 text-sm">
           <span className="text-gray-600 dark:text-gray-400">登録済みの物件から写しています。</span>
           {canOpenProperty && (
-            <Link href={`/properties/${deal.propertyId}`} className="text-indigo-700 hover:underline dark:text-indigo-400">物件を開く</Link>
+            <>
+              <Link href={`/properties/${deal.propertyId}`} className="text-indigo-700 hover:underline dark:text-indigo-400">物件を開く</Link>
+              <Button variant="secondary" size="sm" disabled={busy} onClick={() => setConfirming(true)}>
+                <RefreshCw className="h-4 w-4" />
+                物件から取り直す
+              </Button>
+            </>
           )}
-          <Button variant="secondary" size="sm" disabled={busy} onClick={() => setConfirming(true)}>
-            <RefreshCw className="h-4 w-4" />
-            物件から取り直す
-          </Button>
         </div>
       ) : (
         <p className="text-sm text-gray-600 dark:text-gray-400">手入力の物件です(物件の一覧には登録しません)。</p>
@@ -83,8 +95,16 @@ export default function DealPropertyPanel({
         </Field>
       </div>
 
+      <AssessmentsEditor value={assessments} onChange={setAssessments} />
+
       <Button
-        onClick={() => run(() => dealsApi.update(deal.id, { version: deal.version, propertySnapshot: snapshotFromForm(form) }))}
+        onClick={() => {
+          if (badAssessments.length > 0) {
+            setError(`${badAssessments.join("・")}は数字で入れてください。保存していません。`);
+            return;
+          }
+          void run(() => dealsApi.update(deal.id, { version: deal.version, propertySnapshot: snapshotFromForm(form), assessments: assessmentsValue }));
+        }}
         disabled={busy || !dirty} loading={busy} loadingLabel="保存中"
       >
         <Save className="h-4 w-4" />
