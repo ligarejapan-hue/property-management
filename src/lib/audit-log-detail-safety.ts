@@ -591,6 +591,9 @@ const ACTION_FORCE_SAFE_KEYS: Readonly<Record<string, ReadonlySet<string>>> = {
   // 補完を鍵のため見送ったか」の boolean。/owner/i denylist に当たるが値は boolean
   // ゆえ PII 流入余地なし(他の *SkippedByEditLock/*hasXxx と同型)。
   registry_auto_fetch: new Set(["ownerCorporateFillSkippedByEditLock"]),
+  // pdf_import: ownersFromFullCertificate は「全部事項の判定結果から所有者を反映したか」の
+  // boolean。/owner/i denylist に当たるが値は boolean のみ(process.ts で常に boolean を入れる)。
+  pdf_import: new Set(["ownersFromFullCertificate"]),
 };
 
 /**

@@ -15,7 +15,12 @@ import {
   type PdfExtractionSource,
 } from "@/lib/pdf-extract";
 import { assertImportJsonBodySize } from "@/lib/import-body-size";
-import { summarizeRegistryRights } from "@/lib/registry-strike";
+import {
+  hasDeterminedOwners,
+  isFullCertificateText,
+  ownersFromRights,
+  summarizeRegistryRights,
+} from "@/lib/registry-strike";
 
 // ⚠**断定しない・貼り直しを命じない**(@codex #421 P2)。
 //   判定は「取り出せた文字が50字未満」だけで、画像だけのPDFである証明ではない。
@@ -23,6 +28,9 @@ import { summarizeRegistryRights } from "@/lib/registry-strike";
 //   書くと、**使える抽出結果まで捨てさせてしまう**。画面のバナーと同じ条件付きにする。
 const SCANNED_PDF_WARNING =
   "PDF本文を十分に抽出できませんでした。画像化された謄本PDFの可能性があります。読み取れた内容が不足している場合は、本文をテキストにして貼り付けてください。";
+
+const FULL_CERTIFICATE_PREVIEW_WARNING =
+  "全部事項の謄本から今の所有者を判定できませんでした。謄本を見て所有者を入力してください。";
 
 // ---------- POST /api/import/registry-pdf/parse ----------
 // プレビュー専用: PDF または テキストを受け取り、解析結果だけを返す。
@@ -110,6 +118,18 @@ export async function POST(request: NextRequest) {
     const rights = isLikelyScanned
       ? null
       : await summarizeRegistryRights({ pdf: pdfBuffer, text });
+
+    // 全部事項の所有者は、判定結果（今の所有者）で確認画面を埋める。所有者事項向けの
+    // 読み取りは全部事項では住所の切れ端・旧所有者を拾うため使わない（process.ts と同じ方針）。
+    // 判定できなければ空にして、利用者に謄本を見て入力してもらう。
+    if (isFullCertificateText(text)) {
+      if (hasDeterminedOwners(rights)) {
+        parsed.owners = ownersFromRights(rights);
+      } else {
+        parsed.owners = [];
+        parsed.warnings = [...parsed.warnings, FULL_CERTIFICATE_PREVIEW_WARNING];
+      }
+    }
 
     return apiResponse({
       fileName,

@@ -5,6 +5,10 @@
  * 全部事項には抹消された旧所有者が載り、今の解析は現在/抹消を区別できないため、
  * 旧所有者を現在の所有者として登録すると DM 宛先などが誤る。all は PDF 添付のみに留める。
  * 所有者事項(owner)・手動取込(種別 undefined)は従来どおり反映する。
+ *
+ * ※その後、全部事項の文章（権利部の甲区がある）なら、下線＝抹消事項を読んだ判定結果の
+ *   「今の所有者」だけを反映するようにした（process-full-certificate.test.ts）。
+ *   このファイルの "dummy" は全部事項の文章ではないので、all は従来どおり反映しない。
  */
 import { describe, it, expect, vi, beforeEach, type Mock } from "vitest";
 
