@@ -43,7 +43,7 @@ export interface RegistryActiveRight {
   amount: string | null;
   /** 抵当権者・根抵当権者・権利者など（移転の付記があれば移転後。一部移転は「、」区切り） */
   holder: string | null;
-  /** 債務者（変更の付記があれば変更後） */
+  /** 債務者（変更の付記があれば変更後。複数は「、」区切り） */
   debtor: string | null;
   /** この権利にぶら下がる、効力のある付記登記の件数 */
   activeAnnotations: number;
@@ -166,17 +166,40 @@ function parseEntries(rows: StrikeLine[]): Entry[] {
     cur = null;
   };
 
+  // ⚠ ページの変わり目では、表の下枠（┗）・上枠（┏）・見出しの行が入ることがあるが、
+  //   登記はそのまま次のページへ続く。区切り線ですぐに登記を閉じず、次の中身の行を見て
+  //   「ページをまたいだ続き」（順位番号も登記の目的も空）なら前の登記に足す。
+  let pendingSep: "full" | "sub" | null = null;
+  let crossedPage = false;
+  let prevPage: number | null = null;
+
   for (const row of rows) {
+    if (prevPage !== null && row.page !== prevPage) crossedPage = true;
+    prevPage = row.page;
+
     const sep = isSeparator(row.text);
     if (sep) {
-      flush();
-      pendingSub = sep === "sub";
+      pendingSep = sep;
       continue;
     }
     const cells = splitRow(row);
     if (!cells || cells.length < 4) continue;
     const [rankC, purposeC, , detailC] = cells;
     if (compact(rankC.text).includes("順位番号")) continue; // 見出し
+
+    const isContinuation =
+      cur !== null &&
+      crossedPage &&
+      compact(stripPrivateUse(rankC.text)) === "" &&
+      compact(stripPrivateUse(purposeC.text)) === "";
+    crossedPage = false;
+    if (isContinuation) {
+      pendingSep = null;
+    } else if (pendingSep) {
+      flush();
+      pendingSub = pendingSep === "sub";
+      pendingSep = null;
+    }
 
     if (!cur) {
       const rankCell = toHalfWidthDigits(compact(rankC.text));
@@ -729,6 +752,7 @@ function firstBlock(b: Map<string, Cell[]>, labels: string[]): Cell[] | undefine
  * 権利者欄の名前。欄は「住所（複数行のこともある）→ 名前」で、名前は最後の行。
  * 「（取扱店 ○○支店）」の行は名前ではないので除く。
  */
+/** 権利者・債務者の欄の名前（複数なら全員）。 */
 function holderNames(cells: Cell[] | undefined): string[] {
   // ⚠ 下線の付いた行も落とさず「並び」で読む（名前に下線＝名称変更でも住所と取り違えない）
   const rows = rowsOf(cells ?? []).filter((r) => !/^（?取扱店/.test(compact(r.raw)));
@@ -743,12 +767,6 @@ function holderNames(cells: Cell[] | undefined): string[] {
   });
   if (names.length > 0) return names;
   return rows.length > 0 ? [clean(rows[rows.length - 1].raw)] : [];
-}
-
-/** 債務者欄の名前（最後の行）。並びで読む。 */
-function debtorName(cells: Cell[] | undefined): string | null {
-  const rows = rowsOf(cells ?? []);
-  return rows.length > 0 ? clean(rows[rows.length - 1].raw) : null;
 }
 
 const CAUTION_RE = /差押|仮差押|仮処分|仮登記|買戻|競売|破産|処分禁止|請求権/;
@@ -812,7 +830,7 @@ export function analyzeRegistryRights(lines: StrikeLine[]): RegistryRightsSummar
     if (holders.length > 1) {
       notes.push(`乙区${rank}番の権利者が複数あります（${holders.length}名）。漏れがないか目視で確認してください。`);
     }
-    let debtor = debtorName(firstBlock(bb, ["債務者", "連帯債務者"]) ?? firstBlock(b, ["債務者", "連帯債務者"]));
+    let debtors = holderNames(firstBlock(bb, ["債務者", "連帯債務者"]) ?? firstBlock(b, ["債務者", "連帯債務者"]));
 
     const anns = liveOtsu.filter((k) => k.entry.kind === "annotation" && k.entry.mainRank === rank);
     for (const a of anns) {
@@ -847,9 +865,9 @@ export function analyzeRegistryRights(lines: StrikeLine[]): RegistryRightsSummar
           amount = clean(am.join(""));
           applied = true;
         }
-        const db = debtorName(firstBlock(ab, ["債務者", "連帯債務者", "指定債務者"]));
-        if (db) {
-          debtor = db;
+        const db = holderNames(firstBlock(ab, ["債務者", "連帯債務者", "指定債務者"]));
+        if (db.length > 0) {
+          debtors = db;
           applied = true;
         }
         // 利息・債権の範囲など、表示していない項目だけの変更は「反映済み」と言わずに知らせる
@@ -863,12 +881,15 @@ export function analyzeRegistryRights(lines: StrikeLine[]): RegistryRightsSummar
       }
     }
 
+    if (debtors.length > 1) {
+      notes.push(`乙区${rank}番の債務者が複数あります（${debtors.length}名）。漏れがないか目視で確認してください。`);
+    }
     activeRights.push({
       rank,
       purpose: base.purpose,
       amount,
       holder: holders.length > 0 ? holders.join("、") : null,
-      debtor,
+      debtor: debtors.length > 0 ? debtors.join("、") : null,
       activeAnnotations: anns.length,
     });
     if (CAUTION_RE.test(j.purpose) && !(/仮登記/.test(j.purpose) && margin)) {
