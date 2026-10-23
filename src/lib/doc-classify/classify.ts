@@ -9,12 +9,22 @@
  * ⚠「推測で埋めない」= どれにも当たらなければ null(=その他)。人が直せる。
  */
 
+/**
+ * 段階(フォルダ)。並びは発注者決定(2026-10-23 夜): ①調査資料等 ②管理関係 ③契約関係 ④決済関係
+ * ⑤賃貸関係(現況が賃貸中のときだけ出す)・本人確認は番号なしで最後。
+ * ⚠`pre_contract` の code は最初の版(「契約前」)のまま=DB の doc_stage に入っている値を変えないため。
+ */
 export const DOC_STAGES = [
-  { code: "pre_contract", label: "契約前", short: "①" },
-  { code: "contract", label: "契約関係", short: "②" },
-  { code: "settlement", label: "決済関係", short: "③" },
-  { code: "identity", label: "本人確認", short: "④" },
+  { code: "pre_contract", label: "調査資料等", short: "①" },
+  { code: "management", label: "管理関係", short: "②" },
+  { code: "contract", label: "契約関係", short: "③" },
+  { code: "settlement", label: "決済関係", short: "④" },
+  { code: "rental", label: "賃貸関係", short: "⑤" },
+  { code: "identity", label: "本人確認", short: "" },
 ] as const;
+
+/** 現況が賃貸中(occupancyStatus="rented")のときだけ、空でも出す段階。 */
+export const RENTAL_STAGE: DocStageCode = "rental";
 
 export type DocStageCode = (typeof DOC_STAGES)[number]["code"];
 
@@ -34,31 +44,48 @@ export interface DocKind {
  * ⚠領収書は表に入れず、下の RECEIPT_* で手付/残代金に振り分ける。
  */
 export const DOC_KINDS: readonly DocKind[] = [
-  // ① 契約前
+  // ① 調査資料等
   { code: "brokerage_agreement", label: "媒介契約書", stage: "pre_contract", keywords: ["媒介契約", "専任媒介", "一般媒介"] },
-  { code: "mgmt_report", label: "重要事項調査報告書", stage: "pre_contract", keywords: ["重要事項調査報告書", "管理に係る重要事項"] },
-  { code: "bylaws", label: "管理規約・使用細則", stage: "pre_contract", keywords: ["管理規約", "使用細則"] },
   { code: "appraisal_report", label: "査定書・査定報告書", stage: "pre_contract", keywords: ["査定報告", "査定書"] },
-  // ② 契約関係
+  { code: "drawings", label: "公図・測量図・建物図面", stage: "pre_contract", keywords: ["公図", "測量図", "地積測量", "建物図面", "各階平面図", "間取図", "間取り図"] },
+  { code: "tax_certificate", label: "評価証明・公課証明", stage: "pre_contract", keywords: ["評価証明", "公課証明", "固定資産評価", "名寄帳"] },
+  // ② 管理関係(区分マンションの管理組合・管理会社の書類)
+  { code: "mgmt_report", label: "重要事項調査報告書", stage: "management", keywords: ["重要事項調査報告書", "管理に係る重要事項"] },
+  { code: "bylaws", label: "管理規約・使用細則", stage: "management", keywords: ["管理規約", "使用細則"] },
+  { code: "repair_plan", label: "長期修繕計画", stage: "management", keywords: ["長期修繕計画", "修繕計画"] },
+  { code: "assembly_minutes", label: "総会・理事会の議事録", stage: "management", keywords: ["総会議事録", "理事会議事録", "議事録"] },
+  { code: "mgmt_fees", label: "管理費・修繕積立金の通知", stage: "management", keywords: ["管理費等", "管理費・修繕積立金", "修繕積立金"] },
+  // ③ 契約関係
   { code: "sales_contract", label: "売買契約書", stage: "contract", keywords: ["売買契約書", "不動産売買契約"] },
   { code: "disclosure", label: "重要事項説明書", stage: "contract", keywords: ["重要事項説明書", "重説"] },
   { code: "fixtures_list", label: "付帯設備表", stage: "contract", keywords: ["付帯設備表", "設備表"] },
   { code: "condition_report", label: "物件状況告知書", stage: "contract", keywords: ["物件状況告知書", "物件状況報告書", "告知書"] },
   { code: "deposit_receipt", label: "手付金 領収書・預り証", stage: "contract", keywords: [] },
-  // ③ 決済関係
+  // ④ 決済関係
   { code: "settlement_notice", label: "決済のご案内", stage: "settlement", keywords: ["決済ご案内", "決済のご案内", "決済案内"] },
   { code: "settlement_statement", label: "精算書", stage: "settlement", keywords: ["精算書", "精算金", "残金精算", "固定資産税精算"] },
   { code: "settlement_receipt", label: "領収書(残代金・仲介手数料)", stage: "settlement", keywords: [] },
   { code: "completion_confirmation", label: "取引完了確認書", stage: "settlement", keywords: ["取引完了確認"] },
   { code: "owner_change_forms", label: "区分所有者変更届・口座振替依頼書", stage: "settlement", keywords: ["区分所有者変更", "口座振替", "自動振込"] },
   { code: "key_handover", label: "鍵・引渡し関係", stage: "settlement", keywords: ["鍵引渡", "引渡確認", "引き渡し確認", "鍵の引"] },
-  // ④ 本人確認
+  // ⑤ 賃貸関係(現況が賃貸中の物件)
+  { code: "lease_contract", label: "賃貸借契約書", stage: "rental", keywords: ["賃貸借契約", "賃貸契約", "定期借家契約"] },
+  { code: "rent_roll", label: "レントロール", stage: "rental", keywords: ["レントロール", "賃料一覧", "家賃一覧", "rentroll"] },
+  { code: "pm_agreement", label: "管理委託契約書(賃貸)", stage: "rental", keywords: ["管理委託契約", "賃貸管理契約", "サブリース契約"] },
+  { code: "tenant_info", label: "入居者(賃借人)の情報", stage: "rental", keywords: ["入居者情報", "賃借人情報", "入居者一覧", "入居者"] },
+  { code: "security_deposit", label: "敷金・保証金", stage: "rental", keywords: ["敷金", "保証金"] },
+  { code: "renewal_memo", label: "更新の覚書", stage: "rental", keywords: ["更新に関する覚書", "更新覚書", "契約更新"] },
+  { code: "termination_notice", label: "解約通知", stage: "rental", keywords: ["解約通知", "解約予告", "退去届", "退去通知"] },
+  { code: "owner_change_notice", label: "所有者変更通知(入居者あて)", stage: "rental", keywords: ["所有者変更通知", "所有者変更のお知らせ", "オーナー変更", "貸主変更", "賃貸人変更"] },
+  // 本人確認(番号なし・最後)
   { code: "identity_document", label: "本人確認書類", stage: "identity", keywords: ["運転免許", "マイナンバー", "在留カード", "本人確認", "パスポート", "健康保険証"] },
 ];
 
 /** 領収書・預り証のしるし。見つかったら手付/残代金の文脈で振り分ける。 */
 const RECEIPT_MARKERS = ["領収書", "領収証", "預り証"] as const;
 const DEPOSIT_CONTEXT = ["手付"] as const;
+/** 敷金・保証金の預り証は売買の領収書ではない(⑤賃貸関係の「敷金・保証金」に回す)。 */
+const RENTAL_DEPOSIT_CONTEXT = ["敷金", "保証金"] as const;
 const SETTLEMENT_CONTEXT = ["残代金", "残金", "仲介手数料", "精算"] as const;
 
 /** 本文はここまでしか見ない(1ページ目相当)。 */
@@ -99,6 +126,22 @@ interface Hit {
   tentative: boolean;
 }
 
+/** 見出しの語の前後と見なす幅(文字)。「賃貸借契約の更新に関する覚書」「管理費等精算書」が収まる長さ。 */
+const NEAR_RADIUS = 14;
+
+/** 「敷金預り証」「保証金領収書」「預り証（敷金）」のように語が隣り合うと見なす幅(文字)。 */
+const ADJACENT_RADIUS = 5;
+
+/** 見出しの語そのものの長さの上限(「賃貸借契約」「管理費等」「預り証」…)。窓の後ろ側はこの分だけ延ばす。 */
+const MATCHED_WORD_MAX = 5;
+
+/** `position` から始まる語の前後 `radius` 文字の中に `words` のどれかがあるか(複合語の判定に使う)。 */
+function anyNear(haystack: string, position: number, words: readonly string[], radius = NEAR_RADIUS): boolean {
+  const start = Math.max(0, position - radius);
+  const window = haystack.slice(start, position + MATCHED_WORD_MAX + radius);
+  return words.some((w) => window.includes(w));
+}
+
 function firstIndexOf(haystack: string, words: readonly string[]): number {
   let best = -1;
   for (const w of words) {
@@ -112,6 +155,9 @@ function firstIndexOf(haystack: string, words: readonly string[]): number {
 function receiptHit(normalized: string): Hit | null {
   const receiptAt = firstIndexOf(normalized, RECEIPT_MARKERS);
   if (receiptAt < 0) return null;
+  // 「敷金預り証」「保証金領収書」のように**語のすぐ近く**に敷金/保証金があるときだけ賃貸の預り証。
+  // 本文のどこかに「敷金の承継」とあるだけの残代金領収書は、領収書のまま(@codex #560 P2)。
+  if (anyNear(normalized, receiptAt, RENTAL_DEPOSIT_CONTEXT, ADJACENT_RADIUS)) return null;
   const depositAt = firstIndexOf(normalized, DEPOSIT_CONTEXT);
   const settlementAt = firstIndexOf(normalized, SETTLEMENT_CONTEXT);
   if (depositAt >= 0 && (settlementAt < 0 || depositAt <= settlementAt)) {
@@ -137,7 +183,27 @@ function bestHit(normalized: string, receiptFirst: boolean): Hit | null {
     if (at < 0) continue;
     if (best === null || at < best.position) best = { kind: k.code, position: at, tentative: false };
   }
-  return best;
+  return best ? refineHit(normalized, best) : null;
+}
+
+/**
+ * 「最も前の語」だけでは取り違える複合語の手直し。**見出しの語のすぐ近く**にあるときだけ
+ * (本文のどこかに「覚書」「精算」とあるだけでは変えない・@codex #560 P2)。
+ * - 「賃貸借契約の更新に関する覚書」: 賃貸借契約(先)に負けて賃貸借契約書になる → 近くに更新の覚書の語があれば更新の覚書
+ * - 「管理費等精算書」: 管理費等(先)に負けて管理費の通知になる → 近くに精算書の語があれば精算書
+ */
+function refineHit(normalized: string, hit: Hit): Hit {
+  if (hit.kind === "lease_contract" && anyNear(normalized, hit.position, keywordsOf("renewal_memo"))) {
+    return { ...hit, kind: "renewal_memo" };
+  }
+  if (hit.kind === "mgmt_fees" && anyNear(normalized, hit.position, keywordsOf("settlement_statement"))) {
+    return { ...hit, kind: "settlement_statement" };
+  }
+  return hit;
+}
+
+function keywordsOf(code: string): readonly string[] {
+  return docKindByCode(code)?.keywords ?? [];
 }
 
 /**

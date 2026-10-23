@@ -1,8 +1,8 @@
 /**
  * 添付タブの「段階ごとのフォルダ」の分け方(純関数・画面はこれを並べるだけ)。
- * 段階 ①契約前 ②契約関係 ③決済関係 ④本人確認 の順に、最後に「その他」(段階なし)。
+ * 段階 ①調査資料等 ②管理関係 ③契約関係 ④決済関係 ⑤賃貸関係 本人確認 の順に、最後に「その他」(段階なし)。
  */
-import { DOC_STAGES, type DocStageCode } from "@/lib/doc-classify/classify";
+import { DOC_STAGES, RENTAL_STAGE, docStageOfKind, type DocStageCode } from "@/lib/doc-classify/classify";
 
 export interface FolderItem {
   id: string;
@@ -28,10 +28,26 @@ export function groupAttachmentsByStage<T extends FolderItem>(items: readonly T[
   const other: DocFolder<T> = { code: "other", label: "その他", short: "", items: [] };
   const byCode = new Map<string, DocFolder<T>>(folders.map((f) => [f.code, f]));
   for (const it of items) {
-    const folder = (it.docStage && byCode.get(it.docStage)) || other;
+    // 種類があれば種類の表から段階を引く(段階の並びを変えたとき、保存済みの doc_stage が古くても
+    // 正しいフォルダに出る)。種類が無ければ保存されている段階。
+    const stage = docStageOfKind(it.docKind) ?? it.docStage;
+    const folder = (stage && byCode.get(stage)) || other;
     folder.items.push(it);
   }
   return [...folders, other];
+}
+
+/**
+ * 画面に出すフォルダ。⑤賃貸関係は、現況が賃貸中(occupancyStatus="rented")のときだけ空でも出す。
+ * 賃貸中でなくても、中に書類があれば出す(隠れて見えなくならないように)。
+ */
+export function visibleFolders<T extends FolderItem>(
+  folders: readonly DocFolder<T>[],
+  opts: { occupancyStatus: string | null | undefined },
+): DocFolder<T>[] {
+  return folders.filter(
+    (f) => f.code !== RENTAL_STAGE || opts.occupancyStatus === "rented" || f.items.length > 0,
+  );
 }
 
 /** 画面に出す名前: そろえた名前があればそれ、無ければ元の名前。 */

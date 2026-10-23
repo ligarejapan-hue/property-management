@@ -1,23 +1,47 @@
 import { describe, it, expect } from "vitest";
-import { displayTitle, groupAttachmentsByStage, needsKindCheck } from "../doc-folders";
+import { displayTitle, groupAttachmentsByStage, needsKindCheck, visibleFolders } from "../doc-folders";
 
 const a = (id: string, over: Record<string, unknown> = {}) => ({ id, fileName: `${id}.pdf`, mimeType: "application/pdf", ...over });
 
 describe("groupAttachmentsByStage", () => {
-  it("①②③④その他 の順に、段階なしは その他 へ", () => {
+  it("①②③④⑤ 本人確認 その他 の順に、段階なしは その他 へ", () => {
     const folders = groupAttachmentsByStage([
       a("x", { docStage: "settlement" }),
       a("y", { docStage: null }),
       a("z", { docStage: "contract" }),
       a("w", { docStage: "unknown_stage" }),
+      a("r", { docStage: "rental" }),
     ]);
-    expect(folders.map((f) => f.code)).toEqual(["pre_contract", "contract", "settlement", "identity", "other"]);
-    expect(folders.map((f) => f.items.map((i) => i.id))).toEqual([[], ["z"], ["x"], [], ["y", "w"]]);
+    expect(folders.map((f) => f.code)).toEqual(["pre_contract", "management", "contract", "settlement", "rental", "identity", "other"]);
+    expect(folders.map((f) => f.items.map((i) => i.id))).toEqual([[], [], ["z"], ["x"], ["r"], [], ["y", "w"]]);
     expect(folders[0].short).toBe("①");
-    expect(folders[4].label).toBe("その他");
+    expect(folders[0].label).toBe("調査資料等");
+    expect(folders[5].short).toBe("");
+    expect(folders[6].label).toBe("その他");
   });
-  it("空でも5つのフォルダを返す", () => {
-    expect(groupAttachmentsByStage([]).length).toBe(5);
+  it("種類があれば種類の表の段階を使う(保存済みの段階が古くても正しいフォルダ)", () => {
+    const folders = groupAttachmentsByStage([a("m", { docKind: "mgmt_report", docStage: "pre_contract" })]);
+    expect(folders.find((f) => f.code === "management")?.items.map((i) => i.id)).toEqual(["m"]);
+    expect(folders.find((f) => f.code === "pre_contract")?.items).toEqual([]);
+  });
+  it("空でも7つのフォルダを返す", () => {
+    expect(groupAttachmentsByStage([]).length).toBe(7);
+  });
+});
+
+describe("visibleFolders", () => {
+  it("賃貸中なら ⑤賃貸関係 を空でも出す", () => {
+    const v = visibleFolders(groupAttachmentsByStage([]), { occupancyStatus: "rented" });
+    expect(v.map((f) => f.code)).toContain("rental");
+  });
+  it("賃貸中でなければ、空の ⑤賃貸関係 は出さない(ほかは出す)", () => {
+    const v = visibleFolders(groupAttachmentsByStage([]), { occupancyStatus: "vacant" });
+    expect(v.map((f) => f.code)).toEqual(["pre_contract", "management", "contract", "settlement", "identity", "other"]);
+    expect(visibleFolders(groupAttachmentsByStage([]), { occupancyStatus: null }).map((f) => f.code)).not.toContain("rental");
+  });
+  it("賃貸中でなくても、賃貸関係の書類があれば出す", () => {
+    const v = visibleFolders(groupAttachmentsByStage([a("r", { docStage: "rental" })]), { occupancyStatus: "occupied" });
+    expect(v.map((f) => f.code)).toContain("rental");
   });
 });
 

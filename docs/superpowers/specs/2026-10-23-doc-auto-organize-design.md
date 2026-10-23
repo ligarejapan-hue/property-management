@@ -17,11 +17,16 @@
 
 | 段階 | code | 種類(code) |
 |---|---|---|
-| ① 契約前 | `pre_contract` | 媒介契約書 `brokerage_agreement` / 重要事項調査報告書 `mgmt_report` / 管理規約・使用細則 `bylaws` / 査定書・査定報告書 `appraisal_report` |
-| ② 契約関係 | `contract` | 売買契約書 `sales_contract` / 重要事項説明書 `disclosure` / 付帯設備表 `fixtures_list` / 物件状況告知書 `condition_report` / 手付金 領収書・預り証 `deposit_receipt` |
-| ③ 決済関係 | `settlement` | 決済のご案内 `settlement_notice` / 精算書 `settlement_statement` / 領収書(残代金・仲介手数料) `settlement_receipt` / 取引完了確認書 `completion_confirmation` / 区分所有者変更届・口座振替依頼書 `owner_change_forms` / 鍵・引渡し関係 `key_handover` |
-| ④ 本人確認 | `identity` | 本人確認書類 `identity_document` |
+| ① 調査資料等 | `pre_contract`(code は初版「契約前」のまま=DB の値を変えないため) | 媒介契約書 `brokerage_agreement` / 査定書・査定報告書 `appraisal_report` / 公図・測量図・建物図面 `drawings` / 評価証明・公課証明 `tax_certificate` |
+| ② 管理関係 | `management` | 重要事項調査報告書 `mgmt_report` / 管理規約・使用細則 `bylaws` / 長期修繕計画 `repair_plan` / 総会・理事会の議事録 `assembly_minutes` / 管理費・修繕積立金の通知 `mgmt_fees` |
+| ③ 契約関係 | `contract` | 売買契約書 `sales_contract` / 重要事項説明書 `disclosure` / 付帯設備表 `fixtures_list` / 物件状況告知書 `condition_report` / 手付金 領収書・預り証 `deposit_receipt` |
+| ④ 決済関係 | `settlement` | 決済のご案内 `settlement_notice` / 精算書 `settlement_statement` / 領収書(残代金・仲介手数料) `settlement_receipt` / 取引完了確認書 `completion_confirmation` / 区分所有者変更届・口座振替依頼書 `owner_change_forms` / 鍵・引渡し関係 `key_handover` |
+| ⑤ 賃貸関係 | `rental` | 賃貸借契約書 `lease_contract` / レントロール `rent_roll` / 管理委託契約書(賃貸) `pm_agreement` / 入居者(賃借人)の情報 `tenant_info` / 敷金・保証金 `security_deposit` / 更新の覚書 `renewal_memo` / 解約通知 `termination_notice` / 所有者変更通知(入居者あて) `owner_change_notice` |
+| 本人確認(番号なし・最後) | `identity` | 本人確認書類 `identity_document` |
 | その他 | `other`(列は NULL) | 種類なし |
+
+- 並びは発注者決定(2026-10-23 夜)。⑤賃貸関係は**現況が賃貸中(`occupancyStatus="rented"`)のときだけ**空でも出す。賃貸中でなくても中に書類があれば出す。
+- 添付タブで最初に開く段階: 契約予定→③契約関係・契約完了/決済完了→④決済関係・それ以外→①調査資料等。
 
 - 写真(画像で文字がほぼ無いもの)は第3段で写真タブへ。第1段では画像は名前だけで判別し、当たらなければ「その他」。
 - 謄本(`type="registry"`)は今のまま別枠。段階・種類は付けない。
