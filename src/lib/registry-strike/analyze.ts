@@ -512,47 +512,75 @@ function addHolder(state: Holder[], p: Person, share: Frac, rank: string): void 
   state.push({ name: p.name, aliases: new Set([key(p.name)]), address: p.address, share, fromRank: rank });
 }
 
-/** 名義人の住所・氏名の変更/更正の付記を当てはめる。当て先が分からなければ false。 */
+/**
+ * 名義人の住所・氏名の変更/更正の付記を当てはめる。当て先が分からなければ false。
+ *
+ * 書き方は2通り:
+ *   - 名義人が1人の登記:「住所 X」/「氏名 X」（続きの行を含む）
+ *   - 共有者ごと:「共有者Aの住所 X」/「Aの氏名 X」
+ * ⚠ 変更が重なると（A→B→C）、途中の付記の値（B）にも下線が引かれる。その付記は
+ *   「もう今の値ではない」だけで当て先は分かるので、失敗にせず読み飛ばす。
+ *   ただし途中の氏名（B）は、後の付記「共有者Bの…」の照合に使うので別名として覚える。
+ */
 function applyNameAddressChange(state: Holder[], detail: Cell[], targetRank: string): boolean {
-  // 共有者ごと:「共有者Aの住所 X」/「Aの氏名 X」（続きの行を含む）
-  const lines = detail.map((c) => ({ c, t: currentText(c).replace(/　/g, " ") }));
-  const per: { who: string; field: string; parts: string[] }[] = [];
-  let cur: { who: string; field: string; parts: string[] } | null = null;
-  for (const { c, t } of lines) {
-    if (isFullyStruck(c)) continue;
-    const m = t.match(/^(?:共有者)?(.+?)の(住所|氏名|名称|本店|商号)[ 　]*(.*)$/);
-    if (m && !/^[ 　]/.test(t)) {
-      cur = { who: clean(m[1]), field: m[2], parts: m[3].trim() ? [m[3].trim()] : [] };
-      per.push(cur);
-      continue;
-    }
-    if (/^(原因|住所|氏名|名称|本店|商号)[ 　]/.test(t) || /^(原因|住所|氏名|名称|本店|商号)$/.test(t.trim())) {
+  type Val = { raw: string; live: string; struck: boolean };
+  type Group = { who: string | null; field: string; vals: Val[] };
+  const groups: Group[] = [];
+  let cur: Group | null = null;
+  const PER = /^(?:共有者)?(.+?)の(住所|氏名|名称|本店|商号)[ 　]*(.*)$/;
+  const PLAIN = /^(住所|氏名|名称|本店|商号)(?:[ 　]+(.*))?$/;
+
+  for (const c of detail) {
+    const raw = c.text.replace(/　/g, " ");
+    if (raw.trim() === "") continue;
+    const struck = isFullyStruck(c);
+    const live = currentText(c).replace(/　/g, " ");
+    if (!/^ /.test(raw)) {
+      // 字下げの無い行 = ラベルの行
+      if (/^原因( |$)/.test(raw)) {
+        cur = null;
+        continue;
+      }
+      const plain = raw.match(PLAIN);
+      const per = plain ? null : raw.match(PER);
+      if (plain || per) {
+        const field = plain ? plain[1] : per![2];
+        const rest = (plain ? plain[2] ?? "" : per![3]).trim();
+        const liveRest = struck ? "" : ((plain ? live.match(PLAIN)?.[2] : live.match(PER)?.[3]) ?? "").trim();
+        cur = { who: per ? clean(per[1]) : null, field, vals: [] };
+        if (rest) cur.vals.push({ raw: rest, live: liveRest, struck });
+        groups.push(cur);
+        continue;
+      }
       cur = null;
       continue;
     }
-    if (cur && t.trim()) cur.parts.push(t.trim());
+    if (cur) cur.vals.push({ raw: raw.trim(), live: live.trim(), struck });
   }
-  if (per.length > 0) {
-    for (const p of per) {
-      const hit = findHolder(state, p.who);
+  if (groups.length === 0) return false;
+
+  for (const g of groups) {
+    let target: Holder;
+    if (g.who) {
+      const hit = findHolder(state, g.who);
       if (hit.length !== 1) return false;
-      applyField(hit[0], p.field, p.parts);
+      target = hit[0];
+    } else {
+      const hit = state.filter((h) => h.fromRank === targetRank);
+      if (hit.length !== 1) return false;
+      target = hit[0];
     }
-    return true;
-  }
-  // 名義人が1人の登記:「住所 X」/「氏名 X」
-  const b = blocks(detail, KOU_LABELS);
-  const targets = state.filter((h) => h.fromRank === targetRank);
-  if (targets.length !== 1) return false;
-  let applied = false;
-  for (const field of ["住所", "本店", "氏名", "名称", "商号"]) {
-    const v = liveLines(b.get(field));
-    if (v.length > 0) {
-      applyField(targets[0], field, v);
-      applied = true;
+    const liveParts = g.vals.filter((v) => !v.struck && v.live !== "").map((v) => v.live);
+    if (liveParts.length === 0) {
+      // 後の付記で置き換わった途中の値。氏名なら別名として覚えるだけ。
+      if (g.field !== "住所" && g.field !== "本店" && g.vals.length > 0) {
+        target.aliases.add(key(clean(g.vals.map((v) => v.raw).join(""))));
+      }
+      continue;
     }
+    applyField(target, g.field, liveParts);
   }
-  return applied;
+  return true;
 }
 
 function applyField(h: Holder, field: string, parts: string[]): void {
@@ -704,6 +732,16 @@ function firstBlock(b: Map<string, Cell[]>, labels: string[]): Cell[] | undefine
 function holderNames(cells: Cell[] | undefined): string[] {
   // ⚠ 下線の付いた行も落とさず「並び」で読む（名前に下線＝名称変更でも住所と取り違えない）
   const rows = rowsOf(cells ?? []).filter((r) => !/^（?取扱店/.test(compact(r.raw)));
+  // 権利者が複数のときは「住所→名前」が繰り返される。住所の行には数字（番地）が入り、
+  // 名前の行には入らない。数字の無い行で、次が住所（数字あり）か最後の行のものを名前とみなす。
+  // 漢数字の住所（「大手町一丁目」）もあるので、丁目・番地も住所の目印にする
+  const hasDigit = (t: string) => /[0-9０-９]|丁目|番地/.test(t);
+  const names: string[] = [];
+  rows.forEach((r, i) => {
+    const next = rows[i + 1];
+    if (!hasDigit(r.raw) && (!next || hasDigit(next.raw))) names.push(clean(r.raw));
+  });
+  if (names.length > 0) return names;
   return rows.length > 0 ? [clean(rows[rows.length - 1].raw)] : [];
 }
 
@@ -771,12 +809,20 @@ export function analyzeRegistryRights(lines: StrikeLine[]): RegistryRightsSummar
     const amountLines = liveLines(firstBlock(bb, ["債権額", "極度額"]) ?? firstBlock(b, ["債権額", "極度額"]));
     let amount = amountLines.length > 0 ? clean(amountLines.join("")) : null;
     let holders = holderNames(firstBlock(bb, HOLDER_LABELS) ?? firstBlock(b, HOLDER_LABELS));
+    if (holders.length > 1) {
+      notes.push(`乙区${rank}番の権利者が複数あります（${holders.length}名）。漏れがないか目視で確認してください。`);
+    }
     let debtor = debtorName(firstBlock(bb, ["債務者", "連帯債務者"]) ?? firstBlock(b, ["債務者", "連帯債務者"]));
 
     const anns = liveOtsu.filter((k) => k.entry.kind === "annotation" && k.entry.mainRank === rank);
     for (const a of anns) {
       const ab = blocks(a.entry.detailCells, OTSU_LABELS);
-      if (/権?一部移転$/.test(a.purpose)) {
+      if (/^\d+番付記\d+号/.test(a.purpose)) {
+        // 付記を指す登記（例:「1番付記1号抵当権移転」= 一部移転で取得した分だけの移転）。
+        // 誰の分が動いたかを当てはめないと権利者の一覧を誤るので、読み取り対象外にする。
+        holders = [];
+        notes.push(`乙区${rank}番に「${a.purpose}」があります。権利者は目視で確認してください。`);
+      } else if (/権?一部移転$/.test(a.purpose)) {
         const add = holderNames(firstBlock(ab, HOLDER_LABELS));
         if (add.length === 0) notes.push(`乙区${rank}番の一部移転の権利者を読み取れません。目視で確認してください。`);
         holders = [...holders, ...add];
