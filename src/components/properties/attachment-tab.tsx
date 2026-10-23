@@ -557,6 +557,19 @@ function AttachmentRow({
                 {kindLabel ? "自動で当てました。確かめてください" : "種類を選んでください"}
               </span>
             )}
+            {kindCheck && att.docKind && (
+              // 自動で当てた種類が合っているとき、同じ選択肢は onChange が走らないので「確定」を置く
+              // (同じ種類で保存すると確からしさが manual になり、確認の表示が消える・@codex #556 P2)。
+              <Button
+                variant="ghost"
+                size="sm"
+                disabled={kindSaving}
+                onClick={() => onKindChange(att.docKind ?? null)}
+                className="h-6 px-2 text-xs text-indigo-600 dark:text-indigo-400"
+              >
+                この種類で確定
+              </Button>
+            )}
           </label>
         )}
       </div>

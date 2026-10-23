@@ -11,7 +11,7 @@ import {
 import { writeAuditLog } from "@/lib/audit";
 import { hasPermission } from "@/lib/permissions";
 import { canAccessPropertyRecord } from "@/lib/property-access";
-import { lockPropertyRow } from "@/lib/property-record-guard";
+import { lockPropertyRecordForWrite } from "@/lib/property-record-guard";
 import { normalizeFileUrlsInRecord } from "@/lib/url-normalize";
 import { assertImportJsonBodySize } from "@/lib/import-body-size";
 import { docKindByCode } from "@/lib/doc-classify/classify";
@@ -131,8 +131,10 @@ export async function PATCH(
 
     const property = attachment.property;
     const updated = await prisma.$transaction(async (tx) => {
-      // 物件配下の書き換えは親を先にロック(作成・削除と同じ規約)。同じ名前の連番もロックの中で決める。
-      await lockPropertyRow(tx, propertyId);
+      // 物件配下の書き換えは親を先にロック。⚠担当の範囲はロックを取った物件行で**もう一度**確かめる
+      //   (上の canAccessPropertyRecord は読んだ時点の判定。読んでからロックまでの間に担当が
+      //   外れた field_staff が書き換えられないように・@codex #556 P2)。同じ名前の連番もロックの中で決める。
+      await lockPropertyRecordForWrite(tx, propertyId, session);
       const others = await tx.attachment.findMany({
         where: {
           targetType: "property",

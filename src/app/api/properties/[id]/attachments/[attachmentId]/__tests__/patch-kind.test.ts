@@ -121,6 +121,15 @@ describe("PATCH 添付の種類", () => {
     expect(pm.attachment.update).not.toHaveBeenCalled();
   });
 
+  it("読んだあとロックまでに担当が外れた field_staff → ロック時の再確認で 403・更新しない(@codex P2)", async () => {
+    (getApiSession as unknown as Mock).mockResolvedValue({ id: "u1", role: "field_staff" });
+    // 最初の読みでは担当(createdBy=u1)だが、ロックを取る SELECT は範囲外で 0 行を返す
+    pm.$queryRaw.mockResolvedValueOnce([]);
+    const res = await PATCH(req({ docKind: "disclosure" }) as never, ctx() as never);
+    expect(res.status).toBe(403);
+    expect(pm.attachment.update).not.toHaveBeenCalled();
+  });
+
   it("property:write が無い → 403", async () => {
     (getUserPermissions as unknown as Mock).mockResolvedValue([]);
     expect((await PATCH(req({ docKind: "disclosure" }) as never, ctx() as never)).status).toBe(403);
