@@ -119,6 +119,7 @@ export async function POST(request: Request) {
         return NextResponse.json(created, { status: 201, headers: NO_STORE });
       } catch (e) {
         if (isUniqueViolation(e) && attempt < DEAL_NO_ATTEMPTS) continue;
+        if (isUniqueViolation(e)) throw new ApiError(409, "ほかの人が同時に作成しました。もう一度「作成」を押してください。", "DEAL_NO_BUSY");
         throw e;
       }
     }

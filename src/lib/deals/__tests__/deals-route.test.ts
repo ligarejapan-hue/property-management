@@ -104,6 +104,12 @@ describe("POST /api/deals", () => {
   it("設定にない種別は 422", async () => {
     expect((await POST(json("POST", { name: "a", businessType: "brokerage", propertyKind: "castle" }))).status).toBe(422);
   });
+  it("3回続けて番号がぶつかったら 409(もう一度押せばよい)(M5)", async () => {
+    pm.deal.create.mockRejectedValue(Object.assign(new Error("unique"), { code: "P2002" }));
+    const res = await POST(json("POST", { name: "a", businessType: "brokerage" }));
+    expect(res.status).toBe(409);
+    expect((await res.json()).error.code).toBe("DEAL_NO_BUSY");
+  });
   it("番号がぶつかったら次の番号で作り直す", async () => {
     pm.deal.findFirst.mockResolvedValueOnce(null).mockResolvedValueOnce({ dealNo: "2026-0001" });
     pm.deal.create.mockRejectedValueOnce(Object.assign(new Error("unique"), { code: "P2002" })).mockResolvedValueOnce({ id: DEAL_ID, dealNo: "2026-0002" });

@@ -267,11 +267,15 @@ const ACTION_LABELS: Record<string, string> = {
   deal_party_update: "取引の当事者を更新",
   deal_party_delete: "取引の当事者を削除",
   deal_settings_update: "取引の設定を変更",
+  deal_rate_table_create: "取引の税率の表を追加",
+  deal_rate_table_update: "取引の税率の表を変更",
+  deal_rate_table_delete: "取引の税率の表を削除",
 };
 
 const TARGET_TABLE_LABELS: Record<string, string> = {
   deals: "取引",
   deal_settings: "取引の設定",
+  deal_rate_tables: "取引の税率の表",
   properties: "物件",
   owners: "オーナー",
   buildings: "棟",

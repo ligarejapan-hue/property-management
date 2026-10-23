@@ -1,6 +1,7 @@
 import type { DealListItem, DealPartyView, DealView } from "./view";
 import type { DealSettingsView } from "./settings";
 import type { PropertyKindDef } from "./constants";
+import type { DealCalc } from "./calc/deal-calc";
 
 /** 取引の画面から API を呼ぶ。失敗はサーバーの文言とコードを持った DealApiError にする。 */
 export class DealApiError extends Error {
@@ -27,7 +28,7 @@ export interface DealOptions {
   selfParty: { name: string; representative: string | null; address: string | null; phone: string | null };
 }
 export interface UserOption { id: string; name: string; role: string }
-export interface RateTableView { id: string; kind: string; validFrom: string; validTo: string | null; content: unknown }
+export interface RateTableView { id: string; kind: string; validFrom: string; validTo: string | null; content: unknown; updatedAt: string }
 
 export const dealsApi = {
   list: (params: Record<string, string>) =>
@@ -48,6 +49,11 @@ export const dealsApi = {
   saveSettings: (body: Record<string, unknown>) => call<{ settings: DealSettingsView }>("/api/admin/deal-settings", { method: "PUT", body }),
   rateTables: () => call<{ tables: RateTableView[] }>("/api/admin/deal-settings/rate-tables"),
   users: () => call<{ data: UserOption[] }>("/api/users"),
+  calc: (id: string) => call<{ calc: DealCalc }>(`/api/deals/${id}/calc`),
+  createRateTable: (body: Record<string, unknown>) => call<{ id: string }>("/api/admin/deal-settings/rate-tables", { method: "POST", body }),
+  updateRateTable: (id: string, body: Record<string, unknown>) => call<{ ok: true }>(`/api/admin/deal-settings/rate-tables/${id}`, { method: "PUT", body }),
+  deleteRateTable: (id: string, updatedAt: string) =>
+    call<{ ok: true }>(`/api/admin/deal-settings/rate-tables/${id}?updatedAt=${encodeURIComponent(updatedAt)}`, { method: "DELETE" }),
 };
 
 export const errorText = (e: unknown) => (e instanceof Error ? e.message : "通信に失敗しました。もう一度お試しください。");
