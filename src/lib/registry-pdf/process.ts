@@ -27,6 +27,14 @@ import { recordChanges, PROPERTY_TRACKED_FIELDS } from "@/lib/change-log";
 import { normalizeName, normalizeAddress } from "@/lib/normalize";
 import { pickReusableAddresslessOwner } from "@/lib/registry-pdf/owner-reuse";
 import { parseRegistryText } from "@/lib/pdf-registry-parser";
+import {
+  FULL_CERTIFICATE_OWNERS_UNDETERMINED_WARNING,
+  hasDeterminedOwners,
+  isFullCertificateText,
+  ownersFromRights,
+  summarizeRegistryRights,
+  type RegistryRightsSummary,
+} from "@/lib/registry-strike";
 import { buildErrorRawDataExtras } from "@/lib/import-error-display";
 import { getStorage, validateFile, ALLOWED_ATTACHMENT_MIMES } from "@/lib/storage";
 import {
@@ -148,6 +156,12 @@ export interface ProcessRegistryPdfArgs {
    * （安全側の既定・発注者確定の方針）。種別が分かる添付には別途ラベルを付ける。
    */
   certificateType?: "owner" | "all";
+  /**
+   * 全部事項の「今も効力のある登記」の判定（下線＝抹消事項を読んだ結果）。
+   * 呼び出し側で計算済みなら渡す。未指定(undefined)なら、全部事項のときだけここで
+   * pdfBuffer（無ければ text）から計算する。null は「計算したが判定できなかった」。
+   */
+  rights?: RegistryRightsSummary | null;
 }
 
 // parse 結果に UI 編集値をマージ（編集優先）。下流の Mode A/B は
@@ -759,12 +773,37 @@ export async function processRegistryPdf(
 ): Promise<Record<string, unknown>> {
   const { session, text, propertyId, fileName, edited, pdfBuffer } = args;
 
-  // ⚠**全部事項(all)は所有者を反映しない**。抹消された旧所有者を現在の所有者として
-  // 登録する事故を防ぐ安全既定(所有者事項=owner・手動取込=undefined は従来どおり反映)。
-  const reflectOwners = args.certificateType !== "all";
-
   // Parse the registry text（UI 編集値があれば再 parse より優先してマージ）
   const parsed = applyEditedToParsed(parseRegistryText(text), edited);
+
+  // ⚠**全部事項の所有者は、下線（抹消事項）を読んだ判定結果だけを使う**。
+  //   全部事項には過去の所有者・抹消された住所も載り、所有者事項向けの読み取り
+  //   （parseRegistryText）では住所の切れ端を氏名にしたり旧所有者を混ぜたりする
+  //   （実物の全部事項で確認: 3件とも住所の一部が氏名になっていた）。
+  //   - 判定できた → 今の所有者だけを反映する（自動取得・まとめて取得の all も含む）
+  //   - 判定できない → 所有者は反映しない（警告を返す。物件の項目の取込は続ける）
+  //   - 確認画面で人が直した所有者(edited.owners)は、人の判断としてそのまま使う
+  //   所有者事項(=全部事項でない)の扱いは変えない。
+  const isFullCertificate = isFullCertificateText(text);
+  let ownersFromFullCertificate = false;
+  let fullCertificateOwnersUndetermined = false;
+  if (isFullCertificate && !edited?.owners) {
+    const rights =
+      args.rights !== undefined
+        ? args.rights
+        : await summarizeRegistryRights({ pdf: pdfBuffer ?? null, text });
+    if (rights && hasDeterminedOwners(rights)) {
+      parsed.owners = ownersFromRights(rights);
+      ownersFromFullCertificate = true;
+    } else {
+      parsed.owners = [];
+      fullCertificateOwnersUndetermined = true;
+    }
+  }
+
+  // 有料取得の全部事項(all)は、判定結果の所有者が使えるときだけ反映する
+  // (所有者事項=owner・手動取込=undefined は従来どおり反映。手動の全部事項は上で置き換え済み)。
+  const reflectOwners = args.certificateType !== "all" || ownersFromFullCertificate;
   /**
    * 取込の記録の行に残す、読み取った物件の項目。
    * ⚠所有者だけを入れる経路(ownersOnly)では**残さない**。読み取りは物件の所在が
@@ -1359,6 +1398,9 @@ export async function processRegistryPdf(
   // A-2b の attachment warning と合わせて 1 つの warning 文字列にまとめて返す
   // （両方発生し得るため。取込本体は成功扱いのまま）。
   const warningParts: string[] = [];
+  if (fullCertificateOwnersUndetermined) {
+    warningParts.push(FULL_CERTIFICATE_OWNERS_UNDETERMINED_WARNING);
+  }
   if (ownerWeakMatchSkipped) {
     warningParts.push("住所の部分一致で物件を特定したため、所有者情報は反映されませんでした。");
   }
@@ -1386,6 +1428,8 @@ export async function processRegistryPdf(
       ownersMatched,
       ownersCreated,
       ownersLinked,
+      // 全部事項の判定結果（今の所有者）から反映したか。boolean のみ（氏名・住所は載せない）。
+      ownersFromFullCertificate,
       // A-2b: 保存できた場合のみ attachmentId（UUID）を載せる。
       ...(attachmentId ? { attachmentId } : {}),
     },
@@ -1400,6 +1444,8 @@ export async function processRegistryPdf(
     ownersMatched,
     ownersCreated,
     ownersLinked,
+    // 全部事項の判定結果（今の所有者）から反映したか。
+    ownersFromFullCertificate,
     // A-2b: 保存成功時は attachmentId。owner反映/PDF保存のスキップは warning。
     ...(attachmentId ? { attachmentId } : {}),
     ...(warning ? { warning } : {}),

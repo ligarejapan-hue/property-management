@@ -62,8 +62,17 @@ export interface RegistryRightsSummary {
   hasKouku: boolean;
   /** 権利部（乙区）を読めたか（乙区が無い謄本もある） */
   hasOtsuku: boolean;
-  /** 今の所有者（判断できないときは空。理由は notes） */
+  /**
+   * 今の所有者（判断できないときは空。理由は notes）。
+   * ⚠空でなくても、確認が要る注記が付くことがある（古い氏名に下線があるのに変更の付記を
+   *   読めない など）。自動で反映してよいかは `ownersConfirmed` で判断すること。
+   */
   currentOwners: RegistryCurrentOwner[];
+  /**
+   * 今の所有者を、確認の要る注記なしで判定できたか。true のときだけ自動で反映してよい
+   * （取込の確認画面では、false でも判定結果を下書きとして見せ、人が直して登録できる）。
+   */
+  ownersConfirmed: boolean;
   /** 今も残っている乙区の権利 */
   activeRights: RegistryActiveRight[];
   /** 差押え・仮登記など、残っていると取引に影響する登記 */
@@ -815,7 +824,11 @@ export function analyzeRegistryRights(lines: StrikeLine[]): RegistryRightsSummar
   if (liveKou.some((j) => /相続人申告/.test(j.purpose))) {
     notes.push("相続人申告の登記があります（所有者の相続人からの申出の記録で、権利関係を示すものではありません）。");
   }
+  // 所有者の判定で注記（目視確認）が出たら「確定ではない」。相続人申告の注記は
+  // 権利関係を変えない案内なので、ここ（replayOwners）の外で出しており数えない。
+  const notesBeforeOwners = notes.length;
   const currentOwners = hasKouku ? replayOwners(kou, notes) : [];
+  const ownersConfirmed = currentOwners.length > 0 && notes.length === notesBeforeOwners;
 
   // --- 乙区 ---
   const activeRights: RegistryActiveRight[] = [];
@@ -908,6 +921,7 @@ export function analyzeRegistryRights(lines: StrikeLine[]): RegistryRightsSummar
     hasKouku,
     hasOtsuku,
     currentOwners,
+    ownersConfirmed,
     activeRights,
     cautions,
     cancelled: {

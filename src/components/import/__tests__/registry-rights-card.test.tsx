@@ -11,6 +11,7 @@ const base: RegistryRightsSummary = {
   hasKouku: true,
   hasOtsuku: true,
   currentOwners: [{ name: "乙川二郎", address: "東京都品川区架空五丁目5番2-305号", share: null }],
+  ownersConfirmed: true,
   activeRights: [
     {
       rank: "5",

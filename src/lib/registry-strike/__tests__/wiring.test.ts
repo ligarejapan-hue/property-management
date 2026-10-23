@@ -46,3 +46,12 @@ describe("registry-strike: ページ上限", () => {
     expect(extract).not.toMatch(/Math\.min\(doc\.numPages, MAX_PAGES\)/);
   });
 });
+
+describe("registry-pdf parse route: 全部事項の所有者", () => {
+  it("全部事項なら、確認画面の所有者を判定結果で埋める（判定できなければ空＋警告）", () => {
+    expect(routeSrc).toMatch(/if \(isFullCertificateText\(text\)\) \{\s*\n\s*if \(rights && hasDeterminedOwners\(rights\)\) \{\s*\n\s*parsed\.owners = ownersFromRights\(rights\);/);
+    expect(routeSrc).toMatch(/parsed\.owners = \[\];\s*\n\s*parsed\.warnings = \[\.\.\.parsed\.warnings, FULL_CERTIFICATE_PREVIEW_WARNING\]/);
+    // 確認の要る注記がある判定は、下書きとして見せて注意を出す
+    expect(routeSrc).toMatch(/parsed\.warnings = \[\.\.\.parsed\.warnings, FULL_CERTIFICATE_REVIEW_WARNING\]/);
+  });
+});
