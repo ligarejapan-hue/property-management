@@ -1,5 +1,6 @@
 import { NextRequest } from "next/server";
 import { z } from "zod";
+import { hashSync } from "bcryptjs";
 import prisma from "@/lib/prisma";
 import {
   getApiSession,
@@ -10,6 +11,7 @@ import {
 } from "@/lib/api-helpers";
 import { writeAuditLog } from "@/lib/audit";
 import { hasPermission } from "@/lib/permissions";
+import { checkUserUpdateGuard } from "@/lib/admin-user-rules";
 
 // ---------- GET /api/admin/users/:id ----------
 
@@ -57,14 +59,19 @@ export async function GET(
 // ---------- PATCH /api/admin/users/:id ----------
 
 const updateUserSchema = z.object({
-  name: z.string().min(1, "名前は必須です").optional(),
-  email: z.string().email("メールアドレスの形式が正しくありません").optional(),
+  name: z.string().trim().min(1, "名前は必須です").optional(),
+  email: z.string().trim().email("メールアドレスの形式が正しくありません").optional(),
   role: z.enum(["admin", "office_staff", "field_staff"]).optional(),
   isActive: z.boolean().optional(),
   mustChangePassword: z.boolean().optional(),
   // Unlock: reset loginFailedCount and lockedUntil
   unlock: z.boolean().optional(),
+  // 有効に戻すときの初期パスワード(reset-password と同じ決まり)
+  newPassword: z.string().min(8, "パスワードは8文字以上です").max(128).optional(),
 });
+
+// 有効な管理者を減らす変更を1つずつ通すための鍵(ほかの用途と重ならない固定の名前)
+const ADMIN_GUARD_LOCK_KEY = "admin-users:active-admin-guard";
 
 export async function PATCH(
   request: NextRequest,
@@ -88,16 +95,22 @@ export async function PATCH(
       throw new ApiError(404, "ユーザーが見つかりません", "NOT_FOUND");
     }
 
-    // Prevent deactivating own account
-    if (id === session.id) {
-      const body = await request.clone().json();
-      if (body.isActive === false) {
-        throw new ApiError(400, "自分自身を無効化できません", "SELF_DEACTIVATE");
-      }
-    }
-
     const body = await request.json();
     const data = updateUserSchema.parse(body);
+
+    // 自分の無効化・自分の役割の変更を止める(一覧の「編集」で役割を変えられるようにしたため・2026-10-23)。
+    // 有効な管理者が0人になる変更は、下の書き込みの中で鍵を取ってから数えて止める。
+    const selfGuard = checkUserUpdateGuard({
+      isSelf: id === session.id,
+      existing,
+      next: { role: data.role, isActive: data.isActive },
+      otherActiveAdmins: 1,
+    });
+    if (selfGuard) throw new ApiError(selfGuard.status, selfGuard.message, selfGuard.code);
+    const touchesAdmin =
+      existing.role === "admin" &&
+      existing.isActive &&
+      ((data.role !== undefined && data.role !== "admin") || data.isActive === false);
 
     // Check email uniqueness if changed
     if (data.email && data.email !== existing.email) {
@@ -121,24 +134,47 @@ export async function PATCH(
       updateData.loginFailedCount = 0;
       updateData.lockedUntil = null;
     }
+    // 有効に戻すときの初期パスワード。有効化と同じ1回の書き込みで入れる
+    // =古いパスワードで入れる間を作らない(@review P2)。初回ログインで変更を求める。
+    if (data.newPassword !== undefined) {
+      updateData.passwordHash = hashSync(data.newPassword, 10);
+      updateData.mustChangePassword = true;
+      updateData.loginFailedCount = 0;
+      updateData.lockedUntil = null;
+    }
 
-    const user = await prisma.user.update({
-      where: { id },
-      data: updateData,
-      select: {
-        id: true,
-        email: true,
-        name: true,
-        role: true,
-        isActive: true,
-        lastLoginAt: true,
-        loginFailedCount: true,
-        lockedUntil: true,
-        mustChangePassword: true,
-        createdAt: true,
-        updatedAt: true,
-      },
-    });
+    const select = {
+      id: true,
+      email: true,
+      name: true,
+      role: true,
+      isActive: true,
+      lastLoginAt: true,
+      loginFailedCount: true,
+      lockedUntil: true,
+      mustChangePassword: true,
+      createdAt: true,
+      updatedAt: true,
+    } as const;
+
+    const user = touchesAdmin
+      ? // 有効な管理者を減らす変更は、全員共通の鍵を取ってから数えて書く
+        // =2人が同時にお互いを外して0人になるのを防ぐ(@review P2)。
+        await prisma.$transaction(async (tx) => {
+          await tx.$executeRaw`SELECT pg_advisory_xact_lock(hashtext(${ADMIN_GUARD_LOCK_KEY})::bigint)`;
+          const otherActiveAdmins = await tx.user.count({
+            where: { role: "admin", isActive: true, id: { not: id } },
+          });
+          const guard = checkUserUpdateGuard({
+            isSelf: id === session.id,
+            existing,
+            next: { role: data.role, isActive: data.isActive },
+            otherActiveAdmins,
+          });
+          if (guard) throw new ApiError(guard.status, guard.message, guard.code);
+          return tx.user.update({ where: { id }, data: updateData, select });
+        })
+      : await prisma.user.update({ where: { id }, data: updateData, select });
 
     // Log permission change if role changed
     if (data.role && data.role !== existing.role) {
@@ -153,7 +189,7 @@ export async function PATCH(
       });
     }
 
-    const changedFields = Object.keys(updateData);
+    const changedFields = Object.keys(updateData).map((k) => (k === "passwordHash" ? "password" : k));
     await writeAuditLog({
       userId: session.id,
       action: data.isActive === false

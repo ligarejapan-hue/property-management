@@ -16,12 +16,13 @@ import {
   KeyRound,
   LockOpen,
   ChevronRight,
-  Trash2,
+  Pencil,
   Mail,
 } from "lucide-react";
 import StatusBadge, { USER_ROLE_INTENT } from "@/components/ui/status-badge";
 import { ROLE_LABELS } from "@/lib/role-labels";
 import { InquiryNotifyDialog } from "@/components/admin/inquiry-notify-dialog";
+import { apiErrorMessage } from "@/lib/admin-user-rules";
 
 interface UserItem {
   id: string;
@@ -44,9 +45,10 @@ export default function UsersPage() {
   const [showCreate, setShowCreate] = useState(false);
   const [actionUser, setActionUser] = useState<UserItem | null>(null);
   const [actionType, setActionType] = useState<
-    "deactivate" | "activate" | "resetPw" | "unlock" | "delete" | null
+    "deactivate" | "activate" | "resetPw" | "unlock" | null
   >(null);
   const [notifyUser, setNotifyUser] = useState<UserItem | null>(null);
+  const [editUser, setEditUser] = useState<UserItem | null>(null);
   const { data: sessionData } = useSession();
   const selfId = (sessionData?.user as { id?: string } | undefined)?.id ?? null;
   const [message, setMessage] = useState<{
@@ -76,7 +78,8 @@ export default function UsersPage() {
 
   const flash = (type: "ok" | "err", text: string) => {
     setMessage({ type, text });
-    setTimeout(() => setMessage(null), 3000);
+    // 失敗の理由は読み切れるよう長めに出す
+    setTimeout(() => setMessage(null), type === "err" ? 8000 : 3000);
   };
 
   // ---- action handlers ----
@@ -92,8 +95,8 @@ export default function UsersPage() {
           }),
         });
         if (!res.ok) {
-          const e = await res.json();
-          throw new Error(e.message ?? "失敗");
+          const e = await res.json().catch(() => null);
+          throw new Error(apiErrorMessage(e, actionType === "activate" ? "有効化に失敗しました" : "無効化に失敗しました"));
         }
         flash("ok", actionType === "activate" ? "有効化しました" : "無効化しました");
       } else if (actionType === "unlock") {
@@ -102,17 +105,11 @@ export default function UsersPage() {
           headers: { "Content-Type": "application/json" },
           body: JSON.stringify({ unlock: true }),
         });
-        if (!res.ok) throw new Error("失敗");
-        flash("ok", "ロック解除しました");
-      } else if (actionType === "delete") {
-        const res = await fetch(`/api/admin/users/${actionUser.id}`, {
-          method: "DELETE",
-        });
         if (!res.ok) {
-          const e = await res.json().catch(() => ({}));
-          throw new Error(e.message ?? "削除に失敗しました");
+          const e = await res.json().catch(() => null);
+          throw new Error(apiErrorMessage(e, "ロック解除に失敗しました"));
         }
-        flash("ok", "ユーザーを削除しました");
+        flash("ok", "ロック解除しました");
       } else if (actionType === "resetPw") {
         const pw = prompt("新しいパスワードを入力 (8文字以上):");
         if (!pw || pw.length < 8) {
@@ -129,7 +126,10 @@ export default function UsersPage() {
             body: JSON.stringify({ newPassword: pw }),
           },
         );
-        if (!res.ok) throw new Error("失敗");
+        if (!res.ok) {
+          const e = await res.json().catch(() => null);
+          throw new Error(apiErrorMessage(e, "パスワードのリセットに失敗しました"));
+        }
         flash("ok", "パスワードをリセットしました");
       }
       setActionUser(null);
@@ -252,6 +252,16 @@ export default function UsersPage() {
                     </td>
                     <td className="whitespace-nowrap px-4 py-3 text-sm">
                       <div className="flex items-center gap-2">
+                        <Button
+                          variant="ghost"
+                          size="sm"
+                          onClick={() => setEditUser(u)}
+                          className="text-gray-600 dark:text-gray-300"
+                          title="編集"
+                        >
+                          <Pencil className="h-3.5 w-3.5" />
+                          <span className="text-xs">編集</span>
+                        </Button>
                         <Link
                           href={`/admin/users/${u.id}/permissions`}
                           className="flex items-center gap-0.5 text-indigo-600 hover:text-indigo-800 dark:text-indigo-400 dark:hover:text-indigo-300"
@@ -327,29 +337,6 @@ export default function UsersPage() {
                             <span className="text-xs">解除</span>
                           </Button>
                         )}
-                        {selfId === u.id ? (
-                          <span
-                            className="flex items-center gap-0.5 text-gray-300 dark:text-gray-600"
-                            title="自分自身は削除できません"
-                          >
-                            <Trash2 className="h-3.5 w-3.5" />
-                            <span className="text-xs">削除不可</span>
-                          </span>
-                        ) : (
-                          <Button
-                            variant="ghost"
-                            size="sm"
-                            onClick={() => {
-                              setActionUser(u);
-                              setActionType("delete");
-                            }}
-                            className="text-red-600 dark:text-red-400"
-                            title="削除"
-                          >
-                            <Trash2 className="h-3.5 w-3.5" />
-                            <span className="text-xs">削除</span>
-                          </Button>
-                        )}
                         <Link
                           href={`/admin/users/${u.id}/permissions`}
                           className="text-gray-400 hover:text-gray-600 dark:text-gray-500 dark:hover:text-gray-300"
@@ -388,8 +375,6 @@ export default function UsersPage() {
                 `${actionUser.name} を有効化しますか？`}
               {actionType === "unlock" &&
                 `${actionUser.name} のアカウントロックを解除しますか？`}
-              {actionType === "delete" &&
-                `${actionUser.name} を削除しますか？この操作は取り消せません。参照中のデータがある場合は削除できません。`}
             </p>
             <div className="flex justify-end gap-2">
               <Button
@@ -402,11 +387,7 @@ export default function UsersPage() {
                 キャンセル
               </Button>
               <Button
-                variant={
-                  actionType === "delete" || actionType === "deactivate"
-                    ? "danger"
-                    : "primary"
-                }
+                variant={actionType === "deactivate" ? "danger" : "primary"}
                 onClick={handleAction}
               >
                 実行
@@ -420,9 +401,23 @@ export default function UsersPage() {
       {showCreate && (
         <CreateUserModal
           onClose={() => setShowCreate(false)}
-          onCreated={() => {
+          onCreated={(text) => {
             setShowCreate(false);
-            flash("ok", "ユーザーを作成しました");
+            flash("ok", text);
+            load();
+          }}
+        />
+      )}
+
+      {/* Edit user modal(名前・メール・役割) */}
+      {editUser && (
+        <EditUserModal
+          user={editUser}
+          isSelf={selfId === editUser.id}
+          onClose={() => setEditUser(null)}
+          onSaved={() => {
+            setEditUser(null);
+            flash("ok", "ユーザーを更新しました");
             load();
           }}
         />
@@ -450,7 +445,7 @@ function CreateUserModal({
   onCreated,
 }: {
   onClose: () => void;
-  onCreated: () => void;
+  onCreated: (message: string) => void;
 }) {
   const [form, setForm] = useState({
     name: "",
@@ -460,11 +455,15 @@ function CreateUserModal({
   });
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  // 無効にした人と同じメールだったとき、その人(有効に戻す相手)
+  // email=見つけたときに入っていたメール(欄を変えたら別の人の可能性があるので忘れる・@codex #554 P2)
+  const [inactive, setInactive] = useState<{ id: string; name: string; email: string } | null>(null);
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     setSaving(true);
     setError(null);
+    setInactive(null);
     try {
       const res = await fetch("/api/admin/users", {
         method: "POST",
@@ -472,10 +471,13 @@ function CreateUserModal({
         body: JSON.stringify(form),
       });
       if (!res.ok) {
-        const data = await res.json();
-        throw new Error(data.message ?? "作成に失敗しました");
+        const data = await res.json().catch(() => null);
+        if (data?.error?.code === "INACTIVE_USER_EXISTS" && data.error.user) {
+          setInactive({ ...data.error.user, email: form.email.trim() });
+        }
+        throw new Error(apiErrorMessage(data, "作成に失敗しました"));
       }
-      onCreated();
+      onCreated("ユーザーを作成しました");
     } catch (err) {
       setError(err instanceof Error ? err.message : "エラー");
     } finally {
@@ -483,8 +485,45 @@ function CreateUserModal({
     }
   };
 
-  const setField = (key: string, value: string) =>
+  // 無効にした人を、いま入力した名前・ロール・初期パスワードで有効に戻す(過去の記録もつながったまま)
+  const handleReactivate = async () => {
+    if (!inactive) return;
+    if (form.email.trim() !== inactive.email) {
+      // 念のため(欄を変えると setField で忘れる)。違う人を戻さない
+      setInactive(null);
+      setError("メールアドレスが変わったため、もう一度「作成」を押してください");
+      return;
+    }
+    if (form.name.trim() === "" || form.password.length < 8) {
+      setError("名前と初期パスワード(8文字以上)を入れてから押してください");
+      return;
+    }
+    setSaving(true);
+    setError(null);
+    try {
+      const res = await fetch(`/api/admin/users/${inactive.id}`, {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        // 有効化と初期パスワードは1回の書き込み(古いパスワードで入れる間を作らない)
+        body: JSON.stringify({ isActive: true, name: form.name, role: form.role, newPassword: form.password }),
+      });
+      if (!res.ok) {
+        const data = await res.json().catch(() => null);
+        throw new Error(apiErrorMessage(data, "有効に戻せませんでした"));
+      }
+      onCreated(`「${form.name.trim()}」を有効に戻しました(初回ログインでパスワードの変更を求められます)`);
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "エラー");
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  const setField = (key: string, value: string) => {
+    // メールを変えたら、さっき見つけた「無効にした人」とは別の人かもしれない=有効に戻すボタンを消す
+    if (key === "email") setInactive(null);
     setForm((prev) => ({ ...prev, [key]: value }));
+  };
 
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50">
@@ -495,6 +534,16 @@ function CreateUserModal({
         {error && (
           <div className="mb-4 rounded-md border border-red-200 bg-red-50 p-2 text-sm text-red-700 dark:border-red-500/30 dark:bg-red-500/15 dark:text-red-300">
             {error}
+            {inactive && (
+              <div className="mt-2">
+                <p className="mb-2 text-xs text-gray-600 dark:text-gray-300">
+                  有効に戻すと、いま入力した名前・ロール・初期パスワードになります。これまでの記録はそのままつながります。
+                </p>
+                <Button size="sm" onClick={handleReactivate} disabled={saving} loading={saving} loadingLabel="戻しています">
+                  「{inactive.name}」を有効に戻す
+                </Button>
+              </div>
+            )}
           </div>
         )}
         <form onSubmit={handleSubmit} className="space-y-3">
@@ -564,6 +613,136 @@ function CreateUserModal({
               loadingLabel="作成中"
             >
               作成
+            </Button>
+          </div>
+        </form>
+      </div>
+    </div>
+  );
+}
+
+// ============================================================
+// Edit user modal(名前・メール・ロール)
+// 2026-10-23: 削除の代わりに、打ち間違い・役割の変更をここで直す。
+// ============================================================
+
+function EditUserModal({
+  user,
+  isSelf,
+  onClose,
+  onSaved,
+}: {
+  user: UserItem;
+  isSelf: boolean;
+  onClose: () => void;
+  onSaved: () => void;
+}) {
+  const [form, setForm] = useState({
+    name: user.name,
+    email: user.email,
+    role: user.role,
+  });
+  const [saving, setSaving] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+
+  const handleSubmit = async (e: React.FormEvent) => {
+    e.preventDefault();
+    setSaving(true);
+    setError(null);
+    try {
+      const res = await fetch(`/api/admin/users/${user.id}`, {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(form),
+      });
+      if (!res.ok) {
+        const data = await res.json().catch(() => null);
+        throw new Error(apiErrorMessage(data, "保存に失敗しました"));
+      }
+      onSaved();
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "エラー");
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  const setField = (key: string, value: string) =>
+    setForm((prev) => ({ ...prev, [key]: value }));
+
+  const inputClass =
+    "w-full rounded-md border border-gray-300 bg-white px-3 py-2 text-sm text-gray-900 focus:border-indigo-500 focus:outline-none focus:ring-1 focus:ring-indigo-500 disabled:opacity-60 dark:border-gray-700 dark:bg-gray-900 dark:text-gray-100";
+
+  return (
+    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50">
+      <div className="w-full max-w-md rounded-lg bg-white p-6 shadow-lg dark:bg-gray-900">
+        <h3 className="mb-4 text-lg font-bold text-gray-800 dark:text-gray-100">
+          ユーザーを編集
+        </h3>
+        {error && (
+          <div className="mb-4 rounded-md border border-red-200 bg-red-50 p-2 text-sm text-red-700 dark:border-red-500/30 dark:bg-red-500/15 dark:text-red-300">
+            {error}
+          </div>
+        )}
+        <form onSubmit={handleSubmit} className="space-y-3">
+          <div>
+            <label className="mb-1 block text-xs font-medium text-gray-600 dark:text-gray-300">
+              名前 <span className="text-red-500">*</span>
+            </label>
+            <input
+              type="text"
+              required
+              value={form.name}
+              onChange={(e) => setField("name", e.target.value)}
+              className={inputClass}
+            />
+          </div>
+          <div>
+            <label className="mb-1 block text-xs font-medium text-gray-600 dark:text-gray-300">
+              メールアドレス <span className="text-red-500">*</span>
+            </label>
+            <input
+              type="email"
+              required
+              value={form.email}
+              onChange={(e) => setField("email", e.target.value)}
+              className={inputClass}
+            />
+            <p className="mt-1 text-xs text-gray-400 dark:text-gray-500">
+              変えると、次からは新しいメールアドレスでログインします
+            </p>
+          </div>
+          <div>
+            <label className="mb-1 block text-xs font-medium text-gray-600 dark:text-gray-300">
+              ロール <span className="text-red-500">*</span>
+            </label>
+            <select
+              value={form.role}
+              onChange={(e) => setField("role", e.target.value)}
+              disabled={isSelf}
+              className={inputClass}
+            >
+              <option value="field_staff">現地担当</option>
+              <option value="office_staff">事務担当</option>
+              <option value="admin">管理者</option>
+            </select>
+            {isSelf && (
+              <p className="mt-1 text-xs text-gray-400 dark:text-gray-500">
+                自分のロールは変えられません（ほかの管理者に頼んでください）
+              </p>
+            )}
+          </div>
+          <div className="flex justify-end gap-2 pt-2">
+            <Button variant="secondary" onClick={onClose}>
+              キャンセル
+            </Button>
+            <Button
+              type="submit"
+              disabled={saving}
+              loading={saving}
+              loadingLabel="保存中"
+            >
+              保存
             </Button>
           </div>
         </form>
