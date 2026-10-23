@@ -4,13 +4,16 @@ import type { DealUpdateInput } from "./schemas";
 export const DEAL_TRACKED_FIELDS = [
   "name", "businessType", "tradeSide", "status", "assigneeId", "licensedAgentId", "salesStaffId", "opsStaffId",
   "propertyKind", "hasOc", "contractAt", "contractPlace", "settlementAt", "settlementPlace",
+  "price", "deposit", "taxRateBp",
 ];
 
 const SIMPLE_KEYS = [
   "name", "businessType", "status", "assigneeId", "licensedAgentId", "salesStaffId", "opsStaffId",
   "propertyKind", "hasOc", "contractPlace", "settlementPlace", "propertySnapshot", "counterpartyBroker",
+  "taxRateBp", "assessments", "costs", "settlementTerms", "leases", "overrides",
 ] as const;
 const DATE_KEYS = ["contractAt", "settlementAt"] as const;
+const BIGINT_KEYS = ["price", "deposit"] as const;
 
 export function normalizeTradeSide(businessType: string, tradeSide: string | null | undefined): string | null {
   return businessType === "resale" ? null : tradeSide ?? null;
@@ -26,6 +29,10 @@ export function toDealUpdateData(
   for (const k of DATE_KEYS) {
     const v = patch[k];
     if (v !== undefined) data[k] = v === null ? null : new Date(v);
+  }
+  for (const k of BIGINT_KEYS) {
+    const v = patch[k];
+    if (v !== undefined) data[k] = v === null ? null : BigInt(v);
   }
   if (patch.tradeSide !== undefined || patch.businessType !== undefined) {
     const bt = patch.businessType ?? currentBusinessType;

@@ -19,7 +19,7 @@ describe("取引の作成", () => {
 describe("取引の更新", () => {
   it("版の番号が要る・知らない項目は弾く", () => {
     expect(() => dealUpdateSchema.parse({ name: "a" })).toThrow();
-    expect(() => dealUpdateSchema.parse({ version: 1, price: 100 })).toThrow();
+    expect(() => dealUpdateSchema.parse({ version: 1, buildingTax: 100 })).toThrow();
   });
   it("空文字の場所は null にする・日時は ISO だけ", () => {
     expect(dealUpdateSchema.parse({ version: 1, contractPlace: " " }).contractPlace).toBeNull();
@@ -66,6 +66,13 @@ describe("取引の設定", () => {
     expect(() => dealSettingsUpdateSchema.parse({ version: 0, propertyKinds: four.slice(1) })).toThrow();
     expect(() => dealSettingsUpdateSchema.parse({ version: 0, propertyKinds: [...four, four[0]] })).toThrow();
     expect(() => dealSettingsUpdateSchema.parse({ version: 0, propertyKinds: [...four, { key: "Bad Key", label: "x", base: "unit" }] })).toThrow();
+  });
+  it("基本の4種別は元の種別を変えられない(M1)", () => {
+    const four = [
+      { key: "unit", label: "区分マンション", base: "unit" }, { key: "house", label: "戸建", base: "house" },
+      { key: "land", label: "土地", base: "land" }, { key: "building", label: "一棟", base: "building" },
+    ];
+    expect(() => dealSettingsUpdateSchema.parse({ version: 1, propertyKinds: [{ ...four[0], base: "land" }, ...four.slice(1)] })).toThrow();
   });
   it("口座番号は数字7桁まで", () => {
     expect(() => dealSettingsUpdateSchema.parse({ version: 1, bankAccount: { bankName: null, branchName: null, accountType: "ordinary", accountNumber: "12a4567", accountHolder: null } })).toThrow();

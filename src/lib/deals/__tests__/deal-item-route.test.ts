@@ -98,6 +98,18 @@ describe("PATCH /api/deals/[id]", () => {
     expect((await PATCH(json("PATCH", { version: 3, propertyKind: "castle" }), ctx)).status).toBe(422);
     expect(pm.deal.updateMany).not.toHaveBeenCalled();
   });
+  it("すでに買取再販の取引に取引態様だけ送っても空のまま(M6)", async () => {
+    pm.deal.findUnique.mockResolvedValue({ ...detailRow, businessType: "resale", tradeSide: null });
+    await PATCH(json("PATCH", { version: 3, tradeSide: "seller" }), ctx);
+    expect(pm.deal.updateMany.mock.calls[0][0].data).toMatchObject({ tradeSide: null });
+  });
+  it("金額は BigInt で書き、変更履歴に残す", async () => {
+    await PATCH(json("PATCH", { version: 3, price: 31_000_000 }), ctx);
+    expect(pm.deal.updateMany.mock.calls[0][0].data.price).toBe(BigInt(31_000_000));
+    expect(recordChangesInTx).toHaveBeenCalledWith(expect.anything(), expect.objectContaining({
+      newValues: expect.objectContaining({ price: BigInt(31_000_000) }),
+    }));
+  });
   it("買取再販へ切り替えたら取引態様も空にする", async () => {
     await PATCH(json("PATCH", { version: 3, businessType: "resale" }), ctx);
     expect(pm.deal.updateMany.mock.calls[0][0].data).toMatchObject({ businessType: "resale", tradeSide: null });

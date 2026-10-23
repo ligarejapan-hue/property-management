@@ -5,9 +5,10 @@ import {
 } from "./constants";
 
 /** 文字の欄: 前後の空白を落とし、空なら null。 */
-const text = (max: number) =>
+export const text = (max: number) =>
   z.string().trim().max(max).nullable().transform((v) => (v === null || v === "" ? null : v));
 const isoDateTime = z.string().datetime({ offset: true }).nullable();
+export const yenInt = z.number().int().min(0).max(1_000_000_000_000);
 const userRef = z.string().uuid().nullable();
 
 export const propertySnapshotSchema = z.object({
@@ -53,7 +54,74 @@ const propertyKindSchema = z.object({
 }).strict();
 export const propertyKindsSchema = z.array(propertyKindSchema).min(4).max(20)
   .refine((ks) => new Set(ks.map((k) => k.key)).size === ks.length, "物件種別の鍵が重なっています")
-  .refine((ks) => BASE_PROPERTY_KINDS.every((b) => ks.some((k) => k.key === b)), "基本の4種別は消せません");
+  .refine((ks) => BASE_PROPERTY_KINDS.every((b) => ks.some((k) => k.key === b)), "基本の4種別は消せません")
+  .refine((ks) => ks.every((k) => !(BASE_PROPERTY_KINDS as readonly string[]).includes(k.key) || k.base === k.key), "基本の4種別の元の種別は変えられません");
+
+// ---- 段2(計算)の入力。取引の JSONB 列に入れる(設計 §2.1)。----
+
+export const assessmentsSchema = z.object({
+  rows: z.array(z.object({
+    building: yenInt, land: yenInt,
+    shareNum: z.number().int().positive(), shareDen: z.number().int().positive(),
+  }).strict().refine((r) => r.shareNum <= r.shareDen, "持分は分子≦分母")).max(50),
+  /** 土地評価額に掛ける割合(借地権など)。1/100 %・初期値 100%。 */
+  landRatioBp: z.number().int().min(0).max(10000),
+}).strict();
+export type Assessments = z.output<typeof assessmentsSchema>;
+export const DEFAULT_ASSESSMENTS: Assessments = { rows: [], landRatioBp: 10000 };
+
+const otherCostSchema = z.object({ label: z.string().trim().min(1).max(50), amount: yenInt }).strict();
+export const costsSchema = z.object({
+  scrivener: z.object({ name: text(100), address: text(300), tel: text(50), staff: text(100) }).strict(),
+  registrationFee: yenInt.nullable(),
+  cancellationFee: yenInt.nullable(),
+  surveyFee: yenInt.nullable(),
+  others: z.array(otherCostSchema).max(20),
+  /** 低廉な空家等の特例(依頼書 3.1)。 */
+  lowCostSpecial: z.boolean(),
+}).strict();
+export type Costs = z.output<typeof costsSchema>;
+export const DEFAULT_COSTS: Costs = {
+  scrivener: { name: null, address: null, tel: null, staff: null },
+  registrationFee: null, cancellationFee: null, surveyFee: null, others: [], lowCostSpecial: false,
+};
+
+const otherSettlementSchema = z.object({
+  label: z.string().trim().min(1).max(50), sellerToBuyer: yenInt, buyerToSeller: yenInt,
+}).strict();
+export const settlementTermsSchema = z.object({
+  fixedAssetTax: yenInt.nullable(),
+  cityPlanningTax: yenInt.nullable(),
+  taxStart: z.enum(["01-01", "04-01"]),
+  managementFee: yenInt.nullable(),
+  repairReserve: yenInt.nullable(),
+  otherMonthly: yenInt.nullable(),
+  managementPrepaidMonths: z.number().int().min(0).max(12),
+  rentPrepaidMonths: z.number().int().min(0).max(12),
+  depositMode: z.enum(["offset", "separate"]),
+  others: z.array(otherSettlementSchema).max(20),
+}).strict();
+export type SettlementTerms = z.output<typeof settlementTermsSchema>;
+export const DEFAULT_TERMS: SettlementTerms = {
+  fixedAssetTax: null, cityPlanningTax: null, taxStart: "01-01", managementFee: null, repairReserve: null, otherMonthly: null,
+  managementPrepaidMonths: 0, rentPrepaidMonths: 0, depositMode: "offset", others: [],
+};
+
+export const leaseSchema = z.object({
+  room: text(30), tenant: text(100), contractType: z.enum(["ordinary", "fixed_term"]), period: text(100),
+  rent: yenInt, commonFee: yenInt, parking: yenInt, other: yenInt, deposit: yenInt,
+  arrears: z.boolean(), arrearsAmount: yenInt, manager: text(100),
+}).strict();
+export type Lease = z.output<typeof leaseSchema>;
+export const leasesSchema = z.array(leaseSchema).max(200);
+
+/** 手で直せる計算値の鍵(表示 = 上書き ?? 計算)。 */
+export const OVERRIDE_KEYS = [
+  "brokerageFee", "buildingPrice", "buildingTax", "settlement.propertyTax", "settlement.management", "settlement.rent",
+] as const;
+export type OverrideKey = (typeof OVERRIDE_KEYS)[number];
+export const overridesSchema = z.partialRecord(z.enum(OVERRIDE_KEYS), yenInt);
+export type Overrides = z.output<typeof overridesSchema>;
 
 export const dealCreateSchema = z.object({
   name: z.string().trim().min(1).max(200),
@@ -84,6 +152,14 @@ export const dealUpdateSchema = z.object({
   settlementPlace: text(200).optional(),
   propertySnapshot: propertySnapshotSchema.optional(),
   counterpartyBroker: counterpartyBrokerSchema.optional(),
+  price: yenInt.nullable().optional(),
+  deposit: yenInt.nullable().optional(),
+  taxRateBp: z.number().int().min(0).max(10000).optional(),
+  assessments: assessmentsSchema.optional(),
+  costs: costsSchema.optional(),
+  settlementTerms: settlementTermsSchema.optional(),
+  leases: leasesSchema.optional(),
+  overrides: overridesSchema.optional(),
 }).strict();
 export type DealUpdateInput = z.output<typeof dealUpdateSchema>;
 

@@ -1,6 +1,7 @@
 import type { Prisma } from "@/generated/prisma";
 import { readBroker, readSnapshot } from "./snapshot";
-import type { CounterpartyBroker, PropertySnapshot } from "./schemas";
+import { readAssessments, readCosts, readLeases, readOverrides, readTerms } from "./inputs";
+import type { Assessments, CounterpartyBroker, Costs, Lease, Overrides, PropertySnapshot, SettlementTerms } from "./schemas";
 
 const iso = (d: Date | null) => (d ? d.toISOString() : null);
 const yen = (v: bigint | null) => (v === null ? null : Number(v));
@@ -36,6 +37,7 @@ export const DEAL_DETAIL_SELECT = {
   contractAt: true, contractPlace: true, settlementAt: true, settlementPlace: true,
   price: true, buildingTax: true, deposit: true, taxRateBp: true,
   propertySnapshot: true, counterpartyBroker: true, version: true, createdAt: true, updatedAt: true,
+  assessments: true, costs: true, settlementTerms: true, leases: true, overrides: true,
   parties: { select: DEAL_PARTY_SELECT, orderBy: [{ role: "asc" }, { sortOrder: "asc" }, { createdAt: "asc" }] },
 } satisfies Prisma.DealSelect;
 
@@ -46,6 +48,7 @@ export interface DealView {
   contractAt: string | null; contractPlace: string | null; settlementAt: string | null; settlementPlace: string | null;
   price: number | null; buildingTax: number | null; deposit: number | null; taxRateBp: number;
   propertySnapshot: PropertySnapshot; counterpartyBroker: CounterpartyBroker;
+  assessments: Assessments; costs: Costs; settlementTerms: SettlementTerms; leases: Lease[]; overrides: Overrides;
   version: number; createdAt: string; updatedAt: string; parties: DealPartyView[];
 }
 
@@ -57,6 +60,8 @@ export function toDealView(r: Prisma.DealGetPayload<{ select: typeof DEAL_DETAIL
     contractAt: iso(r.contractAt), contractPlace: r.contractPlace, settlementAt: iso(r.settlementAt), settlementPlace: r.settlementPlace,
     price: yen(r.price), buildingTax: yen(r.buildingTax), deposit: yen(r.deposit), taxRateBp: r.taxRateBp,
     propertySnapshot: readSnapshot(r.propertySnapshot), counterpartyBroker: readBroker(r.counterpartyBroker),
+    assessments: readAssessments(r.assessments), costs: readCosts(r.costs), settlementTerms: readTerms(r.settlementTerms),
+    leases: readLeases(r.leases), overrides: readOverrides(r.overrides),
     version: r.version, createdAt: r.createdAt.toISOString(), updatedAt: r.updatedAt.toISOString(), parties: r.parties,
   };
 }
