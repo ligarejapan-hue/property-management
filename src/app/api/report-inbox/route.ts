@@ -9,16 +9,20 @@ import {
   apiResponse,
 } from "@/lib/api-helpers";
 import { writeAuditLog } from "@/lib/audit";
-import { getStorage } from "@/lib/storage";
+import { getStorage, validateFile, ALLOWED_ATTACHMENT_MIMES } from "@/lib/storage";
 import { UPLOADS_PREFIX } from "@/lib/storage/url-to-key";
 import { MAX_FILE_SIZE } from "@/lib/storage/types";
 import { assertImportMultipartBodySize } from "@/lib/import-body-size";
 import { extractTextFromPdf, isPdfBuffer } from "@/lib/pdf-extract";
 import {
+  MAX_ATTACHMENT_BYTES,
   MAX_PDF_UPLOAD_BYTES,
   isPdfByMimeOrName,
   pdfTooLargeToAcceptMessage,
 } from "@/lib/pdf-compress/policy";
+import { classifyDocument } from "@/lib/doc-classify/classify";
+import { extractDocumentDate, fileExtension } from "@/lib/doc-classify/title";
+import { findKnownBuildingName } from "@/lib/report-inbox/known-names";
 import { fitPdfToLimit, reserveLargePdfSlot } from "@/lib/pdf-compress/fit";
 import { runExclusive } from "@/lib/pdf-compress/run";
 import {
@@ -38,12 +42,14 @@ import {
 } from "@/lib/report-inbox/candidates";
 import { canAccessPropertyRecord } from "@/lib/property-access";
 
-// ---------- 査定報告書の受け取り箱(2026-10-10) ----------
-// GET  /api/report-inbox … 未処理の報告書と、それぞれの添付先の候補
-// POST /api/report-inbox … 報告書PDFを1つ受け取る(multipart: file)
+// ---------- 書類の受け取り箱(2026-10-10 査定報告書→2026-10-24 全書類) ----------
+// GET  /api/report-inbox … 未処理の書類と、それぞれの添付先の候補
+// POST /api/report-inbox … 書類を1つ受け取る(multipart: file)。PDF は本文を読んで手がかりと種類を当てる
 //
 // ⚠この口は大きいPDF(最大50MB)を受けるため proxy を通さない(src/proxy.ts)。
 //   本文を読む前に、認証 → 権限 → Content-Length の確認 → 席の確保 の順に行う。
+// ⚠使える人は今のまま(所有者情報をすべて見られる人・発注者決定 2026-10-24)。契約書・本人確認書類にも
+//   氏名・住所が載るため。未処理の間のファイルは report-inbox/ の守りの中(添付のとき物件の置き場所へ写す)。
 
 /** 一覧の1ページの件数(候補探しは1件ずつ DB を引くので、ページを小さく保つ・@codex PR#500)。 */
 export const PAGE_SIZE = 20;
@@ -126,7 +132,11 @@ export async function GET(request: NextRequest) {
         fileName: item.fileName,
         fileSize: item.fileSize,
         originalSize: item.originalSize,
+        mimeType: item.mimeType,
         source: item.source,
+        docKind: item.docKind,
+        docStage: item.docStage,
+        docConfidence: item.docConfidence,
         status: item.status,
         buildingName: item.buildingName,
         roomNo: item.roomNo,
@@ -155,36 +165,65 @@ export async function POST(request: NextRequest) {
     const form = await request.formData();
     const file = form.get("file");
     if (!(file instanceof Blob) || file.size <= 0) {
-      throw new ApiError(422, "PDFファイルを選んでください", "VALIDATION_ERROR");
+      throw new ApiError(422, "ファイルを選んでください", "VALIDATION_ERROR");
     }
-    const fileName = ((file as File).name || "report.pdf").slice(0, 200);
-    if (!isPdfByMimeOrName(file.type, fileName)) {
-      throw new ApiError(422, "PDFファイルだけを受け付けます", "VALIDATION_ERROR");
-    }
-    if (file.size > MAX_PDF_UPLOAD_BYTES) {
-      throw new ApiError(422, pdfTooLargeToAcceptMessage(), "VALIDATION_ERROR");
+    const fileName = ((file as File).name || "document").slice(0, 200);
+    const isPdf = isPdfByMimeOrName(file.type, fileName);
+    let mimeType = isPdf ? "application/pdf" : file.type || "application/octet-stream";
+    if (isPdf) {
+      if (file.size > MAX_PDF_UPLOAD_BYTES) {
+        throw new ApiError(422, pdfTooLargeToAcceptMessage(), "VALIDATION_ERROR");
+      }
+    } else {
+      // PDF 以外(画像・Excel・Word・CSV)は物件の添付と同じ種類・同じ上限(20MB)。縮めない。
+      const invalid = validateFile(file.size, mimeType, ALLOWED_ATTACHMENT_MIMES, MAX_ATTACHMENT_BYTES);
+      if (invalid) throw new ApiError(422, invalid, "VALIDATION_ERROR");
     }
     const original = Buffer.from(await file.arrayBuffer());
-    if (!isPdfBuffer(original)) {
+    if (isPdf && !isPdfBuffer(original)) {
       throw new ApiError(422, "PDFファイルではありません", "VALIDATION_ERROR");
     }
+    mimeType = isPdf ? "application/pdf" : mimeType;
 
     // 手がかりは元のPDFから読む(縮めても文字は同じ)。大きいものは圧縮と同じ順番待ちで。
+    // PDF 以外は文字が無い(種類は名前だけで当て、物件は手で探す)。
     let text = "";
-    try {
-      text =
-        original.length > MAX_FILE_SIZE
-          ? await runExclusive(() => extractTextFromPdf(original))
-          : await extractTextFromPdf(original);
-    } catch {
-      // 文字が読めなくても受け取る(手で物件を選べる)。
-      text = "";
+    if (isPdf) {
+      try {
+        text =
+          original.length > MAX_FILE_SIZE
+            ? await runExclusive(() => extractTextFromPdf(original))
+            : await extractTextFromPdf(original);
+      } catch {
+        // 文字が読めなくても受け取る(手で物件を選べる)。
+        text = "";
+      }
     }
     const clues = extractReportClues(text);
+    // 見出しから名前が取れなければ、登録済みの物件名が本文に出ていないかを探す(契約書・管理規約など)。
+    // ⚠呼び出した人が開ける物件の名前だけで探す(担当外の建物名を手がかりに出さない)。
+    if (clues.buildingName === null && text !== "") {
+      const known = await prisma.property.findMany({
+        where: { isArchived: false, buildingName: { not: null }, ...propertyScopeWhere(session) },
+        select: { buildingName: true },
+        distinct: ["buildingName"],
+      });
+      const hit = findKnownBuildingName(
+        text,
+        known.map((p) => p.buildingName).filter((n): n is string => n !== null),
+      );
+      if (hit) {
+        clues.buildingName = hit.buildingName;
+        if (clues.roomNo === null) clues.roomNo = hit.roomNo;
+      }
+    }
+    // 種類と段階(名前 → 本文の順)。当たらなければ null=その他。
+    const classification = classifyDocument({ fileName, text });
+    const docDate = extractDocumentDate(text);
 
-    const fitted = await fitPdfToLimit(original);
+    const fitted = isPdf ? await fitPdfToLimit(original) : { buffer: original, originalSize: null };
     const storage = getStorage();
-    const key = reportInboxStorageKey(Date.now(), randomUUID());
+    const key = reportInboxStorageKey(Date.now(), randomUUID(), fileExtension(fileName) ?? (isPdf ? "pdf" : "bin"));
 
     // ⚠**記録を先に作ってからファイルを置く**(@codex PR#500 3巡目)。ファイルを先に置くと、
     //   記録の作成と後片付けが両方失敗したとき、個人情報の入ったファイルが誰にも見えない場所に
@@ -199,17 +238,23 @@ export async function POST(request: NextRequest) {
         fileUrl: `${UPLOADS_PREFIX}${key}`,
         fileSize: fitted.buffer.length,
         originalSize: fitted.originalSize,
+        mimeType,
         source: clues.source,
         buildingName: clues.buildingName,
         roomNo: clues.roomNo,
         address: clues.address,
+        docKind: classification?.kind ?? null,
+        docStage: classification?.stage ?? null,
+        docConfidence: classification?.confidence ?? null,
+        docDate,
         status: "uploading",
         uploadedBy: session.id,
       },
     });
 
     try {
-      await storage.upload(fitted.buffer, { key, mimeType: "application/pdf", fileName: "report.pdf" });
+      // ⚠置き場所の名前にも元のファイル名を使わない(依頼者名・所有者名を含み得る)。
+      await storage.upload(fitted.buffer, { key, mimeType, fileName: `document.${fileExtension(fileName) ?? "bin"}` });
     } catch (e) {
       // 途中まで書けているかもしれないので消す。消せたら記録も「削除済み」に。
       // 消せなければ「取り込み中」のまま残る=一覧に出て、人が削除できる。
@@ -247,6 +292,7 @@ export async function POST(request: NextRequest) {
       // ⚠元のファイル名は記録しない(依頼者名を含み得る)。
       detail: {
         source: clues.source,
+        docKind: item.docKind,
         ...(fitted.originalSize !== null
           ? { compressedFrom: fitted.originalSize, compressedTo: fitted.buffer.length }
           : {}),
@@ -260,6 +306,9 @@ export async function POST(request: NextRequest) {
         buildingName: item.buildingName,
         roomNo: item.roomNo,
         address: item.address,
+        docKind: item.docKind,
+        docStage: item.docStage,
+        docConfidence: item.docConfidence,
         compressed: fitted.originalSize !== null,
       },
       201,

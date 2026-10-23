@@ -6,7 +6,7 @@ import { assertReportInboxAccess } from "@/lib/report-inbox/access";
 import { REPORT_ASCII_FALLBACK_NAME } from "@/lib/attachments/report-display-name";
 
 // ---------- GET /api/report-inbox/:id/file ----------
-// 受け取り箱の報告書(まだどの物件にも付いていない)を画面で開く。
+// 受け取り箱の書類(まだどの物件にも付いていない)を画面で開く(2026-10-24 PDF 以外も)。
 // ⚠/uploads は「添付の記録」で権限を見るので、受け取り箱のファイルはここからだけ出す。
 //   使える人は受け取り箱と同じ(所有者情報をすべて見られる人)。キャッシュさせない。
 
@@ -29,12 +29,12 @@ export async function GET(_request: NextRequest, { params }: { params: Promise<{
     return new Response(file.body as unknown as BodyInit, {
       status: 200,
       headers: {
-        "Content-Type": "application/pdf",
+        "Content-Type": item.mimeType ?? "application/pdf",
         "Content-Length": String(file.size),
         "Cache-Control": "no-store",
         "X-Content-Type-Options": "nosniff",
         // ⚠元のファイル名(依頼者名を含み得る)を手元に落ちる名前に使わない。
-        "Content-Disposition": `inline; filename="${REPORT_ASCII_FALLBACK_NAME}"`,
+        "Content-Disposition": `inline; filename="${(item.mimeType ?? "application/pdf") === "application/pdf" ? REPORT_ASCII_FALLBACK_NAME : "document"}"`,
       },
     });
   } catch (error) {
