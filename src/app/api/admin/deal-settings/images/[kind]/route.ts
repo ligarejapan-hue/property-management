@@ -34,8 +34,16 @@ function versionOf(v: FormDataEntryValue | string | null): number {
 async function currentRow() {
   return prisma.dealSettings.findUnique({ where: { id: DEAL_SETTINGS_ID } });
 }
-async function settingsResponse() {
-  return NextResponse.json({ settings: resolveDealSettings(await currentRow()) }, { headers: NO_STORE });
+type Row = Awaited<ReturnType<typeof currentRow>>;
+/** 行がまだ無いときの形(DB の初期値と同じ)。 */
+const EMPTY_ROW = { representativeTitle: null, representativeName: null, bankAccount: {}, propertyKinds: [], texts: {}, logoKey: null, sealKey: null };
+/**
+ * この書き込みで決まった版で返す(読み直さない)。読み直すと、直後にほかの人が保存した版を返してしまい、
+ * 画面はその版で自分の古い入力を保存して、ほかの人の変更を 409 なしで上書きしてしまう(@codex P2)。
+ */
+function respond(before: Row, change?: { field: "logoKey" | "sealKey"; key: string | null; version: number }) {
+  const row = change ? { ...EMPTY_ROW, ...before, [change.field]: change.key, version: change.version, updatedAt: new Date() } : before;
+  return NextResponse.json({ settings: resolveDealSettings(row) }, { headers: NO_STORE });
 }
 
 /** 設定画面の見本。管理者だけ。`/uploads` からは配らない(設計の読み替え 2)。 */
@@ -114,7 +122,7 @@ export async function POST(request: Request, ctx: Ctx) {
       userId: session.id, action: "deal_settings_image_update", targetTable: "deal_settings",
       detail: { kind, op: "set", bytes: body.length, width: dims.width, height: dims.height },
     });
-    return settingsResponse();
+    return respond(before, { field, key: stored.key, version: version + 1 });
   } catch (error) {
     return handleApiError(error);
   }
@@ -130,7 +138,7 @@ export async function DELETE(request: Request, ctx: Ctx) {
     const before = await currentRow();
     if ((before?.version ?? 0) !== version) throw conflict();
     const oldKey = before?.[field] ?? null;
-    if (!oldKey) return settingsResponse();
+    if (!oldKey) return respond(before);
 
     const res = await prisma.dealSettings.updateMany({
       where: { id: DEAL_SETTINGS_ID, version },
@@ -141,7 +149,7 @@ export async function DELETE(request: Request, ctx: Ctx) {
     await writeAuditLog({
       userId: session.id, action: "deal_settings_image_update", targetTable: "deal_settings", detail: { kind, op: "clear" },
     });
-    return settingsResponse();
+    return respond(before, { field, key: null, version: version + 1 });
   } catch (error) {
     return handleApiError(error);
   }

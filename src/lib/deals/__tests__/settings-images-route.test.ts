@@ -96,7 +96,6 @@ describe("画像を上げる", () => {
     expect((await GET(new Request("http://x"), ctx("stamp"))).status).toBe(404);
   });
   it("PNG を受け取り、deal-settings/ に置いて鍵を書く・監査にファイル名は残さない", async () => {
-    pm.dealSettings.findUnique.mockResolvedValueOnce(settingsRow(3)).mockResolvedValueOnce(settingsRow(4, { logoKey: "deal-settings/logo-x.png" }));
     const res = await upload(png(120, 40));
     expect(res.status).toBe(200);
     const key = store.upload.mock.calls[0][1].key as string;
@@ -142,6 +141,16 @@ describe("画像を上げる", () => {
     expect((await upload(png(10, 10), { version: "3" })).status).toBe(500);
     expect([...files.keys()]).toEqual([OLD]);
   });
+  it("@codex: 返す版はこの書き込みで決まった版(直後にほかの人が保存しても、その版を返さない)", async () => {
+    // 1回目=書く前の行・2回目以降=直後にほかの管理者が文字の設定を保存した行(版 9)
+    pm.dealSettings.findUnique.mockResolvedValueOnce(settingsRow(3)).mockResolvedValue(settingsRow(9, { logoKey: "deal-settings/logo-x.png" }));
+    expect((await (await upload(png(10, 10))).json()).settings).toMatchObject({ version: 4, hasLogo: true });
+    pm.dealSettings.findUnique.mockResolvedValueOnce(null).mockResolvedValue(settingsRow(9));
+    expect((await (await upload(png(10, 10), { version: "0" })).json()).settings).toMatchObject({ version: 1, hasLogo: true });
+    files.set("deal-settings/seal-a.png", png(5, 5));
+    pm.dealSettings.findUnique.mockResolvedValueOnce(settingsRow(3, { sealKey: "deal-settings/seal-a.png" })).mockResolvedValue(settingsRow(9, { sealKey: "x" }));
+    expect((await (await del("3", "seal")).json()).settings).toMatchObject({ version: 4, hasSeal: false });
+  });
   it("前の画像を消すのは、鍵を書き換えたあと", async () => {
     files.set("deal-settings/logo-old.png", png(1, 1));
     pm.dealSettings.findUnique.mockResolvedValue(settingsRow(3, { logoKey: "deal-settings/logo-old.png" }));
@@ -178,7 +187,7 @@ describe("画像を上げる", () => {
 describe("画像を消す", () => {
   it("鍵を空にしてからファイルを消す・監査を残す", async () => {
     files.set("deal-settings/seal-a.png", png(5, 5));
-    pm.dealSettings.findUnique.mockResolvedValueOnce(settingsRow(3, { sealKey: "deal-settings/seal-a.png" })).mockResolvedValueOnce(settingsRow(4));
+    pm.dealSettings.findUnique.mockResolvedValue(settingsRow(3, { sealKey: "deal-settings/seal-a.png" }));
     const res = await del("3", "seal");
     expect(res.status).toBe(200);
     expect(pm.dealSettings.updateMany).toHaveBeenCalledWith({
