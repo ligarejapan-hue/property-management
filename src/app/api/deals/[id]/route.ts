@@ -16,6 +16,8 @@ import { DEAL_DETAIL_SELECT, toDealView } from "@/lib/deals/view";
 
 type Ctx = { params: Promise<{ id: string }> };
 const NO_STORE = { "Cache-Control": "no-store" };
+const jsonObject = (v: unknown): Record<string, unknown> =>
+  v && typeof v === "object" && !Array.isArray(v) ? (v as Record<string, unknown>) : {};
 const idOf = async (ctx: Ctx) => z.string().uuid().parse((await ctx.params).id);
 
 /** 取引の詳しい中身。物件を開くリンクは、その物件を見られる人にだけ出す。 */
@@ -53,6 +55,8 @@ export async function PATCH(request: Request, ctx: Ctx) {
       const cur = await tx.deal.findUnique({ where: { id }, select: DEAL_DETAIL_SELECT });
       if (!cur) throw new ApiError(404, "取引が見つかりません", "NOT_FOUND");
       const data = toDealUpdateData(patch, cur.businessType);
+      // 資金計画表は plan_inputs の funding だけを差し替える(事業計画書などほかの鍵は残す)。
+      if (patch.fundingPlan !== undefined) data.planInputs = { ...jsonObject(cur.planInputs), funding: patch.fundingPlan };
       const res = await tx.deal.updateMany({ where: { id, version }, data: { ...data, version: { increment: 1 } } });
       if (res.count === 0) throw new ApiError(409, DEAL_VERSION_CONFLICT_MESSAGE, "VERSION_CONFLICT");
       await recordChangesInTx(tx, {

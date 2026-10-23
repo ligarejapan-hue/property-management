@@ -3,12 +3,12 @@ import {
   BANK_ACCOUNT_TYPES, BASE_PROPERTY_KINDS, DEAL_BUSINESS_TYPES, DEAL_PARTY_ROLES, DEAL_PARTY_TYPES,
   DEAL_STATUSES, DEAL_TRADE_SIDES, LAND_RIGHTS,
 } from "./constants";
+import { text, yenInt } from "./schema-parts";
+import { fundingInputsSchema } from "./funding-schema";
 
-/** 文字の欄: 前後の空白を落とし、空なら null。 */
-export const text = (max: number) =>
-  z.string().trim().max(max).nullable().transform((v) => (v === null || v === "" ? null : v));
+export { text, yenInt };
+
 const isoDateTime = z.string().datetime({ offset: true }).nullable();
-export const yenInt = z.number().int().min(0).max(1_000_000_000_000);
 const userRef = z.string().uuid().nullable();
 
 export const propertySnapshotSchema = z.object({
@@ -160,6 +160,8 @@ export const dealUpdateSchema = z.object({
   settlementTerms: settlementTermsSchema.optional(),
   leases: leasesSchema.optional(),
   overrides: overridesSchema.optional(),
+  /** 資金計画表の入力(`plan_inputs.funding` だけを差し替える)。 */
+  fundingPlan: fundingInputsSchema.optional(),
 }).strict();
 export type DealUpdateInput = z.output<typeof dealUpdateSchema>;
 

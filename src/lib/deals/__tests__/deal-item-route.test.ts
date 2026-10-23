@@ -19,6 +19,7 @@ vi.mock("@/lib/prisma", () => {
 import prismaMock from "@/lib/prisma";
 import { getApiSession, getUserPermissions } from "@/lib/api-helpers";
 import { jsonRequest as json, DEAL_ID, PROP_ID, USER_ID, DEAL_PERMS } from "./route-mocks";
+import { DEFAULT_FUNDING_INPUTS } from "../funding-schema";
 import { GET, PATCH } from "../../../app/api/deals/[id]/route";
 import { POST as REFRESH } from "../../../app/api/deals/[id]/refresh-property/route";
 
@@ -113,6 +114,42 @@ describe("PATCH /api/deals/[id]", () => {
   it("買取再販へ切り替えたら取引態様も空にする", async () => {
     await PATCH(json("PATCH", { version: 3, businessType: "resale" }), ctx);
     expect(pm.deal.updateMany.mock.calls[0][0].data).toMatchObject({ businessType: "resale", tradeSide: null });
+  });
+});
+
+describe("PATCH /api/deals/[id] の資金計画表(plan_inputs.funding)", () => {
+  const funding = { ...DEFAULT_FUNDING_INPUTS, mode: "sale" as const, customerName: "架空 太郎" };
+  it("funding だけを差し替え、ほかの鍵(事業計画書)は残す・監査は項目名だけ", async () => {
+    pm.deal.findUnique.mockResolvedValue({ ...detailRow, planInputs: { business: { keep: 1 }, funding: { mode: "purchase" } } });
+    const res = await PATCH(json("PATCH", { version: 3, fundingPlan: funding }), ctx);
+    expect(res.status).toBe(200);
+    const data = pm.deal.updateMany.mock.calls[0][0].data;
+    expect(data.planInputs).toEqual({ business: { keep: 1 }, funding });
+    expect(data).not.toHaveProperty("fundingPlan");
+    const audit = (writeAuditLog as Fn).mock.calls[0][0];
+    expect(audit.detail).toEqual({ fields: ["fundingPlan"] });
+    expect(JSON.stringify(audit)).not.toContain("架空 太郎");
+  });
+  it("保存していない取引(plan_inputs が空)でも書ける", async () => {
+    pm.deal.findUnique.mockResolvedValue({ ...detailRow, planInputs: {} });
+    await PATCH(json("PATCH", { version: 3, fundingPlan: funding }), ctx);
+    expect(pm.deal.updateMany.mock.calls[0][0].data.planInputs).toEqual({ funding });
+  });
+  it("ほかの人が先に保存していたら 409", async () => {
+    pm.deal.findUnique.mockResolvedValue({ ...detailRow, planInputs: {} });
+    pm.deal.updateMany.mockResolvedValue({ count: 0 });
+    expect((await PATCH(json("PATCH", { version: 2, fundingPlan: funding }), ctx)).status).toBe(409);
+  });
+  it("形の違う入力は 422", async () => {
+    expect((await PATCH(json("PATCH", { version: 3, fundingPlan: { ...funding, mode: "lease" } }), ctx)).status).toBe(422);
+    expect(pm.deal.updateMany).not.toHaveBeenCalled();
+  });
+  it("GET は資金計画表の入力を読んで返す(壊れていれば初期値)", async () => {
+    pm.deal.findUnique.mockResolvedValue({ ...detailRow, planInputs: { funding: { customerName: "架空 花子" } } });
+    const body = await (await GET(new Request("http://x"), ctx)).json();
+    expect(body.deal.fundingPlan.customerName).toBe("架空 花子");
+    expect(body.deal.fundingPlan.mode).toBe("purchase");
+    expect(body.deal).not.toHaveProperty("planInputs");
   });
 });
 

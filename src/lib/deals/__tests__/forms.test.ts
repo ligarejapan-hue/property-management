@@ -1,4 +1,5 @@
 import { describe, it, expect } from "vitest";
+import { DEFAULT_FUNDING_INPUTS } from "../funding-schema";
 import {
   basicFormFromDeal, basicPatch, snapshotFormFromDeal, snapshotFromForm,
   EMPTY_PARTY_FORM, partyBodyFromForm, partyFormFromView,
@@ -13,7 +14,7 @@ const deal: DealView = {
   price: null, buildingTax: null, deposit: null, taxRateBp: 1000,
   propertySnapshot: { ...EMPTY_SNAPSHOT, roomNo: "201", floorArea: 65.4 }, counterpartyBroker: EMPTY_BROKER,
   assessments: DEFAULT_ASSESSMENTS, costs: DEFAULT_COSTS, settlementTerms: DEFAULT_TERMS, leases: [], overrides: {},
-  version: 3, createdAt: "", updatedAt: "", parties: [],
+  version: 3, createdAt: "", updatedAt: "", parties: [], fundingPlan: DEFAULT_FUNDING_INPUTS,
 };
 
 describe("基本タブ", () => {

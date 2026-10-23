@@ -1,7 +1,8 @@
 "use client";
 
 import { use, useCallback, useEffect, useState } from "react";
-import { Loader2 } from "lucide-react";
+import Link from "next/link";
+import { Calculator, Loader2 } from "lucide-react";
 import { PageHeader } from "@/components/ui/page-header";
 import { Tabs, tabPanelProps } from "@/components/ui/tabs";
 import DealBasicPanel from "@/components/deals/deal-basic-panel";
@@ -26,6 +27,8 @@ const DEAL_TABS = [
   { key: "settlement", label: "精算" },
   { key: "oc", label: "OC" },
 ] as const;
+const HEADER_LINK_CLS =
+  "inline-flex items-center gap-1.5 rounded-md border border-gray-300 bg-white px-3 py-1.5 text-sm font-medium text-gray-700 hover:bg-gray-50 dark:border-gray-700 dark:bg-gray-900 dark:text-gray-200 dark:hover:bg-gray-800";
 type DealTabKey = (typeof DEAL_TABS)[number]["key"];
 
 /**
@@ -89,6 +92,12 @@ export default function DealDetailPage({ params }: { params: Promise<{ id: strin
       <PageHeader
         title={deal.name}
         back={{ href: "/deals", to: "取引" }}
+        actions={
+          <Link href={`/deals/${deal.id}/funding-plan`} className={HEADER_LINK_CLS}>
+            <Calculator className="h-4 w-4" />
+            資金計画表
+          </Link>
+        }
         description={`${deal.dealNo} ・ ${DEAL_BUSINESS_TYPE_LABELS[deal.businessType as keyof typeof DEAL_BUSINESS_TYPE_LABELS] ?? deal.businessType} ・ ${DEAL_STATUS_LABELS[deal.status as keyof typeof DEAL_STATUS_LABELS] ?? deal.status}`}
       />
       {error && <p className="text-sm text-red-600 dark:text-red-400" role="alert">{error}</p>}

@@ -1,6 +1,7 @@
 import type { Prisma } from "@/generated/prisma";
 import { readBroker, readSnapshot } from "./snapshot";
 import { readAssessments, readCosts, readLeases, readOverrides, readTerms } from "./inputs";
+import { readFundingInputs, type FundingInputs } from "./funding-schema";
 import type { Assessments, CounterpartyBroker, Costs, Lease, Overrides, PropertySnapshot, SettlementTerms } from "./schemas";
 
 const iso = (d: Date | null) => (d ? d.toISOString() : null);
@@ -37,7 +38,7 @@ export const DEAL_DETAIL_SELECT = {
   contractAt: true, contractPlace: true, settlementAt: true, settlementPlace: true,
   price: true, buildingTax: true, deposit: true, taxRateBp: true,
   propertySnapshot: true, counterpartyBroker: true, version: true, createdAt: true, updatedAt: true,
-  assessments: true, costs: true, settlementTerms: true, leases: true, overrides: true,
+  assessments: true, costs: true, settlementTerms: true, leases: true, overrides: true, planInputs: true,
   parties: { select: DEAL_PARTY_SELECT, orderBy: [{ role: "asc" }, { sortOrder: "asc" }, { createdAt: "asc" }] },
 } satisfies Prisma.DealSelect;
 
@@ -49,6 +50,8 @@ export interface DealView {
   price: number | null; buildingTax: number | null; deposit: number | null; taxRateBp: number;
   propertySnapshot: PropertySnapshot; counterpartyBroker: CounterpartyBroker;
   assessments: Assessments; costs: Costs; settlementTerms: SettlementTerms; leases: Lease[]; overrides: Overrides;
+  /** 資金計画表の入力(`plan_inputs.funding`)。 */
+  fundingPlan: FundingInputs;
   version: number; createdAt: string; updatedAt: string; parties: DealPartyView[];
 }
 
@@ -61,7 +64,7 @@ export function toDealView(r: Prisma.DealGetPayload<{ select: typeof DEAL_DETAIL
     price: yen(r.price), buildingTax: yen(r.buildingTax), deposit: yen(r.deposit), taxRateBp: r.taxRateBp,
     propertySnapshot: readSnapshot(r.propertySnapshot), counterpartyBroker: readBroker(r.counterpartyBroker),
     assessments: readAssessments(r.assessments), costs: readCosts(r.costs), settlementTerms: readTerms(r.settlementTerms),
-    leases: readLeases(r.leases), overrides: readOverrides(r.overrides),
+    leases: readLeases(r.leases), overrides: readOverrides(r.overrides), fundingPlan: readFundingInputs(r.planInputs),
     version: r.version, createdAt: r.createdAt.toISOString(), updatedAt: r.updatedAt.toISOString(), parties: r.parties,
   };
 }
