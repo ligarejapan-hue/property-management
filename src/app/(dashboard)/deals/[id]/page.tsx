@@ -37,10 +37,10 @@ export default function DealDetailPage({ params }: { params: Promise<{ id: strin
   }, [id]);
 
   useEffect(() => {
-    void reload();
+    dealsApi.get(id).then(setData).catch((e) => setError(errorText(e)));
     dealsApi.options().then(setOptions).catch(() => {});
     dealsApi.users().then((r) => setUsers(r.data)).catch(() => {});
-  }, [reload]);
+  }, [id]);
 
   if (!data) {
     return error ? (

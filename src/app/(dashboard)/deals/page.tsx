@@ -1,11 +1,12 @@
 "use client";
 
-import { useCallback, useEffect, useState } from "react";
+import { useEffect, useState } from "react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { Loader2, Plus } from "lucide-react";
 import { PageHeader } from "@/components/ui/page-header";
 import { Button } from "@/components/ui/button";
+import { Pagination } from "@/components/ui/pagination";
 import { Field, SelectBox, inputCls, optionsOf } from "@/components/deals/form-parts";
 import { dealsApi, errorText } from "@/lib/deals/client";
 import type { DealListItem } from "@/lib/deals/view";
@@ -24,20 +25,24 @@ export default function DealsPage() {
   const [q, setQ] = useState("");
   const [error, setError] = useState<string | null>(null);
 
-  const load = useCallback(async () => {
-    try {
-      const res = await dealsApi.list({ status, businessType, q, page: String(page), ...(mine ? { assignee: "me" } : {}) });
-      setRows(res.deals);
-      setTotal(res.total);
-      setError(null);
-    } catch (e) {
-      setError(errorText(e));
-    }
-  }, [status, businessType, q, page, mine]);
-
   useEffect(() => {
-    void load();
-  }, [load]);
+    // 条件を続けて変えたとき、古い条件の返事が後から来て上書きしないようにする。
+    let cancelled = false;
+    dealsApi
+      .list({ status, businessType, q, page: String(page), ...(mine ? { assignee: "me" } : {}) })
+      .then((res) => {
+        if (cancelled) return;
+        setRows(res.deals);
+        setTotal(res.total);
+        setError(null);
+      })
+      .catch((e) => {
+        if (!cancelled) setError(errorText(e));
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [status, businessType, q, page, mine]);
 
   const lastPage = Math.max(1, Math.ceil(total / 50));
 
@@ -110,11 +115,10 @@ export default function DealsPage() {
       )}
 
       {lastPage > 1 && (
-        <div className="flex items-center gap-3 text-sm">
-          <Button variant="secondary" size="sm" disabled={page <= 1} onClick={() => setPage((p) => p - 1)}>前へ</Button>
-          <span className="tabular-nums">{page} / {lastPage}</span>
-          <Button variant="secondary" size="sm" disabled={page >= lastPage} onClick={() => setPage((p) => p + 1)}>次へ</Button>
-        </div>
+        <Pagination
+          page={page} totalPages={lastPage} total={total} pageSize={50}
+          onPrev={() => setPage((p) => Math.max(1, p - 1))} onNext={() => setPage((p) => Math.min(lastPage, p + 1))}
+        />
       )}
     </div>
   );
