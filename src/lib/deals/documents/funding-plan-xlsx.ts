@@ -175,10 +175,18 @@ export async function buildFundingPlanXlsx(i: FundingPlanDocInput): Promise<Buff
   const name = [snap.buildingName, snap.roomNo].filter(Boolean).join(" ");
   if (name) w.text(`物件名 ${name}`);
   if (snap.address) w.text(`所在 ${snap.address}`);
+  // 取引の設定の文面は1行ずつ文字として入れる(数式にならない)。ロゴは Excel には入れない(計画の読み替え 5)。
+  const textLines = (t: string | null | undefined) => {
+    if (!t) return;
+    w.row++;
+    for (const line of t.split(/\r?\n/)) w.text(line);
+  };
+  textLines(i.text?.greeting);
 
   if (purchase) purchaseSheet(w, i);
   else saleSheet(w, i);
 
+  textLines(i.text?.notes);
   w.row++;
   w.text(i.company.nameJa);
   if (i.company.license) w.text(i.company.license);

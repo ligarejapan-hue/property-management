@@ -319,6 +319,8 @@ const ACTION_EXTRA_KEYS: Readonly<Record<string, ReadonlySet<string>>> = {
   // 取引の書類の発行(設計 2026-10-23 §4.9)。docType=書類の種類のキー・variant=purchase/sale など・
   // version=版の番号・formats=["pdf","xlsx"]。お客様名・住所・金額は載せない設計。
   deal_document_issue: new Set(["docType", "variant", "version", "formats"]),
+  // 取引の設定のロゴ・角印。kind=logo|seal・op=set|clear・bytes/width/height=数値。ファイル名は載せない。
+  deal_settings_image_update: new Set(["kind", "op", "bytes", "width", "height"]),
   // メール送信設定のテスト送信。result=sent|failed の enum / code=safeErrorCode() 由来の許可リスト一致
   // コードのみ(/^[A-Z][A-Z0-9_]{1,40}$/・管理者が原因(パスワード誤り/接続不可等)を切り分けるため)。
   // 宛先・SMTP応答の生メッセージは載せない。

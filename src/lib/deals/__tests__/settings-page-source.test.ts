@@ -37,6 +37,33 @@ describe("取引の設定の画面", () => {
   });
 });
 
+describe("ロゴ・角印と書類の文面", () => {
+  const IMG = "src/components/deals/deal-image-setting.tsx";
+  it("ロゴ・角印の欄を出し、文面は保存ボタンで一緒に送る", () => {
+    const src = read(PAGE);
+    expect(src).toContain("ロゴ・角印");
+    expect(src).toMatch(/DEAL_IMAGE_KINDS\.map\(\(kind\) => \(\s*<DealImageSetting/);
+    expect(src).toContain("書類の文面(資金計画表)");
+    expect(src).toMatch(/texts: \{ funding_plan: \{ greeting, notes \} \}/);
+    expect(src).toContain("maxLength={DEAL_TEXT_LIMITS.greeting}");
+    expect(src).toContain("maxLength={DEAL_TEXT_LIMITS.notes}");
+  });
+  it("画像を変えても入力中の欄は消さない(版の番号と画像の有無だけ差し替える)", () => {
+    const src = read(PAGE);
+    expect(src).toMatch(/onChanged=\{\(s\) => setSettings\(\(cur\) => \(cur \? \{ \.\.\.cur, version: s\.version, hasLogo: s\.hasLogo, hasSeal: s\.hasSeal, updatedAt: s\.updatedAt \} : cur\)\)\}/);
+  });
+  it("画像は共通の枠で受け取り、PNG・JPEG・1MB まで・縦横比を保って見せる", () => {
+    const src = read(IMG);
+    expect(src).toContain("<FileDropZone");
+    expect(src).not.toMatch(/type="file"/);
+    expect(src).toContain('accept="image/png,image/jpeg"');
+    expect(src).toContain("DEAL_IMAGE_MAX_BYTES");
+    expect(src).toMatch(/className="[^"]*h-auto[^"]*w-auto[^"]*"/);
+    expect(src).toContain("/api/admin/deal-settings/images/${kind}");
+    expect(src).toContain("<ConfirmDialog");
+  });
+});
+
 describe("@codex: 税率の表の編集欄は、選んだ表が変わったら作り直す", () => {
   it("RateTableEditor に選んだ表ごとの key", () => {
     expect(read(PAGE)).toMatch(/<RateTableEditor\s+key=\{/);

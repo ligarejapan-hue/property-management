@@ -14,13 +14,16 @@ import {
   BANK_ACCOUNT_TYPE_LABELS, BASE_PROPERTY_KINDS, BASE_PROPERTY_KIND_LABELS, type PropertyKindDef,
 } from "@/lib/deals/constants";
 import { RATE_TABLE_KINDS, RATE_TABLE_KIND_LABELS, type RateTableKind } from "@/lib/deals/rate-tables";
+import { DEAL_TEXT_LIMITS } from "@/lib/deals/schemas";
+import { DEAL_IMAGE_KINDS } from "@/lib/deals/branding";
+import { DealImageSetting } from "@/components/deals/deal-image-setting";
 
 type Bank = DealSettingsView["bankAccount"];
 const BANK_FIELDS: [Exclude<keyof Bank, "accountType">, string, number][] = [
   ["bankName", "銀行名", 100], ["branchName", "支店名", 100], ["accountNumber", "口座番号(7桁まで)", 7], ["accountHolder", "名義", 100],
 ];
 
-/** 取引の設定(管理者だけ)。代表者・口座・物件種別と、税率・税額の表(期間つき)を直す。 */
+/** 取引の設定(管理者だけ)。代表者・口座・物件種別・書類の文面・ロゴと角印と、税率・税額の表(期間つき)を直す。 */
 export default function DealSettingsPage() {
   const [settings, setSettings] = useState<DealSettingsView | null>(null);
   const [tables, setTables] = useState<RateTableView[]>([]);
@@ -28,6 +31,8 @@ export default function DealSettingsPage() {
   const [repName, setRepName] = useState("");
   const [bank, setBank] = useState<Record<keyof Bank, string>>({ bankName: "", branchName: "", accountType: "", accountNumber: "", accountHolder: "" });
   const [kinds, setKinds] = useState<PropertyKindDef[]>([]);
+  const [greeting, setGreeting] = useState("");
+  const [notes, setNotes] = useState("");
   const [saving, setSaving] = useState(false);
   const [message, setMessage] = useState<{ kind: "ok" | "err"; text: string } | null>(null);
   const [editing, setEditing] = useState<{ table: RateTableView | null; kind: RateTableKind } | null>(null);
@@ -43,6 +48,8 @@ export default function DealSettingsPage() {
       accountNumber: s.bankAccount.accountNumber ?? "", accountHolder: s.bankAccount.accountHolder ?? "",
     });
     setKinds(s.propertyKinds);
+    setGreeting(s.texts.funding_plan?.greeting ?? "");
+    setNotes(s.texts.funding_plan?.notes ?? "");
   };
 
   useEffect(() => {
@@ -61,6 +68,7 @@ export default function DealSettingsPage() {
         representativeName: repName,
         bankAccount: { ...bank, accountType: bank.accountType || null },
         propertyKinds: kinds,
+        texts: { funding_plan: { greeting, notes } },
       });
       apply(res.settings);
       setMessage({ kind: "ok", text: "取引の設定を保存しました" });
@@ -153,10 +161,36 @@ export default function DealSettingsPage() {
         </Button>
       </section>
 
+      <section className="space-y-3">
+        <h2 className="text-sm font-semibold text-gray-700 dark:text-gray-300">書類の文面(資金計画表)</h2>
+        <p className="text-xs text-gray-500">空欄なら出しません。改行はそのまま書類に出ます。</p>
+        <Field label={`あいさつ文(作成日の下・${DEAL_TEXT_LIMITS.greeting}字まで)`}>
+          <textarea value={greeting} onChange={(e) => setGreeting(e.target.value)} maxLength={DEAL_TEXT_LIMITS.greeting} rows={3} aria-label="資金計画表のあいさつ文" className={inputCls} />
+        </Field>
+        <Field label={`注意事項(会社欄の上・${DEAL_TEXT_LIMITS.notes}字まで)`}>
+          <textarea value={notes} onChange={(e) => setNotes(e.target.value)} maxLength={DEAL_TEXT_LIMITS.notes} rows={4} aria-label="資金計画表の注意事項" className={inputCls} />
+        </Field>
+      </section>
+
       <Button onClick={save} disabled={saving} loading={saving} loadingLabel="保存中">
         <Save className="h-4 w-4" />
         保存
       </Button>
+
+      <section className="space-y-3">
+        <h2 className="text-sm font-semibold text-gray-700 dark:text-gray-300">ロゴ・角印</h2>
+        <p className="text-xs text-gray-500">画像を選ぶと、その場で保存します(上の「保存」は要りません。入力中の欄も消えません)。</p>
+        <div className="grid gap-3 sm:grid-cols-2">
+          {DEAL_IMAGE_KINDS.map((kind) => (
+            <DealImageSetting
+              key={kind}
+              kind={kind}
+              settings={settings}
+              onChanged={(s) => setSettings((cur) => (cur ? { ...cur, version: s.version, hasLogo: s.hasLogo, hasSeal: s.hasSeal, updatedAt: s.updatedAt } : cur))}
+            />
+          ))}
+        </div>
+      </section>
 
       <section className="space-y-3">
         <h2 className="text-sm font-semibold text-gray-700 dark:text-gray-300">税率・税額の表</h2>

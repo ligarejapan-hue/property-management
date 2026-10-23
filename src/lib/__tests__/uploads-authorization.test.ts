@@ -146,8 +146,8 @@ describe("authorizeUploadAccess", () => {
     expect(decision).toBe("not_found");
   });
 
-  it("取引の書類(deals/)は、写真や添付として登録し直されていても /uploads からは開けない(404)", async () => {
-    for (const key of ["deals/d1/f1.pdf", "Deals/d1/f1.pdf", "deals/d1/f1.xlsx"]) {
+  it("取引の書類(deals/)・取引の設定のロゴ・角印(deal-settings/)は、写真や添付として登録し直されていても /uploads からは開けない(404)", async () => {
+    for (const key of ["deals/d1/f1.pdf", "Deals/d1/f1.pdf", "deals/d1/f1.xlsx", "deal-settings/logo-a.png", "Deal-Settings/seal-a.jpg"]) {
       const prisma = makeDb({
         photos: [{ fileUrl: `/uploads/${key}`, propertyId: "p1" }],
         attachments: [{ fileUrl: `/uploads/${key}`, isDeleted: false, targetType: "property", targetId: "p1", propertyId: "p1" }],

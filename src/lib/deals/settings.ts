@@ -1,5 +1,5 @@
 import { DEFAULT_PROPERTY_KINDS, type PropertyKindDef } from "./constants";
-import { EMPTY_BANK_ACCOUNT, bankAccountSchema, propertyKindsSchema, type BankAccount } from "./schemas";
+import { EMPTY_BANK_ACCOUNT, bankAccountSchema, dealTextsSchema, propertyKindsSchema, type BankAccount, type DealTexts } from "./schemas";
 
 export const DEAL_SETTINGS_ID = "singleton";
 
@@ -8,6 +8,9 @@ export interface DealSettingsRow {
   representativeName: string | null;
   bankAccount: unknown;
   propertyKinds: unknown;
+  logoKey?: string | null;
+  sealKey?: string | null;
+  texts?: unknown;
   version: number;
   updatedAt: Date;
 }
@@ -17,6 +20,11 @@ export interface DealSettingsView {
   representativeName: string | null;
   bankAccount: BankAccount;
   propertyKinds: PropertyKindDef[];
+  /** 書類ごとの文面。 */
+  texts: DealTexts;
+  /** ロゴ・角印が登録されているか(保存場所の鍵は画面に渡さない)。 */
+  hasLogo: boolean;
+  hasSeal: boolean;
   /** 0 = 行がまだ無い。 */
   version: number;
   updatedAt: string | null;
@@ -25,15 +33,22 @@ export interface DealSettingsView {
 /** DB の行 → 画面・API で使う形。欠けた・壊れた値は初期値で補う。 */
 export function resolveDealSettings(row: DealSettingsRow | null): DealSettingsView {
   if (!row) {
-    return { representativeTitle: null, representativeName: null, bankAccount: EMPTY_BANK_ACCOUNT, propertyKinds: DEFAULT_PROPERTY_KINDS, version: 0, updatedAt: null };
+    return {
+      representativeTitle: null, representativeName: null, bankAccount: EMPTY_BANK_ACCOUNT, propertyKinds: DEFAULT_PROPERTY_KINDS,
+      texts: {}, hasLogo: false, hasSeal: false, version: 0, updatedAt: null,
+    };
   }
   const kinds = propertyKindsSchema.safeParse(row.propertyKinds);
   const bank = bankAccountSchema.safeParse({ ...EMPTY_BANK_ACCOUNT, ...(row.bankAccount && typeof row.bankAccount === "object" ? row.bankAccount : {}) });
+  const texts = dealTextsSchema.safeParse(row.texts ?? {});
   return {
     representativeTitle: row.representativeTitle,
     representativeName: row.representativeName,
     bankAccount: bank.success ? bank.data : EMPTY_BANK_ACCOUNT,
     propertyKinds: kinds.success ? kinds.data : DEFAULT_PROPERTY_KINDS,
+    texts: texts.success ? texts.data : {},
+    hasLogo: Boolean(row.logoKey),
+    hasSeal: Boolean(row.sealKey),
     version: row.version,
     updatedAt: row.updatedAt.toISOString(),
   };

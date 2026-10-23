@@ -2,7 +2,7 @@ import { describe, expect, it } from "vitest";
 import { renderFundingPlanHtml } from "../funding-plan";
 import { fundingPlanCalc } from "../../calc/funding-plan";
 import { computeDealCalc } from "../../calc/deal-calc";
-import { DEFAULT_COSTS, DEFAULT_TERMS, EMPTY_BROKER, EMPTY_SNAPSHOT } from "../../schemas";
+import { DEFAULT_COSTS, DEFAULT_TERMS, EMPTY_BROKER, EMPTY_SNAPSHOT, type DealDocText } from "../../schemas";
 import { DEFAULT_PROPERTY_KINDS } from "../../constants";
 import { INITIAL_RATE_TABLES, type RateTableRow } from "../../rate-tables";
 import { DEFAULT_FUNDING_INPUTS, type FundingInputs } from "../../funding-schema";
@@ -23,8 +23,37 @@ const deal: DealView = {
   leases: [], overrides: {}, version: 1, createdAt: "", updatedAt: "", parties: [], fundingPlan: DEFAULT_FUNDING_INPUTS,
 };
 const company: CompanyProfile = { nameJa: "架空不動産株式会社", license: "架空知事(1)第00000号", tel: "000-0000-0000", fax: "", email: "", hp: "", address: "架空県架空市" };
-const render = (i: FundingInputs, d: DealView = deal) =>
-  renderFundingPlanHtml({ deal: d, inputs: i, calc: fundingPlanCalc(d, computeDealCalc(d, rateRows, DEFAULT_PROPERTY_KINDS, "2026-10-24"), i, rateRows), company, issuedOn: "2026-10-24" });
+const render = (i: FundingInputs, d: DealView = deal, extra: { logo?: string | null; text?: DealDocText } = {}) =>
+  renderFundingPlanHtml({
+    deal: d, inputs: i, calc: fundingPlanCalc(d, computeDealCalc(d, rateRows, DEFAULT_PROPERTY_KINDS, "2026-10-24"), i, rateRows), company, issuedOn: "2026-10-24", ...extra,
+  });
+const LOGO = "data:image/png;base64,iVBORw0KGgo=";
+
+describe("資金計画表の HTML: 取引の設定のロゴ・文面", () => {
+  const i: FundingInputs = { ...DEFAULT_FUNDING_INPUTS, customerName: "架空 太郎" };
+  it("ロゴは data: の画像だけを会社欄に出す・縦横比は保つ・無ければ img なし", () => {
+    const h = render(i, deal, { logo: LOGO });
+    expect(h).toContain(`<img class="logo" src="${LOGO}" alt="">`);
+    expect(h).toMatch(/\.company \.logo \{[^}]*height: auto;[^}]*width: auto;/);
+    expect(h.indexOf('class="logo"')).toBeGreaterThan(h.indexOf('class="company"'));
+    expect(render(i)).not.toContain("<img");
+    // data: の画像の形でないものは出さない(外の URL を読ませない)
+    for (const bad of ["https://evil.example/x.png", "data:text/html;base64,PHNjcmlwdD4=", `data:image/png;base64,AA" onerror="x`]) {
+      expect(render(i, deal, { logo: bad })).not.toContain("<img");
+    }
+  });
+  it("あいさつ文は作成日の下、注意事項は会社欄の上・改行を保ち、無害化する", () => {
+    const h = render(i, deal, { text: { greeting: "このたびは<script>x</script>\n2行目", notes: "※概算です\n金利は変わります" } });
+    expect(h).toContain('<p class="greeting">このたびは&lt;script&gt;x&lt;/script&gt;\n2行目</p>');
+    expect(h).toContain('<p class="remarks">※概算です\n金利は変わります</p>');
+    expect(h).toMatch(/\.greeting, \.remarks \{[^}]*white-space: pre-wrap;/);
+    expect(h.indexOf('class="greeting"')).toBeGreaterThan(h.indexOf("作成日"));
+    expect(h.indexOf('class="remarks"')).toBeLessThan(h.indexOf('class="company"'));
+    const plain = render(i, deal, { text: { greeting: null, notes: null } });
+    expect(plain).not.toContain('class="greeting"');
+    expect(plain).not.toContain('class="remarks"');
+  });
+});
 
 describe("資金計画表の HTML", () => {
   const purchase: FundingInputs = {
