@@ -102,6 +102,22 @@ describe("classifyDocument: ファイル名", () => {
     expect(classifyDocument({ fileName: "x.pdf", text: "預り証 … 敷金として" })?.kind).toBe("security_deposit");
   });
 
+  it("本文の離れた所に「敷金」があるだけの残代金領収書は、領収書のまま(@codex #560)", () => {
+    const r = classifyDocument({ fileName: "scan.pdf", text: "領収書\n残代金として受領。敷金の承継分を含む。" });
+    expect(r?.kind).toBe("settlement_receipt");
+    expect(r?.confidence).toBe("high");
+  });
+
+  it("複合語の手直しは見出しの近くだけ(本文の「精算します」「覚書」で種類を変えない・@codex #560)", () => {
+    const fees = classifyDocument({ fileName: "scan.pdf", text: "管理費等のご案内\n過不足は翌月に精算します。" });
+    expect(fees?.kind).toBe("mgmt_fees");
+    const lease = classifyDocument({
+      fileName: "scan.pdf",
+      text: `賃貸借契約書\n${"第1条…".repeat(30)}別途の覚書による。`,
+    });
+    expect(lease?.kind).toBe("lease_contract");
+  });
+
   it("名前だけの「領収書」は決済の領収書・low", () => {
     const r = byName("領収書.pdf");
     expect(r?.kind).toBe("settlement_receipt");

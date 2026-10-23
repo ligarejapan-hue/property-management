@@ -126,6 +126,22 @@ interface Hit {
   tentative: boolean;
 }
 
+/** 見出しの語の前後と見なす幅(文字)。「賃貸借契約の更新に関する覚書」「管理費等精算書」が収まる長さ。 */
+const NEAR_RADIUS = 14;
+
+/** 「敷金預り証」「保証金領収書」「預り証（敷金）」のように語が隣り合うと見なす幅(文字)。 */
+const ADJACENT_RADIUS = 5;
+
+/** 見出しの語そのものの長さの上限(「賃貸借契約」「管理費等」「預り証」…)。窓の後ろ側はこの分だけ延ばす。 */
+const MATCHED_WORD_MAX = 5;
+
+/** `position` から始まる語の前後 `radius` 文字の中に `words` のどれかがあるか(複合語の判定に使う)。 */
+function anyNear(haystack: string, position: number, words: readonly string[], radius = NEAR_RADIUS): boolean {
+  const start = Math.max(0, position - radius);
+  const window = haystack.slice(start, position + MATCHED_WORD_MAX + radius);
+  return words.some((w) => window.includes(w));
+}
+
 function firstIndexOf(haystack: string, words: readonly string[]): number {
   let best = -1;
   for (const w of words) {
@@ -139,7 +155,9 @@ function firstIndexOf(haystack: string, words: readonly string[]): number {
 function receiptHit(normalized: string): Hit | null {
   const receiptAt = firstIndexOf(normalized, RECEIPT_MARKERS);
   if (receiptAt < 0) return null;
-  if (firstIndexOf(normalized, RENTAL_DEPOSIT_CONTEXT) >= 0) return null;
+  // 「敷金預り証」「保証金領収書」のように**語のすぐ近く**に敷金/保証金があるときだけ賃貸の預り証。
+  // 本文のどこかに「敷金の承継」とあるだけの残代金領収書は、領収書のまま(@codex #560 P2)。
+  if (anyNear(normalized, receiptAt, RENTAL_DEPOSIT_CONTEXT, ADJACENT_RADIUS)) return null;
   const depositAt = firstIndexOf(normalized, DEPOSIT_CONTEXT);
   const settlementAt = firstIndexOf(normalized, SETTLEMENT_CONTEXT);
   if (depositAt >= 0 && (settlementAt < 0 || depositAt <= settlementAt)) {
@@ -169,18 +187,23 @@ function bestHit(normalized: string, receiptFirst: boolean): Hit | null {
 }
 
 /**
- * 「最も前の語」だけでは取り違える組み合わせの手直し(どちらも同じ段階の中での言い換え)。
- * - 「賃貸借契約の更新に関する覚書」: 賃貸借契約(先)に負けて賃貸借契約書になる → 覚書があれば更新の覚書
- * - 「管理費等精算書」: 管理費等(先)に負けて管理費の通知になる → 精算書があれば精算書
+ * 「最も前の語」だけでは取り違える複合語の手直し。**見出しの語のすぐ近く**にあるときだけ
+ * (本文のどこかに「覚書」「精算」とあるだけでは変えない・@codex #560 P2)。
+ * - 「賃貸借契約の更新に関する覚書」: 賃貸借契約(先)に負けて賃貸借契約書になる → 近くに更新の覚書の語があれば更新の覚書
+ * - 「管理費等精算書」: 管理費等(先)に負けて管理費の通知になる → 近くに精算書の語があれば精算書
  */
 function refineHit(normalized: string, hit: Hit): Hit {
-  if (hit.kind === "lease_contract" && normalized.includes("覚書")) {
+  if (hit.kind === "lease_contract" && anyNear(normalized, hit.position, keywordsOf("renewal_memo"))) {
     return { ...hit, kind: "renewal_memo" };
   }
-  if (hit.kind === "mgmt_fees" && normalized.includes("精算")) {
+  if (hit.kind === "mgmt_fees" && anyNear(normalized, hit.position, keywordsOf("settlement_statement"))) {
     return { ...hit, kind: "settlement_statement" };
   }
   return hit;
+}
+
+function keywordsOf(code: string): readonly string[] {
+  return docKindByCode(code)?.keywords ?? [];
 }
 
 /**
