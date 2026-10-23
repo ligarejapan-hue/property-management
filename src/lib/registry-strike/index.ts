@@ -38,8 +38,8 @@ export function ownersFromRights(
  * 甲区を読めて、1人以上を、確認の要る注記なしで判定できたときだけ true。
  * （例: 古い氏名に下線があるのに変更の付記を読めない → 旧氏名が残るので false）
  */
-export function hasDeterminedOwners(rights: RegistryRightsSummary | null | undefined): rights is RegistryRightsSummary {
-  return !!rights && rights.hasKouku && rights.currentOwners.length > 0 && rights.ownersConfirmed;
+export function hasDeterminedOwners(rights: RegistryRightsSummary): boolean {
+  return rights.hasKouku && rights.currentOwners.length > 0 && rights.ownersConfirmed;
 }
 
 export async function summarizeRegistryRights(input: {

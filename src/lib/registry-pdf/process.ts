@@ -792,7 +792,7 @@ export async function processRegistryPdf(
       args.rights !== undefined
         ? args.rights
         : await summarizeRegistryRights({ pdf: pdfBuffer ?? null, text });
-    if (hasDeterminedOwners(rights)) {
+    if (rights && hasDeterminedOwners(rights)) {
       parsed.owners = ownersFromRights(rights);
       ownersFromFullCertificate = true;
     } else {

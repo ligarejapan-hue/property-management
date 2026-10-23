@@ -125,7 +125,7 @@ export async function POST(request: NextRequest) {
     // 読み取りは全部事項では住所の切れ端・旧所有者を拾うため使わない（process.ts と同じ方針）。
     // 判定できなければ空にして、利用者に謄本を見て入力してもらう。
     if (isFullCertificateText(text)) {
-      if (hasDeterminedOwners(rights)) {
+      if (rights && hasDeterminedOwners(rights)) {
         parsed.owners = ownersFromRights(rights);
       } else if (rights && rights.currentOwners.length > 0) {
         // 判定は出たが確認の要る注記がある（旧氏名が残る等）。下書きとして見せ、人に確かめてもらう
