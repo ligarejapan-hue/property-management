@@ -1520,7 +1520,7 @@ describe("問い合わせ者(反響の申込者の氏名・2026-10-24)", () => {
     const res = await POST(req({ ...baseBody, property: { ...baseBody.property, inquirerName: "山田花子" } }));
     expect(res.status).toBe(200);
     expect(created.property?.[0]).toMatchObject({ inquirerName: null });
-    created.property = undefined;
+    delete created.property;
     mockPerms = [...FULL_PERMS.filter((p) => p.resource !== "owner_name"), READ_OWNER];
     const res2 = await POST(req({ ...baseBody, property: { ...baseBody.property, inquirerName: "山田花子" } }));
     expect(res2.status).toBe(200);
