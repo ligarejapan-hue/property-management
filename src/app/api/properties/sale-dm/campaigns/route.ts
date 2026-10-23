@@ -165,7 +165,7 @@ export async function POST(request: NextRequest) {
     const explicitSelection = !!(body.propertyIds && body.propertyIds.length > 0);
     // whereClause は buildPropertyListWhere の where と同型(既存実装に合わせ緩い型)。mgmt短絡時は null。
     let whereClause: Awaited<ReturnType<typeof buildPropertyListWhere>>["where"] | null;
-    let orderBy: ReturnType<typeof buildPropertyListOrderBy> = { updatedAt: "desc" };
+    let orderBy: ReturnType<typeof buildPropertyListOrderBy> = [{ updatedAt: "desc" }, { id: "asc" }];
     if (body.propertyIds && body.propertyIds.length > 0) {
       // チェックで選んだ物件が対象。field_staff の可視スコープは適用する。DM は「送付可(send)」の物件にのみ生成する
       // (filters 経路と同じ不変条件＝アプリのDMモデル)。一覧は全ステータス表示ゆえ、未判断(hold)/送付不可(no_send)を

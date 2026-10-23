@@ -237,13 +237,19 @@ export function propertyVisibilityScopeWhere(
   return { OR: [{ createdBy: session.id }, { assignedTo: session.id }] };
 }
 
-/** sortBy / sortOrder から Prisma orderBy を組み立てる。 */
-export function buildPropertyListOrderBy(query: PropertyListQuery) {
+/**
+ * sortBy / sortOrder から Prisma orderBy を組み立てる。
+ * ⚠最後に id で決着させる。まとめて取り込んだ物件は登録日時が同じになるため、
+ *   それだけで並べると skip/take のページ送りで同じ物件が2ページに出たり抜けたりする。
+ */
+export function buildPropertyListOrderBy(
+  query: PropertyListQuery,
+): Array<Record<string, unknown>> {
   // DM送信回数はリレーション件数(PropertyDmLog)で並べ替える(対応する列は無い)。
   if (query.sortBy === "dmSendCount") {
-    return { dmLogs: { _count: query.sortOrder } };
+    return [{ dmLogs: { _count: query.sortOrder } }, { id: "asc" }];
   }
-  return { [query.sortBy]: query.sortOrder };
+  return [{ [query.sortBy]: query.sortOrder }, { id: "asc" }];
 }
 
 /**

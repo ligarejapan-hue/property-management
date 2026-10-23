@@ -936,15 +936,15 @@ describe("buildPropertyListWhere（一覧 API と共有・従来挙動の固定�
     ).toBe(true);
   });
 
-  it("buildPropertyListOrderBy は { [sortBy]: sortOrder } を返す", () => {
-    expect(buildPropertyListOrderBy(baseQuery)).toEqual({ updatedAt: "desc" });
+  it("buildPropertyListOrderBy は [{ [sortBy]: sortOrder }, { id: \"asc\" }] を返す(同じ日時でもページ送りがぶれない)", () => {
+    expect(buildPropertyListOrderBy(baseQuery)).toEqual([{ updatedAt: "desc" }, { id: "asc" }]);
     expect(
       buildPropertyListOrderBy({
         ...baseQuery,
         sortBy: "createdAt",
         sortOrder: "asc",
       }),
-    ).toEqual({ createdAt: "asc" });
+    ).toEqual([{ createdAt: "asc" }, { id: "asc" }]);
   });
 });
 
