@@ -163,6 +163,7 @@ export default function DealSettingsPage() {
         <p className="text-xs text-gray-500">計算では、契約日(なければ決済日)が期間に入る表を使います。制度が変わるときは「期間を足す」で新しい期間の表を足し、古い表には終わりの日を入れます。</p>
         {editing && (
           <RateTableEditor
+            key={`${editing.kind}:${editing.table?.id || "new"}`}
             table={editing.table}
             kind={editing.kind}
             onDone={() => { setEditing(null); void reloadTables(); }}

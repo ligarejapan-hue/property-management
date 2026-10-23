@@ -67,23 +67,26 @@ export function settlementResult(i: SettlementInput): SettlementResult {
     return { value: o ?? computed, overridden: o !== undefined };
   };
 
+  // 元の金額が無くても、手で直した値があれば行を出す(その値を精算に入れる)。
+  const has = (k: OverrideKey) => i.overrides[k] !== undefined;
+
   const annual = sum([i.terms.fixedAssetTax, i.terms.cityPlanningTax]);
-  if (annual > 0) {
+  if (annual > 0 || has("settlement.propertyTax")) {
     const p = prorateAnnualTax(annual, i.terms.taxStart, date);
-    if (p.warning) warnings.push(p.warning);
+    if (p.warning && annual > 0) warnings.push(p.warning);
     const v = pick("settlement.propertyTax", p.buyer);
     rows.push({
-      key: "propertyTax", label: "固定資産税・都市計画税", period: `${date}〜${p.periodEnd}`, formula: p.formula,
+      key: "propertyTax", label: "固定資産税・都市計画税", period: `${date}〜${p.periodEnd}`, formula: annual > 0 ? p.formula : null,
       sellerToBuyer: 0, buyerToSeller: v.value, computed: p.buyer, overridden: v.overridden, note: null,
     });
   }
 
   const monthly = sum([i.terms.managementFee, i.terms.repairReserve, i.terms.otherMonthly]);
-  if (i.kindBase === "unit" && monthly > 0) {
+  if (i.kindBase === "unit" && (monthly > 0 || has("settlement.management"))) {
     const p = prorateMonthly(monthly, date, i.terms.managementPrepaidMonths);
     const v = pick("settlement.management", p.total);
     rows.push({
-      key: "management", label: "管理費・修繕積立金等", period: null, formula: p.formula,
+      key: "management", label: "管理費・修繕積立金等", period: null, formula: monthly > 0 ? p.formula : null,
       sellerToBuyer: 0, buyerToSeller: v.value, computed: p.total, overridden: v.overridden, note: null,
     });
   }
@@ -91,11 +94,11 @@ export function settlementResult(i: SettlementInput): SettlementResult {
   let depositRow: SettlementRow | null = null;
   if (i.hasOc) {
     const rentMonthly = sum(i.leases.map((l) => l.rent + l.commonFee + l.parking + l.other));
-    if (rentMonthly > 0) {
+    if (rentMonthly > 0 || has("settlement.rent")) {
       const p = prorateMonthly(rentMonthly, date, i.terms.rentPrepaidMonths);
       const v = pick("settlement.rent", p.total);
       rows.push({
-        key: "rent", label: "賃料・共益費・駐車場代等", period: null, formula: p.formula,
+        key: "rent", label: "賃料・共益費・駐車場代等", period: null, formula: rentMonthly > 0 ? p.formula : null,
         sellerToBuyer: v.value, buyerToSeller: 0, computed: p.total, overridden: v.overridden, note: null,
       });
     }

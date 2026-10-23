@@ -93,3 +93,17 @@ describe("取引1件の計算結果", () => {
     expect(c.missing).toEqual(expect.arrayContaining(["売買価格", "決済日時"]));
   });
 });
+
+describe("@codex: 元の金額が無くても、手で直した値は精算に入れる", () => {
+  it("固都税が空でも上書きがあれば行を出す", () => {
+    const r = settlementResult({ ...base, terms: { ...DEFAULT_TERMS }, overrides: { "settlement.propertyTax": 60_000 } });
+    expect(r.rows.find((x) => x.key === "propertyTax")).toMatchObject({ buyerToSeller: 60_000, overridden: true, formula: null });
+    expect(r.net.amount).toBe(60_000);
+  });
+  it("管理費(区分)・賃料(OC)も同じ・当てはまらない種別では出さない", () => {
+    const r = settlementResult({ ...base, kindBase: "unit", hasOc: true, terms: { ...DEFAULT_TERMS }, overrides: { "settlement.management": 10_000, "settlement.rent": 5_000 } });
+    expect(r.rows.map((x) => x.key)).toEqual(["management", "rent"]);
+    const land = settlementResult({ ...base, kindBase: "land", hasOc: false, terms: { ...DEFAULT_TERMS }, overrides: { "settlement.management": 10_000, "settlement.rent": 5_000 } });
+    expect(land.rows).toEqual([]);
+  });
+});

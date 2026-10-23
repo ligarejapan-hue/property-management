@@ -102,3 +102,14 @@ describe("最終レビューの直し", () => {
     expect((ed.match(/<ShareInput /g) ?? []).length).toBe(2);
   });
 });
+
+describe("@codex: 行の金額の打ち間違いを 0 に置き換えない", () => {
+  it("OC・評価額・その他の行は parseYen(v) ?? 0 で入れず、保存のときに読む", () => {
+    for (const p of ["src/components/deals/deal-oc-panel.tsx", "src/components/deals/assessments-editor.tsx", "src/components/deals/deal-money-panel.tsx", "src/components/deals/deal-settlement-panel.tsx"]) {
+      expect(read(p), p).not.toContain("parseYen(v) ?? 0");
+    }
+    for (const p of ["src/components/deals/deal-oc-panel.tsx", "src/components/deals/deal-property-panel.tsx", "src/components/deals/deal-money-panel.tsx", "src/components/deals/deal-settlement-panel.tsx"]) {
+      expect(read(p), p).toContain("untextify(");
+    }
+  });
+});

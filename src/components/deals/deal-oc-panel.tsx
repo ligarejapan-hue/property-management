@@ -5,7 +5,7 @@ import { Plus, Save, Trash2 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Field, SelectBox, YenInput, inputCls } from "./form-parts";
 import { dealsApi, DealApiError, errorText } from "@/lib/deals/client";
-import { parseYen, yenText } from "@/lib/deals/money-forms";
+import { parseYen, textify, untextify, yenText, type Texted } from "@/lib/deals/money-forms";
 import type { DealView } from "@/lib/deals/view";
 import type { DealCalc } from "@/lib/deals/calc/deal-calc";
 import type { Lease, SettlementTerms } from "@/lib/deals/schemas";
@@ -14,29 +14,43 @@ const conflictText = (e: unknown) =>
   e instanceof DealApiError && e.code === "VERSION_CONFLICT"
     ? "ほかの人が先に更新しました。画面を読み込み直してから、もう一度入力してください。"
     : errorText(e);
-const EMPTY_LEASE: Lease = {
-  room: null, tenant: null, contractType: "ordinary", period: null, rent: 0, commonFee: 0, parking: 0, other: 0,
-  deposit: 0, arrears: false, arrearsAmount: 0, manager: null,
+const MONEY_KEYS = ["rent", "commonFee", "parking", "other", "deposit", "arrearsAmount"] as const;
+type MoneyKey = (typeof MONEY_KEYS)[number];
+const MONEY_LABELS: Record<MoneyKey, string> = {
+  rent: "賃料", commonFee: "共益費", parking: "駐車場代", other: "その他", deposit: "預り敷金(保証金)", arrearsAmount: "滞納の金額",
 };
-type MoneyKey = "rent" | "commonFee" | "parking" | "other" | "deposit";
-const MONEY: [MoneyKey, string][] = [["rent", "賃料"], ["commonFee", "共益費"], ["parking", "駐車場代"], ["other", "その他"], ["deposit", "預り敷金(保証金)"]];
+/** 金額の欄は入力の文字のまま持つ(打ち間違いを 0 に置き換えない・@codex)。保存のときに読む。 */
+type LeaseForm = Texted<Lease, MoneyKey>;
+const EMPTY_LEASE: LeaseForm = {
+  room: null, tenant: null, contractType: "ordinary", period: null, rent: "", commonFee: "", parking: "", other: "",
+  deposit: "", arrears: false, arrearsAmount: "", manager: null,
+};
+const num = (s: string) => parseYen(s) ?? 0;
 
 /** OC(オーナーチェンジ)の賃貸条件。一棟なら部屋ごとに複数行。 */
 export default function DealOcPanel({ deal, calc, onSaved }: { deal: DealView; calc: DealCalc | null; onSaved: () => Promise<void> }) {
-  const [leases, setLeases] = useState<Lease[]>(deal.leases);
+  const [leases, setLeases] = useState<LeaseForm[]>(() => deal.leases.map((l) => textify(l, MONEY_KEYS)));
   const [depositMode, setDepositMode] = useState<SettlementTerms["depositMode"]>(deal.settlementTerms.depositMode);
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState<string | null>(null);
-  const set = (i: number, patch: Partial<Lease>) => setLeases((ls) => ls.map((l, j) => (j === i ? { ...l, ...patch } : l)));
+  const set = (i: number, patch: Partial<LeaseForm>) => setLeases((ls) => ls.map((l, j) => (j === i ? { ...l, ...patch } : l)));
   const txt = (v: string) => (v.trim() === "" ? null : v);
-  const monthly = leases.reduce((a, l) => a + l.rent + l.commonFee + l.parking + l.other, 0);
-  const deposits = leases.reduce((a, l) => a + l.deposit, 0);
+  const monthly = leases.reduce((a, l) => a + num(l.rent) + num(l.commonFee) + num(l.parking) + num(l.other), 0);
+  const deposits = leases.reduce((a, l) => a + num(l.deposit), 0);
 
   const save = async () => {
+    const parsed = leases.map((l, i) => untextify(l, MONEY_KEYS, (k) => `${i + 1}部屋目の${MONEY_LABELS[k]}`));
+    const bad = parsed.flatMap((p) => p.bad);
+    if (bad.length > 0) {
+      setError(`${bad.join("・")}は数字で入れてください。保存していません。`);
+      return;
+    }
     setSaving(true);
     setError(null);
     try {
-      await dealsApi.update(deal.id, { version: deal.version, leases, settlementTerms: { ...deal.settlementTerms, depositMode } });
+      await dealsApi.update(deal.id, {
+        version: deal.version, leases: parsed.map((p) => p.value), settlementTerms: { ...deal.settlementTerms, depositMode },
+      });
       await onSaved();
     } catch (e) {
       setError(conflictText(e));
@@ -61,15 +75,15 @@ export default function DealOcPanel({ deal, calc, onSaved }: { deal: DealView; c
               <SelectBox label="契約形態" value={l.contractType} onChange={(v) => set(i, { contractType: v as Lease["contractType"] })} options={[{ value: "ordinary", label: "普通借家" }, { value: "fixed_term", label: "定期借家" }]} />
             </Field>
             <Field label="契約期間"><input value={l.period ?? ""} onChange={(e) => set(i, { period: txt(e.target.value) })} maxLength={100} aria-label="契約期間" className={inputCls} /></Field>
-            {MONEY.map(([k, label]) => (
-              <Field key={k} label={label}><YenInput label={label} value={String(l[k])} onChange={(v) => set(i, { [k]: parseYen(v) ?? 0 })} /></Field>
+            {(["rent", "commonFee", "parking", "other", "deposit"] as const).map((k) => (
+              <Field key={k} label={MONEY_LABELS[k]}><YenInput label={MONEY_LABELS[k]} value={l[k]} onChange={(v) => set(i, { [k]: v })} /></Field>
             ))}
             <Field label="管理会社"><input value={l.manager ?? ""} onChange={(e) => set(i, { manager: txt(e.target.value) })} maxLength={100} aria-label="管理会社" className={inputCls} /></Field>
             <label className="flex items-end gap-2 pb-2 text-sm">
               <input type="checkbox" checked={l.arrears} onChange={(e) => set(i, { arrears: e.target.checked })} />
               滞納あり
             </label>
-            {l.arrears && <Field label="滞納の金額"><YenInput label="滞納の金額" value={String(l.arrearsAmount)} onChange={(v) => set(i, { arrearsAmount: parseYen(v) ?? 0 })} /></Field>}
+            {l.arrears && <Field label="滞納の金額"><YenInput label="滞納の金額" value={l.arrearsAmount} onChange={(v) => set(i, { arrearsAmount: v })} /></Field>}
           </div>
           <Button variant="ghost" size="sm" onClick={() => setLeases((ls) => ls.filter((_, j) => j !== i))}><Trash2 className="h-4 w-4" />この部屋を消す</Button>
         </div>

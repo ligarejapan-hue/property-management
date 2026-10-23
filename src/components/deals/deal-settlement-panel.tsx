@@ -5,7 +5,7 @@ import { Plus, Save, Trash2 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Field, OverrideField, SelectBox, YenInput, inputCls } from "./form-parts";
 import { dealsApi, DealApiError, errorText } from "@/lib/deals/client";
-import { SETTLEMENT_OVERRIDE_KEYS, invalidYenLabels, mergeOverrides, parseYen, yenText } from "@/lib/deals/money-forms";
+import { SETTLEMENT_OVERRIDE_KEYS, invalidYenLabels, mergeOverrides, parseYen, textify, untextify, yenText } from "@/lib/deals/money-forms";
 import type { DealView } from "@/lib/deals/view";
 import type { DealCalc } from "@/lib/deals/calc/deal-calc";
 import type { Overrides, SettlementTerms } from "@/lib/deals/schemas";
@@ -16,6 +16,7 @@ const conflictText = (e: unknown) =>
     : errorText(e);
 const s = (n: number | null) => (n === null ? "" : String(n));
 const MONEY_KEYS = ["fixedAssetTax", "cityPlanningTax", "managementFee", "repairReserve", "otherMonthly"] as const;
+const OTHER_KEYS = ["sellerToBuyer", "buyerToSeller"] as const;
 const MONEY_LABELS: Record<(typeof MONEY_KEYS)[number], string> = {
   fixedAssetTax: "固定資産税", cityPlanningTax: "都市計画税", managementFee: "管理費", repairReserve: "修繕積立金", otherMonthly: "その他の月額",
 };
@@ -24,6 +25,8 @@ type MoneyKey = (typeof MONEY_KEYS)[number];
 /** 精算(依頼書 3.2・4.4)。条件を入れて保存すると、サーバーの決済の計算の結果を表で出す。 */
 export default function DealSettlementPanel({ deal, calc, onSaved }: { deal: DealView; calc: DealCalc | null; onSaved: () => Promise<void> }) {
   const [terms, setTerms] = useState<SettlementTerms>(deal.settlementTerms);
+  // その他の精算の金額は入力の文字のまま持つ(打ち間違いを 0 に置き換えない・@codex)。
+  const [others, setOthers] = useState(() => deal.settlementTerms.others.map((o) => textify(o, OTHER_KEYS)));
   const [money, setMoney] = useState<Record<MoneyKey, string>>(
     Object.fromEntries(MONEY_KEYS.map((k) => [k, s(deal.settlementTerms[k])])) as Record<MoneyKey, string>,
   );
@@ -41,7 +44,8 @@ export default function DealSettlementPanel({ deal, calc, onSaved }: { deal: Dea
     });
 
   const save = async () => {
-    const bad = invalidYenLabels(MONEY_KEYS.map((k) => [MONEY_LABELS[k], money[k]]));
+    const parsedOthers = others.map((o, i) => untextify(o, OTHER_KEYS, (k) => `その他の精算${i + 1}行目の${k === "sellerToBuyer" ? "売主→買主" : "買主→売主"}`));
+    const bad = [...invalidYenLabels(MONEY_KEYS.map((k) => [MONEY_LABELS[k], money[k]])), ...parsedOthers.flatMap((p) => p.bad)];
     if (bad.length > 0) {
       setError(`${bad.join("・")}は数字で入れてください(例 120000)。保存していません。`);
       return;
@@ -54,7 +58,7 @@ export default function DealSettlementPanel({ deal, calc, onSaved }: { deal: Dea
         // 敷金の扱いは OC タブのもの。今の保存済みの値を使う(最終レビュー I-2)。
         depositMode: deal.settlementTerms.depositMode,
         ...(Object.fromEntries(MONEY_KEYS.map((k) => [k, parseYen(money[k])])) as Record<MoneyKey, number | null>),
-        others: terms.others.filter((o) => o.label.trim() !== ""),
+        others: parsedOthers.map((p) => p.value).filter((o) => o.label.trim() !== ""),
       };
       await dealsApi.update(deal.id, {
         version: deal.version, settlementTerms: next,
@@ -113,16 +117,16 @@ export default function DealSettlementPanel({ deal, calc, onSaved }: { deal: Dea
       <section className="space-y-3">
         <h3 className="text-sm font-semibold text-gray-700 dark:text-gray-300">その他の精算(測量費の負担分など)</h3>
         <ul className="space-y-2">
-          {terms.others.map((o, i) => (
+          {others.map((o, i) => (
             <li key={i} className="grid items-end gap-2 sm:grid-cols-[1fr_1fr_1fr_auto]">
-              <Field label="項目"><input value={o.label} onChange={(e) => setTerms((t) => ({ ...t, others: t.others.map((x, j) => (j === i ? { ...x, label: e.target.value } : x)) }))} maxLength={50} aria-label="精算の項目" className={inputCls} /></Field>
-              <Field label="売主→買主"><YenInput label="売主→買主" value={String(o.sellerToBuyer)} onChange={(v) => setTerms((t) => ({ ...t, others: t.others.map((x, j) => (j === i ? { ...x, sellerToBuyer: parseYen(v) ?? 0 } : x)) }))} /></Field>
-              <Field label="買主→売主"><YenInput label="買主→売主" value={String(o.buyerToSeller)} onChange={(v) => setTerms((t) => ({ ...t, others: t.others.map((x, j) => (j === i ? { ...x, buyerToSeller: parseYen(v) ?? 0 } : x)) }))} /></Field>
-              <Button variant="ghost" size="sm" onClick={() => setTerms((t) => ({ ...t, others: t.others.filter((_, j) => j !== i) }))}><Trash2 className="h-4 w-4" />消す</Button>
+              <Field label="項目"><input value={o.label} onChange={(e) => setOthers((os) => os.map((x, j) => (j === i ? { ...x, label: e.target.value } : x)))} maxLength={50} aria-label="精算の項目" className={inputCls} /></Field>
+              <Field label="売主→買主"><YenInput label="売主→買主" value={o.sellerToBuyer} onChange={(v) => setOthers((os) => os.map((x, j) => (j === i ? { ...x, sellerToBuyer: v } : x)))} /></Field>
+              <Field label="買主→売主"><YenInput label="買主→売主" value={o.buyerToSeller} onChange={(v) => setOthers((os) => os.map((x, j) => (j === i ? { ...x, buyerToSeller: v } : x)))} /></Field>
+              <Button variant="ghost" size="sm" onClick={() => setOthers((os) => os.filter((_, j) => j !== i))}><Trash2 className="h-4 w-4" />消す</Button>
             </li>
           ))}
         </ul>
-        <Button variant="secondary" size="sm" disabled={terms.others.length >= 20} onClick={() => setTerms((t) => ({ ...t, others: [...t.others, { label: "", sellerToBuyer: 0, buyerToSeller: 0 }] }))}>
+        <Button variant="secondary" size="sm" disabled={others.length >= 20} onClick={() => setOthers((os) => [...os, { label: "", sellerToBuyer: "", buyerToSeller: "" }])}>
           <Plus className="h-4 w-4" />
           精算の行を足す
         </Button>

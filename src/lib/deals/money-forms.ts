@@ -51,3 +51,29 @@ export function pickOverrides(o: Overrides, keys: readonly OverrideKey[]): Overr
   for (const k of keys) if (o[k] !== undefined) out[k] = o[k];
   return out;
 }
+
+/** 行の金額の欄を、入力の文字のまま持つ形にする(打ち間違いを 0 に置き換えないため・@codex)。 */
+export type Texted<T, K extends keyof T> = Omit<T, K> & Record<K, string>;
+
+export function textify<T extends object, K extends keyof T>(row: T, keys: readonly K[]): Texted<T, K> {
+  const out = { ...row } as Record<string, unknown>;
+  for (const k of keys) out[k as string] = String(row[k] ?? "");
+  return out as Texted<T, K>;
+}
+
+/** 保存のときに読む。空は 0。読めない欄は bad に名前を入れる(1つでもあれば保存しない)。 */
+export function untextify<T extends object, K extends keyof T>(
+  form: Texted<T, K>,
+  keys: readonly K[],
+  labelOf: (k: K) => string,
+): { value: T; bad: string[] } {
+  const out = { ...form } as Record<string, unknown>;
+  const bad: string[] = [];
+  for (const k of keys) {
+    const raw = (form as Record<string, unknown>)[k as string] as string;
+    const n = raw.trim() === "" ? 0 : parseYen(raw);
+    if (n === null) bad.push(labelOf(k));
+    out[k as string] = n ?? 0;
+  }
+  return { value: out as T, bad };
+}

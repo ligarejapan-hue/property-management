@@ -36,3 +36,9 @@ describe("取引の設定の画面", () => {
     expect(read(PAGE)).toMatch(/label="元の種別"[^>]*disabled=\{isBase\}/);
   });
 });
+
+describe("@codex: 税率の表の編集欄は、選んだ表が変わったら作り直す", () => {
+  it("RateTableEditor に選んだ表ごとの key", () => {
+    expect(read(PAGE)).toMatch(/<RateTableEditor\s+key=\{/);
+  });
+});

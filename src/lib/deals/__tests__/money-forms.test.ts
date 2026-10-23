@@ -39,3 +39,16 @@ describe("最終レビュー I-2: 上書きはそのパネルの鍵だけを差�
     expect(mergeOverrides(saved, { buildingPrice: 1 }, ["brokerageFee", "buildingPrice", "buildingTax"])).toEqual({ buildingPrice: 1, "settlement.propertyTax": 60_000 });
   });
 });
+
+describe("@codex: 行の金額は入力の文字のまま持ち、保存のときに読む", () => {
+  it("textify/untextify: 空は0・読めない欄は名前で返す・ほかはそのまま", async () => {
+    const { textify, untextify } = await import("../money-forms");
+    const row = { room: "101", rent: 80000, deposit: 160000 };
+    const form = textify(row, ["rent", "deposit"] as const);
+    expect(form).toEqual({ room: "101", rent: "80000", deposit: "160000" });
+    expect(untextify({ ...form, rent: "８００００", deposit: "" }, ["rent", "deposit"] as const, (k) => `1行目の${k}`)).toEqual({
+      value: { room: "101", rent: 80000, deposit: 0 }, bad: [],
+    });
+    expect(untextify({ ...form, rent: "8万" }, ["rent", "deposit"] as const, (k) => `1行目の${k}`).bad).toEqual(["1行目のrent"]);
+  });
+});

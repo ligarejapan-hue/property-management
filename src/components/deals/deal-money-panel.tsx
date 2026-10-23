@@ -5,7 +5,7 @@ import { Plus, Save, Trash2 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Field, OverrideField, YenInput, inputCls } from "./form-parts";
 import { dealsApi, DealApiError, errorText } from "@/lib/deals/client";
-import { MONEY_OVERRIDE_KEYS, bpToPercentText, invalidYenLabels, mergeOverrides, parseYen, percentTextToBp, yenText } from "@/lib/deals/money-forms";
+import { MONEY_OVERRIDE_KEYS, bpToPercentText, invalidYenLabels, mergeOverrides, parseYen, percentTextToBp, textify, untextify, yenText } from "@/lib/deals/money-forms";
 import type { DealView } from "@/lib/deals/view";
 import type { DealCalc } from "@/lib/deals/calc/deal-calc";
 import type { Costs, Overrides } from "@/lib/deals/schemas";
@@ -22,6 +22,8 @@ export default function DealMoneyPanel({ deal, calc, onSaved }: { deal: DealView
   const [deposit, setDeposit] = useState(s(deal.deposit));
   const [taxRate, setTaxRate] = useState(bpToPercentText(deal.taxRateBp));
   const [costs, setCosts] = useState<Costs>(deal.costs);
+  // その他の費用の金額は入力の文字のまま持つ(打ち間違いを 0 に置き換えない・@codex)。
+  const [others, setOthers] = useState(() => deal.costs.others.map((o) => textify(o, ["amount"] as const)));
   const [fees, setFees] = useState({ registrationFee: s(deal.costs.registrationFee), cancellationFee: s(deal.costs.cancellationFee), surveyFee: s(deal.costs.surveyFee) });
   const [overrides, setOverrides] = useState<Overrides>(deal.overrides);
   const [saving, setSaving] = useState(false);
@@ -41,9 +43,13 @@ export default function DealMoneyPanel({ deal, calc, onSaved }: { deal: DealView
       setError("消費税率は数字で入れてください(例 10)");
       return;
     }
-    const bad = invalidYenLabels([
-      ["売買価格", price], ["手付金", deposit], ["登記費用", fees.registrationFee], ["抹消費用", fees.cancellationFee], ["測量費", fees.surveyFee],
-    ]);
+    const parsedOthers = others.map((o, i) => untextify(o, ["amount"] as const, () => `その他の費用${i + 1}行目の金額`));
+    const bad = [
+      ...invalidYenLabels([
+        ["売買価格", price], ["手付金", deposit], ["登記費用", fees.registrationFee], ["抹消費用", fees.cancellationFee], ["測量費", fees.surveyFee],
+      ]),
+      ...parsedOthers.flatMap((p) => p.bad),
+    ];
     if (bad.length > 0) {
       setError(`${bad.join("・")}は数字で入れてください(例 30000000)。保存していません。`);
       return;
@@ -57,7 +63,7 @@ export default function DealMoneyPanel({ deal, calc, onSaved }: { deal: DealView
         costs: {
           ...costs,
           registrationFee: parseYen(fees.registrationFee), cancellationFee: parseYen(fees.cancellationFee), surveyFee: parseYen(fees.surveyFee),
-          others: costs.others.filter((o) => o.label.trim() !== ""),
+          others: parsedOthers.map((p) => p.value).filter((o) => o.label.trim() !== ""),
         },
         // ほかのタブ(精算)の上書きは、今の保存済みの値を残す(最終レビュー I-2)。
         overrides: mergeOverrides(deal.overrides, overrides, MONEY_OVERRIDE_KEYS),
@@ -120,22 +126,22 @@ export default function DealMoneyPanel({ deal, calc, onSaved }: { deal: DealView
           <Field label="測量費"><YenInput label="測量費" value={fees.surveyFee} onChange={(v) => setFees((f) => ({ ...f, surveyFee: v }))} /></Field>
         </div>
         <ul className="space-y-2">
-          {costs.others.map((o, i) => (
+          {others.map((o, i) => (
             <li key={i} className="grid items-end gap-2 sm:grid-cols-[1fr_1fr_auto]">
               <Field label="その他の費用(名前)">
-                <input value={o.label} onChange={(e) => setCosts((c) => ({ ...c, others: c.others.map((x, j) => (j === i ? { ...x, label: e.target.value } : x)) }))} maxLength={50} aria-label="その他の費用の名前" className={inputCls} />
+                <input value={o.label} onChange={(e) => setOthers((os) => os.map((x, j) => (j === i ? { ...x, label: e.target.value } : x)))} maxLength={50} aria-label="その他の費用の名前" className={inputCls} />
               </Field>
               <Field label="金額">
-                <YenInput label="その他の費用の金額" value={String(o.amount)} onChange={(v) => setCosts((c) => ({ ...c, others: c.others.map((x, j) => (j === i ? { ...x, amount: parseYen(v) ?? 0 } : x)) }))} />
+                <YenInput label="その他の費用の金額" value={o.amount} onChange={(v) => setOthers((os) => os.map((x, j) => (j === i ? { ...x, amount: v } : x)))} />
               </Field>
-              <Button variant="ghost" size="sm" onClick={() => setCosts((c) => ({ ...c, others: c.others.filter((_, j) => j !== i) }))}>
+              <Button variant="ghost" size="sm" onClick={() => setOthers((os) => os.filter((_, j) => j !== i))}>
                 <Trash2 className="h-4 w-4" />
                 消す
               </Button>
             </li>
           ))}
         </ul>
-        <Button variant="secondary" size="sm" disabled={costs.others.length >= 20} onClick={() => setCosts((c) => ({ ...c, others: [...c.others, { label: "", amount: 0 }] }))}>
+        <Button variant="secondary" size="sm" disabled={others.length >= 20} onClick={() => setOthers((os) => [...os, { label: "", amount: "" }])}>
           <Plus className="h-4 w-4" />
           その他の費用を足す
         </Button>
