@@ -34,6 +34,7 @@ export default function DealBasicPanel({
         ? "ほかの人が先に更新しました。画面を読み込み直してから、もう一度入力してください。"
         : errorText(e);
       setMessage({ kind: "err", text });
+    } finally {
       setSaving(false);
     }
   };

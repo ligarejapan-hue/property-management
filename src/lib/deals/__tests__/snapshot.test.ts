@@ -33,3 +33,13 @@ describe("保存済みの写しを読む", () => {
     expect(readBroker({ company: "試験不動産" })).toEqual({ ...EMPTY_BROKER, company: "試験不動産" });
   });
 });
+
+describe("物件の値が写しの範囲を外れているとき(最終レビュー I2)", () => {
+  it("範囲外の値は保存する前に空にする=保存した写しは必ず読める", () => {
+    const s = buildSnapshotFromProperty({ ...prop, builtYear: 45, access: "あ".repeat(600) });
+    expect(s.builtYear).toBeNull();
+    expect(s.access).toBeNull();
+    expect(s.roomNo).toBe("201");
+    expect(readSnapshot(s)).toEqual(s);
+  });
+});

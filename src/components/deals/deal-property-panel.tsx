@@ -44,6 +44,7 @@ export default function DealPropertyPanel({
       await onSaved();
     } catch (e) {
       setError(conflictText(e));
+    } finally {
       setBusy(false);
     }
   };

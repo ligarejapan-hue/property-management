@@ -31,3 +31,10 @@ describe("取引の詳しい画面", () => {
     for (const p of [PAGE, ...PANELS]) expect(read(p), p).not.toMatch(/<button[\s>]/);
   });
 });
+
+describe("保存のあとの読み込みに失敗しても「保存中」のまま固まらない(最終レビュー I1)", () => {
+  it("基本・物件のタブは finally で保存中を解く", () => {
+    expect(read(PANELS[0])).toMatch(/finally \{\s*setSaving\(false\);/);
+    expect(read(PANELS[1])).toMatch(/finally \{\s*setBusy\(false\);/);
+  });
+});
