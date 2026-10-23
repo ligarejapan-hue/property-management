@@ -354,7 +354,9 @@ function InboxItemCard({ item, onChanged }: { item: ReportInboxItem; onChanged: 
       {item.status !== "pending" && (
         <p role="alert" className="mt-2 text-sm text-amber-700 dark:text-amber-400">
           {item.status === "discarding"
-            ? "削除の途中で止まっています。もう一度「削除」を押してください(この書類は添付できません)。"
+            ? item.attachedAlready
+              ? "添付は済んでいます。受け取り箱側のファイルを消せなかったので、「削除」を押して片付けてください(添付した書類は消えません)。"
+              : "削除の途中で止まっています。もう一度「削除」を押してください(この書類は添付できません)。"
             : "取り込みの途中で止まっています。「削除」を押してから、必要ならもう一度入れてください。"}
         </p>
       )}

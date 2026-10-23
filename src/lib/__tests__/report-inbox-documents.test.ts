@@ -52,15 +52,24 @@ vi.mock("@/lib/audit", () => ({ writeAuditLog }));
 const { autoAdvanceCaseStatus } = vi.hoisted(() => ({ autoAdvanceCaseStatus: vi.fn(async () => true) }));
 vi.mock("@/lib/case-status-auto", () => ({ autoAdvanceCaseStatus }));
 
-const { storage } = vi.hoisted(() => ({
-  storage: {
-    upload: vi.fn(async (_b: Buffer, o: { key: string }) => ({ url: `/uploads/${o.key}`, key: o.key })),
-    delete: vi.fn(async () => {}),
-    read: vi.fn(async () => ({ body: Buffer.from("%PDF-1.7 x"), contentType: "application/pdf", size: 10 })),
-    keyFromUrl: vi.fn((u: string) => u.replace(/^\/uploads\//, "")),
-    getUrl: vi.fn(async (k: string) => `/uploads/${k}`),
-  },
-}));
+const { storage, deletedKeys } = vi.hoisted(() => {
+  // 消したキーは読めなくなる(removeFileAndVerify の「消せたと確かめる」を実物に寄せる)
+  const deletedKeys = new Set<string>();
+  return {
+    deletedKeys,
+    storage: {
+      upload: vi.fn(async (_b: Buffer, o: { key: string }) => ({ url: `/uploads/${o.key}`, key: o.key })),
+      delete: vi.fn(async (k: string) => {
+        deletedKeys.add(k);
+      }),
+      read: vi.fn(async (k: string) =>
+        deletedKeys.has(k) ? null : { body: Buffer.from("%PDF-1.7 x"), contentType: "application/pdf", size: 10 },
+      ),
+      keyFromUrl: vi.fn((u: string) => u.replace(/^\/uploads\//, "")),
+      getUrl: vi.fn(async (k: string) => `/uploads/${k}`),
+    },
+  };
+});
 vi.mock("@/lib/storage", async () => {
   const actual = await vi.importActual<typeof import("@/lib/storage")>("@/lib/storage");
   return { ...actual, getStorage: () => storage };
@@ -153,6 +162,7 @@ const created = () => db.attachment.create.mock.calls[0][0].data as Record<strin
 
 beforeEach(() => {
   vi.clearAllMocks();
+  deletedKeys.clear();
   session.current = { id: "u-office", role: "office_staff" };
   perms.current = FULL;
   extractText.mockResolvedValue("");
@@ -231,10 +241,22 @@ describe("添付(通常の書類)", () => {
       docTitle: "売買契約書_ハマイハイライズ305_20261001.pdf",
     });
     expect(autoAdvanceCaseStatus).not.toHaveBeenCalled();
-    // 受け取り箱の側のファイルは消しにいく(写し終えたので)
+    // 受け取り箱の側のファイルは消しにいく(写し終えたので)。消せたので「削除中」には戻さない
     expect(storage.delete).toHaveBeenCalledWith("report-inbox/1-abc.pdf");
+    expect(db.reportInboxItem.updateMany.mock.calls.some((c: [{ data: { status?: string } }]) => c[0].data.status === "discarding")).toBe(false);
     // 監査にファイル名は出さない
     expect(JSON.stringify(writeAuditLog.mock.calls[0][0])).not.toContain("売買契約書.pdf");
+  });
+
+  it("★受け取り箱側のファイルを消せたと確かめられなければ「削除中」に戻す(一覧に残って「削除」で片付けられる・@codex #565)", async () => {
+    // 消しても読めたまま(黙って失敗する保存先)
+    storage.delete.mockImplementationOnce(async () => {});
+    const res = await attachPOST(jsonReq({ propertyId: PID }), ctx());
+    expect(res.status).toBe(200);
+    expect(db.attachment.create).toHaveBeenCalled();
+    const back = db.reportInboxItem.updateMany.mock.calls.find((c: [{ data: { status?: string } }]) => c[0].data.status === "discarding");
+    expect(back).toBeTruthy();
+    expect(back[0].where).toEqual({ id: "item-1", status: "attached" });
   });
 
   it("人が種類を選び直すと manual で、その種類の名前になる", async () => {

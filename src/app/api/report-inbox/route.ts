@@ -138,6 +138,8 @@ export async function GET(request: NextRequest) {
         docStage: item.docStage,
         docConfidence: item.docConfidence,
         status: item.status,
+        // 添付は済んだが受け取り箱側のファイルを消せずに「削除中」で残っている行は、画面でそう伝える。
+        attachedAlready: item.attachmentId !== null,
         buildingName: item.buildingName,
         roomNo: item.roomNo,
         address: item.address,

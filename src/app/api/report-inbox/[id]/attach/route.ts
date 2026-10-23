@@ -206,9 +206,13 @@ export async function POST(request: NextRequest, { params }: { params: Promise<{
     }
 
     // 通常の書類は受け取り箱の側のファイルを消す(写し終えて添付が指すのは物件の置き場所)。
-    // ⚠消せなくても添付は成立している(残った方は report-inbox/ の守りの中・誰も指さない)。
+    // ⚠消せたと確かめられなければ「削除中」に戻す(@codex #565 2巡目)。添付は成立しているが、
+    //   受け取り箱の一覧に残って「削除」を押し直せる=個人情報の入ったファイルを置き去りにしない。
     if (!asReport) {
-      await removeFileAndVerify(storage, storage.keyFromUrl(item.fileUrl));
+      const removed = await removeFileAndVerify(storage, storage.keyFromUrl(item.fileUrl));
+      if (!removed) {
+        await prisma.reportInboxItem.updateMany({ where: { id, status: "attached" }, data: { status: "discarding" } });
+      }
     }
 
     await writeAuditLog({

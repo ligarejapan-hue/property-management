@@ -5387,6 +5387,8 @@ export interface ReportInboxItem {
   docKind: string | null;
   docStage: string | null;
   docConfidence: string | null;
+  /** 添付は済んだが受け取り箱側のファイルを消せずに「削除中」で残っている(「削除」で片付ける)。 */
+  attachedAlready?: boolean;
   originalSize: number | null;
   source: "sre" | "unknown";
   /** pending=未処理 / discarding=削除が途中で止まった / uploading=取り込みが途中で止まった(どちらも「削除」を押す) */
