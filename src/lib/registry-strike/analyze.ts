@@ -752,22 +752,28 @@ function firstBlock(b: Map<string, Cell[]>, labels: string[]): Cell[] | undefine
  * 権利者欄の名前。欄は「住所（複数行のこともある）→ 名前」で、名前は最後の行。
  * 「（取扱店 ○○支店）」の行は名前ではないので除く。
  */
+/** 住所の書き出し（都道府県、または市・区・郡まで）。 */
+const ADDRESS_START = /^(東京都|北海道|京都府|大阪府|[^0-9０-９]{2,3}県|[^0-9０-９]{1,5}?[市区郡])/;
+
 /** 権利者・債務者の欄の名前（複数なら全員）。 */
 function holderNames(cells: Cell[] | undefined): string[] {
   // ⚠ 下線の付いた行も落とさず「並び」で読む（名前に下線＝名称変更でも住所と取り違えない）
   const rows = rowsOf(cells ?? []).filter((r) => !/^（?取扱店/.test(compact(r.raw)));
-  // 権利者が複数のときは「住所→名前」が繰り返される。住所の行には数字（番地）が入り、
-  // 名前の行には入らない。数字の無い行で、次が住所（数字あり）か最後の行のものを名前とみなす。
-  // 漢数字の住所（「大手町一丁目」）もあるので、丁目・番地も住所の目印にする
-  const hasDigit = (t: string) => /[0-9０-９]|丁目|番地/.test(t);
+  // 名前は**最後の行**（社名に数字が入ることもあるので、数字の有無では決めない）。
+  // 複数のときは「住所→名前」が繰り返されるので、「次の行が住所の書き出し（都道府県・市区郡）」
+  // で、自分は住所らしくない行を、途中の名前とみなす。
+  if (rows.length === 0) return [];
+  const addressish = (t: string) => /[0-9０-９]|丁目|番地/.test(t) || ADDRESS_START.test(compact(t));
   const names: string[] = [];
   rows.forEach((r, i) => {
+    if (i === rows.length - 1) return;
     const next = rows[i + 1];
-    if (!hasDigit(r.raw) && (!next || hasDigit(next.raw))) names.push(clean(r.raw));
+    if (!addressish(r.raw) && ADDRESS_START.test(compact(next.raw))) names.push(clean(r.raw));
   });
-  if (names.length > 0) return names;
-  return rows.length > 0 ? [clean(rows[rows.length - 1].raw)] : [];
+  names.push(clean(rows[rows.length - 1].raw));
+  return names;
 }
+
 
 const CAUTION_RE = /差押|仮差押|仮処分|仮登記|買戻|競売|破産|処分禁止|請求権/;
 
