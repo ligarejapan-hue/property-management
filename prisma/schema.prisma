@@ -930,6 +930,14 @@ model Attachment {
   purgeStartedAt DateTime? @map("purge_started_at")
   /// 90日後の自動削除で「守りの記録として残した」時刻(反響資料・査定報告書)。7日ごとに見直す。
   purgeHeldAt    DateTime? @map("purge_held_at")
+  /// 書類の自動整理(2026-10-23 発注者要望・additive)。段階 pre_contract|contract|settlement|identity(NULL=その他)。
+  /// 種類と語の表は src/lib/doc-classify/classify.ts。謄本(type=registry)には付けない。
+  docStage      String? @map("doc_stage")
+  docKind       String? @map("doc_kind")
+  /// そろえた名前 `種類_物件名号室_YYYYMMDD.拡張子`。NULL=元の fileName のまま。
+  docTitle      String? @map("doc_title")
+  /// high(名前か見出しで確定)|low(本文の語だけ・確認待ち)|manual(人が決めた)。
+  docConfidence String? @map("doc_confidence")
   createdAt  DateTime @default(now()) @map("created_at")
 
   uploader   User      @relation(fields: [uploadedBy], references: [id])

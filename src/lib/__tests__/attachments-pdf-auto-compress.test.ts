@@ -72,7 +72,11 @@ vi.mock("@/lib/pdf-compress/fit", () => ({ fitPdfToLimit, reserveLargePdfSlot })
 vi.mock("@/lib/prisma", () => {
   const db: Record<string, unknown> = {
     property: { findUnique: vi.fn(async () => ({ id: "p-1", createdBy: "u-admin", assignedTo: null })) },
-    attachment: { create: vi.fn(async ({ data }: { data: Record<string, unknown> }) => ({ id: "a-1", ...data })) },
+    attachment: {
+      create: vi.fn(async ({ data }: { data: Record<string, unknown> }) => ({ id: "a-1", ...data })),
+      // 書類の自動整理(2026-10-23)で、同じ名前の連番のために既存の名前を読む。
+      findMany: vi.fn(async () => []),
+    },
   };
   db.$transaction = vi.fn(async (fn: (tx: unknown) => unknown) => fn(db));
   db.$queryRaw = vi.fn(async () => [{ id: "p-1" }]);

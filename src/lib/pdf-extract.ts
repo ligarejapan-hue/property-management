@@ -22,6 +22,37 @@ export async function extractTextFromPdf(buffer: Buffer): Promise<string> {
 }
 
 /**
+ * 先頭の数ページだけの文字(書類の自動判別・2026-10-23)。
+ * 判別に使うのは先頭 3,000 文字だけなので、20MB・数十ページの PDF を全部読まない。
+ * 使い終わった parser は必ず destroy する(pdf.js の文書が残らないように)。
+ * 時間の上限(既定 15 秒)を超えたら null(=判別は名前だけで続ける)。
+ */
+export async function extractHeadTextFromPdf(
+  buffer: Buffer,
+  opts: { pages?: number; timeoutMs?: number } = {},
+): Promise<string | null> {
+  const pages = opts.pages ?? 2;
+  const timeoutMs = opts.timeoutMs ?? 15_000;
+  const { PDFParse } = await import("pdf-parse");
+  const parser = new PDFParse({ data: buffer });
+  let timer: ReturnType<typeof setTimeout> | undefined;
+  try {
+    const timeout = new Promise<null>((resolve) => {
+      timer = setTimeout(() => resolve(null), timeoutMs);
+    });
+    const text = parser.getText({ first: pages }).then((r) => r.text);
+    return await Promise.race([text, timeout]);
+  } finally {
+    if (timer !== undefined) clearTimeout(timer);
+    try {
+      await parser.destroy();
+    } catch {
+      // 後始末の失敗は握りつぶす(読めた結果には影響しない)
+    }
+  }
+}
+
+/**
  * PDF Buffer が有効かどうかをチェックする (magic bytes 確認)。
  */
 export function isPdfBuffer(buffer: Buffer): boolean {

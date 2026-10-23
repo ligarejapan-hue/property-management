@@ -27,10 +27,25 @@ import {
   pdfTooLargeToAcceptMessage,
 } from "@/lib/pdf-compress/policy";
 import { fitPdfToLimit, reserveLargePdfSlot } from "@/lib/pdf-compress/fit";
-import { isPdfBuffer } from "@/lib/pdf-extract";
+import { extractHeadTextFromPdf, isPdfBuffer } from "@/lib/pdf-extract";
+import { docColumnsForNewAttachment } from "@/lib/doc-classify/assign";
 
 const ATTACHMENT_TYPES = ["general", "registry"] as const;
 type AttachmentType = (typeof ATTACHMENT_TYPES)[number];
+
+/**
+ * 書類の自動判別に使う PDF の文字(先頭2ページ・15秒まで)。
+ * 読めなくても登録は続ける(判別は名前だけ・当たらなければ「その他」に落ちるだけ)。
+ * ⚠謄本(registry)はここに来ない(段階・種類を付けない)。
+ */
+async function textForClassification(buffer: Buffer, mimeType: string): Promise<string | null> {
+  if (mimeType !== "application/pdf" || !isPdfBuffer(buffer)) return null;
+  try {
+    return await extractHeadTextFromPdf(buffer);
+  } catch {
+    return null;
+  }
+}
 
 const registerAttachmentSchema = z.object({
   fileName: z.string().min(1, "ファイル名は必須です"),
@@ -112,7 +127,8 @@ export async function POST(
 
     const property = await prisma.property.findUnique({
       where: { id: propertyId },
-      select: { id: true, createdBy: true, assignedTo: true },
+      // buildingName/roomNo/address は、そろえた名前(docTitle)の「物件名号室」に使う。
+      select: { id: true, createdBy: true, assignedTo: true, buildingName: true, roomNo: true, address: true },
     });
     if (!property) {
       throw new ApiError(404, "物件が見つかりません", "NOT_FOUND");
@@ -129,6 +145,8 @@ export async function POST(
     let mimeType: string;
     let attachmentType: AttachmentType = "general";
     let originalSize: number | null = null;
+    // 書類の自動判別に使う本文(PDF のときだけ・謄本は対象外)。
+    let classificationText: string | null = null;
 
     if (contentType.includes("multipart/form-data")) {
       // ⚠formData() はボディ全体をメモリに読む。大きいPDF(自動圧縮の対象)を受けるので、
@@ -207,6 +225,9 @@ export async function POST(
         // 大きさの検査は**縮めた後**の実物で行う。
         validate();
       }
+      if (attachmentType !== "registry") {
+        classificationText = await textForClassification(buffer, mimeType);
+      }
 
       const ext = fileName.split(".").pop() ?? "bin";
       const subdir = attachmentType === "registry" ? "registry" : "attachments";
@@ -253,6 +274,23 @@ export async function POST(
     //   ロック」の書き込み規約(#364)に全 type で揃える。ロックは作成の一瞬だけ。
     const attachment = await prisma.$transaction(async (tx) => {
       await lockPropertyRow(tx, propertyId);
+      // 書類の自動整理(2026-10-23): 謄本以外は名前と本文から段階・種類を当て、名前をそろえる。
+      //   当たらなければ4列とも null(=その他・元の名前のまま)。同じ名前には連番。
+      //   ⚠ロックの中で既存の名前を読む=同時に2件入れても同じ名前にならない。
+      let docColumns = {};
+      if (attachmentType !== "registry") {
+        const existing = await tx.attachment.findMany({
+          where: { targetType: "property", targetId: propertyId, isDeleted: false, docTitle: { not: null } },
+          select: { docTitle: true },
+        });
+        docColumns = docColumnsForNewAttachment(
+          { fileName, text: classificationText },
+          {
+            property: { buildingName: property.buildingName, roomNo: property.roomNo, address: property.address },
+            takenTitles: new Set(existing.map((e) => e.docTitle).filter((t): t is string => t !== null)),
+          },
+        );
+      }
       return tx.attachment.create({
         data: {
           targetType: "property",
@@ -265,6 +303,7 @@ export async function POST(
           originalSize,
           mimeType,
           uploadedBy: session.id,
+          ...docColumns,
         },
         include: {
           uploader: { select: { id: true, name: true } },

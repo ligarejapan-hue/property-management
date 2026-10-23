@@ -1092,6 +1092,7 @@ export default function PropertyDetailPage({
           <AttachmentTab
             propertyId={property.id}
             refreshToken={attachmentsRefreshToken}
+            caseStatus={property.caseStatus}
             // 謄本の増減後は「静かな再取得」で件数だけ更新する。fetchProperty は
             // loading を立てて添付タブを一旦アンマウントし、GET が一時失敗すると
             // 成功した添付操作ごとページをエラーに差し替えてしまう(@codex #429 P2)。

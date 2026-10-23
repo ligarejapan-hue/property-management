@@ -89,7 +89,8 @@ vi.mock("@/lib/prisma", () => {
     propertyPhoto: { aggregate: vi.fn(), create: vi.fn() },
     building: { findUnique: vi.fn() },
     buildingPhoto: { aggregate: vi.fn(), create: vi.fn() },
-    attachment: { create: vi.fn() },
+    // 書類の自動整理(2026-10-23)で、同じ名前の連番のために既存の名前(docTitle)を読む。
+    attachment: { create: vi.fn(), findMany: vi.fn(async () => []) },
   };
   // #402: 添付の作成は「親行ロック → tx.attachment.create」の tx 内になった。
   // callback へ同じ db を渡す(registry-pdf-attachment.test と同型)。

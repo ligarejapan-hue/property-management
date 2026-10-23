@@ -124,8 +124,10 @@ describe("S1b-4: attachment-tab の download intent", () => {
 describe("S1b-registry-preview: client 表示名の PII 限定（17-A Phase 1）", () => {
   it("registry は表示名を種別＋登録日(非PII)から作り、registry以外は att.fileName", () => {
     // registry の表示名は生ファイル名を使わず、非PIIの材料だけから組み立てる。
+    // registry 以外は displayTitle(att)=そろえた名前(docTitle)があればそれ、無ければ att.fileName
+    // (書類の自動整理 2026-10-23)。registry の分岐は不変。
     expect(attachSrc).toMatch(
-      /const displayName = isRegistry\s*\?\s*registryDisplayName\(\s*att\.registryCertificateType,\s*att\.createdAt,?\s*\)\s*:\s*att\.fileName/,
+      /const displayName = isRegistry\s*\?\s*registryDisplayName\(\s*att\.registryCertificateType,\s*att\.createdAt,?\s*\)\s*:\s*displayTitle\(att\)/,
     );
     // ラベルの文字列そのものは共通モジュールにしか無い（画面側で手書きしない）。
     expect(attachSrc).not.toMatch(/謄本\(/);
