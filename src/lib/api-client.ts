@@ -5382,6 +5382,13 @@ export interface ReportInboxItem {
   id: string;
   fileName: string;
   fileSize: number;
+  /** 書類の受け取り箱(2026-10-24): PDF 以外も受ける。種類・段階・確からしさは自動判別の結果(null=その他)。 */
+  mimeType: string;
+  docKind: string | null;
+  docStage: string | null;
+  docConfidence: string | null;
+  /** 添付は済んだが受け取り箱側のファイルを消せずに「削除中」で残っている(「削除」で片付ける)。 */
+  attachedAlready?: boolean;
   originalSize: number | null;
   source: "sre" | "unknown";
   /** pending=未処理 / discarding=削除が途中で止まった / uploading=取り込みが途中で止まった(どちらも「削除」を押す) */
@@ -5419,11 +5426,16 @@ export async function uploadReportToInbox(file: File): Promise<{ id: string; com
   return apiFetch("/api/report-inbox", { method: "POST", body: fd });
 }
 
-export async function attachReportInboxItem(id: string, propertyId: string): Promise<{ attachmentId: string }> {
+/** `docKind` を渡すと、その種類で添付する(人が選び直したとき)。渡さなければ受け取ったときの判別。 */
+export async function attachReportInboxItem(
+  id: string,
+  propertyId: string,
+  docKind?: string | null,
+): Promise<{ attachmentId: string }> {
   return apiFetch(`/api/report-inbox/${id}/attach`, {
     method: "POST",
     headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ propertyId }),
+    body: JSON.stringify(docKind === undefined ? { propertyId } : { propertyId, docKind }),
   });
 }
 

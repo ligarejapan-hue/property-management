@@ -10,7 +10,7 @@ import { canOpenReferralDocument } from "@/lib/uploads-authorization";
 import { isPropertyScopedRole } from "@/lib/property-access";
 
 export const REPORT_INBOX_FORBIDDEN_MESSAGE =
-  "査定報告書の受け取り箱は、所有者情報をすべて見られる方だけが使えます。管理者にご相談ください。";
+  "書類の受け取り箱は、所有者情報をすべて見られる方だけが使えます。管理者にご相談ください。";
 
 export function canUseReportInbox(session: { role: string }, perms: PermissionEntry[]): boolean {
   // ⚠**担当の範囲が限られる役割(現地担当)は使えない**(@codex PR#500 5巡目)。受け取り箱の
@@ -65,7 +65,13 @@ export const SCRUB_ON_DISCARD = {
  */
 export const STALE_UPLOAD_MS = 60 * 60 * 1000;
 
-/** 受け取り箱のファイルの置き場所(添付とは別の場所)。 */
-export function reportInboxStorageKey(now: number, uuid: string): string {
-  return `report-inbox/${now}-${uuid}.pdf`;
+/**
+ * 受け取り箱のファイルの置き場所(添付とは別の場所)。
+ * ⚠`report-inbox/` の下は、添付の記録が無くても所有者情報の書類として守られる(uploads-authorization)。
+ *   全書類に広げても(2026-10-24)、未処理の間はこの守りの中に置く。通常の書類は添付のときに
+ *   物件の置き場所へ写す(attach route)。
+ */
+export function reportInboxStorageKey(now: number, uuid: string, ext = "pdf"): string {
+  const safeExt = /^[a-z0-9]{1,8}$/.test(ext) ? ext : "bin";
+  return `report-inbox/${now}-${uuid}.${safeExt}`;
 }

@@ -185,7 +185,7 @@ export const SIDEBAR_GROUPS: NavGroup[] = [
       { label: "貼り付けて物件化", href: "/import/paste", icon: ic(ClipboardPaste), minRole: "office_staff" },
       // 査定サイトの報告書PDFを受け取り、候補の物件に添付する(2026-10-10)。
       // ⚠実際に使えるのは所有者情報をすべて見られる人だけ(画面を開くとAPIが判定して案内する)。
-      { label: "査定報告書の受け取り箱", href: "/import/report-inbox", icon: ic(FileText), minRole: "office_staff" },
+      { label: "書類の受け取り箱", href: "/import/report-inbox", icon: ic(FileText), minRole: "office_staff" },
       // ⚠**管理者のみ**。他人の担当物件もまとめて触るため(APIも管理者だけを通す)。
       //   1件ずつの反映は物件ページの所有者タブにある(こちらは溜まった分の一括処理)。
       { label: "謄本から所有者をまとめて反映", href: "/import/registry-owners", icon: ic(Users), minRole: "admin" },

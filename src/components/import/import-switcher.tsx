@@ -21,7 +21,7 @@ const ITEMS: { href: string; label: string; icon: React.ComponentType<{ classNam
   { href: "/import/registry-pdf", label: IMPORT_TYPE_LABELS.registry_pdf, icon: FileText },
   { href: "/import/registry-dm", label: "取得済みPDFを一括添付", icon: Files },
   { href: "/import/paste", label: "貼り付けて物件化", icon: ClipboardPaste },
-  { href: "/import/report-inbox", label: "査定報告書の受け取り箱", icon: FileCheck },
+  { href: "/import/report-inbox", label: "書類の受け取り箱", icon: FileCheck },
 ];
 
 export default function ImportSwitcher() {

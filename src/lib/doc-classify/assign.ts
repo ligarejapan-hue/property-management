@@ -67,6 +67,27 @@ export function docColumnsForNewAttachment(
 }
 
 /**
+ * 受け取り箱から添付するときの4列(種類・確からしさ・本文の日付は受け取ったときに決めてある)。
+ * 人が受け取り箱で種類を選び直していれば `confidence` は "manual"。種類が無ければ4列とも null。
+ */
+export function docColumnsForKnownKind(
+  input: {
+    kindCode: string | null;
+    confidence: DocConfidence;
+    fileName: string;
+    /** 本文から読んだ日付 YYYYMMDD。無ければ `now` の日付。 */
+    dateStamp: string | null;
+    now?: Date;
+  },
+  ctx: TitleContext,
+): DocColumns {
+  if (input.kindCode === null) return { ...EMPTY };
+  const date =
+    (input.dateStamp ? dateFromStamp(input.dateStamp) : null) ?? parseDateOnly(todayDateOnly(input.now)) ?? new Date();
+  return columnsForKind(input.kindCode, input.confidence, input.fileName, date, ctx);
+}
+
+/**
  * 人が種類を決め直したときの4列。日付は今の名前の日付を引き継ぎ、無ければ登録日。
  * `kindCode` が null なら「その他」(4列とも null)。
  */

@@ -1,18 +1,22 @@
 "use client";
 
 /**
- * 査定報告書の受け取り箱(2026-10-10)。
+ * 書類の受け取り箱(2026-10-10 査定報告書 → 2026-10-24 全書類)。
  *
- * SRE AI査定などでダウンロードした報告書PDFをここへドラッグ&ドロップ →
- * 報告書から読んだマンション名・部屋番号・所在地で物件の候補を出す →
- * 人が確かめて「この物件に添付」(査定報告書として添付)。
+ * 書類(PDF・画像・Excel など)をここへドラッグ&ドロップ →
+ * 本文から読んだマンション名・部屋番号・所在地(または登録済みの物件名)で物件の候補を出し、
+ * 種類(売買契約書・管理規約・賃貸借契約書…)も自動で当てる →
+ * 人が確かめて「この物件に添付」。査定報告書は今までどおり「査定報告書」として、それ以外は
+ * 通常の添付として段階のフォルダに入る。
  *
  * ⚠自動では添付しない(候補を出すだけ)。⚠添付しなかったものも消さない(発注者決定)。
- * ⚠使えるのは所有者情報をすべて見られる人だけ(報告書に依頼者の氏名が載るため)。
+ * ⚠使えるのは所有者情報をすべて見られる人だけ(報告書・契約書・本人確認書類に氏名が載るため)。
  */
 import { useCallback, useEffect, useState } from "react";
 import Link from "next/link";
 import { ExternalLink, FileText, Loader2, Search, Trash2 } from "lucide-react";
+import { DOC_KINDS, DOC_STAGES, docKindByCode, docStageLabel } from "@/lib/doc-classify/classify";
+import { MAX_ATTACHMENT_BYTES } from "@/lib/pdf-compress/policy";
 
 import { PageHeader } from "@/components/ui/page-header";
 import { Button } from "@/components/ui/button";
@@ -94,17 +98,15 @@ export default function ReportInboxPage() {
       const isPdf = f.type === "application/pdf" || f.name.toLowerCase().endsWith(".pdf");
       const update = (p: Partial<UploadProgress>) =>
         setUploads((prev) => prev.map((u, j) => (j === i ? { ...u, ...p } : u)));
-      if (!isPdf) {
-        update({ state: "error", message: "PDFではないので受け付けません" });
-        continue;
-      }
-      if (f.size > MAX_PDF_UPLOAD_BYTES) {
-        update({ state: "error", message: `大きすぎます(${formatMb(MAX_PDF_UPLOAD_BYTES)}まで)` });
+      // PDF は 50MB まで(8MB を超える分は自動で圧縮)。それ以外は物件の添付と同じ 20MB まで。
+      const limit = isPdf ? MAX_PDF_UPLOAD_BYTES : MAX_ATTACHMENT_BYTES;
+      if (f.size > limit) {
+        update({ state: "error", message: `大きすぎます(${formatMb(limit)}まで)` });
         continue;
       }
       update({
         state: "uploading",
-        message: f.size > LARGE_PDF_BYTES ? "大きいPDFを圧縮して受け取っています…(数十秒かかることがあります)" : "受け取っています…",
+        message: isPdf && f.size > LARGE_PDF_BYTES ? "大きいPDFを圧縮して受け取っています…(数十秒かかることがあります)" : "受け取っています…",
       });
       try {
         await uploadReportToInbox(f);
@@ -122,17 +124,17 @@ export default function ReportInboxPage() {
     <div>
       <ImportSwitcher />
       <PageHeader
-        title="査定報告書の受け取り箱"
-        description="査定サイト(SRE AI査定など)からダウンロードした報告書のPDFをここに入れると、報告書のマンション名・部屋番号・所在地から添付先の物件を探します。確かめてから「この物件に添付」を押してください。"
+        title="書類の受け取り箱"
+        description="どの物件のものか決まっていない書類(査定報告書・契約書・管理規約・賃貸借契約書など)をここに入れると、本文から読んだマンション名・部屋番号・所在地で添付先の物件を探し、種類も自動で当てます。確かめてから「この物件に添付」を押してください(自動では添付しません)。"
       />
 
       <div className="max-w-4xl space-y-6">
         <FileDropZone
-          accept="application/pdf,.pdf"
+          accept=".pdf,.xlsx,.xls,.csv,.docx,.jpg,.jpeg,.png,.webp,.heic"
           multiple
           disabled={uploading}
-          title="報告書のPDFをここにドラッグ＆ドロップ"
-          hint={`PDFのみ・${formatMb(MAX_PDF_UPLOAD_BYTES)}まで(8MBを超えるものは自動で圧縮して保存)`}
+          title="書類をここにドラッグ＆ドロップ"
+          hint={`PDFは${formatMb(MAX_PDF_UPLOAD_BYTES)}まで(8MBを超えるものは自動で圧縮して保存)・Excel/Word/CSV/画像は${formatMb(MAX_ATTACHMENT_BYTES)}まで`}
           onFiles={(files) => void handleFiles(files)}
         />
 
@@ -160,7 +162,7 @@ export default function ReportInboxPage() {
 
         <section>
           <h2 className="mb-3 text-sm font-semibold text-gray-800 dark:text-gray-100">
-            未処理の報告書{!loading && !loadError ? `(${total}件)` : ""}
+            未処理の書類{!loading && !loadError ? `(${total}件)` : ""}
           </h2>
           {loading ? (
             <p className="flex items-center gap-2 text-sm text-gray-500 dark:text-gray-400">
@@ -172,7 +174,7 @@ export default function ReportInboxPage() {
               {loadError}
             </p>
           ) : items.length === 0 ? (
-            <p className="text-sm text-gray-500 dark:text-gray-400">未処理の報告書はありません。</p>
+            <p className="text-sm text-gray-500 dark:text-gray-400">未処理の書類はありません。</p>
           ) : (
             <>
               <ul className="space-y-4">
@@ -209,13 +211,20 @@ function InboxItemCard({ item, onChanged }: { item: ReportInboxItem; onChanged: 
   const [query, setQuery] = useState("");
   const [searching, setSearching] = useState(false);
   const [results, setResults] = useState<ReportInboxSearchRow[] | null>(null);
+  // 種類は自動判別の結果を最初の値にし、人が選び直せる("" = その他)。
+  const [kind, setKind] = useState<string>(item.docKind ?? "");
+  const isSre = item.source === "sre";
+  const kindChanged = (kind === "" ? null : kind) !== (item.docKind ?? null);
+  const kindLabel = docKindByCode(kind)?.label ?? null;
+  const needsKindCheck =
+    !isSre && (item.docConfidence === "low" || (!item.docKind && !item.mimeType.startsWith("image/")));
 
   const attach = async () => {
     if (!selected) return;
     setBusy(true);
     setError(null);
     try {
-      await attachReportInboxItem(item.id, selected);
+      await attachReportInboxItem(item.id, selected, kindChanged ? (kind === "" ? null : kind) : undefined);
       setDone(selected);
       await onChanged();
     } catch (e) {
@@ -274,9 +283,49 @@ function InboxItemCard({ item, onChanged }: { item: ReportInboxItem; onChanged: 
             {item.originalSize ? `(自動で圧縮・元 ${formatMb(item.originalSize)})` : ""}
           </p>
           <p className="mt-2 text-sm text-gray-700 dark:text-gray-200">
-            報告書から読んだ物件: {clue || "(マンション名を読み取れませんでした)"}
+            書類から読んだ物件: {clue || "(マンション名を読み取れませんでした)"}
             {item.address ? ` / ${item.address}` : ""}
           </p>
+          {/* 種類(自動判別の結果)。査定報告書(SRE の書式)は固定。それ以外は人が選び直せる。 */}
+          <div className="mt-2 flex flex-wrap items-center gap-2 text-sm">
+            <span className="text-xs font-semibold text-gray-600 dark:text-gray-300">種類:</span>
+            {isSre ? (
+              <span className="rounded-full bg-indigo-50 px-2 py-0.5 text-xs text-indigo-700 dark:bg-indigo-950/40 dark:text-indigo-300">
+                査定報告書(査定サイトの書式)
+              </span>
+            ) : (
+              <>
+                <select
+                  aria-label="書類の種類"
+                  value={kind}
+                  disabled={busy || item.status !== "pending"}
+                  onChange={(e) => setKind(e.target.value)}
+                  className={`rounded border px-2 py-1 text-sm ${
+                    needsKindCheck && !kindChanged
+                      ? "border-amber-300 bg-amber-50 text-amber-800 dark:border-amber-700 dark:bg-amber-950/40 dark:text-amber-200"
+                      : "border-gray-300 bg-white text-gray-800 dark:border-gray-700 dark:bg-gray-950 dark:text-gray-100"
+                  }`}
+                >
+                  <option value="">その他(種類なし)</option>
+                  {DOC_STAGES.map((stage) => (
+                    <optgroup key={stage.code} label={stage.short ? `${stage.short} ${stage.label}` : stage.label}>
+                      {DOC_KINDS.filter((k) => k.stage === stage.code).map((k) => (
+                        <option key={k.code} value={k.code}>{k.label}</option>
+                      ))}
+                    </optgroup>
+                  ))}
+                </select>
+                <span className="text-xs text-gray-500 dark:text-gray-400">
+                  {kind ? `→ ${docStageLabel(docKindByCode(kind)?.stage)} のフォルダ` : "→ その他"}
+                </span>
+                {needsKindCheck && !kindChanged && (
+                  <span className="text-xs text-amber-700 dark:text-amber-300">
+                    {kindLabel ? "自動で当てました。確かめてください" : "種類を選んでください(そのままなら「その他」)"}
+                  </span>
+                )}
+              </>
+            )}
+          </div>
         </div>
         <div className="flex shrink-0 gap-2">
           {item.status === "pending" && (
@@ -287,7 +336,7 @@ function InboxItemCard({ item, onChanged }: { item: ReportInboxItem; onChanged: 
               className="inline-flex items-center gap-1 rounded-md border border-gray-300 px-3 py-1.5 text-xs text-gray-700 hover:bg-gray-50 dark:border-gray-700 dark:text-gray-200 dark:hover:bg-gray-800"
             >
               <ExternalLink className="h-3.5 w-3.5" />
-              報告書を開く
+              開く
             </a>
           )}
           <Button
@@ -305,7 +354,9 @@ function InboxItemCard({ item, onChanged }: { item: ReportInboxItem; onChanged: 
       {item.status !== "pending" && (
         <p role="alert" className="mt-2 text-sm text-amber-700 dark:text-amber-400">
           {item.status === "discarding"
-            ? "削除の途中で止まっています。もう一度「削除」を押してください(この報告書は添付できません)。"
+            ? item.attachedAlready
+              ? "添付は済んでいます。受け取り箱側のファイルを消せなかったので、「削除」を押して片付けてください(添付した書類は消えません)。"
+              : "削除の途中で止まっています。もう一度「削除」を押してください(この書類は添付できません)。"
             : "取り込みの途中で止まっています。「削除」を押してから、必要ならもう一度入れてください。"}
         </p>
       )}
@@ -389,8 +440,8 @@ function InboxItemCard({ item, onChanged }: { item: ReportInboxItem; onChanged: 
 
       {confirmDelete && (
         <ConfirmDialog
-          title="この報告書を受け取り箱から削除しますか?"
-          message="どの物件にも添付されずに消えます。元に戻せません(査定サイトから取り直せます)。"
+          title="この書類を受け取り箱から削除しますか?"
+          message="どの物件にも添付されずに消えます。元に戻せません(元のファイルから入れ直せます)。"
           confirmLabel="削除"
           busy={busy}
           onCancel={() => setConfirmDelete(false)}

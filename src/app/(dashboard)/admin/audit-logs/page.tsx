@@ -323,7 +323,7 @@ const TARGET_TABLE_LABELS: Record<string, string> = {
   edit_locks: "編集の鍵",
   mail_config: "メール送信設定",
   push_subscriptions: "通知の登録",
-  report_inbox_items: "査定報告書の受け取り箱",
+  report_inbox_items: "書類の受け取り箱",
 };
 
 export default function AuditLogsPage() {
