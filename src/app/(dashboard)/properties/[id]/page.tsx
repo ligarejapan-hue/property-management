@@ -100,6 +100,7 @@ import CorporateLookupPanel from "@/components/owners/corporate-lookup-panel";
 import { AddressLookupControls } from "@/components/address/address-lookup-controls";
 import { useScreenProtection } from "@/components/screen-protection/screen-protection-provider";
 import { SalesSheetCreateButton } from "@/components/sales-sheet/SalesSheetCreateButton";
+import CaseDatesField from "@/components/properties/case-dates-field";
 import { SalesSheetList } from "@/components/sales-sheet/SalesSheetList";
 import { salesSheetTemplateKindFor } from "@/lib/sales-sheet/template-kind";
 import { formatPhoneJp, isValidPhoneJp } from "@/lib/phone-format-jp";
@@ -239,6 +240,9 @@ interface ApiProperty {
   registryAttachmentCounts: { owner: number; all: number; other: number } | null;
   dmStatus: string;
   caseStatus: string;
+  /** 契約予定日・決済予定日("YYYY-MM-DD"・未定は null)。案件ステータス 8〜10 のときだけ欄が出る。 */
+  contractPlannedOn: string | null;
+  settlementPlannedOn: string | null;
   isArchived: boolean;
   note: string | null;
   gpsLat: number | null;
@@ -1332,6 +1336,13 @@ function BasicTab({
         badgeLabel={DM_STATUS_LABELS[property.dmStatus]}
       />
       <CaseStatusField
+        property={property}
+        onRefresh={onRefresh}
+        canWrite={canWrite}
+        editLockHeld={editLockHeld}
+      />
+      {/* 契約予定日・決済予定日(契約予定/契約完了/決済完了のときだけ出る・2026-10-23)。 */}
+      <CaseDatesField
         property={property}
         onRefresh={onRefresh}
         canWrite={canWrite}

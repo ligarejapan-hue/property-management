@@ -39,6 +39,7 @@ import {
   REGISTRY_STATUS_LABELS,
   DM_STATUS_LABELS,
 } from "@/lib/property-types";
+import { caseDatesSummary } from "@/lib/case-dates";
 
 // v2: バッジ色は共通レシピ(status-badge.tsx)の intent に集約。
 // scheduled は yellow → amber(warning)に統一。
@@ -63,6 +64,9 @@ interface ApiProperty {
   dmStatus: string;
   dmUndeliverableAt?: string | null;
   caseStatus: string;
+  /** 契約予定日・決済予定日("YYYY-MM-DD"・未定は null)。案件ステータス 8〜10 のときだけ一覧に出す。 */
+  contractPlannedOn?: string | null;
+  settlementPlannedOn?: string | null;
   introductionRoute?: string | null;
   isArchived: boolean;
   updatedAt: string;
@@ -1833,6 +1837,12 @@ function PropertiesPageInner() {
                       {CASE_STATUS_LABELS[property.caseStatus] ??
                         property.caseStatus}
                     </span>
+                    {/* 契約予定・契約完了・決済完了の物件だけ、契約/決済の日付を2行目に添える(未定は「未定」)。 */}
+                    {caseDatesSummary(property.caseStatus, property.contractPlannedOn ?? null, property.settlementPlannedOn ?? null) && (
+                      <span className="block text-[11px] text-gray-500 dark:text-gray-400">
+                        {caseDatesSummary(property.caseStatus, property.contractPlannedOn ?? null, property.settlementPlannedOn ?? null)}
+                      </span>
+                    )}
                   </td>
                   <td className="whitespace-nowrap px-4 py-3">
                     {property.assignee?.name ?? "-"}
@@ -2006,6 +2016,11 @@ function PropertiesPageInner() {
                   <span className="text-xs text-gray-600 dark:text-gray-300">
                     {CASE_STATUS_LABELS[property.caseStatus] ?? property.caseStatus}
                   </span>
+                  {caseDatesSummary(property.caseStatus, property.contractPlannedOn ?? null, property.settlementPlannedOn ?? null) && (
+                    <span className="text-[11px] text-gray-500 dark:text-gray-400">
+                      {caseDatesSummary(property.caseStatus, property.contractPlannedOn ?? null, property.settlementPlannedOn ?? null)}
+                    </span>
+                  )}
                 </div>
               </div>
             );

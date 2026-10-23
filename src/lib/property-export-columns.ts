@@ -24,6 +24,9 @@ export const EXPORT_COLUMNS: readonly ExportColumn[] = [
   { key: "registryStatus", header: "登記状況" },
   { key: "dmStatus", header: "DM判断" },
   { key: "caseStatus", header: "案件ステータス" },
+  // 案件ステータス 8〜10 の日付(未定は空欄)。YYYY-MM-DD で出す。
+  { key: "contractPlannedOn", header: "契約予定日" },
+  { key: "settlementPlannedOn", header: "決済予定日" },
   { key: "introductionRoute", header: "導入ルート" },
   { key: "assigneeName", header: "担当者名" },
   { key: "ownerNames", header: "所有者名" },

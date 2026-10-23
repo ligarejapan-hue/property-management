@@ -16,6 +16,25 @@ import {
 } from "@/lib/field-survey-constants";
 import { BUILDING_NAME_MAX_LENGTH } from "@/lib/property-building-name";
 import { fitsDecimalScale } from "@/lib/decimal-scale";
+import { parseDateOnly } from "@/lib/case-dates";
+
+/**
+ * 日付だけの列(DATE)。画面は "YYYY-MM-DD" か空(未定)を送る。暦にある日だけ受け付け、
+ * UTC の 0 時の Date にして保存する(DB は DATE なので時刻は持たない)。
+ */
+const dateOnlyColumn = z
+  .union([z.string(), z.null(), z.undefined()])
+  .transform((v, ctx) => {
+    if (v == null) return v;
+    const s = v.trim();
+    if (s === "") return null;
+    const d = parseDateOnly(s);
+    if (!d) {
+      ctx.addIssue({ code: z.ZodIssueCode.custom, message: "日付は YYYY-MM-DD の形で入力してください" });
+      return z.NEVER;
+    }
+    return d;
+  });
 
 /**
  * DECIMAL(p,s) 列に入れる数値。範囲だけでなく**小数の桁数**も見る。
@@ -253,6 +272,10 @@ export const updatePropertySchema = z.object({
   registryStatus: z.enum(["unconfirmed", "scheduled", "obtained"]).optional(),
   dmStatus: z.enum(["send", "hold", "no_send"]).optional(),
   caseStatus: z.enum(CASE_STATUS_VALUES).optional(),
+  // 契約予定日・決済予定日(案件ステータス 8〜10 の欄・2026-10-23)。null=未定。
+  // ⚠ステータスとの整合は見ない(欄は画面が出し分ける・値は戻しても残す)。
+  contractPlannedOn: dateOnlyColumn,
+  settlementPlannedOn: dateOnlyColumn,
   introductionRoute: z.enum(INTRODUCTION_ROUTE_VALUES).optional().nullable(),
   // DMの種類(台帳を指す・設計 2026-09-27 §3.6)。null=自動判定に戻す。
   // ⚠作成時(createPropertySchema)には足さない=作成時は自動で決める。
