@@ -194,10 +194,19 @@ export function parseRegistryText(raw: string): RegistryParseResult {
   if (lotNumber) confidence += 0.05;
 
   // --- 家屋番号 ---
-  const buildingMatch = text.match(
-    /家屋番号[：:\s]+([^\n]+?)(?:\n|種\s*類|$)/,
-  );
-  const buildingNumber = buildingMatch ? buildingMatch[1].trim() : null;
+  // ⚠区分建物の全部事項は、冒頭に一棟の建物の「専有部分の家屋番号 5-1-1 ～ 5-1-43」
+  //   （その建物の全部屋の範囲）があり、そのあとに専有部分の「家屋番号 ○番○の○」が来る。
+  //   最初の一致をそのまま使うと範囲を家屋番号にしてしまう（実物で確認）。
+  //   「専有部分の家屋番号」と、範囲（～）の値は飛ばし、最初の1部屋分の家屋番号を使う。
+  let buildingNumber: string | null = null;
+  for (const m of text.matchAll(/家屋番号[：:\s]+([^\n]+?)(?:\n|種\s*類|$)/g)) {
+    const before = text.slice(Math.max(0, (m.index ?? 0) - 5), m.index ?? 0);
+    // 外字（私用領域の文字）は実物で欄の空白として出ていたので落とす
+    const value = m[1].replace(/[\uE000-\uF8FF]/g, "").trim();
+    if (/専有部分の$/.test(before) || /[～〜]/.test(value) || value === "") continue;
+    buildingNumber = value;
+    break;
+  }
 
   // --- 地目フォールバック ---
   if (!landCategory) {
