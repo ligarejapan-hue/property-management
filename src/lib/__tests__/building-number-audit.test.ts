@@ -46,7 +46,11 @@ import { writeAuditLog } from "@/lib/audit";
 import { getStorage } from "@/lib/storage";
 import { extractTextFromPdf } from "@/lib/pdf-extract";
 import { isRangeBuildingNumber, suggestBuildingNumberFromText } from "@/lib/building-number-audit";
-import { GET } from "@/app/api/admin/building-number-audit/route";
+import { GET as rawGET } from "@/app/api/admin/building-number-audit/route";
+import { getApiSession } from "@/lib/api-helpers";
+
+const GET = (after?: string) =>
+  rawGET(new Request(`http://x/api/admin/building-number-audit${after ? `?after=${after}` : ""}`) as never);
 
 const pm = prisma as unknown as {
   property: { count: Mock; findMany: Mock; update: Mock; updateMany: Mock };
@@ -136,9 +140,54 @@ describe("GET /api/admin/building-number-audit", () => {
     expect(s).not.toContain("１－１－１");
   });
 
-  it("上限を超える件数なら truncated を立てる", async () => {
-    pm.property.count.mockResolvedValue(500);
+  it("上限を超えるときは truncated と続きの起点（最後の物件ID）を返す", async () => {
+    const many = Array.from({ length: 201 }, (_, i) => ({
+      id: `00000000-0000-4000-8000-${String(i).padStart(12, "0")}`,
+      address: "東京都世田谷区架空",
+      buildingName: null,
+      roomNo: null,
+      buildingNumber: "１－１ ～ １－９",
+    }));
+    pm.property.count.mockResolvedValue(201);
+    pm.property.findMany.mockResolvedValue(many);
+    pm.attachment.findFirst.mockResolvedValue(null);
     const body = await (await GET()).json();
     expect(body.truncated).toBe(true);
+    expect(body.hasMore).toBe(true);
+    expect(body.rows).toHaveLength(200);
+    expect(body.nextCursor).toBe(many[199].id);
+  });
+
+  it("after を渡すと、その物件の次から点検する（同じ先頭を読み直さない）", async () => {
+    const after = "00000000-0000-4000-8000-000000000123";
+    await GET(after);
+    expect(pm.property.findMany.mock.calls[0][0]).toMatchObject({ cursor: { id: after }, skip: 1 });
+  });
+
+  it("形の正しくない after は無視して先頭から", async () => {
+    await GET("../etc");
+    expect(pm.property.findMany.mock.calls[0][0].cursor).toBeUndefined();
+  });
+
+  it("謄本の読み直しが残り時間を超えたら待たずに未処理にし、続きの起点を返す", async () => {
+    vi.useFakeTimers();
+    try {
+      (getStorage().read as Mock).mockImplementation(() => new Promise(() => {})); // 返ってこない読み取り
+      const p = GET();
+      await vi.advanceTimersByTimeAsync(41_000);
+      const body = await (await p).json();
+      expect(body.timeBudgetExhausted).toBe(true);
+      expect(body.rows[0]).toMatchObject({ propertyId: "p1", status: "not_processed" });
+      expect(body.hasMore).toBe(true);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it("担当分しか見られない役割（field_staff）は、権限があっても使えない", async () => {
+    (getApiSession as Mock).mockResolvedValueOnce({ id: "u2", role: "field_staff" });
+    const res = await GET();
+    expect(res.status).toBe(403);
+    expect(pm.property.findMany).not.toHaveBeenCalled();
   });
 });

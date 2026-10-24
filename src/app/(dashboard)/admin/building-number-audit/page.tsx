@@ -47,6 +47,24 @@ export default function BuildingNumberAuditPage() {
     }
   }, []);
 
+  /** 続きから点検する。読み終えた行は残し、未処理の行は続きの結果で置き換える。 */
+  const runMore = useCallback(async () => {
+    if (!data?.nextCursor && !data?.hasMore) return;
+    setLoading(true);
+    setError(null);
+    try {
+      const next = await fetchBuildingNumberAudit(data.nextCursor);
+      setData({
+        ...next,
+        rows: [...data.rows.filter((r) => r.status !== "not_processed"), ...next.rows],
+      });
+    } catch (e) {
+      setError(e instanceof Error ? e.message : "点検に失敗しました");
+    } finally {
+      setLoading(false);
+    }
+  }, [data]);
+
   const rows = data?.rows ?? [];
 
   return (
@@ -60,6 +78,11 @@ export default function BuildingNumberAuditPage() {
         <Button onClick={run} disabled={loading} loading={loading} loadingLabel="点検中">
           点検を実行
         </Button>
+        {data?.hasMore && (
+          <Button variant="secondary" onClick={runMore} disabled={loading}>
+            続きを点検
+          </Button>
+        )}
         {data && (
           <span className="text-sm text-gray-600 dark:text-gray-300">
             対象 {data.total.toLocaleString()}件・候補あり{" "}
@@ -77,9 +100,9 @@ export default function BuildingNumberAuditPage() {
           <AlertTriangle className="mt-0.5 h-4 w-4 shrink-0" />
           <span>
             {data.truncated &&
-              `対象が上限（${data.maxTargets.toLocaleString()}件）を超えたため、先頭${data.maxTargets.toLocaleString()}件だけを表示しています。直したあとにもう一度点検すると残りが出ます。`}
+              `対象が多いため、${data.maxTargets.toLocaleString()}件ずつ点検しています。「続きを点検」で残りを点検します。`}
             {data.timeBudgetExhausted &&
-              "処理時間の上限に達したため、一部は未処理です。もう一度「点検を実行」してください。"}
+              "処理時間の上限に達したため、一部は未処理です。「続きを点検」で続きから点検します。"}
           </span>
         </div>
       )}

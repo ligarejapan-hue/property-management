@@ -7,6 +7,11 @@
 // 権限: user_management:read（管理者エリア）AND property:read。
 // 監査: 件数・フラグのみ（物件ID・住所・家屋番号の値は記録しない）。
 // 時間: 謄本の読み直しは 1 件ずつ。BUILDING_NUMBER_AUDIT_TIME_BUDGET_MS を超えたら残りは未処理で返す。
+//   読み直し1件ごとにも残り時間で打ち切る（遅い保存先・重いPDFで上限を超えないため）。
+// 続き: 未処理・上限超えのときは nextCursor（物件ID）を返す。?after=<物件ID> で続きから点検する
+//   （同じ先頭を何度も読み直して、後ろの物件にいつまでも届かない、を防ぐ）。
+// 担当分しか見られない役割（field_staff）は、権限の付与があっても使えない（全物件を見る道具のため）。
+import { NextRequest } from "next/server";
 import prisma from "@/lib/prisma";
 import {
   getApiSession,
@@ -16,6 +21,7 @@ import {
   apiResponse,
 } from "@/lib/api-helpers";
 import { hasPermission } from "@/lib/permissions";
+import { isPropertyScopedRole } from "@/lib/property-access";
 import { writeAuditLog } from "@/lib/audit";
 import { getStorage } from "@/lib/storage";
 import { extractTextFromPdf } from "@/lib/pdf-extract";
@@ -62,9 +68,28 @@ async function suggestFor(
   }
 }
 
-export async function GET() {
+/** 残り時間で打ち切る。打ち切ったら null（読み直し自体は止められないが、応答は待たない）。 */
+async function withinBudget<T>(p: Promise<T>, remainingMs: number): Promise<T | null> {
+  if (remainingMs <= 0) return null;
+  let timer: ReturnType<typeof setTimeout> | undefined;
+  const timeout = new Promise<null>((resolve) => {
+    timer = setTimeout(() => resolve(null), remainingMs);
+  });
+  try {
+    return await Promise.race([p, timeout]);
+  } finally {
+    if (timer) clearTimeout(timer);
+  }
+}
+
+const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+
+export async function GET(request: NextRequest) {
   try {
     const session = await getApiSession();
+    if (isPropertyScopedRole(session.role)) {
+      throw new ApiError(403, "権限がありません", "FORBIDDEN");
+    }
     const perms = await getUserPermissions(session.id);
     if (!hasPermission(perms, "user_management", "read")) {
       throw new ApiError(403, "権限がありません", "FORBIDDEN");
@@ -73,33 +98,47 @@ export async function GET() {
       throw new ApiError(403, "物件閲覧の権限がありません", "FORBIDDEN");
     }
 
+    const afterRaw = new URL(request.url).searchParams.get("after");
+    const after = afterRaw && UUID_RE.test(afterRaw) ? afterRaw : null;
+
     const where = {
       isArchived: false,
       OR: [{ buildingNumber: { contains: "～" } }, { buildingNumber: { contains: "〜" } }],
     };
-    const [total, properties] = await Promise.all([
+    const [total, fetched] = await Promise.all([
       prisma.property.count({ where }),
       prisma.property.findMany({
         where,
-        orderBy: { createdAt: "asc" },
-        take: BUILDING_NUMBER_AUDIT_MAX_TARGETS,
+        orderBy: [{ createdAt: "asc" }, { id: "asc" }],
+        // 1件多く取って、続きがあるかを知る
+        take: BUILDING_NUMBER_AUDIT_MAX_TARGETS + 1,
+        ...(after ? { cursor: { id: after }, skip: 1 } : {}),
         select: { id: true, address: true, buildingName: true, roomNo: true, buildingNumber: true },
       }),
     ]);
-    const truncated = total > properties.length;
+    const truncated = fetched.length > BUILDING_NUMBER_AUDIT_MAX_TARGETS;
+    const properties = fetched.slice(0, BUILDING_NUMBER_AUDIT_MAX_TARGETS);
 
     const started = Date.now();
     let timeBudgetExhausted = false;
+    /** 読み直しを終えた最後の物件（続きの起点）。 */
+    let lastDoneId: string | null = after;
     const rows: BuildingNumberAuditRow[] = [];
     for (const p of properties) {
-      if (!isRangeBuildingNumber(p.buildingNumber)) continue;
-      let result: { suggestion: string | null; status: BuildingNumberSuggestionStatus };
-      if (timeBudgetExhausted || Date.now() - started > BUILDING_NUMBER_AUDIT_TIME_BUDGET_MS) {
-        timeBudgetExhausted = true;
-        result = { suggestion: null, status: "not_processed" };
-      } else {
-        result = await suggestFor(p.id);
+      if (!isRangeBuildingNumber(p.buildingNumber)) {
+        if (!timeBudgetExhausted) lastDoneId = p.id;
+        continue;
       }
+      let result: { suggestion: string | null; status: BuildingNumberSuggestionStatus } | null = null;
+      if (!timeBudgetExhausted) {
+        result = await withinBudget(
+          suggestFor(p.id),
+          BUILDING_NUMBER_AUDIT_TIME_BUDGET_MS - (Date.now() - started),
+        );
+        if (result === null) timeBudgetExhausted = true;
+        else lastDoneId = p.id;
+      }
+      if (result === null) result = { suggestion: null, status: "not_processed" };
       rows.push({
         propertyId: p.id,
         address: p.address,
@@ -117,11 +156,20 @@ export async function GET() {
       detail: { total, returned: rows.length, suggested, truncated, timeBudgetExhausted },
     });
 
+    // 続きがあるとき（時間切れ・上限超え）だけ、続きの起点を返す
+    const nextCursor =
+      timeBudgetExhausted || truncated
+        ? (timeBudgetExhausted ? lastDoneId : properties[properties.length - 1]?.id ?? null)
+        : null;
+
     return apiResponse({
       total,
       truncated,
       timeBudgetExhausted,
       maxTargets: BUILDING_NUMBER_AUDIT_MAX_TARGETS,
+      // 時間切れで1件も読めなかったときは null になり得る（その場合は先頭から＝after をそのまま返す）
+      nextCursor: nextCursor ?? (timeBudgetExhausted ? after : null),
+      hasMore: timeBudgetExhausted || truncated,
       rows,
     });
   } catch (error) {

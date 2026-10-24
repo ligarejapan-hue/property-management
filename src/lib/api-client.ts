@@ -4557,16 +4557,20 @@ export interface BuildingNumberAuditResponse {
   truncated: boolean;
   timeBudgetExhausted: boolean;
   maxTargets: number;
+  /** 続きがあるとき（時間切れ・上限超え）の起点。次の呼び出しに after として渡す。 */
+  nextCursor: string | null;
+  hasMore: boolean;
   rows: BuildingNumberAuditRowDTO[];
 }
 
 /** 家屋番号に範囲が入っている物件の一覧（read-only）。 */
-export async function fetchBuildingNumberAudit(): Promise<BuildingNumberAuditResponse> {
+export async function fetchBuildingNumberAudit(after?: string | null): Promise<BuildingNumberAuditResponse> {
   if (USE_MOCK) {
     await mockDelay();
-    return { total: 0, truncated: false, timeBudgetExhausted: false, maxTargets: 200, rows: [] };
+    return { total: 0, truncated: false, timeBudgetExhausted: false, maxTargets: 200, nextCursor: null, hasMore: false, rows: [] };
   }
-  return apiFetch<BuildingNumberAuditResponse>("/api/admin/building-number-audit");
+  const q = after ? `?after=${encodeURIComponent(after)}` : "";
+  return apiFetch<BuildingNumberAuditResponse>(`/api/admin/building-number-audit${q}`);
 }
 
 // ---------- DM送付管理(PR-A): 宛名CSVの控えと送付確定 ----------
