@@ -355,6 +355,8 @@ const ACTION_EXTRA_KEYS: Readonly<Record<string, ReadonlySet<string>>> = {
   // numeric-force-safe 側で許可する（非数値は PII 流入の恐れがあるため [REDACTED]）。
   // owner 名 / zip / address 等の PII は route 側で記録しないが、混入しても
   // allowlist 外 + denylist で引き続き [REDACTED]。
+  // 家屋番号の点検（read-only）の閲覧監査。件数とフラグだけ（物件ID・住所・家屋番号は記録しない）。
+  building_number_audit_view: new Set(["truncated", "timeBudgetExhausted"]),
   postal_code_audit_list: new Set([
     "apiConfigured",
     "truncated",
@@ -626,6 +628,8 @@ const ACTION_NUMERIC_FORCE_SAFE_KEYS: Readonly<
   // 全階層に適用される）。非数値が来た場合は PII 流入の恐れがあるため [REDACTED]。
   // （match は ALWAYS_SAFE だが numeric-force-safe が優先されるため、postal action
   //  では非数値 match も [REDACTED] になる＝防御の二重化。）
+  // 家屋番号の点検の件数（有限数値のときだけ）。
+  building_number_audit_view: new Set(["returned", "suggested"]),
   postal_code_audit_list: new Set([
     "processed",
     "notProcessed",

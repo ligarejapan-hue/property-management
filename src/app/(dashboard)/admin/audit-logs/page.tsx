@@ -192,6 +192,7 @@ const ACTION_LABELS: Record<string, string> = {
   password_change_self: "パスワード変更(本人)",
   // --- 動的生成 action (三項演算子/ヘルパ経由・@codex R3 で網羅) ---
   postal_code_audit_list: "郵便番号監査一覧",
+  building_number_audit_view: "家屋番号チェック一覧",
   postal_code_audit_csv_export: "郵便番号監査CSVエクスポート",
   pii_copy_attempt: "保護画面でのコピー操作",
   pii_cut_attempt: "保護画面での切り取り操作",

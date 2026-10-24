@@ -4533,6 +4533,42 @@ export async function fetchPostalCodeAudit(): Promise<PostalCodeAuditResponse> {
   return apiFetch<PostalCodeAuditResponse>("/api/admin/postal-code-audit");
 }
 
+// ---------- 家屋番号の点検(read-only) ----------
+
+export type BuildingNumberAuditStatus =
+  | "suggested"
+  | "no_registry"
+  | "unreadable"
+  | "not_found"
+  | "not_processed";
+
+export interface BuildingNumberAuditRowDTO {
+  propertyId: string;
+  address: string;
+  buildingName: string | null;
+  roomNo: string | null;
+  buildingNumber: string;
+  suggestion: string | null;
+  status: BuildingNumberAuditStatus;
+}
+
+export interface BuildingNumberAuditResponse {
+  total: number;
+  truncated: boolean;
+  timeBudgetExhausted: boolean;
+  maxTargets: number;
+  rows: BuildingNumberAuditRowDTO[];
+}
+
+/** 家屋番号に範囲が入っている物件の一覧（read-only）。 */
+export async function fetchBuildingNumberAudit(): Promise<BuildingNumberAuditResponse> {
+  if (USE_MOCK) {
+    await mockDelay();
+    return { total: 0, truncated: false, timeBudgetExhausted: false, maxTargets: 200, rows: [] };
+  }
+  return apiFetch<BuildingNumberAuditResponse>("/api/admin/building-number-audit");
+}
+
 // ---------- DM送付管理(PR-A): 宛名CSVの控えと送付確定 ----------
 
 export interface DmBatchSummary {
