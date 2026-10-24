@@ -27,6 +27,7 @@ import { recordChanges, PROPERTY_TRACKED_FIELDS } from "@/lib/change-log";
 import { normalizeName, normalizeAddress } from "@/lib/normalize";
 import { pickReusableAddresslessOwner } from "@/lib/registry-pdf/owner-reuse";
 import { parseRegistryText } from "@/lib/pdf-registry-parser";
+import { supportsUnitFields } from "@/lib/property-building-name";
 import {
   FULL_CERTIFICATE_OWNERS_UNDETERMINED_WARNING,
   hasDeterminedOwners,
@@ -889,11 +890,17 @@ export async function processRegistryPdf(
       //   下見でも確認画面でも所有者しか見せていないのに、見ていない項目が黙って
       //   変わるのは筋が通らない。とくに**不動産番号が入るとその物件は謄本の
       //   所在検索が使えなくなる**(「不動産番号は今後も作らない」という方針に反する)。
+      // 区分の登記簿の専有面積(2026-10-25)。区分マンションで、欄が空のときだけ埋める
+      // (手で入れた値・前の謄本で入った値は上書きしない=ほかの3項目と同じ)。
+      const parsedUnitFloorArea = parsed.unitFloorArea ?? null;
+      const wouldFillUnitArea = (p: { propertyType: string; exclusiveAreaRegistry: unknown }) =>
+        supportsUnitFields(p.propertyType) && p.exclusiveAreaRegistry == null && !!parsedUnitFloorArea;
       const wouldFillProperty =
         !args.ownersOnly &&
         ((!existing.realEstateNumber && !!parsed.realEstateNumber) ||
           (!existing.lotNumber && !!parsed.lotNumber) ||
-          (!existing.buildingNumber && !!parsed.buildingNumber));
+          (!existing.buildingNumber && !!parsed.buildingNumber) ||
+          wouldFillUnitArea(existing));
       const wouldAdvanceStatus =
         !args.ownersOnly && existing.registryStatus === "unconfirmed" && !!parsed.realEstateNumber;
 
@@ -936,6 +943,9 @@ export async function processRegistryPdf(
                   realEstateNumber: true,
                   lotNumber: true,
                   buildingNumber: true,
+                  // 区分の登記簿の専有面積(2026-10-25)。種別は埋めてよいかの判定に使う(merged には入らない)。
+                  exclusiveAreaRegistry: true,
+                  propertyType: true,
                 },
               });
               // ロック直後に取れない=行ロックとfindUniqueの間で削除された。
@@ -951,7 +961,8 @@ export async function processRegistryPdf(
               const freshWouldFillProperty =
                 (!fresh.realEstateNumber && !!parsed.realEstateNumber) ||
                 (!fresh.lotNumber && !!parsed.lotNumber) ||
-                (!fresh.buildingNumber && !!parsed.buildingNumber);
+                (!fresh.buildingNumber && !!parsed.buildingNumber) ||
+                wouldFillUnitArea(fresh);
               const freshWouldAdvanceStatus =
                 fresh.registryStatus === "unconfirmed" && !!parsed.realEstateNumber;
 
@@ -973,6 +984,9 @@ export async function processRegistryPdf(
                 }
                 if (!fresh.buildingNumber && parsed.buildingNumber) {
                   fieldUpdates.buildingNumber = parsed.buildingNumber;
+                }
+                if (wouldFillUnitArea(fresh)) {
+                  fieldUpdates.exclusiveAreaRegistry = parsedUnitFloorArea;
                 }
               } else if (freshWouldFillProperty) {
                 // 実際に埋まるはずだった欄があるときだけフラグを立てる(@codex R10 P2)。
