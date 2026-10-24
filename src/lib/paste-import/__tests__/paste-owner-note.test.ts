@@ -2,7 +2,12 @@ import { readFileSync } from "node:fs";
 import { join } from "node:path";
 import { describe, expect, it } from "vitest";
 import { buildPasteDraft } from "../build-draft";
-import { composePasteOwnerNote, goesToOwnerNote, PASTE_IMPORT_OWNER_NOTE_PREFIX } from "../paste-owner-note";
+import {
+  composePasteOwnerNote,
+  goesToOwnerNote,
+  MAX_PASTE_OWNER_NOTE_LENGTH,
+  PASTE_IMPORT_OWNER_NOTE_PREFIX,
+} from "../paste-owner-note";
 
 const fixture = (f: string) => buildPasteDraft(readFileSync(join(__dirname, "fixtures", f), "utf8"));
 
@@ -37,6 +42,24 @@ describe("貼り付けのコメントを所有者の備考へ(2026-10-24 従業�
     );
     expect(d.withheldFromNote.map((w) => w.reason)).toEqual(["unclassified", "unclassified", "unclassified"]);
     expect(composePasteOwnerNote(d)).toBe(`${PASTE_IMPORT_OWNER_NOTE_PREFIX}\n売却する理由: 住み替えのため（築25年）`);
+  });
+
+  it("★自由記述の欄だと分からない見出しは入れない(姓： Jonathan Smith・URL の欄など・@codex P1)", () => {
+    const d = buildPasteDraft(
+      "■物件所在地： 東京都A区B1-2-3\n■姓： Jonathan Smith\n■パンフレットを探す： https://example.jp/x\n■ご要望： 早めに知りたい",
+    );
+    expect(d.withheldFromNote.filter((w) => w.reason === "unclassified").map((w) => w.label)).toEqual(
+      expect.arrayContaining(["姓", "パンフレットを探す", "ご要望"]),
+    );
+    expect(composePasteOwnerNote(d)).toBe(`${PASTE_IMPORT_OWNER_NOTE_PREFIX}\nご要望: 早めに知りたい`);
+  });
+
+  it("★上限を超えたら切り詰めて印を付ける(取込を止めない・@codex P2)", () => {
+    const long = "あ".repeat(MAX_PASTE_OWNER_NOTE_LENGTH + 100);
+    const note = composePasteOwnerNote({ withheldFromNote: [{ label: "コメント", value: long, reason: "unclassified" }] });
+    expect(note!.length).toBe(MAX_PASTE_OWNER_NOTE_LENGTH);
+    expect(note!.startsWith(`${PASTE_IMPORT_OWNER_NOTE_PREFIX}\nコメント: あ`)).toBe(true);
+    expect(note!.endsWith("元の文面は取込元をご覧ください)")).toBe(true);
   });
 
   it("入れるものが無ければ null(年齢だけ=見出しで伏せたもの)", () => {

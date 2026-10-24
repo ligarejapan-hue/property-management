@@ -48,6 +48,8 @@ import {
   isInquirerNameTooLong,
   normalizeInquirerName,
 } from "@/lib/inquirer-name";
+// 画面が組み立てる側(composePasteOwnerNote)が同じ上限で切り詰めるので、正しく使えばここで断られない。
+import { MAX_PASTE_OWNER_NOTE_LENGTH } from "@/lib/paste-import/paste-owner-note";
 
 // ---------------------------------------------------------------------------
 // 入力の検査（全体レビュー I-3）
@@ -204,8 +206,6 @@ const COMMIT_LOCK_KEY = "paste-excel-bulk-commit";
  *   異常な入力でも正規の登録を弾かない余裕を見て 2MB(下書き側の半分)。
  */
 const MAX_COMMIT_JSON_BODY_BYTES = 2 * 1024 * 1024;
-/** 貼り付け画面が自動で組み立てる所有者の備考の上限(自由記述の数項目で足りる・異常に長い送信を断る)。 */
-const MAX_IMPORT_OWNER_NOTE_LENGTH = 4000;
 
 export async function POST(request: NextRequest) {
   let releaseSlot = () => {};
@@ -376,8 +376,8 @@ export async function POST(request: NextRequest) {
     if (typeof importNoteInput !== "undefined" && importNoteInput !== null && typeof importNoteInput !== "string") {
       throw new ApiError(400, "所有者の備考の形式が正しくありません", "BAD_REQUEST");
     }
-    if ((importNoteInput ?? "").length > MAX_IMPORT_OWNER_NOTE_LENGTH) {
-      throw new ApiError(400, `所有者の備考は${MAX_IMPORT_OWNER_NOTE_LENGTH}文字までです`, "BAD_REQUEST");
+    if ((importNoteInput ?? "").length > MAX_PASTE_OWNER_NOTE_LENGTH) {
+      throw new ApiError(400, `所有者の備考は${MAX_PASTE_OWNER_NOTE_LENGTH}文字までです`, "BAD_REQUEST");
     }
     const importOwnerNote = hasExplicitWritePerm(perms, "owner_note") ? importNoteInput?.trim() || null : null;
 

@@ -1576,7 +1576,7 @@ describe("貼り付けの自由記述を所有者の備考へ(importNote・2026-
   it("★文字列以外・長すぎるものは400(何も作らない)", async () => {
     mockPerms = [...FULL_PERMS, NOTE_PERM];
     expect((await POST(req(ownerBody({ importNote: 123 })))).status).toBe(400);
-    expect((await POST(req(ownerBody({ importNote: "あ".repeat(4001) })))).status).toBe(400);
+    expect((await POST(req(ownerBody({ importNote: "あ".repeat(20001) })))).status).toBe(400);
     expect(created.property).toBeUndefined();
   });
 
