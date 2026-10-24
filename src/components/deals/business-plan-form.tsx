@@ -144,31 +144,41 @@ export default function BusinessPlanForm({ deal, onSaved }: { deal: DealView; on
           </Group>
         )}
 
-        {shown("holding") && (
-        <Group title="保有コスト">
+        {/* 借入額は資金計画(銀行向け)でも使うので、保有コストを出さないときも残す(@codex P2)。 */}
+        {(shown("holding") || shown("financing")) && (
+        <Group title={shown("holding") ? "保有コスト" : "借入"}>
           <div className="grid gap-4 sm:grid-cols-2">
-            <Field label="販売予定日" hint="事業期間 = 決済日〜この日">
-              <input type="date" value={form.saleDate} onChange={(e) => set("saleDate", e.target.value)} aria-label="販売予定日" className={inputCls} />
-            </Field>
+            {shown("holding") && (
+              <>
+                <Field label="販売予定日" hint="事業期間 = 決済日〜この日">
+                  <input type="date" value={form.saleDate} onChange={(e) => set("saleDate", e.target.value)} aria-label="販売予定日" className={inputCls} />
+                </Field>
+                <Field label="借入金利(年%)">
+                  <input inputMode="decimal" value={form.loanRate} onChange={(e) => set("loanRate", e.target.value)} aria-label="借入金利" className={inputCls} />
+                </Field>
+              </>
+            )}
             {yen("loanAmount")}
-            <Field label="借入金利(年%)">
-              <input inputMode="decimal" value={form.loanRate} onChange={(e) => set("loanRate", e.target.value)} aria-label="借入金利" className={inputCls} />
-            </Field>
           </div>
-          {calc && <p className="text-xs text-gray-500">事業期間 {calc.holding.days === null ? "—" : `${calc.holding.days}日`}・保有コスト {yenText(calc.holding.total)}円</p>}
+          {shown("holding") && calc && <p className="text-xs text-gray-500">事業期間 {calc.holding.days === null ? "—" : `${calc.holding.days}日`}・保有コスト {yenText(calc.holding.total)}円</p>}
         </Group>
         )}
 
-        {shown("sale") && (
-        <Group title="販売">
+        {/* 売却価格は収支でも使うので、販売を出さないときも残す(@codex P2)。 */}
+        {(shown("sale") || shown("profit")) && (
+        <Group title={shown("sale") ? "販売" : "売却価格"}>
           <div className="grid gap-4 sm:grid-cols-2">
             {yen("salePrice", "税込")}
-            {yen("saleBuildingTax", "空なら仕入と同じ割合で按分")}
-            <div>{yen("saleBrokerage")}{capButton("saleBrokerage", calc?.brokerageCap.sale)}</div>
-            {yen("mortgageCancellation")}
-            {yen("surveyFee")}
+            {shown("sale") && (
+              <>
+                {yen("saleBuildingTax", "空なら仕入と同じ割合で按分")}
+                <div>{yen("saleBrokerage")}{capButton("saleBrokerage", calc?.brokerageCap.sale)}</div>
+                {yen("mortgageCancellation")}
+                {yen("surveyFee")}
+              </>
+            )}
           </div>
-          <OtherRows rows={form.saleOthers} onChange={(rows) => set("saleOthers", rows)} />
+          {shown("sale") && <OtherRows rows={form.saleOthers} onChange={(rows) => set("saleOthers", rows)} />}
         </Group>
         )}
 

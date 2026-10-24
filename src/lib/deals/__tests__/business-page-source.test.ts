@@ -31,9 +31,17 @@ describe("事業計画書の画面", () => {
   });
   it("最終レビュー: 出さないセクションの入力欄は出さない(プレビューと同じ決まり)", () => {
     const src = read(FORM);
-    for (const s of ["acquisition", "renovation", "holding", "sale", "financing", "oc", "evidence"]) {
+    for (const s of ["acquisition", "renovation", "financing", "oc", "evidence"]) {
       expect(src, s).toContain(`{shown("${s}") && (`);
     }
+  });
+  it("@codex: ほかの出すセクションが使う欄は残す(売却価格=収支・借入額=資金計画)", () => {
+    const src = read(FORM);
+    expect(src).toContain('{(shown("sale") || shown("profit")) && (');
+    expect(src).toContain('{(shown("holding") || shown("financing")) && (');
+    // 外したセクションだけの費用の欄は、そのセクションを出すときだけ
+    expect(src).toMatch(/\{shown\("sale"\) && \(\s*<>\s*\{yen\("saleBuildingTax"/);
+    expect(src).toMatch(/\{shown\("holding"\) && \(\s*<>\s*<Field label="販売予定日"/);
   });
   it("管理者だけの設定画面へのリンクは置かない(開けない人がいる)", () => {
     expect(read(FORM)).not.toContain('href="/admin/deal-settings"');
