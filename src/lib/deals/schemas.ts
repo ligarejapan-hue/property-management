@@ -6,6 +6,7 @@ import {
 import { text, yenInt } from "./schema-parts";
 import { fundingInputsSchema } from "./funding-schema";
 import { businessInputsSchema } from "./business-schema";
+import { sectionMatrixSchema } from "./business-sections";
 
 export { text, yenInt };
 
@@ -223,4 +224,6 @@ export const dealSettingsUpdateSchema = z.object({
   bankAccount: bankAccountSchema.optional(),
   propertyKinds: propertyKindsSchema.optional(),
   texts: dealTextsSchema.optional(),
+  /** 事業計画書の種別×セクションの表。 */
+  sectionMatrix: sectionMatrixSchema.optional(),
 }).strict();
