@@ -11,6 +11,7 @@ import { PERCENT, Writer, amountLines, sumOf, type XlsxValue } from "./xlsx-writ
 /**
  * 事業計画書の Excel(設計 §4.8・計画 段4後半の読み替え 1〜2)。出すセクションは画面・PDF と同じ。
  * 合計・税抜・借入金利息・経費合計・粗利・利益率・損益分岐・NOI・利回りは数式で入れ、結果としてサーバーの値を入れておく。
+ * 割り算・率の掛け算は整数にしてから行う(小数のままだと割り切れる値が 1 つ下に切り捨てられる=最終レビュー)。
  * 固都税・管理費等の日割りは値(日数の端数の決まりはサーバーの1か所)。文字はすべて文字の値。
  */
 export interface BusinessPlanXlsxInput {
@@ -99,7 +100,7 @@ export async function buildBusinessPlanXlsx(i: BusinessPlanXlsxInput): Promise<B
     const days = w.line("事業期間(日)", h.days, { numFmt: "0" });
     const loan = w.line("借入額", i.inputs.loanAmount ?? 0);
     const rate = w.line("借入金利(年)", i.inputs.loanRateBp / 10000, { numFmt: PERCENT });
-    const first = w.line("借入金利息", h.days === null ? 0 : f(`ROUNDDOWN(B${loan}*B${rate}*B${days}/365,0)`, h.interest));
+    const first = w.line("借入金利息", h.days === null ? 0 : f(`ROUNDDOWN(B${loan}*ROUND(B${rate}*10000,0)*B${days}/3650000,0)`, h.interest));
     w.line("固都税(日割り)", h.propertyTax);
     const last = w.line("管理費・修繕積立金など(日割り)", h.management);
     totals.push(`B${w.line("保有コストの合計", f(`SUM(B${first}:B${last})`, h.total), { bold: true })}`);
@@ -122,7 +123,7 @@ export async function buildBusinessPlanXlsx(i: BusinessPlanXlsxInput): Promise<B
     const costFormula = [priceRef ?? String(c.purchase.priceIncl ?? 0), ...totals].join("+");
     const cost = w.line("経費合計", f(costFormula, p.costTotal), { bold: true });
     const gross = w.line("粗利", p.gross === null ? null : f(`B${revenue}-B${cost}`, p.gross), { bold: true });
-    w.line("利益率", p.marginBp === null ? null : f(`TRUNC(B${gross}/B${revenue},4)`, p.marginBp / 10000), { bold: true, numFmt: PERCENT });
+    w.line("利益率", p.marginBp === null ? null : f(`TRUNC(B${gross}*10000/B${revenue})/10000`, p.marginBp / 10000), { bold: true, numFmt: PERCENT });
     w.line("損益分岐の販売価格", f(`B${cost}`, p.breakEven));
     w.line("坪単価(仕入)", p.purchaseTsuboPrice);
     w.line("坪単価(販売)", p.saleTsuboPrice);
@@ -144,11 +145,11 @@ export async function buildBusinessPlanXlsx(i: BusinessPlanXlsxInput): Promise<B
     w.heading("OC収支");
     const income = w.line("年間の賃料収入", o.annualIncome);
     const priceCell = priceRef ?? (price === null ? null : String(price));
-    w.line("表面利回り", o.grossYieldBp === null || priceCell === null ? null : f(`TRUNC(B${income}/${priceCell},4)`, o.grossYieldBp / 10000), { numFmt: PERCENT });
+    w.line("表面利回り", o.grossYieldBp === null || priceCell === null ? null : f(`TRUNC(B${income}*10000/${priceCell})/10000`, o.grossYieldBp / 10000), { numFmt: PERCENT });
     const expenses = w.line("年間の運営費", o.annualExpenses);
     const noi = w.line("NOI", f(`B${income}-B${expenses}`, o.noi), { bold: true });
     const base = priceCell === null ? null : `(${priceCell}+${acquisitionRef ?? c.acquisition.total})`;
-    w.line("NET利回り", o.netYieldBp === null || base === null ? null : f(`TRUNC(B${noi}/${base},4)`, o.netYieldBp / 10000), { numFmt: PERCENT });
+    w.line("NET利回り", o.netYieldBp === null || base === null ? null : f(`TRUNC(B${noi}*10000/${base})/10000`, o.netYieldBp / 10000), { numFmt: PERCENT });
     w.pair("入居者の状況", `${o.rooms}室中 ${o.occupied}室入居${o.arrearsRooms ? `・滞納 ${o.arrearsRooms}室(${o.arrearsAmount}円)` : ""}`);
   }
 

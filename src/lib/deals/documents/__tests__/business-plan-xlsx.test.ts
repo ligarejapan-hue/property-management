@@ -72,7 +72,7 @@ describe("事業計画書の Excel", () => {
     expectFormula(ws, B(ws, "仕入価格(税抜)"), calc.purchase.priceExcl!, /^B\d+-B\d+$/);
     expectFormula(ws, B(ws, "取得経費の合計"), calc.acquisition.total, /^SUM\(B\d+:B\d+\)$/);
     expectFormula(ws, B(ws, "改装・工事の合計"), calc.renovation.total, /^SUM\(B\d+:B\d+\)$/);
-    expectFormula(ws, B(ws, "借入金利息"), calc.holding.interest, /^ROUNDDOWN\(B\d+\*B\d+\*B\d+\/365,0\)$/);
+    expectFormula(ws, B(ws, "借入金利息"), calc.holding.interest, /^ROUNDDOWN\(B\d+\*ROUND\(B\d+\*10000,0\)\*B\d+\/3650000,0\)$/);
     expect(calc.holding.interest).toBe(180_493);
     expectFormula(ws, B(ws, "保有コストの合計"), calc.holding.total, /^SUM\(B\d+:B\d+\)$/);
     expectFormula(ws, B(ws, "売却価格(税抜)"), calc.sale.priceExcl!, /^B\d+-B\d+$/);
@@ -83,10 +83,34 @@ describe("事業計画書の Excel", () => {
     expectFormula(ws, B(ws, "経費合計"), calc.profit.costTotal, /^B\d+(\+B\d+)+$/);
     expectFormula(ws, B(ws, "粗利"), calc.profit.gross!, /^B\d+-B\d+$/);
     const m = ws.getCell(B(ws, "利益率")).value;
-    expect(isFormula(m) && m.formula).toMatch(/^TRUNC\(B\d+\/B\d+,4\)$/);
+    expect(isFormula(m) && m.formula).toMatch(/^TRUNC\(B\d+\*10000\/B\d+\)\/10000$/);
     expect(evaluate(ws, B(ws, "利益率"))).toBe(calc.profit.marginBp! / 10000);
     expect(ws.getCell(B(ws, "利益率")).numFmt).toBe("0.00%");
     expectFormula(ws, B(ws, "損益分岐の販売価格"), calc.profit.breakEven, /^B\d+$/);
+  });
+  it("最終レビュー: 割り切れる値でも、計算し直すと 1 つ下にならない(利益率 0.29%・利息 2,100円)", async () => {
+    // 経費合計 = 仕入 19,922,000 + 印紙(仕入)10,000 + 印紙(販売)10,000 = 19,942,000・売上 20,000,000 → 粗利 58,000 = 0.29%
+    // 利息 = 3,650,000 × 0.21% × 100日 ÷ 365 = 2,100(小数の掛け算だと 2,099.9999… になる)
+    const d = { ...deal, price: 19_922_000, costs: DEFAULT_COSTS, settlementTerms: DEFAULT_TERMS };
+    const i: BusinessInputs = {
+      ...DEFAULT_BUSINESS_INPUTS, settlementPaid: 0, salePrice: 20_000_000, loanAmount: 3_650_000, loanRateBp: 21, saleDate: "2026-09-08",
+    };
+    const { ws, calc } = await sheetOf(i, d, resolveSectionMatrix({ unit: { holding: false } }, DEFAULT_PROPERTY_KINDS));
+    expect(calc.profit.marginBp).toBe(29);
+    expect(evaluate(ws, B(ws, "利益率"))).toBe(0.0029);
+    const h = await sheetOf(i, d);
+    expect(h.calc.holding).toMatchObject({ days: 100, interest: 2100 });
+    expect(evaluate(h.ws, B(h.ws, "借入金利息"))).toBe(2100);
+  });
+  it("最終レビュー: 仕入・取得経費を出さなくても、経費合計と利回りは値で補ってサーバーと一致", async () => {
+    const oc = { ...deal, hasOc: true, leases: [
+      { room: "101", tenant: "架空 一郎", contractType: "ordinary" as const, period: null, rent: 100_000, commonFee: 5_000, parking: 0, other: 0, deposit: 200_000, arrears: false, arrearsAmount: 0, manager: null },
+    ] };
+    const { ws, calc } = await sheetOf(inputs, oc, resolveSectionMatrix({ unit: { purchase: false, acquisition: false } }, DEFAULT_PROPERTY_KINDS));
+    expect(() => rowOf(ws, "仕入価格(税込)")).toThrow();
+    expect(evaluate(ws, B(ws, "経費合計"))).toBe(calc.profit.costTotal);
+    expect(evaluate(ws, B(ws, "表面利回り"))).toBe(calc.oc!.grossYieldBp! / 10000);
+    expect(evaluate(ws, B(ws, "NET利回り"))).toBe(calc.oc!.netYieldBp! / 10000);
   });
   it("表で外したセクションは Excel にも無く、経費合計の数式にも入らない", async () => {
     const { ws, calc } = await sheetOf(inputs, deal, resolveSectionMatrix({ unit: { renovation: false } }, DEFAULT_PROPERTY_KINDS));

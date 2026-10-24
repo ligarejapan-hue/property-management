@@ -16,7 +16,7 @@ export function rowOf(ws: ExcelJS.Worksheet, label: string): number {
 
 /**
  * テスト用の小さな数式の評価(Excel で計算し直したときと同じ値になるかを確かめる)。
- * 使う形は SUM(範囲)・ROUNDDOWN(x,0)・TRUNC(x,桁)・PMT(r,n,pv)・四則・セル参照だけ。
+ * 使う形は SUM(範囲)・ROUNDDOWN(x,0)・TRUNC(x,桁)・ROUND(x,桁)・PMT(r,n,pv)・四則・セル参照だけ。
  */
 export function evaluate(ws: ExcelJS.Worksheet, addr: string): number {
   const v = ws.getCell(addr).value;
@@ -36,6 +36,7 @@ const FUNCS: Record<string, (...a: number[]) => number> = {
   ROUNDDOWN: (x) => Math.trunc(x),
   /** TRUNC(x, 桁): 0 に向けて桁の下を切り捨て。 */
   TRUNC: (x, d = 0) => Math.trunc(x * 10 ** d) / 10 ** d,
+  ROUND: (x, d = 0) => Math.round(x * 10 ** d) / 10 ** d,
   PMT: (r, n, pv) => (r === 0 ? -pv / n : (-pv * r * Math.pow(1 + r, n)) / (Math.pow(1 + r, n) - 1)),
 };
 
