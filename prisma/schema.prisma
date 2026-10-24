@@ -495,6 +495,7 @@ model Property {
   agentInquiries     AgentInquiry[]
   adPermissions      PropertyAdPermission[]
   deals              Deal[]
+  driveFolder        PropertyDriveFolder?
 
   @@index([caseStatus])
   @@index([introductionRoute])
@@ -966,6 +967,8 @@ model Attachment {
   docTitle      String? @map("doc_title")
   /// high(名前か見出しで確定)|low(本文の語だけ・確認待ち)|manual(人が決めた)。
   docConfidence String? @map("doc_confidence")
+  /// Google ドライブへ複製した写しの file id(第2段・2026-10-24・additive)。NULL=まだ複製していない/対象外。
+  driveFileId   String? @map("drive_file_id")
   createdAt  DateTime @default(now()) @map("created_at")
 
   uploader   User      @relation(fields: [uploadedBy], references: [id])
@@ -2403,4 +2406,64 @@ model DealRateTable {
 
   @@index([kind, validFrom])
   @@map("deal_rate_tables")
+}
+
+/// Google ドライブ連携の接続(第2段・2026-10-24・1行だけ)。refresh token は暗号化して保存(secret-crypto)。
+/// ⚠トークンは API の応答に出さない。画面に出すのはアカウントのメールだけ。
+model DriveConnection {
+  id                  String    @id @default("singleton")
+  accountEmail        String?   @map("account_email")
+  refreshTokenEnc     String?   @map("refresh_token_enc")
+  /// 見回り(changes.list)の続きの位置。接続し直したら取り直す。
+  startPageToken      String?   @map("start_page_token")
+  lastSyncAt          DateTime? @map("last_sync_at")
+  lastError           String?   @map("last_error")
+  consecutiveFailures Int       @default(0) @map("consecutive_failures")
+  connectedById       String?   @map("connected_by_id") @db.Uuid
+  connectedAt         DateTime? @map("connected_at")
+  updatedAt           DateTime  @default(now()) @updatedAt @map("updated_at")
+
+  @@map("drive_connection")
+}
+
+/// 物件とドライブのフォルダの紐づけ(1物件=1フォルダ・1フォルダ=1物件)。アプリが触るのはここに載ったフォルダの中だけ。
+model PropertyDriveFolder {
+  id         String   @id @default(uuid()) @db.Uuid
+  propertyId String   @unique @map("property_id") @db.Uuid
+  folderId   String   @unique @map("folder_id")
+  /// ⚠フォルダ名は所有者名を含むことがある=監査ログ・journal には書かない(画面だけ)。
+  folderName String   @map("folder_name")
+  folderPath String   @map("folder_path")
+  webViewLink String? @map("web_view_link")
+  linkedById String?  @map("linked_by_id") @db.Uuid
+  createdAt  DateTime @default(now()) @map("created_at")
+
+  /// 物件を消す経路のどれでも邪魔をしない(取込の取り消し含む・@codex #577 P1)=物件と一緒に消える。
+  property Property @relation(fields: [propertyId], references: [id], onDelete: Cascade)
+  syncFiles DriveSyncFile[]
+
+  @@map("property_drive_folders")
+}
+
+/// ドライブとの往復の台帳(重複と往復ループの防止)。direction=in(ドライブ→アプリ)|out(アプリ→ドライブ)。
+/// status=imported|inbox|duplicate|unsupported|failed|copied。
+model DriveSyncFile {
+  id           String    @id @default(uuid()) @db.Uuid
+  folderLinkId String    @map("folder_link_id") @db.Uuid
+  driveFileId  String    @unique @map("drive_file_id")
+  md5          String?
+  name         String
+  mimeType     String    @map("mime_type")
+  size         Int?
+  modifiedTime DateTime? @map("modified_time")
+  direction    String
+  attachmentId String?   @map("attachment_id") @db.Uuid
+  status       String
+  error        String?
+  createdAt    DateTime  @default(now()) @map("created_at")
+
+  folderLink PropertyDriveFolder @relation(fields: [folderLinkId], references: [id], onDelete: Cascade)
+
+  @@index([folderLinkId, createdAt])
+  @@map("drive_sync_files")
 }

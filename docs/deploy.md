@@ -1168,6 +1168,21 @@ sudo chown root:root /etc/property-management/app.env
 sudo vim /etc/property-management/app.env
 ```
 
+#### Google ドライブ連携(書類の自動整理 第2段・2026-10-24〜)
+
+管理 › ドライブ連携の「Google に接続」を使うには、次の2つを app.env に置く(どちらも Cloud Console の **ウェブ アプリケーション型** の OAuth クライアント。既存の rclone 用=デスクトップ型は使えない)。
+
+```
+GOOGLE_DRIVE_CLIENT_ID=<xxxx.apps.googleusercontent.com>
+GOOGLE_DRIVE_CLIENT_SECRET=<GOCSPX-...>
+```
+
+- Cloud Console 側: APIs & Services › 認証情報 › 「OAuth クライアント ID を作成」› 種類=ウェブ アプリケーション › **承認済みのリダイレクト URI** に `https://<アプリの入口>/api/drive/oauth/callback`(管理画面に表示される「戻り先」をそのまま)。Drive API が有効であること。同意画面のスコープに `https://www.googleapis.com/auth/drive` を足す(公開ステータスが「テスト中」だと refresh token が7日で切れる=「本番環境」に)。
+- 戻り先の土台は `NEXTAUTH_URL`(別にしたいときだけ `DRIVE_OAUTH_BASE_URL`)。
+- refresh token は DB(`drive_connection`)に `SALE_DM_SETTINGS_ENC_KEY` で暗号化して保存(メール設定のパスワードと同じ)。state の署名は `NEXTAUTH_SECRET`。
+- app.env を足したら flock 付きで restart。接続そのものは発注者がブラウザで「Google に接続」を押す(値は私たちが扱わない)。
+- 見回り(timer・`DRIVE_SYNC_SECRET`)は第2段b で足す。
+
 ---
 
 ### 画面を閉じていても届く通知（Web プッシュ・通知 段階4）

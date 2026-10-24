@@ -105,6 +105,14 @@ describe("DELETE /api/properties/[id] と鍵の後始末の順序", () => {
         propertyPhoto: { findMany: vi.fn(async () => []) },
         attachment: { updateMany: vi.fn(async () => ({ count: 0 })) },
         propertyDmLog: { deleteMany: vi.fn(async () => ({ count: 0 })) },
+        // Google ドライブの紐づけ(property_drive_folders.property_id は RESTRICT)。紐づけ済みの物件を
+        // 消すとき、素の 500(P2003)にしないため同じ tx で先に外す(内部レビュー 2a P2)。
+        propertyDriveFolder: {
+          deleteMany: vi.fn(async () => {
+            order.push("driveUnlink");
+            return { count: 1 };
+          }),
+        },
         property: {
           delete: vi.fn(async () => {
             order.push("delete");
@@ -130,7 +138,11 @@ describe("DELETE /api/properties/[id] と鍵の後始末の順序", () => {
     // main合流で「lock」の直後に査定申込チェック(dmInquiry.count)が入った。
     // 親行ロック→申込チェック→(写真/添付/DMログの後始末)→鍵の後始末→削除、
     // という実際の順序のうち意味のある境目だけを記録している。
-    expect(order).toEqual(["tx", "lock", "inquiryCheck", "cleanup", "delete"]);
+    // ★ドライブの紐づけは親行ロックの後・property.delete の前に同じ tx で外す(RESTRICT を素の 500 にしない)。
+    expect(order).toEqual(["tx", "lock", "inquiryCheck", "driveUnlink", "cleanup", "delete"]);
+    expect((txClient as { propertyDriveFolder: { deleteMany: Mock } }).propertyDriveFolder.deleteMany).toHaveBeenCalledWith({
+      where: { propertyId: PROP },
+    });
     // ⚠tx そのもの(identity)に対して呼ばれたこと(base client=prisma のトップレベル
     //   ではないこと)を固定する。
     expect(lockTxArg).toBe(txClient);

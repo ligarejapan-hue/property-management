@@ -15,6 +15,7 @@ import {
   KeyRound,
   UserCog,
   MapPinned,
+  Cloud,
   Map as MapIcon,
   ScanSearch,
   ScanText,
@@ -242,6 +243,8 @@ export const SIDEBAR_GROUPS: NavGroup[] = [
       { label: "会社情報（販売図面の差出人）", href: "/admin/company-settings", icon: ic(Building2), minRole: "admin" },
       // 取引の設定(設計 2026-10-23 §5)。会社名・住所などは上の会社情報を使う。
       { label: "取引の設定", href: "/admin/deal-settings", icon: ic(Handshake), minRole: "admin" },
+      // Google ドライブと物件フォルダの紐づけ(書類の自動整理 第2段・2026-10-24)。発注者のドライブを触る設定=管理者だけ。
+      { label: "ドライブ連携", href: "/admin/drive", icon: ic(Cloud), minRole: "admin" },
       // ⚠添付ファイル検索は「物件」グループへ移した(日々の道具のため)。
     ],
   },

@@ -26,6 +26,11 @@ const ACTION_LABELS: Record<string, string> = {
   login: "ログイン",
   login_failed: "ログイン失敗",
   logout: "ログアウト",
+  // Google ドライブ連携(2026-10-24)
+  drive_connect: "ドライブに接続",
+  drive_disconnect: "ドライブの接続を切る",
+  drive_folder_link: "ドライブのフォルダを物件に紐づけ",
+  drive_folder_unlink: "ドライブのフォルダの紐づけを外す",
   property_create: "物件作成",
   property_update: "物件更新",
   property_delete: "物件削除",
@@ -276,6 +281,8 @@ const ACTION_LABELS: Record<string, string> = {
 };
 
 const TARGET_TABLE_LABELS: Record<string, string> = {
+  drive_connection: "ドライブの接続",
+  property_drive_folders: "ドライブのフォルダの紐づけ",
   deals: "取引",
   deal_settings: "取引の設定",
   deal_rate_tables: "取引の税率の表",
