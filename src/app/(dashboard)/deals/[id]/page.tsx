@@ -136,7 +136,7 @@ export default function DealDetailPage({ params }: { params: Promise<{ id: strin
           </div>
         )}
         <div hidden={tab !== "documents"}>
-          <DealDocumentsPanel dealId={deal.id} active={tab === "documents"} />
+          <DealDocumentsPanel dealId={deal.id} active={tab === "documents"} resale={deal.businessType === "resale"} />
         </div>
       </div>
     </div>

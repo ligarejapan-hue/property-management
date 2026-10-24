@@ -37,6 +37,7 @@ import { GET, POST } from "../../../app/api/deals/[id]/documents/route";
 import { GET as FILE } from "../../../app/api/deals/[id]/documents/[docId]/file/route";
 import { INITIAL_RATE_TABLES } from "../rate-tables";
 import { DEFAULT_FUNDING_INPUTS } from "../funding-schema";
+import { DEFAULT_BUSINESS_INPUTS } from "../business-schema";
 
 type Fn = ReturnType<typeof vi.fn>;
 const pm = prismaMock as never as {
@@ -171,6 +172,38 @@ describe("POST /api/deals/[id]/documents(発行)", () => {
     expect(h).toContain("いつもお世話になっております");
     expect(h).toContain("概算です");
     (prismaMock as never as { dealSettings: { findUnique: Fn } }).dealSettings.findUnique.mockResolvedValue(null);
+  });
+
+  it("事業計画書: 買取再販の保存済みの入力で発行・社内用/銀行向けの版として残す", async () => {
+    const business = { ...DEFAULT_BUSINESS_INPUTS, salePrice: 40_000_000, memo: "架空の社内メモ" };
+    pm.deal.findUnique.mockResolvedValue({ ...row, businessType: "resale", tradeSide: null, planInputs: { business } });
+    const res = await POST(json("POST", { docType: "business_plan", version: 3 }), ctx);
+    expect(res.status).toBe(201);
+    const body = await res.json();
+    expect(body.title).toBe("事業計画書(社内用)");
+    expect(body.fileBaseName).toMatch(/^2026-0007_事業計画書_社内用_\d{8}$/);
+    const data = pm.dealDocument.create.mock.calls[0][0].data;
+    expect(data).toMatchObject({ docType: "business_plan", variant: "internal" });
+    expect(data.inputSnapshot).toEqual(business);
+    expect(data.calcSnapshot.profit.revenue).toBe(40_000_000);
+    expect((renderHtmlToPdfDocument as Fn).mock.calls[0][0]).toContain("架空の社内メモ");
+    expect([...files.keys()].some((k) => k.endsWith(".xlsx"))).toBe(true);
+
+    pm.dealDocument.create.mockClear();
+    (renderHtmlToPdfDocument as Fn).mockClear();
+    pm.deal.findUnique.mockResolvedValue({ ...row, businessType: "resale", tradeSide: null, planInputs: { business: { ...business, variant: "bank" } } });
+    expect((await (await POST(json("POST", { docType: "business_plan", version: 3 }), ctx)).json()).title).toBe("事業計画書(銀行向け)");
+    expect(pm.dealDocument.create.mock.calls[0][0].data.variant).toBe("bank");
+    expect((renderHtmlToPdfDocument as Fn).mock.calls[0][0]).not.toContain("架空の社内メモ");
+  });
+
+  it("事業計画書: 仲介の取引では 422 で、ファイルも記録も作らない", async () => {
+    const res = await POST(json("POST", { docType: "business_plan", version: 3 }), ctx);
+    expect(res.status).toBe(422);
+    expect((await res.json()).error.code).toBe("NOT_RESALE");
+    expect(files.size).toBe(0);
+    expect(pm.dealDocument.create).not.toHaveBeenCalled();
+    expect(renderHtmlToPdfDocument).not.toHaveBeenCalled();
   });
 
   it("売却の入力なら売却の版として残す", async () => {

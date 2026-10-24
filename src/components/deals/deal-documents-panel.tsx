@@ -2,7 +2,7 @@
 
 import { useEffect, useState } from "react";
 import Link from "next/link";
-import { Calculator, FileSpreadsheet, FileText, Loader2, RefreshCw } from "lucide-react";
+import { BarChart3, Calculator, FileSpreadsheet, FileText, Loader2, RefreshCw } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { dealsApi, dealDocumentFileUrl, errorText, type DealDocumentView } from "@/lib/deals/client";
 import { formatJaDateTime } from "@/lib/format-datetime";
@@ -14,7 +14,7 @@ const LINK_CLS =
  * 書類タブ(設計 §5)。発行した書類の履歴と、書類を作る画面への入口。
  * 履歴はタブを開いたときに読み直す(資金計画表の画面で発行して戻ってきたときも新しいものが出る)。
  */
-export default function DealDocumentsPanel({ dealId, active }: { dealId: string; active: boolean }) {
+export default function DealDocumentsPanel({ dealId, active, resale }: { dealId: string; active: boolean; resale: boolean }) {
   const [docs, setDocs] = useState<DealDocumentView[] | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [loading, setLoading] = useState(false);
@@ -42,6 +42,13 @@ export default function DealDocumentsPanel({ dealId, active }: { dealId: string;
           <Calculator className="h-4 w-4" />
           資金計画表を作る・発行する
         </Link>
+        {/* 事業計画書は買取再販の取引だけ(依頼書 4.2)。 */}
+        {resale && (
+          <Link href={`/deals/${dealId}/business-plan`} className={LINK_CLS}>
+            <BarChart3 className="h-4 w-4" />
+            事業計画書を作る・発行する
+          </Link>
+        )}
         <Button variant="ghost" size="sm" onClick={reload} disabled={loading}>
           {loading ? <Loader2 className="h-4 w-4 animate-spin" /> : <RefreshCw className="h-4 w-4" />}
           読み込み直す
@@ -52,7 +59,7 @@ export default function DealDocumentsPanel({ dealId, active }: { dealId: string;
         <div className="flex items-center gap-2 text-sm text-gray-500"><Loader2 className="h-4 w-4 animate-spin" /> 読み込み中…</div>
       )}
       {docs !== null && docs.length === 0 && (
-        <p className="text-sm text-gray-500 dark:text-gray-400">発行した書類はまだありません。資金計画表の画面の「保存して発行」で作れます。</p>
+        <p className="text-sm text-gray-500 dark:text-gray-400">発行した書類はまだありません。資金計画表{resale ? "・事業計画書" : ""}の画面の「保存して発行」で作れます。</p>
       )}
       {docs !== null && docs.length > 0 && (
         <ul className="divide-y divide-gray-100 rounded-lg border border-gray-200 dark:divide-gray-800 dark:border-gray-800">
