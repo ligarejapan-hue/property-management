@@ -2,7 +2,7 @@
 
 import { use, useCallback, useEffect, useState } from "react";
 import Link from "next/link";
-import { Calculator, Loader2 } from "lucide-react";
+import { BarChart3, Calculator, Loader2 } from "lucide-react";
 import { PageHeader } from "@/components/ui/page-header";
 import { Tabs, tabPanelProps } from "@/components/ui/tabs";
 import DealBasicPanel from "@/components/deals/deal-basic-panel";
@@ -95,10 +95,19 @@ export default function DealDetailPage({ params }: { params: Promise<{ id: strin
         title={deal.name}
         back={{ href: "/deals", to: "取引" }}
         actions={
-          <Link href={`/deals/${deal.id}/funding-plan`} className={HEADER_LINK_CLS}>
-            <Calculator className="h-4 w-4" />
-            資金計画表
-          </Link>
+          <div className="flex flex-wrap gap-2">
+            <Link href={`/deals/${deal.id}/funding-plan`} className={HEADER_LINK_CLS}>
+              <Calculator className="h-4 w-4" />
+              資金計画表
+            </Link>
+            {/* 事業計画書は買取再販の取引だけ(依頼書 4.2)。 */}
+            {deal.businessType === "resale" && (
+              <Link href={`/deals/${deal.id}/business-plan`} className={HEADER_LINK_CLS}>
+                <BarChart3 className="h-4 w-4" />
+                事業計画書
+              </Link>
+            )}
+          </div>
         }
         description={`${deal.dealNo} ・ ${DEAL_BUSINESS_TYPE_LABELS[deal.businessType as keyof typeof DEAL_BUSINESS_TYPE_LABELS] ?? deal.businessType} ・ ${DEAL_STATUS_LABELS[deal.status as keyof typeof DEAL_STATUS_LABELS] ?? deal.status}`}
       />

@@ -5,6 +5,9 @@ import type { DealCalc } from "./calc/deal-calc";
 import type { FundingPlanCalc } from "./calc/funding-plan";
 import type { FundingInputs } from "./funding-schema";
 import type { DealImageKind } from "./branding";
+import type { BusinessInputs } from "./business-schema";
+import type { BusinessPlanCalc } from "./calc/business-plan";
+import type { BusinessSectionKey } from "./business-sections";
 
 /** 取引の画面から API を呼ぶ。失敗はサーバーの文言とコードを持った DealApiError にする。 */
 export class DealApiError extends Error {
@@ -70,6 +73,8 @@ export const dealsApi = {
   calc: (id: string) => call<{ calc: DealCalc }>(`/api/deals/${id}/calc`),
   fundingPreview: (id: string, fundingPlan: FundingInputs) =>
     call<{ calc: FundingPlanCalc; html: string }>(`/api/deals/${id}/funding-plan/preview`, { method: "POST", body: { fundingPlan } }),
+  businessPreview: (id: string, businessPlan: BusinessInputs) =>
+    call<{ calc: BusinessPlanCalc; sections: BusinessSectionKey[]; html: string }>(`/api/deals/${id}/business-plan/preview`, { method: "POST", body: { businessPlan } }),
   documents: (id: string) => call<{ documents: DealDocumentView[] }>(`/api/deals/${id}/documents`),
   issueDocument: (id: string, docType: string, version: number) =>
     call<{ id: string; version: number; title: string; fileBaseName: string }>(`/api/deals/${id}/documents`, { method: "POST", body: { docType, version } }),
