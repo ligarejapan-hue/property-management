@@ -65,7 +65,8 @@ jobs:
           done
 
       - name: Tailscale に接続
-        uses: tailscale/github-action@v3
+        # 版は中身の SHA で固定する(タグは後から付け替えられる・秘密を渡す手順なので特に)。v3 = v3.3.0。
+        uses: tailscale/github-action@6cae46e2d796f265265cfcf628b72a32b4d7cade # v3.3.0
         with:
           oauth-client-id: ${{ secrets.TS_OAUTH_CLIENT_ID }}
           oauth-secret: ${{ secrets.TS_OAUTH_SECRET }}
