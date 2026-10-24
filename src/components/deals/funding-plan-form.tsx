@@ -1,7 +1,7 @@
 "use client";
 
 import { useEffect, useRef, useState } from "react";
-import { Plus, Save, Trash2 } from "lucide-react";
+import { FileOutput, Plus, Save, Trash2 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Field, YenInput, inputCls } from "./form-parts";
 import { dealsApi, DealApiError, errorText } from "@/lib/deals/client";
@@ -20,6 +20,11 @@ const conflictText = (e: unknown) =>
     ? "ほかの人が先にこの取引を更新しました。画面を読み込み直してから、もう一度入力してください。"
     : errorText(e);
 
+/** 発行の結果。画面(親)が持つ=保存のあとにこの入力欄が作り直されても消えない。 */
+export type IssueNotice =
+  | { kind: "ok"; id: string; title: string; version: number }
+  | { kind: "error"; message: string };
+
 type Purchase = FundingForm["purchase"];
 type Sale = FundingForm["sale"];
 
@@ -27,14 +32,14 @@ type Sale = FundingForm["sale"];
  * 資金計画表(設計 §5)。左で入力し、右に PDF と同じ HTML のプレビューを出す。
  * 購入・売却は同じ入力の中の切り替えで、切り替えてももう一方の入力とお客様名は消えない(両方を保存する)。
  */
-export default function FundingPlanForm({ deal, kindBase, onSaved }: {
-  deal: DealView; kindBase: BasePropertyKind | null; onSaved: () => Promise<void>;
+export default function FundingPlanForm({ deal, kindBase, onSaved, onIssue }: {
+  deal: DealView; kindBase: BasePropertyKind | null; onSaved: () => Promise<void>; onIssue: (n: IssueNotice | null) => void;
 }) {
   const [form, setForm] = useState<FundingForm>(() => fundingFormFromInputs(deal.fundingPlan));
   const [preview, setPreview] = useState<{ html: string; calc: FundingPlanCalc } | null>(null);
   const [previewError, setPreviewError] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
-  const [saving, setSaving] = useState(false);
+  const [saving, setSaving] = useState<false | "save" | "issue">(false);
   // 保存で返った版の番号。保存のあとの読み直しに失敗しても、次の保存を「ほかの人が更新」にしない(最終レビュー)。
   const [savedVersion, setSavedVersion] = useState(0);
   const seq = useRef(0);
@@ -65,16 +70,31 @@ export default function FundingPlanForm({ deal, kindBase, onSaved }: {
   const setP = <K extends keyof Purchase>(k: K, v: Purchase[K]) => setForm((f) => ({ ...f, purchase: { ...f.purchase, [k]: v } }));
   const setS = <K extends keyof Sale>(k: K, v: Sale[K]) => setForm((f) => ({ ...f, sale: { ...f.sale, [k]: v } }));
 
-  const save = async () => {
+  /** 保存する。issue のときは、保存した入力で PDF と Excel を発行する(サーバーは保存済みの入力を使う)。 */
+  const save = async (issue: boolean) => {
     if (!parsed.value) {
-      setError(`${parsed.bad.join("・")}を直してください。保存していません。`);
+      setError(`${parsed.bad.join("・")}を直してください。${issue ? "発行も保存もしていません" : "保存していません"}。`);
       return;
     }
-    setSaving(true);
+    setSaving(issue ? "issue" : "save");
     setError(null);
+    onIssue(null);
     try {
       const r = await dealsApi.update(deal.id, { version: Math.max(deal.version, savedVersion), fundingPlan: parsed.value });
       setSavedVersion(r.version);
+      if (issue) {
+        try {
+          const doc = await dealsApi.issueDocument(deal.id, "funding_plan", r.version);
+          onIssue({ kind: "ok", id: doc.id, title: doc.title, version: doc.version });
+        } catch (e) {
+          onIssue({
+            kind: "error",
+            message: e instanceof DealApiError && e.code === "VERSION_CONFLICT"
+              ? "入力は保存しましたが、その直後にほかの人がこの取引を更新したため、発行していません。画面を読み込み直して内容を確かめてから、もう一度発行してください。"
+              : `入力は保存しました。発行はできませんでした: ${errorText(e)}`,
+          });
+        }
+      }
       await onSaved();
     } catch (e) {
       setError(conflictText(e));
@@ -93,7 +113,7 @@ export default function FundingPlanForm({ deal, kindBase, onSaved }: {
   return (
     <div className="grid gap-6 lg:grid-cols-[minmax(0,26rem)_minmax(0,1fr)]">
       {/* 保存中は打てなくする(保存のあとの作り直しで、その間の入力が消えないように)。 */}
-      <fieldset disabled={saving} className="min-w-0 space-y-6">
+      <fieldset disabled={saving !== false} className="min-w-0 space-y-6">
         <div role="group" aria-label="購入・売却の切り替え" className="inline-flex gap-1">
           {(["purchase", "sale"] as const).map((m) => (
             <Button key={m} size="sm" variant={form.mode === m ? "primary" : "secondary"} aria-pressed={form.mode === m} onClick={() => setForm((f) => ({ ...f, mode: m }))}>
@@ -220,10 +240,16 @@ export default function FundingPlanForm({ deal, kindBase, onSaved }: {
         {!error && parsed.bad.length > 0 && (
           <p className="text-sm text-amber-700 dark:text-amber-400">直す欄: {parsed.bad.join("・")}(直すまでプレビューは前のままです)</p>
         )}
-        <Button onClick={() => void save()} disabled={saving} loading={saving} loadingLabel="保存中">
-          <Save className="h-4 w-4" />
-          保存
-        </Button>
+        <div className="flex flex-wrap gap-2">
+          <Button variant="secondary" onClick={() => void save(false)} disabled={saving !== false} loading={saving === "save"} loadingLabel="保存中">
+            <Save className="h-4 w-4" />
+            保存
+          </Button>
+          <Button onClick={() => void save(true)} disabled={saving !== false} loading={saving === "issue"} loadingLabel="発行中">
+            <FileOutput className="h-4 w-4" />
+            保存して発行(PDF・Excel)
+          </Button>
+        </div>
       </fieldset>
 
       <div className="space-y-2">

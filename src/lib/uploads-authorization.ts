@@ -24,6 +24,7 @@ import {
   resolveOwnerDisplayConfig,
 } from "@/lib/permissions";
 import { isValidStorageKey } from "@/lib/storage/key-validation";
+import { isDealDocumentStorageKey } from "@/lib/deals/documents/issue";
 import { getStorage } from "@/lib/storage";
 import type { ApiSession, PermissionEntry } from "@/lib/api-helpers";
 
@@ -208,6 +209,9 @@ export async function authorizeUploadAccess(
   const db: PrismaLike = args.prisma ?? prismaDefault;
 
   if (!isValidStorageKey(key)) return "forbidden";
+  // 取引の書類は取引の権限で配る専用の道(/api/deals/[id]/documents/[docId]/file)だけから開く。
+  // 同じファイルを写真・添付として登録し直されても、ここからは開けない(404 のまま)。
+  if (isDealDocumentStorageKey(key)) return "not_found";
 
   // DB 候補絞り込みは LIKE-literal で。最終判定は下の JS 側で正規化 key の
   // 完全一致を要求するため、escape 漏れがあっても認可 bypass にはならないが、

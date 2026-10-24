@@ -67,6 +67,16 @@ export async function renderHtmlToPdf(
   );
 }
 
+/**
+ * 何ページにもなる書類(取引の帳票)の PDF。用紙と余白は HTML の `@page` に従い、ページは絞らない。
+ * 販売図面の renderHtmlToPdf(1枚目だけ)とは別にしてある。同時実行の上限・外部遮断は同じものを使う。
+ */
+export async function renderHtmlToPdfDocument(html: string): Promise<Buffer> {
+  return RENDER_GATE.run(() =>
+    withPage(html, (page) => page.pdf({ preferCSSPageSize: true, printBackground: true })),
+  );
+}
+
 export async function renderHtmlToImage(
   html: string,
   opts: {

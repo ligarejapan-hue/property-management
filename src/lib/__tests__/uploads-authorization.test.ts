@@ -146,6 +146,18 @@ describe("authorizeUploadAccess", () => {
     expect(decision).toBe("not_found");
   });
 
+  it("取引の書類(deals/)は、写真や添付として登録し直されていても /uploads からは開けない(404)", async () => {
+    for (const key of ["deals/d1/f1.pdf", "Deals/d1/f1.pdf", "deals/d1/f1.xlsx"]) {
+      const prisma = makeDb({
+        photos: [{ fileUrl: `/uploads/${key}`, propertyId: "p1" }],
+        attachments: [{ fileUrl: `/uploads/${key}`, isDeleted: false, targetType: "property", targetId: "p1", propertyId: "p1" }],
+        properties: [{ id: "p1", createdBy: "u-admin", assignedTo: null }],
+      });
+      const decision = await authorizeUploadAccess({ key, session: admin, permissions: permsWithOwnerRead, prisma });
+      expect(decision, key).toBe("not_found");
+    }
+  });
+
   describe("PropertyPhoto", () => {
     const key = "properties/p1/photos/1.jpg";
     const fileUrl = `/uploads/${key}`;
