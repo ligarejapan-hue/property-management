@@ -289,6 +289,7 @@ interface ApiProperty {
   roomNo: string | null;
   floorNo: number | null;
   exclusiveArea: number | null;
+  exclusiveAreaRegistry?: number | null;
   balconyArea: number | null;
   layoutType: string | null;
   orientation: string | null;
@@ -1297,9 +1298,14 @@ function BasicTab({
         <>
           <Field label="部屋番号" value={property.roomNo} />
           <Field label="階" value={property.floorNo != null ? `${property.floorNo}F` : null} />
+          {/* 専有面積は2つ(2026-10-24)。壁芯=パンフレット・登記簿=内法(ほぼ必ず数％ずれる)。 */}
           <Field
-            label="専有面積"
+            label="専有面積（壁芯・パンフレット）"
             value={property.exclusiveArea != null ? `${Number(property.exclusiveArea).toFixed(2)}m²` : null}
+          />
+          <Field
+            label="専有面積（登記簿）"
+            value={property.exclusiveAreaRegistry != null ? `${Number(property.exclusiveAreaRegistry).toFixed(2)}m²` : null}
           />
           <Field
             label="バルコニー面積"

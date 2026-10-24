@@ -109,6 +109,8 @@ describe("property-field-constants.ts は Prisma-free (Codex P1)", () => {
       // 変更履歴が残らず、取込の取り消しでも戻らなかった。
       "floorNo",
       "exclusiveArea",
+      // 2026-10-24 専有面積の登記簿(壁芯と別に持つ)。
+      "exclusiveAreaRegistry",
       "balconyArea",
       "layoutType",
       "orientation",

@@ -127,6 +127,7 @@ export const UNIT_ONLY_PROPERTY_FIELDS = [
   "roomNo",
   "floorNo",
   "exclusiveArea",
+  "exclusiveAreaRegistry",
   "balconyArea",
   "layoutType",
   "orientation",

@@ -322,6 +322,8 @@ describe("normalizeUnitOnlyFields（区分専用の欄を種別で落とす）",
       [
         "balconyArea",
         "exclusiveArea",
+        // 2026-10-24 専有面積の登記簿(物件詳細の区分ブロックに「専有面積（登記簿）」)。
+        "exclusiveAreaRegistry",
         "floorNo",
         "layoutType",
         "managementFee",

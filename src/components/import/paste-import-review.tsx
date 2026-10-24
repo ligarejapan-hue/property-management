@@ -17,6 +17,7 @@ import type { ChangeEvent } from "react";
 import Link from "next/link";
 import type { DraftWarningCode, PasteDraft } from "@/lib/paste-import/types";
 import { goesToOwnerNote } from "@/lib/paste-import/paste-owner-note";
+import { CUSTOMER_AREA_HINT } from "@/lib/paste-import/customer-area";
 import { OCCUPANCY_STATUS_OPTIONS, PROPERTY_TYPE_OPTIONS } from "@/lib/property-types";
 import { Button } from "@/components/ui/button";
 import BuildingNameCombobox from "@/components/buildings/building-name-combobox";
@@ -138,7 +139,7 @@ const PROPERTY_FIELD_LABELS: { key: PropertyFieldKey; label: string }[] = [
   { key: "buildingName", label: "建物名" },
   { key: "roomNo", label: "部屋番号" },
   { key: "propertyType", label: "種別" },
-  { key: "exclusiveArea", label: "専有面積(m²)" },
+  { key: "exclusiveArea", label: "専有面積(m²)・お客様の記載" },
   { key: "landArea", label: "土地面積(m²)" },
   { key: "layoutType", label: "間取り" },
   { key: "occupancyStatus", label: "現況" },
@@ -178,6 +179,8 @@ const FIELD_WARNING_CODE: Partial<Record<PropertyFieldKey, DraftWarningCode>> = 
  */
 const FIELD_NO_COLUMN_HINT: Partial<Record<PropertyFieldKey, string>> = {
   landArea: "※専用の欄が無いため、備考に記録されます",
+  // お客様の書いた専有面積は登記簿か壁芯か分からないので欄に入れない(2026-10-24・登録 API が備考へ移す)。
+  exclusiveArea: CUSTOMER_AREA_HINT,
   builtYear: "※専用の欄が無いため、備考に記録されます",
 };
 

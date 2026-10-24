@@ -384,7 +384,10 @@ model Property {
   buildingId               String?           @map("building_id") @db.Uuid
   roomNo                   String?           @map("room_no")
   floorNo                  Int?              @map("floor_no")
+  /// 専有面積(壁芯・パンフレットの面積)。資金計画表・事業計画書の税金の計算もこの値(2026-10-24 発注者決定)。
   exclusiveArea            Decimal?          @map("exclusive_area") @db.Decimal(8, 2)
+  /// 専有面積(登記簿の面積・内法)。壁芯とはほぼ必ず数％ずれるので別に持つ(2026-10-24)。
+  exclusiveAreaRegistry    Decimal?          @map("exclusive_area_registry") @db.Decimal(8, 2)
   balconyArea              Decimal?          @map("balcony_area") @db.Decimal(8, 2)
   layoutType               String?           @map("layout_type")
   orientation              String?

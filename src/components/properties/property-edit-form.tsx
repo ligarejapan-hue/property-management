@@ -96,6 +96,7 @@ interface PropertyData {
   grossYield: number | null;
   expectedIncome: number | null;
   exclusiveArea: number | null;
+  exclusiveAreaRegistry?: number | null;
   balconyArea: number | null;
   layoutType: string | null;
   orientation: string | null;
@@ -308,7 +309,9 @@ export function salesFieldsFor(
     case "unit":
       return [
         ...price, ...tax, ...access,
-        { key: "exclusiveArea", label: "専有面積(㎡)", type: "number", section: "販売" },
+        // 専有面積は2つ(2026-10-24)。壁芯=パンフレットの面積(資金計画表・事業計画書の税金の計算もこちら)、登記簿=内法。
+        { key: "exclusiveArea", label: "専有面積・壁芯(パンフレット)(㎡)", type: "number", section: "販売" },
+        { key: "exclusiveAreaRegistry", label: "専有面積・登記簿(㎡)", type: "number", section: "販売" },
         { key: "balconyArea", label: "バルコニー面積(㎡)", type: "number", section: "販売" },
         { key: "layoutType", label: "間取り", type: "text", section: "販売" },
         { key: "orientation", label: "向き", type: "text", section: "販売" },

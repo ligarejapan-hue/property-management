@@ -310,7 +310,10 @@ interface MansionAutoSource {
   buildingName?: string | null;
   occupancyStatus?: string | null;
   zoningDistrict?: string | null;
+  /** 壁芯(パンフレット)の専有面積。 */
   exclusiveArea?: number | string | null;
+  /** 登記簿の専有面積(2026-10-24)。面積計測方式を「内法」にすると図面はこちらを使う。 */
+  exclusiveAreaRegistry?: number | string | null;
   balconyArea?: number | string | null;
   layoutType?: string | null;
   orientation?: string | null;
@@ -501,6 +504,8 @@ export function computeMansionAutoValues(data: MansionAutoSource): FieldModelAut
       repairFee: toPreviewString(data.repairReserveFee),
       address: toPreviewString(data.address),
       exclusiveArea: toPreviewString(data.exclusiveArea),
+      // 登記簿の面積(2026-10-24)。表示は面積計測方式で切り替える(mansionAreaPreview)。
+      exclusiveAreaRegistry: toPreviewString(data.exclusiveAreaRegistry),
       balconyArea: toPreviewString(data.balconyArea),
       balconyDir: toPreviewString(data.orientation),
       layout: toPreviewString(data.layoutType),
@@ -1029,19 +1034,43 @@ function FieldModelWidget({
   );
 }
 
+/**
+ * 区分の専有面積の表示値と案内(2026-10-24・@codex PR#578 P2)。
+ * 図面(build-document の buildMansionValues)と同じく、面積計測方式が「内法」なら登記簿の面積、
+ * それ以外(壁芯・未選択)なら壁芯の面積を出す。⚠表示と図面の数字を食い違わせない。
+ */
+export function mansionAreaPreview(
+  values: FieldModelValues,
+  autoPreview: Record<string, string>,
+): { value: string; hint?: string } {
+  const method = typeof values.areaMethod === "string" ? values.areaMethod.trim() : "";
+  const wall = autoPreview.exclusiveArea ?? "";
+  const registry = autoPreview.exclusiveAreaRegistry ?? "";
+  if (method === "内法") {
+    return registry !== ""
+      ? { value: registry, hint: "面積計測方式が「内法」なので、登記簿の面積を入れます" }
+      : { value: "", hint: "登記簿の面積が未入力のため、図面の専有面積は空になります（物件の編集で入れてください）" };
+  }
+  return registry !== ""
+    ? { value: wall, hint: `登記簿の面積は ${registry}㎡（面積計測方式を「内法」にすると、図面にはこちらが入ります）` }
+    : { value: wall };
+}
+
 /** 自動反映専用フィールドの参照表示（disabled・編集不可＝物件/建物レコードが正）。
  * mansion/land 共通（[F2-A Task4] 汎用化）。 */
 function AutoPreviewField({
   field,
   value,
   idPrefix,
+  hint,
 }: {
   field: SheetField;
   value: string;
   idPrefix: string;
+  hint?: string;
 }) {
   const id = `ss-${idPrefix}-${field.key}`;
-  return (
+  const row = (
     <div className="flex items-center gap-2">
       <label htmlFor={id} className="w-28 shrink-0 text-sm text-gray-500 dark:text-gray-400">
         {field.label}
@@ -1056,6 +1085,13 @@ function AutoPreviewField({
         className="flex-1 rounded border border-neutral-200 bg-neutral-100 px-2 py-1 text-sm text-neutral-500 dark:border-neutral-700 dark:bg-neutral-800 dark:text-neutral-400"
       />
       {field.unit && <span className="text-xs text-neutral-400">{field.unit}</span>}
+    </div>
+  );
+  if (!hint) return row;
+  return (
+    <div>
+      {row}
+      <p className="mt-0.5 text-[11px] text-neutral-400">{hint}</p>
     </div>
   );
 }
@@ -1125,12 +1161,16 @@ export function FieldModelForm({
               if (ctrlStr !== f.showWhen.equals) return null;
             }
             if (autoOnlyKeys.has(f.key)) {
+              // 区分の専有面積は面積計測方式で壁芯/登記簿を切り替える(図面と同じ数字を見せる)。
+              const area =
+                kind === "mansion" && f.key === "exclusiveArea" ? mansionAreaPreview(values, autoPreview) : null;
               return (
                 <AutoPreviewField
                   key={f.key}
                   idPrefix={kind}
                   field={f}
-                  value={autoPreview[f.key] ?? ""}
+                  value={area ? area.value : (autoPreview[f.key] ?? "")}
+                  hint={area?.hint}
                 />
               );
             }

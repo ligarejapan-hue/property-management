@@ -342,7 +342,8 @@ export const updatePropertySchema = z.object({
   grossYield: decimalColumn(999.99, 2).optional().nullable(), // DECIMAL(5,2) %
   expectedIncome: decimalColumn(99999999999.9, 1).optional().nullable(), // DECIMAL(12,1) 万円/年
   // 区分マンションの部屋固有項目(既存列。画面からは今回はじめて編集できるようにする)。
-  exclusiveArea: decimalColumn(999999.99, 2).optional().nullable(), // DECIMAL(8,2) ㎡
+  exclusiveArea: decimalColumn(999999.99, 2).optional().nullable(), // DECIMAL(8,2) ㎡ 壁芯(パンフレット)
+  exclusiveAreaRegistry: decimalColumn(999999.99, 2).optional().nullable(), // DECIMAL(8,2) ㎡ 登記簿(2026-10-24)
   balconyArea: decimalColumn(999999.99, 2).optional().nullable(), // DECIMAL(8,2) ㎡
   layoutType: z.string().max(50).optional().nullable(),
   orientation: z.string().max(50).optional().nullable(),

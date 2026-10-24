@@ -52,6 +52,7 @@ export const PROPERTY_TRACKED_FIELDS = [
   // 以前は漏れていて、CSV で変えても変更履歴が残らず、取込の取り消しでも戻らなかった。
   "floorNo",
   "exclusiveArea",
+  "exclusiveAreaRegistry",
   "balconyArea",
   "layoutType",
   "orientation",

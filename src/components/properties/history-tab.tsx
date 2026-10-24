@@ -85,7 +85,8 @@ const FIELD_LABELS: Record<string, string> = {
   expectedIncome: "満室想定収入",
   // 区分マンション(販売図面・CSV の「既存物件の更新」)。
   floorNo: "所在階",
-  exclusiveArea: "専有面積",
+  exclusiveArea: "専有面積（壁芯）",
+  exclusiveAreaRegistry: "専有面積（登記簿）",
   balconyArea: "バルコニー面積",
   layoutType: "間取り",
   orientation: "バルコニー向き",

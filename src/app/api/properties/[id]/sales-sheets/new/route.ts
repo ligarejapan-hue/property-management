@@ -315,6 +315,7 @@ export async function POST(
         // 区分マンション用
         roomNo: true,
         exclusiveArea: true,
+        exclusiveAreaRegistry: true,
         balconyArea: true,
         layoutType: true,
         floorNo: true,
@@ -451,6 +452,7 @@ export async function POST(
           address: property.address,
           roomNo: property.roomNo,
           exclusiveArea: property.exclusiveArea?.toString() ?? null,
+          exclusiveAreaRegistry: property.exclusiveAreaRegistry?.toString() ?? null,
           balconyArea: property.balconyArea?.toString() ?? null,
           layoutType: property.layoutType,
           floorNo: property.floorNo,
@@ -660,6 +662,8 @@ export async function POST(
           // ⚠R14: 区分マンションの物件側7項目(仕様書 §4.4)。「今の値と同じか」の判定と
           // ChangeLog の oldValue に使う(選ばないと常に undefined 扱いになり両方壊れる)。
           exclusiveArea: true,
+          // 内法の専有面積は登記簿の欄へ書き戻す(build-writeback の registryAreaColumn)。
+          exclusiveAreaRegistry: true,
           balconyArea: true,
           layoutType: true,
           orientation: true,

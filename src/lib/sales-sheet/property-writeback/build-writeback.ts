@@ -177,6 +177,20 @@ const BUILT_TARGET: Record<SalesSheetTemplateKind, "property" | "building" | nul
   building: "property",
 };
 
+/**
+ * 区分の専有面積は、面積計測方式が「内法」なら**登記簿の面積**の欄へ入れる(2026-10-24)。
+ * 壁芯・未選択なら今までどおり exclusiveArea(壁芯=パンフレットの面積)。
+ */
+const REGISTRY_AREA_COLUMN = "exclusiveAreaRegistry";
+function registryAreaColumn(
+  kind: SalesSheetTemplateKind,
+  rule: Rule,
+  values: Record<string, string | undefined>,
+): string | null {
+  if (kind !== "mansion" || rule.key !== "exclusiveArea") return null;
+  return (values.areaMethod ?? "").trim() === "内法" ? REGISTRY_AREA_COLUMN : null;
+}
+
 /** 今の値と同じなら保存しない(Decimal や Date は toString で比べる)。 */
 function same(current: unknown, next: string | number): boolean {
   if (current === null || current === undefined) return false;
@@ -199,7 +213,9 @@ export function buildWriteback(input: {
     const to: "property" | "building" =
       rule.to === "building" && !hasBuilding && rule.propertyColumnWhenNoBuilding ? "property" : rule.to;
     const column =
-      to === "property" && rule.to === "building" ? rule.propertyColumnWhenNoBuilding! : rule.column;
+      to === "property" && rule.to === "building"
+        ? rule.propertyColumnWhenNoBuilding!
+        : registryAreaColumn(kind, rule, values) ?? rule.column;
     if (to === "building" && !hasBuilding) {
       out.noTarget.push(rule.label); // 棟に紐づいていない＝入れても行き先が無い
       continue;
@@ -267,7 +283,9 @@ export function labelsOf(kind: SalesSheetTemplateKind, result: WritebackResult):
     // 棟の項目を物件の欄へ保存した場合(棟に紐づいていない区分)も「保存した」に数える。
     const inProperty =
       rule.propertyColumnWhenNoBuilding !== undefined && rule.propertyColumnWhenNoBuilding in result.property;
-    if (rule.column in bag || inProperty) out.push(rule.label);
+    // 内法の専有面積は登記簿の欄へ入る(registryAreaColumn)。
+    const inRegistryArea = kind === "mansion" && rule.key === "exclusiveArea" && REGISTRY_AREA_COLUMN in result.property;
+    if (rule.column in bag || inProperty || inRegistryArea) out.push(rule.label);
   }
   const builtIn = (bag: WritebackResult["property"]) => "builtYear" in bag || "builtMonth" in bag;
   if (builtIn(result.property) || builtIn(result.building)) out.push(BUILT_LABEL);
