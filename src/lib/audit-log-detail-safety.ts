@@ -361,6 +361,7 @@ const ACTION_EXTRA_KEYS: Readonly<Record<string, ReadonlySet<string>>> = {
   // owner 名 / zip / address 等の PII は route 側で記録しないが、混入しても
   // allowlist 外 + denylist で引き続き [REDACTED]。
   // 家屋番号の点検（read-only）の閲覧監査。件数とフラグだけ（物件ID・住所・家屋番号は記録しない）。
+  // ⚠画面と API は 2026-10-24 に削除（対象0件で不要になった）。記録済みの監査ログを表示するため残す。
   building_number_audit_view: new Set(["truncated", "timeBudgetExhausted"]),
   postal_code_audit_list: new Set([
     "apiConfigured",
