@@ -63,9 +63,39 @@ describe("区分建物の謄本から専有部分の床面積(登記簿)を読�
     expect(r.skippedReason).toContain("変更の履歴");
   });
 
-  it("同じ階・同じ数字が2回出ても1回と数える", () => {
+  it("★同じ階・同じ数字が2回出ても読まない(履歴の行かもしれない)", () => {
     const r = parseUnitFloorArea(unit(["┃居宅 │ │ ３階部分 ６３：５０│ ┃", "┃ │ │ ３階部分 ６３：５０│ ┃"]));
+    expect(r.value).toBeNull();
+  });
+
+  it("★メゾネットの片方の階を分けたあと(古い2階分の行+今の1階分の行)は足さずに読まない(@codex PR#583 P2)", () => {
+    const r = parseUnitFloorArea(
+      unit([
+        "┃居宅 │ │ ４階部分 ５０：２５│平成７年１１月１日新築 ┃",
+        "┃ │ │ ５階部分 ３０：８０│ ┃",
+        "┃居宅 │ │ ４階部分 ５０：２５│令和２年１月５日区分 ┃",
+      ]),
+    );
+    expect(r.value).toBeNull();
+  });
+
+  it("★階ごとに1回ずつでも、変更の原因(変更・分割など)があれば読まない", () => {
+    for (const cause of ["②③令和２年１月５日変更", "令和２年１月５日分割", "③錯誤", "令和２年１月５日区分"]) {
+      const r = parseUnitFloorArea(
+        unit(["┃居宅 │ │ ４階部分 ５０：２５│ ┃", `┃ │ │ ５階部分 ３０：８０│${cause} ┃`]),
+      );
+      expect(r.value, cause).toBeNull();
+    }
+  });
+
+  it("新築の原因だけなら読む", () => {
+    const r = parseUnitFloorArea(unit(["┃居宅 │ │ ３階部分 ６３：５０│平成７年１１月１日新築 ┃", "┃ │ │ │〔平成７年１１月２２日〕 ┃"]));
     expect(r.value).toBe("63.50");
+  });
+
+  it("改行をまたいだ2桁の数字を小数と読まない", () => {
+    const r = parseUnitFloorArea(unit(["┃居宅 │ │ ３階部分 ６３", "１２ │ ┃"]));
+    expect(r.value).toBeNull();
   });
 
   it("★附属建物の面積は足さない", () => {
