@@ -719,6 +719,10 @@ export async function DELETE(
       if (agentInquiryCount > 0) {
         throw new ApiError(409, "業者からの反響がある物件は削除できません", "HAS_AGENT_INQUIRIES");
       }
+      // Google ドライブの紐づけ(property_drive_folders.property_id は RESTRICT)は、同じ tx で先に外す
+      // (紐づけ済みの物件を消すと P2003=素の 500 になるため・2026-10-24 第2段a)。紐づけはアプリ側の
+      // 記録だけで、ドライブのファイルもアプリの添付も触らない(台帳は Cascade で連れて消える)。
+      await tx.propertyDriveFolder.deleteMany({ where: { propertyId: id } });
       const photos = await tx.propertyPhoto.findMany({
         where: { propertyId: id },
         select: { fileUrl: true },

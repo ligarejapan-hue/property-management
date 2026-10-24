@@ -97,6 +97,48 @@ migration は ADD COLUMN ×4 のみ。既存の行は NULL(=その他・元の�
 - 同じ PII 判定を使う場所もすべて docKind 対応: 反響の資料送付の候補と送る直前の判定(本人確認書類は送らない)・添付のお掃除(削除済みの本人確認書類の記録も、同じファイルを他の記録が指す間は残す=保持期限後も sticky が崩れない)。
 - 画面は変えない(一覧には出る・開くと 403/404)。資料に1文。DB 変更なし。
 
+### 6.3 第2段 Google ドライブ双方向(2026-10-24 設計・発注者決定: ドライブ側で人が置いたファイルの名前は触らない/認可は実装ができてから)
+
+**ねらい**: 発注者の Google ドライブ(ligare.japan@gmail.com のマイドライブ・物件ごとのフォルダ)とアプリの添付を往復させる。アプリが触るのは**物件に紐づけたフォルダの中だけ**。削除は同期しない。人が置いたファイルの名前は変えない(アプリに取り込んだ写しだけ、そろえた名前にする)。
+
+**接続(バックアップ用の rclone とは別)**
+- Google Cloud Console(既存の案件 `pm-backup`)に **ウェブ アプリケーション型の OAuth クライアント**を1つ足す(今の rclone 用はデスクトップ型で、ブラウザの戻り先を登録できない)。スコープ=`https://www.googleapis.com/auth/drive`(ドライブ全体の読み書き・人が置いたファイルを見るため)。戻り先=`https://property-management.tail182d6b.ts.net/api/drive/oauth/callback`。クライアント ID・シークレットは app.env(`GOOGLE_DRIVE_CLIENT_ID` / `GOOGLE_DRIVE_CLIENT_SECRET`)=個別承認。
+- 認可はアプリの画面から: 管理 › ドライブ連携 の「Google に接続」→ Google の同意画面 → 戻り先で refresh token を受け取り、`drive_connection`(1行)に **暗号化して保存**(`secret-crypto.ts` の `encryptSecret`=メール設定のパスワードと同じ守り)。state は CSRF 対策の乱数(セッションに紐づけ・10分)。接続できる・切れるのは管理者だけ。アクセストークンは都度 refresh(メモリに短時間だけ)。
+- Google の API は `fetch` で直接呼ぶ(npm の新しい部品なし)。使う口: `files.list`(フォルダの一覧・候補探し)・`files.get?alt=media`(取り込み)・`files.create`(multipart・複製)・`files.update`(自分が置いた写しの名前の付け直しだけ)・`changes.getStartPageToken` / `changes.list`(見回り)。
+
+**データ(migration 1本・足すだけ)**
+- `drive_connection`: id(singleton)・account_email・refresh_token_enc・start_page_token(見回りの続き)・last_sync_at・last_error・consecutive_failures・connected_by・updated_at。
+- `property_drive_folders`: id・property_id(unique)・folder_id(unique)・folder_name・folder_path(表示用「ハマイハイライズ 305 › 売却」)・linked_by・created_at。1物件=1フォルダ(売却|購入 の下の階層を紐づける)。
+- `drive_sync_files`(往復の台帳=重複と往復ループの防止): id・folder_link_id・drive_file_id(unique)・md5・name(⚠表示は管理画面だけ)・mime_type・size・modified_time・direction(`in`=ドライブ→アプリ / `out`=アプリ→ドライブ)・attachment_id?・status(`imported`|`inbox`|`duplicate`|`unsupported`|`failed`)・error・created_at。
+- `attachments.drive_file_id String?`(アプリ→ドライブの写しの id・「ドライブ同期済」のしるし)。
+
+**物件とフォルダの紐づけ(管理 › ドライブ連携・管理者)**
+- 接続の状態(アカウント・最後の見回り・連続失敗)・「Google に接続」「接続を切る」。
+- フォルダの一覧: マイドライブ直下のフォルダ(名前順・検索)→ 中の「売却|購入|仕入|販売」を選ぶ。右に**アプリの物件の候補**(純関数 `matchFolderToProperties`: フォルダ名から建物名と号室を切り出し、`buildingName`+`roomNo` の一致=「名前一致」、所在地の町名一致=「住所が近い」。根拠の無い候補は出さない)。「紐づける」/「物件を選ぶ」(検索)/「外す」。紐づけ・外しは監査ログ(物件 ID とフォルダ ID だけ・フォルダ名は書かない)。
+- 紐づけた物件の添付タブに「ドライブ: フォルダ名 › 開く」(ドライブへのリンク・`<a target=_blank>`)。
+- 2024 年分など**別アカウントが所有するフォルダ**も、共有されていれば一覧に出る(所有者を小さく表示)。
+
+**見回り(timer 5分ごと・`POST /api/drive/sync-run`・合言葉 `DRIVE_SYNC_SECRET`・未設定なら 503 で休眠・proxy の公開パスに追加)**
+1. アプリ → ドライブ(複製): 紐づけた物件の添付で `type=general`・未削除・`drive_file_id` が空のもの → 段階のフォルダ(無ければ作る。既存の「契約資料・契約書類・契約書類関係」は③契約関係として、「決済資料・決済関係」は④決済関係として**そのまま使う**=名前は変えない)へ、そろえた名前(`docTitle` ?? 元の名前)で `files.create`。`appProperties: { pmAttachmentId, pmSource: "app" }` を付ける(往復防止の目印)。写しの id を `attachments.drive_file_id` に。種類を直して名前が変わったら、自分が置いた写しだけ `files.update` で名前を合わせる。⚠謄本(`registry`)・反響資料(`referral`)・査定報告書(`report`)・**本人確認書類(`docKind=identity_document`・発注者決定 10-24「複製しない」)**は複製しない(課金した原本・所有者情報の守りの対象=`isOwnerPiiDocument` で判定)。1回の見回りで最大 20 件・1件 20MB まで。
+2. ドライブ → アプリ(取り込み): `changes.list`(前回の page token から)→ 紐づけたフォルダの**中**(親をたどって最大3階層)にある・フォルダでない・ゴミ箱でない・`appProperties.pmSource` が無い・台帳に無い・md5 が同じ物件の添付と重複しない、ファイルだけ。Google ドキュメント形式(エクスポートが要るもの)は `unsupported` として台帳に残し取り込まない。20MB 超・許可外の MIME も同じ。
+   - 段階のフォルダの中(①〜⑤・本人確認書類・写真)にあるもの → ダウンロード → PDF は本文を読んで種類を判別(§3)。フォルダ名が段階を示していれば、判別が `low`/当たらないときの段階の補助に使う(`docStage` に入れる)。その物件の添付(`general`)として登録(`uploadedBy`=接続した管理者・`docConfidence` は判別どおり・当たらなければ「その他」+「種類を確認」)。**「写真」フォルダの画像は物件の写真(写真タブ)に登録する**(発注者決定 10-24): 今の写真の登録口と同じ処理(EXIF の位置情報の除去・縮小版の作成・`PropertyPhoto`)を通す。画像でないもの(PDF など)が写真フォルダにあれば添付「その他」。
+   - 紐づけたフォルダの直下(段階のフォルダの外)にあるもの → **書類の受け取り箱**へ(候補=その物件・根拠「フォルダ一致」)。
+   - 紐づけ外のフォルダのもの → 何もしない(台帳にも書かない)。
+   - 取り込んだ行は台帳 `in` に。重複(md5 一致)は `duplicate`。
+3. 削除・移動・名前変更(ドライブ側の人の操作)はアプリに反映しない。アプリ側の削除もドライブに反映しない。
+4. 失敗: 1件ごとに台帳 `failed`+理由(PII なし)。見回り全体の失敗(認可切れ・API エラー)は `drive_connection.last_error`・`consecutive_failures` に。3回続いたら管理者にベル通知(通知の仕組み・1日1回まで)。認可切れ(`invalid_grant`)は「再接続が必要です」と画面に。
+5. 鍵: 見回りは同時に1つ(`pg_try_advisory_lock`)。timer は `pm-drive-sync.timer`(5分・`pm-attachment-cleanup` と同じ作り)=個別承認。
+
+**守り**
+- 取り込んだファイルは物件の置き場所(`properties/<id>/attachments/`)に `storage.upload`=今の添付と同じ守り。本人確認書類と判別されれば 1c の守りがそのまま効く。
+- 管理画面の API は `admin` だけ。フォルダ名・ファイル名は PII の可能性がある(所有者名が付いたフォルダなど)=監査ログ・journal に書かない(ID と件数だけ)。
+- トークンは `drive_connection` に暗号化・API の応答に出さない・画面にはアカウントのメールだけ。
+
+**PR の分け方**
+- 2a: 接続(OAuth の往復・暗号化保存)+ 管理 › ドライブ連携(フォルダの一覧・候補・紐づけ)+ migration(表3つ+列1つ)+ 資料。見回りは無し(紐づけだけできる)。
+- 2b: 見回り(複製・取り込み・台帳・失敗の表示・ベル通知)+ timer + proxy の公開パス。
+- 発注者の作業(2a のマージ後・反映の前): Cloud Console でウェブ型 OAuth クライアントの作成(戻り先 URL の登録)→ ID・シークレットを app.env へ(私が手順を出す・値は見ない)→ 反映後に管理画面の「Google に接続」。
+
 ## 7. テスト
 
 - 判別・名前・日付・段階の純関数: 表のすべての種類に1件以上、名前一致/見出し一致/本文一致/当たらない/領収書の振り分け/重複名の連番/使えない文字。
