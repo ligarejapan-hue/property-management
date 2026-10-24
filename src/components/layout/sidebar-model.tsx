@@ -215,6 +215,7 @@ export const SIDEBAR_GROUPS: NavGroup[] = [
       { label: "法人番号紐づけ", href: "/admin/owners/correction?tab=corporate_restore", icon: ic(Link2), minRole: "admin" },
       { label: "表示名監査", href: "/admin/display-name-audit", icon: ic(ScanSearch), minRole: "admin" },
       { label: "郵便番号×住所チェック", href: "/admin/postal-code-audit", icon: ic(MapPinned), minRole: "admin" },
+      { label: "家屋番号チェック", href: "/admin/building-number-audit", icon: ic(ScanSearch), minRole: "admin" },
       { label: "テキスト衛生監査", href: "/admin/owners/text-hygiene", icon: ic(ScanText), minRole: "admin" },
       { label: "氏名・連絡先チェック", href: "/admin/owners/quality-audit", icon: ic(ClipboardCheck), minRole: "admin" },
       // ⚠物件削除で孤児化した送付記録の訂正・取消(PR-B・設計§2.4)は
