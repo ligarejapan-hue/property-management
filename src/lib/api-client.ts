@@ -5489,3 +5489,84 @@ export async function searchPropertiesForReportInbox(q: string): Promise<ReportI
   );
   return json.data;
 }
+
+// ---------- Google ドライブ連携(管理者・第2段 2a・2026-10-24) ----------
+
+export interface DriveConnectionStatus {
+  connected: boolean;
+  accountEmail: string | null;
+  connectedAt: string | null;
+  lastSyncAt: string | null;
+  lastError: string | null;
+  consecutiveFailures: number;
+  clientConfigured: boolean;
+  cryptoConfigured: boolean;
+  redirectUri: string | null;
+  linkedFolderCount: number;
+}
+
+export interface DrivePropertyCandidate {
+  propertyId: string;
+  reason: "name_room" | "name" | "address";
+  buildingName: string | null;
+  roomNo: string | null;
+  address: string;
+  linkedFolderId: string | null;
+}
+
+export interface DriveFolderRow {
+  id: string;
+  name: string;
+  ownedByMe: boolean;
+  ownerEmail: string | null;
+  linkedProperty: { id: string; buildingName: string | null; roomNo: string | null; address: string } | null;
+  candidates: DrivePropertyCandidate[];
+}
+
+export interface DriveFolderLink {
+  id: string;
+  propertyId: string;
+  folderId: string;
+  folderName: string;
+  folderPath: string;
+  webViewLink: string | null;
+  createdAt: string;
+  property: { buildingName: string | null; roomNo: string | null; address: string };
+}
+
+export async function getDriveStatus(): Promise<DriveConnectionStatus> {
+  return (await apiFetch<{ data: DriveConnectionStatus }>("/api/admin/drive")).data;
+}
+
+export async function disconnectDrive(): Promise<DriveConnectionStatus> {
+  return (await apiFetch<{ data: DriveConnectionStatus }>("/api/admin/drive", { method: "DELETE" })).data;
+}
+
+export async function listDriveFolders(args: { parent: string; q?: string; pageToken?: string }): Promise<{
+  data: DriveFolderRow[];
+  path: string;
+  nextPageToken: string | null;
+}> {
+  const sp = new URLSearchParams({ parent: args.parent });
+  if (args.q) sp.set("q", args.q);
+  if (args.pageToken) sp.set("pageToken", args.pageToken);
+  return apiFetch(`/api/admin/drive/folders?${sp.toString()}`);
+}
+
+export async function listDriveLinks(): Promise<DriveFolderLink[]> {
+  return (await apiFetch<{ data: DriveFolderLink[] }>("/api/admin/drive/links")).data;
+}
+
+export async function createDriveLink(propertyId: string, folderId: string): Promise<DriveFolderLink> {
+  return (
+    await apiFetch<{ data: DriveFolderLink }>("/api/admin/drive/links", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ propertyId, folderId }),
+    })
+  ).data;
+}
+
+export async function deleteDriveLink(id: string): Promise<void> {
+  await apiFetch(`/api/admin/drive/links/${encodeURIComponent(id)}`, { method: "DELETE" });
+}
