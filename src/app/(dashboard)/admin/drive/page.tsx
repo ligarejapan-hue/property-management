@@ -162,7 +162,7 @@ function DriveAdminPageInner() {
               </div>
               <div className="text-xs text-gray-500 dark:text-gray-400">
                 {connected
-                  ? `接続日時: ${status?.connectedAt ? new Date(status.connectedAt).toLocaleString("ja-JP") : "—"} ／ 紐づけたフォルダ: ${status?.linkedFolderCount ?? 0}`
+                  ? `接続日時: ${status?.connectedAt ? new Date(status.connectedAt).toLocaleString("ja-JP") : "—"} ／ 紐づけたフォルダ: ${status?.linkedFolderCount ?? 0} ／ 最後の見回り: ${status?.lastSyncAt ? new Date(status.lastSyncAt).toLocaleString("ja-JP") : "まだ"}`
                   : "「Google に接続」を押すと Google の画面が開きます。会社のアカウント(ドライブの持ち主)で許可してください。"}
               </div>
             </div>
@@ -204,7 +204,10 @@ function DriveAdminPageInner() {
           </div>
         )}
         {status?.lastError && (
-          <div className="mt-3 text-xs text-red-700 dark:text-red-300">直近の失敗: {status.lastError}</div>
+          <div className="mt-3 text-xs text-red-700 dark:text-red-300">
+            直近の失敗: {status.lastError}
+            {status.consecutiveFailures >= 3 && `(${status.consecutiveFailures}回続いています)`}
+          </div>
         )}
       </section>
 

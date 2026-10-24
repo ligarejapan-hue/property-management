@@ -34,6 +34,8 @@ const PUBLIC_EXACT_PATHS = [
   "/api/agent-registry/crawl-run",
   // マンション名簿の読み込み(手で1回叩く・合言葉で守る・未設定なら 503)。
   "/api/mansion-catalog/load-run",
+  // Google ドライブの見回り(timer 用・x-drive-sync-secret で守る・未設定なら 503 で休眠)。
+  "/api/drive/sync-run",
   // 通知 段階1: Service Worker とホーム画面追加の設定。ログイン画面(未ログイン)でも
   // 読む必要がある(共用 PC の通知の後片付け・iPhone のホーム画面追加)。中身は静的・PII なし。
   "/sw.js",

@@ -1,0 +1,15 @@
+# Google ドライブの見回り — 前回が終わってから5分ごと(書類の自動整理 第2段b)。
+# ⚠有効にするのは反映の**最後**、戻すときは**最初に**止める(docs/deploy.md)。
+[Unit]
+Description=Run Google Drive sync every 5 minutes
+
+[Timer]
+OnBootSec=5min
+# ⚠前回が**終わってから**5分(OnUnitInactiveSec)。OnUnitActiveSec(始まりから)だと、1回が5分を超えたとき
+#   次の起動が「実行中なので見送り」になり、その後 timer が二度と動かなくなる(@codex #472 P1 と同じ)。
+OnUnitInactiveSec=5min
+AccuracySec=30s
+Unit=pm-drive-sync.service
+
+[Install]
+WantedBy=timers.target
