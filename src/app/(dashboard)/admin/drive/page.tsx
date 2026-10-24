@@ -1,6 +1,6 @@
 "use client";
 
-import { Suspense, useCallback, useEffect, useState } from "react";
+import { Suspense, useCallback, useEffect, useRef, useState } from "react";
 import { useSearchParams } from "next/navigation";
 import { AlertTriangle, Cloud, CloudOff, ExternalLink, FolderOpen, Link2, Loader2, Search, Unlink } from "lucide-react";
 import { PageHeader } from "@/components/ui/page-header";
@@ -307,18 +307,25 @@ function FolderBrowser({
   const [err, setErr] = useState<string | null>(null);
   const parent = crumbs[crumbs.length - 1].id;
 
+  // 読み込みの世代。移動・絞り込み・さらに読むが重なったとき、最後に始めたもの以外の応答は捨てる
+  // (古い応答が今のパンくずの下に別のフォルダの一覧を出してしまう・@codex #577 R3)。
+  const loadGen = useRef(0);
+
   // ⚠effect の中で同期に state を変えない(読み込み中の印は押した側で立てる)。
   const load = useCallback(
     async (append = false, pageToken?: string) => {
+      const gen = ++loadGen.current;
       try {
         const r = await listDriveFolders({ parent, q: q.trim() || undefined, pageToken });
+        if (gen !== loadGen.current) return;
         setRows((prev) => (append ? [...prev, ...r.data] : r.data));
         setNextToken(r.nextPageToken);
         setErr(null);
       } catch (e) {
+        if (gen !== loadGen.current) return;
         setErr(e instanceof Error ? e.message : "フォルダを読めませんでした");
       } finally {
-        setLoading(false);
+        if (gen === loadGen.current) setLoading(false);
       }
     },
     [parent, q],

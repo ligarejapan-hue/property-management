@@ -71,7 +71,7 @@ export async function saveDriveConnection(args: { accountEmail: string; refreshT
       connectedAt: now,
     },
   });
-  cachedAccessToken = null;
+  invalidateTokenCache();
 }
 
 export async function clearDriveConnection(): Promise<void> {
@@ -79,22 +79,38 @@ export async function clearDriveConnection(): Promise<void> {
     where: { id: DRIVE_CONNECTION_ID },
     data: { refreshTokenEnc: null, startPageToken: null, lastError: null, consecutiveFailures: 0 },
   });
-  cachedAccessToken = null;
+  invalidateTokenCache();
 }
 
 let cachedAccessToken: { token: string; expiresAtMs: number } | null = null;
+/**
+ * 接続の世代。つなぐ・切るたびに進む。更新(refresh)の途中で世代が変わったら、その結果は古い接続のもの
+ * =控えに入れず返さない(切ったあとにドライブを触る・別のアカウントのトークンを使い続けるのを防ぐ・@codex #577 R3)。
+ */
+let connectionGeneration = 0;
+function invalidateTokenCache(): void {
+  connectionGeneration++;
+  cachedAccessToken = null;
+}
 
 /** 有効なアクセストークン(メモリの控え→無ければ refresh)。未接続は DriveAuthError(not_connected)。 */
 export async function getDriveAccessToken(fetchFn: typeof fetch = fetch, nowMs: number = Date.now()): Promise<string> {
-  if (cachedAccessToken && cachedAccessToken.expiresAtMs - 60_000 > nowMs) return cachedAccessToken.token;
-  const cfg = getDriveClientConfig();
-  if (!cfg) throw new DriveAuthError("not_configured", "Google ドライブのクライアント設定(app.env)がありません");
-  const row = await prisma.driveConnection.findUnique({ where: { id: DRIVE_CONNECTION_ID }, select: { refreshTokenEnc: true } });
-  if (!row?.refreshTokenEnc) throw new DriveAuthError("not_connected", "Google ドライブに接続されていません");
-  const refreshToken = decryptSecret(row.refreshTokenEnc);
-  const r = await refreshAccessToken({ refreshToken, clientId: cfg.clientId, clientSecret: cfg.clientSecret }, fetchFn);
-  cachedAccessToken = { token: r.accessToken, expiresAtMs: nowMs + r.expiresInSec * 1000 };
-  return r.accessToken;
+  // 更新の途中で接続が変わったら、DB を読み直してやり直す(つなぎ直しが続いても無限には回らない)。
+  for (let attempt = 0; attempt < 3; attempt++) {
+    if (cachedAccessToken && cachedAccessToken.expiresAtMs - 60_000 > nowMs) return cachedAccessToken.token;
+    const gen = connectionGeneration;
+    const cfg = getDriveClientConfig();
+    if (!cfg) throw new DriveAuthError("not_configured", "Google ドライブのクライアント設定(app.env)がありません");
+    const row = await prisma.driveConnection.findUnique({ where: { id: DRIVE_CONNECTION_ID }, select: { refreshTokenEnc: true } });
+    if (gen !== connectionGeneration) continue;
+    if (!row?.refreshTokenEnc) throw new DriveAuthError("not_connected", "Google ドライブに接続されていません");
+    const refreshToken = decryptSecret(row.refreshTokenEnc);
+    const r = await refreshAccessToken({ refreshToken, clientId: cfg.clientId, clientSecret: cfg.clientSecret }, fetchFn);
+    if (gen !== connectionGeneration) continue; // 古い接続のトークン=捨てる
+    cachedAccessToken = { token: r.accessToken, expiresAtMs: nowMs + r.expiresInSec * 1000 };
+    return r.accessToken;
+  }
+  throw new DriveAuthError("connection_changed", "Google ドライブの接続が切り替わっている途中です。もう一度お試しください");
 }
 
 export async function getDriveClient(fetchFn: typeof fetch = fetch): Promise<DriveClient> {

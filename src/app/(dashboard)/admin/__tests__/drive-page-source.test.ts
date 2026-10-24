@@ -36,6 +36,16 @@ describe("ドライブ連携の画面", () => {
     expect(SRC).toMatch(/linkedTo=\{linkByFolder\.get\(f\.id\)\?\.property \?\? null\}/);
   });
 
+  it("★古いフォルダ一覧の応答は捨てる(移動・絞り込み・さらに読むが重なっても今の場所の一覧だけ出す・@codex #577 R3)", () => {
+    const load = /const load = useCallback\([\s\S]*?\n {2}\);/.exec(SRC)?.[0] ?? "";
+    expect(load).toMatch(/const gen = \+\+loadGen\.current;/);
+    // await のあと、状態を変える前に世代を確かめる
+    const afterAwait = load.slice(load.indexOf("await listDriveFolders"));
+    expect(afterAwait).toMatch(/if \(gen !== loadGen\.current\) return;/);
+    expect(afterAwait.indexOf("if (gen !== loadGen.current) return;")).toBeLessThan(afterAwait.indexOf("setRows("));
+    expect(load).toMatch(/finally \{\n\s+if \(gen === loadGen\.current\) setLoading\(false\);/);
+  });
+
   it("useSearchParams を使う本体は Suspense で包む", () => {
     expect(SRC).toMatch(/<Suspense[\s\S]*<DriveAdminPageInner \/>[\s\S]*<\/Suspense>/);
   });
