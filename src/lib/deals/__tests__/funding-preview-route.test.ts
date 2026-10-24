@@ -9,6 +9,9 @@ vi.mock("@/lib/prisma", () => ({
     companyProfile: { findUnique: vi.fn(async () => ({ nameJa: "架空不動産株式会社" })) },
   },
 }));
+vi.mock("@/lib/storage", () => ({
+  getStorage: () => ({ read: vi.fn(async (k: string) => (k === "deal-settings/logo-a.jpg" ? { body: Buffer.from("ab"), contentType: "x", size: 2 } : null)) }),
+}));
 
 import prismaMock from "@/lib/prisma";
 import { getApiSession, getUserPermissions } from "@/lib/api-helpers";
@@ -51,6 +54,16 @@ describe("POST /api/deals/[id]/funding-plan/preview", () => {
     expect(body.html).toContain("架空 太郎");
     expect(body.html).toContain("架空不動産株式会社");
     expect(pm.deal.updateMany).not.toHaveBeenCalled();
+  });
+  it("取引の設定のロゴと文面をプレビューにも入れる(PDF と同じ見た目)", async () => {
+    (prismaMock as never as { dealSettings: { findUnique: Fn } }).dealSettings.findUnique.mockResolvedValue({
+      representativeTitle: null, representativeName: null, bankAccount: {}, propertyKinds: [], version: 1, updatedAt: new Date(),
+      logoKey: "deal-settings/logo-a.jpg", sealKey: null, texts: { funding_plan: { greeting: "ごあいさつ", notes: null } },
+    });
+    const body = await (await POST(json("POST", { fundingPlan: DEFAULT_FUNDING_INPUTS }), ctx)).json();
+    expect(body.html).toContain('src="data:image/jpeg;base64,YWI="');
+    expect(body.html).toContain("ごあいさつ");
+    (prismaMock as never as { dealSettings: { findUnique: Fn } }).dealSettings.findUnique.mockResolvedValue(null);
   });
   it("形の違う入力は 422", async () => {
     expect((await POST(json("POST", { fundingPlan: { ...DEFAULT_FUNDING_INPUTS, mode: "x" } }), ctx)).status).toBe(422);

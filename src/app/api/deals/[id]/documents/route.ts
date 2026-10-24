@@ -10,6 +10,7 @@ import { loadCompanyProfile } from "@/lib/sales-sheet/company-profile-store";
 import { DEAL_VERSION_CONFLICT_MESSAGE, requireDeal } from "@/lib/deals/guard";
 import { DEAL_DETAIL_SELECT, toDealView } from "@/lib/deals/view";
 import { loadDealSettings } from "@/lib/deals/settings-store";
+import { loadDealBranding } from "@/lib/deals/branding-store";
 import { jstDateString } from "@/lib/deals/datetime";
 import { buildFundingPlan } from "@/lib/deals/documents/funding-plan";
 import { buildFundingPlanXlsx } from "@/lib/deals/documents/funding-plan-xlsx";
@@ -71,10 +72,13 @@ export async function POST(request: Request, ctx: Ctx) {
     const deal = toDealView(row);
     const inputs = deal.fundingPlan;
     const today = jstDateString(new Date());
-    const [rateRows, settings, company] = await Promise.all([prisma.dealRateTable.findMany(), loadDealSettings(), loadCompanyProfile()]);
-    const { calc, html } = buildFundingPlan({ deal, rateRows, kinds: settings.propertyKinds, inputs, company, today });
+    const [rateRows, settings, company, branding] = await Promise.all([
+      prisma.dealRateTable.findMany(), loadDealSettings(), loadCompanyProfile(), loadDealBranding(),
+    ]);
+    const text = settings.texts.funding_plan;
+    const { calc, html } = buildFundingPlan({ deal, rateRows, kinds: settings.propertyKinds, inputs, company, today, logo: branding.logo, text });
     const pdf = await renderHtmlToPdfDocument(html);
-    const xlsx = await buildFundingPlanXlsx({ deal, inputs, calc, company, issuedOn: today });
+    const xlsx = await buildFundingPlanXlsx({ deal, inputs, calc, company, issuedOn: today, text });
 
     const variant = inputs.mode;
     const fileBaseName = dealDocumentBaseName(deal.dealNo, docType, variant, today);

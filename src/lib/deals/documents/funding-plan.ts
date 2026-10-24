@@ -5,6 +5,7 @@ import type { PropertyKindDef } from "../constants";
 import type { RateTableRow } from "../rate-tables";
 import { yen } from "../calc/format";
 import type { FundingInputs } from "../funding-schema";
+import type { DealDocText } from "../schemas";
 import type { DealView } from "../view";
 import { html, type SafeHtml } from "./html";
 import { companyBlock, documentHtml } from "./layout";
@@ -16,6 +17,10 @@ export interface FundingPlanDocInput {
   company: CompanyProfile;
   /** 作成日(日本時間の YYYY-MM-DD)。 */
   issuedOn: string;
+  /** 取引の設定のロゴ(data: の URL)。PDF・プレビューだけに使う。 */
+  logo?: string | null;
+  /** 取引の設定の文面(あいさつ文・注意事項)。 */
+  text?: DealDocText;
 }
 
 const money = (n: number | null) => (n === null ? "—" : `${yen(n)}円`);
@@ -106,16 +111,23 @@ export function renderFundingPlanHtml(i: FundingPlanDocInput): string {
 <div class="customer">${i.inputs.customerName ?? ""} 様</div>
 <div class="right">作成日 ${dateJa(i.issuedOn)}</div>
 </div>
+${i.text?.greeting ? html`<p class="greeting">${i.text.greeting}</p>` : null}
 ${propertyRows(i.deal)}
 ${purchase ? purchaseBody(i.calc) : saleBody(i.calc)}
-${companyBlock(i.company)}`,
+${i.text?.notes ? html`<p class="remarks">${i.text.notes}</p>` : null}
+${companyBlock(i.company, i.logo)}`,
   });
 }
 
 /** 取引・税率の表・入力から、資金計画表の計算と HTML をまとめて作る(プレビュー・PDF・Excel で共通)。 */
 export function buildFundingPlan(a: {
   deal: DealView; rateRows: RateTableRow[]; kinds: PropertyKindDef[]; inputs: FundingInputs; company: CompanyProfile; today: string;
+  /** 取引の設定のロゴ・文面(呼ぶ側が必ず渡す。無ければ null・undefined)。 */
+  logo: string | null; text: DealDocText | undefined;
 }): { calc: FundingPlanCalc; html: string } {
   const calc = fundingPlanCalc(a.deal, computeDealCalc(a.deal, a.rateRows, a.kinds, a.today), a.inputs, a.rateRows);
-  return { calc, html: renderFundingPlanHtml({ deal: a.deal, inputs: a.inputs, calc, company: a.company, issuedOn: a.today }) };
+  return {
+    calc,
+    html: renderFundingPlanHtml({ deal: a.deal, inputs: a.inputs, calc, company: a.company, issuedOn: a.today, logo: a.logo, text: a.text }),
+  };
 }

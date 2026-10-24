@@ -204,6 +204,14 @@ export const partyUpdateSchema = z.object({
   .refine((v) => (v.shareNum === undefined) === (v.shareDen === undefined), SHARE_MESSAGE)
   .refine((v) => v.shareNum === undefined || shareOk(v), SHARE_MESSAGE);
 
+/** 書類ごとの文面(設計 §2.4)。あいさつ文は書類の頭、注意事項は末尾に出す。改行はそのまま。 */
+export const DEAL_TEXT_LIMITS = { greeting: 400, notes: 1000 } as const;
+const docTextSchema = z.object({ greeting: text(DEAL_TEXT_LIMITS.greeting), notes: text(DEAL_TEXT_LIMITS.notes) }).strict();
+export type DealDocText = z.infer<typeof docTextSchema>;
+/** 文面を持つ書類。書類を足すときはここに1行足す。 */
+export const dealTextsSchema = z.object({ funding_plan: docTextSchema.optional() }).strict();
+export type DealTexts = z.infer<typeof dealTextsSchema>;
+
 export const dealSettingsUpdateSchema = z.object({
   /** 0 = まだ設定の行が無い(初めての保存)。 */
   version: z.number().int().min(0),
@@ -211,4 +219,5 @@ export const dealSettingsUpdateSchema = z.object({
   representativeName: text(100).optional(),
   bankAccount: bankAccountSchema.optional(),
   propertyKinds: propertyKindsSchema.optional(),
+  texts: dealTextsSchema.optional(),
 }).strict();

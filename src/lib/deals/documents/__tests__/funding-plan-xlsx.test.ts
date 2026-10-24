@@ -3,7 +3,7 @@ import ExcelJS from "exceljs";
 import { buildFundingPlanXlsx } from "../funding-plan-xlsx";
 import { fundingPlanCalc, type FundingPlanCalc } from "../../calc/funding-plan";
 import { computeDealCalc } from "../../calc/deal-calc";
-import { DEFAULT_COSTS, DEFAULT_TERMS, EMPTY_BROKER, EMPTY_SNAPSHOT } from "../../schemas";
+import { DEFAULT_COSTS, DEFAULT_TERMS, EMPTY_BROKER, EMPTY_SNAPSHOT, type DealDocText } from "../../schemas";
 import { DEFAULT_PROPERTY_KINDS } from "../../constants";
 import { INITIAL_RATE_TABLES, type RateTableRow } from "../../rate-tables";
 import { DEFAULT_FUNDING_INPUTS, type FundingInputs } from "../../funding-schema";
@@ -28,9 +28,9 @@ const company: CompanyProfile = { nameJa: "架空不動産株式会社", license
 const calcOf = (i: FundingInputs, d: DealView = deal) =>
   fundingPlanCalc(d, computeDealCalc(d, rateRows, DEFAULT_PROPERTY_KINDS, "2026-10-24"), i, rateRows);
 
-async function sheetOf(i: FundingInputs, d: DealView = deal): Promise<{ ws: ExcelJS.Worksheet; calc: FundingPlanCalc }> {
+async function sheetOf(i: FundingInputs, d: DealView = deal, text?: DealDocText): Promise<{ ws: ExcelJS.Worksheet; calc: FundingPlanCalc }> {
   const calc = calcOf(i, d);
-  const buf = await buildFundingPlanXlsx({ deal: d, inputs: i, calc, company, issuedOn: "2026-10-24" });
+  const buf = await buildFundingPlanXlsx({ deal: d, inputs: i, calc, company, issuedOn: "2026-10-24", text });
   const wb = new ExcelJS.Workbook();
   await wb.xlsx.load(buf as unknown as ArrayBuffer);
   return { ws: wb.worksheets[0], calc };
@@ -154,6 +154,24 @@ describe("資金計画表の Excel", () => {
     ws.eachRow((row) => row.eachCell((c) => { if (isFormula(c.value) && /HYPERLINK/.test(c.value.formula)) formulas++; }));
     expect(formulas).toBe(0);
     expect(() => rowOf(ws, "ローン保証料")).toThrow();
+  });
+
+  it("取引の設定の文面: あいさつ文は物件の下、注意事項は会社名の上に1行ずつ・文字のまま", async () => {
+    const { ws } = await sheetOf(purchase, deal, { greeting: "このたびは\n=SUM(1,2)", notes: "金利は変わります\n概算です" });
+    const values: unknown[] = [];
+    ws.eachRow((row) => values.push(row.getCell(1).value));
+    const at = (v: string) => values.indexOf(v);
+    expect(at("このたびは")).toBeGreaterThan(at("所在 架空県架空市1-2-3"));
+    expect(at("=SUM(1,2)")).toBe(at("このたびは") + 1);
+    expect(at("金利は変わります")).toBeGreaterThan(at("自己資金"));
+    expect(at("概算です")).toBe(at("金利は変わります") + 1);
+    expect(at("架空不動産株式会社")).toBeGreaterThan(at("概算です"));
+    let formulas = 0;
+    ws.eachRow((row) => row.eachCell((c) => { if (isFormula(c.value) && /SUM\(1,2\)/.test(c.value.formula)) formulas++; }));
+    expect(formulas).toBe(0);
+    // 文面が無ければ行も増えない
+    const count = (s: ExcelJS.Worksheet) => { let n = 0; s.eachRow(() => n++); return n; };
+    expect(count((await sheetOf(purchase, deal, { greeting: null, notes: null })).ws)).toBe(count((await sheetOf(purchase)).ws));
   });
 
   it("土地: 保存登記・火災保険の行が無く、区分の月々の合計も無い", async () => {

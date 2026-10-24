@@ -159,6 +159,20 @@ describe("POST /api/deals/[id]/documents(発行)", () => {
     expect((await POST(json("POST", { docType: "funding_plan" }), ctx)).status).toBe(422);
   });
 
+  it("取引の設定のロゴと文面を PDF に入れる(ロゴは data: の URL で埋め込む)", async () => {
+    files.set("deal-settings/logo-a.png", Buffer.from("ab"));
+    (prismaMock as never as { dealSettings: { findUnique: Fn } }).dealSettings.findUnique.mockResolvedValue({
+      representativeTitle: null, representativeName: null, bankAccount: {}, propertyKinds: [], version: 1, updatedAt: new Date(),
+      logoKey: "deal-settings/logo-a.png", sealKey: null, texts: { funding_plan: { greeting: "いつもお世話になっております", notes: "概算です" } },
+    });
+    expect((await POST(json("POST", { docType: "funding_plan", version: 3 }), ctx)).status).toBe(201);
+    const h = (renderHtmlToPdfDocument as Fn).mock.calls[0][0] as string;
+    expect(h).toContain('src="data:image/png;base64,YWI="');
+    expect(h).toContain("いつもお世話になっております");
+    expect(h).toContain("概算です");
+    (prismaMock as never as { dealSettings: { findUnique: Fn } }).dealSettings.findUnique.mockResolvedValue(null);
+  });
+
   it("売却の入力なら売却の版として残す", async () => {
     pm.deal.findUnique.mockResolvedValue({ ...row, planInputs: { funding: { ...funding, mode: "sale" } } });
     const body = await (await POST(json("POST", { docType: "funding_plan", version: 3 }), ctx)).json();

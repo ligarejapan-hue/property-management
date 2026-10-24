@@ -26,11 +26,19 @@ tr.total th, tr.total td { font-weight: bold; background: #f9fafb; }
 .notes { margin: 2mm 0 0; padding-left: 5mm; font-size: 8.5pt; color: #333; }
 .company { margin-top: 8mm; text-align: right; font-size: 9pt; line-height: 1.6; }
 .company .name { font-size: 11pt; }
+.company .logo { display: block; margin: 0 0 1.5mm auto; max-height: 14mm; max-width: 50mm; height: auto; width: auto; }
+.greeting, .remarks { white-space: pre-wrap; margin: 3mm 0; }
+.remarks { font-size: 8.5pt; color: #333; }
 `;
 
-export function companyBlock(c: CompanyProfile): SafeHtml {
+/** 書類に埋め込めるロゴの形(PNG・JPEG の data: の URL)。それ以外は出さない(外の URL を読ませない)。 */
+const LOGO_DATA_URI = /^data:image\/(?:png|jpeg);base64,[A-Za-z0-9+/]+=*$/;
+
+/** 会社欄。ロゴは取引の設定で登録したもの(縦横比は保ったまま、枠の中に収める)。 */
+export function companyBlock(c: CompanyProfile, logo?: string | null): SafeHtml {
   const tel = [c.tel && `TEL ${c.tel}`, c.fax && `FAX ${c.fax}`].filter(Boolean).join(" / ");
   return html`<div class="company">
+${logo && LOGO_DATA_URI.test(logo) ? html`<img class="logo" src="${logo}" alt="">` : null}
 <div class="name">${c.nameJa}</div>
 ${c.license ? html`<div>${c.license}</div>` : null}
 ${c.address ? html`<div>${c.address}</div>` : null}

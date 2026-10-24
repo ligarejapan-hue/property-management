@@ -4,6 +4,7 @@ import type { PropertyKindDef } from "./constants";
 import type { DealCalc } from "./calc/deal-calc";
 import type { FundingPlanCalc } from "./calc/funding-plan";
 import type { FundingInputs } from "./funding-schema";
+import type { DealImageKind } from "./branding";
 
 /** 取引の画面から API を呼ぶ。失敗はサーバーの文言とコードを持った DealApiError にする。 */
 export class DealApiError extends Error {
@@ -13,10 +14,12 @@ export class DealApiError extends Error {
 }
 
 async function call<T>(url: string, init?: { method?: string; body?: unknown }): Promise<T> {
+  const form = init?.body instanceof FormData;
   const res = await fetch(url, {
     method: init?.method ?? "GET",
-    headers: init?.body !== undefined ? { "Content-Type": "application/json" } : undefined,
-    body: init?.body !== undefined ? JSON.stringify(init.body) : undefined,
+    // FormData はブラウザに区切り付きの Content-Type を付けさせる。
+    headers: init?.body !== undefined && !form ? { "Content-Type": "application/json" } : undefined,
+    body: init?.body === undefined ? undefined : form ? (init.body as FormData) : JSON.stringify(init.body),
   });
   const body = await res.json().catch(() => null);
   if (!res.ok) {
@@ -54,6 +57,15 @@ export const dealsApi = {
   getSettings: () => call<{ settings: DealSettingsView }>("/api/admin/deal-settings"),
   saveSettings: (body: Record<string, unknown>) => call<{ settings: DealSettingsView }>("/api/admin/deal-settings", { method: "PUT", body }),
   rateTables: () => call<{ tables: RateTableView[] }>("/api/admin/deal-settings/rate-tables"),
+  /** ロゴ・角印を登録する(差し替えも同じ)。version は取引の設定の版。 */
+  uploadSettingsImage: (kind: DealImageKind, file: File, version: number) => {
+    const body = new FormData();
+    body.append("file", file);
+    body.append("version", String(version));
+    return call<{ settings: DealSettingsView }>(`/api/admin/deal-settings/images/${kind}`, { method: "POST", body });
+  },
+  deleteSettingsImage: (kind: DealImageKind, version: number) =>
+    call<{ settings: DealSettingsView }>(`/api/admin/deal-settings/images/${kind}?version=${version}`, { method: "DELETE" }),
   users: () => call<{ data: UserOption[] }>("/api/users"),
   calc: (id: string) => call<{ calc: DealCalc }>(`/api/deals/${id}/calc`),
   fundingPreview: (id: string, fundingPlan: FundingInputs) =>
