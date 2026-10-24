@@ -93,6 +93,12 @@ describe("区分建物の謄本から専有部分の床面積(登記簿)を読�
     expect(r.value).toBe("63.50");
   });
 
+  it("★メゾネットの片方の面積が読めないときは、読めた分だけを足さない(@codex PR#583 2巡目 P2)", () => {
+    const r = parseUnitFloorArea(unit(["┃居宅 │ │ ４階部分 ５０：２５│ ┃", "┃ │ │ ５階部分 ３０", "８０│ ┃"]));
+    expect(r.value).toBeNull();
+    expect(r.skippedReason).toContain("一部読めません");
+  });
+
   it("改行をまたいだ2桁の数字を小数と読まない", () => {
     const r = parseUnitFloorArea(unit(["┃居宅 │ │ ３階部分 ６３", "１２ │ ┃"]));
     expect(r.value).toBeNull();

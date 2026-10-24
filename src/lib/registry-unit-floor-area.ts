@@ -66,6 +66,12 @@ export function parseUnitFloorArea(raw: string): UnitFloorAreaResult {
     byFloor.set(floor, Number(m[3]) * 100 + Number(m[4]));
   }
   if (byFloor.size === 0) return { value: null, skippedReason: "専有部分の床面積が読めません" };
+  // 「N階部分」が出た数だけ面積が読めていなければ、読めた分だけ足さない
+  // (メゾネットの片方の面積が行をまたいで読めないと、小さすぎる合計になる・@codex PR#583 2巡目 P2)。
+  const floorMentions = section.match(/[0-9]{1,3}[ \t]*階[ \t]*部[ \t]*分/g)?.length ?? 0;
+  if (floorMentions !== byFloor.size) {
+    return { value: null, skippedReason: "専有部分の床面積が一部読めません" };
+  }
   if (CHANGE_CAUSE.test(section)) return history;
   let total = 0;
   for (const v of byFloor.values()) total += v;
