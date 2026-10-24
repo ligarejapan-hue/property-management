@@ -122,6 +122,14 @@ describe("DriveClient(見回り用)", () => {
     expect(JSON.parse(String(calls[0].init?.body))).toEqual({ name: "新しい名前.pdf" });
   });
 
+  it("trash: ゴミ箱へ入れるだけ(消し切らない)", async () => {
+    const { fetch, calls } = fake([{ status: 200, body: { id: "f1" } }]);
+    const c = new DriveClient("tok", fetch);
+    await c.trash("f1");
+    expect(calls[0].init?.method).toBe("PATCH");
+    expect(JSON.parse(String(calls[0].init?.body))).toEqual({ trashed: true });
+  });
+
   it("失敗はファイル名を含まないエラー・401 は再接続が要る", async () => {
     const { fetch } = fake([{ status: 401, body: {} }]);
     const c = new DriveClient("tok", fetch);

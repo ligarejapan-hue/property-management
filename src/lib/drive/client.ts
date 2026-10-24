@@ -19,7 +19,15 @@ export class DriveApiError extends Error {
 }
 
 export type DriveFolderSummary = { id: string; name: string; ownedByMe: boolean; ownerEmail: string | null };
-export type DriveFolderDetail = { id: string; name: string; parents: string[]; trashed: boolean; webViewLink: string | null };
+export type DriveFolderDetail = {
+  id: string;
+  name: string;
+  parents: string[];
+  trashed: boolean;
+  webViewLink: string | null;
+  /** 接続したアカウントが持ち主か(共有されただけのフォルダは false)。 */
+  ownedByMe: boolean;
+};
 
 /** Drive の検索式の文字列の中で ' と \ を逃がす。 */
 export function escapeDriveQueryValue(v: string): string {
@@ -118,11 +126,18 @@ export class DriveClient {
   /** フォルダ1つ。無い/フォルダでない → null。 */
   async getFolder(id: string): Promise<DriveFolderDetail | null> {
     const f = await this.getJson<RawFile>(`/files/${encodeURIComponent(id)}`, {
-      fields: "id,name,mimeType,parents,trashed,webViewLink",
+      fields: "id,name,mimeType,parents,trashed,webViewLink,ownedByMe",
       supportsAllDrives: "true",
     });
     if (!f || f.mimeType !== FOLDER_MIME) return null;
-    return { id: f.id, name: f.name, parents: f.parents ?? [], trashed: f.trashed === true, webViewLink: f.webViewLink ?? null };
+    return {
+      id: f.id,
+      name: f.name,
+      parents: f.parents ?? [],
+      trashed: f.trashed === true,
+      webViewLink: f.webViewLink ?? null,
+      ownedByMe: f.ownedByMe === true,
+    };
   }
 
   private async send(url: string, init: RequestInit): Promise<Response> {
@@ -223,6 +238,18 @@ export class DriveClient {
     });
     const j = (await res.json()) as { id: string; md5Checksum?: string };
     return { id: j.id, md5: j.md5Checksum ?? null };
+  }
+
+  /** ゴミ箱へ入れる(消し切らない・アプリが置いた写しにだけ使う)。 */
+  async trash(fileId: string): Promise<void> {
+    const u = new URL(`${API}/files/${encodeURIComponent(fileId)}`);
+    u.searchParams.set("supportsAllDrives", "true");
+    u.searchParams.set("fields", "id");
+    await this.send(u.toString(), {
+      method: "PATCH",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ trashed: true }),
+    });
   }
 
   /** 名前だけを付け直す(アプリが置いた写しにだけ使う)。 */

@@ -66,9 +66,10 @@ export function createSyncRepo(uploaderId: string): SyncRepo {
   const storage = getStorage();
 
   return {
-    async ledger(linkId): Promise<LedgerRow[]> {
+    async ledger(linkId, driveFileIds): Promise<LedgerRow[]> {
       return prisma.driveSyncFile.findMany({
-        where: { folderLinkId: linkId },
+        // ほかの物件の行でも、いま見えるファイルの行なら読む(扱い済みのファイルを二度取り込まない・行を奪い合わない)
+        where: { OR: [{ folderLinkId: linkId }, { driveFileId: { in: driveFileIds } }] },
         select: {
           driveFileId: true,
           md5: true,
@@ -140,6 +141,10 @@ export function createSyncRepo(uploaderId: string): SyncRepo {
         data: { driveFileId },
       });
       return set.count === 1;
+    },
+
+    async markWithdrawn(driveFileId) {
+      await prisma.driveSyncFile.updateMany({ where: { driveFileId }, data: { status: "withdrawn" } });
     },
 
     async renameLedger(driveFileId, name) {

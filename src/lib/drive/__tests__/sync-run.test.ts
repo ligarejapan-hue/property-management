@@ -84,6 +84,34 @@ describe("runDriveSync", () => {
     expect(saved).toEqual([{ ok: false, error: "一部のフォルダを読めませんでした(1件)" }]);
   });
 
+  it("★フォルダは読めても複製・取り込みが失敗したら、失敗として記録する(@codex #580 P2)", async () => {
+    const { d, saved } = deps({
+      async syncLink(_d, _r, _l, budget) {
+        budget.transfers--;
+        return { ...emptyLinkResult(), failed: 2 };
+      },
+    });
+    await runDriveSync(d, { budget: 20, startAt: 0 });
+    expect(saved).toEqual([{ ok: false, error: "書類の複製・取り込みに失敗したものがあります(6件)" }]);
+  });
+
+  it("★ほかの物件に紐づけたフォルダを、それぞれの物件に渡す(入れ子の紐づけで書類を混ぜない)", async () => {
+    const seen: Array<[string, string[]]> = [];
+    const { d } = deps({
+      async syncLink(_d, _r, link, budget) {
+        budget.transfers--;
+        seen.push([link.id, [...(link.otherLinkedFolderIds ?? [])].sort()]);
+        return emptyLinkResult();
+      },
+    });
+    await runDriveSync(d, { budget: 20, startAt: 0 });
+    expect(seen).toEqual([
+      ["L1", ["F2", "F3"]],
+      ["L2", ["F1", "F3"]],
+      ["L3", ["F1", "F2"]],
+    ]);
+  });
+
   it("認可切れ(401・invalid_grant)は見回りを止めて「再接続が必要です」", async () => {
     const a = deps({
       async syncLink() {

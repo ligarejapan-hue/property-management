@@ -68,7 +68,12 @@ export async function runDriveSync(deps: RunDeps, opts: { budget: number; startA
   const start = n === 0 ? 0 : ((opts.startAt % n) + n) % n;
   let i = 0;
   for (; i < n && budget.transfers > 0; i++) {
-    const link = links[(start + i) % n];
+    const base = links[(start + i) % n];
+    // ほかの物件に紐づけたフォルダ(入れ子の紐づけでも、その中は見ない・@codex #580 P1)
+    const link: LinkInfo = {
+      ...base,
+      otherLinkedFolderIds: new Set(links.filter((l) => l.id !== base.id).map((l) => l.folderId)),
+    };
     result.links++;
     try {
       result.totals = add(result.totals, await deps.syncLink(drive, repo, link, budget));
@@ -82,10 +87,13 @@ export async function runDriveSync(deps: RunDeps, opts: { budget: number; startA
     }
   }
   result.nextStartAt = n === 0 ? 0 : (start + i) % n;
+  // フォルダは読めても、複製・取り込みの失敗があれば失敗として残す(件数だけ・@codex #580 P2)
   await deps.saveStatus(
-    result.linkErrors === 0
-      ? { ok: true, error: null }
-      : { ok: false, error: `一部のフォルダを読めませんでした(${result.linkErrors}件)` },
+    result.linkErrors > 0
+      ? { ok: false, error: `一部のフォルダを読めませんでした(${result.linkErrors}件)` }
+      : result.totals.failed > 0
+        ? { ok: false, error: `書類の複製・取り込みに失敗したものがあります(${result.totals.failed}件)` }
+        : { ok: true, error: null },
   );
   return result;
 }

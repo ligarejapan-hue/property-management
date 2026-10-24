@@ -43,6 +43,9 @@ function fakeDrive(tree: Record<string, DriveItem[]>, contents: Record<string, s
     async getFolder(id) {
       return missing.has(id) ? null : { trashed: false };
     },
+    async trash(id) {
+      log.push(`trash:${id}`);
+    },
     async rename(id, name) {
       log.push(`rename:${id}:${name}`);
     },
@@ -68,6 +71,9 @@ function fakeRepo(init: { ledger?: LedgerRow[]; toCopy?: OutCandidate[]; copied?
       writes.push(w);
       log.push(`mark:${attId}:${w.item.id}:${w.status}`);
       return true;
+    },
+    async markWithdrawn(id) {
+      log.push(`withdrawn:${id}`);
     },
     async renameLedger(id, name) {
       log.push(`renameLedger:${id}:${name}`);
@@ -316,6 +322,57 @@ describe("syncOneLink", () => {
     expect(log).toEqual([]);
     expect(rlog).toEqual(["link:a1:f0"]);
     expect(r.matched).toBe(1);
+  });
+
+  it("★複製したあとで本人確認書類に直したものは、アプリが置いた写しだけゴミ箱へ(名前は合わせない)", async () => {
+    const { drive, log } = fakeDrive({ root1: [] });
+    const ledger: LedgerRow[] = [
+      { driveFileId: "w1", md5: null, direction: "out", status: "copied", name: "旧.pdf", attachmentId: "a1", modifiedTime: null },
+      { driveFileId: "w2", md5: null, direction: "out", status: "matched", name: "人の.pdf", attachmentId: "a2", modifiedTime: null },
+    ];
+    const idDoc = { docKind: "identity_document", docStage: "identity", docTitle: "本人確認書類_x.pdf" };
+    const { repo, log: rlog } = fakeRepo({
+      ledger,
+      copied: [att("a1", { ...idDoc, driveFileId: "w1" }), att("a2", { ...idDoc, driveFileId: "w2" })],
+    });
+    const r = await syncOneLink(drive, repo, LINK, { transfers: 20 });
+    // 人が置いたファイル(matched)は触らない
+    expect(log).toEqual(["trash:w1"]);
+    expect(rlog).toEqual(["withdrawn:w1"]);
+    expect(r.withdrawn).toBe(1);
+    expect(r.renamed).toBe(0);
+  });
+
+  it("★中に別の物件に紐づけたフォルダがあれば、そこは見ない(ほかの物件の書類を混ぜない)", async () => {
+    const { drive } = fakeDrive({
+      root1: [folder("other", "売却"), file("f0", "a.pdf", "a")],
+      other: [file("f9", "別の物件の書類.pdf", "z")],
+    });
+    const { repo, log } = fakeRepo();
+    await syncOneLink(drive, repo, { ...LINK, otherLinkedFolderIds: new Set(["other"]) }, { transfers: 20 });
+    expect(log).toEqual(["inbox:f0"]);
+  });
+
+  it("★持ち主が別のアカウントのフォルダ(共有されただけ)には複製しない・取り込みはする", async () => {
+    const { drive, log } = fakeDrive({ root1: [file("f0", "a.pdf", "a")] });
+    drive.getFolder = async () => ({ trashed: false, ownedByMe: false });
+    const { repo, log: rlog } = fakeRepo({ toCopy: [att("a1")], files: { "/uploads/a1": "body1" } });
+    await syncOneLink(drive, repo, LINK, { transfers: 20 });
+    expect(log.filter((l) => l.startsWith("upload") || l.startsWith("mkdir"))).toEqual([]);
+    expect(rlog).toEqual(["inbox:f0"]);
+  });
+
+  it("★台帳は、いま見えるファイルの id も渡して引く(ほかの物件で扱い済みのものを二度取り込まない)", async () => {
+    const { drive } = fakeDrive({ root1: [file("f0", "a.pdf", "a")] });
+    const { repo, log } = fakeRepo();
+    let asked: string[] = [];
+    repo.ledger = async (_l, ids) => {
+      asked = ids;
+      return [{ driveFileId: "f0", md5: md5("a"), direction: "in", status: "imported", name: "a.pdf", attachmentId: "x", modifiedTime: null }];
+    };
+    await syncOneLink(drive, repo, LINK, { transfers: 20 });
+    expect(asked).toEqual(["f0"]);
+    expect(log).toEqual([]);
   });
 
   it("★紐づけたフォルダが消された・ゴミ箱なら、何もせずに知らせる(空のフォルダとして扱わない)", async () => {

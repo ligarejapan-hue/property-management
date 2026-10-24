@@ -8,6 +8,7 @@
 import { createHash } from "node:crypto";
 import { docStageOfKind, type DocStageCode } from "@/lib/doc-classify/classify";
 import { MAX_FILE_SIZE } from "@/lib/storage/types";
+import { isOwnerPiiDocument } from "@/lib/uploads-authorization";
 import { DriveApiError, FOLDER_MIME, type DriveItem } from "./client";
 import {
   outFileName,
@@ -32,7 +33,9 @@ export type DriveFiles = {
   }): Promise<{ id: string; md5: string | null }>;
   rename(fileId: string, name: string): Promise<void>;
   /** 紐づけたフォルダがまだあるか(消された・ゴミ箱なら null か trashed)。 */
-  getFolder(id: string): Promise<{ trashed: boolean } | null>;
+  getFolder(id: string): Promise<{ trashed: boolean; ownedByMe?: boolean } | null>;
+  /** アプリが置いた写しをゴミ箱へ(複製のあとで本人確認書類などに直されたとき)。 */
+  trash(fileId: string): Promise<void>;
 };
 
 /** 紐づけたフォルダが消された・ゴミ箱に入った(見回り全体の「一部のフォルダを読めませんでした」に数える)。 */
@@ -43,7 +46,13 @@ export class LinkedFolderMissingError extends Error {
   }
 }
 
-export type LinkInfo = { id: string; propertyId: string; folderId: string };
+export type LinkInfo = {
+  id: string;
+  propertyId: string;
+  folderId: string;
+  /** ほかの物件に紐づけたフォルダ(この中にあっても見ない)。 */
+  otherLinkedFolderIds?: ReadonlySet<string>;
+};
 
 export type LedgerRow = {
   driveFileId: string;
@@ -73,13 +82,16 @@ export type LedgerWrite = {
   linkId: string;
   item: Pick<DriveItem, "id" | "name" | "mimeType" | "md5" | "size" | "modifiedTime">;
   direction: "in" | "out";
-  status: "imported" | "inbox" | "photo" | "duplicate" | "unsupported" | "failed" | "copied" | "matched";
+  status: "imported" | "inbox" | "photo" | "duplicate" | "unsupported" | "failed" | "copied" | "matched" | "withdrawn";
   attachmentId?: string | null;
   error?: string | null;
 };
 
 export interface SyncRepo {
-  ledger(linkId: string): Promise<LedgerRow[]>;
+  /** この物件の台帳の行と、driveFileIds のどれかの行(ほかの物件の行も)。 */
+  ledger(linkId: string, driveFileIds: string[]): Promise<LedgerRow[]>;
+  /** 写しをゴミ箱へ入れた印(台帳の status=withdrawn)。 */
+  markWithdrawn(driveFileId: string): Promise<void>;
   /** 複製の候補(型 general・未削除・まだ写しが無い)と、写し済みの添付(名前合わせ用)。 */
   attachmentsForLink(propertyId: string): Promise<{ toCopy: OutCandidate[]; copied: OutCandidate[] }>;
   readAttachment(fileUrl: string): Promise<Buffer | null>;
@@ -100,6 +112,7 @@ export interface SyncRepo {
 
 export type LinkResult = {
   renamed: number;
+  withdrawn: number;
   copied: number;
   matched: number;
   imported: number;
@@ -111,6 +124,7 @@ export type LinkResult = {
 
 export const emptyLinkResult = (): LinkResult => ({
   renamed: 0,
+  withdrawn: 0,
   copied: 0,
   matched: 0,
   imported: 0,
@@ -129,7 +143,7 @@ export type TreeFile = { item: DriveItem; relPath: string[] };
 export async function walkLinkedFolder(
   drive: Pick<DriveFiles, "listChildren">,
   folderId: string,
-  opts: { maxDepth?: number; maxFolders?: number } = {},
+  opts: { maxDepth?: number; maxFolders?: number; skipFolderIds?: ReadonlySet<string> } = {},
 ): Promise<{ direct: DriveItem[]; files: TreeFile[] }> {
   const maxDepth = opts.maxDepth ?? 3;
   const maxFolders = opts.maxFolders ?? 50;
@@ -144,6 +158,8 @@ export async function walkLinkedFolder(
     if (cur.relPath.length === 0) direct = children.filter((c) => c.mimeType === FOLDER_MIME);
     for (const c of children) {
       if (c.mimeType === FOLDER_MIME) {
+        // ★別の物件に紐づけたフォルダの中は見ない(ほかの物件の書類を混ぜない・@codex #580 P1)
+        if (opts.skipFolderIds?.has(c.id)) continue;
         if (cur.relPath.length < maxDepth) queue.push({ id: c.id, relPath: [...cur.relPath, c.name] });
       } else {
         files.push({ item: c, relPath: cur.relPath });
@@ -194,8 +210,9 @@ export async function syncOneLink(
   // 一覧の問い合わせは、消されたフォルダでも「空」を返す=先に在るかを確かめる(消えたら知らせる)
   const root = await drive.getFolder(link.folderId);
   if (!root || root.trashed) throw new LinkedFolderMissingError();
-  const tree = await walkLinkedFolder(drive, link.folderId);
-  const ledger = await repo.ledger(link.id);
+  const tree = await walkLinkedFolder(drive, link.folderId, { skipFolderIds: link.otherLinkedFolderIds });
+  // 台帳はこの物件の行+いま見えるファイルの行(ほかの物件で扱い済みのファイルも二度は取り込まない)
+  const ledger = await repo.ledger(link.id, tree.files.map((f) => f.item.id));
   const ledgerById = new Map(ledger.map((l) => [l.driveFileId, l]));
   // 中身がアプリにあるもの(失敗・形式外の行は数えない=失敗したファイルを「重複」にしない)
   const knownMd5 = new Set(
@@ -209,6 +226,19 @@ export async function syncOneLink(
     if (!a.driveFileId) continue;
     const row = ledgerById.get(a.driveFileId);
     if (!row || row.direction !== "out" || row.status !== "copied") continue;
+    if (isOwnerPiiDocument(a)) {
+      // ★複製のあとで本人確認書類などに直されたもの=アプリが置いた写しだけゴミ箱へ(名前は合わせない)。
+      //   人が置いたファイル(matched)・取り込んだ原本には触らない
+      try {
+        await drive.trash(a.driveFileId);
+        await repo.markWithdrawn(a.driveFileId);
+        r.withdrawn++;
+      } catch (e) {
+        if (isAuthError(e)) throw e;
+        r.failed++;
+      }
+      continue;
+    }
     const want = outFileName(a);
     if (row.name === want) continue;
     try {
@@ -224,7 +254,10 @@ export async function syncOneLink(
   // ② アプリ → ドライブ(複製)
   const driveByMd5 = new Map<string, DriveItem>();
   for (const f of tree.files) if (f.item.md5 && f.item.appSource !== "app") driveByMd5.set(f.item.md5, f.item);
-  for (const a of toCopy) {
+  // ★持ち主が別のアカウントのフォルダ(共有されただけ)には複製しない=会社の書類を社外のドライブに置かない。
+  //   取り込み(ドライブ → アプリ)はする
+  const canCopyOut = root.ownedByMe !== false;
+  for (const a of canCopyOut ? toCopy : []) {
     if (!shouldCopyOut(a)) continue;
     // 前の見回りで置けたのに記録できなかった写し(目印にこの添付の id)があれば、置き直さずに結ぶ
     const orphan = tree.files.find(
