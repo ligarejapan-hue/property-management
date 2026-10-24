@@ -5,6 +5,9 @@ import { companyBlock, documentHtml } from "../layout";
 import { DASH, dateJa, dateTimeJa, headTable, money, namesOf, partiesOf, propertyLabel, type BusinessDocContext, type ValueRow } from "./common";
 
 const cell = (n: number) => (n ? `${yen(n)}円` : "");
+/** 計算式の欄。手で直した行は、元の計算式を金額の根拠に見せない(@codex)。 */
+const formulaOf = (r: SettlementRow) => (r.overridden ? `手で直した金額${r.formula ? `(元の計算: ${r.formula})` : ""}` : r.formula);
+const labelOf = (r: SettlementRow) => (r.overridden ? `${r.label}・手で直した金額` : r.label);
 
 /** 精算の行(当てはまらない行は段2の計算が出さない=管理費は区分だけ・賃料と敷金は OC だけ)。敷金の承継は合計に入らないので別に出す。 */
 const rowsOf = (c: BusinessDocContext): SettlementRow[] => c.calc.settlement.rows;
@@ -44,7 +47,7 @@ ${s.warnings.length ? html`<ul class="notes">${s.warnings.map((w) => html`<li>${
 function fullTable(c: BusinessDocContext): SafeHtml {
   return html`<table>
 <tr><th>項目</th><th>計算期間</th><th>計算式</th><th class="num">売主→買主</th><th class="num">買主→売主</th></tr>
-${rowsOf(c).map((r) => html`<tr><td>${r.label}${r.note ? html`(${r.note})` : null}</td><td>${r.period ?? ""}</td><td>${r.formula ?? ""}</td><td class="num">${cell(r.sellerToBuyer)}</td><td class="num">${cell(r.buyerToSeller)}</td></tr>`)}
+${rowsOf(c).map((r) => html`<tr><td>${r.label}${r.note ? html`(${r.note})` : null}</td><td>${r.period ?? ""}</td><td>${formulaOf(r) ?? ""}</td><td class="num">${cell(r.sellerToBuyer)}</td><td class="num">${cell(r.buyerToSeller)}</td></tr>`)}
 ${totals(c, 3)}
 ${depositLine(c, 3)}
 </table>`;
@@ -63,7 +66,7 @@ ${depositLine(c, 1)}
 <p class="notes">計算の過程は2枚目の「計算明細」をご覧ください。</p>`,
     detail: html`<div style="page-break-before:always"><h1>計算明細</h1><table>
 <tr><th>項目</th><th>計算期間</th><th>計算式</th></tr>
-${rows.map((r) => html`<tr><td>${r.label}</td><td>${r.period ?? DASH}</td><td>${r.formula ?? DASH}</td></tr>`)}
+${rows.map((r) => html`<tr><td>${r.label}</td><td>${r.period ?? DASH}</td><td>${formulaOf(r) ?? DASH}</td></tr>`)}
 </table></div>`,
   };
 }
@@ -83,8 +86,8 @@ export function buildSettlementStatement(c: BusinessDocContext): { html: string;
     { label: "決済日時", value: dateTimeJa(c.deal.settlementAt) }, { label: "精算項目", heading: true },
     // 両方に金額がある行(自由行)は、向きごとに1行ずつ(最終レビュー)。
     ...rowsOf(c).flatMap((r) => [
-      ...(r.sellerToBuyer ? [{ label: `${r.label}(売主→買主)`, value: r.sellerToBuyer }] : []),
-      ...(r.buyerToSeller || !r.sellerToBuyer ? [{ label: `${r.label}(買主→売主)`, value: r.buyerToSeller }] : []),
+      ...(r.sellerToBuyer ? [{ label: `${labelOf(r)}(売主→買主)`, value: r.sellerToBuyer }] : []),
+      ...(r.buyerToSeller || !r.sellerToBuyer ? [{ label: `${labelOf(r)}(買主→売主)`, value: r.buyerToSeller }] : []),
     ]),
     { label: "合計(売主→買主)", value: s.totalSellerToBuyer }, { label: "合計(買主→売主)", value: s.totalBuyerToSeller },
     ...(s.depositRow ? [{ label: `${s.depositRow.label}(${s.depositRow.note ?? ""}・合計には含まない)`, value: s.depositRow.sellerToBuyer }] : []),

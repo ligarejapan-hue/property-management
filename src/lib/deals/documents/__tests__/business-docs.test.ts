@@ -182,3 +182,23 @@ describe("最終レビューの直し", () => {
     expect(doc("settlement_statement").blocking(ctx({ ...deal, price: null }))).toEqual([]);
   });
 });
+
+describe("@codex の直し", () => {
+  it("手で直した精算額は「手で直した金額」と出し、元の計算式を根拠に見せない(1枚の形・計算明細・Excel)", () => {
+    const d = { ...deal, overrides: { "settlement.propertyTax": 12_345 } };
+    const c = ctx(d);
+    const row = c.calc.settlement.rows.find((r) => r.key === "propertyTax")!;
+    expect(row.overridden).toBe(true);
+    const out = doc("settlement_statement").build(c, {});
+    expect(out.html).toContain(`手で直した金額(元の計算: ${row.formula})`);
+    expect(out.html).not.toContain(`<td>${row.formula}</td>`);
+    const detail = out.compactHtml!.split("page-break-before:always")[1];
+    expect(detail).toContain(`手で直した金額(元の計算: ${row.formula})`);
+    expect(out.rows.some((r) => r.label === "固定資産税・都市計画税・手で直した金額(買主→売主)")).toBe(true);
+  });
+  it("非課税を選んだら、印紙の表が無くても「非課税」と出す", () => {
+    const { html, rows } = doc("deposit_receipt").build(ctx(deal, { rateRows: [] }), { issuer: SELLER.id, exempt: "yes", receivedOn: null });
+    expect(html).toContain("非課税");
+    expect(rows.find((r) => r.label === "収入印紙")?.value).toBe("非課税");
+  });
+});

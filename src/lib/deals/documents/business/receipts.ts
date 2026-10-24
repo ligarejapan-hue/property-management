@@ -109,13 +109,15 @@ export function buildReceipt(kind: ReceiptKind, c: BusinessDocContext, o: Receip
   const individual = issuer.kind === "party" && issuer.party.partyType === "individual";
   if (individual && o.exempt === null) throw new DocOptionError("印紙が要るか(非課税か)を選んでください", "NEEDS_DECISION");
   const table = pickRateContent(c.rateRows, "stamp_receipt", o.receivedOn ?? c.today);
-  const stamp = table ? receiptStamp(amount, table, individual && o.exempt === "yes" ? "yes" : "no").tax : null;
+  // 非課税を選んだら、表の有無に関わらず 0(=「非課税」と出す・@codex)。
+  const exempt = individual && o.exempt === "yes";
+  const stamp = exempt ? 0 : table ? receiptStamp(amount, table, "no").tax : null;
   const sides = receiptSides(kind, c)!;
   const payer = namesOf(partiesOf(c.deal, sides.payer));
   const breakdown = kind === "settlement_receipt" ? c.calc.settlement.rows.map((r) => r.label).join("・") : null;
   const issuerLabel = issuer.kind === "self" ? c.company.nameJa : issuer.party.name;
   // 0円は「非課税」(個人の事業用でない売買を選んだとき)か「不要」(5万円未満など)。
-  const stampNone = individual && o.exempt === "yes" ? "非課税" : "印紙 不要";
+  const stampNone = exempt ? "非課税" : "印紙 不要";
 
   const body = html`
 <h1>領収書</h1>
