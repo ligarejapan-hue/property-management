@@ -33,9 +33,11 @@ CREATE TABLE "property_drive_folders" (
 );
 CREATE UNIQUE INDEX "property_drive_folders_property_id_key" ON "property_drive_folders"("property_id");
 CREATE UNIQUE INDEX "property_drive_folders_folder_id_key" ON "property_drive_folders"("folder_id");
+-- 物件を消す経路(物件の削除・取込の取り消し)のどれでも邪魔をしないよう CASCADE(紐づけはアプリ側の記録だけ・
+-- ドライブのファイルは消えない)。RESTRICT だと取込の取り消しが外部キー違反で止まる(@codex #577 P1)。
 ALTER TABLE "property_drive_folders"
   ADD CONSTRAINT "property_drive_folders_property_id_fkey"
-  FOREIGN KEY ("property_id") REFERENCES "properties"("id") ON DELETE RESTRICT ON UPDATE CASCADE;
+  FOREIGN KEY ("property_id") REFERENCES "properties"("id") ON DELETE CASCADE ON UPDATE CASCADE;
 
 -- 往復の台帳(重複と往復ループの防止)。
 CREATE TABLE "drive_sync_files" (

@@ -26,6 +26,28 @@ export async function loadNamedProperties(): Promise<MatchableProperty[]> {
   return prisma.property.findMany({ where: { buildingName: { not: null } }, select: SELECT });
 }
 
+/**
+ * いま開いているフォルダ(親)の子フォルダの候補。「ハマイハイライズ 305 › 売却」のように、子(売却・購入)の
+ * 名前に物件の手がかりが無いときは、親フォルダの名前で候補を出す(紐づけるのは子フォルダ・@codex #577 P2)。
+ * 子自身に候補があればそれを使う。parentName=null(マイドライブ直下・共有アイテム)なら子の名前だけ。
+ */
+export async function candidatesForChildFolders(
+  childNames: string[],
+  parentName: string | null,
+  linked: Map<string, string>,
+  named?: MatchableProperty[],
+): Promise<Map<string, PropertyCandidate[]>> {
+  const names = [...new Set(parentName ? [...childNames, parentName] : childNames)];
+  const all = await candidatesForFolderNames(names, linked, named);
+  const parentCandidates = parentName ? (all.get(parentName) ?? []) : [];
+  const out = new Map<string, PropertyCandidate[]>();
+  for (const name of childNames) {
+    const own = all.get(name) ?? [];
+    out.set(name, own.length > 0 ? own : parentCandidates);
+  }
+  return out;
+}
+
 export async function candidatesForFolderNames(
   folderNames: string[],
   linked: Map<string, string>, // propertyId → folderId

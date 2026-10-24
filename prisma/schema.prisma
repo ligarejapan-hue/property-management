@@ -2435,7 +2435,8 @@ model PropertyDriveFolder {
   linkedById String?  @map("linked_by_id") @db.Uuid
   createdAt  DateTime @default(now()) @map("created_at")
 
-  property  Property        @relation(fields: [propertyId], references: [id])
+  /// 物件を消す経路のどれでも邪魔をしない(取込の取り消し含む・@codex #577 P1)=物件と一緒に消える。
+  property Property @relation(fields: [propertyId], references: [id], onDelete: Cascade)
   syncFiles DriveSyncFile[]
 
   @@map("property_drive_folders")

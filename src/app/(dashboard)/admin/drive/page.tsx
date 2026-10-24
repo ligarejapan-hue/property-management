@@ -316,6 +316,9 @@ function FolderBrowser({ links, onLinked }: { links: DriveFolderLink[]; onLinked
   const go = (next: Crumb[]) => {
     setLoading(true);
     setRows([]);
+    // ⚠名前の絞り込みは「いま開いているフォルダの中」用。移ったら外す(残すと、建物名で絞って開いた
+    //   物件フォルダの中の「売却」「購入」が隠れて「フォルダがありません」になる・@codex #577 P2)。
+    setQ("");
     setCrumbs(next);
   };
 

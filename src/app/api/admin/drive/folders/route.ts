@@ -3,7 +3,7 @@ import { ApiError, handleApiError } from "@/lib/api-helpers";
 import prisma from "@/lib/prisma";
 import { requireDriveAdmin, toDriveApiError } from "@/lib/drive/admin-access";
 import { getDriveClient } from "@/lib/drive/connection";
-import { candidatesForFolderNames } from "@/lib/drive/candidates";
+import { candidatesForChildFolders } from "@/lib/drive/candidates";
 
 const noStore = { headers: { "Cache-Control": "no-store" } };
 
@@ -31,8 +31,11 @@ export async function GET(request: NextRequest) {
     });
     const linkedByFolder = new Map(links.map((l) => [l.folderId, l]));
     const linkedByProperty = new Map(links.map((l) => [l.propertyId, l.folderId]));
-    const candidates = await candidatesForFolderNames(
+    // 親フォルダの名前(道の最後)。子(売却・購入)に手がかりが無いときは親の名前で候補を出す(@codex #577 P2)。
+    const parentName = path ? (path.split(" › ").pop() ?? null) : null;
+    const candidates = await candidatesForChildFolders(
       listed.folders.map((f) => f.name),
+      parentName,
       linkedByProperty,
     );
     const data = listed.folders.map((f) => {
