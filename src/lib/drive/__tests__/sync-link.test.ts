@@ -361,6 +361,25 @@ describe("syncOneLink", () => {
     expect(log.filter((l) => l.startsWith("mkdir"))).toEqual(["mkdir:root1/③契約関係"]);
   });
 
+  it("★紐づけを外して付け直しても(台帳が消えても)、取り込み済み・複製済みの添付は二度扱わない(@codex #580 R3)", async () => {
+    const { drive, log } = fakeDrive({
+      root1: [folder("d1", "契約資料")],
+      d1: [
+        file("f1", "人が置いた.pdf", "human"),
+        file("w1", "旧.pdf", "copy", { appSource: "app", appAttachmentId: "a2" }),
+      ],
+    });
+    const idDoc = { docKind: "identity_document", docStage: "identity", docTitle: "本人確認書類_x.pdf" };
+    const { repo, log: rlog } = fakeRepo({
+      ledger: [], // 付け直しで台帳は空
+      copied: [att("a1", { driveFileId: "f1" }), att("a2", { ...idDoc, driveFileId: "w1" })],
+    });
+    await syncOneLink(drive, repo, LINK, { transfers: 20 });
+    // 取り込み直さない・アプリの写しは(本人確認に直っているので)ゴミ箱へ
+    expect(rlog.filter((l) => l.startsWith("attach") || l.startsWith("inbox"))).toEqual([]);
+    expect(log).toEqual(["trash:w1"]);
+  });
+
   it("★持ち主が別のアカウントのフォルダ(共有されただけ)には複製しない・取り込みはする", async () => {
     const { drive, log } = fakeDrive({ root1: [file("f0", "a.pdf", "a")] });
     drive.getFolder = async () => ({ trashed: false, ownedByMe: false });

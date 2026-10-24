@@ -215,12 +215,33 @@ export async function syncOneLink(
   // 台帳はこの物件の行+いま見えるファイルの行(ほかの物件で扱い済みのファイルも二度は取り込まない)
   const ledger = await repo.ledger(link.id, tree.files.map((f) => f.item.id));
   const ledgerById = new Map(ledger.map((l) => [l.driveFileId, l]));
+  const { toCopy, copied } = await repo.attachmentsForLink(link.propertyId);
+  // ★紐づけを外して付け直すと台帳は消える(紐づけと一緒に消える)。添付に残っている drive_file_id から
+  //   扱い済みを組み立て直す=取り込み直さない・アプリの写しは写しとして扱う(@codex #580 R3)
+  const treeById = new Map(tree.files.map((f) => [f.item.id, f.item]));
+  for (const a of copied) {
+    if (!a.driveFileId || ledgerById.has(a.driveFileId)) continue;
+    const item = treeById.get(a.driveFileId);
+    if (!item) continue;
+    const ours = item.appSource === "app" && item.appAttachmentId === a.id;
+    ledgerById.set(a.driveFileId, {
+      driveFileId: a.driveFileId,
+      md5: item.md5,
+      direction: ours ? "out" : "in",
+      status: ours ? "copied" : "imported",
+      name: item.name,
+      attachmentId: a.id,
+      modifiedTime: null,
+    });
+  }
   // 中身がアプリにあるもの(失敗・形式外の行は数えない=失敗したファイルを「重複」にしない)
   const knownMd5 = new Set(
-    ledger.filter((l) => l.status !== "failed" && l.status !== "unsupported").map((l) => l.md5).filter((m): m is string => !!m),
+    [...ledgerById.values()]
+      .filter((l) => l.status !== "failed" && l.status !== "unsupported")
+      .map((l) => l.md5)
+      .filter((m): m is string => !!m),
   );
   const subfolders = [...tree.direct];
-  const { toCopy, copied } = await repo.attachmentsForLink(link.propertyId);
 
   // ① 写しの名前合わせ(種類を直して名前が変わったもの・アプリが置いた写しだけ)
   for (const a of copied) {

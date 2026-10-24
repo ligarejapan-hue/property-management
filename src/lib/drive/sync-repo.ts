@@ -109,7 +109,7 @@ export function createSyncRepo(uploaderId: string): SyncRepo {
             driveFileId: { not: null },
           },
           select: OUT_SELECT,
-          take: 500,
+          // ⚠上限を付けない=名前合わせ・本人確認に直した写しの片付けから漏れる添付を作らない(@codex #580 R3)
         }),
       ]);
       return { toCopy, copied };
