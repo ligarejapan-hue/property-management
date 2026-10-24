@@ -343,10 +343,22 @@ function FolderBrowser({
     if (same && q === "") return;
     setLoading(true);
     setRows([]);
+    setNextToken(null);
     // ⚠名前の絞り込みは「いま開いているフォルダの中」用。移ったら外す(残すと、建物名で絞って開いた
     //   物件フォルダの中の「売却」「購入」が隠れて「フォルダがありません」になる・@codex #577 P2)。
     setQ("");
     setCrumbs(next);
+  };
+
+  /**
+   * 絞り込みを変える。前の問い合わせの続きの印(nextToken)は別の問い合わせには使えないので消し、
+   * 読み込み中にする(「さらに読む」が新しい1ページ目を追い越して捨てさせない・@codex #577 R4)。
+   */
+  const changeFilter = (v: string) => {
+    setLoading(true);
+    setRows([]);
+    setNextToken(null);
+    setQ(v);
   };
 
   // 「紐づけ済」の表示と候補の使えなさは、読み込んだ時点の行ではなく今の紐づけ一覧から決める
@@ -392,7 +404,7 @@ function FolderBrowser({
         <input
           type="search"
           value={q}
-          onChange={(e) => setQ(e.target.value)}
+          onChange={(e) => changeFilter(e.target.value)}
           placeholder="このフォルダの中を名前で絞る"
           aria-label="フォルダを名前で絞る"
           className="w-full rounded-md border border-gray-300 px-2 py-1 text-sm dark:border-gray-600 dark:bg-gray-800"

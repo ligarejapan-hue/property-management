@@ -46,6 +46,16 @@ describe("ドライブ連携の画面", () => {
     expect(load).toMatch(/finally \{\n\s+if \(gen === loadGen\.current\) setLoading\(false\);/);
   });
 
+  it("★絞り込みを変える・フォルダを移るときは、前の続きの印(nextToken)を消して読み込み中にする(@codex #577 R4)", () => {
+    const filter = /const changeFilter = \(v: string\) => \{[\s\S]*?\n {2}\};/.exec(SRC)?.[0] ?? "";
+    expect(filter).toContain("setNextToken(null)");
+    expect(filter).toContain("setLoading(true)");
+    expect(filter).toContain("setQ(v)");
+    expect(SRC).toMatch(/onChange=\{\(e\) => changeFilter\(e\.target\.value\)\}/);
+    const go = /const go = \(next: Crumb\[\]\) => \{[\s\S]*?\n {2}\};/.exec(SRC)?.[0] ?? "";
+    expect(go).toContain("setNextToken(null)");
+  });
+
   it("useSearchParams を使う本体は Suspense で包む", () => {
     expect(SRC).toMatch(/<Suspense[\s\S]*<DriveAdminPageInner \/>[\s\S]*<\/Suspense>/);
   });
