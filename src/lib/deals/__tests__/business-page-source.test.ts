@@ -29,6 +29,12 @@ describe("事業計画書の画面", () => {
     expect(src).toContain("calc?.brokerageCap.sale");
     expect(src).toContain("を入れる");
   });
+  it("最終レビュー: 出さないセクションの入力欄は出さない(プレビューと同じ決まり)", () => {
+    const src = read(FORM);
+    for (const s of ["acquisition", "renovation", "holding", "sale", "financing", "oc", "evidence"]) {
+      expect(src, s).toContain(`{shown("${s}") && (`);
+    }
+  });
   it("管理者だけの設定画面へのリンクは置かない(開けない人がいる)", () => {
     expect(read(FORM)).not.toContain('href="/admin/deal-settings"');
   });

@@ -8,6 +8,7 @@ import { buildingPriceApportion, buildingTaxOf } from "./building-tax";
 import { daysInclusive } from "./dates";
 import { pickRateContent, type DealCalc } from "./deal-calc";
 import { contractStamp } from "./stamp";
+import { BUSINESS_SECTIONS, type BusinessSectionKey } from "../business-sections";
 
 export interface BusinessLine {
   key: string;
@@ -58,7 +59,11 @@ const ratioBp = (n: number, d: number) => (d > 0 ? Math.trunc((n * 10000) / d) :
  * 事業計画書(依頼書 4.2・買取再販)。計画の読み替え 3〜11 のとおり。端数はすべて円未満切り捨て。
  * 仕入価格 = 取引の売買価格。建物消費税・登記費用・精算金は取引の計算(`computeDealCalc`)の値を使い、入力があればそれを使う。
  */
-export function businessPlanCalc(deal: DealView, dc: DealCalc, i: BusinessInputs, rateRows: RateTableRow[]): BusinessPlanCalc {
+export function businessPlanCalc(
+  deal: DealView, dc: DealCalc, i: BusinessInputs, rateRows: RateTableRow[],
+  /** 出すセクション。出さない費用のセクションは経費合計に入れない(最終レビュー)。省略=全部。 */
+  sections: readonly BusinessSectionKey[] = BUSINESS_SECTIONS.map((s) => s.key),
+): BusinessPlanCalc {
   const missing: string[] = [];
   const price = deal.price;
   if (price === null) missing.push("売買価格");
@@ -130,7 +135,10 @@ export function businessPlanCalc(deal: DealView, dc: DealCalc, i: BusinessInputs
 
   // 収支
   const areaSqm = dc.kindBase === "unit" ? deal.propertySnapshot.floorArea : deal.propertySnapshot.landArea;
-  const costTotal = (price ?? 0) + acquisition.total + renovation.total + holding.total + sale.total;
+  // 仕入価格はいつも入れる。取得経費・改装・工事・保有コスト・販売の費用は、出すセクションのときだけ(書類に無い費用で粗利を変えない)。
+  const counted = (k: BusinessSectionKey, n: number) => (sections.includes(k) ? n : 0);
+  const costTotal = (price ?? 0) + counted("acquisition", acquisition.total) + counted("renovation", renovation.total)
+    + counted("holding", holding.total) + counted("sale", sale.total);
   const gross = salePrice === null ? null : salePrice - costTotal;
   const profit = {
     revenue: salePrice, costTotal, gross,

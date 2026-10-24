@@ -138,8 +138,8 @@ export function buildBusinessPlan(a: {
   deal: DealView; rateRows: RateTableRow[]; kinds: PropertyKindDef[]; matrix: SectionMatrix; inputs: BusinessInputs;
   company: CompanyProfile; today: string; logo: string | null;
 }): { calc: BusinessPlanCalc; sections: BusinessSectionKey[]; html: string } {
-  const calc = businessPlanCalc(a.deal, computeDealCalc(a.deal, a.rateRows, a.kinds, a.today), a.inputs, a.rateRows);
   const sections = businessPlanSections(a.deal.propertyKind, a.kinds, a.deal.hasOc, a.inputs.variant, a.matrix);
+  const calc = businessPlanCalc(a.deal, computeDealCalc(a.deal, a.rateRows, a.kinds, a.today), a.inputs, a.rateRows, sections);
   const kindLabel = a.kinds.find((k) => k.key === a.deal.propertyKind)?.label ?? null;
   return {
     calc, sections,

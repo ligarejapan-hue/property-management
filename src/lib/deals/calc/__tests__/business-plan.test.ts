@@ -37,6 +37,14 @@ const calc = (i: BusinessInputs = inputs, d: DealView = deal) =>
   businessPlanCalc(d, computeDealCalc(d, rateRows, DEFAULT_PROPERTY_KINDS, "2026-10-24"), i, rateRows);
 
 describe("事業計画書の計算", () => {
+  it("最終レビュー: 出さないセクションの費用は経費合計に入れない(仕入価格はいつも入れる)", () => {
+    const all = calc();
+    const noReno = businessPlanCalc(deal, computeDealCalc(deal, rateRows, DEFAULT_PROPERTY_KINDS, "2026-10-24"), inputs, rateRows,
+      ["overview", "purchase", "acquisition", "holding", "sale", "profit"]);
+    expect(noReno.profit.costTotal).toBe(all.profit.costTotal - 3_000_000);
+    const only = businessPlanCalc(deal, computeDealCalc(deal, rateRows, DEFAULT_PROPERTY_KINDS, "2026-10-24"), inputs, rateRows, ["profit"]);
+    expect(only.profit.costTotal).toBe(20_000_000);
+  });
   it("仕入: 税込は売買価格・建物消費税は家屋割合で按分・税抜は差し引き", () => {
     const c = calc();
     expect(c.purchase).toEqual({ priceIncl: 20_000_000, buildingTax: 1_090_909, priceExcl: 18_909_091 });

@@ -85,7 +85,12 @@ export default function BusinessPlanForm({ deal, onSaved }: { deal: DealView; on
   };
 
   const calc = preview?.calc ?? null;
-  const shown = (s: BusinessSectionKey) => !preview || preview.sections.includes(s);
+  // 出すセクション(種別×セクションの表・銀行向け/OC の決まり)の入力欄だけを出す。出さない欄の費用は経費合計にも入らない。
+  // プレビューがまだ無いうちは、社内用/銀行向けの決まりだけで決める。
+  const shown = (s: BusinessSectionKey) =>
+    preview
+      ? preview.sections.includes(s)
+      : !((s === "financing" || s === "evidence") && form.variant !== "bank") && !(s === "oc" && !deal.hasOc);
   const yen = (k: YenKey, hint?: string) => (
     <Field label={BUSINESS_YEN_LABELS[k]} hint={hint}>
       <YenInput label={BUSINESS_YEN_LABELS[k]} value={form[k]} onChange={(v) => set(k, v)} />
@@ -114,6 +119,7 @@ export default function BusinessPlanForm({ deal, onSaved }: { deal: DealView; on
           仕入価格・建物消費税・登記費用・精算金は、取引の「金額・費用」「精算」タブの値を使います。出すセクションは、管理者が「取引の設定」の種別×セクションの表で決めます。
         </p>
 
+        {shown("acquisition") && (
         <Group title="取得経費">
           <div className="grid gap-4 sm:grid-cols-2">
             <div>{yen("purchaseBrokerage")}{capButton("purchaseBrokerage", calc?.brokerageCap.purchase)}</div>
@@ -130,6 +136,7 @@ export default function BusinessPlanForm({ deal, onSaved }: { deal: DealView; on
           </div>
           <OtherRows rows={form.acquisitionOthers} onChange={(rows) => set("acquisitionOthers", rows)} />
         </Group>
+        )}
 
         {shown("renovation") && (
           <Group title="改装・工事">
@@ -137,6 +144,7 @@ export default function BusinessPlanForm({ deal, onSaved }: { deal: DealView; on
           </Group>
         )}
 
+        {shown("holding") && (
         <Group title="保有コスト">
           <div className="grid gap-4 sm:grid-cols-2">
             <Field label="販売予定日" hint="事業期間 = 決済日〜この日">
@@ -149,7 +157,9 @@ export default function BusinessPlanForm({ deal, onSaved }: { deal: DealView; on
           </div>
           {calc && <p className="text-xs text-gray-500">事業期間 {calc.holding.days === null ? "—" : `${calc.holding.days}日`}・保有コスト {yenText(calc.holding.total)}円</p>}
         </Group>
+        )}
 
+        {shown("sale") && (
         <Group title="販売">
           <div className="grid gap-4 sm:grid-cols-2">
             {yen("salePrice", "税込")}
@@ -160,6 +170,7 @@ export default function BusinessPlanForm({ deal, onSaved }: { deal: DealView; on
           </div>
           <OtherRows rows={form.saleOthers} onChange={(rows) => set("saleOthers", rows)} />
         </Group>
+        )}
 
         {calc && (
           <p className="rounded-md bg-gray-50 px-3 py-2 text-sm dark:bg-gray-900">
@@ -168,7 +179,8 @@ export default function BusinessPlanForm({ deal, onSaved }: { deal: DealView; on
           </p>
         )}
 
-        <Group title="資金計画" note={bank ? undefined : "銀行向けにだけ出します"}>
+        {shown("financing") && (
+        <Group title="資金計画">
           <div className="grid gap-4 sm:grid-cols-2">
             {yen("ownFunds")}
             <Field label="借入期間(か月)">
@@ -181,17 +193,20 @@ export default function BusinessPlanForm({ deal, onSaved }: { deal: DealView; on
             </Field>
           </div>
         </Group>
+        )}
 
-        {deal.hasOc && (
+        {shown("oc") && (
           <Group title="OC収支">
             <div className="grid gap-4 sm:grid-cols-2">{yen("ocAnnualExpenses", "空なら固都税+管理費等の年額")}</div>
             <p className="text-xs text-gray-500">賃料は取引の「OC」タブの値を使います。</p>
           </Group>
         )}
 
-        <Group title="販売価格の根拠" note={bank ? undefined : "銀行向けにだけ出します"}>
+        {shown("evidence") && (
+        <Group title="販売価格の根拠">
           <Comparables rows={form.comparables} onChange={(rows) => set("comparables", rows)} />
         </Group>
+        )}
 
         <Group title="社内メモ" note={bank ? "社内用にだけ出します" : undefined}>
           <textarea value={form.memo} onChange={(e) => set("memo", e.target.value)} maxLength={1000} rows={3} aria-label="社内メモ" className={inputCls} />

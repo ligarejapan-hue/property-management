@@ -173,6 +173,12 @@ describe("PATCH /api/deals/[id] の事業計画書(plan_inputs.business)", () =>
     await PATCH(json("PATCH", { version: 3, businessPlan: business, fundingPlan: DEFAULT_FUNDING_INPUTS }), ctx);
     expect(pm.deal.updateMany.mock.calls[0][0].data.planInputs).toEqual({ funding: DEFAULT_FUNDING_INPUTS, business });
   });
+  it("最終レビュー: 同じ保存で事業区分を変えるときは、変えたあとの区分で決める", async () => {
+    pm.deal.findUnique.mockResolvedValue({ ...resale, planInputs: {} });
+    expect((await PATCH(json("PATCH", { version: 3, businessType: "brokerage", businessPlan: business }), ctx)).status).toBe(422);
+    pm.deal.findUnique.mockResolvedValue({ ...detailRow, planInputs: {} });
+    expect((await PATCH(json("PATCH", { version: 3, businessType: "resale", businessPlan: business }), ctx)).status).toBe(200);
+  });
   it("仲介の取引には保存しない(422)", async () => {
     pm.deal.findUnique.mockResolvedValue({ ...detailRow, planInputs: {} });
     const res = await PATCH(json("PATCH", { version: 3, businessPlan: business }), ctx);
