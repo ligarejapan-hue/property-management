@@ -32,9 +32,11 @@ import {
 import {
   normalizeBuildingName,
   normalizeUnitOnlyFields,
+  supportsUnitFields,
   BUILDING_NAME_MAX_LENGTH,
   BUILDING_NAME_TOO_LONG_MESSAGE,
 } from "@/lib/property-building-name";
+import { CUSTOMER_AREA_NOTE_LABEL } from "@/lib/paste-import/customer-area";
 import { structuredFieldsFor } from "@/lib/paste-import/structured-fields";
 import { introductionRouteForLeadSource } from "@/lib/paste-import/lead-source-route";
 import { countPasteDuplicatesUnscoped } from "@/lib/paste-import-duplicates";
@@ -417,9 +419,15 @@ export async function POST(request: NextRequest) {
     // ⚠個別に3つ並べず、判定は1か所(normalizeUnitOnlyFields)に置く。
     //   区分専用の欄が増えたときは UNIT_ONLY_PROPERTY_FIELDS に足すだけで、
     //   この経路が自動的に守られる(走査テストで固定)。
+    // ⚠取込で読んだ専有面積は**お客様が書いた数字**で、登記簿か壁芯か分からない。
+    //   発注者の指示(2026-10-24)で**どちらの欄にも入れず、物件の備考に1行で残す**(区分のときだけ)。
+    const customerAreaNoteLine =
+      exclusiveArea !== null && supportsUnitFields(propertyType)
+        ? `${CUSTOMER_AREA_NOTE_LABEL}: ${exclusiveArea}㎡`
+        : null;
     const unitOnly = normalizeUnitOnlyFields(propertyType, {
       roomNo: p.roomNo?.trim() || null,
-      exclusiveArea,
+      exclusiveArea: null,
       layoutType: p.layoutType?.trim() || null,
       occupancyStatus,
     });
@@ -622,7 +630,7 @@ export async function POST(request: NextRequest) {
             landArea,
             totalFloorArea,
             builtYear,
-            note: p.note?.trim() || null,
+            note: [p.note?.trim(), customerAreaNoteLine].filter((v): v is string => !!v).join("\n") || null,
             inquirerName,
             introductionRoute: introductionRouteForLeadSource(body.leadSource),
             // 所有者からの反響(査定サイト・問い合わせ)で作る物件=最初から「所有者とやりとり中」

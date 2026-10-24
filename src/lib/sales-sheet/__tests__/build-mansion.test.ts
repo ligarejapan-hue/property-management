@@ -223,11 +223,13 @@ describe("buildSaleMansionDocument（自社マイソク様式）", () => {
     });
     expect(tableRow(withMethod, "専有面積")).toBe("67.21㎡（壁芯）");
 
+    // 内法は登記簿の面積を使う(2026-10-24・物件に専有面積が2つ)。
     const withOtherMethod = buildSaleMansionDocument({
       ...base,
+      property: { ...base.property, exclusiveAreaRegistry: "63.5" },
       overrides: { areaMethod: "内法" },
     });
-    expect(tableRow(withOtherMethod, "専有面積")).toBe("67.21㎡（内法）");
+    expect(tableRow(withOtherMethod, "専有面積")).toBe("63.5㎡（内法）");
   });
 
   it("専有面積は面積計測方式が未選択なら括弧を付けない", () => {

@@ -480,7 +480,7 @@ export default function BuildingDetailPage({
                   間取り
                 </th>
                 <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 dark:text-gray-400">
-                  専有面積
+                  専有面積（壁芯）
                 </th>
                 <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 dark:text-gray-400">
                   入居状況
@@ -677,7 +677,7 @@ function AddUnitModal({
           <div className="grid grid-cols-2 gap-3">
             <div>
               <label className="mb-1 block text-xs font-medium text-gray-600 dark:text-gray-300">
-                専有面積 (m²)
+                専有面積・壁芯 (m²)
               </label>
               <input
                 type="number"

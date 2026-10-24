@@ -294,8 +294,9 @@ export function composeLeadOwnerNote(
 export type LeadRowStatus = "ready" | "review" | "registered";
 
 /** 区分マンションで専用の欄に入る項目(読めないと空のまま登録される)。 */
+// ⚠専有面積は載せない(2026-10-24)。お客様の書いた面積は読めても読めなくても欄には入れず備考に残す
+//   (customer-area.ts)ので、読めないことで止める理由が無い。
 const UNIT_FIELD_LABELS: Record<string, string> = {
-  exclusiveArea: "専有面積",
   occupancyStatus: "現況",
 };
 

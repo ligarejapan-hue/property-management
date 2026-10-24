@@ -310,7 +310,10 @@ interface MansionAutoSource {
   buildingName?: string | null;
   occupancyStatus?: string | null;
   zoningDistrict?: string | null;
+  /** 壁芯(パンフレット)の専有面積。 */
   exclusiveArea?: number | string | null;
+  /** 登記簿の専有面積(2026-10-24)。面積計測方式を「内法」にすると図面はこちらを使う。 */
+  exclusiveAreaRegistry?: number | string | null;
   balconyArea?: number | string | null;
   layoutType?: string | null;
   orientation?: string | null;
@@ -493,6 +496,10 @@ export function computeMansionAutoValues(data: MansionAutoSource): FieldModelAut
   }
   if (data.access) hints.access = savedValueHint(data.access);
   if (data.parking) hints.parking = savedValueHint(data.parking);
+  // 専有面積は2つ(2026-10-24)。ここに出すのは壁芯。登記簿の面積もあれば、内法で使えることを添える。
+  if (data.exclusiveAreaRegistry != null && data.exclusiveAreaRegistry !== "") {
+    hints.exclusiveArea = `登記簿の面積は ${data.exclusiveAreaRegistry}㎡（面積計測方式を「内法」にすると、図面にはこちらが入ります）`;
+  }
   return {
     preview: {
       // 建物マスタ優先・無ければ物件のスカラを使う。

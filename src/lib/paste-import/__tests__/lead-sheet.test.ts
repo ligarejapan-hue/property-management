@@ -219,7 +219,8 @@ describe("leadRowStatus", () => {
     );
     expect(leadRowStatus(d, none)).toEqual({
       status: "review",
-      reasons: ["専有面積を読み取れません", "現況を読み取れません"],
+      // 専有面積は読めなくても止めない(欄に入れず備考へ残す・2026-10-24)。
+      reasons: ["現況を読み取れません"],
     });
   });
 

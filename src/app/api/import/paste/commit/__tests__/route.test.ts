@@ -653,12 +653,15 @@ describe("入力の検査: 直せる形の400で断る(500に化けさせない�
   it("整数6桁・小数2桁ちょうどは通る(境界)", async () => {
     const res = await POST(req(area("999999.99")));
     expect(res.status).toBe(200);
-    expect(created.property?.[0]).toMatchObject({ exclusiveArea: "999999.99" });
+    // お客様の書いた専有面積は欄に入れず備考へ(2026-10-24)。
+    expect(created.property?.[0]).toMatchObject({ exclusiveArea: null });
+    expect(String((created.property?.[0] as { note: string }).note)).toContain("専有面積（お客様の記載・登記簿か壁芯か不明）: 999999.99㎡");
   });
 
   it("専有面積が素の数字なら通る(小数も)", async () => {
     expect((await POST(req(area("70")))).status).toBe(200);
-    expect(created.property?.[0]).toMatchObject({ exclusiveArea: "70" });
+    expect(created.property?.[0]).toMatchObject({ exclusiveArea: null });
+    expect(String((created.property?.[0] as { note: string }).note)).toContain("専有面積（お客様の記載・登記簿か壁芯か不明）: 70㎡");
   });
 
   it("専有面積が空欄なら null で通る(未入力は誤りではない)", async () => {
@@ -1193,16 +1196,34 @@ describe("区分マンション専用の欄は種別に合うときだけ保存�
     }
   });
 
-  it("★種別が apartment_unit なら、4つともそのまま保存される（落としすぎていない）", async () => {
+  it("★種別が apartment_unit なら、部屋番号・間取り・現況はそのまま保存される（落としすぎていない）", async () => {
     const res = await POST(req(withType("apartment_unit")));
     expect(res.status).toBe(200);
-    expect(created.property?.[0]).toMatchObject(unitFields);
+    expect(created.property?.[0]).toMatchObject({ ...unitFields, exclusiveArea: null });
+  });
+
+  it("★区分の専有面積はお客様の記載なので、登記簿・壁芯のどちらの欄にも入れず備考の最後に1行で残す(2026-10-24)", async () => {
+    const res = await POST(req({
+      ...withType("apartment_unit"),
+      property: { ...withType("apartment_unit").property, note: "売却希望時期: 1年以内" },
+    }));
+    expect(res.status).toBe(200);
+    const row = created.property?.[0] as Record<string, unknown>;
+    expect(row.exclusiveArea).toBeNull();
+    expect(row).not.toHaveProperty("exclusiveAreaRegistry");
+    expect(row.note).toBe("売却希望時期: 1年以内\n専有面積（お客様の記載・登記簿か壁芯か不明）: 70.55㎡");
+  });
+
+  it("区分以外は備考に面積の行を足さない(今までどおり null に落とすだけ)", async () => {
+    await POST(req(withType("land")));
+    expect(String((created.property?.[0] as { note: unknown }).note ?? "")).not.toContain("専有面積");
   });
 
   it("★旧値 unit でもそのまま保存される（既存データの取り込みで消えない）", async () => {
     const res = await POST(req(withType("unit")));
     expect(res.status).toBe(200);
-    expect(created.property?.[0]).toMatchObject(unitFields);
+    // 専有面積だけはお客様の記載なので欄に入れない(2026-10-24・備考へ)。
+    expect(created.property?.[0]).toMatchObject({ ...unitFields, exclusiveArea: null });
   });
 
   it("★物件名(buildingName)の扱いは変わっていない（既存の正規化と共存する）", async () => {

@@ -261,7 +261,10 @@ export interface SaleMansionInput {
   property: {
     address: string;
     roomNo?: string | null;
+    /** 壁芯(パンフレット)の専有面積。 */
     exclusiveArea?: string | null;
+    /** 登記簿の専有面積(2026-10-24)。面積計測方式が「内法」のときに使う。 */
+    exclusiveAreaRegistry?: string | null;
     balconyArea?: string | null;
     layoutType?: string | null;
     floorNo?: number | null;
@@ -375,8 +378,14 @@ function buildMansionValues(input: SaleMansionInput): SheetValues {
     // 専有面積: 面積計測方式(壁芯/内法)を括弧書きで併記して1つの表示値に合成する
     // （field-model.exclusiveArea は unit を持たないため ㎡ もここで付与する）。
     // ⚠R16: override 優先(空/未指定なら property の自動反映値)。
+    // ⚠専有面積は物件に2つある(2026-10-24)。面積計測方式が「内法」なら登記簿の面積、
+    //   それ以外(壁芯・未選択)は壁芯の面積を自動で入れる。
     exclusiveArea: fmtExclusiveArea(
-      o.exclusiveArea && o.exclusiveArea.trim() !== "" ? o.exclusiveArea : p.exclusiveArea,
+      o.exclusiveArea && o.exclusiveArea.trim() !== ""
+        ? o.exclusiveArea
+        : (o.areaMethod ?? "").trim() === "内法"
+          ? p.exclusiveAreaRegistry
+          : p.exclusiveArea,
       o.areaMethod,
     ),
     // ⚠R16: 以下4項目も override 優先(空/未指定なら property の自動反映値)。

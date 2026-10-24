@@ -311,6 +311,7 @@ export async function PATCH(
         grossYield: true,
         expectedIncome: true,
         exclusiveArea: true,
+        exclusiveAreaRegistry: true,
         balconyArea: true,
         layoutType: true,
         orientation: true,
