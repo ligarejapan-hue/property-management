@@ -20,6 +20,7 @@ import prismaMock from "@/lib/prisma";
 import { getApiSession, getUserPermissions } from "@/lib/api-helpers";
 import { jsonRequest as json, DEAL_ID, PROP_ID, USER_ID, DEAL_PERMS } from "./route-mocks";
 import { DEFAULT_FUNDING_INPUTS } from "../funding-schema";
+import { DEFAULT_BUSINESS_INPUTS } from "../business-schema";
 import { GET, PATCH } from "../../../app/api/deals/[id]/route";
 import { POST as REFRESH } from "../../../app/api/deals/[id]/refresh-property/route";
 
@@ -150,6 +151,48 @@ describe("PATCH /api/deals/[id] の資金計画表(plan_inputs.funding)", () => 
     expect(body.deal.fundingPlan.customerName).toBe("架空 花子");
     expect(body.deal.fundingPlan.mode).toBe("purchase");
     expect(body.deal).not.toHaveProperty("planInputs");
+  });
+});
+
+describe("PATCH /api/deals/[id] の事業計画書(plan_inputs.business)", () => {
+  const business = { ...DEFAULT_BUSINESS_INPUTS, variant: "bank" as const, salePrice: 40_000_000, memo: "架空の社内メモ" };
+  const resale = { ...detailRow, businessType: "resale", tradeSide: null };
+  it("business だけを差し替え、資金計画表の鍵は残す・監査は項目名だけ", async () => {
+    pm.deal.findUnique.mockResolvedValue({ ...resale, planInputs: { funding: { keep: 1 }, business: { variant: "internal" } } });
+    const res = await PATCH(json("PATCH", { version: 3, businessPlan: business }), ctx);
+    expect(res.status).toBe(200);
+    const data = pm.deal.updateMany.mock.calls[0][0].data;
+    expect(data.planInputs).toEqual({ funding: { keep: 1 }, business });
+    expect(data).not.toHaveProperty("businessPlan");
+    const audit = (writeAuditLog as Fn).mock.calls[0][0];
+    expect(audit.detail).toEqual({ fields: ["businessPlan"] });
+    expect(JSON.stringify(audit)).not.toContain("架空の社内メモ");
+  });
+  it("資金計画表と一緒に送れば両方を差し替える", async () => {
+    pm.deal.findUnique.mockResolvedValue({ ...resale, planInputs: {} });
+    await PATCH(json("PATCH", { version: 3, businessPlan: business, fundingPlan: DEFAULT_FUNDING_INPUTS }), ctx);
+    expect(pm.deal.updateMany.mock.calls[0][0].data.planInputs).toEqual({ funding: DEFAULT_FUNDING_INPUTS, business });
+  });
+  it("最終レビュー: 同じ保存で事業区分を変えるときは、変えたあとの区分で決める", async () => {
+    pm.deal.findUnique.mockResolvedValue({ ...resale, planInputs: {} });
+    expect((await PATCH(json("PATCH", { version: 3, businessType: "brokerage", businessPlan: business }), ctx)).status).toBe(422);
+    pm.deal.findUnique.mockResolvedValue({ ...detailRow, planInputs: {} });
+    expect((await PATCH(json("PATCH", { version: 3, businessType: "resale", businessPlan: business }), ctx)).status).toBe(200);
+  });
+  it("仲介の取引には保存しない(422)", async () => {
+    pm.deal.findUnique.mockResolvedValue({ ...detailRow, planInputs: {} });
+    const res = await PATCH(json("PATCH", { version: 3, businessPlan: business }), ctx);
+    expect(res.status).toBe(422);
+    expect((await res.json()).error.code).toBe("NOT_RESALE");
+    expect(pm.deal.updateMany).not.toHaveBeenCalled();
+  });
+  it("形の違う入力は 422・GET は入力を読んで返す(壊れていれば初期値)", async () => {
+    expect((await PATCH(json("PATCH", { version: 3, businessPlan: { ...business, variant: "x" } }), ctx)).status).toBe(422);
+    pm.deal.findUnique.mockResolvedValue({ ...resale, planInputs: { business: { salePrice: 5 } } });
+    const body = await (await GET(new Request("http://x"), ctx)).json();
+    expect(body.deal.businessPlan).toEqual({ ...DEFAULT_BUSINESS_INPUTS, salePrice: 5 });
+    pm.deal.findUnique.mockResolvedValue({ ...resale, planInputs: { business: { variant: "x" } } });
+    expect((await (await GET(new Request("http://x"), ctx)).json()).deal.businessPlan).toEqual(DEFAULT_BUSINESS_INPUTS);
   });
 });
 

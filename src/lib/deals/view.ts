@@ -2,6 +2,7 @@ import type { Prisma } from "@/generated/prisma";
 import { readBroker, readSnapshot } from "./snapshot";
 import { readAssessments, readCosts, readLeases, readOverrides, readTerms } from "./inputs";
 import { readFundingInputs, type FundingInputs } from "./funding-schema";
+import { readBusinessInputs, type BusinessInputs } from "./business-schema";
 import type { Assessments, CounterpartyBroker, Costs, Lease, Overrides, PropertySnapshot, SettlementTerms } from "./schemas";
 
 const iso = (d: Date | null) => (d ? d.toISOString() : null);
@@ -52,6 +53,8 @@ export interface DealView {
   assessments: Assessments; costs: Costs; settlementTerms: SettlementTerms; leases: Lease[]; overrides: Overrides;
   /** 資金計画表の入力(`plan_inputs.funding`)。 */
   fundingPlan: FundingInputs;
+  /** 事業計画書の入力(`plan_inputs.business`)。 */
+  businessPlan: BusinessInputs;
   version: number; createdAt: string; updatedAt: string; parties: DealPartyView[];
 }
 
@@ -65,6 +68,7 @@ export function toDealView(r: Prisma.DealGetPayload<{ select: typeof DEAL_DETAIL
     propertySnapshot: readSnapshot(r.propertySnapshot), counterpartyBroker: readBroker(r.counterpartyBroker),
     assessments: readAssessments(r.assessments), costs: readCosts(r.costs), settlementTerms: readTerms(r.settlementTerms),
     leases: readLeases(r.leases), overrides: readOverrides(r.overrides), fundingPlan: readFundingInputs(r.planInputs),
+    businessPlan: readBusinessInputs(r.planInputs),
     version: r.version, createdAt: r.createdAt.toISOString(), updatedAt: r.updatedAt.toISOString(), parties: r.parties,
   };
 }

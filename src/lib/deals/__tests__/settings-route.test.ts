@@ -60,6 +60,16 @@ describe("取引の設定", () => {
     pm.dealSettings.create.mockRejectedValue(Object.assign(new Error("dup"), { code: "P2002" }));
     expect((await PUT(json("PUT", { version: 0, representativeName: "a" }))).status).toBe(409);
   });
+  it("事業計画書の種別×セクションの表: 知っている形だけ保存・ほかは 422 で書かない", async () => {
+    pm.dealSettings.findUnique.mockResolvedValue(row(3));
+    expect((await PUT(json("PUT", { version: 2, sectionMatrix: { unit: { holding: false } } }))).status).toBe(200);
+    expect(pm.dealSettings.updateMany.mock.calls[0][0].data.sectionMatrix).toEqual({ unit: { holding: false } });
+    pm.dealSettings.updateMany.mockClear();
+    for (const bad of [{ unit: { memo: false } }, { "Bad Key": { holding: false } }, { unit: { holding: "no" } }]) {
+      expect((await PUT(json("PUT", { version: 2, sectionMatrix: bad }))).status).toBe(422);
+    }
+    expect(pm.dealSettings.updateMany).not.toHaveBeenCalled();
+  });
 });
 
 describe("税率の表", () => {

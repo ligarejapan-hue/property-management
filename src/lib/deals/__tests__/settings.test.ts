@@ -2,13 +2,26 @@ import { describe, it, expect } from "vitest";
 import { resolveDealSettings, isKnownPropertyKind } from "../settings";
 import { DEFAULT_PROPERTY_KINDS } from "../constants";
 import { EMPTY_BANK_ACCOUNT, dealSettingsUpdateSchema } from "../schemas";
+import { resolveSectionMatrix } from "../business-sections";
 
 describe("取引の設定の解決", () => {
   it("行が無ければ初期値・版は 0", () => {
     expect(resolveDealSettings(null)).toEqual({
       representativeTitle: null, representativeName: null, bankAccount: EMPTY_BANK_ACCOUNT,
-      propertyKinds: DEFAULT_PROPERTY_KINDS, texts: {}, hasLogo: false, hasSeal: false, version: 0, updatedAt: null,
+      propertyKinds: DEFAULT_PROPERTY_KINDS, texts: {}, hasLogo: false, hasSeal: false,
+      sectionMatrix: resolveSectionMatrix(undefined, DEFAULT_PROPERTY_KINDS), version: 0, updatedAt: null,
     });
+  });
+  it("種別×セクションの表: 保存した値を、今の物件種別ごとの行にそろえて返す・保存は知っている形だけ", () => {
+    const kinds = [...DEFAULT_PROPERTY_KINDS, { key: "shop_unit", label: "店舗区分", base: "unit" as const }];
+    const s = resolveDealSettings({
+      representativeTitle: null, representativeName: null, bankAccount: {}, propertyKinds: kinds, version: 2,
+      updatedAt: new Date("2026-10-24T00:00:00Z"), sectionMatrix: { unit: { holding: false } },
+    });
+    expect(Object.keys(s.sectionMatrix)).toEqual(["unit", "house", "land", "building", "shop_unit"]);
+    expect(s.sectionMatrix.shop_unit.holding).toBe(false);
+    expect(dealSettingsUpdateSchema.safeParse({ version: 1, sectionMatrix: { unit: { holding: false } } }).success).toBe(true);
+    expect(dealSettingsUpdateSchema.safeParse({ version: 1, sectionMatrix: { unit: { memo: false } } }).success).toBe(false);
   });
   it("保存した種別を使う・壊れていれば初期値", () => {
     const kinds = [...DEFAULT_PROPERTY_KINDS, { key: "shop_unit", label: "店舗区分", base: "unit" }];

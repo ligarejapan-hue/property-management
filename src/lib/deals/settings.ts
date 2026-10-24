@@ -1,4 +1,5 @@
 import { DEFAULT_PROPERTY_KINDS, type PropertyKindDef } from "./constants";
+import { resolveSectionMatrix, type SectionMatrix } from "./business-sections";
 import { EMPTY_BANK_ACCOUNT, bankAccountSchema, dealTextsSchema, propertyKindsSchema, type BankAccount, type DealTexts } from "./schemas";
 
 export const DEAL_SETTINGS_ID = "singleton";
@@ -11,6 +12,7 @@ export interface DealSettingsRow {
   logoKey?: string | null;
   sealKey?: string | null;
   texts?: unknown;
+  sectionMatrix?: unknown;
   version: number;
   updatedAt: Date;
 }
@@ -25,6 +27,8 @@ export interface DealSettingsView {
   /** ロゴ・角印が登録されているか(保存場所の鍵は画面に渡さない)。 */
   hasLogo: boolean;
   hasSeal: boolean;
+  /** 事業計画書の種別×セクションの表(今の物件種別ごとの行にそろえたもの)。 */
+  sectionMatrix: SectionMatrix;
   /** 0 = 行がまだ無い。 */
   version: number;
   updatedAt: string | null;
@@ -35,20 +39,22 @@ export function resolveDealSettings(row: DealSettingsRow | null): DealSettingsVi
   if (!row) {
     return {
       representativeTitle: null, representativeName: null, bankAccount: EMPTY_BANK_ACCOUNT, propertyKinds: DEFAULT_PROPERTY_KINDS,
-      texts: {}, hasLogo: false, hasSeal: false, version: 0, updatedAt: null,
+      texts: {}, hasLogo: false, hasSeal: false, sectionMatrix: resolveSectionMatrix(undefined, DEFAULT_PROPERTY_KINDS), version: 0, updatedAt: null,
     };
   }
   const kinds = propertyKindsSchema.safeParse(row.propertyKinds);
   const bank = bankAccountSchema.safeParse({ ...EMPTY_BANK_ACCOUNT, ...(row.bankAccount && typeof row.bankAccount === "object" ? row.bankAccount : {}) });
   const texts = dealTextsSchema.safeParse(row.texts ?? {});
+  const propertyKinds = kinds.success ? kinds.data : DEFAULT_PROPERTY_KINDS;
   return {
     representativeTitle: row.representativeTitle,
     representativeName: row.representativeName,
     bankAccount: bank.success ? bank.data : EMPTY_BANK_ACCOUNT,
-    propertyKinds: kinds.success ? kinds.data : DEFAULT_PROPERTY_KINDS,
+    propertyKinds,
     texts: texts.success ? texts.data : {},
     hasLogo: Boolean(row.logoKey),
     hasSeal: Boolean(row.sealKey),
+    sectionMatrix: resolveSectionMatrix(row.sectionMatrix, propertyKinds),
     version: row.version,
     updatedAt: row.updatedAt.toISOString(),
   };

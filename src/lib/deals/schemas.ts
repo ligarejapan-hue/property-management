@@ -5,6 +5,8 @@ import {
 } from "./constants";
 import { text, yenInt } from "./schema-parts";
 import { fundingInputsSchema } from "./funding-schema";
+import { businessInputsSchema } from "./business-schema";
+import { sectionMatrixSchema } from "./business-sections";
 
 export { text, yenInt };
 
@@ -162,6 +164,8 @@ export const dealUpdateSchema = z.object({
   overrides: overridesSchema.optional(),
   /** 資金計画表の入力(`plan_inputs.funding` だけを差し替える)。 */
   fundingPlan: fundingInputsSchema.optional(),
+  /** 事業計画書の入力(`plan_inputs.business` だけを差し替える・買取再販だけ)。 */
+  businessPlan: businessInputsSchema.optional(),
 }).strict();
 export type DealUpdateInput = z.output<typeof dealUpdateSchema>;
 
@@ -220,4 +224,6 @@ export const dealSettingsUpdateSchema = z.object({
   bankAccount: bankAccountSchema.optional(),
   propertyKinds: propertyKindsSchema.optional(),
   texts: dealTextsSchema.optional(),
+  /** 事業計画書の種別×セクションの表。 */
+  sectionMatrix: sectionMatrixSchema.optional(),
 }).strict();
