@@ -55,8 +55,17 @@ export async function PATCH(request: Request, ctx: Ctx) {
       const cur = await tx.deal.findUnique({ where: { id }, select: DEAL_DETAIL_SELECT });
       if (!cur) throw new ApiError(404, "取引が見つかりません", "NOT_FOUND");
       const data = toDealUpdateData(patch, cur.businessType);
-      // 資金計画表は plan_inputs の funding だけを差し替える(事業計画書などほかの鍵は残す)。
-      if (patch.fundingPlan !== undefined) data.planInputs = { ...jsonObject(cur.planInputs), funding: patch.fundingPlan };
+      // 資金計画表・事業計画書は plan_inputs のそれぞれの鍵(funding / business)だけを差し替える(ほかの鍵は残す)。
+      if (patch.businessPlan !== undefined && (patch.businessType ?? cur.businessType) !== "resale") {
+        throw new ApiError(422, "事業計画書は買取再販の取引だけで使えます", "NOT_RESALE");
+      }
+      if (patch.fundingPlan !== undefined || patch.businessPlan !== undefined) {
+        data.planInputs = {
+          ...jsonObject(cur.planInputs),
+          ...(patch.fundingPlan !== undefined ? { funding: patch.fundingPlan } : {}),
+          ...(patch.businessPlan !== undefined ? { business: patch.businessPlan } : {}),
+        };
+      }
       const res = await tx.deal.updateMany({ where: { id, version }, data: { ...data, version: { increment: 1 } } });
       if (res.count === 0) throw new ApiError(409, DEAL_VERSION_CONFLICT_MESSAGE, "VERSION_CONFLICT");
       await recordChangesInTx(tx, {

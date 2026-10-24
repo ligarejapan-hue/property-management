@@ -1,13 +1,7 @@
 import { z } from "zod";
-import { text, yenInt } from "./schema-parts";
+import { isoDate, otherCostSchema, text, yenInt } from "./schema-parts";
 
-/** 実在する日付の YYYY-MM-DD(2015-02-30 などは通さない)。 */
-const isoDate = z.string().regex(/^\d{4}-\d{2}-\d{2}$/).refine((s) => {
-  const d = new Date(`${s}T00:00:00Z`);
-  return !Number.isNaN(d.getTime()) && d.toISOString().slice(0, 10) === s;
-}, "日付が正しくありません");
 const bp = z.number().int().min(0).max(10000);
-const otherCostSchema = z.object({ label: z.string().trim().min(1).max(50), amount: yenInt }).strict();
 
 export const fundingLoanSchema = z.object({
   /** 年利(1/100 %)。0〜30%。 */
