@@ -487,16 +487,17 @@ const ACTION_EXTRA_KEYS: Readonly<Record<string, ReadonlySet<string>>> = {
     "providerErrorCode",
     "confirmed",
   ]),
-  // 「貼り付けて物件化」の登録監査。detail は**真偽値4つだけ**で、
+  // 「貼り付けて物件化」の登録監査。detail は**真偽値だけ**で、
   // 貼った原文・氏名・電話・メール・住所は route 側で載せていない
   // (社内の恒久ルール「ログに外部由来の文字を出すときは許可リスト」)。
   //   attachmentCreated = 取込元PDFを添付として保存したか
   //   hasExternalKey    = 査定ナンバー等の外部キーがあったか
   //   inquirerSaved     = 問い合わせ者(申込者の氏名)を物件に残したか(真偽だけ・氏名は載せない)
+  //   commentNoteSaved  = 貼り付けの自由記述(コメント等)を所有者の備考に残したか(真偽だけ・中身は載せない)
   // ⚠ownerCreated / ownerLinked は /owner/i の denylist に当たるため
   //   force-safe 側で保持する(値は boolean ゆえ PII 流入余地なし)。
   // ⚠ここに氏名・住所・原文のキーは**足さない**(安全なものだけを並べる方式)。
-  paste_import_property_create: new Set(["attachmentCreated", "hasExternalKey", "inquirerSaved"]),
+  paste_import_property_create: new Set(["attachmentCreated", "hasExternalKey", "inquirerSaved", "commentNoteSaved"]),
   // 編集中の鍵(設計 2026-09-17)。detail は UUID と enum のみ。
   // 氏名・画面の合言葉(生値もハッシュも)は載せない。
   edit_lock_acquire: new Set(["resourceType", "resourceId"]),

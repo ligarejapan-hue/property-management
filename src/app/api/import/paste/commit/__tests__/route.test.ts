@@ -1104,13 +1104,14 @@ describe("監査ログが管理画面で「物件」として拾え、中身も�
     }, pdfFile()));
 
     const call = auditCalls[0] as { action: string; detail: Record<string, unknown> };
-    // 記録した5つの真偽値が、まず route 側で正しい値になっている(問い合わせ者=2026-10-24 追加)。
+    // 記録した6つの真偽値が、まず route 側で正しい値になっている(問い合わせ者・自由記述の備考=2026-10-24 追加)。
     expect(call.detail).toEqual({
       ownerCreated: true,
       ownerLinked: true,
       attachmentCreated: true,
       hasExternalKey: true,
       inquirerSaved: false,
+      commentNoteSaved: false,
     });
     // その**同じ detail** を管理画面と同じ関数に通しても、1つも伏せ字にならない。
     const shown = sanitizeAuditDetail(call.action, call.detail) as Record<string, unknown>;
@@ -1542,5 +1543,48 @@ describe("問い合わせ者(反響の申込者の氏名・2026-10-24)", () => {
     const dumped = JSON.stringify(auditCalls);
     expect(dumped).not.toContain("山田花子");
     expect(dumped).toContain("inquirerSaved");
+  });
+});
+
+describe("貼り付けの自由記述を所有者の備考へ(importNote・2026-10-24)", () => {
+  const NOTE_PERM = { resource: "owner_note", action: "full", granted: true };
+  const ownerBody = (extra: Record<string, unknown>) => ({
+    ...baseBody,
+    owner: { name: "山田太郎", nameKana: null, phone: null, email: null, currentAddress: null, ...extra },
+  });
+
+  it("★owner_note を書ける人なら所有者の備考に入る", async () => {
+    mockPerms = [...FULL_PERMS, NOTE_PERM];
+    const res = await POST(req(ownerBody({ importNote: "貼り付け取込:\nコメント: 査定をお願いしたい" })));
+    expect(res.status).toBe(200);
+    expect(created.owner?.[0]).toMatchObject({ note: "貼り付け取込:\nコメント: 査定をお願いしたい" });
+  });
+
+  it("★owner_note を書けない人なら、備考だけ残さず取込は通す(403にしない)", async () => {
+    mockPerms = FULL_PERMS;
+    const res = await POST(req(ownerBody({ importNote: "貼り付け取込:\nコメント: 査定をお願いしたい" })));
+    expect(res.status).toBe(200);
+    expect(created.owner?.[0]).toMatchObject({ note: null });
+  });
+
+  it("手で送った備考(note)と自動の備考(importNote)は1つの欄にまとめる", async () => {
+    mockPerms = [...FULL_PERMS, NOTE_PERM];
+    await POST(req(ownerBody({ note: "Excel取込: 1行目", importNote: "貼り付け取込:\nコメント: よろしく" })));
+    expect(created.owner?.[0]).toMatchObject({ note: "Excel取込: 1行目\n貼り付け取込:\nコメント: よろしく" });
+  });
+
+  it("★文字列以外・長すぎるものは400(何も作らない)", async () => {
+    mockPerms = [...FULL_PERMS, NOTE_PERM];
+    expect((await POST(req(ownerBody({ importNote: 123 })))).status).toBe(400);
+    expect((await POST(req(ownerBody({ importNote: "あ".repeat(20001) })))).status).toBe(400);
+    expect(created.property).toBeUndefined();
+  });
+
+  it("★監査ログには中身を入れない(残したかどうかだけ)", async () => {
+    mockPerms = [...FULL_PERMS, NOTE_PERM];
+    await POST(req(ownerBody({ importNote: "貼り付け取込:\nコメント: ひみつの事情" })));
+    const dumped = JSON.stringify(auditCalls);
+    expect(dumped).not.toContain("ひみつの事情");
+    expect(dumped).toContain('"commentNoteSaved":true');
   });
 });

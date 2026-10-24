@@ -48,6 +48,8 @@ import {
   isInquirerNameTooLong,
   normalizeInquirerName,
 } from "@/lib/inquirer-name";
+// 画面が組み立てる側(composePasteOwnerNote)が同じ上限で切り詰めるので、正しく使えばここで断られない。
+import { MAX_PASTE_OWNER_NOTE_LENGTH } from "@/lib/paste-import/paste-owner-note";
 
 // ---------------------------------------------------------------------------
 // 入力の検査（全体レビュー I-3）
@@ -163,6 +165,12 @@ interface CommitBody {
      * 貼り付け画面は送らない(省略可)。
      */
     note?: string | null;
+    /**
+     * 貼り付け画面が自動で組み立てた所有者の備考(コメント・ご要望などの自由記述・2026-10-24)。省略可。
+     * ⚠note と違い、owner_note を書けない人のときは**断らずに残さない**(取込そのものは止めない)。
+     *   画面は権限を見ずに送るので、断ると今まで取り込めていた役割の取込がすべて止まる(問い合わせ者と同じ)。
+     */
+    importNote?: string | null;
   } | null;
   externalLinkKey: string | null;
   /** 確認画面で選んだ棟。省略=auto。形は入口で buildingChoiceSchema が検査する。 */
@@ -361,6 +369,17 @@ export async function POST(request: NextRequest) {
     }
     const canWriteInquirer = hasPermission(perms, "owner", "read") && hasExplicitWritePerm(perms, "owner_name");
     const inquirerName = canWriteInquirer ? normalizeInquirerName(p.inquirerName) : null;
+
+    // ---- 所有者の備考へ自動で入れる自由記述（2026-10-24） ----
+    // ⚠owner_note を書ける人のときだけ残す(書けない人は黙って残さない=取込は通す)。
+    const importNoteInput = body.owner?.importNote;
+    if (typeof importNoteInput !== "undefined" && importNoteInput !== null && typeof importNoteInput !== "string") {
+      throw new ApiError(400, "所有者の備考の形式が正しくありません", "BAD_REQUEST");
+    }
+    if ((importNoteInput ?? "").length > MAX_PASTE_OWNER_NOTE_LENGTH) {
+      throw new ApiError(400, `所有者の備考は${MAX_PASTE_OWNER_NOTE_LENGTH}文字までです`, "BAD_REQUEST");
+    }
+    const importOwnerNote = hasExplicitWritePerm(perms, "owner_note") ? importNoteInput?.trim() || null : null;
 
     // ---- 値の検査（全体レビュー I-3）。Prisma に渡す前に、欄の名前つきで断る ----
     const exclusiveArea = parseAreaInput(p.exclusiveArea, "専有面積");
@@ -629,7 +648,8 @@ export async function POST(request: NextRequest) {
               //   限らない。address(登記上住所)は空のままにする(設計書 §7・
               //   発注者承認 2026-08-26)。address キー自体を書かない。
               currentAddress: body.owner.currentAddress?.trim() || null,
-              note: body.owner.note?.trim() || null,
+              // 手で送られた備考(Excel)と、自動で組み立てた備考(貼り付け)を1つの欄にまとめる。
+              note: [body.owner.note?.trim(), importOwnerNote].filter((v): v is string => !!v).join("\n") || null,
             },
           });
           ownerId = owner.id;
@@ -717,6 +737,8 @@ export async function POST(request: NextRequest) {
         hasExternalKey: externalLinkKey !== null,
         // 問い合わせ者を残したか(有無だけ・氏名は入れない)。
         inquirerSaved: inquirerName !== null,
+        // 自由記述を所有者の備考に残したか(有無だけ・中身は入れない)。
+        commentNoteSaved: result.ownerCreated && importOwnerNote !== null,
       },
     });
 

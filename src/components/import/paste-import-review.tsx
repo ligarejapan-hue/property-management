@@ -16,6 +16,7 @@
 import type { ChangeEvent } from "react";
 import Link from "next/link";
 import type { DraftWarningCode, PasteDraft } from "@/lib/paste-import/types";
+import { goesToOwnerNote } from "@/lib/paste-import/paste-owner-note";
 import { OCCUPANCY_STATUS_OPTIONS, PROPERTY_TYPE_OPTIONS } from "@/lib/property-types";
 import { Button } from "@/components/ui/button";
 import BuildingNameCombobox from "@/components/buildings/building-name-combobox";
@@ -489,6 +490,9 @@ export function PasteImportReview({
   const similarList = similar ?? [];
   const candidates = ownerCandidates ?? [];
   const mode = ownerMode ?? defaultOwnerMode(draft);
+  // 備考へ入れなかった項目のうち、所有者を新しく登録するときに所有者の備考へ入るもの(自由記述)と、それ以外。
+  const toOwnerNote = mode === "new" ? draft.withheldFromNote.filter(goesToOwnerNote) : [];
+  const notToOwnerNote = draft.withheldFromNote.filter((w) => !toOwnerNote.includes(w));
 
   /**
    * ⚠「新しい所有者として登録する」を選んだまま氏名が空のとき、**登録を止める**
@@ -708,7 +712,28 @@ export function PasteImportReview({
             そこへ流すと項目別権限チェックの迂回路になる。
             ただし**捨てない**。ここに出して、人が適切な欄へ移せるようにする。
         */}
-        {draft.withheldFromNote.length > 0 && (
+        {/*
+          ⚠コメント・ご要望などの自由記述(unclassified)は、所有者を新しく登録するときは
+            **所有者の備考**へ自動で入れる(2026-10-24 従業員の指摘・paste-owner-note.ts)。
+            それ以外(電話・住所・氏名など見出しや値の形で伏せたもの)は今までどおり人が移す。
+        */}
+        {toOwnerNote.length > 0 && (
+          <div
+            data-section="withheld-to-owner-note"
+            className="mt-3 rounded-md border border-blue-300 bg-blue-50 px-3 py-2 text-sm text-blue-800 dark:border-blue-500 dark:bg-blue-950/40 dark:text-blue-300"
+          >
+            次の項目は、物件の備考ではなく<b>所有者の備考</b>に入れます（所有者の備考を見られる人にだけ出ます）。
+            <ul className="mt-1 list-disc pl-5">
+              {toOwnerNote.map((w, i) => (
+                <li key={`${i}-${w.label}`}>
+                  {w.label}: {w.value}
+                </li>
+              ))}
+            </ul>
+            <p className="mt-1 text-xs">所有者の備考を書く権限がない方の登録では入りません。</p>
+          </div>
+        )}
+        {notToOwnerNote.length > 0 && (
           <div
             data-section="withheld-from-note"
             role="alert"
@@ -716,7 +741,7 @@ export function PasteImportReview({
           >
             次の項目は<b>備考に入れません</b>。必要なら適切な欄へ移してください。
             <ul className="mt-1 list-disc pl-5">
-              {draft.withheldFromNote.map((w, i) => (
+              {notToOwnerNote.map((w, i) => (
                 <li key={`${i}-${w.label}`}>
                   {w.label}: {w.value}
                 </li>

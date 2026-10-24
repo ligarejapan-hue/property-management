@@ -1139,3 +1139,39 @@ describe("控えから戻したときの登録の止め", () => {
     expect(renderToStaticMarkup(createElement(PasteImportReview, base))).not.toMatch(/<input[^>]*disabled=""/);
   });
 });
+
+describe("コメントなどの自由記述は所有者の備考へ(2026-10-24 従業員の指摘)", () => {
+  const text =
+    "■物件所在地： 東京都A区B1-2-3" + NL + "■お名前： 山田太郎" + NL + "■携帯電話： 090-1234-5678" + NL +
+    "■コメント： 売却を検討しているのでまずは査定をお願いしたい。";
+  const d = buildPasteDraft(text);
+
+  it("★所有者を新しく登録するときは、コメントを「所有者の備考に入れます」の区画に出す", () => {
+    const out = renderToStaticMarkup(createElement(PasteImportReview, { draft: d, rawText: "", ownerMode: "new" }));
+    const at = out.indexOf('data-section="withheld-to-owner-note"');
+    expect(at).toBeGreaterThanOrEqual(0);
+    const box = out.slice(at, out.indexOf("</div>", at));
+    expect(box).toContain("所有者の備考");
+    expect(box).toContain("コメント");
+    expect(box).not.toContain("090-1234-5678");
+    // 電話は今までどおり「備考に入れません」の区画に残る。
+    const at2 = out.indexOf('data-section="withheld-from-note"');
+    expect(out.slice(at2, out.indexOf("</div>", at2))).toContain("090-1234-5678");
+  });
+
+  it("★所有者なし・既存の所有者につなぐときは、コメントは今までどおり「備考に入れません」", () => {
+    for (const ownerMode of ["none", "link"] as const) {
+      const out = renderToStaticMarkup(createElement(PasteImportReview, { draft: d, rawText: "", ownerMode }));
+      expect(out).not.toContain('data-section="withheld-to-owner-note"');
+      const at = out.indexOf('data-section="withheld-from-note"');
+      expect(out.slice(at, out.indexOf("</div>", at))).toContain("売却を検討している");
+    }
+  });
+});
+
+describe("登録の送信に自動の所有者の備考を載せる(ソース)", () => {
+  const src = readFileSync(join(dirname(fileURLToPath(import.meta.url)), "../../../app/(dashboard)/import/paste/page.tsx"), "utf8");
+  it("★新しい所有者の送信に importNote: composePasteOwnerNote(draft) がある", () => {
+    expect(src).toContain("importNote: composePasteOwnerNote(draft)");
+  });
+});
