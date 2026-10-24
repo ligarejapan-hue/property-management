@@ -1,5 +1,6 @@
 import { describe, it, expect } from "vitest";
 import { DEFAULT_FUNDING_INPUTS } from "../../funding-schema";
+import { DEFAULT_BUSINESS_INPUTS } from "../../business-schema";
 import { settlementResult } from "../settlement";
 import { computeDealCalc } from "../deal-calc";
 import { DEFAULT_COSTS, DEFAULT_TERMS, EMPTY_BROKER, EMPTY_SNAPSHOT } from "../../schemas";
@@ -70,7 +71,7 @@ const deal: DealView = {
   propertySnapshot: EMPTY_SNAPSHOT, counterpartyBroker: EMPTY_BROKER,
   assessments: { rows: [{ building: 10_000_000, land: 20_000_000, shareNum: 1, shareDen: 1 }], landRatioBp: 10000 },
   costs: DEFAULT_COSTS, settlementTerms: base.terms, leases: [], overrides: {},
-  version: 1, createdAt: "", updatedAt: "", parties: [], fundingPlan: DEFAULT_FUNDING_INPUTS,
+  version: 1, createdAt: "", updatedAt: "", parties: [], fundingPlan: DEFAULT_FUNDING_INPUTS, businessPlan: DEFAULT_BUSINESS_INPUTS,
 };
 
 describe("取引1件の計算結果", () => {

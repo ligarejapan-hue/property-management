@@ -5,6 +5,7 @@ import { DEFAULT_COSTS, DEFAULT_TERMS, EMPTY_BROKER, EMPTY_SNAPSHOT } from "../.
 import { DEFAULT_PROPERTY_KINDS } from "../../constants";
 import { INITIAL_RATE_TABLES, type RateTableRow } from "../../rate-tables";
 import { DEFAULT_FUNDING_INPUTS, type FundingInputs } from "../../funding-schema";
+import { DEFAULT_BUSINESS_INPUTS } from "../../business-schema";
 import type { DealView } from "../../view";
 
 const rateRows: RateTableRow[] = INITIAL_RATE_TABLES.map((t) => ({
@@ -19,7 +20,7 @@ const deal: DealView = {
   assessments: { rows: [], landRatioBp: 10000 },
   costs: { ...DEFAULT_COSTS, registrationFee: 300_000, cancellationFee: 30_000 },
   settlementTerms: { ...DEFAULT_TERMS, fixedAssetTax: 100_000, cityPlanningTax: 20_000, managementFee: 20_000, repairReserve: 10_000 },
-  leases: [], overrides: {}, version: 1, createdAt: "", updatedAt: "", parties: [], fundingPlan: DEFAULT_FUNDING_INPUTS,
+  leases: [], overrides: {}, version: 1, createdAt: "", updatedAt: "", parties: [], fundingPlan: DEFAULT_FUNDING_INPUTS, businessPlan: DEFAULT_BUSINESS_INPUTS,
 };
 const purchase = (p: Partial<FundingInputs["purchase"]>): FundingInputs => ({
   ...DEFAULT_FUNDING_INPUTS,

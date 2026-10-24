@@ -6,6 +6,7 @@ import { DEFAULT_COSTS, DEFAULT_TERMS, EMPTY_BROKER, EMPTY_SNAPSHOT, type DealDo
 import { DEFAULT_PROPERTY_KINDS } from "../../constants";
 import { INITIAL_RATE_TABLES, type RateTableRow } from "../../rate-tables";
 import { DEFAULT_FUNDING_INPUTS, type FundingInputs } from "../../funding-schema";
+import { DEFAULT_BUSINESS_INPUTS } from "../../business-schema";
 import type { DealView } from "../../view";
 import type { CompanyProfile } from "@/lib/sales-sheet/company-profile-store";
 
@@ -20,7 +21,7 @@ const deal: DealView = {
   propertySnapshot: { ...EMPTY_SNAPSHOT, buildingName: "試験マンション<b>", roomNo: "101", address: "架空県架空市1-2-3" },
   counterpartyBroker: EMPTY_BROKER, assessments: { rows: [], landRatioBp: 10000 }, costs: DEFAULT_COSTS,
   settlementTerms: { ...DEFAULT_TERMS, fixedAssetTax: 100_000, managementFee: 20_000, repairReserve: 10_000 },
-  leases: [], overrides: {}, version: 1, createdAt: "", updatedAt: "", parties: [], fundingPlan: DEFAULT_FUNDING_INPUTS,
+  leases: [], overrides: {}, version: 1, createdAt: "", updatedAt: "", parties: [], fundingPlan: DEFAULT_FUNDING_INPUTS, businessPlan: DEFAULT_BUSINESS_INPUTS,
 };
 const company: CompanyProfile = { nameJa: "架空不動産株式会社", license: "架空知事(1)第00000号", tel: "000-0000-0000", fax: "", email: "", hp: "", address: "架空県架空市" };
 const render = (i: FundingInputs, d: DealView = deal, extra: { logo?: string | null; text?: DealDocText } = {}) =>
