@@ -353,6 +353,14 @@ describe("syncOneLink", () => {
     expect(log).toEqual(["inbox:f0"]);
   });
 
+  it("★別の物件に紐づけた「契約資料」には複製しない(自分の段階のフォルダを作る・@codex #580 R2)", async () => {
+    const { drive, log } = fakeDrive({ root1: [folder("other", "契約資料")] });
+    const { repo } = fakeRepo({ toCopy: [att("a1")], files: { "/uploads/a1": "body1" } });
+    await syncOneLink(drive, repo, { ...LINK, otherLinkedFolderIds: new Set(["other"]) }, { transfers: 20 });
+    expect(log.filter((l) => l.startsWith("upload:other/"))).toEqual([]);
+    expect(log.filter((l) => l.startsWith("mkdir"))).toEqual(["mkdir:root1/③契約関係"]);
+  });
+
   it("★持ち主が別のアカウントのフォルダ(共有されただけ)には複製しない・取り込みはする", async () => {
     const { drive, log } = fakeDrive({ root1: [file("f0", "a.pdf", "a")] });
     drive.getFolder = async () => ({ trashed: false, ownedByMe: false });

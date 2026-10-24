@@ -155,7 +155,8 @@ export async function walkLinkedFolder(
     const cur = queue.shift()!;
     opened++;
     const children = await drive.listChildren(cur.id);
-    if (cur.relPath.length === 0) direct = children.filter((c) => c.mimeType === FOLDER_MIME);
+    // 直下のフォルダ=複製先の候補。別の物件に紐づけたフォルダは入れない(そこへ複製しない・@codex #580 R2)
+    if (cur.relPath.length === 0) direct = children.filter((c) => c.mimeType === FOLDER_MIME && !opts.skipFolderIds?.has(c.id));
     for (const c of children) {
       if (c.mimeType === FOLDER_MIME) {
         // ★別の物件に紐づけたフォルダの中は見ない(ほかの物件の書類を混ぜない・@codex #580 P1)
