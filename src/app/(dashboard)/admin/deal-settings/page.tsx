@@ -17,6 +17,9 @@ import { RATE_TABLE_KINDS, RATE_TABLE_KIND_LABELS, type RateTableKind } from "@/
 import { DEAL_TEXT_LIMITS } from "@/lib/deals/schemas";
 import { DEAL_IMAGE_KINDS } from "@/lib/deals/branding";
 import { DealImageSetting } from "@/components/deals/deal-image-setting";
+import { BUSINESS_SECTIONS, SECTION_RULE_LABELS, type SectionMatrix, type SectionRow } from "@/lib/deals/business-sections";
+
+const ALL_ON = Object.fromEntries(BUSINESS_SECTIONS.map((s) => [s.key, true])) as SectionRow;
 
 type Bank = DealSettingsView["bankAccount"];
 const BANK_FIELDS: [Exclude<keyof Bank, "accountType">, string, number][] = [
@@ -33,6 +36,7 @@ export default function DealSettingsPage() {
   const [kinds, setKinds] = useState<PropertyKindDef[]>([]);
   const [greeting, setGreeting] = useState("");
   const [notes, setNotes] = useState("");
+  const [matrix, setMatrix] = useState<SectionMatrix>({});
   const [saving, setSaving] = useState(false);
   const [message, setMessage] = useState<{ kind: "ok" | "err"; text: string } | null>(null);
   const [editing, setEditing] = useState<{ table: RateTableView | null; kind: RateTableKind } | null>(null);
@@ -50,7 +54,13 @@ export default function DealSettingsPage() {
     setKinds(s.propertyKinds);
     setGreeting(s.texts.funding_plan?.greeting ?? "");
     setNotes(s.texts.funding_plan?.notes ?? "");
+    setMatrix(s.sectionMatrix);
   };
+  /** 種別の行。足したばかりの種別(まだ行が無い)は、元の種別の行を初期値にする。 */
+  const rowOf = (k: PropertyKindDef): SectionRow => matrix[k.key] ?? matrix[k.base] ?? ALL_ON;
+  /** 保存する表: 今の種別の行だけ(鍵がまだ正しくない種別は送らない=種別の保存で 422 になる)。 */
+  const matrixForSave = () =>
+    Object.fromEntries(kinds.filter((k) => /^[a-z0-9_]{1,30}$/.test(k.key)).map((k) => [k.key, rowOf(k)]));
 
   useEffect(() => {
     dealsApi.getSettings().then((r) => apply(r.settings)).catch((e) => setMessage({ kind: "err", text: errorText(e) }));
@@ -69,6 +79,7 @@ export default function DealSettingsPage() {
         bankAccount: { ...bank, accountType: bank.accountType || null },
         propertyKinds: kinds,
         texts: { funding_plan: { greeting, notes } },
+        sectionMatrix: matrixForSave(),
       });
       apply(res.settings);
       setMessage({ kind: "ok", text: "取引の設定を保存しました" });
@@ -159,6 +170,46 @@ export default function DealSettingsPage() {
           <Plus className="h-4 w-4" />
           種別を足す
         </Button>
+      </section>
+
+      <section className="space-y-3">
+        <h2 className="text-sm font-semibold text-gray-700 dark:text-gray-300">事業計画書に出すセクション</h2>
+        <p className="text-xs text-gray-500">チェックを外したセクションは、その種別の事業計画書(画面・PDF・Excel)に出しません。「銀行向けだけ」「OC ありだけ」のセクションは、チェックがあってもその条件のときだけ出ます。</p>
+        <div className="overflow-x-auto rounded-lg border border-gray-200 dark:border-gray-800">
+          <table className="w-full text-xs">
+            <thead className="bg-gray-50 text-left text-gray-500 dark:bg-gray-900 dark:text-gray-400">
+              <tr>
+                <th className="px-2 py-2">種別</th>
+                {BUSINESS_SECTIONS.map((s) => (
+                  <th key={s.key} className="px-2 py-2 text-center">
+                    {s.label}
+                    {s.rule !== "all" && <span className="block font-normal">({SECTION_RULE_LABELS[s.rule]})</span>}
+                  </th>
+                ))}
+              </tr>
+            </thead>
+            <tbody>
+              {kinds.map((k) => {
+                const row = rowOf(k);
+                return (
+                  <tr key={k.key || k.label} className="border-t border-gray-100 dark:border-gray-800">
+                    <td className="whitespace-nowrap px-2 py-1.5">{k.label || "(名前なし)"}</td>
+                    {BUSINESS_SECTIONS.map((s) => (
+                      <td key={s.key} className="px-2 py-1.5 text-center">
+                        <input
+                          type="checkbox"
+                          checked={row[s.key]}
+                          onChange={(e) => setMatrix((m) => ({ ...m, [k.key]: { ...row, [s.key]: e.target.checked } }))}
+                          aria-label={`${k.label}の${s.label}`}
+                        />
+                      </td>
+                    ))}
+                  </tr>
+                );
+              })}
+            </tbody>
+          </table>
+        </div>
       </section>
 
       <section className="space-y-3">

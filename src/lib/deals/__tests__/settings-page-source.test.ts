@@ -37,6 +37,22 @@ describe("取引の設定の画面", () => {
   });
 });
 
+describe("事業計画書の種別×セクションの表", () => {
+  it("種別ごとの行・セクションごとの列のチェックで、保存ボタンで一緒に送る", () => {
+    const src = read(PAGE);
+    expect(src).toContain("事業計画書に出すセクション");
+    expect(src).toMatch(/BUSINESS_SECTIONS\.map\(\(s\) =>/);
+    expect(src).toMatch(/kinds\.map\(\(k\) =>/);
+    expect(src).toContain('type="checkbox"');
+    expect(src).toMatch(/sectionMatrix: matrixForSave\(\)/);
+    // 「銀行向けだけ」「OC ありだけ」の決まりを見出しに出す
+    expect(src).toContain("SECTION_RULE_LABELS");
+  });
+  it("足したばかりの種別は、元の種別の行を初期値にする", () => {
+    expect(read(PAGE)).toMatch(/matrix\[k\.key\] \?\? matrix\[k\.base\]/);
+  });
+});
+
 describe("ロゴ・角印と書類の文面", () => {
   const IMG = "src/components/deals/deal-image-setting.tsx";
   it("ロゴ・角印の欄を出し、文面は保存ボタンで一緒に送る", () => {
