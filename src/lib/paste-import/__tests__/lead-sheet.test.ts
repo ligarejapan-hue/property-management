@@ -60,6 +60,8 @@ describe("readLeadSheet — 査定サイト反響の顧客管理表", () => {
     expect(row.text).not.toContain("勝地");
     expect(row.ownerNoteLines).toContain("見込度: C");
     expect(row.ownerNoteLines).toContain("担当者: 勝地");
+    // 担当者の列は物件の担当者に当てる材料にも使う(従業員の指摘⑨ 2026-10-25)。備考にも残す。
+    expect(row.assigneeLabel).toBe("勝地");
     // 複数行のメモも失わない
     expect(row.ownerNoteLines.join("\n")).toContain("6/2 折返しあり");
   });
@@ -118,6 +120,7 @@ describe("readLeadSheet — 査定サイト反響の顧客管理表", () => {
       "媒体: 不動産売却", "見込度: 0.1", "推定ステータス: 本人確認済", "年齢: 62歳",
       "物件の名義: 物件の名義人", "ご依頼の理由: 相続", "担当者氏名: 村山",
     ]));
+    expect(row.assigneeLabel).toBe("村山");
     // 個人に関わる列は文章(=物件の備考へ流れうる側)に入れない
     expect(row.text).not.toContain("62歳");
   });

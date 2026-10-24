@@ -19,9 +19,14 @@ import FileDropZone from "@/components/ui/file-drop-zone";
 import {
   ExcelLeadTable,
   excelLeadRowKey,
+  countRowsWithoutAssignee,
+  dropUnknownAssignees,
+  fillEmptyAssignees,
+  type AssigneeOption,
   type ExcelLeadRow,
   type ExcelLeadResult,
 } from "@/components/import/excel-lead-table";
+import { fetchUsers } from "@/lib/api-client";
 import {
   excelLeadCommitBody,
   commitOutcome,
@@ -77,6 +82,24 @@ function ExcelLeadImportScreen({ draftEnabled }: { draftEnabled: boolean }) {
   const [total, setTotal] = useState(0);
   /** 中止の合図。押された行の登録は終わらせ、次の行から止める。 */
   const stopRef = useRef(false);
+  /** 担当者に選べる人(在籍中のユーザー・従業員の指摘⑨)。取れなければ空=「担当者なし」だけ。 */
+  const [users, setUsers] = useState<AssigneeOption[]>([]);
+  useEffect(() => {
+    let alive = true;
+    fetchUsers()
+      .then((res) => {
+        const data = (res as { data?: AssigneeOption[] }).data ?? [];
+        if (!alive) return;
+        setUsers(data.map((u) => ({ id: u.id, name: u.name })));
+        // 戻した控えの行に、今は選べない人(無効にした人など)が入っていたら外す(見た目と送る値をそろえる)。
+        const ids = new Set(data.map((u) => u.id));
+        setRows((prev) => (prev ? dropUnknownAssignees(prev, ids) : prev));
+      })
+      .catch(() => {});
+    return () => {
+      alive = false;
+    };
+  }, []);
 
   const draftData = useMemo<PasteExcelDraft>(
     () => ({ rev: 1, fileName: file?.name ?? restoredFileName, rows: rows ?? [], results, sendingKey }),
@@ -172,6 +195,17 @@ function ExcelLeadImportScreen({ draftEnabled }: { draftEnabled: boolean }) {
     setRunning(false);
   }, [readyRows, draftSaver]);
 
+  // 行の担当者は行そのものに持つ(作業中の控えにもそのまま残る)。
+  const handleAssigneeChange = (rowKey: string, userId: string | null) => {
+    setRows((prev) =>
+      prev ? prev.map((r) => (excelLeadRowKey(r) === rowKey ? { ...r, assignedTo: userId } : r)) : prev,
+    );
+  };
+  const handleFillAssignee = (userId: string) => {
+    setRows((prev) => (prev ? fillEmptyAssignees(prev, results, userId) : prev));
+  };
+  const withoutAssignee = countRowsWithoutAssignee(rows ?? [], results);
+
   const handleReturnUnknown = (rowKey: string) => {
     setResults((prev) => {
       const next = { ...prev };
@@ -256,6 +290,26 @@ function ExcelLeadImportScreen({ draftEnabled }: { draftEnabled: boolean }) {
                 今回登録 {createdCount}件{failedCount > 0 ? `・登録できなかった ${failedCount}件` : ""}
               </span>
             )}
+            {!running && withoutAssignee > 0 && users.length > 0 && (
+              <label className="flex items-center gap-2">
+                <span>担当者が空の {withoutAssignee}件に</span>
+                <select
+                  value=""
+                  onChange={(e) => {
+                    if (e.target.value) handleFillAssignee(e.target.value);
+                  }}
+                  aria-label="担当者が空の行にまとめて入れる"
+                  className="rounded-md border border-gray-300 px-2 py-1 text-sm dark:border-gray-600 dark:bg-gray-900 dark:text-gray-100"
+                >
+                  <option value="">まとめて入れる…</option>
+                  {users.map((u) => (
+                    <option key={u.id} value={u.id}>
+                      {u.name}
+                    </option>
+                  ))}
+                </select>
+              </label>
+            )}
             <div className="ml-auto flex items-center gap-2">
               {running ? (
                 <>
@@ -276,6 +330,8 @@ function ExcelLeadImportScreen({ draftEnabled }: { draftEnabled: boolean }) {
             rows={rows}
             results={results}
             onReturnUnknown={running ? undefined : handleReturnUnknown}
+            users={users}
+            onAssigneeChange={running ? undefined : handleAssigneeChange}
           />
         </section>
       )}
@@ -297,6 +353,11 @@ function ExcelLeadImportScreen({ draftEnabled }: { draftEnabled: boolean }) {
           <p className="text-sm text-gray-500 dark:text-gray-400">
             物件と所有者を1件ずつ登録します。途中で「中止」を押すと、その時点で止まります（登録済みの分は残ります）。
           </p>
+          {withoutAssignee > 0 && (
+            <p className="mt-2 text-sm text-amber-700 dark:text-amber-300">
+              担当者が空の行が {withoutAssignee}件あります。担当者なしで登録します（あとで物件一覧の「まとめて変更」でも付けられます）。
+            </p>
+          )}
         </ModalShell>
       )}
     </div>

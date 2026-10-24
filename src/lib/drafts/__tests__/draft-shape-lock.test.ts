@@ -54,7 +54,8 @@ const read = (rel: string) => readFileSync(path.join(ROOT, rel), "utf8");
 const LOCKED_FILES: Array<{ file: string; rev: string; hash: string }> = [
   { file: "src/lib/paste-import/types.ts", rev: "paste rev 1 / excel rev 1", hash: "f04d6a93a40474f1" },
   { file: "src/lib/paste-import/review-types.ts", rev: "paste rev 1", hash: "8c209d8a4708f652" },
-  { file: "src/lib/paste-import/excel-lead-types.ts", rev: "excel rev 1", hash: "6053181d1c374b44" },
+  // 2026-10-25: 行に assigneeLabel・assignedTo を**省略可で**足した(前の控えの行は「担当者なし」で読める=rev は上げない)。
+  { file: "src/lib/paste-import/excel-lead-types.ts", rev: "excel rev 1", hash: "53229ea1f7783058" },
 ];
 
 const LOCKED_DECLS: Array<{ file: string; name: string; rev: string; hash: string }> = [

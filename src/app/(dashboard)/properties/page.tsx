@@ -5,7 +5,7 @@ import { PageHeader } from "@/components/ui/page-header";
 import { Button } from "@/components/ui/button";
 import { useSearchParams, useRouter, usePathname } from "next/navigation";
 import Link from "next/link";
-import { Search, Loader2, Plus, Trash2, AlertTriangle, RotateCcw, Download, CheckCircle2 } from "lucide-react";
+import { Search, Loader2, Plus, Trash2, AlertTriangle, RotateCcw, Download, CheckCircle2, ArrowUpDown, SlidersHorizontal } from "lucide-react";
 import { MenuButton } from "@/components/ui/menu-button";
 import { Pagination } from "@/components/ui/pagination";
 import { SkeletonRows } from "@/components/ui/skeleton";
@@ -116,6 +116,8 @@ interface Pagination {
 // 既定の並び=登録日の新しい順(従業員の指摘 2026-10-24: 更新日順だと触った物件が上に来て管理しにくい)。
 // リセット・URL・件数バッジがすべてこの1か所を見る。
 const DEFAULT_SORT = "createdAt:desc";
+/** 「まとめて変更」の担当者で「担当者なしにする」を表す値(ユーザーの id と重ならない)。 */
+const BULK_UNASSIGN = "__unassign__";
 
 export default function PropertiesPage() {
   return (
@@ -212,8 +214,7 @@ function PropertiesPageInner() {
         sp.get("updatedTo") ||
         sp.get("hasWarning") === "true" ||
         sp.get("undeliverable") === "1" ||
-        sp.get("resendOnly") === "1" ||
-        (sp.get("sort") && sp.get("sort") !== DEFAULT_SORT),
+        sp.get("resendOnly") === "1",
     ),
   );
 
@@ -922,8 +923,7 @@ function PropertiesPageInner() {
     ].filter(Boolean).length +
     (warningOnly ? 1 : 0) +
     (undeliverableOnly ? 1 : 0) +
-    (resendOnly ? 1 : 0) +
-    (sort !== DEFAULT_SORT ? 1 : 0);
+    (resendOnly ? 1 : 0);
 
   const toggleSelect = (id: string) => {
     setSelectedIds((prev) => {
@@ -1361,9 +1361,36 @@ function PropertiesPageInner() {
           aria-expanded={advancedOpen}
           title="種別・登記状況・日付などの詳細条件を開閉"
         >
+          <SlidersHorizontal className="h-3.5 w-3.5" aria-hidden />
           詳細条件{advancedFilterCount > 0 ? `（${advancedFilterCount}件適用中）` : ""}
           {advancedOpen ? " ▴" : " ▾"}
         </Button>
+
+        {/* 並び替え(従業員の指摘⑦ 2026-10-25): 絞り込みの「詳細条件」と同じ形のボタンが並んで見分けにくかった。
+            折りたたみの外に出し、⇅の印と名前を付ける(詳細条件には絞り込みの印)。 */}
+        <label className="flex items-center gap-1.5 text-sm text-gray-600 dark:text-gray-300">
+          <ArrowUpDown className="h-4 w-4 text-gray-400 dark:text-gray-500" aria-hidden />
+          <span className="whitespace-nowrap">並び替え</span>
+          <select
+            value={sort}
+            onChange={(e) => {
+              setSort(e.target.value);
+              setPage(1);
+            }}
+            className="rounded-md border border-gray-300 px-3 py-2 text-sm focus:border-indigo-500 focus:ring-1 focus:ring-indigo-500 focus:outline-none dark:border-gray-700 dark:bg-gray-900 dark:text-gray-100"
+            aria-label="並び替え"
+            title="一覧の並び順"
+          >
+            <option value="createdAt:desc">登録日 新しい順</option>
+            <option value="createdAt:asc">登録日 古い順</option>
+            <option value="updatedAt:desc">更新日 新しい順</option>
+            <option value="updatedAt:asc">更新日 古い順</option>
+            <option value="caseStatus:asc">案件ステータス順</option>
+            <option value="address:asc">住所昇順</option>
+            <option value="dmSendCount:asc">DM送信回数 少ない順</option>
+            <option value="dmSendCount:desc">DM送信回数 多い順</option>
+          </select>
+        </label>
         </div>
 
         {/* 詳細条件(折りたたみ)。適用中はトグルに件数が出るので、畳んでいても
@@ -1526,25 +1553,6 @@ function PropertiesPageInner() {
           ))}
         </select>
 
-        <select
-          value={sort}
-          onChange={(e) => {
-            setSort(e.target.value);
-            setPage(1);
-          }}
-          className="rounded-md border border-gray-300 px-3 py-2 text-sm focus:border-indigo-500 focus:ring-1 focus:ring-indigo-500 focus:outline-none dark:border-gray-700 dark:bg-gray-900 dark:text-gray-100"
-          title="並び替え"
-        >
-          <option value="createdAt:desc">登録日 新しい順</option>
-          <option value="createdAt:asc">登録日 古い順</option>
-          <option value="updatedAt:desc">更新日 新しい順</option>
-          <option value="updatedAt:asc">更新日 古い順</option>
-          <option value="caseStatus:asc">案件ステータス順</option>
-          <option value="address:asc">住所昇順</option>
-          <option value="dmSendCount:asc">DM送信回数 少ない順</option>
-          <option value="dmSendCount:desc">DM送信回数 多い順</option>
-        </select>
-
         <label className="flex items-center gap-1 text-sm text-gray-600 dark:text-gray-300">
           更新日:
           <input
@@ -1568,6 +1576,7 @@ function PropertiesPageInner() {
         </label>
           </div>
         )}
+        {/* 詳細条件ここまで */}
       </div>
 
       {/* Error */}
@@ -1659,6 +1668,26 @@ function PropertiesPageInner() {
             <option value="send">送付可</option>
             <option value="no_send">送付不可</option>
             <option value="hold">未判断</option>
+          </select>
+          {/* 担当者の振り分け(従業員の指摘⑨ 2026-10-25)。Excel などで取り込んだ物件にまとめて付ける。
+              API(bulk-update の assignedTo)は前からあった。null=担当者を外す。 */}
+          <select
+            disabled={bulkUpdating || searchPending}
+            onChange={(e) => {
+              const v = e.target.value;
+              if (v) {
+                handleBulkUpdate({ assignedTo: v === BULK_UNASSIGN ? null : v });
+                e.target.value = "";
+              }
+            }}
+            aria-label="担当者をまとめて変更"
+            className="rounded-md border border-gray-300 px-2 py-1 text-xs"
+          >
+            <option value="">担当者変更...</option>
+            {users.map((u) => (
+              <option key={u.id} value={u.id}>{u.name}</option>
+            ))}
+            <option value={BULK_UNASSIGN}>担当者なしにする</option>
           </select>
           {canDeleteProperty && (
           <Button variant="danger" size="sm"

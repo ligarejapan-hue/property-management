@@ -81,6 +81,101 @@ function StatusCell({
   );
 }
 
+export interface AssigneeOption {
+  id: string;
+  name: string;
+}
+
+/**
+ * 選べる人(在籍中のユーザー)に居ない担当者を外す(作業中の控えを戻すまでの間に無効にした人など)。
+ * ⚠外さないと、画面は「担当者なし」に見えるのに古い id を送り、登録で断られる(内部レビュー P3)。
+ * 変わる行が無ければ同じ配列を返す。
+ */
+export function dropUnknownAssignees(rows: ExcelLeadRow[], userIds: ReadonlySet<string>): ExcelLeadRow[] {
+  let changed = false;
+  const next = rows.map((r) => {
+    if (!r.assignedTo || userIds.has(r.assignedTo)) return r;
+    changed = true;
+    return { ...r, assignedTo: null };
+  });
+  return changed ? next : rows;
+}
+
+/** まとめて登録する行(登録できる・まだ送っていない)か。担当者を選べるのはこの行だけ。 */
+export function isAssignableRow(row: ExcelLeadRow, results: Record<string, ExcelLeadResult>): boolean {
+  return row.status === "ready" && results[excelLeadRowKey(row)] === undefined;
+}
+
+/** まとめて登録する行のうち、担当者が空の行の数。 */
+export function countRowsWithoutAssignee(rows: readonly ExcelLeadRow[], results: Record<string, ExcelLeadResult>): number {
+  return rows.filter((r) => isAssignableRow(r, results) && !r.assignedTo).length;
+}
+
+/**
+ * 担当者が空の行(まとめて登録する行だけ)に同じ人を入れる。表で当たった人・選び直した人は変えない。
+ * 変わる行が無ければ同じ配列を返す。
+ */
+export function fillEmptyAssignees(
+  rows: ExcelLeadRow[],
+  results: Record<string, ExcelLeadResult>,
+  userId: string,
+): ExcelLeadRow[] {
+  let changed = false;
+  const next = rows.map((r) => {
+    if (!isAssignableRow(r, results) || r.assignedTo) return r;
+    changed = true;
+    return { ...r, assignedTo: userId };
+  });
+  return changed ? next : rows;
+}
+
+/**
+ * 行の担当者(従業員の指摘⑨ 2026-10-25)。表の担当者の名前が1人に当たれば最初から選ばれている。
+ * まとめて登録する行(登録できる・まだ送っていない)だけ選べる。それ以外は名前だけ出す。
+ */
+export function AssigneeCell({
+  row,
+  users,
+  editable,
+  onChange,
+}: {
+  row: ExcelLeadRow;
+  users: readonly AssigneeOption[];
+  editable: boolean;
+  onChange?: (userId: string | null) => void;
+}) {
+  const current = row.assignedTo ?? null;
+  const currentName = users.find((u) => u.id === current)?.name ?? null;
+  const label = row.assigneeLabel ?? null;
+  const unmatched = label !== null && current === null;
+  if (!editable || !onChange) {
+    return <span className="text-gray-700 dark:text-gray-300">{currentName ?? "—"}</span>;
+  }
+  return (
+    <div className="space-y-1">
+      <select
+        value={current ?? ""}
+        onChange={(e) => onChange(e.target.value === "" ? null : e.target.value)}
+        aria-label={`${row.sheetName} ${row.rowNumber}行目の担当者`}
+        className="w-full min-w-[8rem] rounded-md border border-gray-300 px-2 py-1 text-sm dark:border-gray-600 dark:bg-gray-900 dark:text-gray-100"
+      >
+        <option value="">担当者なし</option>
+        {users.map((u) => (
+          <option key={u.id} value={u.id}>
+            {u.name}
+          </option>
+        ))}
+      </select>
+      {label !== null && (
+        <p className={`text-xs ${unmatched ? "text-amber-700 dark:text-amber-300" : "text-gray-500 dark:text-gray-400"}`}>
+          表の担当者: {label}
+          {unmatched ? "（1人に決まらないため、選んでください）" : ""}
+        </p>
+      )}
+    </div>
+  );
+}
+
 function ReviewHelp({ row }: { row: ExcelLeadRow }) {
   return (
     <details className="mt-2 text-xs">
@@ -114,11 +209,17 @@ export function ExcelLeadTable({
   rows,
   results,
   onReturnUnknown,
+  users = [],
+  onAssigneeChange,
 }: {
   rows: ExcelLeadRow[];
   results: Record<string, ExcelLeadResult>;
   /** 「登録されたか分からない」行を、人が確かめた後でまとめて登録の対象に戻す。 */
   onReturnUnknown?: (rowKey: string) => void;
+  /** 担当者に選べる人(在籍中のユーザー)。 */
+  users?: readonly AssigneeOption[];
+  /** 行の担当者を選び直す。登録中は渡さない(選べない)。 */
+  onAssigneeChange?: (rowKey: string, userId: string | null) => void;
 }) {
   return (
     <div className="overflow-x-auto rounded-lg border border-gray-200 bg-white dark:border-gray-700 dark:bg-gray-800">
@@ -129,6 +230,7 @@ export function ExcelLeadTable({
             <th className="px-3 py-2">氏名</th>
             <th className="px-3 py-2">物件の住所</th>
             <th className="px-3 py-2">種別</th>
+            <th className="px-3 py-2">担当者</th>
             <th className="px-3 py-2">状態</th>
           </tr>
         </thead>
@@ -150,6 +252,16 @@ export function ExcelLeadTable({
                 </td>
                 <td className="whitespace-nowrap px-3 py-2 text-gray-700 dark:text-gray-300">
                   {type ? (PROPERTY_TYPE_LABELS[type] ?? type) : "—"}
+                </td>
+                <td className="px-3 py-2">
+                  <AssigneeCell
+                    row={row}
+                    users={users}
+                    // まとめて登録する行(登録できる・まだ送っていない)だけ選べる。
+                    // 要確認の行は「貼り付けて物件化」で登録するので、ここで選んでも届かない。
+                    editable={isAssignableRow(row, results)}
+                    onChange={onAssigneeChange ? (id) => onAssigneeChange(key, id) : undefined}
+                  />
                 </td>
                 <td className="px-3 py-2">
                   <StatusCell

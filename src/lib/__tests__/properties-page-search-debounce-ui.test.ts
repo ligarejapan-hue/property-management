@@ -118,7 +118,7 @@ describe("properties page: 一覧検索 (keyword/管理ID) の debounce 化", ()
 
   it("保留中(searchPending)は一括・有料操作も全て止まる(@codex #404 R13 P1)", () => {
     // 出力2つ(R11)に加え、保留中に再チェックして撃てる残りの経路も塞ぐ:
-    // 売却DM作成・謄本一括取得・一括変更(2つのselect)・一括削除。
+    // 売却DM作成・謄本一括取得・一括変更(3つのselect=案件ステータス・DM判断・担当者[2026-10-25])・一括削除。
     expect(pageSrc).toContain(
       "creatingDm || loading || selectedIds.size === 0 || searchPending",
     );
@@ -127,7 +127,7 @@ describe("properties page: 一覧検索 (keyword/管理ID) の debounce 化", ()
     );
     const bulkSelects =
       pageSrc.match(/disabled=\{bulkUpdating \|\| searchPending\}/g) ?? [];
-    expect(bulkSelects).toHaveLength(2);
+    expect(bulkSelects).toHaveLength(3);
     expect(pageSrc).toContain("bulkDeleting || bulkUpdating || searchPending");
     // ハンドラ側でも防ぐ(disabled はUIの門・ハンドラは最終ガード)。
     expect(pageSrc).toContain("if (creatingDm || searchPending) return;");

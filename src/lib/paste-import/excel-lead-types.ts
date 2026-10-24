@@ -11,6 +11,13 @@ export interface ExcelLeadRow {
   status: LeadRowStatus;
   reasons: string[];
   registeredPropertyId: string | null;
+  /**
+   * Excel の担当者の列の値(従業員の指摘⑨ 2026-10-25)。列が無い・空なら null。
+   * ⚠省略可=この項目より前に保存した作業中の控えには無い。
+   */
+  assigneeLabel?: string | null;
+  /** 登録で物件の担当者にする人(ユーザーの id)。読み取りで1人に決まれば入り、画面で選び直せる。null=担当者なし。 */
+  assignedTo?: string | null;
 }
 
 /** 登録を試みた結果。 */

@@ -189,7 +189,14 @@ interface CommitBody {
    * 導入ルートだけに使う(査定サイト=一括査定・それ以外/省略=Web問い合わせ)。
    */
   leadSource?: unknown;
+  /**
+   * 物件の担当者(ユーザーの id)。Excel まとめ取込が行ごとに送る(従業員の指摘⑨ 2026-10-25)。
+   * 省略・null=担当者なし(今までどおり)。在籍中のユーザーでなければ断る。
+   */
+  assignedTo?: unknown;
 }
+
+const ASSIGNED_TO_FORMAT = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 
 /**
  * この口(貼り付け・まとめ取込)の確定を直列化する助言ロックの鍵
@@ -382,6 +389,14 @@ export async function POST(request: NextRequest) {
       throw new ApiError(400, `所有者の備考は${MAX_PASTE_OWNER_NOTE_LENGTH}文字までです`, "BAD_REQUEST");
     }
     const importOwnerNote = hasExplicitWritePerm(perms, "owner_note") ? importNoteInput?.trim() || null : null;
+
+    // ---- 担当者（Excel まとめ取込で行ごとに決めた人・従業員の指摘⑨ 2026-10-25） ----
+    // ⚠形の検査はここで(DB に渡す前)。在籍中かどうかは物件を作るトランザクションの中で確かめる。
+    const assignedToInput = body.assignedTo ?? null;
+    if (assignedToInput !== null && (typeof assignedToInput !== "string" || !ASSIGNED_TO_FORMAT.test(assignedToInput))) {
+      throw new ApiError(400, "担当者の形式が正しくありません", "BAD_REQUEST");
+    }
+    const assignedToRequested = assignedToInput as string | null;
 
     // ---- 値の検査（全体レビュー I-3）。Prisma に渡す前に、欄の名前つきで断る ----
     const exclusiveArea = parseAreaInput(p.exclusiveArea, "専有面積");
@@ -615,6 +630,17 @@ export async function POST(request: NextRequest) {
           }
         }
 
+        // 担当者は在籍中のユーザーだけ(いない人・無効にした人は断る=黙って空にしない)。
+        if (assignedToRequested !== null) {
+          const assignee = await tx.user.findFirst({
+            where: { id: assignedToRequested, isActive: true },
+            select: { id: true },
+          });
+          if (!assignee) {
+            throw new ApiError(400, "担当者が見つかりません（無効にした人かもしれません）。選び直してください", "BAD_REQUEST");
+          }
+        }
+
         const property = await tx.property.create({
           data: {
             ...(pregenPropertyId ? { id: pregenPropertyId } : {}),
@@ -639,6 +665,7 @@ export async function POST(request: NextRequest) {
             registryStatus: "unconfirmed",
             dmStatus: "hold",
             createdBy: session.id,
+            assignedTo: assignedToRequested,
           },
         });
 
@@ -747,6 +774,8 @@ export async function POST(request: NextRequest) {
         inquirerSaved: inquirerName !== null,
         // 自由記述を所有者の備考に残したか(有無だけ・中身は入れない)。
         commentNoteSaved: result.ownerCreated && importOwnerNote !== null,
+        // 担当者を付けたか(有無だけ)。
+        assigneeSet: assignedToRequested !== null,
       },
     });
 

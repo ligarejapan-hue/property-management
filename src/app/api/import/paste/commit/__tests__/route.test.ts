@@ -40,6 +40,10 @@ const storedKeys: string[] = [];
 const deletedKeys: string[] = [];
 /** アダプタが要求と違う key へ保存する状況の再現(null = 要求どおり)。 */
 let storedKeyOverride: string | null = null;
+/** 在籍中のユーザーの id(担当者の確認・従業員の指摘⑨)。 */
+const ACTIVE_USER = "11111111-2222-4333-8444-555555555555";
+const INACTIVE_USER = "99999999-2222-4333-8444-555555555555";
+const userFindFirstArgs: unknown[] = [];
 
 // ⚠api-helpers を vi.importActual すると実物の "@/lib/auth" まで読み込まれ、
 //   next-auth 内部の拡張子なし "next/server" import が node の ESM 解決に失敗する
@@ -150,6 +154,14 @@ vi.mock("@/lib/prisma", () => {
         callOrder.push("owner.updateMany");
         ownerUpdateManyArgs.push(args);
         return { count: ownerLinkable ? 1 : 0 };
+      }),
+    },
+    // 担当者の確認(在籍中のユーザーだけ)。where を実際に当てる。
+    user: {
+      findFirst: vi.fn(async (args: { where?: { id?: string; isActive?: boolean } }) => {
+        callOrder.push("user.findFirst");
+        userFindFirstArgs.push(args);
+        return args?.where?.isActive === true && args?.where?.id === ACTIVE_USER ? { id: ACTIVE_USER } : null;
       }),
     },
     propertyOwner: {
@@ -292,6 +304,7 @@ beforeEach(() => {
   sqlSeen.length = 0;
   advisoryLockValues.length = 0;
   findFirstArgs.length = 0;
+  userFindFirstArgs.length = 0;
   dupCountCalls.length = 0;
   dupCount = { similarCount: 0, ownerCount: 0, truncated: false };
 });
@@ -1107,7 +1120,7 @@ describe("監査ログが管理画面で「物件」として拾え、中身も�
     }, pdfFile()));
 
     const call = auditCalls[0] as { action: string; detail: Record<string, unknown> };
-    // 記録した6つの真偽値が、まず route 側で正しい値になっている(問い合わせ者・自由記述の備考=2026-10-24 追加)。
+    // 記録した7つの真偽値が、まず route 側で正しい値になっている(問い合わせ者・自由記述の備考=2026-10-24・担当者=10-25 追加)。
     expect(call.detail).toEqual({
       ownerCreated: true,
       ownerLinked: true,
@@ -1115,6 +1128,7 @@ describe("監査ログが管理画面で「物件」として拾え、中身も�
       hasExternalKey: true,
       inquirerSaved: false,
       commentNoteSaved: false,
+      assigneeSet: false,
     });
     // その**同じ detail** を管理画面と同じ関数に通しても、1つも伏せ字にならない。
     const shown = sanitizeAuditDetail(call.action, call.detail) as Record<string, unknown>;
@@ -1607,5 +1621,41 @@ describe("貼り付けの自由記述を所有者の備考へ(importNote・2026-
     const dumped = JSON.stringify(auditCalls);
     expect(dumped).not.toContain("ひみつの事情");
     expect(dumped).toContain('"commentNoteSaved":true');
+  });
+});
+
+describe("担当者(Excel まとめ取込で行ごとに決めた人・従業員の指摘⑨ 2026-10-25)", () => {
+  it("★在籍中のユーザーなら物件の担当者にする(確かめてから作る)", async () => {
+    const res = await POST(req({ ...baseBody, assignedTo: ACTIVE_USER }));
+    expect(res.status).toBe(200);
+    expect(created.property?.[0]).toMatchObject({ assignedTo: ACTIVE_USER });
+    expect(userFindFirstArgs[0]).toMatchObject({ where: { id: ACTIVE_USER, isActive: true } });
+    expect(callOrder.indexOf("user.findFirst")).toBeLessThan(callOrder.indexOf("property.create"));
+    expect(JSON.stringify(auditCalls)).toContain('"assigneeSet":true');
+  });
+
+  it("送らない・null なら担当者なし(今までどおり・確かめにも行かない)", async () => {
+    await POST(req(baseBody));
+    expect(created.property?.[0]).toMatchObject({ assignedTo: null });
+    await POST(req({ ...baseBody, assignedTo: null }));
+    expect(created.property?.[1]).toMatchObject({ assignedTo: null });
+    expect(userFindFirstArgs).toHaveLength(0);
+    expect(JSON.stringify(auditCalls)).toContain('"assigneeSet":false');
+  });
+
+  it("★無効にした人・いない人なら断って作らない(黙って空にしない)", async () => {
+    const res = await POST(req({ ...baseBody, assignedTo: INACTIVE_USER }));
+    expect(res.status).toBe(400);
+    expect((await res.json()).error.message).toContain("担当者が見つかりません");
+    expect(created.property).toBeUndefined();
+  });
+
+  it("★形の正しくない値は DB に渡す前に断る", async () => {
+    for (const bad of ["abc", 123, { id: ACTIVE_USER }, ""]) {
+      const res = await POST(req({ ...baseBody, assignedTo: bad }));
+      expect(res.status).toBe(400);
+    }
+    expect(userFindFirstArgs).toHaveLength(0);
+    expect(created.property).toBeUndefined();
   });
 });

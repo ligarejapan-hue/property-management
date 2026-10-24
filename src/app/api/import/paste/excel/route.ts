@@ -31,6 +31,8 @@ import {
   cellToString,
 } from "@/lib/sheet-parser";
 import { assertZipExpandsWithin } from "@/lib/xlsx-zip-guard";
+import { prisma } from "@/lib/prisma";
+import { matchAssignee } from "@/lib/paste-import/assignee-match";
 
 // ---------- POST /api/import/paste/excel ----------
 // 査定サイトの反響を書き溜めた顧客管理表(Excel)を読み、行ごとに
@@ -288,6 +290,12 @@ export async function POST(request: NextRequest) {
       groupRows.set(k, (groupRows.get(k) ?? 0) + 1);
     }
 
+    // 担当者の列の名前を、在籍中のユーザーに当てる(従業員の指摘⑨ 2026-10-25)。
+    // ⚠1人に決まるときだけ当てる。画面で人が選び直せる(登録 API が在籍中かを確かめ直す)。
+    const activeUsers = looked.some((l) => l.row.assigneeLabel !== null)
+      ? await prisma.user.findMany({ where: { isActive: true }, select: { id: true, name: true } })
+      : [];
+
     const rows = [];
     for (const { row, text, draft, dup, earlierImportIds } of looked) {
       const earlierImportId =
@@ -313,6 +321,8 @@ export async function POST(request: NextRequest) {
         status,
         reasons,
         registeredPropertyId: dup.duplicates.blockedByPropertyId ?? earlierImportId,
+        assigneeLabel: row.assigneeLabel,
+        assignedTo: matchAssignee(row.assigneeLabel, activeUsers),
       });
     }
 

@@ -9,7 +9,13 @@ import { readFileSync } from "node:fs";
 import { fileURLToPath } from "node:url";
 import { dirname, join } from "node:path";
 import { buildPasteDraft } from "@/lib/paste-import/build-draft";
-import { ExcelLeadTable, type ExcelLeadRow } from "@/components/import/excel-lead-table";
+import {
+  ExcelLeadTable,
+  fillEmptyAssignees,
+  countRowsWithoutAssignee,
+  dropUnknownAssignees,
+  type ExcelLeadRow,
+} from "@/components/import/excel-lead-table";
 
 vi.mock("next/navigation", () => ({
   useRouter: () => ({ push: vi.fn() }),
@@ -130,5 +136,79 @@ describe("登録されたか分からない行", () => {
     expect(html).toContain("登録されたか分かりません");
     expect(html).toContain("物件一覧で確かめてください");
     expect(html).toContain("確かめたので登録の対象に戻す");
+  });
+});
+
+describe("担当者(従業員の指摘⑨ 2026-10-25)", () => {
+  const users = [
+    { id: "u-katsuchi", name: "勝地 太郎" },
+    { id: "u-murayama", name: "村山 花子" },
+  ];
+
+  it("★表の担当者が当たった行は、その人が選ばれた状態で出る(表の名前も添える)", () => {
+    const html = renderToStaticMarkup(
+      createElement(ExcelLeadTable, {
+        rows: [mk({ assigneeLabel: "勝地", assignedTo: "u-katsuchi" })],
+        results: {},
+        users,
+        onAssigneeChange: () => {},
+      }),
+    );
+    expect(html).toContain("担当者</th>");
+    expect(html).toMatch(/<option value="u-katsuchi" selected="">勝地 太郎<\/option>/);
+    expect(html).toContain("表の担当者: 勝地");
+  });
+
+  it("★1人に決まらなかった行は「選んでください」と出る", () => {
+    const html = renderToStaticMarkup(
+      createElement(ExcelLeadTable, {
+        rows: [mk({ assigneeLabel: "佐藤", assignedTo: null })],
+        results: {},
+        users,
+        onAssigneeChange: () => {},
+      }),
+    );
+    expect(html).toContain("1人に決まらないため、選んでください");
+    expect(html).toMatch(/<option value="" selected="">担当者なし<\/option>/);
+  });
+
+  it("要確認・登録済みの行は選べない(名前だけ)", () => {
+    const html = renderToStaticMarkup(
+      createElement(ExcelLeadTable, {
+        rows: [mk({ status: "review", reasons: ["x"], assignedTo: "u-katsuchi" })],
+        results: {},
+        users,
+        onAssigneeChange: () => {},
+      }),
+    );
+    expect(html).not.toContain("行目の担当者");
+    expect(html).toContain("勝地 太郎");
+  });
+
+  it("★空の行にまとめて入れても、当たった人・選び直した人は変えない", () => {
+    const a = mk({ rowNumber: 3, assignedTo: "u-katsuchi" });
+    const b = mk({ rowNumber: 4, assignedTo: null });
+    const c = mk({ rowNumber: 5, status: "review", reasons: ["x"], assignedTo: null });
+    const d = mk({ rowNumber: 6 }); // 前の控えの行(項目なし)
+    const next = fillEmptyAssignees([a, b, c, d], {}, "u-murayama");
+    expect(next.map((r) => r.assignedTo ?? null)).toEqual(["u-katsuchi", "u-murayama", null, "u-murayama"]);
+    expect(countRowsWithoutAssignee([a, b, c, d], {})).toBe(2);
+    // 変わる行が無ければ同じ配列
+    expect(fillEmptyAssignees(next, {}, "u-katsuchi")).toBe(next);
+  });
+
+  it("★まとめて登録の本文に行の担当者が入る・担当者が空の行は確認で知らせる", () => {
+    expect(source).toContain("excelLeadCommitBody(row)");
+    expect(source).toContain("担当者が空の行が {withoutAssignee}件あります");
+    expect(source).toContain("onAssigneeChange={running ? undefined : handleAssigneeChange}");
+  });
+
+  it("★戻した控えの行に今は選べない人(無効にした人)がいたら外す(見た目と送る値をそろえる)", () => {
+    const a = mk({ rowNumber: 3, assignedTo: "u-katsuchi" });
+    const b = mk({ rowNumber: 4, assignedTo: "u-gone" });
+    const next = dropUnknownAssignees([a, b], new Set(["u-katsuchi"]));
+    expect(next.map((r) => r.assignedTo)).toEqual(["u-katsuchi", null]);
+    expect(dropUnknownAssignees(next, new Set(["u-katsuchi"]))).toBe(next);
+    expect(source).toContain("dropUnknownAssignees(prev, ids)");
   });
 });
