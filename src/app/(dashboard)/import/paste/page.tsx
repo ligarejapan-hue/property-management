@@ -37,6 +37,7 @@ import {
   type OwnerValues,
 } from "@/components/import/paste-import-review";
 import type { PasteDraft } from "@/lib/paste-import/types";
+import { composePasteOwnerNote } from "@/lib/paste-import/paste-owner-note";
 import { AUTO_CHOICE, type BuildingChoice } from "@/lib/building-link/resolve";
 import { stashBuildingLinkNotice } from "@/lib/building-link/notice";
 import { areaChanged } from "@/lib/building-link/combobox-model";
@@ -460,6 +461,9 @@ function PasteImportScreen({ draftEnabled }: { draftEnabled: boolean }) {
                 phone: ownerValues.phone || null,
                 email: ownerValues.email || null,
                 currentAddress: ownerValues.currentAddress || null,
+                // コメント・ご要望などの自由記述は所有者の備考へ(2026-10-24 従業員の指摘)。
+                // 物件の備考には入れない(見られる人が広い)。書けない人のときはサーバーが残さない。
+                importNote: composePasteOwnerNote(draft),
               }
             : null,
         // ⚠人が直した値をそのまま使う。空にしたら外部キー無しとして登録する
