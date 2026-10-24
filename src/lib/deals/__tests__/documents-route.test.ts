@@ -35,6 +35,7 @@ import { isChromiumAvailable, renderHtmlToPdfDocument } from "@/lib/sales-sheet/
 import { jsonRequest as json, DEAL_ID, DEAL_PERMS, USER_ID } from "./route-mocks";
 import { GET, POST } from "../../../app/api/deals/[id]/documents/route";
 import { GET as FILE } from "../../../app/api/deals/[id]/documents/[docId]/file/route";
+import { GET as AVAILABLE } from "../../../app/api/deals/[id]/documents/available/route";
 import { INITIAL_RATE_TABLES } from "../rate-tables";
 import { DEFAULT_FUNDING_INPUTS } from "../funding-schema";
 import { DEFAULT_BUSINESS_INPUTS } from "../business-schema";
@@ -218,6 +219,73 @@ describe("POST /api/deals/[id]/documents(発行)", () => {
     expect((await POST(json("POST", { docType: "funding_plan", version: 3 }), ctx)).status).toBe(404);
     (getUserPermissions as Fn).mockResolvedValue([{ resource: "deal", action: "read", granted: true }]);
     expect((await POST(json("POST", { docType: "funding_plan", version: 3 }), ctx)).status).toBe(403);
+  });
+});
+
+describe("業務書類の発行(段5a)", () => {
+  const SELLER = { id: "33333333-3333-4333-8333-000000000001", role: "seller", partyType: "individual", name: "架空 一郎", representative: null, address: "架空県架空市1-1", phone: null, shareNum: null, shareDen: null, isSelf: false, sortOrder: 0, version: 1 };
+  const BUYER = { ...SELLER, id: "33333333-3333-4333-8333-000000000002", role: "buyer", name: "架空 花子", address: null };
+  const settled = {
+    ...row, deposit: BigInt(1_500_000), settlementAt: new Date("2026-06-30T01:00:00Z"), settlementPlace: "架空銀行",
+    settlementTerms: { fixedAssetTax: 100_000, cityPlanningTax: 20_000, taxStart: "01-01" }, parties: [SELLER, BUYER],
+  };
+  beforeEach(() => pm.deal.findUnique.mockResolvedValue(settled));
+
+  it("領収書: 選んだもので組み立て、入力の写しに残す・監査に名前は無い・ファイル名は書類名だけ", async () => {
+    const res = await POST(json("POST", { docType: "deposit_receipt", version: 3, options: { issuer: SELLER.id, exempt: "no", receivedOn: "2026-05-01" } }), ctx);
+    expect(res.status).toBe(201);
+    const body = await res.json();
+    expect(body.title).toBe("手付金領収書");
+    expect(body.fileBaseName).toMatch(/^2026-0007_手付金領収書_\d{8}$/);
+    const data = pm.dealDocument.create.mock.calls[0][0].data;
+    expect(data).toMatchObject({ docType: "deposit_receipt", variant: "default" });
+    expect(data.inputSnapshot).toEqual({ options: { issuer: SELLER.id, exempt: "no", receivedOn: "2026-05-01" } });
+    expect((renderHtmlToPdfDocument as Fn).mock.calls[0][0]).toContain("金 1,500,000 円也");
+    expect(JSON.stringify((writeAuditLog as Fn).mock.calls[0][0])).not.toContain("架空");
+  });
+  it("個人の発行者で非課税を選ばない・受け取る側でない発行者・形の違う選択 → 422 で何も作らない", async () => {
+    for (const options of [
+      { issuer: SELLER.id, exempt: null, receivedOn: null },
+      { issuer: BUYER.id, exempt: "no", receivedOn: null },
+      { issuer: SELLER.id, exempt: "maybe", receivedOn: null },
+      { issuer: SELLER.id, exempt: "no", receivedOn: null, extra: 1 },
+    ]) {
+      expect((await POST(json("POST", { docType: "deposit_receipt", version: 3, options }), ctx)).status, JSON.stringify(options)).toBe(422);
+    }
+    const r = await POST(json("POST", { docType: "deposit_receipt", version: 3, options: { issuer: SELLER.id, exempt: null, receivedOn: null } }), ctx);
+    expect((await r.json()).error.code).toBe("NEEDS_DECISION");
+    expect(files.size).toBe(0);
+    expect(pm.dealDocument.create).not.toHaveBeenCalled();
+  });
+  it("この取引で出せない書類(差引 0 の精算金領収書)は 422", async () => {
+    pm.deal.findUnique.mockResolvedValue({ ...settled, settlementTerms: {} });
+    const res = await POST(json("POST", { docType: "settlement_receipt", version: 3, options: { issuer: "self", exempt: null, receivedOn: null } }), ctx);
+    expect((await res.json()).error.code).toBe("DOC_NOT_APPLICABLE");
+  });
+  it("精算書: 1枚に収まれば1回で作る・2ページ以上なら計算明細を2枚目に回して作り直す", async () => {
+    expect((await POST(json("POST", { docType: "settlement_statement", version: 3 }), ctx)).status).toBe(201);
+    expect(renderHtmlToPdfDocument).toHaveBeenCalledTimes(1);
+    (renderHtmlToPdfDocument as Fn).mockClear();
+    (renderHtmlToPdfDocument as Fn).mockResolvedValueOnce(Buffer.from("%PDF /Type /Pages /Type /Page /Type /Page"));
+    expect((await POST(json("POST", { docType: "settlement_statement", version: 3 }), ctx)).status).toBe(201);
+    expect(renderHtmlToPdfDocument).toHaveBeenCalledTimes(2);
+    expect((renderHtmlToPdfDocument as Fn).mock.calls[1][0]).toContain("計算明細");
+  });
+  it("出せる書類と出す前の確認(空欄・初期値・選べる発行者)を返す", async () => {
+    pm.deal.findUnique.mockResolvedValue({ ...settled, settlementPlace: null });
+    const res = await AVAILABLE(new Request("http://x"), ctx);
+    expect(res.headers.get("Cache-Control")).toBe("no-store");
+    const body = await res.json();
+    expect(body.version).toBe(3);
+    const keys = body.documents.map((d: { docType: string }) => d.docType);
+    expect(keys).toEqual(["settlement_statement", "settlement_guide", "deposit_receipt", "balance_receipt", "settlement_receipt"]);
+    const guide = body.documents.find((d: { docType: string }) => d.docType === "settlement_guide");
+    expect(guide.missing).toEqual(["決済場所"]);
+    const receipt = body.documents.find((d: { docType: string }) => d.docType === "deposit_receipt");
+    expect(receipt.defaults).toEqual({ issuer: SELLER.id, exempt: null, receivedOn: null });
+    expect(receipt.issuers.map((i: { value: string }) => i.value)).toEqual(["self", SELLER.id]);
+    (getUserPermissions as Fn).mockResolvedValue([]);
+    expect((await AVAILABLE(new Request("http://x"), ctx)).status).toBe(403);
   });
 });
 

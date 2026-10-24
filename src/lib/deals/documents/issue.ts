@@ -8,6 +8,12 @@ export const DEAL_DOC_TYPES = {
   funding_plan: { label: "資金計画表", variants: { purchase: "購入", sale: "売却" } },
   /** 買取再販の取引だけ(依頼書 4.2)。 */
   business_plan: { label: "事業計画書", variants: { internal: "社内用", bank: "銀行向け" } },
+  // 業務書類(段5・組み立ては registry.ts)。出し分けは無い(variant = default)。
+  settlement_statement: { label: "精算書", variants: { default: "" } },
+  settlement_guide: { label: "残金決済のご案内", variants: { default: "" } },
+  deposit_receipt: { label: "手付金領収書", variants: { default: "" } },
+  balance_receipt: { label: "残金領収書", variants: { default: "" } },
+  settlement_receipt: { label: "精算金領収書", variants: { default: "" } },
 } as const;
 
 export type DealDocType = keyof typeof DEAL_DOC_TYPES;

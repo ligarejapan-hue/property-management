@@ -37,6 +37,11 @@ export interface DealOptions {
 }
 export interface UserOption { id: string; name: string; role: string }
 export interface RateTableView { id: string; kind: string; validFrom: string; validTo: string | null; content: unknown; updatedAt: string }
+/** 書類タブに出す業務書類と、出す前の確認(段5)。 */
+export interface AvailableDocument {
+  docType: string; label: string; missing: string[]; defaults: Record<string, unknown>;
+  issuers: { value: string; label: string; individual: boolean }[] | null;
+}
 export interface DealDocumentView {
   id: string; docType: string; variant: string; version: number; title: string;
   issuedAt: string; issuedByName: string; fileBaseName: string; hasPdf: boolean; hasXlsx: boolean;
@@ -76,8 +81,11 @@ export const dealsApi = {
   businessPreview: (id: string, businessPlan: BusinessInputs) =>
     call<{ calc: BusinessPlanCalc; sections: BusinessSectionKey[]; html: string }>(`/api/deals/${id}/business-plan/preview`, { method: "POST", body: { businessPlan } }),
   documents: (id: string) => call<{ documents: DealDocumentView[] }>(`/api/deals/${id}/documents`),
-  issueDocument: (id: string, docType: string, version: number) =>
-    call<{ id: string; version: number; title: string; fileBaseName: string }>(`/api/deals/${id}/documents`, { method: "POST", body: { docType, version } }),
+  issueDocument: (id: string, docType: string, version: number, options?: Record<string, unknown>) =>
+    call<{ id: string; version: number; title: string; fileBaseName: string }>(`/api/deals/${id}/documents`, {
+      method: "POST", body: options === undefined ? { docType, version } : { docType, version, options },
+    }),
+  availableDocuments: (id: string) => call<{ documents: AvailableDocument[]; version: number }>(`/api/deals/${id}/documents/available`),
   createRateTable: (body: Record<string, unknown>) => call<{ id: string }>("/api/admin/deal-settings/rate-tables", { method: "POST", body }),
   updateRateTable: (id: string, body: Record<string, unknown>) => call<{ ok: true }>(`/api/admin/deal-settings/rate-tables/${id}`, { method: "PUT", body }),
   deleteRateTable: (id: string, updatedAt: string) =>

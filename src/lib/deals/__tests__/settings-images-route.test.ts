@@ -216,12 +216,17 @@ describe("画像を消す", () => {
 describe("書類に使うロゴ", () => {
   it("登録した画像を data: の URL で返す・無い/読めないときは null", async () => {
     pm.dealSettings.findUnique.mockResolvedValue(settingsRow(3));
-    expect(await loadDealBranding()).toEqual({ logo: null });
+    expect(await loadDealBranding()).toEqual({ logo: null, seal: null });
     pm.dealSettings.findUnique.mockResolvedValue(settingsRow(3, { logoKey: "deal-settings/logo-a.png" }));
-    expect(await loadDealBranding()).toEqual({ logo: null });
+    expect(await loadDealBranding()).toEqual({ logo: null, seal: null });
     files.set("deal-settings/logo-a.png", Buffer.from("ab"));
-    expect(await loadDealBranding()).toEqual({ logo: "data:image/png;base64,YWI=" });
+    expect(await loadDealBranding()).toEqual({ logo: "data:image/png;base64,YWI=", seal: null });
     store.read.mockRejectedValueOnce(new Error("io"));
-    expect(await loadDealBranding()).toEqual({ logo: null });
+    expect(await loadDealBranding()).toEqual({ logo: null, seal: null });
+  });
+  it("段5: 角印も同じく読む(領収書に使う)", async () => {
+    files.set("deal-settings/seal-a.jpg", Buffer.from("cd"));
+    pm.dealSettings.findUnique.mockResolvedValue(settingsRow(3, { sealKey: "deal-settings/seal-a.jpg" }));
+    expect(await loadDealBranding()).toEqual({ logo: null, seal: "data:image/jpeg;base64,Y2Q=" });
   });
 });

@@ -6,12 +6,13 @@ import { BarChart3, Calculator, FileSpreadsheet, FileText, Loader2, RefreshCw } 
 import { Button } from "@/components/ui/button";
 import { dealsApi, dealDocumentFileUrl, errorText, type DealDocumentView } from "@/lib/deals/client";
 import { formatJaDateTime } from "@/lib/format-datetime";
+import BusinessDocsSection from "./business-docs-section";
 
 const LINK_CLS =
   "inline-flex items-center gap-1 rounded-md border border-gray-300 px-2 py-1 text-xs font-medium text-gray-700 hover:bg-gray-50 dark:border-gray-700 dark:text-gray-200 dark:hover:bg-gray-800";
 
 /**
- * 書類タブ(設計 §5)。発行した書類の履歴と、書類を作る画面への入口。
+ * 書類タブ(設計 §5)。発行した書類の履歴と、書類を作る画面への入口・決済の書類の発行(段5)。
  * 履歴はタブを開いたときに読み直す(資金計画表の画面で発行して戻ってきたときも新しいものが出る)。
  */
 export default function DealDocumentsPanel({ dealId, active, resale }: { dealId: string; active: boolean; resale: boolean }) {
@@ -54,6 +55,8 @@ export default function DealDocumentsPanel({ dealId, active, resale }: { dealId:
           読み込み直す
         </Button>
       </div>
+      <BusinessDocsSection dealId={dealId} active={active} onIssued={reload} />
+      <h3 className="text-sm font-semibold text-gray-700 dark:text-gray-300">発行の履歴</h3>
       {error && <p className="text-sm text-red-600 dark:text-red-400" role="alert">{error}</p>}
       {docs === null && !error && (
         <div className="flex items-center gap-2 text-sm text-gray-500"><Loader2 className="h-4 w-4 animate-spin" /> 読み込み中…</div>
