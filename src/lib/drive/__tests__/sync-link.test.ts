@@ -4,7 +4,7 @@
 import { describe, it, expect } from "vitest";
 import { createHash } from "node:crypto";
 import { DriveApiError, FOLDER_MIME, type DriveItem } from "../client";
-import { LinkedFolderMissingError, syncOneLink, walkLinkedFolder, type DriveFiles, type LedgerRow, type LedgerWrite, type OutCandidate, type SyncRepo } from "../sync-link";
+import { LinkedFolderMissingError, OutboundBackoff, syncOneLink, walkLinkedFolder, type DriveFiles, type LedgerRow, type LedgerWrite, type OutCandidate, type SyncRepo } from "../sync-link";
 
 const md5 = (s: string) => createHash("md5").update(Buffer.from(s)).digest("hex");
 const folder = (id: string, name: string): DriveItem => ({ id, name, mimeType: FOLDER_MIME, md5: null, size: null, modifiedTime: null, appSource: null });
@@ -378,6 +378,30 @@ describe("syncOneLink", () => {
     // 取り込み直さない・アプリの写しは(本人確認に直っているので)ゴミ箱へ
     expect(rlog.filter((l) => l.startsWith("attach") || l.startsWith("inbox"))).toEqual([]);
     expect(log).toEqual(["trash:w1"]);
+  });
+
+  it("★失敗し続ける複製が上限を使い切っても、次の見回りではあとの書類と取り込みに番が回る(@codex #580 R4)", async () => {
+    let t = 0;
+    const backoff = new OutboundBackoff(() => t);
+    const tree = { root1: [folder("d1", "契約資料"), file("f0", "in.pdf", "in")] };
+    const bad = [att("b1"), att("b2")]; // 保存場所に中身が無い
+    const good = att("g1");
+    const mk = () => fakeRepo({ toCopy: [...bad, good], files: { "/uploads/g1": "good" } });
+    // 1回目: 上限2で失敗2件が使い切る
+    const first = mk();
+    const r1 = await syncOneLink(fakeDrive(structuredClone(tree)).drive, first.repo, LINK, { transfers: 2 }, { backoff });
+    expect(r1.failed).toBe(2);
+    expect(first.log).toEqual([]);
+    // 2回目(5分後): 失敗した2件は待たせ、良い書類と取り込みが進む
+    t += 5 * 60_000;
+    const second = mk();
+    const d2 = fakeDrive(structuredClone(tree));
+    await syncOneLink(d2.drive, second.repo, LINK, { transfers: 2 }, { backoff });
+    expect(d2.log.filter((l) => l.startsWith("upload"))).toEqual(["upload:d1/売買契約書_g1.pdf:app"]);
+    expect(second.log).toContain("inbox:f0");
+    // 待ち時間が過ぎればもう一度試す
+    t += 31 * 60_000;
+    expect(backoff.isDeferred("b1")).toBe(false);
   });
 
   it("★持ち主が別のアカウントのフォルダ(共有されただけ)には複製しない・取り込みはする", async () => {

@@ -189,6 +189,29 @@ function parseTime(s: string | null): Date | null {
   return Number.isNaN(d.getTime()) ? null : d;
 }
 
+/**
+ * 複製に失敗した添付の待ち時間(このプロセスの中だけ・再起動で忘れる=もう一度試すだけ)。
+ * 30分 → 1時間 → 2時間 …(最大1日)。成功したら忘れる。
+ */
+export class OutboundBackoff {
+  private readonly state = new Map<string, { fails: number; untilMs: number }>();
+  constructor(private readonly now: () => number = () => Date.now()) {}
+  isDeferred(id: string): boolean {
+    const s = this.state.get(id);
+    return !!s && s.untilMs > this.now();
+  }
+  fail(id: string): void {
+    const fails = (this.state.get(id)?.fails ?? 0) + 1;
+    const waitMs = Math.min(30 * 60_000 * 2 ** (fails - 1), 24 * 60 * 60_000);
+    this.state.set(id, { fails, untilMs: this.now() + waitMs });
+  }
+  ok(id: string): void {
+    this.state.delete(id);
+  }
+}
+
+const defaultBackoff = new OutboundBackoff();
+
 /** 台帳にあるファイルは見ない。ただし失敗したものは、ドライブ側で更新されていればもう一度。 */
 function alreadyHandled(row: LedgerRow | undefined, item: DriveItem): boolean {
   if (!row) return false;
@@ -206,7 +229,9 @@ export async function syncOneLink(
   repo: SyncRepo,
   link: LinkInfo,
   budget: Budget,
+  opts: { backoff?: OutboundBackoff } = {},
 ): Promise<LinkResult> {
+  const backoff = opts.backoff ?? defaultBackoff;
   const r = emptyLinkResult();
   // 一覧の問い合わせは、消されたフォルダでも「空」を返す=先に在るかを確かめる(消えたら知らせる)
   const root = await drive.getFolder(link.folderId);
@@ -297,11 +322,14 @@ export async function syncOneLink(
       }
       continue;
     }
+    // ★失敗が続いている添付はしばらく待たせる(上限を使い切ってあとの書類・取り込みの番を奪わない)
+    if (backoff.isDeferred(a.id)) continue;
     if (budget.transfers <= 0) break;
     budget.transfers--;
     try {
       const body = await repo.readAttachment(a.fileUrl);
       if (!body) {
+        backoff.fail(a.id);
         r.failed++;
         continue;
       }
@@ -342,8 +370,10 @@ export async function syncOneLink(
         if (item.md5) knownMd5.add(item.md5);
         r.copied++;
       }
+      backoff.ok(a.id);
     } catch (e) {
       if (isAuthError(e)) throw e;
+      backoff.fail(a.id);
       r.failed++;
     }
   }
