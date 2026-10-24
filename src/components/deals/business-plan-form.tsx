@@ -1,7 +1,7 @@
 "use client";
 
 import { useEffect, useRef, useState, type ReactNode } from "react";
-import { Plus, Save, Trash2 } from "lucide-react";
+import { FileOutput, Plus, Save, Trash2 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Field, YenInput, inputCls } from "./form-parts";
 import { dealsApi, DealApiError, errorText } from "@/lib/deals/client";
@@ -13,6 +13,7 @@ import { BUSINESS_VARIANTS, BUSINESS_VARIANT_LABELS, COMPARABLE_KIND_LABELS, REP
 import type { BusinessPlanCalc } from "@/lib/deals/calc/business-plan";
 import type { BusinessSectionKey } from "@/lib/deals/business-sections";
 import type { DealView } from "@/lib/deals/view";
+import type { IssueNotice } from "./funding-plan-form";
 
 const PREVIEW_DELAY_MS = 600;
 const MAX_COMPARABLES = 10;
@@ -26,13 +27,15 @@ type YenKey = keyof typeof BUSINESS_YEN_LABELS;
  * 事業計画書(設計 §5・依頼書 4.2・買取再販だけ)。左で入力し、右に PDF と同じ HTML のプレビューを出す。
  * 社内用・銀行向けは同じ入力の中の切り替え(切り替えても入力は消えない)。出すセクションは取引の設定の表で決まる。
  */
-export default function BusinessPlanForm({ deal, onSaved }: { deal: DealView; onSaved: () => Promise<void> }) {
+export default function BusinessPlanForm({ deal, onSaved, onIssue }: {
+  deal: DealView; onSaved: () => Promise<void>; onIssue: (n: IssueNotice | null) => void;
+}) {
   const [form, setForm] = useState<BusinessForm>(() => businessFormFromInputs(deal.businessPlan));
   const [preview, setPreview] = useState<{ html: string; calc: BusinessPlanCalc; sections: BusinessSectionKey[] } | null>(null);
   const [previewError, setPreviewError] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [saved, setSaved] = useState(false);
-  const [saving, setSaving] = useState(false);
+  const [saving, setSaving] = useState<false | "save" | "issue">(false);
   // 保存で返った版の番号。保存のあとの読み直しに失敗しても、次の保存を「ほかの人が更新」にしない。
   const [savedVersion, setSavedVersion] = useState(0);
   const seq = useRef(0);
@@ -65,17 +68,32 @@ export default function BusinessPlanForm({ deal, onSaved }: { deal: DealView; on
     setForm((f) => ({ ...f, [k]: v }));
   };
 
-  const save = async () => {
+  /** 保存する。issue のときは、保存した入力で PDF と Excel を発行する(サーバーは保存済みの入力を使う)。 */
+  const save = async (issue: boolean) => {
     if (!parsed.value) {
-      setError(`${parsed.bad.join("・")}を直してください。保存していません。`);
+      setError(`${parsed.bad.join("・")}を直してください。${issue ? "発行も保存もしていません" : "保存していません"}。`);
       return;
     }
-    setSaving(true);
+    setSaving(issue ? "issue" : "save");
     setError(null);
+    onIssue(null);
     try {
       const r = await dealsApi.update(deal.id, { version: Math.max(deal.version, savedVersion), businessPlan: parsed.value });
       setSavedVersion(r.version);
       setSaved(true);
+      if (issue) {
+        try {
+          const doc = await dealsApi.issueDocument(deal.id, "business_plan", r.version);
+          onIssue({ kind: "ok", id: doc.id, title: doc.title, version: doc.version });
+        } catch (e) {
+          onIssue({
+            kind: "error",
+            message: e instanceof DealApiError && e.code === "VERSION_CONFLICT"
+              ? "入力は保存しましたが、その直後にほかの人がこの取引を更新したため、発行していません。画面を読み込み直して内容を確かめてから、もう一度発行してください。"
+              : `入力は保存しました。発行はできませんでした: ${errorText(e)}`,
+          });
+        }
+      }
       await onSaved();
     } catch (e) {
       setError(conflictText(e));
@@ -106,7 +124,7 @@ export default function BusinessPlanForm({ deal, onSaved }: { deal: DealView; on
   return (
     <div className="grid gap-6 lg:grid-cols-[minmax(0,28rem)_minmax(0,1fr)]">
       {/* 保存中は打てなくする(保存のあとの作り直しで、その間の入力が消えないように)。 */}
-      <fieldset disabled={saving} className="min-w-0 space-y-6">
+      <fieldset disabled={saving !== false} className="min-w-0 space-y-6">
         <div role="group" aria-label="社内用・銀行向けの切り替え" className="inline-flex gap-1">
           {BUSINESS_VARIANTS.map((v) => (
             <Button key={v} size="sm" variant={form.variant === v ? "primary" : "secondary"} aria-pressed={form.variant === v} onClick={() => set("variant", v)}>
@@ -227,10 +245,16 @@ export default function BusinessPlanForm({ deal, onSaved }: { deal: DealView; on
           <p className="text-sm text-amber-700 dark:text-amber-400">直す欄: {parsed.bad.join("・")}(直すまでプレビューは前のままです)</p>
         )}
         {saved && !error && <p className="text-sm text-emerald-600 dark:text-emerald-400" role="status">事業計画書の入力を保存しました</p>}
-        <Button onClick={() => void save()} disabled={saving} loading={saving} loadingLabel="保存中">
-          <Save className="h-4 w-4" />
-          保存
-        </Button>
+        <div className="flex flex-wrap gap-2">
+          <Button variant="secondary" onClick={() => void save(false)} disabled={saving !== false} loading={saving === "save"} loadingLabel="保存中">
+            <Save className="h-4 w-4" />
+            保存
+          </Button>
+          <Button onClick={() => void save(true)} disabled={saving !== false} loading={saving === "issue"} loadingLabel="発行中">
+            <FileOutput className="h-4 w-4" />
+            保存して発行(PDF・Excel)
+          </Button>
+        </div>
       </fieldset>
 
       <div className="space-y-2">

@@ -1,11 +1,13 @@
 import { encodeRfc5987 } from "@/lib/attachments/registry-display-name";
 
 /**
- * 発行する書類の一覧(設計 §4.1 の一部)。段3は資金計画表だけ。段4・段5でここに足す。
- * variant は書類ごとの出し分け(資金計画表=購入/売却)。
+ * 発行する書類の一覧(設計 §4.1 の一部)。段3=資金計画表・段4=事業計画書。段5でここに足す。
+ * variant は書類ごとの出し分け(資金計画表=購入/売却・事業計画書=社内用/銀行向け)。
  */
 export const DEAL_DOC_TYPES = {
   funding_plan: { label: "資金計画表", variants: { purchase: "購入", sale: "売却" } },
+  /** 買取再販の取引だけ(依頼書 4.2)。 */
+  business_plan: { label: "事業計画書", variants: { internal: "社内用", bank: "銀行向け" } },
 } as const;
 
 export type DealDocType = keyof typeof DEAL_DOC_TYPES;

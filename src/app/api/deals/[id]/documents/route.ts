@@ -14,6 +14,8 @@ import { loadDealBranding } from "@/lib/deals/branding-store";
 import { jstDateString } from "@/lib/deals/datetime";
 import { buildFundingPlan } from "@/lib/deals/documents/funding-plan";
 import { buildFundingPlanXlsx } from "@/lib/deals/documents/funding-plan-xlsx";
+import { buildBusinessPlan } from "@/lib/deals/documents/business-plan";
+import { buildBusinessPlanXlsx } from "@/lib/deals/documents/business-plan-xlsx";
 import {
   DEAL_DOC_MIME, DEAL_DOC_TYPE_KEYS, dealDocumentBaseName, dealDocumentKey, dealDocumentTitle, type DealDocFormat,
 } from "@/lib/deals/documents/issue";
@@ -65,22 +67,38 @@ export async function POST(request: Request, ctx: Ctx) {
     if (!row) throw new ApiError(404, "取引が見つかりません", "NOT_FOUND");
     // 保存してから発行するまでの間に、ほかの人が別の入力を保存していたら、その入力を自分の名前で発行しない(最終レビュー)。
     if (row.version !== version) throw new ApiError(409, DEAL_VERSION_CONFLICT_MESSAGE, "VERSION_CONFLICT");
+    if (docType === "business_plan" && row.businessType !== "resale") {
+      throw new ApiError(422, "事業計画書は買取再販の取引だけで使えます", "NOT_RESALE");
+    }
     if (!isChromiumAvailable()) {
       throw new ApiError(503, "PDF を作る仕組みが使えません(サーバーの設定)", "PDF_UNAVAILABLE");
     }
 
     const deal = toDealView(row);
-    const inputs = deal.fundingPlan;
     const today = jstDateString(new Date());
     const [rateRows, settings, company, branding] = await Promise.all([
       prisma.dealRateTable.findMany(), loadDealSettings(), loadCompanyProfile(), loadDealBranding(),
     ]);
-    const text = settings.texts.funding_plan;
-    const { calc, html } = buildFundingPlan({ deal, rateRows, kinds: settings.propertyKinds, inputs, company, today, logo: branding.logo, text });
-    const pdf = await renderHtmlToPdfDocument(html);
-    const xlsx = await buildFundingPlanXlsx({ deal, inputs, calc, company, issuedOn: today, text });
-
-    const variant = inputs.mode;
+    // 書類の種類ごとに、保存済みの入力 → 計算と HTML → Excel を作る(保存・版・後片付けは共通)。
+    let built: { variant: string; inputs: object; calc: object; html: string; xlsx: () => Promise<Buffer> };
+    if (docType === "business_plan") {
+      const inputs = deal.businessPlan;
+      const kinds = settings.propertyKinds;
+      const plan = buildBusinessPlan({ deal, rateRows, kinds, matrix: settings.sectionMatrix, inputs, company, today, logo: branding.logo });
+      const kindLabel = kinds.find((k) => k.key === deal.propertyKind)?.label ?? null;
+      built = {
+        variant: inputs.variant, inputs, calc: plan.calc, html: plan.html,
+        xlsx: () => buildBusinessPlanXlsx({ deal, inputs, calc: plan.calc, sections: plan.sections, company, issuedOn: today, kindLabel }),
+      };
+    } else {
+      const inputs = deal.fundingPlan;
+      const text = settings.texts.funding_plan;
+      const { calc, html } = buildFundingPlan({ deal, rateRows, kinds: settings.propertyKinds, inputs, company, today, logo: branding.logo, text });
+      built = { variant: inputs.mode, inputs, calc, html, xlsx: () => buildFundingPlanXlsx({ deal, inputs, calc, company, issuedOn: today, text }) };
+    }
+    const pdf = await renderHtmlToPdfDocument(built.html);
+    const xlsx = await built.xlsx();
+    const { variant, inputs, calc } = built;
     const fileBaseName = dealDocumentBaseName(deal.dealNo, docType, variant, today);
     const storage = getStorage();
     const fileId = safeRandomId();

@@ -1,6 +1,6 @@
 import ExcelJS from "exceljs";
-import type { FundingLine } from "../calc/funding-plan";
 import type { FundingPlanDocInput } from "./funding-plan";
+import { YEN, Writer, amountLines, sumOf } from "./xlsx-writer";
 
 /**
  * 資金計画表の Excel(設計 §4.8)。合計・自己資金・手取り・月返済額は Excel の数式で入れ、
@@ -9,54 +9,7 @@ import type { FundingPlanDocInput } from "./funding-plan";
  * 文字はすべて文字の値として入れる(お客様名などが数式として読まれない)。
  */
 
-const YEN = "#,##0";
 const SHEET = "資金計画表";
-
-type Cell = ExcelJS.Cell;
-
-class Writer {
-  row = 1;
-  constructor(readonly ws: ExcelJS.Worksheet) {}
-
-  /** 見出し(A列だけ・太字)。 */
-  heading(text: string) {
-    this.row++;
-    const c = this.ws.getCell(`A${this.row}`);
-    c.value = text;
-    c.font = { bold: true, size: 12 };
-    this.row++;
-  }
-
-  /** ラベルと値(または数式)の1行。行番号を返す。 */
-  line(label: string, value: number | null | { formula: string; result: number }, opts: { bold?: boolean } = {}): number {
-    const r = this.row++;
-    this.ws.getCell(`A${r}`).value = label;
-    const b: Cell = this.ws.getCell(`B${r}`);
-    b.value = value;
-    b.numFmt = YEN;
-    if (opts.bold) {
-      this.ws.getCell(`A${r}`).font = { bold: true };
-      b.font = { bold: true };
-    }
-    return r;
-  }
-
-  text(t: string) {
-    this.ws.getCell(`A${this.row++}`).value = t;
-  }
-}
-
-/** 金額のある行だけを並べ、最初と最後の行番号を返す(1行も無ければ null)。 */
-function amountLines(w: Writer, lines: FundingLine[]): { first: number; last: number } | null {
-  const shown = lines.filter((l) => l.amount !== null);
-  if (!shown.length) return null;
-  const first = w.row;
-  for (const l of shown) w.line(l.label, l.amount);
-  return { first, last: w.row - 1 };
-}
-
-const sumOf = (range: { first: number; last: number } | null, result: number) =>
-  range ? { formula: `SUM(B${range.first}:B${range.last})`, result } : 0;
 
 function purchaseSheet(w: Writer, i: FundingPlanDocInput) {
   const c = i.calc;

@@ -7,6 +7,28 @@ const PAGE = "src/app/(dashboard)/deals/[id]/business-plan/page.tsx";
 const FORM = "src/components/deals/business-plan-form.tsx";
 const DETAIL = "src/app/(dashboard)/deals/[id]/page.tsx";
 
+describe("事業計画書の発行(段4後半)", () => {
+  it("保存してから、保存で返った版で発行する(サーバーは保存済みの入力を使う)", () => {
+    const src = read(FORM);
+    const update = src.indexOf("dealsApi.update(deal.id");
+    const issue = src.indexOf('dealsApi.issueDocument(deal.id, "business_plan", r.version)');
+    expect(update).toBeGreaterThan(-1);
+    expect(issue).toBeGreaterThan(update);
+    expect(src).toContain("保存して発行(PDF・Excel)");
+    expect(src).toContain("発行も保存もしていません");
+  });
+  it("発行の結果は画面(親)が持ち、PDF・Excel を開ける", () => {
+    const src = read(PAGE);
+    expect(src).toContain("onIssue={setNotice}");
+    expect(src).toContain('dealDocumentFileUrl(deal.id, notice.id, "pdf")');
+    expect(src).toContain('dealDocumentFileUrl(deal.id, notice.id, "xlsx")');
+  });
+  it("書類タブの「事業計画書を作る」は買取再販の取引だけ", () => {
+    expect(read("src/components/deals/deal-documents-panel.tsx")).toMatch(/\{resale && \(\s*<Link href=\{`\/deals\/\$\{dealId\}\/business-plan`\}/);
+    expect(read(DETAIL)).toContain('resale={deal.businessType === "resale"}');
+  });
+});
+
 describe("事業計画書の画面", () => {
   it("取引の画面のボタンは買取再販の取引だけ", () => {
     expect(read(DETAIL)).toMatch(/deal\.businessType === "resale" && \(\s*<Link href=\{`\/deals\/\$\{deal\.id\}\/business-plan`\}/);
@@ -21,7 +43,7 @@ describe("事業計画書の画面", () => {
     expect(src).toContain('aria-label="社内用・銀行向けの切り替え"');
     expect(src).toMatch(/dealsApi\.update\(deal\.id, \{ version: Math\.max\(deal\.version, savedVersion\), businessPlan: parsed\.value \}\)/);
     expect(src).toMatch(/<iframe[^>]*srcDoc=\{preview\.html\}[^>]*sandbox=""/);
-    expect(src).toContain("<fieldset disabled={saving}");
+    expect(src).toContain("<fieldset disabled={saving !== false}");
   });
   it("仲介手数料は自動で入れず、上限額を入れるボタンだけ", () => {
     const src = read(FORM);

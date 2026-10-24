@@ -69,7 +69,7 @@ describe("資金計画表の画面", () => {
   it("取引の画面に「書類」タブ(発行の履歴)があり、タブを開いたときに読み直す", () => {
     const page = read("src/app/(dashboard)/deals/[id]/page.tsx");
     expect(page).toContain('{ key: "documents", label: "書類" }');
-    expect(page).toContain('<DealDocumentsPanel dealId={deal.id} active={tab === "documents"} />');
+    expect(page).toContain('<DealDocumentsPanel dealId={deal.id} active={tab === "documents"} resale={deal.businessType === "resale"} />');
     const panel = read("src/components/deals/deal-documents-panel.tsx");
     expect(panel).toContain("if (!active) return;");
     expect(panel).toContain("[dealId, active, tick]");
