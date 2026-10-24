@@ -98,6 +98,13 @@ function DriveAdminPageInner() {
     void reload();
   }, [reload]);
 
+  // 紐づけ・外しのあと: 状態と紐づけ一覧を読み直し、フォルダの一覧も読み直させる(rev を進める)。
+  const [linksRev, setLinksRev] = useState(0);
+  const afterLinkChange = useCallback(async () => {
+    await reload();
+    setLinksRev((v) => v + 1);
+  }, [reload]);
+
   const onDisconnect = async () => {
     setBusy(true);
     try {
@@ -209,14 +216,14 @@ function DriveAdminPageInner() {
         ) : (
           <ul className="divide-y divide-gray-100 dark:divide-gray-800">
             {links.map((l) => (
-              <LinkRow key={l.id} link={l} onRemoved={reload} />
+              <LinkRow key={l.id} link={l} onRemoved={afterLinkChange} />
             ))}
           </ul>
         )}
       </section>
 
       {/* フォルダをたどる */}
-      {connected && <FolderBrowser links={links} onLinked={reload} />}
+      {connected && <FolderBrowser links={links} rev={linksRev} onLinked={afterLinkChange} />}
 
       {confirmDisconnect && (
         <ConfirmDialog
@@ -282,7 +289,16 @@ function LinkRow({ link, onRemoved }: { link: DriveFolderLink; onRemoved: () => 
 
 type Crumb = { id: string; name: string };
 
-function FolderBrowser({ links, onLinked }: { links: DriveFolderLink[]; onLinked: () => Promise<void> }) {
+function FolderBrowser({
+  links,
+  rev,
+  onLinked,
+}: {
+  links: DriveFolderLink[];
+  /** 紐づけ・外しのたびに増える番号。変わったらフォルダの一覧も読み直す(候補と「紐づけ済」をサーバーの今の状態に)。 */
+  rev: number;
+  onLinked: () => Promise<void>;
+}) {
   const [crumbs, setCrumbs] = useState<Crumb[]>([{ id: "root", name: "マイドライブ" }]);
   const [rows, setRows] = useState<DriveFolderRow[]>([]);
   const [nextToken, setNextToken] = useState<string | null>(null);
@@ -310,10 +326,14 @@ function FolderBrowser({ links, onLinked }: { links: DriveFolderLink[]; onLinked
 
   useEffect(() => {
     void load(false);
-  }, [load]);
+  }, [load, rev]);
 
   /** フォルダを移る(押した側で読み込み中の印を立ててから場所を変える)。 */
   const go = (next: Crumb[]) => {
+    // 同じフォルダ(今のパンくず・選択中のタブ)で絞り込みも無い=読み込み直す理由が無い。ここで印を立てると、
+    // load の依存(parent・q)が変わらず effect が走らないので「読み込み中」のまま固まる(@codex #577 R2)。
+    const same = next.length === crumbs.length && next[next.length - 1].id === parent;
+    if (same && q === "") return;
     setLoading(true);
     setRows([]);
     // ⚠名前の絞り込みは「いま開いているフォルダの中」用。移ったら外す(残すと、建物名で絞って開いた
@@ -322,7 +342,10 @@ function FolderBrowser({ links, onLinked }: { links: DriveFolderLink[]; onLinked
     setCrumbs(next);
   };
 
-  const linkedFolderIds = new Set(links.map((l) => l.folderId));
+  // 「紐づけ済」の表示と候補の使えなさは、読み込んだ時点の行ではなく今の紐づけ一覧から決める
+  // (外した直後でも紐づけ直せるように・@codex #577 R2)。
+  const linkByFolder = new Map(links.map((l) => [l.folderId, l]));
+  const linkedFolderByProperty = new Map(links.map((l) => [l.propertyId, l.folderId]));
 
   return (
     <section className="rounded-lg border border-gray-200 bg-white p-4 dark:border-gray-700 dark:bg-gray-900">
@@ -379,7 +402,8 @@ function FolderBrowser({ links, onLinked }: { links: DriveFolderLink[]; onLinked
             <FolderRow
               key={f.id}
               folder={f}
-              linked={linkedFolderIds.has(f.id)}
+              linkedTo={linkByFolder.get(f.id)?.property ?? null}
+              linkedFolderByProperty={linkedFolderByProperty}
               onOpen={() => go([...crumbs, { id: f.id, name: f.name }])}
               onLinked={onLinked}
             />
@@ -399,12 +423,16 @@ function FolderBrowser({ links, onLinked }: { links: DriveFolderLink[]; onLinked
 
 function FolderRow({
   folder,
-  linked,
+  linkedTo,
+  linkedFolderByProperty,
   onOpen,
   onLinked,
 }: {
   folder: DriveFolderRow;
-  linked: boolean;
+  /** このフォルダが今紐づいている物件(今の紐づけ一覧から)。null=紐づいていない。 */
+  linkedTo: { buildingName: string | null; roomNo: string | null; address: string } | null;
+  /** 物件 → 紐づいているフォルダ(今の紐づけ一覧から)。候補の「紐づけ済」をこれで決める。 */
+  linkedFolderByProperty: Map<string, string>;
   onOpen: () => void;
   onLinked: () => Promise<void>;
 }) {
@@ -455,25 +483,28 @@ function FolderRow({
           )}
         </div>
         <div className="flex flex-wrap items-center gap-1">
-          {folder.linkedProperty || linked ? (
+          {linkedTo ? (
             <span className="inline-flex items-center gap-1 rounded bg-emerald-50 px-2 py-0.5 text-xs text-emerald-800 dark:bg-emerald-950/40 dark:text-emerald-300">
-              <Link2 className="h-3 w-3" /> 紐づけ済{folder.linkedProperty ? `: ${propertyLabel(folder.linkedProperty)}` : ""}
+              <Link2 className="h-3 w-3" /> 紐づけ済: {propertyLabel(linkedTo)}
             </span>
           ) : (
             <>
-              {folder.candidates.map((c) => (
-                <Button
-                  key={c.propertyId}
-                  variant="secondary"
-                  size="sm"
-                  disabled={busy || c.linkedFolderId !== null}
-                  onClick={() => setPendingLink({ propertyId: c.propertyId, label: propertyLabel(c) })}
-                  title={c.linkedFolderId ? "この物件は別のフォルダと紐づいています" : REASON_LABELS[c.reason]}
-                >
-                  <Link2 className="mr-1 h-3 w-3" /> {propertyLabel(c)}
-                  <span className="ml-1 text-[10px] text-gray-500">({c.linkedFolderId ? "紐づけ済" : REASON_LABELS[c.reason]})</span>
-                </Button>
-              ))}
+              {folder.candidates.map((c) => {
+                const otherFolder = linkedFolderByProperty.get(c.propertyId) ?? null;
+                return (
+                  <Button
+                    key={c.propertyId}
+                    variant="secondary"
+                    size="sm"
+                    disabled={busy || otherFolder !== null}
+                    onClick={() => setPendingLink({ propertyId: c.propertyId, label: propertyLabel(c) })}
+                    title={otherFolder ? "この物件は別のフォルダと紐づいています" : REASON_LABELS[c.reason]}
+                  >
+                    <Link2 className="mr-1 h-3 w-3" /> {propertyLabel(c)}
+                    <span className="ml-1 text-[10px] text-gray-500">({otherFolder ? "紐づけ済" : REASON_LABELS[c.reason]})</span>
+                  </Button>
+                );
+              })}
               <Button variant="secondary" size="sm" onClick={() => setPicking((v) => !v)} disabled={busy}>
                 物件を探す
               </Button>

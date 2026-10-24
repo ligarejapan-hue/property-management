@@ -20,6 +20,22 @@ describe("ドライブ連携の画面", () => {
     expect(direct).toEqual(["    setCrumbs(next);"]);
   });
 
+  it("★同じフォルダへの移動(今のパンくず・選択中のタブ)で、絞り込みも無ければ何もしない(読み込み中のまま固まらない・@codex #577 R2)", () => {
+    const go = /const go = \(next: Crumb\[\]\) => \{[\s\S]*?\n {2}\};/.exec(SRC)?.[0] ?? "";
+    expect(go).toMatch(/const same = next\.length === crumbs\.length && next\[next\.length - 1\]\.id === parent;/);
+    expect(go).toMatch(/if \(same && q === ""\) return;/);
+    // 早めの return は、読み込み中の印を立てる前
+    expect(go.indexOf("return;")).toBeLessThan(go.indexOf("setLoading(true)"));
+  });
+
+  it("★紐づけ・外しのあとはフォルダの一覧も読み直す(rev)・紐づけ済みの表示は今の紐づけ一覧から決める(@codex #577 R2)", () => {
+    expect(SRC).toMatch(/useEffect\(\(\) => \{\n\s+void load\(false\);\n\s+\}, \[load, rev\]\);/);
+    expect(SRC).toMatch(/setLinksRev\(\(v\) => v \+ 1\)/);
+    // 行の「紐づけ済」は読み込んだ時点の folder.linkedProperty ではなく、今の links から
+    expect(SRC).not.toMatch(/folder\.linkedProperty \|\| linked/);
+    expect(SRC).toMatch(/linkedTo=\{linkByFolder\.get\(f\.id\)\?\.property \?\? null\}/);
+  });
+
   it("useSearchParams を使う本体は Suspense で包む", () => {
     expect(SRC).toMatch(/<Suspense[\s\S]*<DriveAdminPageInner \/>[\s\S]*<\/Suspense>/);
   });
