@@ -1,6 +1,6 @@
 import type { PermissionEntry } from "@/lib/api-helpers";
 import { hasPermission } from "@/lib/permissions";
-import { isOwnerPiiDocumentType } from "@/lib/uploads-authorization";
+import { isOwnerPiiDocument } from "@/lib/uploads-authorization";
 import { MATERIAL_SEND_LIMITS } from "./material-send-limits";
 
 // ⚠サーバー専用(uploads-authorization を読む)。画面は material-send-limits を読む(@codex 7巡目 P1)。
@@ -19,15 +19,17 @@ export type MaterialAttachmentRow = {
   fileUrl: string;
   mimeType: string;
   createdAt: Date;
+  /** 書類の種類(本人確認書類=identity_document は general でも送らない・2026-10-24)。 */
+  docKind: string | null;
 };
 
-/** 送ってよい種類(許可リスト)。⚠所有者の個人情報が載った書類は種類が増えても isOwnerPiiDocumentType で外す。 */
+/** 送ってよい種類(許可リスト)。⚠所有者の個人情報が載った書類は種類が増えても isOwnerPiiDocument で外す(type と docKind の両方を見る)。 */
 const SENDABLE_TYPES: ReadonlySet<string> = new Set(["general", "registry"]);
 
 /** その物件の、送ってよい添付か(spec §3)。画面の一覧と送信の両方がこれを通す。 */
 export function selectableForMaterialSend(a: MaterialAttachmentRow, propertyId: string, perms: PermissionEntry[]): boolean {
   if (a.isDeleted || a.targetType !== "property" || a.targetId !== propertyId) return false;
-  if (isOwnerPiiDocumentType(a.type) || !SENDABLE_TYPES.has(a.type)) return false;
+  if (isOwnerPiiDocument(a) || !SENDABLE_TYPES.has(a.type)) return false;
   // 謄本を送る=写しを渡す=ダウンロードと同じ扱い(uploads-authorization の preview+download と同じ線)。
   if (a.type === "registry") {
     return hasPermission(perms, "registry_pdf", "preview") && hasPermission(perms, "registry_pdf", "download");

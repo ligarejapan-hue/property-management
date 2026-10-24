@@ -15,6 +15,8 @@ import { lockPropertyRecordForWrite } from "@/lib/property-record-guard";
 import { normalizeFileUrlsInRecord } from "@/lib/url-normalize";
 import { assertImportJsonBodySize } from "@/lib/import-body-size";
 import { docKindByCode } from "@/lib/doc-classify/classify";
+import { canOpenReferralDocument } from "@/lib/uploads-authorization";
+import { IDENTITY_DOC_KIND } from "@/lib/attachments/identity-display-name";
 import { docColumnsForManualKind } from "@/lib/doc-classify/assign";
 
 // ---------- DELETE /api/properties/:id/attachments/:attachmentId ----------
@@ -128,6 +130,15 @@ export async function PATCH(
     if (body.docKind !== null && !docKindByCode(body.docKind)) {
       throw new ApiError(422, "知らない種類です", "VALIDATION_ERROR");
     }
+    // 本人確認書類(開ける人を絞る種類・2026-10-24)への変更・からの変更は、その書類を開ける人だけ。
+    //   物件を編集できるだけの人が「種類をその他に直す」で守りを外せないように。
+    //   ⚠ここは読んだ時点の判定(早い段階で断る)。確定はロックの中で読み直した行で行う(下)。
+    const identityGuard = (currentKind: string | null) => {
+      if ((currentKind === IDENTITY_DOC_KIND || body.docKind === IDENTITY_DOC_KIND) && !canOpenReferralDocument(perms)) {
+        throw new ApiError(403, "本人確認書類の種類は、所有者情報をすべて見られる方だけが変えられます", "FORBIDDEN");
+      }
+    };
+    identityGuard(attachment.docKind);
 
     const property = attachment.property;
     const updated = await prisma.$transaction(async (tx) => {
@@ -135,6 +146,15 @@ export async function PATCH(
       //   (上の canAccessPropertyRecord は読んだ時点の判定。読んでからロックまでの間に担当が
       //   外れた field_staff が書き換えられないように・@codex #556 P2)。同じ名前の連番もロックの中で決める。
       await lockPropertyRecordForWrite(tx, propertyId, session);
+      // ⚠種類もロックの中で読み直す: 読んでからロックまでの間に、権限のある人が本人確認書類に変えて
+      //   いたら、物件を編集できるだけの人の古い判定で上書きして守りを外せてしまう(内部レビュー P2)。
+      const fresh = await tx.attachment.findUnique({
+        where: { id: attachmentId },
+        select: { docKind: true, isDeleted: true, type: true },
+      });
+      if (!fresh || fresh.isDeleted) throw new ApiError(404, "添付ファイルが見つかりません", "NOT_FOUND");
+      if (fresh.type !== "general") throw new ApiError(422, "この添付には種類を付けられません", "VALIDATION_ERROR");
+      identityGuard(fresh.docKind);
       const others = await tx.attachment.findMany({
         where: {
           targetType: "property",

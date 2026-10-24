@@ -91,6 +91,18 @@ export function canOpenReferralDocument(permissions: PermissionEntry[]): boolean
  */
 export const OWNER_PII_DOCUMENT_TYPES: ReadonlySet<string> = new Set(["referral", "report"]);
 
+/**
+ * 種類の列(doc_kind)で守る書類。本人確認書類(運転免許証など・2026-10-24 発注者決定)は
+ * type が general でも反響資料・査定報告書と同じ守り(開ける人を絞る・キャッシュさせない)。
+ * ⚠値は src/lib/doc-classify/classify.ts の DOC_KINDS(identity_document)と同じ。
+ */
+export const OWNER_PII_DOC_KINDS: ReadonlySet<string> = new Set(["identity_document"]);
+
+/** 添付の行(種類 type と書類の種類 docKind)が、所有者の個人情報を含む書類か。 */
+export function isOwnerPiiDocument(a: { type: string | null | undefined; docKind?: string | null }): boolean {
+  return isOwnerPiiDocumentType(a.type) || (a.docKind != null && OWNER_PII_DOC_KINDS.has(a.docKind));
+}
+
 export function isOwnerPiiDocumentType(type: string | null | undefined): boolean {
   return type != null && OWNER_PII_DOCUMENT_TYPES.has(type);
 }
@@ -280,6 +292,8 @@ export async function authorizeUploadAccess(
       propertyId: true,
       fileUrl: true,
       type: true,
+      // 本人確認書類(docKind)は type が general でも守る(2026-10-24)
+      docKind: true,
     },
   });
   // ⚠**守りは外れない**(@codex PR#500 9巡目)。同じファイルを指す記録に、謄本・反響資料・査定報告書
@@ -294,7 +308,7 @@ export async function authorizeUploadAccess(
     if (resolveStoredFileUrlToKey(a.fileUrl) !== key) continue;
     if (a.isDeleted) {
       const stickyForbidden =
-        (isOwnerPiiDocumentType(a.type) && !canOpenReferralDocument(permissions)) ||
+        (isOwnerPiiDocument(a) && !canOpenReferralDocument(permissions)) ||
         (a.type === "registry" &&
           (!hasPermission(permissions, "registry_pdf", "preview") ||
             (downloadIntent && !hasPermission(permissions, "registry_pdf", "download"))));
@@ -304,7 +318,7 @@ export async function authorizeUploadAccess(
       //   保護書類の削除済みの記録は、元の物件を今も開けるかも念押しする。
       if (
         !stickyForbidden &&
-        (a.type === "registry" || isOwnerPiiDocumentType(a.type)) &&
+        (a.type === "registry" || isOwnerPiiDocument(a)) &&
         a.targetType === "property" &&
         (await authorizePropertyAccess(a.propertyId ?? a.targetId, session, permissions, db)) !== "ok"
       ) {
@@ -336,7 +350,8 @@ export async function authorizeUploadAccess(
     //    書類を開ける最低権限は owner:read。
     //  上の registry と同じく、下の targetType scope とは独立に AND で課す。
     //  ⚠査定報告書(report・依頼者の氏名が載る)も同じ扱い(2026-10-10)。
-    if (isOwnerPiiDocumentType(a.type)) {
+    //  ⚠本人確認書類(種類 docKind=identity_document・type は general)も同じ扱い(2026-10-24)。
+    if (isOwnerPiiDocument(a)) {
       if (!canOpenReferralDocument(permissions)) {
         decisions.push("forbidden");
         continue;
@@ -460,8 +475,8 @@ export interface RegistryServeMeta {
  *   素通しになる形だった。
  */
 export interface ReferralServeMeta {
-  /** referral=反響資料 / report=査定報告書(保存名だけが違う・扱いは同じ)。 */
-  kind: "referral" | "report";
+  /** referral=反響資料 / report=査定報告書 / identity=本人確認書類(保存名だけが違う・扱いは同じ)。 */
+  kind: "referral" | "report" | "identity";
   /** 添付の記録が1件も無い受け取り箱のファイル(写真などとして登録し直されたもの)は null。 */
   attachmentId: string | null;
   propertyId: string | null;
@@ -500,6 +515,7 @@ export async function resolveProtectedServeMeta(
       // 保存名の材料（owner|all と登録日）。生の fileName は select しない。
       registryCertificateType: true,
       createdAt: true,
+      docKind: true,
     },
   });
   // ⚠配信の扱い(キャッシュさせない・定型名)も**守りと同じく外れない**(@codex PR#500 10巡目)。
@@ -528,9 +544,14 @@ export async function resolveProtectedServeMeta(
   }
   // 有効な添付が無くても(写真など**別の記録**として登録し直されていても)保護の扱いで配る(12巡目)。
   //   守り(authorizeUploadAccess)を通った人だけがここまで来る。記録は保護された行にそろえる(15巡目)。
-  const piiRow = pick((a) => isOwnerPiiDocumentType(a.type));
+  const piiRow = pick((a) => isOwnerPiiDocument(a));
   if (piiRow !== null) {
-    return { kind: piiRow.type === "report" ? "report" : "referral", ...toBase(piiRow) };
+    const kind = isOwnerPiiDocumentType(piiRow.type)
+      ? piiRow.type === "report"
+        ? "report"
+        : "referral"
+      : "identity";
+    return { kind, ...toBase(piiRow) };
   }
   if (key.startsWith("report-inbox/")) {
     const active = rows.find((a) => !a.isDeleted) ?? null;

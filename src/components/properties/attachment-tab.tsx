@@ -493,7 +493,7 @@ function AttachmentRow({
   const previewable = getPreviewKind(att) !== null;
   const isRegistry = att.type === "registry";
   const normalizedUrl = normalizeFileUrl(att.fileUrl);
-  const downloadHref = sendsDownloadIntent(att.type) ? withDownloadIntent(normalizedUrl) : normalizedUrl;
+  const downloadHref = sendsDownloadIntent(att) ? withDownloadIntent(normalizedUrl) : normalizedUrl;
   // registry は表示名・保存名ともに generic（att.fileName の PII を client 表示にも出さない）。
   // 通常添付は、そろえた名前(docTitle)があればそれを出し、元の名前は小さく添える。
   const displayName = isRegistry
@@ -624,7 +624,7 @@ function PreviewModal({
   const safeUrl = normalizeFileUrl(att.fileUrl);
   const isRegistry = att.type === "registry";
   // preview(iframe) は無 param のまま。download リンクのみ download intent を付ける。
-  const downloadHref = sendsDownloadIntent(att.type) ? withDownloadIntent(safeUrl) : safeUrl;
+  const downloadHref = sendsDownloadIntent(att) ? withDownloadIntent(safeUrl) : safeUrl;
   // registry は表示名・保存名ともに generic（att.fileName の PII を client 表示にも出さない）。
   const displayName = isRegistry
     ? registryDisplayName(att.registryCertificateType, att.createdAt)

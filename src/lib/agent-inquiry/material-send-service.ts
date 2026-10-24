@@ -14,14 +14,14 @@ import { hasPermission } from "@/lib/permissions";
 import {
   authorizeUploadAccess,
   escapePrismaLikePattern,
-  isOwnerPiiDocumentType,
+  isOwnerPiiDocument,
   resolveProtectedServeMeta,
   resolveStoredFileUrlToKey,
 } from "@/lib/uploads-authorization";
 
 export const MATERIAL_ATTACHMENT_SELECT = {
   id: true, targetType: true, targetId: true, type: true, isDeleted: true,
-  fileName: true, fileSize: true, fileUrl: true, mimeType: true, createdAt: true,
+  fileName: true, fileSize: true, fileUrl: true, mimeType: true, createdAt: true, docKind: true,
 } as const;
 
 /** 反響を読み、資料請求か・物件を開けるかを確かめる(候補・記録・送信で共通)。 */
@@ -57,7 +57,7 @@ export type MaterialFileGuard =
 
 const BATCH = 50;
 type KeyRecords = {
-  atts: { id: string; targetType: string; targetId: string; propertyId: string | null; type: string }[];
+  atts: { id: string; targetType: string; targetId: string; propertyId: string | null; type: string; docKind: string | null }[];
   photoPropertyIds: string[];
   other: boolean; // 棟の写真・巡回の写真
 };
@@ -78,7 +78,7 @@ async function loadKeyRecords(keys: string[]): Promise<Map<string, KeyRecords>> 
     const [atts, photos, buildingPhotos, pinPhotos] = await Promise.all([
       prisma.attachment.findMany({
         where: { OR: likes.map((like) => ({ fileUrl: like })) },
-        select: { id: true, targetType: true, targetId: true, propertyId: true, fileUrl: true, type: true },
+        select: { id: true, targetType: true, targetId: true, propertyId: true, fileUrl: true, type: true, docKind: true },
       }),
       prisma.propertyPhoto.findMany({ where: { OR: both }, select: { propertyId: true, fileUrl: true, thumbnailUrl: true } }),
       prisma.buildingPhoto.findMany({ where: { OR: both }, select: { fileUrl: true, thumbnailUrl: true } }),
@@ -103,7 +103,7 @@ async function loadKeyRecords(keys: string[]): Promise<Map<string, KeyRecords>> 
  * ⚠送る資料は物件に縛る(@codex P2・3巡目): 両方の物件を開ける人が別の物件のファイルをこの物件の添付として
  *   登録し直しても送らない。別の物件・所有者に付いた添付(削除済みも)・別の物件の写真・棟の写真・巡回の写真
  *   (サムネイルも)・受け取り箱の置き場所・別の物件の置き場所・写真の置き場所は送らない。
- * ⚠反響資料・査定報告書の記録(削除済みも)が同じファイルを指せば送らない。謄本の記録が指せば謄本として扱う。
+ * ⚠反響資料・査定報告書・本人確認書類(docKind)の記録(削除済みも)が同じファイルを指せば送らない。謄本の記録が指せば謄本として扱う。
  */
 function decideMaterialFile(
   row: MaterialAttachmentRow,
@@ -119,7 +119,7 @@ function decideMaterialFile(
   const onlyHere = rec.atts.every(
     (a) => a.targetType === "property" && a.targetId === propertyId && (a.propertyId == null || a.propertyId === propertyId),
   );
-  if (!onlyHere || rec.atts.some((a) => isOwnerPiiDocumentType(a.type))) return { ok: false };
+  if (!onlyHere || rec.atts.some((a) => isOwnerPiiDocument(a))) return { ok: false };
   const effectiveType = row.type === "registry" || rec.atts.some((a) => a.type === "registry") ? "registry" : "general";
   if (
     effectiveType === "registry" &&

@@ -43,6 +43,8 @@ vi.mock("@/lib/prisma", () => ({
 vi.mock("@/lib/uploads-authorization", () => ({
   escapePrismaLikePattern: (s: string) => s,
   isOwnerPiiDocumentType: (t: string | null | undefined) => t === "referral" || t === "report",
+  isOwnerPiiDocument: (a: { type: string | null | undefined; docKind?: string | null }) =>
+    a.type === "referral" || a.type === "report" || a.docKind === "identity_document",
 }));
 
 import prisma from "@/lib/prisma";
@@ -109,7 +111,8 @@ describe("findPurgeableAttachments", () => {
       { purgeStartedAt: { lte: expect.any(Date) } },
     ]);
     expect(arg.take).toBe(200);
-    expect(arg.select).toEqual({ id: true, fileUrl: true, type: true });
+    // docKind: 本人確認書類(general+identity_document)も守りの記録として残すため(2026-10-24)
+    expect(arg.select).toEqual({ id: true, fileUrl: true, type: true, docKind: true });
     expect(arg.orderBy).toEqual([{ deletedAt: "asc" }, { id: "asc" }]);
     // ★守りの記録として残した行は、見直しの間隔(7日)が過ぎるまで外す(@codex PR#500 21巡目)
     const holdCutoff = arg.where.AND[0].OR[1].purgeHeldAt.lte as Date;
@@ -337,6 +340,20 @@ describe("purgeExpiredAttachments", () => {
       expect(r).toEqual({ scanned: 1, purged: 0, failed: 0, skipped: 1 });
     },
   );
+
+  it("★本人確認書類(general+docKind=identity_document)の記録も、同じファイルを写真などがまだ指している間は消さない(2026-10-24)", async () => {
+    const key = "/uploads/properties/p/attachments/9-id.jpg";
+    wireFindMany([{ id: "c1", fileUrl: key, type: "general", docKind: "identity_document" }], []);
+    pm.propertyPhoto.findMany.mockResolvedValue([{ fileUrl: key }]);
+    const r = await purgeExpiredAttachments({ now: NOW, limit: 200 });
+    expect(deleteSpy).not.toHaveBeenCalled();
+    expect(pm.attachment.deleteMany).not.toHaveBeenCalled();
+    expect(pm.attachment.updateMany).toHaveBeenLastCalledWith({
+      where: { id: "c1", purgeStartedAt: NOW },
+      data: { purgeStartedAt: null, purgeHeldAt: NOW },
+    });
+    expect(r).toEqual({ scanned: 1, purged: 0, failed: 0, skipped: 1 });
+  });
 
   it("report でも、他に指す記録が無ければファイルも記録も消す", async () => {
     const key = "/uploads/report-inbox/1-abc.pdf";
