@@ -20,11 +20,13 @@ export interface BusinessDocDef {
   applies(c: BusinessDocContext): boolean;
   /** 必要な項目のうち空欄のもの(出す前の確認に出す)。 */
   missing(c: BusinessDocContext): string[];
+  /** 空欄のままでは組み立てられない項目(「空欄のまま出す」を止める・最終レビュー)。 */
+  blocking(c: BusinessDocContext): string[];
   options: z.ZodType<Record<string, unknown>>;
   /** 発行のときに選ぶものの初期値と選べる値(画面に渡す)。 */
   defaults(c: BusinessDocContext): { values: Record<string, unknown>; issuers?: IssuerChoice[] };
   /** 組み立て。html = PDF にするもの。compactHtml があれば、html が 2 ページ以上のときにそちらで作り直す。 */
-  build(c: BusinessDocContext, options: Record<string, unknown>): { html: string; compactHtml?: string; rows: ValueRow[] };
+  build(c: BusinessDocContext, options: Record<string, unknown>): { html: string; compactHtml?: string; rows: ValueRow[]; issuerName?: string };
 }
 
 const emptyOptions = z.object({}).strict();
@@ -40,12 +42,16 @@ function receiptDef(kind: ReceiptKind): BusinessDocDef {
     missing: (c) => need([
       [`${RECEIPT_KINDS[kind].purpose}の金額`, receiptAmount(kind, c)], ["売主", hasParty(c, "seller")], ["買主", hasParty(c, "buyer")],
     ]),
+    blocking: (c) => need([[`${RECEIPT_KINDS[kind].purpose}の金額`, receiptAmount(kind, c)]]),
     options: receiptOptionsSchema as z.ZodType<Record<string, unknown>>,
     defaults: (c) => {
       const { choices, initial } = issuerChoices(kind, c);
       return { values: { issuer: initial, exempt: null, receivedOn: null }, issuers: choices };
     },
-    build: (c, o) => buildReceipt(kind, c, receiptOptionsSchema.parse(o)),
+    build: (c, o) => {
+      const r = buildReceipt(kind, c, receiptOptionsSchema.parse(o));
+      return { html: r.html, rows: r.rows, issuerName: r.issuerLabel };
+    },
   };
 }
 
@@ -57,6 +63,7 @@ export const BUSINESS_DOCS: BusinessDocDef[] = [
     missing: (c) => need([
       ["決済日時", c.deal.settlementAt], ["売買価格", c.deal.price], ["売主", hasParty(c, "seller")], ["買主", hasParty(c, "buyer")],
     ]),
+    blocking: () => [],
     options: emptyOptions,
     defaults: () => ({ values: {} }),
     build: (c) => buildSettlementStatement(c),
@@ -68,6 +75,7 @@ export const BUSINESS_DOCS: BusinessDocDef[] = [
     missing: (c) => need([
       ["決済日時", c.deal.settlementAt], ["決済場所", c.deal.settlementPlace], ["売買価格", c.deal.price], ["買主", hasParty(c, "buyer")],
     ]),
+    blocking: () => [],
     options: settlementGuideOptionsSchema as z.ZodType<Record<string, unknown>>,
     defaults: (c) => ({ values: { payee: defaultPayee(c), belongings: DEFAULT_BELONGINGS } }),
     build: (c, o) => buildSettlementGuide(c, settlementGuideOptionsSchema.parse(o)),

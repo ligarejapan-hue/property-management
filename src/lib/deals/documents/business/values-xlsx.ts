@@ -1,12 +1,14 @@
 import ExcelJS from "exceljs";
-import type { CompanyProfile } from "@/lib/sales-sheet/company-profile-store";
 import { YEN } from "../xlsx-writer";
 import type { ValueRow } from "./common";
 
-/** 業務書類の Excel(値だけ・設計 §4.8)。A列=項目・B列=値。文字は文字のまま(数式として読まれない)。 */
-export async function buildValuesXlsx(a: { title: string; dealNo: string; issuedOn: string; rows: ValueRow[]; company: CompanyProfile }): Promise<Buffer> {
+/**
+ * 業務書類の Excel(値だけ・設計 §4.8)。A列=項目・B列=値。文字は文字のまま(数式として読まれない)。
+ * issuerName = その書類を出す人(個人の売主の領収書では、その人の名前=自社の名前は入れない・最終レビュー)。
+ */
+export async function buildValuesXlsx(a: { title: string; dealNo: string; issuedOn: string; rows: ValueRow[]; issuerName: string }): Promise<Buffer> {
   const wb = new ExcelJS.Workbook();
-  wb.creator = a.company.nameJa;
+  wb.creator = a.issuerName;
   const ws = wb.addWorksheet(a.title.slice(0, 31), { pageSetup: { paperSize: 9, orientation: "portrait", fitToPage: true, fitToWidth: 1, fitToHeight: 0 } });
   ws.getColumn(1).width = 34;
   ws.getColumn(2).width = 48;
@@ -29,6 +31,6 @@ export async function buildValuesXlsx(a: { title: string; dealNo: string; issued
     }
     r++;
   }
-  ws.getCell(`A${r + 1}`).value = a.company.nameJa;
+  ws.getCell(`A${r + 1}`).value = a.issuerName;
   return Buffer.from(await wb.xlsx.writeBuffer());
 }

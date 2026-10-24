@@ -55,7 +55,7 @@ export default function DealDocumentsPanel({ dealId, active, resale }: { dealId:
           読み込み直す
         </Button>
       </div>
-      <BusinessDocsSection dealId={dealId} active={active} onIssued={reload} />
+      <BusinessDocsSection dealId={dealId} active={active} refresh={tick} onIssued={reload} />
       <h3 className="text-sm font-semibold text-gray-700 dark:text-gray-300">発行の履歴</h3>
       {error && <p className="text-sm text-red-600 dark:text-red-400" role="alert">{error}</p>}
       {docs === null && !error && (

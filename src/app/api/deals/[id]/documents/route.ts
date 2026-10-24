@@ -106,7 +106,7 @@ export async function POST(request: Request, ctx: Ctx) {
       }
       built = {
         variant: "default", inputs: { options: parsed }, calc: { settlement: bctx.calc.settlement }, html: out.html, compactHtml: out.compactHtml,
-        xlsx: () => buildValuesXlsx({ title: businessDoc.label, dealNo: deal.dealNo, issuedOn: today, rows: out.rows, company }),
+        xlsx: () => buildValuesXlsx({ title: businessDoc.label, dealNo: deal.dealNo, issuedOn: today, rows: out.rows, issuerName: out.issuerName ?? company.nameJa }),
       };
     } else if (docType === "business_plan") {
       const inputs = deal.businessPlan;

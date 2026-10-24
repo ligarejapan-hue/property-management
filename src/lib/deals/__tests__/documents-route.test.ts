@@ -1,4 +1,5 @@
 import { describe, it, expect, vi, beforeEach } from "vitest";
+import ExcelJS from "exceljs";
 vi.mock("next/server", async () => (await import("./route-mocks")).nextServerMock());
 vi.mock("@/lib/api-helpers", async () => (await import("./route-mocks")).apiHelpersMock());
 vi.mock("@/lib/audit", () => ({ writeAuditLog: vi.fn(async () => undefined) }));
@@ -242,6 +243,14 @@ describe("業務書類の発行(段5a)", () => {
     expect(data.inputSnapshot).toEqual({ options: { issuer: SELLER.id, exempt: "no", receivedOn: "2026-05-01" } });
     expect((renderHtmlToPdfDocument as Fn).mock.calls[0][0]).toContain("金 1,500,000 円也");
     expect(JSON.stringify((writeAuditLog as Fn).mock.calls[0][0])).not.toContain("架空");
+    // 個人の売主が発行した領収書の Excel にも、自社の名前を入れない(最終レビュー)
+    const xlsxKey = [...files.keys()].find((k) => k.endsWith(".xlsx"))!;
+    const wb = new ExcelJS.Workbook();
+    await wb.xlsx.load(files.get(xlsxKey) as unknown as ArrayBuffer);
+    const cells: unknown[] = [];
+    wb.worksheets[0].eachRow((r) => r.eachCell((c) => cells.push(c.value)));
+    expect(JSON.stringify(cells)).not.toContain("架空不動産株式会社");
+    expect(cells).toContain("架空 一郎");
   });
   it("個人の発行者で非課税を選ばない・受け取る側でない発行者・形の違う選択 → 422 で何も作らない", async () => {
     for (const options of [

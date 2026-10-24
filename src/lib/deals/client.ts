@@ -39,7 +39,7 @@ export interface UserOption { id: string; name: string; role: string }
 export interface RateTableView { id: string; kind: string; validFrom: string; validTo: string | null; content: unknown; updatedAt: string }
 /** 書類タブに出す業務書類と、出す前の確認(段5)。 */
 export interface AvailableDocument {
-  docType: string; label: string; missing: string[]; defaults: Record<string, unknown>;
+  docType: string; label: string; missing: string[]; blocking: string[]; defaults: Record<string, unknown>;
   issuers: { value: string; label: string; individual: boolean }[] | null;
 }
 export interface DealDocumentView {

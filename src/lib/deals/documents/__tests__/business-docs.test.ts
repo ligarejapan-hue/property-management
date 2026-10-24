@@ -1,4 +1,6 @@
 import { describe, expect, it } from "vitest";
+import ExcelJS from "exceljs";
+import { buildValuesXlsx } from "../business/values-xlsx";
 import { computeDealCalc } from "../../calc/deal-calc";
 import { DEFAULT_COSTS, DEFAULT_TERMS, EMPTY_BANK_ACCOUNT, EMPTY_BROKER, EMPTY_SNAPSHOT } from "../../schemas";
 import { DEFAULT_PROPERTY_KINDS } from "../../constants";
@@ -145,5 +147,38 @@ describe("領収書", () => {
     expect(html).toContain(`金 ${s.net.amount.toLocaleString("ja-JP")} 円也`);
     expect(html).toContain("内訳: 固定資産税・都市計画税・管理費・修繕積立金等");
     expect(html).toContain("架空 花子 様");
+  });
+});
+
+describe("最終レビューの直し", () => {
+  it("個人が発行した領収書の Excel にも自社の名前を入れない", async () => {
+    const out = doc("deposit_receipt").build(ctx(), { issuer: SELLER.id, exempt: "no", receivedOn: null });
+    const buf = await buildValuesXlsx({ title: "手付金領収書", dealNo: "2026-0010", issuedOn: "2026-10-25", rows: out.rows, issuerName: out.issuerName ?? company.nameJa });
+    const wb = new ExcelJS.Workbook();
+    await wb.xlsx.load(buf as unknown as ArrayBuffer);
+    const values: unknown[] = [];
+    wb.worksheets[0].eachRow((row) => row.eachCell((c) => values.push(c.value)));
+    expect(JSON.stringify(values)).not.toContain("架空不動産株式会社");
+    expect(wb.creator).toBe("架空 一郎");
+    expect(values).toContain("架空 一郎");
+  });
+  it("精算書の Excel: 両方に金額がある行は、向きごとに2行で入れる・敷金の承継は合計のあと", () => {
+    const d = {
+      ...deal, hasOc: true,
+      leases: [{ room: "101", tenant: "架空", contractType: "ordinary" as const, period: null, rent: 0, commonFee: 0, parking: 0, other: 0, deposit: 200_000, arrears: false, arrearsAmount: 0, manager: null }],
+      settlementTerms: { ...deal.settlementTerms, others: [{ label: "測量費の負担", sellerToBuyer: 1_000, buyerToSeller: 5_000 }] },
+    };
+    const out = doc("settlement_statement").build(ctx(d), {});
+    const labels = out.rows.map((r) => r.label);
+    expect(labels).toContain("測量費の負担(売主→買主)");
+    expect(labels).toContain("測量費の負担(買主→売主)");
+    expect(labels.findIndex((l) => l.startsWith("預り敷金の承継"))).toBeGreaterThan(labels.indexOf("合計(買主→売主)"));
+    // PDF でも敷金の承継は合計の行のあと
+    expect(out.html.indexOf("預り敷金の承継")).toBeGreaterThan(out.html.indexOf(">合計<"));
+  });
+  it("金額が無い領収書は「空欄のまま出す」ができない(止める項目として返す)", () => {
+    expect(doc("deposit_receipt").blocking(ctx({ ...deal, deposit: null }))).toEqual(["手付金の金額"]);
+    expect(doc("deposit_receipt").blocking(ctx())).toEqual([]);
+    expect(doc("settlement_statement").blocking(ctx({ ...deal, price: null }))).toEqual([]);
   });
 });

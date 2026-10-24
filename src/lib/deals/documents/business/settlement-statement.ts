@@ -6,10 +6,13 @@ import { DASH, dateJa, dateTimeJa, headTable, money, namesOf, partiesOf, propert
 
 const cell = (n: number) => (n ? `${yen(n)}円` : "");
 
-/** 精算の行(当てはまらない行は段2の計算が出さない=管理費は区分だけ・賃料と敷金は OC だけ)。 */
-function rowsOf(c: BusinessDocContext): SettlementRow[] {
-  const s = c.calc.settlement;
-  return s.depositRow ? [...s.rows, s.depositRow] : s.rows;
+/** 精算の行(当てはまらない行は段2の計算が出さない=管理費は区分だけ・賃料と敷金は OC だけ)。敷金の承継は合計に入らないので別に出す。 */
+const rowsOf = (c: BusinessDocContext): SettlementRow[] => c.calc.settlement.rows;
+
+/** 預り敷金の承継(OC だけ)。合計の行のあとに出す(合計に入らない・最終レビュー)。 */
+function depositLine(c: BusinessDocContext, cols: number): SafeHtml | null {
+  const d = c.calc.settlement.depositRow;
+  return d ? html`<tr><td colspan="${cols}">${d.label}(${d.note ?? ""}・合計には含みません)</td><td class="num">${cell(d.sellerToBuyer)}</td><td class="num"></td></tr>` : null;
 }
 
 function head(c: BusinessDocContext): SafeHtml {
@@ -43,6 +46,7 @@ function fullTable(c: BusinessDocContext): SafeHtml {
 <tr><th>項目</th><th>計算期間</th><th>計算式</th><th class="num">売主→買主</th><th class="num">買主→売主</th></tr>
 ${rowsOf(c).map((r) => html`<tr><td>${r.label}${r.note ? html`(${r.note})` : null}</td><td>${r.period ?? ""}</td><td>${r.formula ?? ""}</td><td class="num">${cell(r.sellerToBuyer)}</td><td class="num">${cell(r.buyerToSeller)}</td></tr>`)}
 ${totals(c, 3)}
+${depositLine(c, 3)}
 </table>`;
 }
 
@@ -54,6 +58,7 @@ function compactTables(c: BusinessDocContext): { first: SafeHtml; detail: SafeHt
 <tr><th>項目</th><th class="num">売主→買主</th><th class="num">買主→売主</th></tr>
 ${rows.map((r) => html`<tr><td>${r.label}${r.note ? html`(${r.note})` : null}</td><td class="num">${cell(r.sellerToBuyer)}</td><td class="num">${cell(r.buyerToSeller)}</td></tr>`)}
 ${totals(c, 1)}
+${depositLine(c, 1)}
 </table>
 <p class="notes">計算の過程は2枚目の「計算明細」をご覧ください。</p>`,
     detail: html`<div style="page-break-before:always"><h1>計算明細</h1><table>
@@ -76,8 +81,13 @@ export function buildSettlementStatement(c: BusinessDocContext): { html: string;
   const rows: ValueRow[] = [
     { label: "物件", value: propertyLabel(c.deal) }, { label: "売買価格", value: c.deal.price },
     { label: "決済日時", value: dateTimeJa(c.deal.settlementAt) }, { label: "精算項目", heading: true },
-    ...rowsOf(c).map((r) => ({ label: `${r.label}(${r.sellerToBuyer ? "売主→買主" : "買主→売主"})`, value: r.sellerToBuyer || r.buyerToSeller })),
+    // 両方に金額がある行(自由行)は、向きごとに1行ずつ(最終レビュー)。
+    ...rowsOf(c).flatMap((r) => [
+      ...(r.sellerToBuyer ? [{ label: `${r.label}(売主→買主)`, value: r.sellerToBuyer }] : []),
+      ...(r.buyerToSeller || !r.sellerToBuyer ? [{ label: `${r.label}(買主→売主)`, value: r.buyerToSeller }] : []),
+    ]),
     { label: "合計(売主→買主)", value: s.totalSellerToBuyer }, { label: "合計(買主→売主)", value: s.totalBuyerToSeller },
+    ...(s.depositRow ? [{ label: `${s.depositRow.label}(${s.depositRow.note ?? ""}・合計には含まない)`, value: s.depositRow.sellerToBuyer }] : []),
     { label: "差引", value: s.netLine }, { label: "決済時のお支払額", value: s.paymentAtSettlement },
   ];
   return {
