@@ -103,8 +103,10 @@ describe("S1b-4: attachment-tab の download intent", () => {
     expect(attachSrc).toMatch(/function withDownloadIntent/);
     expect(attachSrc).toMatch(/download=1/);
     expect(attachSrc).toMatch(/att\.type === "registry"/);
-    // 判定は共通の関数(@/lib/attachments/download-intent)に1本化(@codex PR#500 16巡目)
-    expect(attachSrc).toMatch(/sendsDownloadIntent\(att\.type\) \? withDownloadIntent/);
+    // 判定は共通の関数(@/lib/attachments/download-intent)に1本化(@codex PR#500 16巡目)。
+    // 行ごと渡す=type だけでなく docKind(本人確認書類)も見る(@codex PR#571)
+    expect(attachSrc).toMatch(/sendsDownloadIntent\(att\) \? withDownloadIntent/);
+    expect(attachSrc).not.toMatch(/sendsDownloadIntent\(att\.type\)/);
     expect(attachSrc).toMatch(/from "@\/lib\/attachments\/download-intent"/);
   });
 
