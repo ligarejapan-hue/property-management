@@ -25,6 +25,7 @@ vi.mock("@/lib/prisma", () => ({
     dealRateTable: { findMany: vi.fn(async () => []) },
     dealSettings: { findUnique: vi.fn(async () => null) },
     companyProfile: { findUnique: vi.fn(async () => ({ nameJa: "架空不動産株式会社" })) },
+    user: { findMany: vi.fn(async () => []) },
   },
 }));
 
@@ -46,6 +47,7 @@ const pm = prismaMock as never as {
   deal: { findUnique: Fn };
   dealDocument: { findFirst: Fn; findMany: Fn; create: Fn };
   dealRateTable: { findMany: Fn };
+  user: { findMany: Fn };
 };
 const files = (storageMod as unknown as { __files: Map<string, Buffer> }).__files;
 const ctx = { params: Promise.resolve({ id: DEAL_ID }) };
@@ -288,7 +290,7 @@ describe("業務書類の発行(段5a)", () => {
     expect(body.version).toBe(3);
     const keys = body.documents.map((d: { docType: string }) => d.docType);
     // OC なしの取引には OC の4種を出さない(段5b)
-    expect(keys).toEqual(["settlement_statement", "settlement_guide", "deposit_receipt", "balance_receipt", "settlement_receipt", "power_of_attorney", "key_receipt"]);
+    expect(keys).toEqual(["settlement_statement", "settlement_guide", "deposit_receipt", "balance_receipt", "settlement_receipt", "power_of_attorney", "key_receipt", "checklist_contract", "checklist_settlement"]);
     const guide = body.documents.find((d: { docType: string }) => d.docType === "settlement_guide");
     expect(guide.missing).toEqual(["決済場所"]);
     const receipt = body.documents.find((d: { docType: string }) => d.docType === "deposit_receipt");
@@ -296,6 +298,39 @@ describe("業務書類の発行(段5a)", () => {
     expect(receipt.issuers.map((i: { value: string }) => i.value)).toEqual(["self", SELLER.id]);
     (getUserPermissions as Fn).mockResolvedValue([]);
     expect((await AVAILABLE(new Request("http://x"), ctx)).status).toBe(403);
+  });
+});
+
+describe("書類確認書の発行(段5c-1)", () => {
+  const SALES = "66666666-6666-4666-8666-000000000001";
+  const OPS = "66666666-6666-4666-8666-000000000002";
+  it("担当者の名前を引いて頭に出す・払い方は写しに残す", async () => {
+    pm.deal.findUnique.mockResolvedValue({ ...row, salesStaffId: SALES, opsStaffId: OPS, settlementAt: new Date("2026-06-30T01:00:00Z") });
+    pm.user.findMany.mockResolvedValue([{ id: SALES, name: "架空 営業" }, { id: OPS, name: "架空 業務" }]);
+    const options = { pay: { s_bring_payment: "from_balance" } };
+    const res = await POST(json("POST", { docType: "checklist_settlement", version: 3, options }), ctx);
+    expect(res.status).toBe(201);
+    expect((await res.json()).title).toBe("書類確認書(決済時)");
+    const h = (renderHtmlToPdfDocument as Fn).mock.calls[0][0];
+    expect(h).toContain("架空 営業");
+    expect(h).toContain("架空 業務");
+    expect(h).toContain("残金から");
+    expect(pm.user.findMany.mock.calls[0][0].where.id.in.sort()).toEqual([SALES, OPS]);
+    expect(pm.dealDocument.create.mock.calls[0][0].data.inputSnapshot).toEqual({ options });
+  });
+  it("担当が無ければユーザーを読まない・知らない払い方は 422", async () => {
+    const ok = await POST(json("POST", { docType: "checklist_contract", version: 3, options: { pay: {} } }), ctx);
+    expect(ok.status).toBe(201);
+    expect(pm.user.findMany).not.toHaveBeenCalled();
+    const bad = await POST(json("POST", { docType: "checklist_contract", version: 3, options: { pay: { c_bring_deposit: "card" } } }), ctx);
+    expect(bad.status).toBe(422);
+  });
+  it("出せる書類に、書類確認書のまとまりと払い方の選べる値を返す", async () => {
+    const body = await (await AVAILABLE(new Request("http://x"), ctx)).json();
+    const cl = body.documents.find((d: { docType: string }) => d.docType === "checklist_contract");
+    expect(cl.group).toBe("checklist");
+    expect(cl.choices.payMethods.map((x: { value: string }) => x.value)).toEqual(["cash", "from_deposit", "from_balance"]);
+    expect(cl.defaults).toEqual({ pay: { c_bring_deposit: "cash" } });
   });
 });
 

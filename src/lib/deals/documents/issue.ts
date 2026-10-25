@@ -20,6 +20,8 @@ export const DEAL_DOC_TYPES = {
   tenant_survey: { label: "賃借人属性調査書", variants: { default: "" } },
   landlord_change_notice: { label: "賃貸人変更のお知らせ", variants: { default: "" } },
   handover_checklist: { label: "引継書類チェックリスト", variants: { default: "" } },
+  checklist_contract: { label: "書類確認書(契約時)", variants: { default: "" } },
+  checklist_settlement: { label: "書類確認書(決済時)", variants: { default: "" } },
 } as const;
 
 export type DealDocType = keyof typeof DEAL_DOC_TYPES;

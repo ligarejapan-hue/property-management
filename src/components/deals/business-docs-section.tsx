@@ -9,11 +9,14 @@ import { dealsApi, dealDocumentFileUrl, DealApiError, errorText, type AvailableD
 
 const RECEIPTS = new Set(["deposit_receipt", "balance_receipt", "settlement_receipt"]);
 const str = (v: unknown) => (typeof v === "string" ? v : "");
+const CHECKLISTS = new Set(["checklist_contract", "checklist_settlement"]);
+const payOf = (v: unknown): Record<string, string> => (v && typeof v === "object" ? (v as Record<string, string>) : {});
 /** 書類タブのまとまり(一覧表の group と同じ順)。 */
 const GROUPS = [
   { key: "settlement", label: "決済の書類" },
   { key: "other", label: "そのほかの書類" },
   { key: "oc", label: "OC の書類" },
+  { key: "checklist", label: "書類確認書" },
 ] as const;
 type KeyRow = { label: string; count: string };
 const keyRowsOf = (v: unknown): KeyRow[] => (Array.isArray(v) ? (v as KeyRow[]) : []);
@@ -111,6 +114,7 @@ function IssueDialog({ dealId, doc, version, onCancel, onDone }: {
     || (doc.docType === "key_receipt" && (!keyRows.length || !keyRows.every(keyRowOk)));
   const setKey = (i: number, patch: Partial<KeyRow>) => set("keys", keyRows.map((k, j) => (j === i ? { ...k, ...patch } : k)));
   const choices = doc.choices ?? {};
+  const pay = payOf(values.pay);
 
   const issue = async () => {
     setBusy(true);
@@ -264,6 +268,18 @@ function IssueDialog({ dealId, doc, version, onCancel, onDone }: {
               <textarea value={str(values.payee)} onChange={(e) => set("payee", e.target.value || null)} maxLength={300} rows={2} aria-label="賃料のお振込先" className={inputCls} />
             </Field>
             <p className="text-xs text-gray-500">賃借人のいる部屋ごとに1枚ずつ作ります。売主・買主の押印の欄は空けて出します。</p>
+          </>
+        )}
+        {CHECKLISTS.has(doc.docType) && (
+          <>
+            {(choices.payItems ?? []).map((it) => (
+              <Field key={it.value} label={`${it.label}の払い方`}>
+                <select aria-label={`${it.label}の払い方`} value={pay[it.value] ?? "cash"} onChange={(e) => set("pay", { ...pay, [it.value]: e.target.value })} className={inputCls}>
+                  {(choices.payMethods ?? []).map((m) => <option key={m.value} value={m.value}>{m.label}</option>)}
+                </select>
+              </Field>
+            ))}
+            <p className="text-xs text-gray-500">チェック欄は空けて出します(紙に手で付けてください)。持参する金額は決済の計算と取引の値を使います。</p>
           </>
         )}
         {error && <p className="text-sm text-red-600 dark:text-red-400" role="alert">{error}</p>}

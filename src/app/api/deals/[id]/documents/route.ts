@@ -22,6 +22,7 @@ import { buildValuesXlsx } from "@/lib/deals/documents/business/values-xlsx";
 import { pdfPageCount } from "@/lib/deals/documents/business/pdf-pages";
 import type { BusinessDocContext } from "@/lib/deals/documents/business/common";
 import { computeDealCalc } from "@/lib/deals/calc/deal-calc";
+import { loadDealStaffNames } from "@/lib/deals/staff-names";
 import {
   DEAL_DOC_MIME, DEAL_DOC_TYPE_KEYS, dealDocumentBaseName, dealDocumentKey, dealDocumentTitle, type DealDocFormat,
 } from "@/lib/deals/documents/issue";
@@ -87,13 +88,14 @@ export async function POST(request: Request, ctx: Ctx) {
     const [rateRows, settings, company, branding] = await Promise.all([
       prisma.dealRateTable.findMany(), loadDealSettings(), loadCompanyProfile(), loadDealBranding(),
     ]);
+    const businessDoc = businessDocOf(docType);
+    // 担当者の名前は業務書類(書類確認書の頭)にだけ使う。
     // 書類の種類ごとに、保存済みの入力 → 計算と HTML → Excel を作る(保存・版・後片付けは共通)。
     let built: { variant: string; inputs: object; calc: object; html: string; compactHtml?: string; xlsx: () => Promise<Buffer> };
-    const businessDoc = businessDocOf(docType);
     if (businessDoc) {
       const bctx: BusinessDocContext = {
         deal, calc: computeDealCalc(deal, rateRows, settings.propertyKinds, today), settings, company, rateRows, today,
-        logo: branding.logo, seal: branding.seal,
+        logo: branding.logo, seal: branding.seal, staff: await loadDealStaffNames(deal),
       };
       if (!businessDoc.applies(bctx)) throw new ApiError(422, `この取引では${businessDoc.label}を出せません`, "DOC_NOT_APPLICABLE");
       // 止める項目(賃借人がいない・金額が無いなど)は画面だけでなくサーバーでも止める(空の書類を作らない)。
