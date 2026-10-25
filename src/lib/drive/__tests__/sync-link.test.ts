@@ -380,6 +380,61 @@ describe("syncOneLink", () => {
     expect(log).toEqual(["trash:w1"]);
   });
 
+  it("★紐づけを外して同じ物件に付け直しても、受け取り箱・写真タブへ取り込み済みのものは取り込み直さない(台帳は残る)", async () => {
+    const { drive } = fakeDrive({
+      root1: [folder("d2", "写真"), file("f0", "直下.pdf", "a")],
+      d2: [file("f2", "p.jpg", "c", { mimeType: "image/jpeg" })],
+    });
+    const orphan = { folderLinkId: null, propertyId: "P1", attachmentId: null, modifiedTime: null };
+    const { repo, log } = fakeRepo({
+      ledger: [
+        { driveFileId: "f0", md5: md5("a"), direction: "in", status: "inbox", name: "直下.pdf", ...orphan },
+        { driveFileId: "f2", md5: md5("c"), direction: "in", status: "photo", name: "p.jpg", ...orphan },
+      ],
+    });
+    await syncOneLink(drive, repo, LINK, { transfers: 20 });
+    expect(log).toEqual([]);
+  });
+
+  it("★別の物件に付け直したら、写真・添付は新しい物件へ取り込む(受け取り箱は物件に属さないので取り込み直さない)", async () => {
+    const { drive } = fakeDrive({
+      root1: [folder("d1", "契約資料"), folder("d2", "写真"), file("f0", "直下.pdf", "a")],
+      d1: [file("f1", "c.pdf", "b")],
+      d2: [file("f2", "p.jpg", "c", { mimeType: "image/jpeg" })],
+    });
+    const orphan = { folderLinkId: null, propertyId: "P-old", modifiedTime: null };
+    const { repo, log, writes } = fakeRepo({
+      ledger: [
+        { driveFileId: "f0", md5: md5("a"), direction: "in", status: "inbox", name: "直下.pdf", attachmentId: null, ...orphan },
+        { driveFileId: "f1", md5: md5("b"), direction: "in", status: "imported", name: "c.pdf", attachmentId: "old-att", ...orphan },
+        { driveFileId: "f2", md5: md5("c"), direction: "in", status: "photo", name: "p.jpg", attachmentId: null, ...orphan },
+      ],
+    });
+    await syncOneLink(drive, repo, LINK, { transfers: 20 });
+    expect(log).toEqual(["attach:f1:contract", "photo:f2"]);
+    // 台帳はいまの紐づけ・物件で書き直す
+    expect(writes.map((w) => [w.item.id, w.linkId, w.propertyId])).toEqual([
+      ["f1", "L1", "P1"],
+      ["f2", "L1", "P1"],
+    ]);
+  });
+
+  it("★ほかの(今も紐づいている)物件の行は、これまでどおり扱い済み", async () => {
+    const { drive } = fakeDrive({ root1: [folder("d2", "写真")], d2: [file("f2", "p.jpg", "c", { mimeType: "image/jpeg" })] });
+    const { repo, log } = fakeRepo({
+      ledger: [{ driveFileId: "f2", md5: md5("c"), direction: "in", status: "photo", name: "p.jpg", attachmentId: null, modifiedTime: null, folderLinkId: "L2", propertyId: "P2" }],
+    });
+    await syncOneLink(drive, repo, LINK, { transfers: 20 });
+    expect(log).toEqual([]);
+  });
+
+  it("台帳に書く行には、いまの物件も入れる(紐づけを外したあとの見分けに使う)", async () => {
+    const { drive } = fakeDrive({ root1: [file("f0", "直下.pdf", "a")] });
+    const { repo, writes } = fakeRepo();
+    await syncOneLink(drive, repo, LINK, { transfers: 20 });
+    expect(writes[0]).toMatchObject({ linkId: "L1", propertyId: "P1" });
+  });
+
   it("★失敗し続ける複製が上限を使い切っても、次の見回りではあとの書類と取り込みに番が回る(@codex #580 R4)", async () => {
     let t = 0;
     const backoff = new OutboundBackoff(() => t);

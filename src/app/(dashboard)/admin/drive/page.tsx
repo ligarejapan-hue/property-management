@@ -280,7 +280,7 @@ function LinkRow({ link, onRemoved }: { link: DriveFolderLink; onRemoved: () => 
       {confirm && (
         <ConfirmDialog
           title="この紐づけを外しますか?"
-          message="アプリとドライブのファイルはどちらも消えません。往復の記録(台帳)だけが消えます。"
+          message="アプリとドライブのファイルはどちらも消えません。あとで同じ物件に付け直しても、取り込み済みの書類は取り込み直しません。"
           confirmLabel="外す"
           busy={busy}
           onCancel={() => setConfirm(false)}
