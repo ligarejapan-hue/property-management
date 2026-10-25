@@ -290,7 +290,7 @@ describe("業務書類の発行(段5a)", () => {
     expect(body.version).toBe(3);
     const keys = body.documents.map((d: { docType: string }) => d.docType);
     // OC なしの取引には OC の4種を出さない(段5b)
-    expect(keys).toEqual(["settlement_statement", "settlement_guide", "deposit_receipt", "balance_receipt", "settlement_receipt", "power_of_attorney", "key_receipt", "checklist_contract", "checklist_settlement"]);
+    expect(keys).toEqual(["settlement_statement", "settlement_guide", "settlement_guide_seller", "deposit_receipt", "balance_receipt", "settlement_receipt", "power_of_attorney", "key_receipt", "checklist_contract", "checklist_settlement"]);
     const guide = body.documents.find((d: { docType: string }) => d.docType === "settlement_guide");
     expect(guide.missing).toEqual(["決済場所"]);
     const receipt = body.documents.find((d: { docType: string }) => d.docType === "deposit_receipt");
@@ -298,6 +298,24 @@ describe("業務書類の発行(段5a)", () => {
     expect(receipt.issuers.map((i: { value: string }) => i.value)).toEqual(["self", SELLER.id]);
     (getUserPermissions as Fn).mockResolvedValue([]);
     expect((await AVAILABLE(new Request("http://x"), ctx)).status).toBe(403);
+  });
+});
+
+describe("残金決済のご案内(売主様)の発行", () => {
+  const SELLER = { id: "33333333-3333-4333-8333-000000000001", role: "seller", partyType: "individual", name: "架空 一郎", representative: null, address: null, phone: null, shareNum: null, shareDen: null, isSelf: false, sortOrder: 0, version: 1 };
+  it("諸費用の行を写しに残し、お受取額から引く・監査に名前は無い・金額が負なら 422", async () => {
+    pm.deal.findUnique.mockResolvedValue({ ...row, deposit: BigInt(3_000_000), settlementAt: new Date("2026-06-30T01:00:00Z"), parties: [SELLER] });
+    const options = { costs: [{ label: "測量費", amount: 300_000 }], receiveTo: null, belongings: null };
+    const res = await POST(json("POST", { docType: "settlement_guide_seller", version: 3, options }), ctx);
+    expect(res.status).toBe(201);
+    expect((await res.json()).title).toBe("残金決済のご案内(売主様)");
+    expect(pm.dealDocument.create.mock.calls[0][0].data.inputSnapshot).toEqual({ options });
+    const h = (renderHtmlToPdfDocument as Fn).mock.calls[0][0];
+    expect(h).toContain("架空 一郎 様");
+    expect(h).toContain("26,700,000円");
+    expect(JSON.stringify((writeAuditLog as Fn).mock.calls[0][0])).not.toContain("架空");
+    const bad = await POST(json("POST", { docType: "settlement_guide_seller", version: 3, options: { ...options, costs: [{ label: "x", amount: -1 }] } }), ctx);
+    expect(bad.status).toBe(422);
   });
 });
 
