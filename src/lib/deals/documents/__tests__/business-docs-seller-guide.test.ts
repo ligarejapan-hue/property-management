@@ -81,12 +81,17 @@ describe("残金決済のご案内(売主様)", () => {
     expect(out.rows).toContainEqual({ label: "諸費用の合計", value: 350_000 });
   });
 
-  it("出す前の確認と、選ぶものの形(諸費用の行は20行まで・金額は0以上の整数)", () => {
+  it("出す前の確認と、選ぶものの形(諸費用の行は30行まで・金額は0以上の整数)", () => {
     expect(doc(KEY).missing(ctx({ ...deal, settlementPlace: null, parties: [] }))).toEqual(["決済場所", "売主"]);
     const o = doc(KEY).options;
     expect(() => o.parse({ costs: [{ label: "x", amount: -1 }], receiveTo: null, belongings: null })).toThrow();
     expect(() => o.parse({ costs: [{ label: "x", amount: 1.5 }], receiveTo: null, belongings: null })).toThrow();
-    expect(() => o.parse({ costs: Array.from({ length: 21 }, () => ({ label: "x", amount: 1 })), receiveTo: null, belongings: null })).toThrow();
+    expect(() => o.parse({ costs: Array.from({ length: 31 }, () => ({ label: "x", amount: 1 })), receiveTo: null, belongings: null })).toThrow();
+    // 費用のその他が上限(20行)でも、初期値はそのまま発行できる(仲介手数料・抹消・測量を足して 23 行)
+    const full = ctx({ ...brokerDeal, costs: { ...brokerDeal.costs, others: Array.from({ length: 20 }, (_, i) => ({ label: `費用${i}`, amount: 1 })) } });
+    const values = doc(KEY).defaults(full).values;
+    expect((values.costs as unknown[]).length).toBe(23);
+    expect(() => o.parse(values)).not.toThrow();
     expect(o.parse({ costs: [], receiveTo: null, belongings: null })).toEqual({ costs: [], receiveTo: null, belongings: null });
   });
 });

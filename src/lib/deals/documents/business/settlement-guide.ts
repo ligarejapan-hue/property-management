@@ -56,10 +56,12 @@ ${companyBlock(c.company, c.logo)}`;
 
 // ---- 売主様あて(依頼書 4.3 の「残代金+精算金−諸費用」・10-25 発注者の決定)----
 
+/** 諸費用の行の上限。初期値(費用のその他 20 行+仲介手数料・抹消・測量)がそのまま収まる数。 */
+export const SELLER_COST_ROWS_MAX = 30;
 const sellerCostSchema = z.object({ label: z.string().trim().min(1, "諸費用の項目名が空の行があります").max(50), amount: yenInt }).strict();
 export const sellerGuideOptionsSchema = z.object({
   /** お受取額から差し引く諸費用(初期値は取引の費用・発行のときに直す)。 */
-  costs: z.array(sellerCostSchema).max(20),
+  costs: z.array(sellerCostSchema).max(SELLER_COST_ROWS_MAX),
   /** お受け取りの口座(空なら「当日までにお知らせください」)。 */
   receiveTo: text(300),
   belongings: text(500),

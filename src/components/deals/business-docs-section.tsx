@@ -223,7 +223,7 @@ function IssueDialog({ dealId, doc, version, onCancel, onDone }: {
                   </Button>
                 </div>
               ))}
-              {costRows.length < 20 && (
+              {costRows.length < 30 && (
                 <Button variant="secondary" size="sm" onClick={() => set("costs", [...costRows, { label: "", amount: "" }])}>
                   <Plus className="h-4 w-4" />
                   諸費用の行を足す
