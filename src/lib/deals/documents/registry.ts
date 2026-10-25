@@ -1,12 +1,18 @@
 import { z } from "zod";
 import type { BusinessDocContext, ValueRow } from "./business/common";
-import { partiesOf } from "./business/common";
+import { partiesOf, type Choice } from "./business/common";
 import { buildSettlementStatement } from "./business/settlement-statement";
 import { DEFAULT_BELONGINGS, buildSettlementGuide, defaultPayee, settlementGuideOptionsSchema } from "./business/settlement-guide";
 import {
   RECEIPT_KINDS, buildReceipt, issuerChoices, receiptAmount, receiptOptionsSchema, receiptSides,
   type IssuerChoice, type ReceiptKind,
 } from "./business/receipts";
+import { POA_MATTERS, buildPowerOfAttorney, poaChoices, poaOptionsSchema } from "./business/power-of-attorney";
+import { buildKeyReceipt, keyReceiptOptionsSchema, keyReceiverChoices } from "./business/key-receipt";
+import {
+  buildHandoverChecklist, buildLandlordChangeNotice, buildOcPurchaseConsult, buildTenantSurvey, landlordChangeDefaults,
+  landlordChangeOptionsSchema, occupiedLeases,
+} from "./business/oc-docs";
 
 /**
  * 業務書類の一覧表(設計 §4.1・計画 段5a)。書類ごとに1行:
@@ -16,6 +22,8 @@ import {
 export interface BusinessDocDef {
   key: string;
   label: string;
+  /** 書類タブのまとまり(決済の書類/そのほかの書類/OC の書類・計画 段5b の読み替え 8)。 */
+  group: "settlement" | "other" | "oc";
   /** この取引で出せるか(書類タブに出すか)。 */
   applies(c: BusinessDocContext): boolean;
   /** 必要な項目のうち空欄のもの(出す前の確認に出す)。 */
@@ -24,7 +32,7 @@ export interface BusinessDocDef {
   blocking(c: BusinessDocContext): string[];
   options: z.ZodType<Record<string, unknown>>;
   /** 発行のときに選ぶものの初期値と選べる値(画面に渡す)。 */
-  defaults(c: BusinessDocContext): { values: Record<string, unknown>; issuers?: IssuerChoice[] };
+  defaults(c: BusinessDocContext): { values: Record<string, unknown>; issuers?: IssuerChoice[]; choices?: Record<string, Choice[]> };
   /** 組み立て。html = PDF にするもの。compactHtml があれば、html が 2 ページ以上のときにそちらで作り直す。 */
   build(c: BusinessDocContext, options: Record<string, unknown>): { html: string; compactHtml?: string; rows: ValueRow[]; issuerName?: string };
 }
@@ -33,10 +41,19 @@ const emptyOptions = z.object({}).strict();
 const need = (pairs: [string, unknown][]) => pairs.filter(([, v]) => v === null || v === undefined || v === "").map(([k]) => k);
 const hasParty = (c: BusinessDocContext, role: "seller" | "buyer") => (partiesOf(c.deal, role).length ? "ok" : null);
 
+/** 賃借人のいる部屋が無ければ、お知らせ・調査書は組み立てられない(空のページになる)。 */
+const needTenants = (c: BusinessDocContext) => (occupiedLeases(c).length ? [] : ["賃借人(賃貸条件)"]);
+
+/** OC ありの取引だけに出す書類(選ぶもの無し。お知らせは上書きする)。 */
+function ocDef(key: string, label: string, d: Pick<BusinessDocDef, "missing" | "blocking" | "build">): BusinessDocDef {
+  return { key, label, group: "oc", applies: (c) => c.deal.hasOc, options: emptyOptions, defaults: () => ({ values: {} }), ...d };
+}
+
 function receiptDef(kind: ReceiptKind): BusinessDocDef {
   return {
     key: kind,
     label: RECEIPT_KINDS[kind].label,
+    group: "settlement",
     // 精算金は差引が 0 のときは出さない(計画の読み替え 8)。手付金・残金はいつも出す(金額が無ければ確認に出す)。
     applies: (c) => kind !== "settlement_receipt" || receiptSides(kind, c) !== null,
     missing: (c) => need([
@@ -59,6 +76,7 @@ export const BUSINESS_DOCS: BusinessDocDef[] = [
   {
     key: "settlement_statement",
     label: "精算書",
+    group: "settlement",
     applies: () => true,
     missing: (c) => need([
       ["決済日時", c.deal.settlementAt], ["売買価格", c.deal.price], ["売主", hasParty(c, "seller")], ["買主", hasParty(c, "buyer")],
@@ -71,6 +89,7 @@ export const BUSINESS_DOCS: BusinessDocDef[] = [
   {
     key: "settlement_guide",
     label: "残金決済のご案内",
+    group: "settlement",
     applies: () => true,
     missing: (c) => need([
       ["決済日時", c.deal.settlementAt], ["決済場所", c.deal.settlementPlace], ["売買価格", c.deal.price], ["買主", hasParty(c, "buyer")],
@@ -83,6 +102,57 @@ export const BUSINESS_DOCS: BusinessDocDef[] = [
   receiptDef("deposit_receipt"),
   receiptDef("balance_receipt"),
   receiptDef("settlement_receipt"),
+  {
+    key: "power_of_attorney",
+    label: "委任状",
+    group: "other",
+    applies: () => true,
+    missing: (c) => need([["物件", c.deal.propertySnapshot.address || c.deal.propertySnapshot.buildingName]]),
+    blocking: (c) => (poaChoices(c).initialPrincipal ? [] : ["委任する人(売主・買主)"]),
+    options: poaOptionsSchema as z.ZodType<Record<string, unknown>>,
+    defaults: (c) => {
+      const ch = poaChoices(c);
+      return {
+        values: { principal: ch.initialPrincipal, agent: "self", matters: [], otherMatter: null, signedOn: null },
+        choices: { principal: ch.principal, agent: ch.agent, matters: Object.entries(POA_MATTERS).map(([value, label]) => ({ value, label })) },
+      };
+    },
+    build: (c, o) => buildPowerOfAttorney(c, poaOptionsSchema.parse(o)),
+  },
+  {
+    key: "key_receipt",
+    label: "鍵受領書",
+    group: "other",
+    applies: () => true,
+    missing: (c) => need([["売主", hasParty(c, "seller")], ["買主", hasParty(c, "buyer")]]),
+    blocking: () => [],
+    options: keyReceiptOptionsSchema as z.ZodType<Record<string, unknown>>,
+    defaults: (c) => {
+      const { choices, initial } = keyReceiverChoices(c);
+      return { values: { receiver: initial, keys: [], receivedOn: null }, choices: { receiver: choices } };
+    },
+    build: (c, o) => buildKeyReceipt(c, keyReceiptOptionsSchema.parse(o)),
+  },
+  ocDef("oc_purchase_consult", "仕入相談表", {
+    missing: (c) => need([["売買価格", c.deal.price], ["賃貸条件", c.deal.leases.length ? "ok" : null]]),
+    blocking: () => [],
+    build: (c) => buildOcPurchaseConsult(c),
+  }),
+  ocDef("tenant_survey", "賃借人属性調査書", { missing: () => [], blocking: needTenants, build: (c) => buildTenantSurvey(c) }),
+  {
+    ...ocDef("landlord_change_notice", "賃貸人変更のお知らせ", {
+      missing: (c) => need([["決済日時(変更日)", c.deal.settlementAt], ["売主", hasParty(c, "seller")], ["買主", hasParty(c, "buyer")]]),
+      blocking: needTenants,
+      build: (c, o) => buildLandlordChangeNotice(c, landlordChangeOptionsSchema.parse(o)),
+    }),
+    options: landlordChangeOptionsSchema as z.ZodType<Record<string, unknown>>,
+    defaults: (c) => ({ values: landlordChangeDefaults(c) }),
+  },
+  ocDef("handover_checklist", "引継書類チェックリスト", {
+    missing: (c) => need([["賃貸条件", c.deal.leases.length ? "ok" : null]]),
+    blocking: () => [],
+    build: (c) => buildHandoverChecklist(c),
+  }),
 ];
 
 export const BUSINESS_DOC_KEYS = BUSINESS_DOCS.map((d) => d.key);

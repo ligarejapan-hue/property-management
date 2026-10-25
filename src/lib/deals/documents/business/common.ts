@@ -4,6 +4,7 @@ import type { RateTableRow } from "../../rate-tables";
 import type { DealSettingsView } from "../../settings";
 import type { DealPartyView, DealView } from "../../view";
 import { yen } from "../../calc/format";
+import { BANK_ACCOUNT_TYPE_LABELS } from "../../constants";
 import { formatJstDateTime } from "../../datetime";
 import { html, type SafeHtml } from "../html";
 
@@ -45,4 +46,22 @@ export function propertyLabel(deal: DealView): string {
 /** 書類の頭の表(項目と値)。値が無い行は「—」。 */
 export function headTable(rows: [string, string | null][]): SafeHtml {
   return html`<table>${rows.map(([k, v]) => html`<tr><th style="width:28%">${k}</th><td>${v ?? DASH}</td></tr>`)}</table>`;
+}
+
+/** 発行のときに当事者などから選ぶ値(画面の選択肢)。 */
+export interface Choice { value: string; label: string }
+
+export const LEASE_CONTRACT_LABELS: Record<string, string> = { ordinary: "普通借家", fixed_term: "定期借家" };
+
+/** 署名・押印の欄(どの書類でも常に空欄・設計 §4.4)。 */
+export function signBox(label: string): SafeHtml {
+  return html`<div style="border:1px solid #333;padding:2mm 3mm;margin-top:2mm;height:20mm;width:60mm;margin-left:auto;font-size:9pt">${label}</div>`;
+}
+
+/** 取引の設定の振込先口座を1行に。銀行名が無ければ null。 */
+export function bankAccountText(c: BusinessDocContext): string | null {
+  const b = c.settings.bankAccount;
+  if (!b.bankName) return null;
+  return [b.bankName, b.branchName, b.accountType ? BANK_ACCOUNT_TYPE_LABELS[b.accountType] : null, b.accountNumber, b.accountHolder && `名義 ${b.accountHolder}`]
+    .filter(Boolean).join(" ");
 }

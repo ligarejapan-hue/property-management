@@ -14,6 +14,12 @@ export const DEAL_DOC_TYPES = {
   deposit_receipt: { label: "手付金領収書", variants: { default: "" } },
   balance_receipt: { label: "残金領収書", variants: { default: "" } },
   settlement_receipt: { label: "精算金領収書", variants: { default: "" } },
+  power_of_attorney: { label: "委任状", variants: { default: "" } },
+  key_receipt: { label: "鍵受領書", variants: { default: "" } },
+  oc_purchase_consult: { label: "仕入相談表", variants: { default: "" } },
+  tenant_survey: { label: "賃借人属性調査書", variants: { default: "" } },
+  landlord_change_notice: { label: "賃貸人変更のお知らせ", variants: { default: "" } },
+  handover_checklist: { label: "引継書類チェックリスト", variants: { default: "" } },
 } as const;
 
 export type DealDocType = keyof typeof DEAL_DOC_TYPES;
