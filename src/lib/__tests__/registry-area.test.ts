@@ -206,3 +206,17 @@ describe("迷う謄本は読まない(内部レビュー)", () => {
     expect(parseLandArea(text).value).toBeNull();
   });
 });
+
+describe("表が途中で切れている文字は読まない(@codex PR#593 P2)", () => {
+  it("★土地: 表の終わり(権利部)が無い=後ろに更正の行があるかもしれないので読まない", () => {
+    const cut = land(["┃１番１ │宅地 │ １２０：５０│余白 ┃"]).split("\n").slice(0, 5).join("\n");
+    expect(cut).not.toContain("権 利 部");
+    expect(parseLandArea(cut).value).toBeNull();
+  });
+
+  it("★建物: 表の終わりが無い=後ろに階や増築の行があるかもしれないので読まない", () => {
+    const cut = house(["┃居宅 │木造２階建 │ １階 ５０：００│新築 ┃"]).split("\n").slice(0, 6).join("\n");
+    expect(cut).not.toContain("権 利 部");
+    expect(parseBuildingFloorArea(cut).value).toBeNull();
+  });
+});

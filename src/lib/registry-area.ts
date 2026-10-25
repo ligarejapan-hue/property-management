@@ -85,12 +85,19 @@ function findTable(raw: string, section: RegExp, header: RegExp, colLabel: RegEx
   if (col === -1) return null;
   const causeCol = headerCells.findIndex((c) => /原\s*因/.test(c));
   const rows: string[][] = [];
+  let closed = false;
   for (let i = headerIdx + 1; i < lines.length; i++) {
-    if (end.test(lines[i])) break;
+    if (end.test(lines[i])) {
+      closed = true;
+      break;
+    }
     const cells = cellsOf(lines[i]);
     if (!cells) continue;
     rows.push(cells);
   }
+  // ⚠表の終わり(権利部・附属建物・次の表題部など)が文字の中に無ければ読まない。PDF の先頭の数ページだけを
+  //   読んだときに表が途中で切れていると、後ろの更正・増築の行が抜けて古い値や一部の合計になる(@codex PR#593 P2)。
+  if (!closed) return null;
   return { rows, col, causeCol };
 }
 
