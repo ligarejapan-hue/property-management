@@ -21,19 +21,28 @@ export type RegistryRightsView =
     notes: string[];
   };
 
+/**
+ * 登記の目的・注記には名前が入りうる(「〇〇持分差押」・持分移転の名義人を特定できない注記など・@codex P1)。
+ * 名前を出せないときは、目的は「持分」の前を伏せ、注記は件数だけにする。
+ */
+export const maskPurpose = (p: string) => p.replace(/[^\s　、・]+?持分/g, "(名義人)持分");
+const genericNotes = (notes: string[]) => (notes.length ? [`謄本に目で確かめてほしい点があります(${notes.length}件)。謄本を開いて確認してください。`] : []);
+
 /** 甲区を読めない謄本は判定できない(自動の項目は出さない)。 */
 const readable = (s: DealRegistryState): s is Extract<DealRegistryState, { status: "ok" }> => s.status === "ok" && s.summary.hasKouku;
 
-/** 画面に出す形。権利者名は「所有者の閲覧」もある人だけ。債務者・今の所有者は出さない。 */
+/** 画面に出す形。権利者名・注記・目的の名前は「所有者の閲覧」もある人だけ。債務者・今の所有者は出さない。 */
 export function registryRightsView(s: DealRegistryState, o: { showNames: boolean }): RegistryRightsView {
   if (s.status === "none") return { status: "none" };
   if (!readable(s)) return { status: "unreadable" };
   return {
     status: "ok",
     attachmentCreatedAt: s.attachmentCreatedAt,
-    activeRights: s.summary.activeRights.map((r) => ({ rank: r.rank, purpose: r.purpose, amount: r.amount, holder: o.showNames ? r.holder : null })),
-    cautions: s.summary.cautions.map((c) => ({ section: c.section, rank: c.rank, purpose: c.purpose })),
-    notes: [...s.summary.notes],
+    activeRights: s.summary.activeRights.map((r) => ({
+      rank: r.rank, purpose: o.showNames ? r.purpose : maskPurpose(r.purpose), amount: r.amount, holder: o.showNames ? r.holder : null,
+    })),
+    cautions: s.summary.cautions.map((c) => ({ section: c.section, rank: c.rank, purpose: o.showNames ? c.purpose : maskPurpose(c.purpose) })),
+    notes: o.showNames ? [...s.summary.notes] : genericNotes(s.summary.notes),
   };
 }
 
@@ -44,8 +53,8 @@ export function registryDocInfo(s: DealRegistryState): { activeRights: number; c
   if (s.status === "none") return { activeRights: 0, caution: null };
   if (!readable(s)) return { activeRights: 0, caution: REGISTRY_UNREADABLE_NOTE };
   const parts = [
-    ...(s.summary.cautions.length ? [`${s.summary.cautions.map((c) => `${c.section} ${c.rank}番 ${c.purpose}`).join("・")}が残っています。`] : []),
-    ...s.summary.notes,
+    ...(s.summary.cautions.length ? [`${s.summary.cautions.map((c) => `${c.section} ${c.rank}番 ${maskPurpose(c.purpose)}`).join("・")}が残っています。`] : []),
+    ...genericNotes(s.summary.notes),
   ];
   return { activeRights: s.summary.activeRights.length, caution: parts.length ? parts.join("/ ") : null };
 }
