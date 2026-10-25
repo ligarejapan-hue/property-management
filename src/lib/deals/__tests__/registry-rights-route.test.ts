@@ -25,7 +25,7 @@ const SUMMARY = {
 beforeEach(() => {
   vi.clearAllMocks();
   (getApiSession as Fn).mockResolvedValue({ id: USER_ID, role: "field_staff" });
-  (getUserPermissions as Fn).mockResolvedValue(DEAL_PERMS);
+  (getUserPermissions as Fn).mockResolvedValue([...DEAL_PERMS, { resource: "registry_pdf", action: "preview", granted: true }]);
   findUnique.mockResolvedValue({ id: DEAL_ID, propertyId: PROP_ID });
   propFind.mockResolvedValue({ createdBy: USER_ID, assignedTo: null });
   loadDealRegistryRights.mockImplementation(async (p: string | null) => (p ? { status: "ok", attachmentCreatedAt: "2026-10-01T00:00:00.000Z", summary: SUMMARY } : { status: "none" }));
@@ -36,8 +36,14 @@ describe("取引の謄本の登記の現況の口(段5c-2)", () => {
     (getUserPermissions as Fn).mockResolvedValue(DEAL_PERMS.filter((p) => p.resource !== "property"));
     expect((await (await GET(new Request("http://x"), ctx)).json()).rights).toEqual({ status: "none" });
     expect(loadDealRegistryRights).toHaveBeenCalledWith(null);
-    (getUserPermissions as Fn).mockResolvedValue(DEAL_PERMS);
+    (getUserPermissions as Fn).mockResolvedValue([...DEAL_PERMS, { resource: "registry_pdf", action: "preview", granted: true }]);
     propFind.mockResolvedValue({ createdBy: "77777777-7777-4777-8777-777777777777", assignedTo: null });
+    loadDealRegistryRights.mockClear();
+    await GET(new Request("http://x"), ctx);
+    expect(loadDealRegistryRights).toHaveBeenCalledWith(null);
+    // 謄本を見る権限(registry_pdf:preview)が無い人にも読まない(既存の謄本の画面と同じ)
+    propFind.mockResolvedValue({ createdBy: USER_ID, assignedTo: null });
+    (getUserPermissions as Fn).mockResolvedValue(DEAL_PERMS.filter((p) => p.resource !== "registry_pdf"));
     loadDealRegistryRights.mockClear();
     await GET(new Request("http://x"), ctx);
     expect(loadDealRegistryRights).toHaveBeenCalledWith(null);
@@ -57,7 +63,7 @@ describe("取引の謄本の登記の現況の口(段5c-2)", () => {
   });
 
   it("所有者の閲覧もあれば権利者名を出す", async () => {
-    (getUserPermissions as Fn).mockResolvedValue([...DEAL_PERMS, { resource: "owner", action: "read", granted: true }]);
+    (getUserPermissions as Fn).mockResolvedValue([...DEAL_PERMS, { resource: "registry_pdf", action: "preview", granted: true }, { resource: "owner", action: "read", granted: true }]);
     const body = await (await GET(new Request("http://x"), ctx)).json();
     expect(body.rights.activeRights[0].holder).toBe("架空銀行");
     expect(JSON.stringify(body)).not.toContain("架空 一郎");

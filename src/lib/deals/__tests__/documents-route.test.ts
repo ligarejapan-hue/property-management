@@ -328,6 +328,7 @@ describe("書類確認書と謄本の登記の現況(段5c-2)", () => {
   beforeEach(() => {
     pm.deal.findUnique.mockResolvedValue({ ...row, propertyId: "22222222-2222-4222-8222-222222222222", settlementAt: new Date("2026-06-30T01:00:00Z") });
     loadDealRegistryRights.mockImplementation((async (p: string | null) => (p ? RIGHTS : { status: "none" })) as never);
+    (getUserPermissions as Fn).mockResolvedValue([...DEAL_PERMS, { resource: "registry_pdf", action: "preview", granted: true }]);
   });
   it("決済時の書類確認書は謄本を読み、抹消の項目と登記の注意を出す(名前は出さない)", async () => {
     const res = await POST(json("POST", { docType: "checklist_settlement", version: 3, options: { pay: {} } }), ctx);
