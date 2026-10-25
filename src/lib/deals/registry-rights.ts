@@ -25,7 +25,8 @@ export type RegistryRightsView =
  * 登記の目的・注記には名前が入りうる(「〇〇持分差押」・持分移転の名義人を特定できない注記など・@codex P1)。
  * 名前を出せないときは、目的は「持分」の前を伏せ、注記は件数だけにする。
  */
-export const maskPurpose = (p: string) => p.replace(/[^\s　、・]+?持分/g, "(名義人)持分");
+// 最後の「持分」より前を丸ごと伏せる(中黒・読点・空白を含む名前も残さない・@codex P1)。
+export const maskPurpose = (p: string) => p.replace(/^[\s\S]+持分/, "(名義人)持分");
 const genericNotes = (notes: string[]) => (notes.length ? [`謄本に目で確かめてほしい点があります(${notes.length}件)。謄本を開いて確認してください。`] : []);
 
 /** 甲区を読めない謄本は判定できない(自動の項目は出さない)。 */

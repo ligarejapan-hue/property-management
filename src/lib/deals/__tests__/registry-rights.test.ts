@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import type { RegistryRightsSummary } from "@/lib/registry-strike";
-import { registryDocInfo, registryRightsView, type DealRegistryState } from "../registry-rights";
+import { maskPurpose, registryDocInfo, registryRightsView, type DealRegistryState } from "../registry-rights";
 
 const summary = (p: Partial<RegistryRightsSummary> = {}): RegistryRightsSummary => ({
   underlineDetected: true, hasKouku: true, hasOtsuku: true, currentOwners: [{ name: "架空 一郎", address: "架空県架空市1-1", share: null }],
@@ -36,6 +36,12 @@ describe("謄本の登記の現況(段5c-2)", () => {
     expect(h3.status === "ok" && h3.cautions[0].purpose).toBe("(名義人)持分差押");
     expect(h3.status === "ok" && h3.activeRights[0].purpose).toBe("(名義人)持分抵当権設定");
     expect(JSON.stringify(registryDocInfo(seized))).not.toContain("架空四郎");
+    // 中黒・読点・空白を含む名前も、持分の前を丸ごと伏せる(@codex P1)
+    for (const p of ["ジョン・スミス持分差押", "架空 四郎持分差押", "架空四郎、架空五郎持分仮差押"]) {
+      expect(maskPurpose(p)).toMatch(/^\(名義人\)持分(差押|仮差押)$/);
+    }
+    expect(maskPurpose("抵当権設定")).toBe("抵当権設定");
+    expect(maskPurpose("持分全部移転")).toBe("持分全部移転");
     const s3 = registryRightsView(seized, { showNames: true });
     expect(s3.status === "ok" && s3.cautions[0].purpose).toBe("架空四郎持分差押");
     expect(JSON.stringify(registryRightsView(ok(summary()), { showNames: true }))).not.toContain("架空 一郎");
