@@ -17,7 +17,9 @@ export type NoticeKind =
   // 段階2(画面を開いている間に件数を取りに行って知らせる・設計書 §5)
   | "next_action"
   | "inquiry_new"
-  | "registry_job_done";
+  | "registry_job_done"
+  // ドライブの見回りが続けて失敗(管理者だけ)
+  | "drive_sync_failed";
 
 export interface Notice {
   id: string;
@@ -51,7 +53,7 @@ export const NOTICE_SWITCH_KEY = "pm:notices:switched-at";
 export const NOTICE_TTL_MS = 7 * 24 * 60 * 60 * 1000;
 export const NOTICE_MAX = 50;
 
-const KINDS: readonly NoticeKind[] = ["edit_lock_warn", "edit_lock_lost", "idle_logout_warn", "next_action", "inquiry_new", "registry_job_done"];
+const KINDS: readonly NoticeKind[] = ["edit_lock_warn", "edit_lock_lost", "idle_logout_warn", "next_action", "inquiry_new", "registry_job_done", "drive_sync_failed"];
 
 function isNotice(v: unknown): v is Notice {
   if (!v || typeof v !== "object") return false;
