@@ -34,7 +34,12 @@ import { getStorage } from "@/lib/storage";
 import { extractStorageKeyFromUrl } from "@/lib/storage/url-to-key";
 import { CASE_DATE_FIELDS, dateOnlyString } from "@/lib/case-dates";
 import { applyInquirerNameVisibility } from "@/lib/inquirer-name";
-import { LEAD_EXCLUSION_DATE_FIELDS, jstTodayDateOnly, normalizeLeadExclusionPatch } from "@/lib/lead-exclusion";
+import {
+  LEAD_EXCLUSION_DATE_FIELDS,
+  caseStatusForLeadExclusionChange,
+  jstTodayDateOnly,
+  normalizeLeadExclusionPatch,
+} from "@/lib/lead-exclusion";
 
 // ---------- GET /api/properties/[id] ----------
 
@@ -413,7 +418,23 @@ export async function PATCH(
       },
       jstTodayDateOnly(new Date()),
     );
-    const persistedFields = { ...updateFields, ...unitOnlyPatch, ...buildingNamePatch, ...leadExclusionPatch };
+    // 除外申請の状態が変わったら案件ステータスも合わせる(申請=除外申請中・承認=除外・不可=コンタクト中・2026-10-25)。
+    // ⚠同じ保存で案件ステータスも送られていたら、そちらを優先する(人の選択を上書きしない)。
+    const leadExclusionCaseStatus =
+      "leadExclusionStatus" in leadExclusionPatch && updateFields.caseStatus === undefined
+        ? caseStatusForLeadExclusionChange(
+            current.leadExclusionStatus,
+            leadExclusionPatch.leadExclusionStatus ?? null,
+            current.caseStatus,
+          )
+        : null;
+    const persistedFields = {
+      ...updateFields,
+      ...unitOnlyPatch,
+      ...buildingNamePatch,
+      ...leadExclusionPatch,
+      ...(leadExclusionCaseStatus ? { caseStatus: leadExclusionCaseStatus } : {}),
+    };
 
     // 棟へのつなぎ直しが要るか(設計 2026-10-04 §4.4)。物件名・種別・住所のどれかが変わったとき、
     // または画面が棟を選んで送ってきたときだけ。⚠メモだけの保存で棟を触らない。

@@ -39,7 +39,8 @@ export const PROPERTY_DONE_GLYPH = "✓";
  *   終わった物件が現役の赤で出て状態を誤らせる(@codex #409 R2 P2)。
  * `other_brokerage`(他社で決まった)も終わった案件(2026-10-20 の整理で名前が変わり意味がはっきりした)。
  */
-const DONE_CASE_STATUSES = new Set(["sold", "other_brokerage", "closed", "done"]);
+// 「除外」(査定サイトの反響を課金から外してもらった)も終わった案件(2026-10-25)。
+const DONE_CASE_STATUSES = new Set(["sold", "other_brokerage", "closed", "done", "lead_excluded"]);
 
 /**
  * 案件が終わっているか。まとめ表示(クラスタ)も**この同じ規則**を使う

@@ -135,6 +135,33 @@ export interface LeadExclusionFields {
 }
 
 /**
+ * 除外申請の状態が変わったときに、案件ステータスをどれにするか。変えないなら null。
+ * 2026-10-25 発注者「申請したら除外申請中・承認されたら除外・除外されなかったらコンタクト中に戻す」。
+ * - 状態が変わらない保存(申請した日・結果の日だけを直す)では触らない(人が手で選んだ段階を消さない)。
+ * - 取り消し(なしに戻す)は、案件ステータスが除外申請中・除外のままのときだけコンタクト中に戻す。
+ */
+export function caseStatusForLeadExclusionChange(
+  previous: string | null | undefined,
+  next: LeadExclusionStatus | null,
+  currentCaseStatus: string,
+): "lead_exclusion_requested" | "lead_excluded" | "contact_attempting" | null {
+  const prev = isLeadExclusionStatus(previous) ? previous : null;
+  if (prev === next) return null;
+  switch (next) {
+    case "requested":
+      return "lead_exclusion_requested";
+    case "approved":
+      return "lead_excluded";
+    case "rejected":
+      return "contact_attempting";
+    default:
+      return currentCaseStatus === "lead_exclusion_requested" || currentCaseStatus === "lead_excluded"
+        ? "contact_attempting"
+        : null;
+  }
+}
+
+/**
  * PATCH で送られた除外申請の値を、保存する値にそろえる(送られていなければ {} を返す)。
  * - 状態を「なし」(null)にしたら、2つの日付も消す。
  * - 申請中にしたのに申請した日が無ければ今日(JST)にする。結果の日は消す(申請し直し)。

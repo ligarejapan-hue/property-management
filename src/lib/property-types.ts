@@ -82,7 +82,7 @@ export const PROPERTY_TYPE_OPTIONS: { value: string; label: string }[] = [
 // 案件状況 (CaseStatus)
 // ════════════════════════════════════════════════════════════════════════════
 
-// 現役の13値(発注者決定 2026-10-20・「コンタクト中」は 2026-10-22 追加・上から順に進む)。並びは DB の enum の並び(並べ替え)と同じ。
+// 現役の15値(発注者決定 2026-10-20・「コンタクト中」は 2026-10-22 追加・「除外申請中」「除外」は 2026-10-25 追加=除外申請の欄と連動・上から順に進む)。並びは DB の enum の並び(並べ替え)と同じ。
 // やめた値(owner_contacted など)と古い値(waiting_registry / done)はここに含めない
 // =新しく保存できない。DB には enum として残る(戻すときに安全・古い記録の表示用)。
 export const CASE_STATUS_VALUES = [
@@ -99,6 +99,8 @@ export const CASE_STATUS_VALUES = [
   "other_brokerage",
   "hold",
   "closed",
+  "lead_exclusion_requested",
+  "lead_excluded",
 ] as const;
 
 export type CaseStatusValue = (typeof CASE_STATUS_VALUES)[number];
@@ -117,6 +119,8 @@ export const CASE_STATUS_LABELS: Record<string, string> = {
   other_brokerage:    "他社で決まった",
   hold:               "保留",
   closed:             "見送り・終了",
+  lead_exclusion_requested: "除外申請中",
+  lead_excluded:      "除外",
   // やめた値 — 古い変更履歴などの表示だけに使う
   owner_contacted:    "所有者連絡済（旧）",
   site_checked:       "現地確認済（旧）",
@@ -147,6 +151,8 @@ export const CASE_STATUS_JP_TO_VALUE: Record<string, string> = {
   "他社で決まった":   "other_brokerage",
   "保留":             "hold",
   "見送り・終了":     "closed",
+  "除外申請中":       "lead_exclusion_requested",
+  "除外":             "lead_excluded",
   // 整理前(2026-10-20 まで)の名前
   "新規":             "new_case",
   "DM対象":           "new_case",

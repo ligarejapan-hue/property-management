@@ -28,7 +28,9 @@ export interface LeadExclusionProperty {
  * 物件詳細の「除外申請」(査定サイトへ無効な反響の課金を外してもらう申し出・2026-10-24)。
  * - 導入ルートが「一括査定」か、既に状態が入っている物件だけ最初から出す。それ以外は
  *   「除外申請を記録する」の小さなリンクの奥に畳む(書ける人だけ)。
- * - 操作: 申請中にする(申請した日=今日・直せる)/ 除外された・認められなかった(結果の日=今日・直せる)/ 取り消す。
+ * - 操作: 申請中にする(申請した日=今日・直せる)/ 承認された・承認されなかった(結果の日=今日・直せる)/ 取り消す。
+ * - 案件ステータスも合わせて変わる(保存する API 側=caseStatusForLeadExclusionChange・2026-10-25):
+ *   申請=除外申請中・承認=除外・承認されなかった=コンタクト中。
  * - 保存は案件ステータスと同じ鍵なし保存(runNoLockPropertyPatch・版番号つき PATCH)。
  *   書ける条件も物件の編集と同じ(canWrite)。他の人の鍵のときは止める。
  */
@@ -142,7 +144,7 @@ export default function LeadExclusionField({
                 save({ leadExclusionStatus: "approved", leadExclusionDecidedAt: dateOrNull(decidedRef.current) })
               }
             >
-              除外された
+              承認された（除外）
             </Button>
             <Button
               variant="secondary"
@@ -152,14 +154,14 @@ export default function LeadExclusionField({
                 save({ leadExclusionStatus: "rejected", leadExclusionDecidedAt: dateOrNull(decidedRef.current) })
               }
             >
-              認められなかった
+              承認されなかった
             </Button>
             <Button
               variant="ghost"
               size="sm"
               disabled={disabled}
               onClick={() => {
-                if (window.confirm("除外申請の記録を取り消します(申請した日・結果の日も消えます)。よろしいですか？")) {
+                if (window.confirm("除外申請の記録を取り消します(申請した日・結果の日も消えます。案件ステータスが「除外申請中」「除外」なら「コンタクト中」に戻ります)。よろしいですか？")) {
                   save({ leadExclusionStatus: null });
                 }
               }}
@@ -167,6 +169,11 @@ export default function LeadExclusionField({
               取り消す
             </Button>
           </div>
+        )}
+        {canWrite && (
+          <p className="text-xs text-gray-500 dark:text-gray-400">
+            案件ステータスも変わります：申請中にする＝「除外申請中」／承認された＝「除外」／承認されなかった＝「コンタクト中」に戻す
+          </p>
         )}
         {(saving || error) && (
           <div className="text-xs">

@@ -999,6 +999,30 @@ INSERT INTO dm_inquiries SELECT * FROM dm_inquiries_public_hold_<日付> ON CONF
 
 退避した申込は旧コードの間は画面に出ない(対応中の案件があれば退避表を直接見る)。通知メール・受付メールは退避前に送信済みの分は再送されない(`notify_status`/`auto_reply_status` も退避表にそのまま残る)。
 
+### 8.1a 案件ステータス「除外申請中」「除外」(2026-10-25・migration `20261025120000_case_status_lead_exclusion`)より前へ戻すとき
+
+enum `CaseStatus` に `lead_exclusion_requested`(除外申請中)・`lead_excluded`(除外)を足しただけ(表は書き換えない)。値は残してよいが、**古い版はこの値を知らず、その行を読むと失敗し得る**。**サービスを止めてから**、その物件を版ごと控えて「コンタクト中」へ退避する(除外申請の欄 lead_exclusion_status はそのまま残る)。⚠`prisma migrate resolve --rolled-back` は使わない。
+
+```bash
+sudo systemctl stop property-management
+```
+
+```sql
+CREATE TABLE case_status_lead_exclusion_backup_<日付> AS
+  SELECT id, version, case_status::text AS case_status FROM properties
+  WHERE case_status IN ('lead_exclusion_requested', 'lead_excluded');
+UPDATE properties SET case_status = 'contact_attempting', version = version + 1
+  WHERE case_status IN ('lead_exclusion_requested', 'lead_excluded');
+```
+
+再び新コードへ進めるときは、旧版を止めてから下を流し、そのあと start する(版がちょうど +1 の物件だけ戻す)。
+
+```sql
+UPDATE properties p SET case_status = b.case_status::"CaseStatus", version = p.version + 1
+  FROM case_status_lead_exclusion_backup_<日付> b
+  WHERE p.id = b.id AND p.version = b.version + 1 AND p.case_status = 'contact_attempting';
+```
+
 ### 8.1b 案件ステータス「コンタクト中」(2026-10-22・migration `20261022120000_case_status_contact_attempting`)より前へ戻すとき
 
 enum `CaseStatus` に `contact_attempting`(コンタクト中)を足しただけ(表は書き換えない)。値は残してよいが、**古い版はこの値を知らず、その行を読むと失敗し得る**(物件一覧・物件の画面)。**サービスを止めてから**、その物件を版ごと控えて「未着手」へ退避する。⚠`prisma migrate resolve --rolled-back` は使わない(値を残したままなので、記録が実態とずれる)。
