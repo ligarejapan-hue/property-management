@@ -44,7 +44,11 @@ export async function loadDealRegistryRights(propertyId: string | null): Promise
       if (a.registryCertificateType === "all") return { status: "unreadable" };
       continue;
     }
-    if (!isFullCertificateText(pdf.text)) continue;
+    if (!isFullCertificateText(pdf.text)) {
+      // 全部事項と分かっている添付が全部事項として読めない(画像だけの PDF など)=判定できない(@codex)。種別が空なら所有者事項かもしれないので次を見る。
+      if (a.registryCertificateType === "all") return { status: "unreadable" };
+      continue;
+    }
     const summary = await summarizeRegistryRights({ pdf: pdf.body, text: pdf.text });
     return summary ? { status: "ok", attachmentCreatedAt: a.createdAt.toISOString(), summary } : { status: "unreadable" };
   }

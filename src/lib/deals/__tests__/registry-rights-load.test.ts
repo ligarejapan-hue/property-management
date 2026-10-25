@@ -74,6 +74,14 @@ describe("取引の物件の謄本を読む(段5c-2)", () => {
     expect(await loadDealRegistryRights("p1")).toEqual({ status: "unreadable" });
   });
 
+  it("全部事項と分かっている添付が全部事項として読めない(画像だけの PDF など)ときは飛ばさず unreadable", async () => {
+    findMany.mockResolvedValue([att("a2", "all"), att("a1", "all")]);
+    files.set("a2.pdf", Buffer.from("-- 1 of 1 --"));
+    files.set("a1.pdf", Buffer.from(FULL));
+    expect(await loadDealRegistryRights("p1")).toEqual({ status: "unreadable" });
+    expect(summarizeRegistryRights).not.toHaveBeenCalled();
+  });
+
   it("種別が空でファイルが読めない添付は飛ばして次を見る", async () => {
     findMany.mockResolvedValue([att("a2", null), att("a1", "all")]);
     files.set("a1.pdf", Buffer.from(FULL));
