@@ -10,6 +10,7 @@ import { computeDealCalc } from "@/lib/deals/calc/deal-calc";
 import { BUSINESS_DOCS } from "@/lib/deals/documents/registry";
 import { loadCompanyProfile } from "@/lib/sales-sheet/company-profile-store";
 import { loadDealStaffNames } from "@/lib/deals/staff-names";
+import { loadRegistryDocInfo } from "@/lib/deals/registry-doc-info";
 
 type Ctx = { params: Promise<{ id: string }> };
 
@@ -28,8 +29,10 @@ export async function GET(_request: Request, ctx: Ctx) {
     const [rateRows, settings, company, staff] = await Promise.all([
       prisma.dealRateTable.findMany(), loadDealSettings(), loadCompanyProfile(), loadDealStaffNames(deal),
     ]);
+    // 書類確認書の抹消の項目のため、謄本を1回だけ読む(物件の無い取引は読まない)。
+    const registry = await loadRegistryDocInfo(deal.propertyId);
     const bctx = {
-      deal, calc: computeDealCalc(deal, rateRows, settings.propertyKinds, today), settings, company, rateRows, today, logo: null, seal: null, staff,
+      deal, calc: computeDealCalc(deal, rateRows, settings.propertyKinds, today), settings, company, rateRows, today, logo: null, seal: null, staff, registry,
     };
     const documents = BUSINESS_DOCS.filter((d) => d.applies(bctx)).map((d) => {
       const def = d.defaults(bctx);

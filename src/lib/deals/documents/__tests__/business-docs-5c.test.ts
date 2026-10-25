@@ -121,3 +121,44 @@ describe("書類確認書(段5c-1)", () => {
     expect(h).toMatch(/営業担当<\/th><td>—/);
   });
 });
+
+describe("書類確認書と謄本の登記の現況(段5c-2)", () => {
+  const withRights = (d: DealView, activeRights: number, caution: string | null = null): BusinessDocContext => ({ ...ctx(d), registry: { activeRights, caution } });
+  const cancelDeal: DealView = { ...unitDeal, costs: { ...unitDeal.costs, cancellationFee: 40_000 } };
+
+  it("決済時: 乙区の権利が残っていれば、抹消の依頼・抹消費用・抹消書類の3項目を自動で足す", () => {
+    const c = withRights(cancelDeal, 2);
+    const out = doc("checklist_settlement").build(c, { pay: {} });
+    expect(out.html).toContain("司法書士への抹消の依頼(抵当権など 2件)");
+    expect(out.html).toContain("抵当権抹消書類(金融機関)");
+    expect(out.html).toContain("40,000円");
+    expect(out.rows).toContainEqual({ label: "持参: 抹消費用", value: 40_000 });
+    // 払い方を選べる・初期値は現金
+    expect(doc("checklist_settlement").defaults(c).values).toEqual({ pay: { s_bring_payment: "cash", s_bring_registration: "cash", auto_cancel_fee: "cash" } });
+    // 抹消費用が空なら出す前の確認に出す
+    expect(doc("checklist_settlement").missing(withRights(unitDeal, 1))).toEqual(["抹消費用"]);
+  });
+
+  it("権利が残っていない・契約時には足さない", () => {
+    expect(doc("checklist_settlement").build(withRights(cancelDeal, 0), { pay: {} }).html).not.toContain("抵当権抹消書類");
+    expect(doc("checklist_contract").build(withRights(cancelDeal, 2), { pay: {} }).html).not.toContain("抵当権抹消書類");
+    expect(doc("checklist_settlement").build(ctx(cancelDeal), { pay: {} }).html).not.toContain("抵当権抹消書類");
+  });
+
+  it("設定に抹消費用の金額付き項目があれば、持参の抹消費用は足さない", () => {
+    const c = withRights(cancelDeal, 1);
+    const items = [...c.settings.checklistItems, { id: "mine", phase: "settlement" as const, group: "bring" as const, label: "抹消の費用", note: null, scope: "all" as const, amount: "cancellation" as const }];
+    const out = doc("checklist_settlement").build({ ...c, settings: { ...c.settings, checklistItems: items } }, { pay: {} });
+    expect(out.html).toContain("抹消の費用");
+    expect(out.rows.filter((r) => r.label === "持参: 抹消費用")).toEqual([]);
+    expect(out.html).toContain("抵当権抹消書類(金融機関)");
+  });
+
+  it("頭に登記の注意(契約時・決済時とも)", () => {
+    for (const k of CL) {
+      const h = doc(k).build(withRights(cancelDeal, 0, "甲区 3番 差押が残っています。"), { pay: {} }).html;
+      expect(h).toMatch(/登記の注意<\/th><td>甲区 3番 差押が残っています。/);
+    }
+    expect(doc("checklist_contract").build(ctx(), { pay: {} }).html).not.toContain("登記の注意");
+  });
+});

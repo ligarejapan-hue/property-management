@@ -22,6 +22,8 @@ export interface BusinessDocContext {
   seal: string | null;
   /** 取引の営業担当・業務担当の名前(書類確認書の頭・無ければ「—」)。 */
   staff?: { sales: string | null; ops: string | null };
+  /** 物件の謄本(全部事項)の登記の現況(書類確認書だけ・名前は入れない・計画 段5c-2)。 */
+  registry?: { activeRights: number; caution: string | null };
 }
 
 /** Excel(値だけ)の1行。見出しは value 無し。 */
