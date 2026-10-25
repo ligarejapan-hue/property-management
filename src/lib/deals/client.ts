@@ -8,6 +8,7 @@ import type { DealImageKind } from "./branding";
 import type { BusinessInputs } from "./business-schema";
 import type { BusinessPlanCalc } from "./calc/business-plan";
 import type { BusinessSectionKey } from "./business-sections";
+import type { RegistryRightsView } from "./registry-rights";
 
 /** 取引の画面から API を呼ぶ。失敗はサーバーの文言とコードを持った DealApiError にする。 */
 export class DealApiError extends Error {
@@ -54,6 +55,8 @@ export const dealsApi = {
     call<{ deals: DealListItem[]; total: number; page: number; pageSize: number }>(`/api/deals?${new URLSearchParams(params)}`),
   create: (body: Record<string, unknown>) => call<{ id: string; dealNo: string }>("/api/deals", { method: "POST", body }),
   get: (id: string) => call<{ deal: DealView; canOpenProperty: boolean }>(`/api/deals/${id}`),
+  /** 物件の謄本(全部事項)の登記の現況(確認用・段5c-2)。 */
+  registryRights: (id: string) => call<{ rights: RegistryRightsView }>(`/api/deals/${id}/registry-rights`),
   update: (id: string, body: Record<string, unknown>) => call<{ version: number }>(`/api/deals/${id}`, { method: "PATCH", body }),
   refreshProperty: (id: string, version: number) =>
     call<{ version: number }>(`/api/deals/${id}/refresh-property`, { method: "POST", body: { version } }),

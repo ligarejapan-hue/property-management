@@ -12,6 +12,7 @@ import DealMoneyPanel from "@/components/deals/deal-money-panel";
 import DealSettlementPanel from "@/components/deals/deal-settlement-panel";
 import DealOcPanel from "@/components/deals/deal-oc-panel";
 import DealDocumentsPanel from "@/components/deals/deal-documents-panel";
+import { DealRegistryRights } from "@/components/deals/deal-registry-rights";
 import { dealsApi, errorText, type DealOptions, type UserOption } from "@/lib/deals/client";
 import type { DealView } from "@/lib/deals/view";
 import type { DealCalc } from "@/lib/deals/calc/deal-calc";
@@ -113,6 +114,8 @@ export default function DealDetailPage({ params }: { params: Promise<{ id: strin
       />
       {error && <p className="text-sm text-red-600 dark:text-red-400" role="alert">{error}</p>}
       {calcError && <p className="text-sm text-red-600 dark:text-red-400" role="alert">{calcError}</p>}
+      {/* 物件の謄本の登記の現況(段5c-2)。物件を差し替えたら読み直す。 */}
+      <DealRegistryRights key={deal.propertyId ?? "none"} dealId={deal.id} propertyId={deal.propertyId} />
       <Tabs tabs={tabs} active={tab} onChange={setSelected} idBase="deal-detail" />
       <div {...tabPanelProps("deal-detail", tab)}>
         <div hidden={tab !== "basic"}>
