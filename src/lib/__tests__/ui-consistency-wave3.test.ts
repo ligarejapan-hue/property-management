@@ -91,6 +91,8 @@ describe("(⑪) モーダルの器の手書き禁止(ラチェット)", () => {
       "src/components/properties/attachment-tab.tsx",
       "src/components/buildings/building-photo-tab.tsx",
       "src/components/sales-sheet/editor/PhotoGalleryPanel.tsx",
+      // 書類を撮る=全画面のカメラ(黒地の撮影ビューア・器の規約対象外)
+      "src/components/properties/doc-scan/doc-scan-dialog.tsx",
       // ── 以下は既存モーダル(順次 ModalShell へ移行待ち)。新規追加は不可 ──
       "src/app/(dashboard)/admin/users/page.tsx",
       "src/app/(dashboard)/buildings/page.tsx",

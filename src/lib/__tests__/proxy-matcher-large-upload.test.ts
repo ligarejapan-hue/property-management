@@ -19,6 +19,7 @@ const re = new RegExp(`^${matcher}$`);
 describe("proxy の matcher", () => {
   it.each([
     "/api/properties/0b6f6c1e-0000-4000-8000-000000000000/attachments",
+    "/api/properties/0b6f6c1e-0000-4000-8000-000000000000/attachments/scan",
     "/api/import/paste",
     "/api/import/paste/commit",
     "/api/report-inbox",
@@ -33,6 +34,7 @@ describe("proxy の matcher", () => {
     "/api/properties/abc",
     "/api/properties/abc/photos",
     "/api/properties/abc/attachments/att-1",
+    "/api/properties/abc/attachments/scan/x",
     "/api/import/paste/excel",
     "/api/import/paste-other",
     "/api/import/jobs",
@@ -53,7 +55,7 @@ describe("proxy の matcher", () => {
   });
 });
 
-describe("nginx の見本(アプリ全体を nginx で出す構成)も、4つの口だけ大きい送信と長い待ちを許す", () => {
+describe("nginx の見本(アプリ全体を nginx で出す構成)も、5つの口だけ大きい送信と長い待ちを許す", () => {
   const conf = readFileSync(path.join(process.cwd(), "deploy/nginx/property-management.conf.example"), "utf8");
   const m = /location ~ (\^\/api\/[^\s]+) \{([\s\S]*?)\n    \}/.exec(conf);
 
@@ -64,10 +66,11 @@ describe("nginx の見本(アプリ全体を nginx で出す構成)も、4つの
     expect(m![2]).toMatch(/proxy_send_timeout\s+300s;/);
   });
 
-  it("対象は proxy の除外と同じ4つの口だけ", () => {
+  it("対象は proxy の除外と同じ5つの口だけ", () => {
     const re = new RegExp(m![1]);
     for (const p of [
       "/api/properties/0b6f6c1e-0000-4000-8000-000000000000/attachments",
+      "/api/properties/0b6f6c1e-0000-4000-8000-000000000000/attachments/scan",
       "/api/import/paste",
       "/api/import/paste/commit",
       "/api/report-inbox",
@@ -89,6 +92,7 @@ describe("proxy を通さない口は、本文を読む前に認証と大きさ�
   const root = process.cwd();
   it.each([
     "src/app/api/properties/[id]/attachments/route.ts",
+    "src/app/api/properties/[id]/attachments/scan/route.ts",
     "src/app/api/import/paste/route.ts",
     "src/app/api/import/paste/commit/route.ts",
     "src/app/api/report-inbox/route.ts",

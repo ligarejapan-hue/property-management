@@ -27,7 +27,11 @@ import {
   deleteAttachment,
   updateAttachmentKind,
   uploadFile,
+  type ScanUploadResult,
 } from "@/lib/api-client";
+import DocScanLauncher, { uploadOriginalsAsPhotos } from "@/components/properties/doc-scan/doc-scan-launcher";
+import ScanResultNotice, { type ScanNotice } from "@/components/properties/doc-scan/scan-result-notice";
+import { hasLittleText } from "@/lib/doc-scan/upload";
 import { DOC_KINDS, DOC_STAGES, docKindByCode } from "@/lib/doc-classify/classify";
 import { defaultOpenStage } from "@/lib/doc-classify/stage";
 import { displayTitle, groupAttachmentsByStage, needsKindCheck, visibleFolders } from "@/lib/attachments/doc-folders";
@@ -164,6 +168,9 @@ export default function AttachmentTab({
   const [previewTarget, setPreviewTarget] = useState<AttachmentData | null>(null);
   // 種類を直している最中の添付(二重送信を防ぐ)。
   const [kindSavingId, setKindSavingId] = useState<string | null>(null);
+  // 書類を撮ったあとの知らせ。「写真タブへ移す」のために、撮った元の写真と入れた添付を控える。
+  const [scanNotice, setScanNotice] = useState<ScanNotice | null>(null);
+  const scanMoveRef = useRef<{ attachmentId: string; originals: readonly Blob[]; uploaded: number } | null>(null);
   // 一覧の取り直しの交通整理は、物件ページと**同じ純関数**に委ねる
   // （@codex #395 R7 P2）。独自の世代ガードだと、**新しい取り直しが失敗しただけ**で
   // 先に届いていた使える一覧を捨て、タブが空/古いままエラーになる。
@@ -302,6 +309,43 @@ export default function AttachmentTab({
     }
   };
 
+  /** 書類を撮って PDF にした。種類の判別の結果を知らせ、一覧を静かに読み直す。 */
+  const handleScanSaved = async (result: ScanUploadResult, originals: readonly Blob[]) => {
+    const kind = docKindByCode(result.docKind);
+    const stage = kind ? DOC_STAGES.find((s) => s.code === kind.stage) : undefined;
+    scanMoveRef.current = { attachmentId: result.id, originals, uploaded: 0 };
+    setScanNotice({
+      kind: "saved",
+      pages: result.scan.pages,
+      kindLabel: kind?.label ?? null,
+      stageLabel: stage ? `${stage.short}${stage.label}` : null,
+      littleText: hasLittleText(result.scan),
+      moving: false,
+    });
+    await fetchAttachmentsData({ silent: true });
+  };
+
+  /** 文字がほとんど無かった=現地の写真だった。元の写真を写真タブへ入れ、入れた PDF はゴミ箱へ。 */
+  const handleScanMoveToPhotos = async () => {
+    const move = scanMoveRef.current;
+    if (!move || scanNotice?.kind !== "saved" || scanNotice.moving) return;
+    setScanNotice({ ...scanNotice, moving: true });
+    try {
+      // ⚠途中で失敗して押し直したとき、入れ終わった写真を二重に入れない(何枚目まで入れたかを控える)。
+      while (move.uploaded < move.originals.length) {
+        await uploadOriginalsAsPhotos(propertyId, [move.originals[move.uploaded]], move.uploaded);
+        move.uploaded++;
+      }
+      await deleteAttachment(propertyId, move.attachmentId);
+      scanMoveRef.current = null;
+      setScanNotice({ kind: "photos", count: move.originals.length });
+      await fetchAttachmentsData({ silent: true });
+    } catch (err) {
+      setScanNotice({ ...scanNotice, moving: false });
+      setError(err instanceof Error ? err.message : "写真タブへ移せませんでした");
+    }
+  };
+
   if (loading) {
     return (
       <div className="flex items-center justify-center py-12">
@@ -322,6 +366,26 @@ export default function AttachmentTab({
       {/* ============================== 通常添付 ============================== */}
       <section>
         <h3 className="mb-2 text-sm font-semibold text-gray-700 dark:text-gray-200">添付ファイル</h3>
+
+        {/* 書類を撮る(スマホ・タブレットだけ) */}
+        <DocScanLauncher
+          propertyId={propertyId}
+          onSaved={handleScanSaved}
+          onPhotosSaved={(count) => {
+            scanMoveRef.current = null;
+            setScanNotice({ kind: "photos", count });
+          }}
+        />
+        {scanNotice && (
+          <ScanResultNotice
+            notice={scanNotice}
+            onMoveToPhotos={() => void handleScanMoveToPhotos()}
+            onDismiss={() => {
+              scanMoveRef.current = null;
+              setScanNotice(null);
+            }}
+          />
+        )}
 
         {/* Upload area: general */}
         <FileDropZone
