@@ -113,11 +113,11 @@ const VERSIONED: Record<string, string> = {
     "property.registryStatus=scheduled(有料取得の予約)+version increment",
   "src/lib/registry-fetch/auto-fetch.ts:4509":
     "property.registryStatus=obtained(有料取得の確定)+version increment",
-  "src/lib/registry-pdf/process.ts:248":
+  "src/lib/registry-pdf/process.ts:249":
     "owner.corporateNumber(空欄補完・fillOwnerCorporateNumberIfUnlocked)+version increment" +
     "(Task 7で修正済)",
-  "src/lib/registry-pdf/process.ts:987":
-    "property.registryStatus/realEstateNumber/lotNumber/buildingNumber(取得状況前進+空欄補完)+version increment",
+  "src/lib/registry-pdf/process.ts:1001":
+    "property.registryStatus/realEstateNumber/lotNumber/buildingNumber/exclusiveAreaRegistry(取得状況前進+空欄補完)+version increment",
 };
 
 /**
@@ -202,19 +202,19 @@ const ALLOWED_WITHOUT_VERSION: Record<string, AllowedEntry> = {
       "編集画面から書けない)",
     keys: ["dmUndeliverableAt"],
   },
-  "src/lib/registry-pdf/process.ts:396": {
+  "src/lib/registry-pdf/process.ts:397": {
     reason:
       "owner.updatedAt のみ(添付済み謄本からの反映で、候補の所有者を物件行より先に" +
       "id順で押さえる touch。ロック順を /owners 窓口と同じ Owner→物件 にそろえる)",
     keys: ["updatedAt"],
   },
-  "src/lib/registry-pdf/process.ts:673": {
+  "src/lib/registry-pdf/process.ts:674": {
     reason:
       "owner.updatedAt のみ(ロック後の再探索で拾った所有者を、アーカイブされていない" +
       "条件で押さえる touch。押さえられなければ新規作成に回す)",
     keys: ["updatedAt"],
   },
-  "src/lib/registry-pdf/process.ts:548": {
+  "src/lib/registry-pdf/process.ts:549": {
     reason: "owner.updatedAt のみ(既存所有者再利用時の行ロックtouch)",
     keys: ["updatedAt"],
   },
