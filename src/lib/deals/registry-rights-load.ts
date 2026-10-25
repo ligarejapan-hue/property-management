@@ -8,11 +8,12 @@ import type { DealRegistryState } from "./registry-rights";
 const CANDIDATES = 5;
 
 async function readPdf(fileUrl: string): Promise<{ body: Buffer; text: string } | null> {
-  const storage = getStorage();
-  const key = storage.keyFromUrl(fileUrl);
-  const file = key ? await storage.read(key) : null;
-  if (!file) return null;
   try {
+    // 保存場所の鍵が壊れている・読めないときも「読めない」扱い(例外の中身は出さない)。
+    const storage = getStorage();
+    const key = storage.keyFromUrl(fileUrl);
+    const file = key ? await storage.read(key) : null;
+    if (!file) return null;
     const text = await extractTextFromPdf(file.body);
     return text.trim() ? { body: file.body, text } : null;
   } catch {

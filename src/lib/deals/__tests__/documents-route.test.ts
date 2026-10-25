@@ -26,6 +26,7 @@ vi.mock("@/lib/prisma", () => ({
     dealSettings: { findUnique: vi.fn(async () => null) },
     companyProfile: { findUnique: vi.fn(async () => ({ nameJa: "架空不動産株式会社" })) },
     user: { findMany: vi.fn(async () => []) },
+    property: { findUnique: vi.fn(async () => ({ createdBy: "66666666-6666-4666-8666-666666666666", assignedTo: null })) },
   },
 }));
 
@@ -326,7 +327,7 @@ describe("書類確認書と謄本の登記の現況(段5c-2)", () => {
   const RIGHTS = { status: "ok", attachmentCreatedAt: "2026-10-01T00:00:00.000Z", summary: { hasKouku: true, activeRights: [{ rank: "1", purpose: "抵当権設定", amount: null, holder: "架空銀行", debtor: "架空 一郎", activeAnnotations: 0 }], cautions: [{ section: "甲区", rank: "4", purpose: "差押" }], notes: [] } };
   beforeEach(() => {
     pm.deal.findUnique.mockResolvedValue({ ...row, propertyId: "22222222-2222-4222-8222-222222222222", settlementAt: new Date("2026-06-30T01:00:00Z") });
-    loadDealRegistryRights.mockResolvedValue(RIGHTS as never);
+    loadDealRegistryRights.mockImplementation((async (p: string | null) => (p ? RIGHTS : { status: "none" })) as never);
   });
   it("決済時の書類確認書は謄本を読み、抹消の項目と登記の注意を出す(名前は出さない)", async () => {
     const res = await POST(json("POST", { docType: "checklist_settlement", version: 3, options: { pay: {} } }), ctx);
@@ -336,6 +337,12 @@ describe("書類確認書と謄本の登記の現況(段5c-2)", () => {
     expect(h).toContain("抵当権抹消書類(金融機関)");
     expect(h).toContain("甲区 4番 差押が残っています。");
     expect(h).not.toContain("架空銀行");
+  });
+  it("物件を見られない人が出すときは謄本を読まない", async () => {
+    (getUserPermissions as Fn).mockResolvedValue(DEAL_PERMS.filter((p) => p.resource !== "property"));
+    await POST(json("POST", { docType: "checklist_settlement", version: 3, options: { pay: {} } }), ctx);
+    expect(loadDealRegistryRights).toHaveBeenCalledWith(null);
+    expect((renderHtmlToPdfDocument as Fn).mock.calls[0][0]).not.toContain("抵当権抹消書類");
   });
   it("ほかの書類では謄本を読まない・読み取りが壊れても書類は出す", async () => {
     await POST(json("POST", { docType: "settlement_statement", version: 3 }), ctx);

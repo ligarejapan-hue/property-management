@@ -3,7 +3,7 @@ vi.mock("next/server", async () => (await import("./route-mocks")).nextServerMoc
 vi.mock("@/lib/api-helpers", async () => (await import("./route-mocks")).apiHelpersMock());
 const { writeAuditLog } = vi.hoisted(() => ({ writeAuditLog: vi.fn() }));
 vi.mock("@/lib/audit", () => ({ writeAuditLog }));
-vi.mock("@/lib/prisma", () => ({ default: { deal: { findUnique: vi.fn() } } }));
+vi.mock("@/lib/prisma", () => ({ default: { deal: { findUnique: vi.fn() }, property: { findUnique: vi.fn() } } }));
 const { loadDealRegistryRights } = vi.hoisted(() => ({ loadDealRegistryRights: vi.fn() }));
 vi.mock("@/lib/deals/registry-rights-load", () => ({ loadDealRegistryRights }));
 
@@ -14,6 +14,7 @@ import { GET } from "../../../app/api/deals/[id]/registry-rights/route";
 
 type Fn = ReturnType<typeof vi.fn>;
 const findUnique = (prismaMock as never as { deal: { findUnique: Fn } }).deal.findUnique;
+const propFind = (prismaMock as never as { property: { findUnique: Fn } }).property.findUnique;
 const ctx = { params: Promise.resolve({ id: DEAL_ID }) };
 const SUMMARY = {
   hasKouku: true, currentOwners: [{ name: "架空 一郎", address: "架空県架空市", share: null }],
@@ -26,10 +27,22 @@ beforeEach(() => {
   (getApiSession as Fn).mockResolvedValue({ id: USER_ID, role: "field_staff" });
   (getUserPermissions as Fn).mockResolvedValue(DEAL_PERMS);
   findUnique.mockResolvedValue({ id: DEAL_ID, propertyId: PROP_ID });
-  loadDealRegistryRights.mockResolvedValue({ status: "ok", attachmentCreatedAt: "2026-10-01T00:00:00.000Z", summary: SUMMARY });
+  propFind.mockResolvedValue({ createdBy: USER_ID, assignedTo: null });
+  loadDealRegistryRights.mockImplementation(async (p: string | null) => (p ? { status: "ok", attachmentCreatedAt: "2026-10-01T00:00:00.000Z", summary: SUMMARY } : { status: "none" }));
 });
 
 describe("取引の謄本の登記の現況の口(段5c-2)", () => {
+  it("物件を見られない人(物件の閲覧が無い・担当外)には謄本を読まずに none", async () => {
+    (getUserPermissions as Fn).mockResolvedValue(DEAL_PERMS.filter((p) => p.resource !== "property"));
+    expect((await (await GET(new Request("http://x"), ctx)).json()).rights).toEqual({ status: "none" });
+    expect(loadDealRegistryRights).toHaveBeenCalledWith(null);
+    (getUserPermissions as Fn).mockResolvedValue(DEAL_PERMS);
+    propFind.mockResolvedValue({ createdBy: "77777777-7777-4777-8777-777777777777", assignedTo: null });
+    loadDealRegistryRights.mockClear();
+    await GET(new Request("http://x"), ctx);
+    expect(loadDealRegistryRights).toHaveBeenCalledWith(null);
+  });
+
   it("取引の閲覧で読める・所有者の閲覧が無ければ権利者名を出さない・監査は件数だけ", async () => {
     const res = await GET(new Request("http://x"), ctx);
     expect(res.status).toBe(200);

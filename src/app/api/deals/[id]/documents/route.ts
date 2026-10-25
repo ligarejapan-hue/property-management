@@ -23,7 +23,7 @@ import { pdfPageCount } from "@/lib/deals/documents/business/pdf-pages";
 import type { BusinessDocContext } from "@/lib/deals/documents/business/common";
 import { computeDealCalc } from "@/lib/deals/calc/deal-calc";
 import { loadDealStaffNames } from "@/lib/deals/staff-names";
-import { loadRegistryDocInfo } from "@/lib/deals/registry-doc-info";
+import { loadRegistryDocInfo, registryPropertyFor } from "@/lib/deals/registry-doc-info";
 import {
   DEAL_DOC_MIME, DEAL_DOC_TYPE_KEYS, dealDocumentBaseName, dealDocumentKey, dealDocumentTitle, type DealDocFormat,
 } from "@/lib/deals/documents/issue";
@@ -73,7 +73,7 @@ export async function GET(_request: Request, ctx: Ctx) {
  */
 export async function POST(request: Request, ctx: Ctx) {
   try {
-    const { session } = await requireDeal("write");
+    const { session, perms } = await requireDeal("write");
     const id = z.string().uuid().parse((await ctx.params).id);
     const { docType, version, options } = bodySchema.parse(await parseJsonBody(request));
     const row = await prisma.deal.findUnique({ where: { id }, select: DEAL_DETAIL_SELECT });
@@ -98,7 +98,7 @@ export async function POST(request: Request, ctx: Ctx) {
         deal, calc: computeDealCalc(deal, rateRows, settings.propertyKinds, today), settings, company, rateRows, today,
         logo: branding.logo, seal: branding.seal, staff: await loadDealStaffNames(deal),
         // 謄本は書類確認書のときだけ読む(計画 段5c-2 の読み替え 5)。
-        registry: businessDoc.group === "checklist" ? await loadRegistryDocInfo(deal.propertyId) : undefined,
+        registry: businessDoc.group === "checklist" ? await loadRegistryDocInfo(await registryPropertyFor(session, perms, deal.propertyId)) : undefined,
       };
       if (!businessDoc.applies(bctx)) throw new ApiError(422, `この取引では${businessDoc.label}を出せません`, "DOC_NOT_APPLICABLE");
       // 止める項目(賃借人がいない・金額が無いなど)は画面だけでなくサーバーでも止める(空の書類を作らない)。
