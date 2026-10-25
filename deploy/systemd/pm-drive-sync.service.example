@@ -1,0 +1,36 @@
+# =============================================================================
+# Google ドライブの見回り — 実行ユニット(書類の自動整理 第2段b)
+# =============================================================================
+# 使い方(docs/deploy.md「Google ドライブ連携」の順番どおりに):
+#   1. app.env に DRIVE_SYNC_SECRET を設定し、アプリを再起動する
+#      (GOOGLE_DRIVE_CLIENT_ID / GOOGLE_DRIVE_CLIENT_SECRET と「Google に接続」が済んでいること)
+#   2. 手で1回だけ実行して、エラーなく終わることを確かめる:
+#        sudo systemctl start pm-drive-sync.service && journalctl -u pm-drive-sync -n 20
+#   3. 最後に timer を有効にする:
+#        sudo cp deploy/systemd/pm-drive-sync.service.example /etc/systemd/system/pm-drive-sync.service
+#        sudo cp deploy/systemd/pm-drive-sync.timer.example   /etc/systemd/system/pm-drive-sync.timer
+#        sudo systemctl daemon-reload
+#        sudo systemctl enable --now pm-drive-sync.timer
+#        # 確認: systemctl list-timers pm-drive-sync.timer
+# 戻すときは**最初に** timer を止める: sudo systemctl disable --now pm-drive-sync.timer
+#
+# ⚠合言葉が未設定なら route は 503(休眠=何もしない)。curl --fail で失敗として残る。
+# ⚠接続していない・クライアント設定が無いときは 200 で skipped(何もしない)。
+# ⚠oneshot は実行中に次を起動しない。アプリ側も同時に1つだけ(重なれば 409)。
+# =============================================================================
+
+[Unit]
+Description=Sync Google Drive folders (property-management)
+After=network.target property-management.service
+
+[Service]
+Type=oneshot
+# app.env から合言葉だけを読む(root:600 のまま・値はログに出さない)。
+EnvironmentFile=/etc/property-management/app.env
+# ⚠合言葉を curl の引数に置かない(argv は ps や /proc で他プロセスに見える)。値は標準入力から `-H @-`。
+# ⚠`%` は必ず `%%` と書く(systemd が `%s` 等を先に置き換えるため)。
+# 応答は件数だけ(ファイル名・フォルダ名は無い)なので、そのまま journal に残してよい。
+# ⚠1回の読み書きは 20 件まで(1件 20MB まで)。時間制限は長めに取る(切れてもアプリ側の処理は続き、
+#   終わるまで次は 409 で重ならない)。
+ExecStart=/bin/sh -c 'printf "%%s" "x-drive-sync-secret: $DRIVE_SYNC_SECRET" | /usr/bin/curl --fail --silent --show-error --max-time 900 -X POST http://127.0.0.1:3000/api/drive/sync-run -H @-'
+# 失敗しても次回の tick で拾えるので再起動はしない。

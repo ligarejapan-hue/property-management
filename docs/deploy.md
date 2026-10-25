@@ -1181,7 +1181,19 @@ GOOGLE_DRIVE_CLIENT_SECRET=<GOCSPX-...>
 - 戻り先の土台は `NEXTAUTH_URL`(別にしたいときだけ `DRIVE_OAUTH_BASE_URL`)。
 - refresh token は DB(`drive_connection`)に `SALE_DM_SETTINGS_ENC_KEY` で暗号化して保存(メール設定のパスワードと同じ)。state の署名は `NEXTAUTH_SECRET`。
 - app.env を足したら flock 付きで restart。接続そのものは発注者がブラウザで「Google に接続」を押す(値は私たちが扱わない)。
-- 見回り(timer・`DRIVE_SYNC_SECRET`)は第2段b で足す。
+
+**見回り(第2段b・timer `pm-drive-sync` 5分ごと)** — **timer は最後に有効にし、戻すときは最初に止める**。
+
+1. 上の2つと「Google に接続」・フォルダの紐づけが済んでいること。
+2. app.env に合言葉を足して(`printf 'DRIVE_SYNC_SECRET=%s\n' "$(openssl rand -base64 32)" >> app.env`・値は画面に出さない)flock 付きで restart。
+3. 手で1回: `sudo systemctl start pm-drive-sync.service && journalctl -u pm-drive-sync -n 20`(応答は件数だけ=`links=… imported=… copied=…`)。
+4. 最後に timer: `deploy/systemd/pm-drive-sync.{service,timer}.example` を `/etc/systemd/system/` へ写し、`daemon-reload` → `enable --now pm-drive-sync.timer`。
+5. 止める: `sudo systemctl disable --now pm-drive-sync.timer`(合言葉を消せば口も 503 で休眠)。
+
+動き(1回の読み書きは全物件で20件・1件20MBまで・前回の続きの物件から):
+- アプリ → ドライブ: 紐づけた物件の添付(謄本・反響資料・査定報告書・**本人確認書類は除く**・**持ち主が別のアカウントのフォルダには複製しない**・複製のあとで本人確認書類に直したものはアプリの写しをゴミ箱へ・ほかの物件に紐づけたフォルダの中は見ない)を段階のフォルダ(既存の「契約資料」などはそのまま使う・無ければ「③契約関係」のように作る)へ、そろえた名前で複製。種類を直して名前が変わったら、アプリが置いた写しだけ名前を合わせる。人が同じ中身を置いてあれば複製せずに結ぶ。
+- ドライブ → アプリ: 紐づけたフォルダの中(3階層まで)の、アプリが置いた写しでない・台帳に無い・同じ中身が無いファイル。直下=書類の受け取り箱 / 段階のフォルダ=添付(種類の自動判別・当たらなければそのフォルダの段階) / 「本人確認」のフォルダ=本人確認書類として守る / 「写真」の JPEG・PNG・WebP=写真タブ(位置情報を消す)。Google ドキュメント形式・形式外・20MB 超は取り込まない(台帳に残す)。
+- 削除・移動・名前の変更はどちら向きにも反映しない。結果は管理 › ドライブ連携の「最後の見回り」「直近の失敗」に出る。
 
 ---
 

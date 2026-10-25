@@ -77,7 +77,7 @@ describe("DriveClient", () => {
       { status: 200, body: { id: "f1", name: "売却", mimeType: FOLDER_MIME, parents: ["p0"], trashed: false, webViewLink: "https://drive.google.com/x" } },
     ]);
     expect(await new DriveClient("tok", fetch).getFolder("f1")).toEqual({
-      id: "f1", name: "売却", parents: ["p0"], trashed: false, webViewLink: "https://drive.google.com/x",
+      id: "f1", name: "売却", parents: ["p0"], trashed: false, webViewLink: "https://drive.google.com/x", ownedByMe: false,
     });
     const { fetch: f2 } = fake([{ status: 200, body: { id: "x", name: "a.pdf", mimeType: "application/pdf" } }]);
     expect(await new DriveClient("tok", f2).getFolder("x")).toBeNull();

@@ -88,7 +88,7 @@ let cachedAccessToken: { token: string; expiresAtMs: number } | null = null;
  * =控えに入れず返さない(切ったあとにドライブを触る・別のアカウントのトークンを使い続けるのを防ぐ・@codex #577 R3)。
  */
 let connectionGeneration = 0;
-function invalidateTokenCache(): void {
+export function invalidateTokenCache(): void {
   connectionGeneration++;
   cachedAccessToken = null;
 }
