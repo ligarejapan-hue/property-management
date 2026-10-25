@@ -2,11 +2,14 @@
  * 書類を撮る — 送られてきたページの検査と、保存のときの名前(純関数・サーバーと画面の両方で使う)。
  */
 
-/** 1ページの上限。端末で長い辺 2000px の JPEG にしてから送るので、ふつうは 1MB 未満。 */
-export const MAX_SCAN_PAGE_BYTES = 2 * 1024 * 1024;
+/** 1ページの上限。端末で長い辺 2000px の JPEG にしてから送るので、ふつうは 0.5MB 前後(超えたら端末で画質を下げて収める)。 */
+export const MAX_SCAN_PAGE_BYTES = 1.5 * 1024 * 1024;
 
-/** 送信全体の上限(30ページ × 2MB + 余白)。⚠本文を読む前に Content-Length で見る。 */
-export const MAX_SCAN_BODY_BYTES = 64 * 1024 * 1024;
+/**
+ * 送信全体の上限(30ページ × 1.5MB = 45MB に余白)。⚠本文を読む前に Content-Length で見る。
+ * ⚠大きいPDFの口と同じ 50MB にそろえる=nginx の見本(client_max_body_size 52m)に収まる(@codex #594 P2)。
+ */
+export const MAX_SCAN_BODY_BYTES = 50 * 1024 * 1024;
 
 /** 読めた文字(空白を除く)がこれ未満なら「写真タブへ移す」を出す。 */
 export const LITTLE_TEXT_CHARS = 30;

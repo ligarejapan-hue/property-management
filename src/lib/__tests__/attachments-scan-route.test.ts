@@ -133,6 +133,15 @@ describe("書類を撮る(POST scan)", () => {
     expect(buildScanPdf).not.toHaveBeenCalled();
   });
 
+  it("PDF にしているあいだに担当から外れたら、ロックの中で 403・置いたファイルを消す(@codex #594 P2)", async () => {
+    const raw = (prisma as unknown as { $queryRaw: ReturnType<typeof vi.fn> }).$queryRaw;
+    raw.mockResolvedValueOnce([]);
+    const res = await POST(await req([JPEG(1)]), params);
+    expect(res.status).toBe(403);
+    expect(db.attachment.create).not.toHaveBeenCalled();
+    expect(storageStub.delete).toHaveBeenCalledTimes(1);
+  });
+
   it("部品が無い環境は 503", async () => {
     buildScanPdf.mockResolvedValueOnce({ ok: false, reason: "unavailable" });
     expect((await POST(await req([JPEG(1)]), params)).status).toBe(503);

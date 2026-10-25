@@ -7,6 +7,7 @@ import {
   scanFileName,
   sniffImage,
 } from "../upload";
+import { MAX_PDF_UPLOAD_BYTES } from "@/lib/pdf-compress/policy";
 
 describe("sniffImage", () => {
   it("先頭のバイトで JPEG・PNG・WebP を見分ける(送られてきた種類の申告は信じない)", () => {
@@ -23,8 +24,9 @@ describe("sniffImage", () => {
 });
 
 describe("上限", () => {
-  it("1枚 2MB・全体は 30枚分に余白", () => {
-    expect(MAX_SCAN_PAGE_BYTES).toBe(2 * 1024 * 1024);
+  it("1枚 1.5MB・全体は 30枚分に余白・大きいPDFの口と同じ 50MB(nginx の見本 52m に収まる)", () => {
+    expect(MAX_SCAN_PAGE_BYTES).toBe(1.5 * 1024 * 1024);
+    expect(MAX_SCAN_BODY_BYTES).toBe(MAX_PDF_UPLOAD_BYTES);
     expect(MAX_SCAN_BODY_BYTES).toBeGreaterThanOrEqual(30 * MAX_SCAN_PAGE_BYTES);
   });
 });

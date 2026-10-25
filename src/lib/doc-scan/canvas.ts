@@ -38,6 +38,19 @@ export function cropToQuadBounds(source: HTMLCanvasElement, quad: Quad, maxEdge:
   return drawScaled(cropped, b.width, b.height, maxEdge);
 }
 
+/**
+ * 上限の大きさに収まる JPEG にする。画質を下げ、それでも大きければ縦横比のまま縮める。
+ * ⚠サーバーは1枚の上限を超えたページを断る(1枚のために30枚の送信がまるごと失敗しないよう、ここで収める)。
+ */
+export async function jpegWithin(canvas: HTMLCanvasElement, maxBytes: number): Promise<Blob> {
+  for (const quality of [0.85, 0.7, 0.55]) {
+    const blob = await canvasToJpeg(canvas, quality);
+    if (blob.size <= maxBytes) return blob;
+  }
+  const smaller = drawScaled(canvas, canvas.width, canvas.height, Math.round(Math.max(canvas.width, canvas.height) * 0.7));
+  return canvasToJpeg(smaller, 0.55);
+}
+
 export function canvasToJpeg(canvas: HTMLCanvasElement, quality: number): Promise<Blob> {
   return new Promise((resolve, reject) => {
     canvas.toBlob((blob) => (blob ? resolve(blob) : reject(new Error("encode-failed"))), "image/jpeg", quality);

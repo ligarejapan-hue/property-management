@@ -19,7 +19,8 @@ import { defaultQuad, scaleQuad, type Quad } from "@/lib/doc-scan/geometry";
 import { MAX_SCAN_PAGES, addPage, movePage, removePage } from "@/lib/doc-scan/pages";
 import { loadOpenCv, type CV } from "@/lib/doc-scan/opencv-loader";
 import { detectQuad, warpDocument, type ScanFinish } from "@/lib/doc-scan/detect";
-import { canvasToJpeg, cropToQuadBounds, drawScaled } from "@/lib/doc-scan/canvas";
+import { canvasToJpeg, cropToQuadBounds, drawScaled, jpegWithin } from "@/lib/doc-scan/canvas";
+import { MAX_SCAN_PAGE_BYTES } from "@/lib/doc-scan/upload";
 import { scanGuide } from "@/lib/doc-scan/guide";
 import CornerEditor from "./corner-editor";
 
@@ -224,7 +225,7 @@ export default function DocScanDialog({ onClose, onSavePdf, onSavePhotos }: DocS
         ? warpDocument(cv, shot.canvas, shot.quad, finish)
         : cropToQuadBounds(shot.canvas, shot.quad, ORIGINAL_MAX_EDGE);
       const [scanned, original] = await Promise.all([
-        canvasToJpeg(scannedCanvas, 0.85),
+        jpegWithin(scannedCanvas, MAX_SCAN_PAGE_BYTES),
         canvasToJpeg(drawScaled(shot.canvas, shot.canvas.width, shot.canvas.height, ORIGINAL_MAX_EDGE), 0.85),
       ]);
       const page: ScannedPage = { id: safeRandomId(), original, scanned, thumbUrl: URL.createObjectURL(scanned) };

@@ -1,7 +1,7 @@
 import { randomUUID } from "node:crypto";
 import { NextRequest } from "next/server";
 import prisma from "@/lib/prisma";
-import { lockPropertyRow } from "@/lib/property-record-guard";
+import { lockPropertyRecordForWrite } from "@/lib/property-record-guard";
 import { getApiSession, getUserPermissions, ApiError, handleApiError, apiResponse } from "@/lib/api-helpers";
 import { writeAuditLog } from "@/lib/audit";
 import { hasPermission } from "@/lib/permissions";
@@ -84,11 +84,14 @@ export async function POST(request: NextRequest, { params }: { params: Promise<{
 
     const fileName = scanFileName(new Date());
     const key = `properties/${propertyId}/attachments/${Date.now()}-${randomUUID()}.pdf`;
-    const stored = await getStorage().upload(scan.pdf, { key, mimeType: "application/pdf", fileName });
+    const storage = getStorage();
+    const stored = await storage.upload(scan.pdf, { key, mimeType: "application/pdf", fileName });
 
     // 通常の添付と同じく、親の物件行をロックしてから作る(名前の連番を同時の登録とぶつけない)。
+    // 作れなかったときは、先に置いたファイルを消す(持ち主のいないファイルを残さない)。
     const attachment = await prisma.$transaction(async (tx) => {
-      await lockPropertyRow(tx, propertyId);
+      // ⚠PDF にして読むあいだ(最大2分)に担当から外れた人には作らせない=ロックの中で担当範囲を見直す(@codex #594 P2)。
+      await lockPropertyRecordForWrite(tx, propertyId, session);
       const existing = await tx.attachment.findMany({
         where: { targetType: "property", targetId: propertyId, isDeleted: false, docTitle: { not: null } },
         select: { docTitle: true },
@@ -115,6 +118,13 @@ export async function POST(request: NextRequest, { params }: { params: Promise<{
         },
         include: { uploader: { select: { id: true, name: true } } },
       });
+    }).catch(async (err: unknown) => {
+      try {
+        await storage.delete(key);
+      } catch {
+        // 消せなくても元のエラーを返す。
+      }
+      throw err;
     });
 
     await writeAuditLog({
