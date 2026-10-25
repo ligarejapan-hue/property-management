@@ -53,6 +53,25 @@ describe("事業計画書の種別×セクションの表", () => {
   });
 });
 
+describe("書類確認書の項目", () => {
+  const ED = "src/components/deals/checklist-items-editor.tsx";
+  it("編集の部品を出し、保存ボタンで一緒に送る", () => {
+    const src = read(PAGE);
+    expect(src).toContain("書類確認書の項目");
+    expect(src).toMatch(/<ChecklistItemsEditor items=\{checklist\} onChange=\{setChecklist\} \/>/);
+    expect(src).toMatch(/checklistItems: checklist,/);
+  });
+  it("時点・まとまりごとに、項目・注意事項・出す取引・金額(持参だけ)を直し、足す・消す・初めの項目に戻す", () => {
+    const src = read(ED);
+    for (const s of ["CHECKLIST_PHASES", "CHECKLIST_GROUPS", "CHECKLIST_SCOPES", "CHECKLIST_AMOUNTS", "DEFAULT_CHECKLIST_ITEMS", "項目を足す", "初めの項目に戻す"]) {
+      expect(src).toContain(s);
+    }
+    expect(src).toMatch(/group === "bring"/);
+    // 最後の1件は消せない(保存は1件以上)
+    expect(src).toMatch(/disabled=\{items\.length <= 1\}/);
+  });
+});
+
 describe("ロゴ・角印と書類の文面", () => {
   const IMG = "src/components/deals/deal-image-setting.tsx";
   it("ロゴ・角印の欄を出し、文面は保存ボタンで一緒に送る", () => {

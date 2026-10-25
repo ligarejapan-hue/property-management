@@ -1,5 +1,6 @@
 import { DEFAULT_PROPERTY_KINDS, type PropertyKindDef } from "./constants";
 import { resolveSectionMatrix, type SectionMatrix } from "./business-sections";
+import { DEFAULT_CHECKLIST_ITEMS, resolveChecklistItems, type ChecklistItem } from "./checklist";
 import { EMPTY_BANK_ACCOUNT, bankAccountSchema, dealTextsSchema, propertyKindsSchema, type BankAccount, type DealTexts } from "./schemas";
 
 export const DEAL_SETTINGS_ID = "singleton";
@@ -13,6 +14,7 @@ export interface DealSettingsRow {
   sealKey?: string | null;
   texts?: unknown;
   sectionMatrix?: unknown;
+  checklistItems?: unknown;
   version: number;
   updatedAt: Date;
 }
@@ -29,6 +31,8 @@ export interface DealSettingsView {
   hasSeal: boolean;
   /** 事業計画書の種別×セクションの表(今の物件種別ごとの行にそろえたもの)。 */
   sectionMatrix: SectionMatrix;
+  /** 書類確認書の項目(保存が無ければ初めの項目)。 */
+  checklistItems: ChecklistItem[];
   /** 0 = 行がまだ無い。 */
   version: number;
   updatedAt: string | null;
@@ -39,7 +43,7 @@ export function resolveDealSettings(row: DealSettingsRow | null): DealSettingsVi
   if (!row) {
     return {
       representativeTitle: null, representativeName: null, bankAccount: EMPTY_BANK_ACCOUNT, propertyKinds: DEFAULT_PROPERTY_KINDS,
-      texts: {}, hasLogo: false, hasSeal: false, sectionMatrix: resolveSectionMatrix(undefined, DEFAULT_PROPERTY_KINDS), version: 0, updatedAt: null,
+      texts: {}, hasLogo: false, hasSeal: false, sectionMatrix: resolveSectionMatrix(undefined, DEFAULT_PROPERTY_KINDS), checklistItems: DEFAULT_CHECKLIST_ITEMS, version: 0, updatedAt: null,
     };
   }
   const kinds = propertyKindsSchema.safeParse(row.propertyKinds);
@@ -55,6 +59,7 @@ export function resolveDealSettings(row: DealSettingsRow | null): DealSettingsVi
     hasLogo: Boolean(row.logoKey),
     hasSeal: Boolean(row.sealKey),
     sectionMatrix: resolveSectionMatrix(row.sectionMatrix, propertyKinds),
+    checklistItems: resolveChecklistItems(row.checklistItems),
     version: row.version,
     updatedAt: row.updatedAt.toISOString(),
   };

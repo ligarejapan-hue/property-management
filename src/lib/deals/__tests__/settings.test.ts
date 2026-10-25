@@ -3,14 +3,23 @@ import { resolveDealSettings, isKnownPropertyKind } from "../settings";
 import { DEFAULT_PROPERTY_KINDS } from "../constants";
 import { EMPTY_BANK_ACCOUNT, dealSettingsUpdateSchema } from "../schemas";
 import { resolveSectionMatrix } from "../business-sections";
+import { DEFAULT_CHECKLIST_ITEMS } from "../checklist";
 
 describe("取引の設定の解決", () => {
   it("行が無ければ初期値・版は 0", () => {
     expect(resolveDealSettings(null)).toEqual({
       representativeTitle: null, representativeName: null, bankAccount: EMPTY_BANK_ACCOUNT,
       propertyKinds: DEFAULT_PROPERTY_KINDS, texts: {}, hasLogo: false, hasSeal: false,
-      sectionMatrix: resolveSectionMatrix(undefined, DEFAULT_PROPERTY_KINDS), version: 0, updatedAt: null,
+      sectionMatrix: resolveSectionMatrix(undefined, DEFAULT_PROPERTY_KINDS), checklistItems: DEFAULT_CHECKLIST_ITEMS, version: 0, updatedAt: null,
     });
+  });
+  it("書類確認書の項目: 保存した値を使う・空や壊れていれば初めの項目・保存は1件以上", () => {
+    const mine = [{ id: "a", phase: "contract", group: "bring", label: "試験", note: null, scope: "all", amount: "deposit" }];
+    const base = { representativeTitle: null, representativeName: null, bankAccount: {}, propertyKinds: DEFAULT_PROPERTY_KINDS, version: 1, updatedAt: new Date("2026-10-25T00:00:00Z") };
+    expect(resolveDealSettings({ ...base, checklistItems: mine }).checklistItems).toEqual(mine);
+    expect(resolveDealSettings({ ...base, checklistItems: [] }).checklistItems).toEqual(DEFAULT_CHECKLIST_ITEMS);
+    expect(dealSettingsUpdateSchema.safeParse({ version: 1, checklistItems: mine }).success).toBe(true);
+    expect(dealSettingsUpdateSchema.safeParse({ version: 1, checklistItems: [] }).success).toBe(false);
   });
   it("種別×セクションの表: 保存した値を、今の物件種別ごとの行にそろえて返す・保存は知っている形だけ", () => {
     const kinds = [...DEFAULT_PROPERTY_KINDS, { key: "shop_unit", label: "店舗区分", base: "unit" as const }];

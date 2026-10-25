@@ -7,6 +7,7 @@ import { text, yenInt } from "./schema-parts";
 import { fundingInputsSchema } from "./funding-schema";
 import { businessInputsSchema } from "./business-schema";
 import { sectionMatrixSchema } from "./business-sections";
+import { checklistItemsSchema } from "./checklist";
 
 export { text, yenInt };
 
@@ -226,4 +227,6 @@ export const dealSettingsUpdateSchema = z.object({
   texts: dealTextsSchema.optional(),
   /** 事業計画書の種別×セクションの表。 */
   sectionMatrix: sectionMatrixSchema.optional(),
+  /** 書類確認書の項目(1件以上)。 */
+  checklistItems: checklistItemsSchema.optional(),
 }).strict();
