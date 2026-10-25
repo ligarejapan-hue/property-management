@@ -6,6 +6,7 @@ import { AlertTriangle, Cloud, CloudOff, ExternalLink, FolderOpen, Link2, Loader
 import { PageHeader } from "@/components/ui/page-header";
 import { Button } from "@/components/ui/button";
 import { ConfirmDialog } from "@/components/ui/confirm-dialog";
+import { DRIVE_ALERT_AFTER_FAILURES } from "@/lib/drive/failure-alert";
 import {
   createDriveLink,
   deleteDriveLink,
@@ -206,7 +207,7 @@ function DriveAdminPageInner() {
         {status?.lastError && (
           <div className="mt-3 text-xs text-red-700 dark:text-red-300">
             直近の失敗: {status.lastError}
-            {status.consecutiveFailures >= 3 && `(${status.consecutiveFailures}回続いています)`}
+            {status.consecutiveFailures >= DRIVE_ALERT_AFTER_FAILURES && `(${status.consecutiveFailures}回続いています)`}
           </div>
         )}
       </section>

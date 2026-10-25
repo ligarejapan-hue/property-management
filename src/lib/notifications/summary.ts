@@ -30,6 +30,8 @@ import {
   rereadWhere,
 } from "./event-cursor";
 import { isTimedNextAction, jstDateToDbDate, jstToday, nextActionDeadline, nextActionReminderSlot } from "./reminder-schedule";
+import { DRIVE_CONNECTION_ID } from "@/lib/drive/connection";
+import { driveAlertParts } from "@/lib/drive/failure-alert";
 
 type PermissionList = Parameters<typeof hasPermission>[0];
 
@@ -64,10 +66,16 @@ export interface RegistryJobSummary {
   initialSeenKeys?: string[];
 }
 
+export interface DriveSyncSummary {
+  /** 見回りが続けて失敗しているときだけ。回数は管理画面と同じ数え方。 */
+  alert: { key: string; failures: number } | null;
+}
+
 export interface NotificationSummary {
   nextActions: NextActionSummary | null;
   inquiries: InquirySummary | null;
   registryJobs: RegistryJobSummary | null;
+  driveSync: DriveSyncSummary | null;
 }
 
 export interface SummaryInput {
@@ -88,12 +96,13 @@ export const BAD_CURSOR_CODE: Record<CursorKind, string> = {
 };
 
 export async function buildNotificationSummary(input: SummaryInput): Promise<NotificationSummary> {
-  const [nextActions, inquiries, registryJobs] = await Promise.all([
+  const [nextActions, inquiries, registryJobs, driveSync] = await Promise.all([
     nextActionSummary(input),
     inquirySummary(input),
     registryJobSummary(input),
+    driveSyncSummary(input),
   ]);
-  return { nextActions, inquiries, registryJobs };
+  return { nextActions, inquiries, registryJobs, driveSync };
 }
 
 // ---------- 次回対応(N4) ----------
@@ -284,4 +293,19 @@ async function registryJobSummary({ session, permissions, registryCursor, now, k
     cursorAt: read.cursor.t.getTime(),
     ...(read.initialSeen ? { initialSeenKeys: read.initialSeen.map((r) => key(r.id)) } : {}),
   };
+}
+
+// ---------- ドライブの見回りが続けて失敗している(第2段b の続き) ----------
+
+async function driveSyncSummary({ session, permissions, keys }: SummaryInput): Promise<DriveSyncSummary | null> {
+  // ドライブ連携の画面・API と同じ権限(requireDriveAdmin: user_management:write)。
+  if (!hasPermission(permissions, "user_management", "write")) return null;
+  // ⚠エラー文・アカウントのメールは読まない(知らせは定型文だけ)。トークンは「つないでいるか」を見るだけ。
+  const row = await prisma.driveConnection.findUnique({
+    where: { id: DRIVE_CONNECTION_ID },
+    select: { refreshTokenEnc: true, consecutiveFailures: true, connectedAt: true, lastSyncAt: true },
+  });
+  const parts = driveAlertParts(row);
+  if (!parts || !row) return { alert: null };
+  return { alert: { key: seenKey(keys, session.id, "drive_sync", parts), failures: row.consecutiveFailures } };
 }

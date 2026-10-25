@@ -25,6 +25,8 @@ export interface SummaryState {
   nextAction: { seen: Record<string, number> };
   inquiry: CursorSection;
   registry: CursorSection;
+  /** ドライブの見回りの失敗の見た印(1日で捨てる=続いていれば次の日にまた出す)。 */
+  drive: { seen: Record<string, number> };
 }
 
 /** 窓口の応答(`lib/notifications/summary.ts` の NotificationSummary と同じ形)。 */
@@ -43,10 +45,12 @@ export interface SummaryResponse {
     cursorAt: number;
     initialSeenKeys?: string[];
   } | null;
+  /** 反映の前後で古いサーバーが返さないことがあるので任意。 */
+  driveSync?: { alert: { key: string; failures: number } | null } | null;
 }
 
 export interface SummaryNotice {
-  kind: Extract<NoticeKind, "next_action" | "inquiry_new" | "registry_job_done">;
+  kind: Extract<NoticeKind, "next_action" | "inquiry_new" | "registry_job_done" | "drive_sync_failed">;
   tag: string;
   title: string;
   body: string;
@@ -55,6 +59,7 @@ export interface SummaryNotice {
 
 export const NEXT_ACTION_URL = "/home";
 export const INQUIRY_URL = "/properties/sale-dm/inquiries";
+export const DRIVE_ADMIN_URL = "/admin/drive";
 
 export function emptySummaryState(): SummaryState {
   return {
@@ -62,6 +67,7 @@ export function emptySummaryState(): SummaryState {
     nextAction: { seen: {} },
     inquiry: { cursor: null, cursorAt: null, seen: {} },
     registry: { cursor: null, cursorAt: null, seen: {} },
+    drive: { seen: {} },
   };
 }
 
@@ -93,11 +99,14 @@ export function parseSummaryState(raw: string | null, now: number): SummaryState
   if (!data || typeof data !== "object" || (data as { v?: unknown }).v !== 1) return emptySummaryState();
   const d = data as Record<string, unknown>;
   const na = (d.nextAction && typeof d.nextAction === "object" ? d.nextAction : {}) as Record<string, unknown>;
+  // ドライブの欄は後から足した=前の保存値には無い(空から始める)。
+  const dr = (d.drive && typeof d.drive === "object" ? d.drive : {}) as Record<string, unknown>;
   return {
     v: 1,
     nextAction: { seen: pruneSeen(na.seen, now, REMINDER_SEEN_TTL_MS) },
     inquiry: parseSection(d.inquiry, now),
     registry: parseSection(d.registry, now),
+    drive: { seen: pruneSeen(dr.seen, now, EVENT_SEEN_TTL_MS) },
   };
 }
 
@@ -186,6 +195,7 @@ export function decideSummaryNotices(
     nextAction: { seen: { ...prev.nextAction.seen } },
     inquiry: { ...prev.inquiry, seen: { ...prev.inquiry.seen } },
     registry: { ...prev.registry, seen: { ...prev.registry.seen } },
+    drive: { seen: { ...prev.drive.seen } },
   };
 
   // ---- 次回対応: まだ見ていない (次回対応, 期限, 版, 回) があれば1つにまとめて知らせる ----
@@ -243,6 +253,19 @@ export function decideSummaryNotices(
       });
     }
     state.registry = mergeCursor(state.registry, reg.cursor, reg.cursorAt);
+  }
+
+  // ---- ドライブの見回りが続けて失敗している(管理者だけ・同じ続きの失敗は1日に1回) ----
+  const alert = res.driveSync?.alert;
+  if (alert && !(alert.key in state.drive.seen)) {
+    state.drive.seen[alert.key] = now;
+    notices.push({
+      kind: "drive_sync_failed",
+      tag: "drive-sync:failing",
+      title: "Google ドライブの見回り",
+      body: `見回りが${alert.failures}回続けて失敗しています。ドライブ連携の画面で確かめてください`,
+      url: DRIVE_ADMIN_URL,
+    });
   }
 
   return { state, notices };

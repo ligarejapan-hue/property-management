@@ -47,6 +47,7 @@ const LOOK: Record<SummaryNotice["kind"], { tone: ToastTone; icon: ToastIcon }> 
   next_action: { tone: "amber", icon: "calendar" },
   inquiry_new: { tone: "indigo", icon: "inbox" },
   registry_job_done: { tone: "green", icon: "file" },
+  drive_sync_failed: { tone: "red", icon: "file" },
 };
 
 export function SummaryPoller() {

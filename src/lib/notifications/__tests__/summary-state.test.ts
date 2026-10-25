@@ -101,6 +101,41 @@ describe("謄本の一括取得の知らせ", () => {
   });
 });
 
+describe("ドライブの見回りが続けて失敗している知らせ", () => {
+  const failing = (key: string, failures: number) => res({ driveSync: { alert: { key, failures } } });
+  it("管理者に1回出す・押すとドライブ連携の画面・同じ続きの失敗は2回出さない", () => {
+    const a = decideSummaryNotices(emptySummaryState(), failing("d1", 3), NOW);
+    expect(a.notices).toEqual([
+      {
+        kind: "drive_sync_failed",
+        tag: "drive-sync:failing",
+        title: "Google ドライブの見回り",
+        body: "見回りが3回続けて失敗しています。ドライブ連携の画面で確かめてください",
+        url: "/admin/drive",
+      },
+    ]);
+    expect(decideSummaryNotices(a.state, failing("d1", 4), NOW + 60_000).notices).toEqual([]);
+  });
+  it("いったん成功したあとの新しい続きの失敗(別の印)はまた出す", () => {
+    const a = decideSummaryNotices(emptySummaryState(), failing("d1", 3), NOW);
+    expect(decideSummaryNotices(a.state, failing("d2", 3), NOW).notices).toHaveLength(1);
+  });
+  it("失敗が続いていない・見られない・古いサーバー(欄なし)は何も出さない", () => {
+    expect(decideSummaryNotices(emptySummaryState(), res({ driveSync: { alert: null } }), NOW).notices).toEqual([]);
+    expect(decideSummaryNotices(emptySummaryState(), res({ driveSync: null }), NOW).notices).toEqual([]);
+    expect(decideSummaryNotices(emptySummaryState(), res(), NOW).notices).toEqual([]);
+  });
+  it("見た印は1日で捨てる=失敗が続いていれば次の日にまた出す", () => {
+    const a = decideSummaryNotices(emptySummaryState(), failing("d1", 3), NOW);
+    const back = parseSummaryState(JSON.stringify(a.state), NOW + EVENT_SEEN_TTL_MS);
+    expect(decideSummaryNotices(back, failing("d1", 300), NOW + EVENT_SEEN_TTL_MS).notices).toHaveLength(1);
+  });
+  it("ドライブの欄が無い前の保存値も読める", () => {
+    const old = { v: 1, nextAction: { seen: {} }, inquiry: { cursor: null, cursorAt: null, seen: {} }, registry: { cursor: null, cursorAt: null, seen: {} } };
+    expect(parseSummaryState(JSON.stringify(old), NOW).drive).toEqual({ seen: {} });
+  });
+});
+
 describe("保存値", () => {
   it("往復でき、期限を過ぎた印は捨てる(申込・謄本は1日・次回対応は1週間)", () => {
     const s = emptySummaryState();

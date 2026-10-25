@@ -20,6 +20,7 @@ vi.mock("@/lib/prisma", () => {
     user: { findUnique: vi.fn(async () => ({ isActive: true, inquiryNotifyEnabled: true })) },
     registryFetchJob: { findMany: vi.fn(async () => []) },
     registryFetchJobItem: { findMany: vi.fn(async () => []) },
+    driveConnection: { findUnique: vi.fn(async () => null) },
   };
   return { default: db };
 });
@@ -36,6 +37,7 @@ const pm = prismaMock as never as {
   user: { findUnique: Fn };
   registryFetchJob: { findMany: Fn };
   registryFetchJobItem: { findMany: Fn };
+  driveConnection: { findUnique: Fn };
 };
 const U = "11111111-1111-4111-8111-111111111111";
 const ID1 = "00000000-0000-4000-8000-000000000001";
@@ -66,6 +68,7 @@ beforeEach(() => {
   pm.dmInquiry.findMany.mockResolvedValue([]);
   pm.registryFetchJob.findMany.mockResolvedValue([]);
   pm.registryFetchJobItem.findMany.mockResolvedValue([]);
+  pm.driveConnection.findUnique.mockResolvedValue(null);
 });
 
 describe("通知の件数の窓口(設計書 §5.1)", () => {
@@ -281,6 +284,50 @@ describe("通知の件数の窓口(設計書 §5.1)", () => {
       expect(r.body.registryJobs.completed).toEqual([
         { key: seenKey(KEYS, U, "registry_job", [ID1]), href: `/properties/registry-fetch/${ID1}`, done: 1, failed: 0, skipped: 0, chargedButFailed: 1 },
       ]);
+    });
+  });
+
+  describe("ドライブの見回りの失敗", () => {
+    const admin = () =>
+      (getUserPermissions as Fn).mockResolvedValue([
+        { resource: "property", action: "read", granted: true },
+        { resource: "user_management", action: "write", granted: true },
+      ]);
+    const connectedAt = new Date("2026-10-20T01:00:00Z");
+    const lastSyncAt = new Date("2026-10-25T01:00:00Z");
+    it("管理者(user_management:write)でなければ null・読まない", async () => {
+      const r = await call();
+      expect(r.body.driveSync).toBeNull();
+      expect(pm.driveConnection.findUnique).not.toHaveBeenCalled();
+    });
+    it("3回続けて失敗したら印と回数を返す・印は接続と最後の成功の時刻から作る(生の値・エラー文は出さない)", async () => {
+      admin();
+      pm.driveConnection.findUnique.mockResolvedValue({ refreshTokenEnc: "enc", consecutiveFailures: 3, connectedAt, lastSyncAt, lastError: "秘密" });
+      const r = await call();
+      expect(r.body.driveSync).toEqual({
+        alert: { key: seenKey(KEYS, U, "drive_sync", [connectedAt.toISOString(), lastSyncAt.toISOString()]), failures: 3 },
+      });
+      const sel = pm.driveConnection.findUnique.mock.calls[0][0].select;
+      expect(sel.lastError).toBeUndefined();
+      expect(sel.accountEmail).toBeUndefined();
+      expect(JSON.stringify(r.body)).not.toContain("enc");
+    });
+    it("一度も成功していなくても出す(最後の成功なし)", async () => {
+      admin();
+      pm.driveConnection.findUnique.mockResolvedValue({ refreshTokenEnc: "enc", consecutiveFailures: 5, connectedAt, lastSyncAt: null });
+      const r = await call();
+      expect(r.body.driveSync.alert.key).toBe(seenKey(KEYS, U, "drive_sync", [connectedAt.toISOString(), "never"]));
+    });
+    it("2回まで・つないでいない・行が無いときは知らせない", async () => {
+      admin();
+      for (const row of [
+        { refreshTokenEnc: "enc", consecutiveFailures: 2, connectedAt, lastSyncAt },
+        { refreshTokenEnc: null, consecutiveFailures: 9, connectedAt, lastSyncAt },
+        null,
+      ]) {
+        pm.driveConnection.findUnique.mockResolvedValue(row);
+        expect((await call()).body.driveSync).toEqual({ alert: null });
+      }
     });
   });
 
