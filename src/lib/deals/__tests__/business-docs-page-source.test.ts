@@ -30,6 +30,13 @@ describe("書類タブの業務書類(段5a・5b・5c)", () => {
     for (const g of ['{ key: "settlement", label: "決済の書類" }', '{ key: "other", label: "そのほかの書類" }', '{ key: "oc", label: "OC の書類" }']) expect(src).toContain(g);
     expect(src).toContain("docs.filter((d) => d.group === g.key)");
   });
+  it("売主様あてのご案内: 諸費用の行を直す・足す・消す、行がそろうまで押せない", () => {
+    const src = read(SECTION);
+    expect(src).toContain('doc.docType === "settlement_guide_seller"');
+    expect(src).toContain("諸費用の行を足す");
+    expect(src).toMatch(/costRows\.every\(costRowOk\)/);
+    expect(src).toContain("costs: costRows.map((r) => ({ label: r.label.trim(), amount: Number(r.amount.replace(/,/g, \"\")) }))");
+  });
   it("書類確認書のまとまりと、持参する金額ごとの払い方の選択(段5c-1)", () => {
     const src = read(SECTION);
     expect(src).toContain('{ key: "checklist", label: "書類確認書" }');

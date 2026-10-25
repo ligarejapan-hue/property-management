@@ -22,6 +22,10 @@ type KeyRow = { label: string; count: string };
 const keyRowsOf = (v: unknown): KeyRow[] => (Array.isArray(v) ? (v as KeyRow[]) : []);
 /** 鍵の行が出せる形か(番号・種類があり、本数が 1〜99)。 */
 const keyRowOk = (k: KeyRow) => k.label.trim() !== "" && /^\d+$/.test(k.count) && Number(k.count) >= 1 && Number(k.count) <= 99;
+type CostRow = { label: string; amount: string };
+const costRowsOf = (v: unknown): CostRow[] => (Array.isArray(v) ? (v as CostRow[]) : []);
+/** 諸費用の行が出せる形か(項目名があり、金額が 0 以上の整数)。 */
+const costRowOk = (r: CostRow) => r.label.trim() !== "" && /^\d{1,13}$/.test(r.amount.replace(/,/g, ""));
 
 /**
  * 業務書類(段5)。その取引で出せる書類を並べ、「発行」→ 出す前の確認(空欄の項目・発行のときに選ぶもの)→ 発行。
@@ -98,7 +102,11 @@ function IssueDialog({ dealId, doc, version, onCancel, onDone }: {
 }) {
   // 鍵の行は入力しやすいよう本数を文字で持ち、送るときに数にする。
   const [values, setValues] = useState<Record<string, unknown>>(
-    doc.docType === "key_receipt" ? { ...doc.defaults, keys: [{ label: "", count: "1" }] } : doc.defaults,
+    doc.docType === "key_receipt" ? { ...doc.defaults, keys: [{ label: "", count: "1" }] }
+      // 諸費用の金額は入力しやすいよう文字で持ち、送るときに数にする。
+      : doc.docType === "settlement_guide_seller"
+        ? { ...doc.defaults, costs: (doc.defaults.costs as { label: string; amount: number }[] ?? []).map((r) => ({ label: r.label, amount: String(r.amount) })) }
+        : doc.defaults,
   );
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -109,9 +117,12 @@ function IssueDialog({ dealId, doc, version, onCancel, onDone }: {
   const needsDecision = receipt && issuer?.individual === true && values.exempt == null;
   const matters = Array.isArray(values.matters) ? (values.matters as string[]) : [];
   const keyRows = keyRowsOf(values.keys);
+  const costRows = costRowsOf(values.costs);
   // 委任状は委任する事項が1つ以上・鍵受領書は鍵の行がすべて埋まっているまで発行できない(サーバーも 422)。
   const incomplete = (doc.docType === "power_of_attorney" && !matters.length && !str(values.otherMatter).trim())
-    || (doc.docType === "key_receipt" && (!keyRows.length || !keyRows.every(keyRowOk)));
+    || (doc.docType === "key_receipt" && (!keyRows.length || !keyRows.every(keyRowOk)))
+    || (doc.docType === "settlement_guide_seller" && !costRows.every(costRowOk));
+  const setCost = (i: number, patch: Partial<CostRow>) => set("costs", costRows.map((r, j) => (j === i ? { ...r, ...patch } : r)));
   const setKey = (i: number, patch: Partial<KeyRow>) => set("keys", keyRows.map((k, j) => (j === i ? { ...k, ...patch } : k)));
   const choices = doc.choices ?? {};
   const pay = payOf(values.pay);
@@ -128,7 +139,9 @@ function IssueDialog({ dealId, doc, version, onCancel, onDone }: {
             ? { ...values, otherMatter: str(values.otherMatter).trim() || null, signedOn: str(values.signedOn) || null }
             : doc.docType === "landlord_change_notice"
               ? { ...values, changeOn: str(values.changeOn) || null }
-              : values;
+              : doc.docType === "settlement_guide_seller"
+                ? { ...values, costs: costRows.map((r) => ({ label: r.label.trim(), amount: Number(r.amount.replace(/,/g, "")) })) }
+                : values;
       const r = await dealsApi.issueDocument(dealId, doc.docType, version, options);
       onDone({ id: r.id, title: r.title, version: r.version });
     } catch (e) {
@@ -194,6 +207,36 @@ function IssueDialog({ dealId, doc, version, onCancel, onDone }: {
             <Field label="お持ちいただくもの(1行に1つ)">
               <textarea value={str(values.belongings)} onChange={(e) => set("belongings", e.target.value || null)} maxLength={500} rows={4} aria-label="お持ちいただくもの" className={inputCls} />
             </Field>
+          </>
+        )}
+        {doc.docType === "settlement_guide_seller" && (
+          <>
+            <div className="space-y-1.5">
+              <p className="text-xs font-medium text-gray-600 dark:text-gray-400">諸費用(お受取額から差し引くもの・初めは取引の費用)</p>
+              {costRows.map((r, i) => (
+                <div key={i} className="flex items-center gap-2">
+                  <input value={r.label} onChange={(e) => setCost(i, { label: e.target.value })} maxLength={50} placeholder="例: 抵当権などの抹消費用" aria-label={`諸費用の項目 ${i + 1}`} className={inputCls} />
+                  <input value={r.amount} onChange={(e) => setCost(i, { amount: e.target.value })} inputMode="numeric" aria-label={`諸費用の金額 ${i + 1}`} className={`${inputCls} w-36`} />
+                  <span className="text-sm">円</span>
+                  <Button variant="secondary" size="sm" aria-label={`諸費用の${i + 1}行目を消す`} onClick={() => set("costs", costRows.filter((_, j) => j !== i))}>
+                    <Trash2 className="h-4 w-4" />
+                  </Button>
+                </div>
+              ))}
+              {costRows.length < 30 && (
+                <Button variant="secondary" size="sm" onClick={() => set("costs", [...costRows, { label: "", amount: "" }])}>
+                  <Plus className="h-4 w-4" />
+                  諸費用の行を足す
+                </Button>
+              )}
+            </div>
+            <Field label="お受け取りの口座(空なら「当日までにお知らせください」)">
+              <textarea value={str(values.receiveTo)} onChange={(e) => set("receiveTo", e.target.value || null)} maxLength={300} rows={2} aria-label="お受け取りの口座" className={inputCls} />
+            </Field>
+            <Field label="お持ちいただくもの(1行に1つ)">
+              <textarea value={str(values.belongings)} onChange={(e) => set("belongings", e.target.value || null)} maxLength={500} rows={4} aria-label="お持ちいただくもの" className={inputCls} />
+            </Field>
+            <p className="text-xs text-gray-500">残代金+精算金−諸費用=当日のお受取額を出します。</p>
           </>
         )}
         {doc.docType === "power_of_attorney" && (

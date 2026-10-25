@@ -2,7 +2,10 @@ import { z } from "zod";
 import type { BusinessDocContext, ValueRow } from "./business/common";
 import { partiesOf, type Choice } from "./business/common";
 import { buildSettlementStatement } from "./business/settlement-statement";
-import { DEFAULT_BELONGINGS, buildSettlementGuide, defaultPayee, settlementGuideOptionsSchema } from "./business/settlement-guide";
+import {
+  DEFAULT_BELONGINGS, DEFAULT_SELLER_BELONGINGS, buildSellerSettlementGuide, buildSettlementGuide, defaultPayee, defaultSellerCosts,
+  sellerGuideOptionsSchema, settlementGuideOptionsSchema,
+} from "./business/settlement-guide";
 import {
   RECEIPT_KINDS, buildReceipt, issuerChoices, receiptAmount, receiptOptionsSchema, receiptSides,
   type IssuerChoice, type ReceiptKind,
@@ -111,6 +114,19 @@ export const BUSINESS_DOCS: BusinessDocDef[] = [
     options: settlementGuideOptionsSchema as z.ZodType<Record<string, unknown>>,
     defaults: (c) => ({ values: { payee: defaultPayee(c), belongings: DEFAULT_BELONGINGS } }),
     build: (c, o) => buildSettlementGuide(c, settlementGuideOptionsSchema.parse(o)),
+  },
+  {
+    key: "settlement_guide_seller",
+    label: "残金決済のご案内(売主様)",
+    group: "settlement",
+    applies: () => true,
+    missing: (c) => need([
+      ["決済日時", c.deal.settlementAt], ["決済場所", c.deal.settlementPlace], ["売買価格", c.deal.price], ["売主", hasParty(c, "seller")],
+    ]),
+    blocking: () => [],
+    options: sellerGuideOptionsSchema as z.ZodType<Record<string, unknown>>,
+    defaults: (c) => ({ values: { costs: defaultSellerCosts(c), receiveTo: null, belongings: DEFAULT_SELLER_BELONGINGS } }),
+    build: (c, o) => buildSellerSettlementGuide(c, sellerGuideOptionsSchema.parse(o)),
   },
   receiptDef("deposit_receipt"),
   receiptDef("balance_receipt"),

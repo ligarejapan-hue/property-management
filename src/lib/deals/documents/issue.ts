@@ -21,6 +21,7 @@ export const DEAL_DOC_TYPES = {
   landlord_change_notice: { label: "賃貸人変更のお知らせ", variants: { default: "" } },
   handover_checklist: { label: "引継書類チェックリスト", variants: { default: "" } },
   checklist_contract: { label: "書類確認書(契約時)", variants: { default: "" } },
+  settlement_guide_seller: { label: "残金決済のご案内(売主様)", variants: { default: "" } },
   checklist_settlement: { label: "書類確認書(決済時)", variants: { default: "" } },
 } as const;
 
