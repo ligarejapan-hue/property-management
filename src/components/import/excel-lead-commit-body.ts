@@ -71,9 +71,15 @@ export interface ExcelLeadCommitBody {
   requireNoDuplicates: true;
   /** 顧客管理表(査定サイトの反響)からの取込=導入ルート「一括査定」。 */
   leadSource: "excel_lead";
+  /** 物件の担当者(ユーザーの id・従業員の指摘⑨ 2026-10-25)。null=担当者なし。 */
+  assignedTo: string | null;
 }
 
-export function excelLeadCommitBody(row: { draft: PasteDraft; ownerNote: string }): ExcelLeadCommitBody {
+export function excelLeadCommitBody(row: {
+  draft: PasteDraft;
+  ownerNote: string;
+  assignedTo?: string | null;
+}): ExcelLeadCommitBody {
   const pv = defaultPropertyValues(row.draft);
   const ov = defaultOwnerValues(row.draft);
   // ⚠土地面積・延床面積・築年は物件の正式な欄へ入れる(@codex PR#456 3巡目)。
@@ -129,6 +135,7 @@ export function excelLeadCommitBody(row: { draft: PasteDraft; ownerNote: string 
     linkExistingOwnerId: null,
     requireNoDuplicates: true,
     leadSource: "excel_lead",
+    assignedTo: row.assignedTo ?? null,
   };
 }
 

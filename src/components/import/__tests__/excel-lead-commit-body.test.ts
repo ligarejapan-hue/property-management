@@ -143,3 +143,14 @@ describe("区分以外の種別で消える欄は備考に残す(@codex PR#456 2
     expect(body.property.note).toContain("築年: 1980");
   });
 });
+
+describe("excelLeadCommitBody — 担当者(従業員の指摘⑨ 2026-10-25)", () => {
+  const draft = buildPasteDraft("お名前：山田　太郎\n物件所在地：東京都港区1-1\n物件種別：戸建", { maxYear: 2026 });
+  it("★行で決めた担当者を送る", () => {
+    expect(excelLeadCommitBody({ draft, ownerNote: "x", assignedTo: "u-1" }).assignedTo).toBe("u-1");
+  });
+  it("決まっていない・前の控えの行(項目なし)は null", () => {
+    expect(excelLeadCommitBody({ draft, ownerNote: "x", assignedTo: null }).assignedTo).toBeNull();
+    expect(excelLeadCommitBody({ draft, ownerNote: "x" }).assignedTo).toBeNull();
+  });
+});

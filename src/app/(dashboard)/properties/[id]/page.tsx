@@ -106,6 +106,7 @@ import InquirerNameField from "@/components/properties/inquirer-name-field";
 import LeadExclusionField from "@/components/properties/lead-exclusion-field";
 import { SalesSheetList } from "@/components/sales-sheet/SalesSheetList";
 import { salesSheetTemplateKindFor } from "@/lib/sales-sheet/template-kind";
+import { landBuildingAreaRows } from "@/lib/property-area-display";
 import { formatPhoneJp, isValidPhoneJp } from "@/lib/phone-format-jp";
 import {
   beginRefresh,
@@ -1342,6 +1343,12 @@ function BasicTab({
           )}
         </>
       )}
+
+      {/* 戸建・土地・一棟の土地面積・建物面積(従業員の指摘⑧ 2026-10-25)。
+          値は販売用の欄に入っていたが、基本情報に出ていなかった。出す欄は編集画面の「販売」区分と同じ規則。 */}
+      {landBuildingAreaRows(property).map((row) => (
+        <Field key={row.label} label={row.label} value={row.value} />
+      ))}
 
       <Field
         label="登記状況"

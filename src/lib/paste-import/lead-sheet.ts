@@ -18,6 +18,7 @@
  */
 import type { PasteDraft } from "./types";
 import { supportsUnitFields } from "@/lib/property-building-name";
+import { ASSIGNEE_COLUMN_HEADERS } from "./assignee-match";
 
 export type LeadSheetFormat = "form_text" | "columns";
 
@@ -40,6 +41,11 @@ export interface LeadRow {
    * findEarlierExcelImport)。同じ人・同じ住所でも依頼日が違えば別の申込とみなす。
    */
   requestDateNoteLine: string | null;
+  /**
+   * 担当者の列(「担当者」「担当者氏名」)の値。無ければ null。物件の担当者に当てる材料
+   * (assignee-match.ts・従業員の指摘⑨ 2026-10-25)。値は今までどおり所有者の備考にも残る。
+   */
+  assigneeLabel: string | null;
 }
 
 /**
@@ -159,7 +165,7 @@ function looksLikeLabeledText(s: string): boolean {
   return (s.match(/^[^\n：:]{1,30}[：:]/gm) ?? []).length >= 3;
 }
 
-function formRow(header: readonly string[], cells: readonly string[]): Omit<LeadRow, "sheetName" | "rowNumber"> {
+function formRow(header: readonly string[], cells: readonly string[]): Omit<LeadRow, "sheetName" | "rowNumber" | "assigneeLabel"> {
   const h = header.map(norm);
   const at = (key: string) => {
     const i = h.indexOf(key);
@@ -194,7 +200,7 @@ function formRow(header: readonly string[], cells: readonly string[]): Omit<Lead
   };
 }
 
-function columnsRow(header: readonly string[], cells: readonly string[]): Omit<LeadRow, "sheetName" | "rowNumber"> {
+function columnsRow(header: readonly string[], cells: readonly string[]): Omit<LeadRow, "sheetName" | "rowNumber" | "assigneeLabel"> {
   const lines: string[] = [];
   const ownerNoteLines: string[] = [];
   let addrHead = "";
@@ -247,13 +253,15 @@ export function readLeadSheet(sheetName: string, aoa: readonly (readonly string[
   if (format === null) return { sheetName, format: null, rows: [] };
 
   const header = aoa[headerIdx].map((c) => String(c ?? ""));
+  const assigneeCol = header.findIndex((h) => ASSIGNEE_COLUMN_HEADERS.some((a) => norm(a) === norm(h)));
   const rows: LeadRow[] = [];
   for (let i = headerIdx + 1; i < aoa.length; i++) {
     const cells = aoa[i].map((c) => String(c ?? ""));
     if (cells.every((c) => c.trim() === "")) continue;
     const built = format === "form_text" ? formRow(header, cells) : columnsRow(header, cells);
     if (built.text.trim() === "") continue; // 氏名も住所も本文も無い行(集計行など)
-    rows.push({ sheetName, rowNumber: i + 1, ...built });
+    const assigneeLabel = assigneeCol === -1 ? "" : oneLine(cells[assigneeCol] ?? "");
+    rows.push({ sheetName, rowNumber: i + 1, ...built, assigneeLabel: assigneeLabel || null });
   }
   return { sheetName, format, rows };
 }

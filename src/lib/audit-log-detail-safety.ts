@@ -494,11 +494,12 @@ const ACTION_EXTRA_KEYS: Readonly<Record<string, ReadonlySet<string>>> = {
   //   attachmentCreated = 取込元PDFを添付として保存したか
   //   hasExternalKey    = 査定ナンバー等の外部キーがあったか
   //   inquirerSaved     = 問い合わせ者(申込者の氏名)を物件に残したか(真偽だけ・氏名は載せない)
+  //   assigneeSet       = Excel まとめ取込で物件の担当者を付けたか(真偽だけ・2026-10-25)
   //   commentNoteSaved  = 貼り付けの自由記述(コメント等)を所有者の備考に残したか(真偽だけ・中身は載せない)
   // ⚠ownerCreated / ownerLinked は /owner/i の denylist に当たるため
   //   force-safe 側で保持する(値は boolean ゆえ PII 流入余地なし)。
   // ⚠ここに氏名・住所・原文のキーは**足さない**(安全なものだけを並べる方式)。
-  paste_import_property_create: new Set(["attachmentCreated", "hasExternalKey", "inquirerSaved", "commentNoteSaved"]),
+  paste_import_property_create: new Set(["attachmentCreated", "hasExternalKey", "inquirerSaved", "commentNoteSaved", "assigneeSet"]),
   // 編集中の鍵(設計 2026-09-17)。detail は UUID と enum のみ。
   // 氏名・画面の合言葉(生値もハッシュも)は載せない。
   edit_lock_acquire: new Set(["resourceType", "resourceId"]),

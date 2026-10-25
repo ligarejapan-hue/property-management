@@ -58,7 +58,19 @@ vi.mock("@/lib/paste-import-duplicates", () => ({
     return earlierResult(input);
   }),
 }));
-vi.mock("@/lib/prisma", () => ({ prisma: {} }));
+// 担当者の当て先(在籍中のユーザー)。findMany は isActive の条件も確かめる。
+let mockUsers: { id: string; name: string }[] = [];
+const userFindManyArgs: unknown[] = [];
+vi.mock("@/lib/prisma", () => ({
+  prisma: {
+    user: {
+      findMany: vi.fn(async (args: { where?: { isActive?: boolean } }) => {
+        userFindManyArgs.push(args);
+        return args?.where?.isActive === true ? mockUsers : [];
+      }),
+    },
+  },
+}));
 
 import { POST } from "../route";
 import { NextRequest } from "next/server";
@@ -92,6 +104,8 @@ const row = (over: Partial<Record<string, string>> = {}) =>
 
 beforeEach(() => {
   mockPerms = FULL_PERMS;
+  mockUsers = [];
+  userFindManyArgs.length = 0;
   lookupCalls.length = 0;
   earlierCalls.length = 0;
   earlierResult = () => [];
@@ -480,5 +494,42 @@ describe("POST /api/import/paste/excel", () => {
       }),
     }))).json();
     expect(body.rows.map((r: { sheetName: string }) => r.sheetName)).toEqual(["HOME4U", "タカウル"]);
+  });
+});
+
+describe("担当者の列 → 物件の担当者(従業員の指摘⑨ 2026-10-25)", () => {
+  it("★担当者の名前が在籍中のユーザー1人に当たれば assignedTo に入れる(備考にも残す)", async () => {
+    mockUsers = [{ id: "u-katsuchi", name: "勝地 太郎" }, { id: "u-other", name: "村山 花子" }];
+    const res = await POST(req({
+      fileName: "顧客管理.xlsx",
+      xlsxBase64: xlsxBase64(sheet([row({ 姓名: "山田　太郎", 担当者: "勝地", URL: MAIL })])),
+    }));
+    const r = (await res.json()).rows[0];
+    expect(r.assigneeLabel).toBe("勝地");
+    expect(r.assignedTo).toBe("u-katsuchi");
+    expect(r.ownerNote).toContain("担当者: 勝地");
+    expect(userFindManyArgs[0]).toMatchObject({ where: { isActive: true } });
+  });
+
+  it("★当たらない・同じ名字が2人なら assignedTo は null(画面で選ぶ)", async () => {
+    mockUsers = [{ id: "a", name: "勝地 一郎" }, { id: "b", name: "勝地 二郎" }];
+    const res = await POST(req({
+      fileName: "顧客管理.xlsx",
+      xlsxBase64: xlsxBase64(sheet([row({ 姓名: "山田　太郎", 担当者: "勝地", URL: MAIL })])),
+    }));
+    const r = (await res.json()).rows[0];
+    expect(r.assigneeLabel).toBe("勝地");
+    expect(r.assignedTo).toBeNull();
+  });
+
+  it("担当者の列が空ならユーザーを引きに行かない", async () => {
+    const res = await POST(req({
+      fileName: "顧客管理.xlsx",
+      xlsxBase64: xlsxBase64(sheet([row({ 姓名: "山田　太郎", URL: MAIL })])),
+    }));
+    const r = (await res.json()).rows[0];
+    expect(r.assigneeLabel).toBeNull();
+    expect(r.assignedTo).toBeNull();
+    expect(userFindManyArgs).toHaveLength(0);
   });
 });
