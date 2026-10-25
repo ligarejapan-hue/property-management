@@ -3424,7 +3424,7 @@ export async function fetchPropertySuggestions(q: string) {
 
 // ---------- Search (for import linkage) ----------
 
-export async function searchProperties(query: string) {
+export async function searchProperties(query: string, opts: { caseStatus?: string } = {}) {
   if (USE_MOCK) {
     await mockDelay();
     const q = query.toLowerCase();
@@ -3444,8 +3444,14 @@ export async function searchProperties(query: string) {
       realEstateNumber: string | null;
       propertyType: string;
       externalLinkKey: string | null;
+      buildingName?: string | null;
+      roomNo?: string | null;
+      caseStatus?: string;
     }>;
-  }>(`/api/properties/search?q=${encodeURIComponent(query)}`);
+  }>(
+    `/api/properties/search?q=${encodeURIComponent(query)}` +
+      (opts.caseStatus ? `&caseStatus=${encodeURIComponent(opts.caseStatus)}` : ""),
+  );
 }
 
 /**

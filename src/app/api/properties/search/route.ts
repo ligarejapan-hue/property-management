@@ -8,9 +8,12 @@ import {
   apiResponse,
 } from "@/lib/api-helpers";
 import { hasPermission } from "@/lib/permissions";
+import { CASE_STATUS_VALUES } from "@/lib/property-types";
 
-// ---------- GET /api/properties/search?q=keyword ----------
+// ---------- GET /api/properties/search?q=keyword[&caseStatus=contract_planned] ----------
 // Lightweight search for linking import rows to existing properties.
+// caseStatus を付けたときは「その案件状況の物件だけ」に絞る(取引の新規作成で物件を選ぶ用)。
+//   このときは q が空でもよい(空なら案件状況だけで一覧)。アーカイブ済みは出さない。
 
 export async function GET(request: NextRequest) {
   try {
@@ -22,7 +25,17 @@ export async function GET(request: NextRequest) {
     }
 
     const q = request.nextUrl.searchParams.get("q")?.trim() ?? "";
-    if (q.length < 2) {
+    const caseStatusParam = request.nextUrl.searchParams.get("caseStatus");
+    const caseStatus =
+      caseStatusParam && (CASE_STATUS_VALUES as readonly string[]).includes(caseStatusParam)
+        ? (caseStatusParam as (typeof CASE_STATUS_VALUES)[number])
+        : null;
+    if (caseStatusParam && !caseStatus) {
+      throw new ApiError(400, "案件状況の指定が正しくありません", "VALIDATION_ERROR");
+    }
+    // 案件状況の指定がないときは従来どおり 2 文字未満は空(取込の紐付けの動き)。
+    // 指定があるときは、空なら案件状況だけで一覧、1 文字は空(打ちかけ)。
+    if (caseStatus ? q.length === 1 : q.length < 2) {
       return apiResponse({ data: [] });
     }
 
@@ -40,14 +53,20 @@ export async function GET(request: NextRequest) {
       where: {
         AND: [
           ...fieldStaffScope,
-          {
-            OR: [
-              { address: { contains: q, mode: "insensitive" } },
-              { lotNumber: { contains: q, mode: "insensitive" } },
-              { realEstateNumber: { contains: q, mode: "insensitive" } },
-              { externalLinkKey: { contains: q, mode: "insensitive" } },
-            ],
-          },
+          ...(caseStatus ? [{ caseStatus, isArchived: false }] : []),
+          ...(q
+            ? [
+                {
+                  OR: [
+                    { address: { contains: q, mode: "insensitive" as const } },
+                    { lotNumber: { contains: q, mode: "insensitive" as const } },
+                    { realEstateNumber: { contains: q, mode: "insensitive" as const } },
+                    { externalLinkKey: { contains: q, mode: "insensitive" as const } },
+                    { buildingName: { contains: q, mode: "insensitive" as const } },
+                  ],
+                },
+              ]
+            : []),
         ],
       },
       select: {
@@ -57,8 +76,11 @@ export async function GET(request: NextRequest) {
         realEstateNumber: true,
         propertyType: true,
         externalLinkKey: true,
+        buildingName: true,
+        roomNo: true,
+        caseStatus: true,
       },
-      take: 10,
+      take: caseStatus ? 30 : 10,
       orderBy: { updatedAt: "desc" },
     });
 
