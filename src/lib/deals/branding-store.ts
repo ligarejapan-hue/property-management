@@ -4,20 +4,25 @@ import { DEAL_SETTINGS_ID } from "./settings";
 import { dealImageMimeFromKey, imageDataUri } from "./branding";
 
 export interface DealBranding {
-  /** 書類に埋め込むロゴ(data: の URL)。登録が無い・ファイルが見つからないときは null。 */
+  /** 書類に埋め込むロゴ・角印(data: の URL)。登録が無い・ファイルが見つからないときは null。 */
   logo: string | null;
+  seal: string | null;
 }
 
-/** 書類を作るときのロゴ。読めなければロゴなしで作る(発行は止めない)。 */
-export async function loadDealBranding(): Promise<DealBranding> {
-  const row = await prisma.dealSettings.findUnique({ where: { id: DEAL_SETTINGS_ID }, select: { logoKey: true } });
-  const key = row?.logoKey;
+async function readImage(key: string | null | undefined): Promise<string | null> {
   const mime = key ? dealImageMimeFromKey(key) : null;
-  if (!key || !mime) return { logo: null };
+  if (!key || !mime) return null;
   try {
     const file = await getStorage().read(key);
-    return { logo: file ? imageDataUri(mime, file.body) : null };
+    return file ? imageDataUri(mime, file.body) : null;
   } catch {
-    return { logo: null };
+    return null;
   }
+}
+
+/** 書類を作るときのロゴ・角印。読めなければ無しで作る(発行は止めない)。 */
+export async function loadDealBranding(): Promise<DealBranding> {
+  const row = await prisma.dealSettings.findUnique({ where: { id: DEAL_SETTINGS_ID }, select: { logoKey: true, sealKey: true } });
+  const [logo, seal] = await Promise.all([readImage(row?.logoKey), readImage(row?.sealKey)]);
+  return { logo, seal };
 }

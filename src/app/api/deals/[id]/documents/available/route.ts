@@ -1,0 +1,39 @@
+import { NextResponse } from "next/server";
+import { z } from "zod";
+import prisma from "@/lib/prisma";
+import { ApiError, handleApiError } from "@/lib/api-helpers";
+import { requireDeal } from "@/lib/deals/guard";
+import { DEAL_DETAIL_SELECT, toDealView } from "@/lib/deals/view";
+import { loadDealSettings } from "@/lib/deals/settings-store";
+import { jstDateString } from "@/lib/deals/datetime";
+import { computeDealCalc } from "@/lib/deals/calc/deal-calc";
+import { BUSINESS_DOCS } from "@/lib/deals/documents/registry";
+import { loadCompanyProfile } from "@/lib/sales-sheet/company-profile-store";
+
+type Ctx = { params: Promise<{ id: string }> };
+
+/**
+ * その取引で出せる業務書類と、出す前の確認(空欄の項目・発行のときに選ぶものの初期値と選べる値)。
+ * 判定は一覧表(registry.ts)の1か所だけ。画像は使わないので読まない。
+ */
+export async function GET(_request: Request, ctx: Ctx) {
+  try {
+    await requireDeal("read");
+    const id = z.string().uuid().parse((await ctx.params).id);
+    const row = await prisma.deal.findUnique({ where: { id }, select: DEAL_DETAIL_SELECT });
+    if (!row) throw new ApiError(404, "取引が見つかりません", "NOT_FOUND");
+    const deal = toDealView(row);
+    const today = jstDateString(new Date());
+    const [rateRows, settings, company] = await Promise.all([prisma.dealRateTable.findMany(), loadDealSettings(), loadCompanyProfile()]);
+    const bctx = {
+      deal, calc: computeDealCalc(deal, rateRows, settings.propertyKinds, today), settings, company, rateRows, today, logo: null, seal: null,
+    };
+    const documents = BUSINESS_DOCS.filter((d) => d.applies(bctx)).map((d) => {
+      const def = d.defaults(bctx);
+      return { docType: d.key, label: d.label, missing: d.missing(bctx), blocking: d.blocking(bctx), defaults: def.values, issuers: def.issuers ?? null };
+    });
+    return NextResponse.json({ documents, version: deal.version }, { headers: { "Cache-Control": "no-store" } });
+  } catch (error) {
+    return handleApiError(error);
+  }
+}

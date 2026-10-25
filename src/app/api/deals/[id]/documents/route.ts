@@ -16,6 +16,12 @@ import { buildFundingPlan } from "@/lib/deals/documents/funding-plan";
 import { buildFundingPlanXlsx } from "@/lib/deals/documents/funding-plan-xlsx";
 import { buildBusinessPlan } from "@/lib/deals/documents/business-plan";
 import { buildBusinessPlanXlsx } from "@/lib/deals/documents/business-plan-xlsx";
+import { businessDocOf } from "@/lib/deals/documents/registry";
+import { DocOptionError } from "@/lib/deals/documents/business/receipts";
+import { buildValuesXlsx } from "@/lib/deals/documents/business/values-xlsx";
+import { pdfPageCount } from "@/lib/deals/documents/business/pdf-pages";
+import type { BusinessDocContext } from "@/lib/deals/documents/business/common";
+import { computeDealCalc } from "@/lib/deals/calc/deal-calc";
 import {
   DEAL_DOC_MIME, DEAL_DOC_TYPE_KEYS, dealDocumentBaseName, dealDocumentKey, dealDocumentTitle, type DealDocFormat,
 } from "@/lib/deals/documents/issue";
@@ -23,7 +29,12 @@ import {
 type Ctx = { params: Promise<{ id: string }> };
 const NO_STORE = { "Cache-Control": "no-store" };
 /** version = 画面が保存した直後の取引の版。違えば、そのあとにほかの人が保存している(その入力では発行しない)。 */
-const bodySchema = z.object({ docType: z.enum(DEAL_DOC_TYPE_KEYS), version: z.number().int().min(0) }).strict();
+const bodySchema = z.object({
+  docType: z.enum(DEAL_DOC_TYPE_KEYS),
+  version: z.number().int().min(0),
+  /** 業務書類で、発行のときに選ぶもの(領収書の発行者など・段5の読み替え 2)。形は書類ごとに一覧表で確かめる。 */
+  options: z.record(z.string(), z.unknown()).optional(),
+}).strict();
 /** 同時に発行して版の番号がぶつかったときのやり直しの回数。 */
 const VERSION_ATTEMPTS = 3;
 const isUniqueViolation = (e: unknown) => (e as { code?: string } | null)?.code === "P2002";
@@ -62,16 +73,13 @@ export async function POST(request: Request, ctx: Ctx) {
   try {
     const { session } = await requireDeal("write");
     const id = z.string().uuid().parse((await ctx.params).id);
-    const { docType, version } = bodySchema.parse(await parseJsonBody(request));
+    const { docType, version, options } = bodySchema.parse(await parseJsonBody(request));
     const row = await prisma.deal.findUnique({ where: { id }, select: DEAL_DETAIL_SELECT });
     if (!row) throw new ApiError(404, "取引が見つかりません", "NOT_FOUND");
     // 保存してから発行するまでの間に、ほかの人が別の入力を保存していたら、その入力を自分の名前で発行しない(最終レビュー)。
     if (row.version !== version) throw new ApiError(409, DEAL_VERSION_CONFLICT_MESSAGE, "VERSION_CONFLICT");
     if (docType === "business_plan" && row.businessType !== "resale") {
       throw new ApiError(422, "事業計画書は買取再販の取引だけで使えます", "NOT_RESALE");
-    }
-    if (!isChromiumAvailable()) {
-      throw new ApiError(503, "PDF を作る仕組みが使えません(サーバーの設定)", "PDF_UNAVAILABLE");
     }
 
     const deal = toDealView(row);
@@ -80,8 +88,27 @@ export async function POST(request: Request, ctx: Ctx) {
       prisma.dealRateTable.findMany(), loadDealSettings(), loadCompanyProfile(), loadDealBranding(),
     ]);
     // 書類の種類ごとに、保存済みの入力 → 計算と HTML → Excel を作る(保存・版・後片付けは共通)。
-    let built: { variant: string; inputs: object; calc: object; html: string; xlsx: () => Promise<Buffer> };
-    if (docType === "business_plan") {
+    let built: { variant: string; inputs: object; calc: object; html: string; compactHtml?: string; xlsx: () => Promise<Buffer> };
+    const businessDoc = businessDocOf(docType);
+    if (businessDoc) {
+      const bctx: BusinessDocContext = {
+        deal, calc: computeDealCalc(deal, rateRows, settings.propertyKinds, today), settings, company, rateRows, today,
+        logo: branding.logo, seal: branding.seal,
+      };
+      if (!businessDoc.applies(bctx)) throw new ApiError(422, `この取引では${businessDoc.label}を出せません`, "DOC_NOT_APPLICABLE");
+      const parsed = businessDoc.options.parse(options ?? {});
+      let out: ReturnType<typeof businessDoc.build>;
+      try {
+        out = businessDoc.build(bctx, parsed);
+      } catch (e) {
+        if (e instanceof DocOptionError) throw new ApiError(422, e.message, e.code);
+        throw e;
+      }
+      built = {
+        variant: "default", inputs: { options: parsed }, calc: { settlement: bctx.calc.settlement }, html: out.html, compactHtml: out.compactHtml,
+        xlsx: () => buildValuesXlsx({ title: businessDoc.label, dealNo: deal.dealNo, issuedOn: today, rows: out.rows, issuerName: out.issuerName ?? company.nameJa }),
+      };
+    } else if (docType === "business_plan") {
       const inputs = deal.businessPlan;
       const kinds = settings.propertyKinds;
       const plan = buildBusinessPlan({ deal, rateRows, kinds, matrix: settings.sectionMatrix, inputs, company, today, logo: branding.logo });
@@ -96,7 +123,12 @@ export async function POST(request: Request, ctx: Ctx) {
       const { calc, html } = buildFundingPlan({ deal, rateRows, kinds: settings.propertyKinds, inputs, company, today, logo: branding.logo, text });
       built = { variant: inputs.mode, inputs, calc, html, xlsx: () => buildFundingPlanXlsx({ deal, inputs, calc, company, issuedOn: today, text }) };
     }
-    const pdf = await renderHtmlToPdfDocument(built.html);
+    if (!isChromiumAvailable()) {
+      throw new ApiError(503, "PDF を作る仕組みが使えません(サーバーの設定)", "PDF_UNAVAILABLE");
+    }
+    let pdf = await renderHtmlToPdfDocument(built.html);
+    // 精算書: 1枚に収まらなければ、計算の過程を2枚目に回した形で作り直す(段5の読み替え 6)。
+    if (built.compactHtml && pdfPageCount(pdf) > 1) pdf = await renderHtmlToPdfDocument(built.compactHtml);
     const xlsx = await built.xlsx();
     const { variant, inputs, calc } = built;
     const fileBaseName = dealDocumentBaseName(deal.dealNo, docType, variant, today);
