@@ -70,6 +70,17 @@ describe("取引の設定", () => {
     }
     expect(pm.dealSettings.updateMany).not.toHaveBeenCalled();
   });
+  it("書類確認書の項目: 形の正しいものだけ保存・金額を持参以外に付けたら 422", async () => {
+    pm.dealSettings.findUnique.mockResolvedValue(row(3));
+    const ok = [{ id: "a", phase: "settlement", group: "bring", label: "残代金", note: null, scope: "all", amount: "payment" }];
+    expect((await PUT(json("PUT", { version: 2, checklistItems: ok }))).status).toBe(200);
+    expect(pm.dealSettings.updateMany.mock.calls[0][0].data.checklistItems).toEqual(ok);
+    pm.dealSettings.updateMany.mockClear();
+    for (const bad of [[], [{ ...ok[0], group: "prepare" }], [{ ...ok[0], id: "Bad" }], [ok[0], ok[0]]]) {
+      expect((await PUT(json("PUT", { version: 2, checklistItems: bad }))).status).toBe(422);
+    }
+    expect(pm.dealSettings.updateMany).not.toHaveBeenCalled();
+  });
 });
 
 describe("税率の表", () => {

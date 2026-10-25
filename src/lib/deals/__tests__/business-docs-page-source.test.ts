@@ -5,7 +5,7 @@ import { join } from "node:path";
 const read = (p: string) => readFileSync(join(process.cwd(), p), "utf8").replace(/\r\n/g, "\n");
 const SECTION = "src/components/deals/business-docs-section.tsx";
 
-describe("書類タブの業務書類(段5a・5b)", () => {
+describe("書類タブの業務書類(段5a・5b・5c)", () => {
   it("書類タブに出せる書類を並べる(判定はサーバーの一覧表)", () => {
     expect(read("src/components/deals/deal-documents-panel.tsx")).toContain("<BusinessDocsSection dealId={dealId} active={active} refresh={tick} onIssued={reload} />");
     const src = read(SECTION);
@@ -29,6 +29,13 @@ describe("書類タブの業務書類(段5a・5b)", () => {
     const src = read(SECTION);
     for (const g of ['{ key: "settlement", label: "決済の書類" }', '{ key: "other", label: "そのほかの書類" }', '{ key: "oc", label: "OC の書類" }']) expect(src).toContain(g);
     expect(src).toContain("docs.filter((d) => d.group === g.key)");
+  });
+  it("書類確認書のまとまりと、持参する金額ごとの払い方の選択(段5c-1)", () => {
+    const src = read(SECTION);
+    expect(src).toContain('{ key: "checklist", label: "書類確認書" }');
+    expect(src).toMatch(/\(choices\.payItems \?\? \[\]\)\.map/);
+    expect(src).toMatch(/\(choices\.payMethods \?\? \[\]\)\.map/);
+    expect(src).toMatch(/set\("pay", \{ \.\.\.pay, \[it\.value\]: e\.target\.value \}\)/);
   });
   it("委任状は委任する事項・鍵受領書は鍵の行がそろうまで発行ボタンを押せない(段5b)", () => {
     const src = read(SECTION);

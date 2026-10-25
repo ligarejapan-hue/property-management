@@ -13,6 +13,8 @@ import {
   buildHandoverChecklist, buildLandlordChangeNotice, buildOcPurchaseConsult, buildTenantSurvey, landlordChangeDefaults,
   landlordChangeOptionsSchema, occupiedLeases,
 } from "./business/oc-docs";
+import { buildChecklistDoc, checklistDefaults, checklistMissing, checklistOptionsSchema } from "./business/checklist-doc";
+import type { ChecklistPhase } from "../checklist";
 
 /**
  * 業務書類の一覧表(設計 §4.1・計画 段5a)。書類ごとに1行:
@@ -23,7 +25,7 @@ export interface BusinessDocDef {
   key: string;
   label: string;
   /** 書類タブのまとまり(決済の書類/そのほかの書類/OC の書類・計画 段5b の読み替え 8)。 */
-  group: "settlement" | "other" | "oc";
+  group: "settlement" | "other" | "oc" | "checklist";
   /** この取引で出せるか(書類タブに出すか)。 */
   applies(c: BusinessDocContext): boolean;
   /** 必要な項目のうち空欄のもの(出す前の確認に出す)。 */
@@ -47,6 +49,17 @@ const needTenants = (c: BusinessDocContext) => (occupiedLeases(c).length ? [] : 
 /** OC ありの取引だけに出す書類(選ぶもの無し。お知らせは上書きする)。 */
 function ocDef(key: string, label: string, d: Pick<BusinessDocDef, "missing" | "blocking" | "build">): BusinessDocDef {
   return { key, label, group: "oc", applies: (c) => c.deal.hasOc, options: emptyOptions, defaults: () => ({ values: {} }), ...d };
+}
+
+/** 書類確認書(契約時・決済時・計画 段5c-1)。どの取引でも出す。止める項目は無い(空欄は「—」で出す)。 */
+function checklistDef(phase: ChecklistPhase, key: string, label: string): BusinessDocDef {
+  return {
+    key, label, group: "checklist", applies: () => true,
+    missing: (c) => checklistMissing(phase, c), blocking: () => [],
+    options: checklistOptionsSchema as z.ZodType<Record<string, unknown>>,
+    defaults: (c) => checklistDefaults(phase, c),
+    build: (c, o) => buildChecklistDoc(phase, c, checklistOptionsSchema.parse(o)),
+  };
 }
 
 function receiptDef(kind: ReceiptKind): BusinessDocDef {
@@ -153,6 +166,8 @@ export const BUSINESS_DOCS: BusinessDocDef[] = [
     blocking: () => [],
     build: (c) => buildHandoverChecklist(c),
   }),
+  checklistDef("contract", "checklist_contract", "書類確認書(契約時)"),
+  checklistDef("settlement", "checklist_settlement", "書類確認書(決済時)"),
 ];
 
 export const BUSINESS_DOC_KEYS = BUSINESS_DOCS.map((d) => d.key);

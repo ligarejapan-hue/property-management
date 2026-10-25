@@ -17,6 +17,8 @@ import { RATE_TABLE_KINDS, RATE_TABLE_KIND_LABELS, type RateTableKind } from "@/
 import { DEAL_TEXT_LIMITS } from "@/lib/deals/schemas";
 import { DEAL_IMAGE_KINDS } from "@/lib/deals/branding";
 import { DealImageSetting } from "@/components/deals/deal-image-setting";
+import { ChecklistItemsEditor } from "@/components/deals/checklist-items-editor";
+import type { ChecklistItem } from "@/lib/deals/checklist";
 import { BUSINESS_SECTIONS, SECTION_RULE_LABELS, type SectionMatrix, type SectionRow } from "@/lib/deals/business-sections";
 
 const ALL_ON = Object.fromEntries(BUSINESS_SECTIONS.map((s) => [s.key, true])) as SectionRow;
@@ -37,6 +39,7 @@ export default function DealSettingsPage() {
   const [greeting, setGreeting] = useState("");
   const [notes, setNotes] = useState("");
   const [matrix, setMatrix] = useState<SectionMatrix>({});
+  const [checklist, setChecklist] = useState<ChecklistItem[]>([]);
   const [saving, setSaving] = useState(false);
   const [message, setMessage] = useState<{ kind: "ok" | "err"; text: string } | null>(null);
   const [editing, setEditing] = useState<{ table: RateTableView | null; kind: RateTableKind } | null>(null);
@@ -55,6 +58,7 @@ export default function DealSettingsPage() {
     setGreeting(s.texts.funding_plan?.greeting ?? "");
     setNotes(s.texts.funding_plan?.notes ?? "");
     setMatrix(s.sectionMatrix);
+    setChecklist(s.checklistItems);
   };
   /** 種別の行。足したばかりの種別(まだ行が無い)は、元の種別の行を初期値にする。 */
   const rowOf = (k: PropertyKindDef): SectionRow => matrix[k.key] ?? matrix[k.base] ?? ALL_ON;
@@ -69,6 +73,10 @@ export default function DealSettingsPage() {
 
   const save = async () => {
     if (!settings || saving) return;
+    if (checklist.some((i) => !i.label.trim())) {
+      setMessage({ kind: "err", text: "書類確認書の項目に、項目名が空の行があります。入れるか消してから保存してください。" });
+      return;
+    }
     setSaving(true);
     setMessage(null);
     try {
@@ -80,6 +88,7 @@ export default function DealSettingsPage() {
         propertyKinds: kinds,
         texts: { funding_plan: { greeting, notes } },
         sectionMatrix: matrixForSave(),
+        checklistItems: checklist,
       });
       apply(res.settings);
       setMessage({ kind: "ok", text: "取引の設定を保存しました" });
@@ -221,6 +230,15 @@ export default function DealSettingsPage() {
         <Field label={`注意事項(会社欄の上・${DEAL_TEXT_LIMITS.notes}字まで)`}>
           <textarea value={notes} onChange={(e) => setNotes(e.target.value)} maxLength={DEAL_TEXT_LIMITS.notes} rows={4} aria-label="資金計画表の注意事項" className={inputCls} />
         </Field>
+      </section>
+
+      <section className="space-y-3">
+        <h2 className="text-sm font-semibold text-gray-700 dark:text-gray-300">書類確認書の項目</h2>
+        <p className="text-xs text-gray-500">
+          取引の「書類」タブで出す書類確認書(契約時・決済時)の項目です。「出す取引」で区分だけ・土地のある物件だけ・OC ありだけの項目を分けられます。
+          持参するものには、取引の金額(手付金・残代金と精算金・登記費用など)を付けられます。チェック欄は空欄で出します。
+        </p>
+        <ChecklistItemsEditor items={checklist} onChange={setChecklist} />
       </section>
 
       <Button onClick={save} disabled={saving} loading={saving} loadingLabel="保存中">

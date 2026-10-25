@@ -9,6 +9,7 @@ import { jstDateString } from "@/lib/deals/datetime";
 import { computeDealCalc } from "@/lib/deals/calc/deal-calc";
 import { BUSINESS_DOCS } from "@/lib/deals/documents/registry";
 import { loadCompanyProfile } from "@/lib/sales-sheet/company-profile-store";
+import { loadDealStaffNames } from "@/lib/deals/staff-names";
 
 type Ctx = { params: Promise<{ id: string }> };
 
@@ -24,9 +25,11 @@ export async function GET(_request: Request, ctx: Ctx) {
     if (!row) throw new ApiError(404, "取引が見つかりません", "NOT_FOUND");
     const deal = toDealView(row);
     const today = jstDateString(new Date());
-    const [rateRows, settings, company] = await Promise.all([prisma.dealRateTable.findMany(), loadDealSettings(), loadCompanyProfile()]);
+    const [rateRows, settings, company, staff] = await Promise.all([
+      prisma.dealRateTable.findMany(), loadDealSettings(), loadCompanyProfile(), loadDealStaffNames(deal),
+    ]);
     const bctx = {
-      deal, calc: computeDealCalc(deal, rateRows, settings.propertyKinds, today), settings, company, rateRows, today, logo: null, seal: null,
+      deal, calc: computeDealCalc(deal, rateRows, settings.propertyKinds, today), settings, company, rateRows, today, logo: null, seal: null, staff,
     };
     const documents = BUSINESS_DOCS.filter((d) => d.applies(bctx)).map((d) => {
       const def = d.defaults(bctx);

@@ -20,6 +20,8 @@ export interface BusinessDocContext {
   /** 取引の設定のロゴ・角印(data: の URL)。 */
   logo: string | null;
   seal: string | null;
+  /** 取引の営業担当・業務担当の名前(書類確認書の頭・無ければ「—」)。 */
+  staff?: { sales: string | null; ops: string | null };
 }
 
 /** Excel(値だけ)の1行。見出しは value 無し。 */
