@@ -25,10 +25,24 @@ export function checklistAmount(a: ChecklistAmount, c: BusinessDocContext): numb
   }
 }
 
-/** その取引で出す項目(取引の物件種別の元の種別・OC の有無で出し分ける)。 */
+const auto = (id: string, group: ChecklistItem["group"], label: string, amount: ChecklistAmount | null = null): ChecklistItem =>
+  ({ id, phase: "settlement", group, label, note: "謄本の登記の現況から自動で追加", scope: "all", amount });
+
+/**
+ * その取引で出す項目(取引の物件種別の元の種別・OC の有無で出し分ける)。
+ * 決済時は、謄本の乙区に権利が残っていれば抹消の3項目を足す(設計 §4.6.1)。持参の抹消費用は、設定にすでに抹消費用の金額付き項目があれば足さない。
+ */
 export function checklistItemsOf(phase: ChecklistPhase, c: BusinessDocContext): ChecklistItem[] {
   const base = c.settings.propertyKinds.find((k) => k.key === c.deal.propertyKind)?.base ?? null;
-  return itemsFor(c.settings.checklistItems, phase, { base, hasOc: c.deal.hasOc });
+  const items = itemsFor(c.settings.checklistItems, phase, { base, hasOc: c.deal.hasOc });
+  const n = c.registry?.activeRights ?? 0;
+  if (phase !== "settlement" || n === 0) return items;
+  return [
+    ...items,
+    auto("auto_cancel_request", "prepare", `司法書士への抹消の依頼(抵当権など ${n}件)`),
+    ...(items.some((i) => i.amount === "cancellation") ? [] : [auto("auto_cancel_fee", "bring", "抹消費用", "cancellation")]),
+    auto("auto_cancel_docs", "receive", "抵当権抹消書類(金融機関)"),
+  ];
 }
 
 const amountItems = (phase: ChecklistPhase, c: BusinessDocContext) =>
@@ -77,6 +91,7 @@ export function buildChecklistDoc(phase: ChecklistPhase, c: BusinessDocContext, 
     ["日時", at ? dateTimeJa(at) : null], ["場所", place],
     ["相手方の仲介", broker], ["司法書士", scrivener],
     ["営業担当", c.staff?.sales ?? null], ["業務担当", c.staff?.ops ?? null],
+    ...(c.registry?.caution ? [["登記の注意", c.registry.caution] as [string, string]] : []),
   ];
   const items = checklistItemsOf(phase, c);
   const of = (g: ChecklistGroup) => items.filter((i) => i.group === g);
