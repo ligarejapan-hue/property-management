@@ -79,6 +79,9 @@ enum CaseStatus {
   other_brokerage
   hold
   closed
+  // 除外申請(査定サイトへの課金除外)と連動する(2026-10-25 発注者)
+  lead_exclusion_requested
+  lead_excluded
   // やめた値 — DB のみ保持、新規設定不可
   owner_contacted
   site_checked

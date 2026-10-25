@@ -92,7 +92,7 @@ describe("LeadExclusionField(物件詳細の 除外申請)", () => {
     expect(html).toContain("申請していません");
     expect(html).toContain('value="2026-10-24"');
     expect(html).toContain("申請中にする");
-    expect(html).not.toContain("除外された</button>");
+    expect(html).not.toContain("承認された（除外）</button>");
   });
 
   it("一括査定以外で状態なし: 書ける人には小さなリンクだけ・書けない人には何も出さない", () => {
@@ -102,12 +102,13 @@ describe("LeadExclusionField(物件詳細の 除外申請)", () => {
     expect(render({ introductionRoute: null }, { canWrite: false })).toBe("");
   });
 
-  it("申請中: N日の札・結果の操作(除外された/認められなかった/取り消す)", () => {
+  it("申請中: N日の札・結果の操作(承認された/承認されなかった/取り消す)・案件ステータスも変わる案内", () => {
     const html = render({ introductionRoute: null, leadExclusionStatus: "requested", leadExclusionRequestedAt: "2026-10-16" });
     expect(html).toContain("除外申請中 8日・運営に確認");
     expect(html).toContain("申請した日を直す");
-    expect(html).toContain("除外された");
-    expect(html).toContain("認められなかった");
+    expect(html).toContain("承認された（除外）</button>");
+    expect(html).toContain("承認されなかった</button>");
+    expect(html).toContain("案件ステータスも変わります");
     expect(html).toContain("取り消す");
     expect(html).toContain('value="2026-10-16"');
   });

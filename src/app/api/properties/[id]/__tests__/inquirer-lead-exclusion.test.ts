@@ -247,6 +247,39 @@ describe("PATCH /api/properties/[id] — 除外申請", () => {
       leadExclusionDecidedAt: null,
     });
   });
+  it("★案件ステータスも合わせる: 申請=除外申請中(変更履歴にも残る)", async () => {
+    await PATCH(patchReq({ version: 1, leadExclusionStatus: "requested" }), ctx);
+    expect(sentData()).toMatchObject({ caseStatus: "lead_exclusion_requested" });
+    expect(changeLogs()).toContainEqual(
+      expect.objectContaining({ fieldName: "caseStatus", oldValue: "contacting_owner", newValue: "lead_exclusion_requested" }),
+    );
+  });
+  it("★承認された=除外・承認されなかった=コンタクト中", async () => {
+    prismaMock.property.findUnique.mockResolvedValue({
+      ...CURRENT,
+      caseStatus: "lead_exclusion_requested",
+      leadExclusionStatus: "requested",
+      leadExclusionRequestedAt: new Date("2026-10-10T00:00:00.000Z"),
+    });
+    await PATCH(patchReq({ version: 1, leadExclusionStatus: "approved" }), ctx);
+    expect(sentData()).toMatchObject({ caseStatus: "lead_excluded" });
+    txMock.property.updateMany.mockClear();
+    await PATCH(patchReq({ version: 1, leadExclusionStatus: "rejected" }), ctx);
+    expect(sentData()).toMatchObject({ caseStatus: "contact_attempting" });
+  });
+  it("申請した日だけを直す保存・同じ保存で案件ステータスを選んだときは、案件ステータスを勝手に変えない", async () => {
+    prismaMock.property.findUnique.mockResolvedValue({
+      ...CURRENT,
+      caseStatus: "negotiating",
+      leadExclusionStatus: "requested",
+      leadExclusionRequestedAt: new Date("2026-10-10T00:00:00.000Z"),
+    });
+    await PATCH(patchReq({ version: 1, leadExclusionStatus: "requested", leadExclusionRequestedAt: "2026-10-12" }), ctx);
+    expect(sentData()).not.toHaveProperty("caseStatus");
+    txMock.property.updateMany.mockClear();
+    await PATCH(patchReq({ version: 1, leadExclusionStatus: "approved", caseStatus: "hold" }), ctx);
+    expect(sentData()).toMatchObject({ caseStatus: "hold" });
+  });
   it("知らない状態・壊れた日付は断る", async () => {
     expect((await PATCH(patchReq({ version: 1, leadExclusionStatus: "done" }), ctx)).status).not.toBe(200);
     expect(
