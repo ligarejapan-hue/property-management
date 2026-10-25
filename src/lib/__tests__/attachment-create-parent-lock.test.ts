@@ -57,10 +57,11 @@ describe("attachment.create の親行ロック (@codex #399 R7 P2)", () => {
       while (at !== -1) {
         found += 1;
         // 同一 tx コールバック内で lockPropertyRow(tx, ...) が先行していること。
+        // 担当範囲も見直す lockPropertyRecordForWrite(tx, ...) も同じ親行ロックを取る(書類を撮る・@codex #594)。
         // 遡る範囲は「$transaction の開始」まで(別の tx のロックを誤って数えない)。
         const txStart = src.lastIndexOf("$transaction", at);
         const scope = txStart === -1 ? "" : src.slice(txStart, at);
-        if (!scope.includes("lockPropertyRow(tx")) {
+        if (!scope.includes("lockPropertyRow(tx") && !scope.includes("lockPropertyRecordForWrite(tx")) {
           offenders.push(`${f} (offset ${at})`);
         }
         at = src.indexOf("tx.attachment.create", at + 1);
