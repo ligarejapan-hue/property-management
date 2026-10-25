@@ -38,6 +38,9 @@ describe("書類確認書の項目(段5c-1)", () => {
     expect(checklistItemsSchema.safeParse([item({ group: "bring", amount: "deposit" })]).success).toBe(true);
     expect(checklistItemsSchema.safeParse([item({ label: "  " })]).success).toBe(false);
     expect(CHECKLIST_AMOUNT_KEYS).toContain("cancellation");
+    // 空の項目名は日本語で何が悪いかを返す(画面にそのまま出る)
+    const r = checklistItemsSchema.safeParse([item({ label: "" })]);
+    expect(r.success ? "" : r.error.issues[0].message).toBe("項目名が空の行があります");
   });
 
   it("区分だけ・土地のある物件だけ・OC だけを出し分ける", () => {

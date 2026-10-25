@@ -73,6 +73,10 @@ export default function DealSettingsPage() {
 
   const save = async () => {
     if (!settings || saving) return;
+    if (checklist.some((i) => !i.label.trim())) {
+      setMessage({ kind: "err", text: "書類確認書の項目に、項目名が空の行があります。入れるか消してから保存してください。" });
+      return;
+    }
     setSaving(true);
     setMessage(null);
     try {

@@ -36,7 +36,7 @@ const checklistItemSchema = z.object({
   id: z.string().regex(CHECKLIST_ITEM_ID),
   phase: z.enum(keys(CHECKLIST_PHASES)),
   group: z.enum(keys(CHECKLIST_GROUPS)),
-  label: z.string().trim().min(1).max(CHECKLIST_LIMITS.label),
+  label: z.string().trim().min(1, "項目名が空の行があります").max(CHECKLIST_LIMITS.label, `項目名は${CHECKLIST_LIMITS.label}文字までです`),
   note: text(CHECKLIST_LIMITS.note),
   scope: z.enum(keys(CHECKLIST_SCOPES)),
   amount: z.enum(keys(CHECKLIST_AMOUNTS)).nullable(),

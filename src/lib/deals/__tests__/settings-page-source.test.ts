@@ -60,6 +60,8 @@ describe("書類確認書の項目", () => {
     expect(src).toContain("書類確認書の項目");
     expect(src).toMatch(/<ChecklistItemsEditor items=\{checklist\} onChange=\{setChecklist\} \/>/);
     expect(src).toMatch(/checklistItems: checklist,/);
+    // 項目名が空の行があれば送らずに知らせる
+    expect(src).toMatch(/checklist\.some\(\(i\) => !i\.label\.trim\(\)\)/);
   });
   it("時点・まとまりごとに、項目・注意事項・出す取引・金額(持参だけ)を直し、足す・消す・初めの項目に戻す", () => {
     const src = read(ED);
