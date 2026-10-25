@@ -30,7 +30,10 @@ export async function GET(_request: Request, ctx: Ctx) {
     };
     const documents = BUSINESS_DOCS.filter((d) => d.applies(bctx)).map((d) => {
       const def = d.defaults(bctx);
-      return { docType: d.key, label: d.label, missing: d.missing(bctx), blocking: d.blocking(bctx), defaults: def.values, issuers: def.issuers ?? null };
+      return {
+        docType: d.key, label: d.label, group: d.group, missing: d.missing(bctx), blocking: d.blocking(bctx),
+        defaults: def.values, issuers: def.issuers ?? null, choices: def.choices ?? null,
+      };
     });
     return NextResponse.json({ documents, version: deal.version }, { headers: { "Cache-Control": "no-store" } });
   } catch (error) {

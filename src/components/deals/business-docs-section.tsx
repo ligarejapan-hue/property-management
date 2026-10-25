@@ -1,7 +1,7 @@
 "use client";
 
 import { useEffect, useState } from "react";
-import { FileOutput, FileText, Loader2 } from "lucide-react";
+import { FileOutput, FileText, Loader2, Plus, Trash2 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { ModalShell } from "@/components/ui/modal-shell";
 import { Field, inputCls } from "./form-parts";
@@ -9,6 +9,16 @@ import { dealsApi, dealDocumentFileUrl, DealApiError, errorText, type AvailableD
 
 const RECEIPTS = new Set(["deposit_receipt", "balance_receipt", "settlement_receipt"]);
 const str = (v: unknown) => (typeof v === "string" ? v : "");
+/** 書類タブのまとまり(一覧表の group と同じ順)。 */
+const GROUPS = [
+  { key: "settlement", label: "決済の書類" },
+  { key: "other", label: "そのほかの書類" },
+  { key: "oc", label: "OC の書類" },
+] as const;
+type KeyRow = { label: string; count: string };
+const keyRowsOf = (v: unknown): KeyRow[] => (Array.isArray(v) ? (v as KeyRow[]) : []);
+/** 鍵の行が出せる形か(番号・種類があり、本数が 1〜99)。 */
+const keyRowOk = (k: KeyRow) => k.label.trim() !== "" && /^\d+$/.test(k.count) && Number(k.count) >= 1 && Number(k.count) <= 99;
 
 /**
  * 業務書類(段5)。その取引で出せる書類を並べ、「発行」→ 出す前の確認(空欄の項目・発行のときに選ぶもの)→ 発行。
@@ -34,7 +44,6 @@ export default function BusinessDocsSection({ dealId, active, refresh, onIssued 
 
   return (
     <section className="space-y-2">
-      <h3 className="text-sm font-semibold text-gray-700 dark:text-gray-300">決済の書類</h3>
       {error && <p className="text-sm text-red-600 dark:text-red-400" role="alert">{error}</p>}
       {docs === null && !error && <div className="flex items-center gap-2 text-sm text-gray-500"><Loader2 className="h-4 w-4 animate-spin" /> 読み込み中…</div>}
       {done && (
@@ -46,19 +55,26 @@ export default function BusinessDocsSection({ dealId, active, refresh, onIssued 
           </a>
         </p>
       )}
-      {docs && (
-        <ul className="flex flex-wrap gap-2">
-          {docs.map((d) => (
-            <li key={d.docType}>
-              <Button variant="secondary" size="sm" onClick={() => { setDone(null); setOpen(d); }}>
-                <FileOutput className="h-4 w-4" />
-                {d.label}
-                {d.missing.length > 0 && <span className="ml-1 text-xs text-amber-700 dark:text-amber-400">(空欄 {d.missing.length})</span>}
-              </Button>
-            </li>
-          ))}
-        </ul>
-      )}
+      {docs && GROUPS.map((g) => {
+        const list = docs.filter((d) => d.group === g.key);
+        if (!list.length) return null;
+        return (
+          <div key={g.key} className="space-y-1.5">
+            <h3 className="text-sm font-semibold text-gray-700 dark:text-gray-300">{g.label}</h3>
+            <ul className="flex flex-wrap gap-2">
+              {list.map((d) => (
+                <li key={d.docType}>
+                  <Button variant="secondary" size="sm" onClick={() => { setDone(null); setOpen(d); }}>
+                    <FileOutput className="h-4 w-4" />
+                    {d.label}
+                    {d.missing.length > 0 && <span className="ml-1 text-xs text-amber-700 dark:text-amber-400">(空欄 {d.missing.length})</span>}
+                  </Button>
+                </li>
+              ))}
+            </ul>
+          </div>
+        );
+      })}
       {open && (
         <IssueDialog
           key={open.docType}
@@ -77,7 +93,10 @@ function IssueDialog({ dealId, doc, version, onCancel, onDone }: {
   dealId: string; doc: AvailableDocument; version: number;
   onCancel: () => void; onDone: (r: { id: string; title: string; version: number }) => void;
 }) {
-  const [values, setValues] = useState<Record<string, unknown>>(doc.defaults);
+  // 鍵の行は入力しやすいよう本数を文字で持ち、送るときに数にする。
+  const [values, setValues] = useState<Record<string, unknown>>(
+    doc.docType === "key_receipt" ? { ...doc.defaults, keys: [{ label: "", count: "1" }] } : doc.defaults,
+  );
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const set = (k: string, v: unknown) => setValues((x) => ({ ...x, [k]: v }));
@@ -85,6 +104,13 @@ function IssueDialog({ dealId, doc, version, onCancel, onDone }: {
   const issuer = doc.issuers?.find((i) => i.value === values.issuer) ?? null;
   // 個人の発行者は、非課税か課税かを決めるまで発行できない(設計 §4.3)。
   const needsDecision = receipt && issuer?.individual === true && values.exempt == null;
+  const matters = Array.isArray(values.matters) ? (values.matters as string[]) : [];
+  const keyRows = keyRowsOf(values.keys);
+  // 委任状は委任する事項が1つ以上・鍵受領書は鍵の行がすべて埋まっているまで発行できない(サーバーも 422)。
+  const incomplete = (doc.docType === "power_of_attorney" && !matters.length && !str(values.otherMatter).trim())
+    || (doc.docType === "key_receipt" && (!keyRows.length || !keyRows.every(keyRowOk)));
+  const setKey = (i: number, patch: Partial<KeyRow>) => set("keys", keyRows.map((k, j) => (j === i ? { ...k, ...patch } : k)));
+  const choices = doc.choices ?? {};
 
   const issue = async () => {
     setBusy(true);
@@ -92,7 +118,13 @@ function IssueDialog({ dealId, doc, version, onCancel, onDone }: {
     try {
       const options = receipt
         ? { ...values, exempt: issuer?.individual ? values.exempt ?? null : null, receivedOn: str(values.receivedOn) || null }
-        : values;
+        : doc.docType === "key_receipt"
+          ? { ...values, keys: keyRows.map((k) => ({ label: k.label.trim(), count: Number(k.count) })), receivedOn: str(values.receivedOn) || null }
+          : doc.docType === "power_of_attorney"
+            ? { ...values, otherMatter: str(values.otherMatter).trim() || null, signedOn: str(values.signedOn) || null }
+            : doc.docType === "landlord_change_notice"
+              ? { ...values, changeOn: str(values.changeOn) || null }
+              : values;
       const r = await dealsApi.issueDocument(dealId, doc.docType, version, options);
       onDone({ id: r.id, title: r.title, version: r.version });
     } catch (e) {
@@ -112,7 +144,7 @@ function IssueDialog({ dealId, doc, version, onCancel, onDone }: {
       footer={
         <>
           <Button variant="secondary" onClick={onCancel} disabled={busy}>入力に戻る</Button>
-          <Button onClick={() => void issue()} disabled={busy || needsDecision || doc.blocking.length > 0} loading={busy} loadingLabel="発行中">
+          <Button onClick={() => void issue()} disabled={busy || needsDecision || incomplete || doc.blocking.length > 0} loading={busy} loadingLabel="発行中">
             {doc.missing.length ? "空欄のまま出す" : "発行する"}
           </Button>
         </>
@@ -158,6 +190,80 @@ function IssueDialog({ dealId, doc, version, onCancel, onDone }: {
             <Field label="お持ちいただくもの(1行に1つ)">
               <textarea value={str(values.belongings)} onChange={(e) => set("belongings", e.target.value || null)} maxLength={500} rows={4} aria-label="お持ちいただくもの" className={inputCls} />
             </Field>
+          </>
+        )}
+        {doc.docType === "power_of_attorney" && (
+          <>
+            <Field label="委任する人(委任者)">
+              <select aria-label="委任者" value={str(values.principal)} onChange={(e) => set("principal", e.target.value)} className={inputCls}>
+                {(choices.principal ?? []).map((c) => <option key={c.value} value={c.value}>{c.label}</option>)}
+              </select>
+            </Field>
+            <Field label="委任を受ける人(代理人)">
+              <select aria-label="代理人" value={str(values.agent)} onChange={(e) => set("agent", e.target.value)} className={inputCls}>
+                {(choices.agent ?? []).map((c) => <option key={c.value} value={c.value}>{c.label}</option>)}
+              </select>
+            </Field>
+            <fieldset className="space-y-1 text-sm">
+              <legend className="text-xs font-medium text-gray-600 dark:text-gray-400">委任する事項(1つ以上)</legend>
+              {(choices.matters ?? []).map((m) => (
+                <label key={m.value} className="flex items-center gap-2">
+                  <input type="checkbox" checked={matters.includes(m.value)}
+                    onChange={(e) => set("matters", e.target.checked ? [...matters, m.value] : matters.filter((x) => x !== m.value))} />
+                  {m.label}
+                </label>
+              ))}
+            </fieldset>
+            <Field label="そのほかに委任する事項(任意)">
+              <input value={str(values.otherMatter)} onChange={(e) => set("otherMatter", e.target.value)} maxLength={200} aria-label="そのほかに委任する事項" className={inputCls} />
+            </Field>
+            <Field label="日付(空なら日付の欄を空けて出す)">
+              <input type="date" value={str(values.signedOn)} onChange={(e) => set("signedOn", e.target.value)} aria-label="日付" className={inputCls} />
+            </Field>
+            <p className="text-xs text-gray-500">委任者の署名・実印の欄は空けて出します。</p>
+          </>
+        )}
+        {doc.docType === "key_receipt" && (
+          <>
+            <Field label="受け取る人(受領者)">
+              <select aria-label="受領者" value={str(values.receiver)} onChange={(e) => set("receiver", e.target.value)} className={inputCls}>
+                {(choices.receiver ?? []).map((c) => <option key={c.value} value={c.value}>{c.label}</option>)}
+              </select>
+            </Field>
+            <div className="space-y-1.5">
+              <p className="text-xs font-medium text-gray-600 dark:text-gray-400">鍵の番号・種類と本数</p>
+              {keyRows.map((k, i) => (
+                <div key={i} className="flex items-center gap-2">
+                  <input value={k.label} onChange={(e) => setKey(i, { label: e.target.value })} maxLength={50} placeholder="例: 玄関 No.12" aria-label={`鍵の番号・種類 ${i + 1}`} className={inputCls} />
+                  <input value={k.count} onChange={(e) => setKey(i, { count: e.target.value })} inputMode="numeric" aria-label={`本数 ${i + 1}`} className={`${inputCls} w-20`} />
+                  <span className="text-sm">本</span>
+                  <Button variant="secondary" size="sm" aria-label={`${i + 1}行目を消す`} onClick={() => set("keys", keyRows.filter((_, j) => j !== i))}>
+                    <Trash2 className="h-4 w-4" />
+                  </Button>
+                </div>
+              ))}
+              {keyRows.length < 30 && (
+                <Button variant="secondary" size="sm" onClick={() => set("keys", [...keyRows, { label: "", count: "1" }])}>
+                  <Plus className="h-4 w-4" />
+                  行を足す
+                </Button>
+              )}
+            </div>
+            <Field label="受領日(空なら日付の欄を空けて出す)">
+              <input type="date" value={str(values.receivedOn)} onChange={(e) => set("receivedOn", e.target.value)} aria-label="受領日" className={inputCls} />
+            </Field>
+            <p className="text-xs text-gray-500">受領者の署名・押印の欄は空けて出します(自社が受け取るときも角印は付けません)。</p>
+          </>
+        )}
+        {doc.docType === "landlord_change_notice" && (
+          <>
+            <Field label="変更日(初期値は決済日)">
+              <input type="date" value={str(values.changeOn)} onChange={(e) => set("changeOn", e.target.value)} aria-label="変更日" className={inputCls} />
+            </Field>
+            <Field label="賃料のお振込先">
+              <textarea value={str(values.payee)} onChange={(e) => set("payee", e.target.value || null)} maxLength={300} rows={2} aria-label="賃料のお振込先" className={inputCls} />
+            </Field>
+            <p className="text-xs text-gray-500">賃借人のいる部屋ごとに1枚ずつ作ります。売主・買主の押印の欄は空けて出します。</p>
           </>
         )}
         {error && <p className="text-sm text-red-600 dark:text-red-400" role="alert">{error}</p>}

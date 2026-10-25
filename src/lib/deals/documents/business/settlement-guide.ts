@@ -1,9 +1,8 @@
 import { z } from "zod";
 import { text } from "../../schema-parts";
-import { BANK_ACCOUNT_TYPE_LABELS } from "../../constants";
 import { html } from "../html";
 import { companyBlock, documentHtml } from "../layout";
-import { dateJa, dateTimeJa, headTable, money, namesOf, partiesOf, propertyLabel, type BusinessDocContext, type ValueRow } from "./common";
+import { bankAccountText, dateJa, dateTimeJa, headTable, money, namesOf, partiesOf, propertyLabel, type BusinessDocContext, type ValueRow } from "./common";
 
 /** 発行のときに選ぶもの(計画の読み替え 2・7)。 */
 export const settlementGuideOptionsSchema = z.object({ payee: text(300), belongings: text(500) }).strict();
@@ -14,11 +13,7 @@ export const DEFAULT_BELONGINGS = ["ご本人確認書類(運転免許証など)
 
 /** 振込先の初期値: 売主が自社なら取引の設定の口座、それ以外は空(計画の読み替え 7)。 */
 export function defaultPayee(c: BusinessDocContext): string | null {
-  const selfSeller = partiesOf(c.deal, "seller").some((p) => p.isSelf);
-  const b = c.settings.bankAccount;
-  if (!selfSeller || !b.bankName) return null;
-  return [b.bankName, b.branchName, b.accountType ? BANK_ACCOUNT_TYPE_LABELS[b.accountType] : null, b.accountNumber, b.accountHolder && `名義 ${b.accountHolder}`]
-    .filter(Boolean).join(" ");
+  return partiesOf(c.deal, "seller").some((p) => p.isSelf) ? bankAccountText(c) : null;
 }
 
 /**

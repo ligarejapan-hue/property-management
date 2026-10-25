@@ -287,7 +287,8 @@ describe("業務書類の発行(段5a)", () => {
     const body = await res.json();
     expect(body.version).toBe(3);
     const keys = body.documents.map((d: { docType: string }) => d.docType);
-    expect(keys).toEqual(["settlement_statement", "settlement_guide", "deposit_receipt", "balance_receipt", "settlement_receipt"]);
+    // OC なしの取引には OC の4種を出さない(段5b)
+    expect(keys).toEqual(["settlement_statement", "settlement_guide", "deposit_receipt", "balance_receipt", "settlement_receipt", "power_of_attorney", "key_receipt"]);
     const guide = body.documents.find((d: { docType: string }) => d.docType === "settlement_guide");
     expect(guide.missing).toEqual(["決済場所"]);
     const receipt = body.documents.find((d: { docType: string }) => d.docType === "deposit_receipt");
@@ -295,6 +296,63 @@ describe("業務書類の発行(段5a)", () => {
     expect(receipt.issuers.map((i: { value: string }) => i.value)).toEqual(["self", SELLER.id]);
     (getUserPermissions as Fn).mockResolvedValue([]);
     expect((await AVAILABLE(new Request("http://x"), ctx)).status).toBe(403);
+  });
+});
+
+describe("業務書類の発行(段5b)", () => {
+  const SELLER = { id: "33333333-3333-4333-8333-000000000001", role: "seller", partyType: "individual", name: "架空 一郎", representative: null, address: "架空県架空市1-1", phone: null, shareNum: null, shareDen: null, isSelf: false, sortOrder: 0, version: 1 };
+  const BUYER = { ...SELLER, id: "33333333-3333-4333-8333-000000000002", role: "buyer", name: "架空 花子", address: null };
+  const LEASE = { room: "101", tenant: "架空 三郎", contractType: "ordinary", period: null, rent: 80000, commonFee: 0, parking: 0, other: 0, deposit: 160000, arrears: false, arrearsAmount: 0, manager: null };
+  const base = { ...row, settlementAt: new Date("2026-06-30T01:00:00Z"), parties: [SELLER, BUYER] };
+  const oc = { ...base, hasOc: true, leases: [LEASE, { ...LEASE, room: "102", tenant: null }, { ...LEASE, room: "201", tenant: "架空 四郎" }] };
+  beforeEach(() => pm.deal.findUnique.mockResolvedValue(base));
+
+  it("出せる書類に、まとまりと当事者から選ぶ値(委任者・受任者・鍵の受領者)を返す", async () => {
+    const body = await (await AVAILABLE(new Request("http://x"), ctx)).json();
+    const poa = body.documents.find((d: { docType: string }) => d.docType === "power_of_attorney");
+    expect(poa.group).toBe("other");
+    expect(poa.defaults).toMatchObject({ principal: SELLER.id, agent: "self", matters: [] });
+    expect(poa.choices.principal.map((x: { value: string }) => x.value)).toEqual([SELLER.id, BUYER.id]);
+    const key = body.documents.find((d: { docType: string }) => d.docType === "key_receipt");
+    expect(key.choices.receiver.map((x: { value: string }) => x.value)).toEqual(["self", BUYER.id]);
+    expect(body.documents.find((d: { docType: string }) => d.docType === "settlement_statement").group).toBe("settlement");
+  });
+  it("委任状: 選んだもので組み立て、写しに残す・監査に名前は無い", async () => {
+    const options = { principal: SELLER.id, agent: "self", matters: ["receive_balance"], otherMatter: null, signedOn: null };
+    const res = await POST(json("POST", { docType: "power_of_attorney", version: 3, options }), ctx);
+    expect(res.status).toBe(201);
+    expect((await res.json()).title).toBe("委任状");
+    expect(pm.dealDocument.create.mock.calls[0][0].data.inputSnapshot).toEqual({ options });
+    expect((renderHtmlToPdfDocument as Fn).mock.calls[0][0]).toContain("残代金の受領");
+    expect(JSON.stringify((writeAuditLog as Fn).mock.calls[0][0])).not.toContain("架空");
+  });
+  it("委任内容が無い委任状・鍵の行が無い鍵受領書は 422 で何も作らない", async () => {
+    const r1 = await POST(json("POST", { docType: "power_of_attorney", version: 3, options: { principal: SELLER.id, agent: "self", matters: [], otherMatter: null, signedOn: null } }), ctx);
+    expect((await r1.json()).error.code).toBe("NO_MATTER");
+    const r2 = await POST(json("POST", { docType: "key_receipt", version: 3, options: { receiver: BUYER.id, keys: [], receivedOn: null } }), ctx);
+    expect((await r2.json()).error.code).toBe("NO_KEYS");
+    expect(files.size).toBe(0);
+    expect(pm.dealDocument.create).not.toHaveBeenCalled();
+  });
+  it("OC の書類: OC なしの取引では 422・OC ありならお知らせを賃借人のいる部屋ごとに作る", async () => {
+    const r = await POST(json("POST", { docType: "landlord_change_notice", version: 3, options: { changeOn: null, payee: null } }), ctx);
+    expect((await r.json()).error.code).toBe("DOC_NOT_APPLICABLE");
+    pm.deal.findUnique.mockResolvedValue(oc);
+    const res = await POST(json("POST", { docType: "landlord_change_notice", version: 3, options: { changeOn: "2026-06-30", payee: null } }), ctx);
+    expect(res.status).toBe(201);
+    const htmlOut = (renderHtmlToPdfDocument as Fn).mock.calls[0][0] as string;
+    expect(htmlOut).toContain("101 架空 三郎 様");
+    expect(htmlOut).toContain("201 架空 四郎 様");
+    expect(htmlOut.match(/page-break-before:always/g)?.length).toBe(1);
+    // 賃借人がいない(止める項目がある)ときは、画面を通さなくても 422 で何も作らない
+    pm.deal.findUnique.mockResolvedValue({ ...oc, leases: [{ ...LEASE, tenant: null }] });
+    (renderHtmlToPdfDocument as Fn).mockClear();
+    const blocked = await POST(json("POST", { docType: "tenant_survey", version: 3 }), ctx);
+    expect((await blocked.json()).error.code).toBe("DOC_BLOCKED");
+    expect(renderHtmlToPdfDocument).not.toHaveBeenCalled();
+    pm.deal.findUnique.mockResolvedValue(oc);
+    const keys = (await (await AVAILABLE(new Request("http://x"), ctx)).json()).documents.map((d: { docType: string }) => d.docType);
+    expect(keys).toEqual(expect.arrayContaining(["oc_purchase_consult", "tenant_survey", "landlord_change_notice", "handover_checklist"]));
   });
 });
 

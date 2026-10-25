@@ -96,6 +96,9 @@ export async function POST(request: Request, ctx: Ctx) {
         logo: branding.logo, seal: branding.seal,
       };
       if (!businessDoc.applies(bctx)) throw new ApiError(422, `この取引では${businessDoc.label}を出せません`, "DOC_NOT_APPLICABLE");
+      // 止める項目(賃借人がいない・金額が無いなど)は画面だけでなくサーバーでも止める(空の書類を作らない)。
+      const blocking = businessDoc.blocking(bctx);
+      if (blocking.length) throw new ApiError(422, `${blocking.join("・")}が無いと${businessDoc.label}を出せません`, "DOC_BLOCKED");
       const parsed = businessDoc.options.parse(options ?? {});
       let out: ReturnType<typeof businessDoc.build>;
       try {
