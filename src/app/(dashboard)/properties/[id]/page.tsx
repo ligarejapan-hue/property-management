@@ -1059,6 +1059,7 @@ export default function PropertyDetailPage({
             canWrite={canWriteProperty}
             onOpenAttachments={() => setActiveTab("attachments")}
             editLockHeld={propertyNoLockWritesBlocked}
+            canCreateDeal={canCreateDeal}
           />
         )}
         {activeTab === "owner" && (
@@ -1153,11 +1154,14 @@ function BasicTab({
   canWrite,
   onOpenAttachments,
   editLockHeld,
+  canCreateDeal = false,
 }: {
   property: ApiProperty;
   onRefresh: () => void;
   canWrite: boolean;
   onOpenAttachments: () => void;
+  /** 取引を作れる(deal:write)。契約予定のときに「この物件で取引を作成」を出す(2026-10-25)。 */
+  canCreateDeal?: boolean;
   /** 見ている側(仕様 6.3・Task 9)。物件が他の人の鍵なら案件ステータス・導入ルートを止める。 */
   editLockHeld: boolean;
 }) {
@@ -1385,6 +1389,19 @@ function BasicTab({
         canWrite={canWrite}
         editLockHeld={editLockHeld}
       />
+      {/* 契約予定になった物件は、ここから取引を作れる(発注者指示 2026-10-25)。
+          「その他」メニューの「この物件で取引を作る」と同じ行き先。 */}
+      {canCreateDeal && property.caseStatus === "contract_planned" && (
+        <div className="md:col-span-2">
+          <Link
+            href={`/deals/new?propertyId=${property.id}`}
+            className="inline-flex items-center gap-1.5 rounded-md bg-indigo-600 px-3 py-1.5 text-sm font-medium text-white hover:bg-indigo-700 focus:outline-none focus:ring-2 focus:ring-indigo-500 focus:ring-offset-2 dark:focus:ring-offset-gray-900"
+          >
+            <Handshake className="h-4 w-4" />
+            この物件で取引を作成
+          </Link>
+        </div>
+      )}
       <IntroductionRouteField
         property={property}
         onRefresh={onRefresh}
