@@ -2446,10 +2446,13 @@ model PropertyDriveFolder {
 }
 
 /// ドライブとの往復の台帳(重複と往復ループの防止)。direction=in(ドライブ→アプリ)|out(アプリ→ドライブ)。
-/// status=imported|inbox|duplicate|unsupported|failed|copied。
+/// status=imported|inbox|photo|duplicate|unsupported|failed|copied|matched|withdrawn。
+/// 紐づけを外しても行は残す(folder_link_id=null)=同じ物件に付け直したとき受け取り箱・写真を取り込み直さない。
 model DriveSyncFile {
   id           String    @id @default(uuid()) @db.Uuid
-  folderLinkId String    @map("folder_link_id") @db.Uuid
+  folderLinkId String?   @map("folder_link_id") @db.Uuid
+  /// 書いたときの物件(外部キーなし=物件が消えても台帳は残す)。
+  propertyId   String?   @map("property_id") @db.Uuid
   driveFileId  String    @unique @map("drive_file_id")
   md5          String?
   name         String
@@ -2462,7 +2465,7 @@ model DriveSyncFile {
   error        String?
   createdAt    DateTime  @default(now()) @map("created_at")
 
-  folderLink PropertyDriveFolder @relation(fields: [folderLinkId], references: [id], onDelete: Cascade)
+  folderLink PropertyDriveFolder? @relation(fields: [folderLinkId], references: [id], onDelete: SetNull)
 
   @@index([folderLinkId, createdAt])
   @@map("drive_sync_files")

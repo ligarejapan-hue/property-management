@@ -62,7 +62,26 @@ export type LedgerRow = {
   name: string;
   attachmentId: string | null;
   modifiedTime: Date | null;
+  /**
+   * どの紐づけの行か。null=紐づけを外したあとに残った行(紐づけを消しても台帳は消さない)。
+   * repo は必ず入れる。省略はテストの便宜で「今も紐づいている物件の行」と同じ扱い。
+   */
+  folderLinkId?: string | null;
+  /** 書いたときの物件(外したあとに残った行を、同じ物件に付け直したかの見分けに使う)。 */
+  propertyId?: string | null;
 };
+
+/**
+ * 台帳の行を「扱い済み」に数えるか。
+ * - 今も紐づいている(この物件・ほかの物件の)行 → 数える(二度取り込まない・行を奪い合わない)
+ * - 紐づけを外したあとに残った行 → 受け取り箱の行は物件に属さないので数える。
+ *   ほかは同じ物件に付け直したときだけ数える(別の物件に付け直したら、その物件へ取り込む)
+ */
+export function ledgerRowCounts(row: LedgerRow, link: Pick<LinkInfo, "propertyId">): boolean {
+  if (row.folderLinkId !== null) return true;
+  if (row.status === "inbox") return true;
+  return row.propertyId === link.propertyId;
+}
 
 export type OutCandidate = {
   id: string;
@@ -80,6 +99,7 @@ export type OutCandidate = {
 
 export type LedgerWrite = {
   linkId: string;
+  propertyId: string;
   item: Pick<DriveItem, "id" | "name" | "mimeType" | "md5" | "size" | "modifiedTime">;
   direction: "in" | "out";
   status: "imported" | "inbox" | "photo" | "duplicate" | "unsupported" | "failed" | "copied" | "matched" | "withdrawn";
@@ -239,10 +259,11 @@ export async function syncOneLink(
   const tree = await walkLinkedFolder(drive, link.folderId, { skipFolderIds: link.otherLinkedFolderIds });
   // 台帳はこの物件の行+いま見えるファイルの行(ほかの物件で扱い済みのファイルも二度は取り込まない)
   const ledger = await repo.ledger(link.id, tree.files.map((f) => f.item.id));
-  const ledgerById = new Map(ledger.map((l) => [l.driveFileId, l]));
+  // 紐づけを外したあとに残った行は、同じ物件に付け直したとき(と受け取り箱の行)だけ数える
+  const ledgerById = new Map(ledger.filter((l) => ledgerRowCounts(l, link)).map((l) => [l.driveFileId, l]));
   const { toCopy, copied } = await repo.attachmentsForLink(link.propertyId);
-  // ★紐づけを外して付け直すと台帳は消える(紐づけと一緒に消える)。添付に残っている drive_file_id から
-  //   扱い済みを組み立て直す=取り込み直さない・アプリの写しは写しとして扱う(@codex #580 R3)
+  // ★台帳が無くても(この仕組みより前に外した紐づけ・残った行が別の物件のもの)、添付に残っている
+  //   drive_file_id から扱い済みを組み立て直す=取り込み直さない・アプリの写しは写しとして扱う(@codex #580 R3)
   const treeById = new Map(tree.files.map((f) => [f.item.id, f.item]));
   for (const a of copied) {
     if (!a.driveFileId || ledgerById.has(a.driveFileId)) continue;
@@ -312,7 +333,7 @@ export async function syncOneLink(
     )?.item;
     if (orphan) {
       try {
-        if (await repo.markCopied(a.id, { linkId: link.id, item: orphan, direction: "out", status: "copied", attachmentId: a.id })) {
+        if (await repo.markCopied(a.id, { linkId: link.id, propertyId: link.propertyId, item: orphan, direction: "out", status: "copied", attachmentId: a.id })) {
           ledgerById.set(orphan.id, { driveFileId: orphan.id, md5: orphan.md5, direction: "out", status: "copied", name: orphan.name, attachmentId: a.id, modifiedTime: null });
           if (orphan.md5) knownMd5.add(orphan.md5);
           r.copied++;
@@ -337,7 +358,7 @@ export async function syncOneLink(
       const same = driveByMd5.get(md5);
       if (same && !ledgerById.has(same.id)) {
         // 人が同じ中身をドライブに置いてある=複製しない(その人のファイルを写しとして結ぶだけ・名前は変えない)
-        if (await repo.markCopied(a.id, { linkId: link.id, item: same, direction: "out", status: "matched", attachmentId: a.id })) {
+        if (await repo.markCopied(a.id, { linkId: link.id, propertyId: link.propertyId, item: same, direction: "out", status: "matched", attachmentId: a.id })) {
           ledgerById.set(same.id, { driveFileId: same.id, md5, direction: "out", status: "matched", name: same.name, attachmentId: a.id, modifiedTime: null });
           knownMd5.add(md5);
           r.matched++;
@@ -365,7 +386,7 @@ export async function syncOneLink(
         appProperties: { pmSource: "app", pmAttachmentId: a.id },
       });
       const item = { id: up.id, name, mimeType: a.mimeType, md5: up.md5 ?? md5, size: body.length, modifiedTime: null };
-      if (await repo.markCopied(a.id, { linkId: link.id, item, direction: "out", status: "copied", attachmentId: a.id })) {
+      if (await repo.markCopied(a.id, { linkId: link.id, propertyId: link.propertyId, item, direction: "out", status: "copied", attachmentId: a.id })) {
         ledgerById.set(up.id, { driveFileId: up.id, md5: item.md5, direction: "out", status: "copied", name, attachmentId: a.id, modifiedTime: null });
         if (item.md5) knownMd5.add(item.md5);
         r.copied++;
@@ -384,7 +405,7 @@ export async function syncOneLink(
     const skip = skipReasonForDriveFile(item, { knownMd5 });
     if (skip === "app_copy") continue;
     if (skip) {
-      await repo.record({ linkId: link.id, item, direction: "in", status: skip });
+      await repo.record({ linkId: link.id, propertyId: link.propertyId, item, direction: "in", status: skip });
       ledgerById.set(item.id, { driveFileId: item.id, md5: item.md5, direction: "in", status: skip, name: item.name, attachmentId: null, modifiedTime: parseTime(item.modifiedTime) });
       r.skipped++;
       continue;
@@ -396,19 +417,19 @@ export async function syncOneLink(
     try {
       const body = await drive.download(item.id);
       if (placement.kind === "inbox") {
-        await repo.importInbox(link, item, body, { linkId: link.id, item, direction: "in", status: "inbox" });
+        await repo.importInbox(link, item, body, { linkId: link.id, propertyId: link.propertyId, item, direction: "in", status: "inbox" });
         r.inbox++;
       } else if (placement.kind === "photo") {
-        await repo.importPhoto(link, item, body, { linkId: link.id, item, direction: "in", status: "photo" });
+        await repo.importPhoto(link, item, body, { linkId: link.id, propertyId: link.propertyId, item, direction: "in", status: "photo" });
         r.photos++;
       } else {
-        await repo.importAttachment(link, item, body, placement.stageHint, { linkId: link.id, item, direction: "in", status: "imported" });
+        await repo.importAttachment(link, item, body, placement.stageHint, { linkId: link.id, propertyId: link.propertyId, item, direction: "in", status: "imported" });
         r.imported++;
       }
       if (item.md5) knownMd5.add(item.md5);
     } catch (e) {
       if (isAuthError(e)) throw e;
-      await repo.record({ linkId: link.id, item, direction: "in", status: "failed", error: errorCode(e) });
+      await repo.record({ linkId: link.id, propertyId: link.propertyId, item, direction: "in", status: "failed", error: errorCode(e) });
       r.failed++;
     }
   }

@@ -4,7 +4,7 @@ import prisma from "@/lib/prisma";
 import { writeAuditLog } from "@/lib/audit";
 import { requireDriveAdmin } from "@/lib/drive/admin-access";
 
-/** DELETE: 紐づけを外す。ドライブ側もアプリ側もファイルは消さない(台帳だけ連れて消える)。 */
+/** DELETE: 紐づけを外す。ドライブ側もアプリ側もファイルは消さない(台帳は残る=folder_link_id が null になる。同じ物件に付け直したとき取り込み直さないため)。 */
 export async function DELETE(_request: Request, { params }: { params: Promise<{ id: string }> }) {
   try {
     const session = await requireDriveAdmin();

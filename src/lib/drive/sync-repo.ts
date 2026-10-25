@@ -78,6 +78,8 @@ export function createSyncRepo(uploaderId: string): SyncRepo {
           name: true,
           attachmentId: true,
           modifiedTime: true,
+          folderLinkId: true,
+          propertyId: true,
         },
       });
     },
@@ -365,6 +367,7 @@ async function upsertLedger(db: LedgerDb, w: LedgerWrite): Promise<void> {
   const modifiedTime = w.item.modifiedTime ? new Date(w.item.modifiedTime) : null;
   const data = {
     folderLinkId: w.linkId,
+    propertyId: w.propertyId,
     md5: w.item.md5,
     name: w.item.name,
     mimeType: w.item.mimeType,
