@@ -17,6 +17,7 @@ const ALLOWED: Record<string, string> = {
   "src/components/field-survey/field-survey-map.tsx": "現地調査の撮影ボタン(スマホのカメラ)",
   "src/components/field-survey/pin-create-modal.tsx": "現地調査の撮影ボタン(スマホのカメラ)",
   "src/components/field-survey/pin-detail-panel.tsx": "現地調査の撮影ボタン(スマホのカメラ)",
+  "src/components/properties/doc-scan/doc-scan-dialog.tsx": "書類を撮る画面で、画面の中のカメラが開けない端末だけ OS のカメラで撮る",
 };
 
 function walk(dir: string, out: string[]): void {

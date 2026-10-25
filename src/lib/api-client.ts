@@ -3825,6 +3825,23 @@ export async function uploadFile(
   return res.json();
 }
 
+export interface ScanUploadResult {
+  id: string;
+  docKind: string | null;
+  docTitle: string | null;
+  docConfidence: string | null;
+  scan: { pages: number; ocr: "done" | "unavailable" | "failed"; ocrChars: number };
+}
+
+/** 書類を撮る: 紙の形に直した画像(並び順)を送り、1つの PDF にして添付に入れる。 */
+export async function uploadScannedDocument(propertyId: string, pages: readonly Blob[]): Promise<ScanUploadResult> {
+  const formData = new FormData();
+  pages.forEach((page, i) => formData.append("page", page, `page-${i + 1}.jpg`));
+  const res = await fetch(`/api/properties/${propertyId}/attachments/scan`, { method: "POST", body: formData });
+  if (!res.ok) throw await toApiError(res);
+  return res.json();
+}
+
 // ---------- Property Create ----------
 
 export async function createProperty(data: {
