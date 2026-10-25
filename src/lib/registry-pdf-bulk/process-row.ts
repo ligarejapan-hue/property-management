@@ -7,6 +7,7 @@ import { extractTextFromPdf } from "@/lib/pdf-extract";
 import { parseRegistryText } from "@/lib/pdf-registry-parser";
 import { canAccessPropertyRecord } from "@/lib/property-access";
 import { writeAuditLog } from "@/lib/audit";
+import { fillAreasFromRegistryPdfBestEffort } from "@/lib/registry-pdf/fill-areas";
 import { matchProperty, type PropertyIndex } from "./match";
 
 /**
@@ -396,6 +397,9 @@ export async function processRegistryPdfBulkRow(args: {
       } catch (e) {
         console.error("registry-pdf-bulk: audit failed (non-fatal):", e);
       }
+      // 面積を読んで物件の空の欄に入れる(2026-10-25・全部事項の謄本のとき。所有者事項には面積が無い)。
+      // ⚠失敗しても行は成功のまま(添付は済んでいる)。
+      await fillAreasFromRegistryPdfBestEffort({ propertyId: match.propertyId, pdf: buf, changedBy: executor.id });
     }
     return "success";
   } catch (err) {

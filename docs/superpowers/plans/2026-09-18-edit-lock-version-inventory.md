@@ -91,6 +91,7 @@ Task 7 が直した「謄本取込が所有者の法人番号を版番号を進�
 | `src/lib/registry-fetch/auto-fetch.ts:4509` | `property.registryStatus = obtained`(有料取得の確定) |
 | `src/lib/registry-pdf/process.ts:190` | `owner.corporateNumber`(Task 7 で修正済) |
 | `src/lib/registry-pdf/process.ts:681` | `property.registryStatus`/`realEstateNumber`/`lotNumber`/`buildingNumber` |
+| `src/lib/registry-pdf/fill-areas.ts:62` | (2026-10-25 謄本から面積)`property.exclusiveAreaRegistry`/`landArea`/`landAreaMethod`/`totalFloorArea` の空欄補完(物件の画面の添付・一括取込・物件を指定しない取込から) |
 
 合計: 要修正11 + 対象外15 + 対応済28 = **54件**(全件解決・unresolved行なし)。
 

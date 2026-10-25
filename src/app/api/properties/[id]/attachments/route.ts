@@ -2,6 +2,7 @@ import { randomUUID } from "node:crypto";
 import { NextRequest } from "next/server";
 import { z } from "zod";
 import prisma from "@/lib/prisma";
+import { fillAreasFromRegistryPdfBestEffort } from "@/lib/registry-pdf/fill-areas";
 import { lockPropertyRow } from "@/lib/property-record-guard";
 import {
   getApiSession,
@@ -147,6 +148,8 @@ export async function POST(
     let originalSize: number | null = null;
     // 書類の自動判別に使う本文(PDF のときだけ・謄本は対象外)。
     let classificationText: string | null = null;
+    // 謄本PDFの中身(面積を読む・2026-10-25)。ファイルを受け取った謄本のときだけ。
+    let registryBuffer: Buffer | null = null;
 
     if (contentType.includes("multipart/form-data")) {
       // ⚠formData() はボディ全体をメモリに読む。大きいPDF(自動圧縮の対象)を受けるので、
@@ -227,6 +230,8 @@ export async function POST(
       }
       if (attachmentType !== "registry") {
         classificationText = await textForClassification(buffer, mimeType);
+      } else {
+        registryBuffer = buffer;
       }
 
       const ext = fileName.split(".").pop() ?? "bin";
@@ -322,6 +327,12 @@ export async function POST(
         ...(originalSize !== null ? { compressedFrom: originalSize, compressedTo: fileSize } : {}),
       },
     });
+
+    // 謄本PDFを添付したら、面積を読んで物件の空の欄に入れる(2026-10-25 発注者「謄本を読み込んだ時も
+    // 自動で面積を反映させたい」)。⚠添付そのものは成功させる=読めない・失敗しても添付は残す(ログだけ)。
+    if (registryBuffer) {
+      await fillAreasFromRegistryPdfBestEffort({ propertyId, pdf: registryBuffer, changedBy: session.id });
+    }
 
     return apiResponse(normalizeFileUrlsInRecord(attachment), 201);
   } catch (error) {
