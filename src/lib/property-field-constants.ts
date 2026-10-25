@@ -53,6 +53,10 @@ export const PROPERTY_TRACKED_FIELDS = [
   "floorNo",
   "exclusiveArea",
   "exclusiveAreaRegistry",
+  // 土地面積・計測方式・延床面積(謄本から空の欄を埋める・2026-10-25)。謄本の取込の変更履歴に残すため。
+  "landArea",
+  "landAreaMethod",
+  "totalFloorArea",
   "balconyArea",
   "layoutType",
   "orientation",

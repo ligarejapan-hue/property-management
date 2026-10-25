@@ -40,6 +40,10 @@ vi.mock("@/lib/property-access", () => ({
   canAccessPropertyRecord: vi.fn(() => true),
 }));
 vi.mock("@/lib/audit", () => ({ writeAuditLog: vi.fn() }));
+// 面積の補完(2026-10-25)。中身は fill-areas.test.ts で見る。ここは呼ぶかどうかだけ。
+vi.mock("@/lib/registry-pdf/fill-areas", () => ({
+  fillAreasFromRegistryPdfBestEffort: vi.fn(async () => ({ filled: [], skippedByEditLock: false })),
+}));
 
 import prisma from "@/lib/prisma";
 import { getStorage } from "@/lib/storage";
@@ -47,6 +51,7 @@ import { extractTextFromPdf } from "@/lib/pdf-extract";
 import { parseRegistryText } from "@/lib/pdf-registry-parser";
 import { canAccessPropertyRecord } from "@/lib/property-access";
 import { writeAuditLog } from "@/lib/audit";
+import { fillAreasFromRegistryPdfBestEffort } from "@/lib/registry-pdf/fill-areas";
 import { processRegistryPdfBulkRow } from "../process-row";
 import { buildPropertyIndex } from "../match";
 
@@ -158,6 +163,10 @@ describe("processRegistryPdfBulkRow", () => {
         detail: { propertyId: "p1", jobId: "j1", rowId: "r1" },
       }),
     );
+    // 添付が確定したら、その PDF の面積を物件の空の欄に入れる(2026-10-25)。
+    expect(fillAreasFromRegistryPdfBestEffort).toHaveBeenCalledWith(
+      expect.objectContaining({ propertyId: "p1", changedBy: "u1" }),
+    );
   });
 
   it("行確定が失敗したら添付を取り消してから error 確定する(@codex PR#256 P2)", async () => {
@@ -189,6 +198,8 @@ describe("processRegistryPdfBulkRow", () => {
     // error確定は outer catch 経由で実施される
     const finalize = pm.importJobRow.updateMany.mock.calls.at(-1)![0];
     expect(finalize.data.status).toBe("error");
+    // 添付を取り消したので面積も入れない
+    expect(fillAreasFromRegistryPdfBestEffort).not.toHaveBeenCalled();
   });
 
   it("並行確定済み(count=0)なら添付を取り消して noop(行状態には触れない)", async () => {

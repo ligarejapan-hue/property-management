@@ -15,6 +15,7 @@
 import { parseRegistryOwnerTable } from "./registry-owner-table";
 import { joinSpacedKanji } from "./registry-text-normalize";
 import { parseUnitFloorArea } from "./registry-unit-floor-area";
+import { parseBuildingFloorArea, parseLandArea } from "./registry-area";
 
 export interface RegistryParseResult {
   /** 不動産番号 */
@@ -35,6 +36,14 @@ export interface RegistryParseResult {
    * ⚠省略可=この項目より前に組み立てた結果(テストの値など)には無い。
    */
   unitFloorArea?: string | null;
+  /**
+   * 土地の表題部の地積(例 "120.50")・建物(区分でない)の表題部の床面積の合計(例 "91.05")。
+   * 読めない・変更の履歴があって決められないときは null(registry-area.ts・2026-10-25)。
+   * ⚠上の `area` は確認画面の表示用の簡易な読み取りで、物件には書かない。物件に書くのはこちら。
+   * ⚠省略可(unitFloorArea と同じ理由)。
+   */
+  landAreaRegistry?: string | null;
+  buildingFloorArea?: string | null;
   /** 所有者情報 */
   owners: RegistryOwnerInfo[];
   /** パース信頼度 (0-1) */
@@ -358,6 +367,8 @@ export function parseRegistryText(raw: string): RegistryParseResult {
     area,
     // ⚠罫線を潰す前の生の文字から読む(表の区切りで値が割れないように・部品の中で罫線を扱う)。
     unitFloorArea: parseUnitFloorArea(raw).value,
+    landAreaRegistry: parseLandArea(raw).value,
+    buildingFloorArea: parseBuildingFloorArea(raw).value,
     owners,
     confidence: Math.min(1, confidence),
     warnings,

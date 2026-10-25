@@ -27,7 +27,8 @@ import { recordChanges, PROPERTY_TRACKED_FIELDS } from "@/lib/change-log";
 import { normalizeName, normalizeAddress } from "@/lib/normalize";
 import { pickReusableAddresslessOwner } from "@/lib/registry-pdf/owner-reuse";
 import { parseRegistryText } from "@/lib/pdf-registry-parser";
-import { supportsUnitFields } from "@/lib/property-building-name";
+import { planRegistryAreaFill, registryAreasOf, type RegistryAreaCurrent } from "@/lib/registry-area";
+import { fillPropertyAreasFromRegistry } from "@/lib/registry-pdf/fill-areas";
 import {
   FULL_CERTIFICATE_OWNERS_UNDETERMINED_WARNING,
   hasDeterminedOwners,
@@ -890,17 +891,18 @@ export async function processRegistryPdf(
       //   下見でも確認画面でも所有者しか見せていないのに、見ていない項目が黙って
       //   変わるのは筋が通らない。とくに**不動産番号が入るとその物件は謄本の
       //   所在検索が使えなくなる**(「不動産番号は今後も作らない」という方針に反する)。
-      // 区分の登記簿の専有面積(2026-10-25)。区分マンションで、欄が空のときだけ埋める
-      // (手で入れた値・前の謄本で入った値は上書きしない=ほかの3項目と同じ)。
-      const parsedUnitFloorArea = parsed.unitFloorArea ?? null;
-      const wouldFillUnitArea = (p: { propertyType: string; exclusiveAreaRegistry: unknown }) =>
-        supportsUnitFields(p.propertyType) && p.exclusiveAreaRegistry == null && !!parsedUnitFloorArea;
+      // 面積(2026-10-25): 区分=専有面積(登記簿)・土地=土地面積・戸建/一棟=土地面積と建物面積(延べ)。
+      // 欄が空のときだけ埋める(手で入れた値・前の謄本で入った値は上書きしない=ほかの3項目と同じ)。
+      // 種別ごとの欄の決まりは planRegistryAreaFill(registry-area.ts)。
+      const parsedAreas = registryAreasOf(parsed);
+      const areaFillFor = (p: RegistryAreaCurrent) => planRegistryAreaFill(parsedAreas, p);
+      const wouldFillArea = (p: RegistryAreaCurrent) => Object.keys(areaFillFor(p)).length > 0;
       const wouldFillProperty =
         !args.ownersOnly &&
         ((!existing.realEstateNumber && !!parsed.realEstateNumber) ||
           (!existing.lotNumber && !!parsed.lotNumber) ||
           (!existing.buildingNumber && !!parsed.buildingNumber) ||
-          wouldFillUnitArea(existing));
+          wouldFillArea(existing));
       const wouldAdvanceStatus =
         !args.ownersOnly && existing.registryStatus === "unconfirmed" && !!parsed.realEstateNumber;
 
@@ -943,8 +945,11 @@ export async function processRegistryPdf(
                   realEstateNumber: true,
                   lotNumber: true,
                   buildingNumber: true,
-                  // 区分の登記簿の専有面積(2026-10-25)。種別は埋めてよいかの判定に使う(merged には入らない)。
+                  // 面積(2026-10-25)。種別は埋めてよいかの判定に使う(merged には入らない)。
                   exclusiveAreaRegistry: true,
+                  landArea: true,
+                  landAreaMethod: true,
+                  totalFloorArea: true,
                   propertyType: true,
                 },
               });
@@ -962,7 +967,7 @@ export async function processRegistryPdf(
                 (!fresh.realEstateNumber && !!parsed.realEstateNumber) ||
                 (!fresh.lotNumber && !!parsed.lotNumber) ||
                 (!fresh.buildingNumber && !!parsed.buildingNumber) ||
-                wouldFillUnitArea(fresh);
+                wouldFillArea(fresh);
               const freshWouldAdvanceStatus =
                 fresh.registryStatus === "unconfirmed" && !!parsed.realEstateNumber;
 
@@ -985,9 +990,7 @@ export async function processRegistryPdf(
                 if (!fresh.buildingNumber && parsed.buildingNumber) {
                   fieldUpdates.buildingNumber = parsed.buildingNumber;
                 }
-                if (wouldFillUnitArea(fresh)) {
-                  fieldUpdates.exclusiveAreaRegistry = parsedUnitFloorArea;
-                }
+                Object.assign(fieldUpdates, areaFillFor(fresh));
               } else if (freshWouldFillProperty) {
                 // 実際に埋まるはずだった欄があるときだけフラグを立てる(@codex R10 P2)。
                 propertyFillSkippedByEditLock = true;
@@ -1144,6 +1147,27 @@ export async function processRegistryPdf(
             ownersMatched = modeBOwners.matched;
             ownersCreated = modeBOwners.created;
             ownersLinked = modeBOwners.linked;
+          }
+        }
+      }
+
+      // 面積(2026-10-25): 空の欄だけ埋める(Mode A と同じ決まり・fill-areas.ts)。
+      // ⚠強い一致(不動産番号・住所の完全一致)か新しく作った物件だけ。弱い住所の部分一致では
+      //   別の物件に書きうるので書かない。担当外の物件にも書かない(所有者の反映と同じ)。
+      if (!args.ownersOnly && targetPropertyId && canReflectOwners) {
+        const areas = registryAreasOf(parsed);
+        if (areas.unitFloorArea || areas.landArea || areas.buildingFloorArea) {
+          const targetProp = await prisma.property.findUnique({
+            where: { id: targetPropertyId },
+            select: { createdBy: true, assignedTo: true },
+          });
+          if (targetProp && canAccessPropertyRecord(session, targetProp)) {
+            const areaFill = await fillPropertyAreasFromRegistry({
+              propertyId: targetPropertyId,
+              areas,
+              changedBy: session.id,
+            });
+            if (areaFill.skippedByEditLock) propertyFillSkippedByEditLock = true;
           }
         }
       }

@@ -241,3 +241,105 @@ describe("区分の登記簿の専有面積を謄本から埋める", () => {
     expect(pm.property.updateMany).not.toHaveBeenCalled();
   });
 });
+
+// 2026-10-25 発注者「謄本を読み込んだ時も自動で面積を反映させたい」=土地・戸建も。
+describe("土地・戸建の面積を謄本から埋める(Mode A)", () => {
+  const DONE = {
+    realEstateNumber: "0100099999999",
+    lotNumber: "9番",
+    buildingNumber: "9号",
+    registryStatus: "obtained",
+  };
+  const EMPTY_AREAS = { exclusiveAreaRegistry: null, landArea: null, landAreaMethod: null, totalFloorArea: null };
+
+  it("★土地: 地積を土地面積に・計測方式は「公簿」(変更履歴の変更前も select している)", async () => {
+    (parseRegistryText as Mock).mockReturnValue({ ...FILLED_PARSED, owners: [], landAreaRegistry: "120.50" });
+    pm.property.findUnique.mockResolvedValue({ ...BASE_PROPERTY, ...DONE, ...EMPTY_AREAS, propertyType: "land" });
+    await run();
+    expect(pm.property.updateMany.mock.calls[0][0].data).toMatchObject({
+      landArea: "120.50",
+      landAreaMethod: "公簿",
+      version: { increment: 1 },
+    });
+    const select = pm.property.findUnique.mock.calls.map((c) => c[0]?.select).find((s) => s?.version);
+    expect(select).toMatchObject({ landArea: true, landAreaMethod: true, totalFloorArea: true });
+  });
+
+  it("★戸建: 建物の謄本の床面積を建物面積(延べ)に", async () => {
+    (parseRegistryText as Mock).mockReturnValue({ ...FILLED_PARSED, owners: [], buildingFloorArea: "91.05" });
+    pm.property.findUnique.mockResolvedValue({ ...BASE_PROPERTY, ...DONE, ...EMPTY_AREAS, propertyType: "house" });
+    await run();
+    expect(pm.property.updateMany.mock.calls[0][0].data).toMatchObject({ totalFloorArea: "91.05" });
+    expect(pm.property.updateMany.mock.calls[0][0].data).not.toHaveProperty("landArea");
+  });
+
+  it("入っている値は上書きしない(何も書かない)", async () => {
+    (parseRegistryText as Mock).mockReturnValue({
+      ...FILLED_PARSED,
+      owners: [],
+      landAreaRegistry: "120.50",
+      buildingFloorArea: "91.05",
+    });
+    pm.property.findUnique.mockResolvedValue({
+      ...BASE_PROPERTY,
+      ...DONE,
+      ...EMPTY_AREAS,
+      propertyType: "house",
+      landArea: "100",
+      totalFloorArea: "80",
+    });
+    await run();
+    expect(pm.property.updateMany).not.toHaveBeenCalled();
+  });
+});
+
+describe("物件を指定しない取込(Mode B)でも面積を埋める", () => {
+  const runB = () =>
+    processRegistryPdf({
+      session,
+      text: "dummy",
+      propertyId: undefined,
+      fileName: "謄本.pdf",
+      edited: undefined,
+      pdfBuffer: null,
+      certificateType: "owner",
+    } as unknown as Parameters<typeof processRegistryPdf>[0]);
+  const pmB = prisma as unknown as { property: { findFirst: Mock; findUnique: Mock; updateMany: Mock } };
+
+  it("★不動産番号で一致した物件の空の欄に入れる", async () => {
+    (parseRegistryText as Mock).mockReturnValue({ ...FILLED_PARSED, owners: [], landAreaRegistry: "120.50" });
+    pmB.property.findFirst.mockResolvedValue({ id: PROP_ID, address: "東京都千代田区一番町1", realEstateNumber: "0100012345678" });
+    pmB.property.findUnique.mockResolvedValue({
+      ...BASE_PROPERTY,
+      propertyType: "land",
+      exclusiveAreaRegistry: null,
+      landArea: null,
+      landAreaMethod: null,
+      totalFloorArea: null,
+    });
+    await runB();
+    expect(pmB.property.updateMany).toHaveBeenCalledTimes(1);
+    expect(pmB.property.updateMany.mock.calls[0][0].data).toMatchObject({ landArea: "120.50", landAreaMethod: "公簿" });
+    expect((recordChanges as Mock).mock.calls[0][0]).toMatchObject({ source: "pdf_import", targetId: PROP_ID });
+  });
+
+  it("★住所の部分一致(弱い一致)では入れない", async () => {
+    (parseRegistryText as Mock).mockReturnValue({
+      ...FILLED_PARSED,
+      realEstateNumber: null,
+      owners: [],
+      landAreaRegistry: "120.50",
+    });
+    pmB.property.findFirst.mockResolvedValue({ id: PROP_ID, address: "東京都千代田区一番町1-2-3 別の建物", realEstateNumber: null });
+    pmB.property.findUnique.mockResolvedValue({
+      ...BASE_PROPERTY,
+      propertyType: "land",
+      exclusiveAreaRegistry: null,
+      landArea: null,
+      landAreaMethod: null,
+      totalFloorArea: null,
+    });
+    await runB();
+    expect(pmB.property.updateMany).not.toHaveBeenCalled();
+  });
+});
