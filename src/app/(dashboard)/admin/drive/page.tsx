@@ -7,6 +7,7 @@ import { PageHeader } from "@/components/ui/page-header";
 import { Button } from "@/components/ui/button";
 import { ConfirmDialog } from "@/components/ui/confirm-dialog";
 import { DRIVE_ALERT_AFTER_FAILURES } from "@/lib/drive/failure-alert";
+import { folderIdFromUrl } from "@/lib/drive/folder-url";
 import {
   createDriveLink,
   deleteDriveLink,
@@ -134,7 +135,7 @@ function DriveAdminPageInner() {
     <div className="mx-auto max-w-4xl space-y-5">
       <PageHeader
         title="ドライブ連携"
-        description="会社の Google ドライブに接続し、ドライブの物件フォルダとアプリの物件を紐づけます。アプリが触るのは紐づけたフォルダの中だけです。書類の往復(複製・取り込み)は次の段で入ります。"
+        description="会社の Google ドライブに接続し、ドライブの物件フォルダとアプリの物件を紐づけます。アプリが触るのは紐づけたフォルダの中だけです。紐づけた物件は、約5分ごとの見回りで書類が往復します。"
       />
 
       {(notice ?? paramNotice) && (
@@ -309,6 +310,10 @@ function FolderBrowser({
   const [q, setQ] = useState("");
   const [loading, setLoading] = useState(true);
   const [err, setErr] = useState<string | null>(null);
+  // 開いているフォルダそのものの行(URL を貼って開いたフォルダ自体を紐づけるため・@codex #597 P2)。
+  const [selfRow, setSelfRow] = useState<DriveFolderRow | null>(null);
+  // URL で開いたフォルダの本当の名前(パンくずの表示用・id → 名前)。
+  const [folderNames, setFolderNames] = useState<Record<string, string>>({});
   const parent = crumbs[crumbs.length - 1].id;
 
   // 読み込みの世代。移動・絞り込み・さらに読むが重なったとき、最後に始めたもの以外の応答は捨てる
@@ -322,7 +327,12 @@ function FolderBrowser({
       try {
         const r = await listDriveFolders({ parent, q: q.trim() || undefined, pageToken });
         if (gen !== loadGen.current) return;
+        // URL を貼って開いたフォルダは、読めたら本当の名前をパンくずに出す。
+        // ⚠パンくず(場所)には触らず、表示の名前だけを別に覚える(場所を変えるのは go() だけ)。
+        const realName = r.folderName;
+        if (realName) setFolderNames((prev) => (prev[parent] === realName ? prev : { ...prev, [parent]: realName }));
         setRows((prev) => (append ? [...prev, ...r.data] : r.data));
+        if (!append) setSelfRow(r.self);
         setNextToken(r.nextPageToken);
         setErr(null);
       } catch (e) {
@@ -347,6 +357,7 @@ function FolderBrowser({
     if (same && q === "") return;
     setLoading(true);
     setRows([]);
+    setSelfRow(null);
     setNextToken(null);
     // ⚠名前の絞り込みは「いま開いているフォルダの中」用。移ったら外す(残すと、建物名で絞って開いた
     //   物件フォルダの中の「売却」「購入」が隠れて「フォルダがありません」になる・@codex #577 P2)。
@@ -363,6 +374,28 @@ function FolderBrowser({
     setRows([]);
     setNextToken(null);
     setQ(v);
+  };
+
+  // フォルダの URL を貼って開く(2026-10-26 発注者の実機で「連携させたいフォルダがない」=共有ドライブ・
+  // 深い階層・共有アイテムのどこにあっても、ドライブで開いたフォルダの URL を貼れば開けるように)。
+  const [urlInput, setUrlInput] = useState("");
+  const [urlErr, setUrlErr] = useState<string | null>(null);
+  const openByUrl = () => {
+    const id = folderIdFromUrl(urlInput);
+    if (!id) {
+      setUrlErr("ドライブのフォルダの URL を貼ってください(https://drive.google.com/drive/folders/… の形)");
+      return;
+    }
+    setUrlErr(null);
+    setUrlInput("");
+    // ⚠いま開いているフォルダと同じなら、もう開いている=何もしない(絞り込みだけ外す)。
+    //   go() で1段のパンくずにすると、段の数が変わるので読み込み中になるのに、parent・q が変わらず
+    //   読み込みが走らないで固まる(@codex #597 P2)。
+    if (id === parent) {
+      if (q !== "") changeFilter("");
+      return;
+    }
+    go([{ id, name: "URL で開いたフォルダ" }]);
   };
 
   // 「紐づけ済」の表示と候補の使えなさは、読み込んだ時点の行ではなく今の紐づけ一覧から決める
@@ -393,12 +426,37 @@ function FolderBrowser({
           </button>
         </div>
       </div>
+      <form
+        className="mb-2 flex flex-wrap items-center gap-2"
+        onSubmit={(e) => {
+          e.preventDefault();
+          openByUrl();
+        }}
+      >
+        <Link2 className="h-4 w-4 text-gray-400" aria-hidden="true" />
+        <input
+          type="text"
+          inputMode="url"
+          value={urlInput}
+          onChange={(e) => {
+            setUrlInput(e.target.value);
+            setUrlErr(null);
+          }}
+          placeholder="フォルダの URL を貼って開く(共有ドライブの中も)"
+          aria-label="フォルダの URL"
+          className="min-w-0 flex-1 rounded-md border border-gray-300 px-2 py-1 text-sm dark:border-gray-600 dark:bg-gray-800"
+        />
+        <Button type="submit" variant="secondary" size="sm" disabled={urlInput.trim() === ""}>
+          開く
+        </Button>
+        {urlErr && <p className="w-full text-xs text-red-700 dark:text-red-300">{urlErr}</p>}
+      </form>
       <nav className="mb-2 flex flex-wrap items-center gap-1 text-xs text-gray-600 dark:text-gray-300">
         {crumbs.map((c, i) => (
           <span key={c.id} className="flex items-center gap-1">
             {i > 0 && <span>›</span>}
             <Button variant="ghost" size="sm" className="px-1 py-0.5 underline-offset-2 hover:underline" onClick={() => go(crumbs.slice(0, i + 1))}>
-              {c.name}
+              {folderNames[c.id] ?? c.name}
             </Button>
           </span>
         ))}
@@ -415,6 +473,22 @@ function FolderBrowser({
         />
       </div>
       {err && <div className="mb-2 text-xs text-red-700 dark:text-red-300">{err}</div>}
+      {/* フォルダの中を開いているときは、そのフォルダ自体も紐づけられる行を出す(URL で開いた物件フォルダに中のフォルダが無くても)。 */}
+      {selfRow && selfRow.id === parent && (
+        <div className="mb-2 rounded-md border border-indigo-200 bg-indigo-50/50 px-2 dark:border-indigo-900 dark:bg-indigo-950/20">
+          <p className="pt-2 text-[11px] font-semibold text-indigo-800 dark:text-indigo-300">開いたフォルダ(このフォルダ自体を紐づける)</p>
+          <ul>
+            <FolderRow
+              folder={selfRow}
+              linkedTo={linkByFolder.get(selfRow.id)?.property ?? null}
+              linkedFolderByProperty={linkedFolderByProperty}
+              onOpen={() => go(crumbs)}
+              onLinked={onLinked}
+            />
+          </ul>
+          <p className="pb-2 text-[11px] text-gray-600 dark:text-gray-400">下は、このフォルダの中のフォルダです。</p>
+        </div>
+      )}
       {loading && rows.length === 0 ? (
         <div className="flex items-center gap-2 text-xs text-gray-500"><Loader2 className="h-3.5 w-3.5 animate-spin" /> 読み込み中…</div>
       ) : rows.length === 0 ? (

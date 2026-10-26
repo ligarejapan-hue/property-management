@@ -61,6 +61,8 @@ describe("DriveClient(見回り用)", () => {
     ]);
     expect(calls[0].url.searchParams.get("q")).toBe("'root\\'x' in parents and trashed = false");
     expect(calls[1].url.searchParams.get("pageToken")).toBe("p2");
+    // 共有ドライブの中に紐づけたフォルダも見回れるよう、すべてのドライブを対象にする。
+    expect(calls[0].url.searchParams.get("corpora")).toBe("allDrives");
   });
 
   it("download: alt=media で中身を Buffer で返す", async () => {

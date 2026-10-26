@@ -5528,6 +5528,10 @@ export async function disconnectDrive(): Promise<DriveConnectionStatus> {
 export async function listDriveFolders(args: { parent: string; q?: string; pageToken?: string }): Promise<{
   data: DriveFolderRow[];
   path: string;
+  /** 開いたフォルダの名前(マイドライブ直下・共有アイテムのときは null)。 */
+  folderName: string | null;
+  /** 開いたフォルダそのものの行(フォルダの中を開いたときだけ)。 */
+  self: DriveFolderRow | null;
   nextPageToken: string | null;
 }> {
   const sp = new URLSearchParams({ parent: args.parent });
