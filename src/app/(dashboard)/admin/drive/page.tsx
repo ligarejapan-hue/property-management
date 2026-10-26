@@ -7,6 +7,7 @@ import { PageHeader } from "@/components/ui/page-header";
 import { Button } from "@/components/ui/button";
 import { ConfirmDialog } from "@/components/ui/confirm-dialog";
 import { DRIVE_ALERT_AFTER_FAILURES } from "@/lib/drive/failure-alert";
+import { folderIdFromUrl } from "@/lib/drive/folder-url";
 import {
   createDriveLink,
   deleteDriveLink,
@@ -322,6 +323,14 @@ function FolderBrowser({
       try {
         const r = await listDriveFolders({ parent, q: q.trim() || undefined, pageToken });
         if (gen !== loadGen.current) return;
+        // URL を貼って開いたフォルダは、読めたら本当の名前をパンくずに出す(場所は変えない=読み直さない)。
+        const realName = r.folderName;
+        if (realName) {
+          setCrumbs((prev) => {
+            const last = prev[prev.length - 1];
+            return last.id === parent && last.name !== realName ? [...prev.slice(0, -1), { id: parent, name: realName }] : prev;
+          });
+        }
         setRows((prev) => (append ? [...prev, ...r.data] : r.data));
         setNextToken(r.nextPageToken);
         setErr(null);
@@ -365,6 +374,21 @@ function FolderBrowser({
     setQ(v);
   };
 
+  // フォルダの URL を貼って開く(2026-10-26 発注者の実機で「連携させたいフォルダがない」=共有ドライブ・
+  // 深い階層・共有アイテムのどこにあっても、ドライブで開いたフォルダの URL を貼れば開けるように)。
+  const [urlInput, setUrlInput] = useState("");
+  const [urlErr, setUrlErr] = useState<string | null>(null);
+  const openByUrl = () => {
+    const id = folderIdFromUrl(urlInput);
+    if (!id) {
+      setUrlErr("ドライブのフォルダの URL を貼ってください(https://drive.google.com/drive/folders/… の形)");
+      return;
+    }
+    setUrlErr(null);
+    setUrlInput("");
+    go([{ id, name: "URL で開いたフォルダ" }]);
+  };
+
   // 「紐づけ済」の表示と候補の使えなさは、読み込んだ時点の行ではなく今の紐づけ一覧から決める
   // (外した直後でも紐づけ直せるように・@codex #577 R2)。
   const linkByFolder = new Map(links.map((l) => [l.folderId, l]));
@@ -393,6 +417,31 @@ function FolderBrowser({
           </button>
         </div>
       </div>
+      <form
+        className="mb-2 flex flex-wrap items-center gap-2"
+        onSubmit={(e) => {
+          e.preventDefault();
+          openByUrl();
+        }}
+      >
+        <Link2 className="h-4 w-4 text-gray-400" aria-hidden="true" />
+        <input
+          type="text"
+          inputMode="url"
+          value={urlInput}
+          onChange={(e) => {
+            setUrlInput(e.target.value);
+            setUrlErr(null);
+          }}
+          placeholder="フォルダの URL を貼って開く(共有ドライブの中も)"
+          aria-label="フォルダの URL"
+          className="min-w-0 flex-1 rounded-md border border-gray-300 px-2 py-1 text-sm dark:border-gray-600 dark:bg-gray-800"
+        />
+        <Button type="submit" variant="secondary" size="sm" disabled={urlInput.trim() === ""}>
+          開く
+        </Button>
+        {urlErr && <p className="w-full text-xs text-red-700 dark:text-red-300">{urlErr}</p>}
+      </form>
       <nav className="mb-2 flex flex-wrap items-center gap-1 text-xs text-gray-600 dark:text-gray-300">
         {crumbs.map((c, i) => (
           <span key={c.id} className="flex items-center gap-1">

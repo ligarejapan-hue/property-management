@@ -110,6 +110,9 @@ export class DriveClient {
       pageSize: "100",
       supportsAllDrives: "true",
       includeItemsFromAllDrives: "true",
+      // フォルダの中を開くときは、共有ドライブの中も読めるよう、すべてのドライブを対象にする(2026-10-26)。
+      // マイドライブ直下・共有アイテムは今までどおり(対象を広げない)。
+      ...(args.parent === "root" || args.parent === "shared" ? {} : { corpora: "allDrives" }),
       ...(args.pageToken ? { pageToken: args.pageToken } : {}),
     });
     return {
@@ -160,6 +163,8 @@ export class DriveClient {
         pageSize: "1000",
         supportsAllDrives: "true",
         includeItemsFromAllDrives: "true",
+        // 共有ドライブの中に紐づけたフォルダも見回れるよう、すべてのドライブを対象にする(2026-10-26)。
+        corpora: "allDrives",
         ...(pageToken ? { pageToken } : {}),
       });
       for (const f of j?.files ?? []) {

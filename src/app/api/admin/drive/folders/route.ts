@@ -22,6 +22,20 @@ export async function GET(request: NextRequest) {
     const pageToken = (sp.get("pageToken") ?? "").trim() || undefined;
 
     const client = await getDriveClient();
+    // フォルダの中を開くとき(URL を貼って開く・2026-10-26)は、まずフォルダかどうかを確かめる。
+    // ファイルの番号・見る権限の無いフォルダ・ゴミ箱の中なら、空の一覧ではなく「見つかりません」と返す。
+    let folderName: string | null = null;
+    if (parent !== "root" && parent !== "shared") {
+      const folder = await client.getFolder(parent);
+      if (!folder || folder.trashed) {
+        throw new ApiError(
+          404,
+          "フォルダが見つかりません。フォルダの URL か、接続したアカウントでそのフォルダを開けるかを確かめてください",
+          "DRIVE_FOLDER_NOT_FOUND",
+        );
+      }
+      folderName = folder.name;
+    }
     const [listed, path] = await Promise.all([
       client.listFolders({ parent, nameContains: q || undefined, pageToken }),
       parent === "root" || parent === "shared" ? Promise.resolve("") : client.folderPath(parent),
@@ -48,7 +62,7 @@ export async function GET(request: NextRequest) {
         candidates: link ? [] : (candidates.get(f.name) ?? []),
       };
     });
-    return NextResponse.json({ data, path, nextPageToken: listed.nextPageToken }, noStore);
+    return NextResponse.json({ data, path, folderName, nextPageToken: listed.nextPageToken }, noStore);
   } catch (e) {
     return handleApiError(toDriveApiError(e));
   }

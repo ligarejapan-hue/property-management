@@ -58,6 +58,25 @@ describe("DriveClient", () => {
     expect(calls[0].url.searchParams.get("includeItemsFromAllDrives")).toBe("true");
   });
 
+  it("listFolders(フォルダの中): 共有ドライブの中も読めるよう、すべてのドライブを対象にする", async () => {
+    const { fetch, calls } = fake([{ status: 200, body: { files: [] } }]);
+    await new DriveClient("tok", fetch).listFolders({ parent: "0AbCdEfGhIjKlUk9PVA" });
+    expect(calls[0].url.searchParams.get("corpora")).toBe("allDrives");
+    expect(calls[0].url.searchParams.get("includeItemsFromAllDrives")).toBe("true");
+  });
+
+  it("listFolders(root・shared): マイドライブ・共有アイテムは今までどおり(対象を広げない)", async () => {
+    const { fetch, calls } = fake([
+      { status: 200, body: { files: [] } },
+      { status: 200, body: { files: [] } },
+    ]);
+    const c = new DriveClient("tok", fetch);
+    await c.listFolders({ parent: "root" });
+    await c.listFolders({ parent: "shared" });
+    expect(calls[0].url.searchParams.get("corpora")).toBeNull();
+    expect(calls[1].url.searchParams.get("corpora")).toBeNull();
+  });
+
   it("listFolders(shared): 共有されたフォルダ(sharedWithMe)", async () => {
     const { fetch, calls } = fake([{ status: 200, body: { files: [] } }]);
     await new DriveClient("tok", fetch).listFolders({ parent: "shared" });
