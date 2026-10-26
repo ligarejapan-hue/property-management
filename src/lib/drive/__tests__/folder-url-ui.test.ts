@@ -13,7 +13,7 @@ describe("フォルダの URL を貼って開く", () => {
     expect(src).toContain("folderIdFromUrl(urlInput)");
   });
 
-  it("いま開いているフォルダの URL を貼っても「読み込み中」で固まらない(読み直さずパンくずだけ直す・@codex #597 P2)", () => {
+  it("いま開いているフォルダの URL を貼っても「読み込み中」で固まらない(もう開いている=何もしない・@codex #597 P2)", () => {
     const open = src.slice(src.indexOf("const openByUrl"), src.indexOf("const linkByFolder"));
     const guard = open.indexOf("if (id === parent)");
     const goCall = open.indexOf("go([{ id,");
@@ -24,7 +24,7 @@ describe("フォルダの URL を貼って開く", () => {
 
   it("URL で開いたフォルダそのものも紐づけられる(中にフォルダが無い物件フォルダでも・@codex #597 P2)", () => {
     expect(src).toContain("開いたフォルダ(このフォルダ自体を紐づける)");
-    expect(src).toMatch(/selfRow && crumbs\.length === 1 && selfRow\.id === parent/);
+    expect(src).toMatch(/selfRow && selfRow\.id === parent/);
     expect(src).toContain("folder={selfRow}");
     const route = readFileSync(path.join(process.cwd(), "src/app/api/admin/drive/folders/route.ts"), "utf8");
     expect(route).toContain("folderName: opened?.name ?? null, self,");

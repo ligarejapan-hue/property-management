@@ -312,6 +312,8 @@ function FolderBrowser({
   const [err, setErr] = useState<string | null>(null);
   // 開いているフォルダそのものの行(URL を貼って開いたフォルダ自体を紐づけるため・@codex #597 P2)。
   const [selfRow, setSelfRow] = useState<DriveFolderRow | null>(null);
+  // URL で開いたフォルダの本当の名前(パンくずの表示用・id → 名前)。
+  const [folderNames, setFolderNames] = useState<Record<string, string>>({});
   const parent = crumbs[crumbs.length - 1].id;
 
   // 読み込みの世代。移動・絞り込み・さらに読むが重なったとき、最後に始めたもの以外の応答は捨てる
@@ -325,14 +327,10 @@ function FolderBrowser({
       try {
         const r = await listDriveFolders({ parent, q: q.trim() || undefined, pageToken });
         if (gen !== loadGen.current) return;
-        // URL を貼って開いたフォルダは、読めたら本当の名前をパンくずに出す(場所は変えない=読み直さない)。
+        // URL を貼って開いたフォルダは、読めたら本当の名前をパンくずに出す。
+        // ⚠パンくず(場所)には触らず、表示の名前だけを別に覚える(場所を変えるのは go() だけ)。
         const realName = r.folderName;
-        if (realName) {
-          setCrumbs((prev) => {
-            const last = prev[prev.length - 1];
-            return last.id === parent && last.name !== realName ? [...prev.slice(0, -1), { id: parent, name: realName }] : prev;
-          });
-        }
+        if (realName) setFolderNames((prev) => (prev[parent] === realName ? prev : { ...prev, [parent]: realName }));
         setRows((prev) => (append ? [...prev, ...r.data] : r.data));
         if (!append) setSelfRow(r.self);
         setNextToken(r.nextPageToken);
@@ -390,11 +388,10 @@ function FolderBrowser({
     }
     setUrlErr(null);
     setUrlInput("");
-    // ⚠いま開いているフォルダと同じなら、パンくずだけ1段にして一覧はそのまま(読み直さない)。
-    //   go() は段の数が変わると読み込み中にするが、parent・q が変わらないと読み込みが走らず固まる(@codex #597 P2)。
+    // ⚠いま開いているフォルダと同じなら、もう開いている=何もしない(絞り込みだけ外す)。
+    //   go() で1段のパンくずにすると、段の数が変わるので読み込み中になるのに、parent・q が変わらず
+    //   読み込みが走らないで固まる(@codex #597 P2)。
     if (id === parent) {
-      const current = crumbs[crumbs.length - 1];
-      setCrumbs([{ id, name: current.name }]);
       if (q !== "") changeFilter("");
       return;
     }
@@ -459,7 +456,7 @@ function FolderBrowser({
           <span key={c.id} className="flex items-center gap-1">
             {i > 0 && <span>›</span>}
             <Button variant="ghost" size="sm" className="px-1 py-0.5 underline-offset-2 hover:underline" onClick={() => go(crumbs.slice(0, i + 1))}>
-              {c.name}
+              {folderNames[c.id] ?? c.name}
             </Button>
           </span>
         ))}
@@ -476,8 +473,8 @@ function FolderBrowser({
         />
       </div>
       {err && <div className="mb-2 text-xs text-red-700 dark:text-red-300">{err}</div>}
-      {/* URL を貼って開いたフォルダ(パンくずの1段目)は、そのフォルダ自体も紐づけられる行を出す。 */}
-      {selfRow && crumbs.length === 1 && selfRow.id === parent && (
+      {/* フォルダの中を開いているときは、そのフォルダ自体も紐づけられる行を出す(URL で開いた物件フォルダに中のフォルダが無くても)。 */}
+      {selfRow && selfRow.id === parent && (
         <div className="mb-2 rounded-md border border-indigo-200 bg-indigo-50/50 px-2 dark:border-indigo-900 dark:bg-indigo-950/20">
           <p className="pt-2 text-[11px] font-semibold text-indigo-800 dark:text-indigo-300">開いたフォルダ(このフォルダ自体を紐づける)</p>
           <ul>
