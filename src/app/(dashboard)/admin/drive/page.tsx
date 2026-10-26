@@ -310,6 +310,8 @@ function FolderBrowser({
   const [q, setQ] = useState("");
   const [loading, setLoading] = useState(true);
   const [err, setErr] = useState<string | null>(null);
+  // 開いているフォルダそのものの行(URL を貼って開いたフォルダ自体を紐づけるため・@codex #597 P2)。
+  const [selfRow, setSelfRow] = useState<DriveFolderRow | null>(null);
   const parent = crumbs[crumbs.length - 1].id;
 
   // 読み込みの世代。移動・絞り込み・さらに読むが重なったとき、最後に始めたもの以外の応答は捨てる
@@ -332,6 +334,7 @@ function FolderBrowser({
           });
         }
         setRows((prev) => (append ? [...prev, ...r.data] : r.data));
+        if (!append) setSelfRow(r.self);
         setNextToken(r.nextPageToken);
         setErr(null);
       } catch (e) {
@@ -356,6 +359,7 @@ function FolderBrowser({
     if (same && q === "") return;
     setLoading(true);
     setRows([]);
+    setSelfRow(null);
     setNextToken(null);
     // ⚠名前の絞り込みは「いま開いているフォルダの中」用。移ったら外す(残すと、建物名で絞って開いた
     //   物件フォルダの中の「売却」「購入」が隠れて「フォルダがありません」になる・@codex #577 P2)。
@@ -472,6 +476,22 @@ function FolderBrowser({
         />
       </div>
       {err && <div className="mb-2 text-xs text-red-700 dark:text-red-300">{err}</div>}
+      {/* URL を貼って開いたフォルダ(パンくずの1段目)は、そのフォルダ自体も紐づけられる行を出す。 */}
+      {selfRow && crumbs.length === 1 && selfRow.id === parent && (
+        <div className="mb-2 rounded-md border border-indigo-200 bg-indigo-50/50 px-2 dark:border-indigo-900 dark:bg-indigo-950/20">
+          <p className="pt-2 text-[11px] font-semibold text-indigo-800 dark:text-indigo-300">開いたフォルダ(このフォルダ自体を紐づける)</p>
+          <ul>
+            <FolderRow
+              folder={selfRow}
+              linkedTo={linkByFolder.get(selfRow.id)?.property ?? null}
+              linkedFolderByProperty={linkedFolderByProperty}
+              onOpen={() => go(crumbs)}
+              onLinked={onLinked}
+            />
+          </ul>
+          <p className="pb-2 text-[11px] text-gray-600 dark:text-gray-400">下は、このフォルダの中のフォルダです。</p>
+        </div>
+      )}
       {loading && rows.length === 0 ? (
         <div className="flex items-center gap-2 text-xs text-gray-500"><Loader2 className="h-3.5 w-3.5 animate-spin" /> 読み込み中…</div>
       ) : rows.length === 0 ? (

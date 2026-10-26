@@ -24,7 +24,7 @@ export async function GET(request: NextRequest) {
     const client = await getDriveClient();
     // フォルダの中を開くとき(URL を貼って開く・2026-10-26)は、まずフォルダかどうかを確かめる。
     // ファイルの番号・見る権限の無いフォルダ・ゴミ箱の中なら、空の一覧ではなく「見つかりません」と返す。
-    let folderName: string | null = null;
+    let opened: { id: string; name: string; ownedByMe: boolean } | null = null;
     if (parent !== "root" && parent !== "shared") {
       const folder = await client.getFolder(parent);
       if (!folder || folder.trashed) {
@@ -34,7 +34,7 @@ export async function GET(request: NextRequest) {
           "DRIVE_FOLDER_NOT_FOUND",
         );
       }
-      folderName = folder.name;
+      opened = { id: folder.id, name: folder.name, ownedByMe: folder.ownedByMe };
     }
     const [listed, path] = await Promise.all([
       client.listFolders({ parent, nameContains: q || undefined, pageToken }),
@@ -62,7 +62,29 @@ export async function GET(request: NextRequest) {
         candidates: link ? [] : (candidates.get(f.name) ?? []),
       };
     });
-    return NextResponse.json({ data, path, folderName, nextPageToken: listed.nextPageToken }, noStore);
+    // 開いたフォルダそのものの行(URL を貼って開いたフォルダ自体を紐づけられるように・@codex #597 P2)。
+    // 候補は、そのフォルダの名前と、道のひとつ上の名前から出す(子の行と同じ出し方)。
+    let self = null;
+    if (opened) {
+      const names = path ? path.split(" › ") : [];
+      const upper = names.length >= 2 ? names[names.length - 2] : null;
+      const selfCandidates = await candidatesForChildFolders([opened.name], upper, linkedByProperty);
+      const link = linkedByFolder.get(opened.id);
+      self = {
+        id: opened.id,
+        name: opened.name,
+        ownedByMe: opened.ownedByMe,
+        ownerEmail: null,
+        linkedProperty: link
+          ? { id: link.propertyId, buildingName: link.property.buildingName, roomNo: link.property.roomNo, address: link.property.address }
+          : null,
+        candidates: link ? [] : (selfCandidates.get(opened.name) ?? []),
+      };
+    }
+    return NextResponse.json(
+      { data, path, folderName: opened?.name ?? null, self, nextPageToken: listed.nextPageToken },
+      noStore,
+    );
   } catch (e) {
     return handleApiError(toDriveApiError(e));
   }

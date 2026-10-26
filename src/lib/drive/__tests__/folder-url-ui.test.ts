@@ -22,6 +22,14 @@ describe("フォルダの URL を貼って開く", () => {
     expect(open.slice(guard, goCall)).toContain("return;");
   });
 
+  it("URL で開いたフォルダそのものも紐づけられる(中にフォルダが無い物件フォルダでも・@codex #597 P2)", () => {
+    expect(src).toContain("開いたフォルダ(このフォルダ自体を紐づける)");
+    expect(src).toMatch(/selfRow && crumbs\.length === 1 && selfRow\.id === parent/);
+    expect(src).toContain("folder={selfRow}");
+    const route = readFileSync(path.join(process.cwd(), "src/app/api/admin/drive/folders/route.ts"), "utf8");
+    expect(route).toContain("folderName: opened?.name ?? null, self,");
+  });
+
   it("古い一文「往復は次の段で入ります」を残さない", () => {
     expect(src).not.toContain("書類の往復(複製・取り込み)は次の段で入ります");
   });
