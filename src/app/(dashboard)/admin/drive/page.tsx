@@ -135,7 +135,7 @@ function DriveAdminPageInner() {
     <div className="mx-auto max-w-4xl space-y-5">
       <PageHeader
         title="ドライブ連携"
-        description="会社の Google ドライブに接続し、ドライブの物件フォルダとアプリの物件を紐づけます。アプリが触るのは紐づけたフォルダの中だけです。書類の往復(複製・取り込み)は次の段で入ります。"
+        description="会社の Google ドライブに接続し、ドライブの物件フォルダとアプリの物件を紐づけます。アプリが触るのは紐づけたフォルダの中だけです。紐づけた物件は、約5分ごとの見回りで書類が往復します。"
       />
 
       {(notice ?? paramNotice) && (
@@ -386,6 +386,14 @@ function FolderBrowser({
     }
     setUrlErr(null);
     setUrlInput("");
+    // ⚠いま開いているフォルダと同じなら、パンくずだけ1段にして一覧はそのまま(読み直さない)。
+    //   go() は段の数が変わると読み込み中にするが、parent・q が変わらないと読み込みが走らず固まる(@codex #597 P2)。
+    if (id === parent) {
+      const current = crumbs[crumbs.length - 1];
+      setCrumbs([{ id, name: current.name }]);
+      if (q !== "") changeFilter("");
+      return;
+    }
     go([{ id, name: "URL で開いたフォルダ" }]);
   };
 
