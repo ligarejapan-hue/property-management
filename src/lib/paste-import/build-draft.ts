@@ -410,7 +410,10 @@ export function buildPasteDraft(text: string, options?: YearBoundOptions): Paste
 
   // 部屋番号だけの欄(HOME4U 表の形「物件号室」)があれば、それを採る。
   // 所在地・建物名から切り出した番号と違えば、どちらが正しいか決めずに知らせる。
-  const explicitRoom = raw("roomNo");
+  // ⚠末尾の「号室」「号」は外してから比べる・入れる(切り出した番号と同じ形にそろえる・@codex)。
+  const explicitRoomRaw = raw("roomNo");
+  const explicitRoom =
+    explicitRoomRaw === null ? null : explicitRoomRaw.trim().replace(/[\s　]*号室?$/, "") || explicitRoomRaw.trim();
   if (explicitRoom !== null) {
     if (roomNo !== null && toHalfWidth(roomNo).trim() !== toHalfWidth(explicitRoom).trim()) {
       warnings.push({

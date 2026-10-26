@@ -136,6 +136,12 @@ describe("HOME4U 表の形 — 細かい場合", () => {
     expect(stripRoomFromBlockNumber("1-2-3-405", undefined)).toBe("1-2-3-405");
   });
 
+  it("★物件号室が「405号室」でも、建物名の 405 と食い違いにしない(号室を外して 405)", () => {
+    const d = buildPasteDraft(lines({ "物件号室": "405号室", "物件建物名": "テスト三軒茶屋マンション 405号室" }));
+    expect(d.property.roomNo.value).toBe("405");
+    expect(d.warnings.map((w) => w.code)).not.toContain("room_no_conflict");
+  });
+
   it("名義が「本人以外」「本人ではない」でも警告を出す", () => {
     for (const v of ["本人以外", "本人ではない"]) {
       const d = buildPasteDraft(lines({ "名義": v }));

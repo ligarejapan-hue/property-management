@@ -165,7 +165,7 @@ const ALLOWED_WITHOUT_VERSION: Record<string, AllowedEntry> = {
     keys: ["updatedAt"],
   },
   // 2026-10-25: 担当者(assignedTo)の受け取りと形の検査で 605→620。
-  "src/app/api/import/paste/commit/route.ts:620": {
+  "src/app/api/import/paste/commit/route.ts:617": {
     reason: "owner.updatedAt のみ(既存所有者へのリンク可否確認のための touch)",
     keys: ["updatedAt"],
   },
