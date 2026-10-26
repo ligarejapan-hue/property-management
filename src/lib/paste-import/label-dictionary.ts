@@ -10,6 +10,7 @@ export type DraftFieldKey =
   | "address"
   | "lotNumber"
   | "buildingName"
+  | "roomNo"
   | "propertyTypeRaw"
   | "exclusiveArea"
   | "landArea"
@@ -28,9 +29,11 @@ export const LABEL_DICTIONARY: Record<DraftFieldKey, readonly string[]> = {
   // 「査定物件の所在地」= タカウルの反響メール(顧客管理表 2026-09-28 で確認)。
   address: ["物件所在地", "所在地", "物件住所", "物件の所在地", "査定物件の所在地"],
   lotNumber: ["地番"],
-  buildingName: ["物件名称", "建物名", "マンション名", "物件名"],
+  // 「物件建物名」「物件号室」「専有延べ床面積」= HOME4U 査定依頼の表の形(2026-10-26)。
+  buildingName: ["物件名称", "建物名", "マンション名", "物件名", "物件建物名"],
+  roomNo: ["物件号室"],
   propertyTypeRaw: ["物件種別", "種別", "物件の種類"],
-  exclusiveArea: ["建物（専有）面積", "専有面積", "建物面積", "建物(専有)面積"],
+  exclusiveArea: ["建物（専有）面積", "専有面積", "建物面積", "建物(専有)面積", "専有延べ床面積"],
   landArea: ["土地面積", "敷地面積"],
   layoutType: ["間取り", "間取"],
   occupancyRaw: ["現況", "入居状況", "利用状況", "現在の物件状況"],

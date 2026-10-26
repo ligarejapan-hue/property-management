@@ -583,10 +583,33 @@ describe("土地面積・延床面積・築年を物件の欄に入れる(@codex
     property: { ...baseBody.property, ...over },
   });
 
-  it("★戸建は 土地面積・延床面積・築年 をそれぞれの欄に保存する", async () => {
-    const res = await POST(req(withProp({ landArea: "90", totalFloorArea: "70.5", builtYear: "2018" })));
+  it("★戸建は築年を欄に保存し、土地面積・延床面積は欄に入れず備考へ(お客様の記載・2026-10-26 発注者決定)", async () => {
+    const res = await POST(req(withProp({ propertyType: "house", landArea: "90", totalFloorArea: "70.5", builtYear: "2018" })));
     expect(res.status).toBe(200);
-    expect(created.property?.[0]).toMatchObject({ landArea: "90", totalFloorArea: "70.5", builtYear: 2018 });
+    const p = created.property?.[0] as Record<string, unknown>;
+    expect(p).toMatchObject({ builtYear: 2018 });
+    expect(p.landArea ?? null).toBeNull();
+    expect(p.totalFloorArea ?? null).toBeNull();
+    expect(String(p.note)).toContain("土地面積（お客様の記載）: 90㎡");
+    expect(String(p.note)).toContain("延床面積（お客様の記載）: 70.5㎡");
+  });
+
+  it("★区分以外の専有面積の欄の値(=建物面積)も捨てずに備考へ", async () => {
+    const res = await POST(req(withProp({ propertyType: "house", exclusiveArea: "80" })));
+    expect(res.status).toBe(200);
+    const p = created.property?.[0] as Record<string, unknown>;
+    expect(p.exclusiveArea ?? null).toBeNull();
+    expect(String(p.note)).toContain("建物面積（お客様の記載）: 80㎡");
+  });
+
+  it("どの種別でも面積は備考へ回るので、種別で断らない(土地の延床面積)", async () => {
+    expect((await POST(req(withProp({ propertyType: "land", totalFloorArea: "70" })))).status).toBe(200);
+    expect(String((created.property?.[0] as { note: string }).note)).toContain("延床面積（お客様の記載）: 70㎡");
+  });
+
+  it("どの種別でも面積は備考へ回るので、種別で断らない(区分の土地面積)", async () => {
+    expect((await POST(req(withProp({ propertyType: "apartment_unit", landArea: "30" })))).status).toBe(200);
+    expect(String((created.property?.[0] as { note: string }).note)).toContain("土地面積（お客様の記載）: 30㎡");
   });
 
   it("送らなければ今までどおり(貼り付け画面は送らない)", async () => {
@@ -611,12 +634,8 @@ describe("土地面積・延床面積・築年を物件の欄に入れる(@codex
     expect(created.property).toBeUndefined();
   });
 
-  it("★種別の編集画面に出ない欄は物件に書かない=400(土地の延床面積・区分の延床面積と土地面積)", async () => {
-    expect((await POST(req(withProp({ propertyType: "land", totalFloorArea: "70" })))).status).toBe(400);
+  it("★種別の編集画面に出ない築年は物件に書かない=400(土地の築年)", async () => {
     expect((await POST(req(withProp({ propertyType: "land", builtYear: "2018" })))).status).toBe(400);
-    expect((await POST(req(withProp({ propertyType: "apartment_unit", totalFloorArea: "70" })))).status).toBe(400);
-    expect((await POST(req(withProp({ propertyType: "apartment_unit", landArea: "30" })))).status).toBe(400);
-    expect((await POST(req(withProp({ propertyType: "unknown", landArea: "30" })))).status).toBe(400);
     expect(created.property).toBeUndefined();
   });
 

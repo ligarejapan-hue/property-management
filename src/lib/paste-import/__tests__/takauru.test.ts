@@ -437,7 +437,8 @@ describe("parseLabeledLines の読み方の違い", () => {
   });
 
   it("HOME4U の書式では、続き行・署名欄の読み方を使わない", () => {
-    expect(parseOptionsFor("home4u_assessment")).toEqual({});
+    // 表の形のタブ抜けの行(査定依頼者建物名号室)だけは割る(2026-10-26)。続き行・署名欄は使わない。
+    expect(parseOptionsFor("home4u_assessment")).toEqual({ gluedLabels: ["査定依頼者建物名号室"] });
     expect(parseOptionsFor("home4u_vacant_house")).toEqual({});
     expect(parseOptionsFor("generic")).toEqual({});
   });

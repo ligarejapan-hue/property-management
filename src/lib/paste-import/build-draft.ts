@@ -20,6 +20,8 @@ import {
   SOURCE_PROFILE_LABELS,
 } from "./source-profiles";
 import { judgeOwnerPersonalInfo } from "./owner-personal-info";
+import { mergeSplitFields } from "./split-fields";
+import { toHalfWidth } from "./normalize";
 import type { DraftField, DraftWarning, PasteDraft } from "./types";
 
 const EMPTY: DraftField = { value: null, sourceLabel: null };
@@ -318,8 +320,11 @@ export function buildPasteDraft(text: string, options?: YearBoundOptions): Paste
   const firstPass = parseLabeledLines(text);
   const sourceProfile = detectSourceProfile(firstPass.labeled.map((l) => l.label));
   const parseOptions = parseOptionsFor(sourceProfile);
-  const { labeled, unlabeled } =
+  const parsed =
     Object.keys(parseOptions).length === 0 ? firstPass : parseLabeledLines(text, parseOptions);
+  const { unlabeled } = parsed;
+  // 何行かに分かれた住所・氏名をつなぐ(HOME4U 表の形)。分かれていなければ何もしない。
+  const { labeled, keys: mergedKeys } = mergeSplitFields(parsed.labeled);
   const warnings: DraftWarning[] = [];
 
   // 見出しごとの最初の値だけを採る（同じ見出しが2回出たら先勝ち）。
@@ -330,7 +335,7 @@ export function buildPasteDraft(text: string, options?: YearBoundOptions): Paste
 
   for (const line of labeled) {
     if (isBlankValue(line.value)) continue; // 値なしは拾わない
-    let key = fieldKeyForLabel(line.label);
+    let key = mergedKeys.get(line) ?? fieldKeyForLabel(line.label);
     // ⚠メール欄の「メールアドレスを持っていない」のような**「@」の無い値は
     //   メールアドレスとして扱わない**(実物の HOME4U で22件・@codex PR#456 11巡目で判明)。
     //   欄に入れると登録で形式エラーになる。捨てずに、辞書に無い見出しと同じ扱い
@@ -401,6 +406,21 @@ export function buildPasteDraft(text: string, options?: YearBoundOptions): Paste
       field: "roomNo",
       message: `部屋番号が所在地（${roomNo}）と建物名（${fromName.roomNo}）で食い違っています。ご確認ください。`,
     });
+  }
+
+  // 部屋番号だけの欄(HOME4U 表の形「物件号室」)があれば、それを採る。
+  // 所在地・建物名から切り出した番号と違えば、どちらが正しいか決めずに知らせる。
+  const explicitRoom = raw("roomNo");
+  if (explicitRoom !== null) {
+    if (roomNo !== null && toHalfWidth(roomNo).trim() !== toHalfWidth(explicitRoom).trim()) {
+      warnings.push({
+        code: "room_no_conflict",
+        field: "roomNo",
+        message: `部屋番号が「${label("roomNo")}」（${explicitRoom}）と所在地・建物名（${roomNo}）で食い違っています。ご確認ください。`,
+      });
+    }
+    roomNo = explicitRoom;
+    roomNoLabel = label("roomNo");
   }
 
   if (address === null && !noLabeledLines) {
@@ -506,6 +526,20 @@ export function buildPasteDraft(text: string, options?: YearBoundOptions): Paste
         email: field(raw("ownerEmail"), label("ownerEmail")),
         currentAddress: field(raw("ownerAddress"), label("ownerAddress")),
       };
+  // 「名義」(HOME4U)が本人でなければ、申込者は名義人ではないかもしれない。
+  //   ご所有者様名が別にあるとき(上の警告)は所有者がはっきりしているので出さない。
+  const holderLine = labeled.find((l) => l.label === "名義" && !isBlankValue(l.value));
+  //   「本人以外」「本人ではない」も本人でない側(NOT_OWNER と同じ形)。
+  const holderIsSelf =
+    holderLine !== undefined && holderLine.value.includes("本人") && !NOT_OWNER.test(holderLine.value);
+  if (holderLine && !holderIsSelf && declaredOwnerName === null) {
+    warnings.push({
+      code: "applicant_may_not_be_holder",
+      message:
+        `名義が「${holderLine.value.trim()}」です。申込者が物件の名義人ご本人ではないかもしれません。` +
+        "所有者の氏名・連絡先をご確認ください。",
+    });
+  }
   if (hasAnyOwnerField && ownerName === null) {
     warnings.push({
       code: "owner_name_missing",

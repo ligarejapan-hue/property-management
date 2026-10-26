@@ -80,6 +80,14 @@ export interface ParseOptions {
    * ⚠捨てない。「読み取れなかった行」として残す。
    */
   footerBetweenHeavyRules?: boolean;
+  /**
+   * 区切りが抜けて見出しと値がくっついた行を、**この見出しで始まるときだけ**割る。
+   * 実サンプル(HOME4U 表の形 2026-10-26): `査定依頼者建物名号室〇〇マンション〇号室`
+   * (ほかの行はタブ区切りなのに、この行だけタブが無い)。
+   * ⚠見出しを決め打ちにする。区切りの無い行を辞書で割り始めると、説明文の頭が
+   *   見出しに当たって値にされる。
+   */
+  gluedLabels?: readonly string[];
 }
 
 /** 罫線だけの行(─ ━ = などの連なり)。住所の本体としてつながない。 */
@@ -133,6 +141,13 @@ export function parseLabeledLines(text: string, options: ParseOptions = {}): Par
       sepAt = -1;
     }
     if (sepAt === -1) {
+      const trimmed = trimWide(raw);
+      const glued = options.gluedLabels?.find((l) => trimmed.startsWith(l) && trimmed.length > l.length);
+      if (glued !== undefined) {
+        labeled.push({ label: glued, value: trimWide(trimmed.slice(glued.length)), lineNumber });
+        continuable = null;
+        continue;
+      }
       if (continuable !== null && !RULE_LINE.test(raw)) {
         continuable.value = `${continuable.value} ${trimWide(raw)}`;
         continuable = null;

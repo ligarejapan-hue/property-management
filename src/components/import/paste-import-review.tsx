@@ -139,8 +139,8 @@ const PROPERTY_FIELD_LABELS: { key: PropertyFieldKey; label: string }[] = [
   { key: "buildingName", label: "建物名" },
   { key: "roomNo", label: "部屋番号" },
   { key: "propertyType", label: "種別" },
-  { key: "exclusiveArea", label: "専有面積(m²)・お客様の記載" },
-  { key: "landArea", label: "土地面積(m²)" },
+  { key: "exclusiveArea", label: "専有・建物面積(m²)・お客様の記載" },
+  { key: "landArea", label: "土地面積(m²)・お客様の記載" },
   { key: "layoutType", label: "間取り" },
   { key: "occupancyStatus", label: "現況" },
   { key: "builtYear", label: "築年" },
@@ -178,15 +178,15 @@ const FIELD_WARNING_CODE: Partial<Record<PropertyFieldKey, DraftWarningCode>> = 
  * (`foldNoColumnFieldsIntoNote`)。欄自体は編集可能なまま残し、その旨をここで明記する。
  */
 const FIELD_NO_COLUMN_HINT: Partial<Record<PropertyFieldKey, string>> = {
-  landArea: "※専用の欄が無いため、備考に記録されます",
-  // お客様の書いた専有面積は登記簿か壁芯か分からないので欄に入れない(2026-10-24・登録 API が備考へ移す)。
+  // お客様の書いた面積は実際と違うことが多いので欄に入れない(2026-10-24 専有・10-26 すべての面積)。
+  // 登録 API が「お客様の記載」として備考へ移す。
+  landArea: CUSTOMER_AREA_HINT,
   exclusiveArea: CUSTOMER_AREA_HINT,
   builtYear: "※専用の欄が無いため、備考に記録されます",
 };
 
 /** 備考の行として使う日本語ラベル(登録時に "ラベル: 値" の形で備考へ足す)。 */
-const NOTE_ONLY_FIELD_LABEL: Record<"landArea" | "builtYear", string> = {
-  landArea: "土地面積",
+const NOTE_ONLY_FIELD_LABEL: Record<"builtYear", string> = {
   builtYear: "築年",
 };
 
@@ -224,12 +224,9 @@ export function stripFilledRawLines(
 
 export function foldNoColumnFieldsIntoNote(
   baseNote: string,
-  values: { landArea: string; builtYear: string },
+  values: { builtYear: string },
 ): string {
   const extraLines: string[] = [];
-  if (values.landArea.trim() !== "") {
-    extraLines.push(`${NOTE_ONLY_FIELD_LABEL.landArea}: ${values.landArea.trim()}`);
-  }
   if (values.builtYear.trim() !== "") {
     extraLines.push(`${NOTE_ONLY_FIELD_LABEL.builtYear}: ${values.builtYear.trim()}`);
   }

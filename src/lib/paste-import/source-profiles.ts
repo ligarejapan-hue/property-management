@@ -52,6 +52,9 @@ export function parseOptionsFor(profile: SourceProfileId): ParseOptions {
   if (profile === "takauru_assessment") {
     return { joinAfterPostalCode: true, footerBetweenHeavyRules: true };
   }
+  // HOME4U 査定依頼の表の形(タブ区切り)は、この行だけタブが抜けていた(実物 2026-10-26)。
+  // ⚠メールの形(■見出し：値)には無い見出しなので、メールの読み方は変わらない。
+  if (profile === "home4u_assessment") return { gluedLabels: ["査定依頼者建物名号室"] };
   return {};
 }
 

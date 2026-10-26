@@ -351,6 +351,9 @@ export function leadRowStatus(
   if (codes.has("owner_contact_unconfirmed")) {
     reasons.push("申込者のお名前が無く、連絡先が所有者本人のものか分かりません");
   }
+  if (codes.has("applicant_may_not_be_holder")) {
+    reasons.push("申込者が物件の名義人ご本人ではないかもしれません");
+  }
   if (codes.has("room_no_conflict")) reasons.push("部屋番号が所在地と建物名で食い違っています");
   if (dup.similarCount > 0) reasons.push("同じ住所の物件がすでにあります");
   if (dup.ownerCandidateCount > 0) reasons.push("同じ名前の所有者がすでにいます");

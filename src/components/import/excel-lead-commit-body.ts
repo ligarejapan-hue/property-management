@@ -1,7 +1,7 @@
 /**
  * Excel まとめ取込の1行を、登録API(/api/import/paste/commit)の本文にする。
  *
- * ⚠組み立ては**貼り付け画面の登録と同じ部品**を使う(初期値・土地面積/築年の
+ * ⚠組み立ては**貼り付け画面の登録と同じ部品**を使う(初期値・築年の
  *   備考への畳み込み)。同じ反響をどちらの入口から入れても同じ物件ができるように。
  * ⚠既存の所有者へは**紐付けない**(linkExistingOwnerId=null)。同名の所有者が
  *   いる行は、そもそも「要確認」でまとめ登録の対象から外れている。
@@ -30,7 +30,7 @@ function droppedFieldLines(pv: ReturnType<typeof defaultPropertyValues>): string
     lines.push(`建物名: ${pv.buildingName}`);
   }
   if (!supportsUnitFields(pv.propertyType)) {
-    // ⚠建物面積は excelLeadCommitBody が延床面積の欄か備考かを決めるので、ここでは足さない。
+    // ⚠建物面積は登録APIが備考へ回すので、ここでは足さない。
     if (pv.roomNo) lines.push(`部屋番号: ${pv.roomNo}`);
     if (pv.layoutType) lines.push(`間取り: ${pv.layoutType}`);
     if (pv.occupancyStatus) {
@@ -82,25 +82,16 @@ export function excelLeadCommitBody(row: {
 }): ExcelLeadCommitBody {
   const pv = defaultPropertyValues(row.draft);
   const ov = defaultOwnerValues(row.draft);
-  // ⚠土地面積・延床面積・築年は物件の正式な欄へ入れる(@codex PR#456 3巡目)。
-  //   ただし**その種別の編集画面に出る欄だけ**(4巡目)。出ない欄の値は備考に残す
-  //   (登録APIも同じ規則 structuredFieldsFor で断る)。
-  const isUnit = supportsUnitFields(pv.propertyType);
+  // ⚠面積(専有・建物・土地)は**そのまま登録APIへ送る**。登録APIがどの欄にも入れず
+  //   「お客様の記載」として物件の備考に1行ずつ残す(2026-10-26 発注者決定=貼り付け画面と同じ)。
+  // ⚠築年は物件の正式な欄へ入れる(@codex PR#456 3巡目)。ただし**その種別の編集画面に
+  //   出る欄だけ**(4巡目)。出ない種別の値は備考に残す(登録APIも同じ規則で断る)。
   const allowed = structuredFieldsFor(pv.propertyType);
-  // 区分以外の「建物面積」は延床面積(下書きでは専有面積の欄に読まれている)。
-  const buildingArea = isUnit ? "" : pv.exclusiveArea;
-  const landArea = allowed.has("landArea") ? pv.landArea : "";
-  const totalFloorArea = allowed.has("totalFloorArea") ? buildingArea : "";
   const builtYear = allowed.has("builtYear") && pv.builtYear ? Number(pv.builtYear) : null;
   const folded = foldNoColumnFieldsIntoNote(row.draft.noteFromUnmapped, {
-    landArea: allowed.has("landArea") ? "" : pv.landArea,
     builtYear: allowed.has("builtYear") ? "" : pv.builtYear,
   });
-  const note = [
-    folded.trim(),
-    ...droppedFieldLines(pv),
-    ...(buildingArea && !allowed.has("totalFloorArea") ? [`建物面積: ${buildingArea}㎡`] : []),
-  ]
+  const note = [folded.trim(), ...droppedFieldLines(pv)]
     .filter((l) => l !== "")
     .join("\n");
   return {
@@ -110,13 +101,13 @@ export function excelLeadCommitBody(row: {
       propertyType: pv.propertyType || "unknown",
       buildingName: pv.buildingName || null,
       roomNo: pv.roomNo || null,
-      // 専有面積は区分だけ(区分以外は延床面積として下で送る＝同じ値を二重に送らない)。
-      exclusiveArea: isUnit ? pv.exclusiveArea || null : null,
+      // 区分以外では建物面積(登録APIが「建物面積（お客様の記載）」として備考へ)。
+      exclusiveArea: pv.exclusiveArea || null,
       layoutType: pv.layoutType || null,
       occupancyStatus: pv.occupancyStatus || null,
       note: note || null,
-      landArea: landArea || null,
-      totalFloorArea: totalFloorArea || null,
+      landArea: pv.landArea || null,
+      totalFloorArea: null,
       builtYear,
       inquirerName: row.draft.applicantName?.trim() || null,
     },

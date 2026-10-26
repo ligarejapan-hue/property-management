@@ -49,8 +49,10 @@ describe("貼り付けのコメントを所有者の備考へ(2026-10-24 従業�
       "■物件所在地： 東京都A区B1-2-3\n■姓： Jonathan Smith\n■パンフレットを探す： https://example.jp/x\n■ご要望： 早めに知りたい",
     );
     expect(d.withheldFromNote.filter((w) => w.reason === "unclassified").map((w) => w.label)).toEqual(
-      expect.arrayContaining(["姓", "パンフレットを探す", "ご要望"]),
+      expect.arrayContaining(["パンフレットを探す", "ご要望"]),
     );
+    // 「姓」は氏名の欄として読む(HOME4U 表の形・2026-10-26)=所有者の備考には入らない。
+    expect(d.owner?.name.value).toBe("Jonathan Smith");
     expect(composePasteOwnerNote(d)).toBe(`${PASTE_IMPORT_OWNER_NOTE_PREFIX}\nご要望: 早めに知りたい`);
   });
 
