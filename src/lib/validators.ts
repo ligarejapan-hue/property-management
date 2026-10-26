@@ -36,7 +36,10 @@ const dateOnlyColumn = z
       return z.NEVER;
     }
     return d;
-  });
+  })
+  // ⚠zod 4.6 から、union に z.undefined() を入れても「送らなくてよい欄」にならない
+  // (送らないと nonoptional で断られる)。省略できることを明示する。
+  .optional();
 
 /**
  * DECIMAL(p,s) 列に入れる数値。範囲だけでなく**小数の桁数**も見る。
