@@ -422,10 +422,9 @@ function PasteImportScreen({ draftEnabled }: { draftEnabled: boolean }) {
         );
         return;
       }
-      // ⚠土地面積・築年は Property に対応する列が無い(commit API の契約にも無い)。
-      //   画面では編集可能な欄として出しているため、値を無言で捨てず備考へ行として
-      //   足す(既存の備考は消さない)。詳細は paste-import-review.tsx の
-      //   FIELD_NO_COLUMN_HINT のコメント参照。
+      // ⚠築年は値を無言で捨てず備考へ行として足す(既存の備考は消さない)。
+      //   面積(専有・建物・土地)は登録APIへそのまま送り、登録APIが「お客様の記載」として
+      //   備考へ回す(2026-10-26)。詳細は paste-import-review.tsx の FIELD_NO_COLUMN_HINT。
       // ⚠人が専用欄に値を入れた項目は、備考から生値の行を**取り除いてから**
       //   畳み込む(@codex PR#414 11巡目 ②)。追記だけだと
       //   `土地面積: 20坪（66.1㎡）` と `土地面積: 66.1` が並ぶ。
@@ -435,7 +434,6 @@ function PasteImportScreen({ draftEnabled }: { draftEnabled: boolean }) {
         propertyValues,
       );
       const finalNote = foldNoColumnFieldsIntoNote(noteWithoutFilledRaw, {
-        landArea: propertyValues.landArea,
         builtYear: propertyValues.builtYear,
       });
       const body = {
@@ -446,6 +444,7 @@ function PasteImportScreen({ draftEnabled }: { draftEnabled: boolean }) {
           buildingName: propertyValues.buildingName || null,
           roomNo: propertyValues.roomNo || null,
           exclusiveArea: propertyValues.exclusiveArea || null,
+          landArea: propertyValues.landArea || null,
           layoutType: propertyValues.layoutType || null,
           occupancyStatus: propertyValues.occupancyStatus || null,
           note: finalNote || null,

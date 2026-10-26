@@ -41,7 +41,7 @@ describe("excelLeadCommitBody — 1行を登録APIの形にする", () => {
     expect(body.leadSource).toBe("excel_lead");
   });
 
-  it("★土地面積・築年は物件の欄に入れる(備考に重ねて書かない・@codex PR#456 3巡目)", () => {
+  it("★土地面積は登録APIへ送る(登録APIが備考へ回す=2026-10-26)。築年は物件の欄。備考に重ねて書かない", () => {
     expect(body.property).toMatchObject({ landArea: "90", builtYear: 2018 });
     expect(body.property.note ?? "").not.toContain("土地面積");
     expect(body.property.note ?? "").not.toContain("築年");
@@ -109,10 +109,10 @@ describe("区分以外の種別で消える欄は備考に残す(@codex PR#456 2
     "現況：自身・親族が居住中",
   ].join("\n");
 
-  it("★戸建の建物面積は延床面積の欄へ。間取り・現況は登録で消える欄なので物件の備考に行として残す", () => {
+  it("★戸建の建物面積は延床面積の欄に入れず、登録APIへ送る(備考へ回る)。間取り・現況は物件の備考に行として残す", () => {
     const body = excelLeadCommitBody({ draft: buildPasteDraft(houseText), ownerNote: "" });
-    expect(body.property.totalFloorArea).toBe("70");
-    expect(body.property.exclusiveArea).toBeNull();
+    expect(body.property.totalFloorArea).toBeNull();
+    expect(body.property.exclusiveArea).toBe("70");
     expect(body.property.note ?? "").not.toContain("建物面積");
     expect(body.property.note).toContain("間取り: 3LDK");
     expect(body.property.note).toContain("現況: 居住中");
@@ -126,20 +126,20 @@ describe("区分以外の種別で消える欄は備考に残す(@codex PR#456 2
     expect(body.property.note ?? "").not.toContain("建物面積");
   });
 
-  it("★棟なしの区分マンションの築年は物件の欄へ(編集画面に出る)。土地面積は区分の欄に無いので備考へ", () => {
+  it("★棟なしの区分マンションの築年は物件の欄へ(編集画面に出る)。土地面積も登録APIへ送る(備考へ回る)", () => {
     const text = [houseText.replace("一戸建て", "分譲マンション"), "築年：2001年", "土地面積：30 m2"].join("\n");
     const body = excelLeadCommitBody({ draft: buildPasteDraft(text), ownerNote: "" });
     expect(body.property.builtYear).toBe(2001);
-    expect(body.property.landArea).toBeNull();
-    expect(body.property.note).toContain("土地面積: 30");
+    expect(body.property.landArea).toBe("30");
+    expect(body.property.note ?? "").not.toContain("土地面積");
     expect(body.property.note ?? "").not.toContain("築年");
   });
 
-  it("★土地に建物面積・築年があっても延床面積・築年の欄には入れず、備考に残す(@codex PR#456 4巡目)", () => {
+  it("★土地の築年は欄に入れず備考に残す(@codex PR#456 4巡目)。面積は登録APIへ送る", () => {
     const text = [houseText.replace("一戸建て", "土地"), "築年：1980年", "土地面積：120 m2"].join("\n");
     const body = excelLeadCommitBody({ draft: buildPasteDraft(text), ownerNote: "" });
-    expect(body.property).toMatchObject({ landArea: "120", totalFloorArea: null, builtYear: null });
-    expect(body.property.note).toContain("建物面積: 70㎡");
+    expect(body.property).toMatchObject({ landArea: "120", exclusiveArea: "70", totalFloorArea: null, builtYear: null });
+    expect(body.property.note ?? "").not.toContain("建物面積");
     expect(body.property.note).toContain("築年: 1980");
   });
 });

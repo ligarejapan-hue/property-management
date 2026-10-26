@@ -208,37 +208,30 @@ describe("PasteImportReview（3状態の描き分け・空洞テスト対策）"
 // このため builtYear も landArea と同じ扱い(備考へ行を足す)にした。
 // ============================================================
 
-describe("foldNoColumnFieldsIntoNote(土地面積・築年を備考へ畳み込む純関数)", () => {
-  it("両方空なら備考をそのまま返す(空行を作らない)", () => {
-    expect(foldNoColumnFieldsIntoNote("既存の備考", { landArea: "", builtYear: "" })).toBe(
-      "既存の備考",
-    );
+// ⚠土地面積は 2026-10-26 から畳み込まない=登録APIへ送り、登録APIが「お客様の記載」として備考へ回す。
+describe("foldNoColumnFieldsIntoNote(築年を備考へ畳み込む純関数)", () => {
+  it("空なら備考をそのまま返す(空行を作らない)", () => {
+    expect(foldNoColumnFieldsIntoNote("既存の備考", { builtYear: "" })).toBe("既存の備考");
   });
 
-  it("土地面積だけあれば行を1つ足す(既存の備考は消えない)", () => {
-    expect(foldNoColumnFieldsIntoNote("既存の備考", { landArea: "120.5", builtYear: "" })).toBe(
-      "既存の備考\n土地面積: 120.5",
-    );
-  });
-
-  it("築年だけあれば行を1つ足す", () => {
-    expect(foldNoColumnFieldsIntoNote("既存の備考", { landArea: "", builtYear: "1998" })).toBe(
+  it("築年があれば行を1つ足す", () => {
+    expect(foldNoColumnFieldsIntoNote("既存の備考", { builtYear: "1998" })).toBe(
       "既存の備考\n築年: 1998",
     );
   });
 
-  it("両方あれば2行とも足す(備考が空でも先頭に空行を作らない)", () => {
-    expect(foldNoColumnFieldsIntoNote("", { landArea: "120.5", builtYear: "1998" })).toBe(
-      "土地面積: 120.5\n築年: 1998",
-    );
+  it("備考が空でも先頭に空行を作らない", () => {
+    expect(foldNoColumnFieldsIntoNote("", { builtYear: "1998" })).toBe("築年: 1998");
   });
 });
 
 describe("画面: 専用の欄が無い旨の案内(空洞テスト対策=その欄のブロック内に限定して確認)", () => {
-  it("土地面積の欄のブロック内に案内が出る", () => {
-    const block = extractFieldBlock(html, "landArea");
-    expect(block).not.toBe("");
-    expect(block).toContain("専用の欄が無いため、備考に記録されます");
+  it("★面積の欄(専有・土地)のブロック内に「お客様の記載のため備考へ」の案内が出る(2026-10-26)", () => {
+    for (const key of ["exclusiveArea", "landArea"]) {
+      const block = extractFieldBlock(html, key);
+      expect(block).not.toBe("");
+      expect(block).toContain("お客様の記載のため、面積の欄には入れず備考に記録されます");
+    }
   });
 
   it("築年の欄のブロック内に案内が出る", () => {
@@ -785,14 +778,11 @@ describe("専用欄に値を入れたら、備考の生値の行を取り除く�
     expect(after).toContain("20坪くらい？");
   });
 
-  it("★取り除いたあとに畳み込むと、矛盾した2行にならない", () => {
+  it("★取り除いたあとに畳み込んでも、生値の行は戻らない(土地面積は登録APIが備考に1行足す・2026-10-26)", () => {
     const after = stripFilledRawLines(baseNote, d.unreadable, values({ landArea: "66.1" }));
-    const folded = foldNoColumnFieldsIntoNote(after, { landArea: "66.1", builtYear: "" });
-    expect(folded).toContain("土地面積: 66.1");
+    const folded = foldNoColumnFieldsIntoNote(after, { builtYear: "" });
     expect(folded).not.toContain("20坪（66.1㎡）");
-    // 「土地面積:」で始まる行が1つだけであること。
-    const lines = folded.split("\n").filter((l) => l.startsWith("土地面積:"));
-    expect(lines).toHaveLength(1);
+    expect(folded.split("\n").filter((l) => l.startsWith("土地面積:"))).toHaveLength(0);
   });
 });
 

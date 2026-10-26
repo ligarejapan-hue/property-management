@@ -36,7 +36,7 @@ import {
   BUILDING_NAME_MAX_LENGTH,
   BUILDING_NAME_TOO_LONG_MESSAGE,
 } from "@/lib/property-building-name";
-import { CUSTOMER_AREA_NOTE_LABEL } from "@/lib/paste-import/customer-area";
+import { customerAreaNoteLines } from "@/lib/paste-import/customer-area";
 import { structuredFieldsFor } from "@/lib/paste-import/structured-fields";
 import { introductionRouteForLeadSource } from "@/lib/paste-import/lead-source-route";
 import { countPasteDuplicatesUnscoped } from "@/lib/paste-import-duplicates";
@@ -434,12 +434,7 @@ export async function POST(request: NextRequest) {
     // ⚠個別に3つ並べず、判定は1か所(normalizeUnitOnlyFields)に置く。
     //   区分専用の欄が増えたときは UNIT_ONLY_PROPERTY_FIELDS に足すだけで、
     //   この経路が自動的に守られる(走査テストで固定)。
-    // ⚠取込で読んだ専有面積は**お客様が書いた数字**で、登記簿か壁芯か分からない。
-    //   発注者の指示(2026-10-24)で**どちらの欄にも入れず、物件の備考に1行で残す**(区分のときだけ)。
-    const customerAreaNoteLine =
-      exclusiveArea !== null && supportsUnitFields(propertyType)
-        ? `${CUSTOMER_AREA_NOTE_LABEL}: ${exclusiveArea}㎡`
-        : null;
+    // ⚠専有面積はここでは欄に入れない(下の「面積は備考へ」)。
     const unitOnly = normalizeUnitOnlyFields(propertyType, {
       roomNo: p.roomNo?.trim() || null,
       exclusiveArea: null,
@@ -447,25 +442,27 @@ export async function POST(request: NextRequest) {
       occupancyStatus,
     });
 
-    // ---- 土地面積・延床面積・築年（@codex PR#456 3巡目） ----
-    // ⚠物件に正式な欄がある(販売図面 F3 で追加)。備考へ文字で落とすと、編集画面や
-    //   販売図面で「未入力」に見える。
-    // ⚠**その種別の編集画面に出る欄だけ**受け付ける(@codex PR#456 4巡目)。
-    //   土地の延床面積のように画面に出ない欄へ入れると、誰も見られず直せない。
-    //   黙って捨てず、送られてきたら断る(呼び出し側が備考に残す)。
-    //   規則は structuredFieldsFor(編集画面の salesFieldsFor と一致をテストで固定)。
+    // ---- 面積は備考へ(お客様の記載・2026-10-24/10-26 発注者決定) ----
+    // ⚠取込で受け取った面積(専有・建物・土地・延床)は**どの欄にも入れず、物件の備考に1行ずつ残す**。
+    //   査定の申込の面積は実際と違うことが多々あるため。種別に関係なく備考へ回すので、種別では断らない。
+    //   形の検査(単位・桁あふれは 400)は残す=備考に変な値を書かない。
     const landArea = parseWideAreaInput(p.landArea, "土地面積");
     const totalFloorArea = parseWideAreaInput(p.totalFloorArea, "延床面積");
+    const customerAreaLines = customerAreaNoteLines({
+      isUnit: supportsUnitFields(propertyType),
+      exclusiveArea,
+      landArea,
+      totalFloorArea,
+    });
+
+    // ---- 築年（@codex PR#456 3巡目） ----
+    // ⚠**その種別の編集画面に出る欄だけ**受け付ける(@codex PR#456 4巡目)。
+    //   土地の築年のように画面に出ない欄へ入れると、誰も見られず直せない。
+    //   黙って捨てず、送られてきたら断る(呼び出し側が備考に残す)。
+    //   規則は structuredFieldsFor(編集画面の salesFieldsFor と一致をテストで固定)。
     const builtYear = parseBuiltYearInput(p.builtYear);
-    const allowedStructured = structuredFieldsFor(propertyType);
-    for (const [key, value, label] of [
-      ["landArea", landArea, "土地面積"],
-      ["totalFloorArea", totalFloorArea, "延床面積"],
-      ["builtYear", builtYear, "築年"],
-    ] as const) {
-      if (value !== null && !allowedStructured.has(key)) {
-        throw new ApiError(400, `この物件種別では${label}を物件の欄に入れられません`, "BAD_REQUEST");
-      }
+    if (builtYear !== null && !structuredFieldsFor(propertyType).has("builtYear")) {
+      throw new ApiError(400, "この物件種別では築年を物件の欄に入れられません", "BAD_REQUEST");
     }
 
     // 外部キー（査定ナンバー等）。
@@ -653,10 +650,8 @@ export async function POST(request: NextRequest) {
             // (書くと正規化を上書きしてしまう)。
             ...unitOnly,
             externalLinkKey,
-            landArea,
-            totalFloorArea,
             builtYear,
-            note: [p.note?.trim(), customerAreaNoteLine].filter((v): v is string => !!v).join("\n") || null,
+            note: [p.note?.trim(), ...customerAreaLines].filter((v): v is string => !!v).join("\n") || null,
             inquirerName,
             introductionRoute: introductionRouteForLeadSource(body.leadSource),
             // 所有者からの反響(査定サイト・問い合わせ)で作る物件=最初から「所有者とやりとり中」

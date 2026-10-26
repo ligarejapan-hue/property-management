@@ -27,7 +27,12 @@ export type DraftWarningCode =
   /** 所有者の氏名はあるが申込者のお名前が無い。フリガナ・連絡先が誰のものか決められない。 */
   | "owner_contact_unconfirmed"
   /** 部屋番号が所在地の末尾と建物名の末尾で食い違う(所在地の方を採る)。 */
-  | "room_no_conflict";
+  | "room_no_conflict"
+  /**
+   * 「名義」が本人でない(家族の名義など・HOME4U)。申込者を所有者として入れているので、
+   * 所有者が別の方かもしれない。値はそのまま備考へ。
+   */
+  | "applicant_may_not_be_holder";
 
 export interface DraftWarning {
   code: DraftWarningCode;
