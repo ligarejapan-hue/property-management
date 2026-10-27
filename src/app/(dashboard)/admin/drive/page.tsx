@@ -1,6 +1,7 @@
 "use client";
 
 import { Suspense, useCallback, useEffect, useRef, useState } from "react";
+import Link from "next/link";
 import { useSearchParams } from "next/navigation";
 import { AlertTriangle, Cloud, CloudOff, ExternalLink, FolderOpen, Link2, Loader2, Search, Unlink } from "lucide-react";
 import { PageHeader } from "@/components/ui/page-header";
@@ -8,6 +9,7 @@ import { Button } from "@/components/ui/button";
 import { ConfirmDialog } from "@/components/ui/confirm-dialog";
 import { DRIVE_ALERT_AFTER_FAILURES } from "@/lib/drive/failure-alert";
 import { folderIdFromUrl } from "@/lib/drive/folder-url";
+import { propertyDetailHref } from "@/lib/property-detail-tab";
 import {
   createDriveLink,
   deleteDriveLink,
@@ -263,7 +265,13 @@ function LinkRow({ link, onRemoved }: { link: DriveFolderLink; onRemoved: () => 
   return (
     <li className="flex flex-wrap items-center justify-between gap-2 py-2 text-sm">
       <div className="min-w-0">
-        <div className="font-medium text-gray-900 dark:text-gray-100">{propertyLabel(link.property)}</div>
+        {/* 物件名から、その物件の「添付ファイル」タブへ(見回りで取り込んだ書類を見に行く) */}
+        <Link
+          href={propertyDetailHref(link.propertyId, "attachments")}
+          className="font-medium text-blue-700 underline hover:text-blue-800 dark:text-blue-300 dark:hover:text-blue-200"
+        >
+          {propertyLabel(link.property)}
+        </Link>
         <div className="flex items-center gap-1 text-xs text-gray-500 dark:text-gray-400">
           <FolderOpen className="h-3.5 w-3.5" />
           <span className="truncate">{link.folderPath || link.folderName}</span>
