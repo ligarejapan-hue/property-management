@@ -9,6 +9,7 @@ import { Button } from "@/components/ui/button";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { formatBuiltYearMonth } from "@/lib/built-year-month";
+import { initialPropertyTab } from "@/lib/property-detail-tab";
 import {
   ArrowLeft,
   AlertTriangle,
@@ -358,12 +359,18 @@ function applyRefreshOutcome(
 
 export default function PropertyDetailPage({
   params,
+  searchParams,
 }: {
   params: Promise<{ id: string }>;
+  searchParams: Promise<{ tab?: string | string[] }>;
 }) {
   const { id } = use(params);
+  // ?tab=attachments のように、ほかの画面からタブを指定して開ける(ドライブ連携の紐づけ一覧 → 添付ファイル)。
+  const { tab: tabParam } = use(searchParams);
   const router = useRouter();
-  const [activeTab, setActiveTab] = useState<TabKey>("basic");
+  const [activeTab, setActiveTab] = useState<TabKey>(() =>
+    initialPropertyTab(tabParam, tabs.map((t) => t.key)),
+  );
   const [property, setProperty] = useState<ApiProperty | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
