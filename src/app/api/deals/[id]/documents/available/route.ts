@@ -8,6 +8,7 @@ import { loadDealSettings } from "@/lib/deals/settings-store";
 import { jstDateString } from "@/lib/deals/datetime";
 import { computeDealCalc } from "@/lib/deals/calc/deal-calc";
 import { BUSINESS_DOCS } from "@/lib/deals/documents/registry";
+import { latestSnapshots, rememberedValues } from "@/lib/deals/documents/remember";
 import { loadCompanyProfile } from "@/lib/sales-sheet/company-profile-store";
 import { loadDealStaffNames } from "@/lib/deals/staff-names";
 import { loadRegistryDocInfo, registryPropertyFor } from "@/lib/deals/registry-doc-info";
@@ -34,11 +35,17 @@ export async function GET(_request: Request, ctx: Ctx) {
     const bctx = {
       deal, calc: computeDealCalc(deal, rateRows, settings.propertyKinds, today), settings, company, rateRows, today, logo: null, seal: null, staff, registry,
     };
+    // 前回の入力を初めの値にする書類だけ、発行の履歴を新しい版から読む(設計 第2段階 §3.2)。
+    const rememberKeys = BUSINESS_DOCS.filter((d) => d.remember).map((d) => d.key);
+    const last = latestSnapshots(rememberKeys.length ? await prisma.dealDocument.findMany({
+      where: { dealId: id, docType: { in: rememberKeys } }, orderBy: { version: "desc" }, select: { docType: true, inputSnapshot: true },
+    }) : []);
     const documents = BUSINESS_DOCS.filter((d) => d.applies(bctx)).map((d) => {
       const def = d.defaults(bctx);
+      const values = d.remember ? rememberedValues(d.options, def.values, last.get(d.key)) : def.values;
       return {
-        docType: d.key, label: d.label, group: d.group, missing: d.missing(bctx), blocking: d.blocking(bctx),
-        defaults: def.values, issuers: def.issuers ?? null, choices: def.choices ?? null,
+        docType: d.key, label: d.label, group: d.group, missing: d.missing(bctx, values), blocking: d.blocking(bctx),
+        defaults: values, issuers: def.issuers ?? null, choices: def.choices ?? null,
       };
     });
     return NextResponse.json({ documents, version: deal.version }, { headers: { "Cache-Control": "no-store" } });

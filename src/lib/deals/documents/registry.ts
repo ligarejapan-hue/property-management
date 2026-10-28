@@ -17,6 +17,10 @@ import {
   landlordChangeOptionsSchema, occupiedLeases,
 } from "./business/oc-docs";
 import { buildChecklistDoc, checklistDefaults, checklistMissing, checklistOptionsSchema } from "./business/checklist-doc";
+import {
+  addresseeChoices, addresseeMissingChoices, buildContractGuide, contractGuideMissing, contractGuideOptionsSchema, defaultAddressee, defaultContractBelongings,
+} from "./business/contract-guide";
+import { buildCompletion, completionMissing, completionOptionsSchema, defaultHandover } from "./business/completion";
 import type { ChecklistPhase } from "../checklist";
 
 /**
@@ -27,12 +31,14 @@ import type { ChecklistPhase } from "../checklist";
 export interface BusinessDocDef {
   key: string;
   label: string;
-  /** 書類タブのまとまり(決済の書類/そのほかの書類/OC の書類・計画 段5b の読み替え 8)。 */
-  group: "settlement" | "other" | "oc" | "checklist";
+  /** 書類タブのまとまり(契約・媒介の書類/決済の書類/そのほかの書類/OC の書類/書類確認書)。 */
+  group: "contract" | "settlement" | "other" | "oc" | "checklist";
+  /** 前回発行したときの入力を、次の発行の初めの値にする(設計 第2段階 §3.2)。 */
+  remember?: boolean;
   /** この取引で出せるか(書類タブに出すか)。 */
   applies(c: BusinessDocContext): boolean;
-  /** 必要な項目のうち空欄のもの(出す前の確認に出す)。 */
-  missing(c: BusinessDocContext): string[];
+  /** 必要な項目のうち空欄のもの(出す前の確認に出す)。values = 画面に渡す初めの値(前回の入力を含む)。 */
+  missing(c: BusinessDocContext, values?: Record<string, unknown>): string[];
   /** 空欄のままでは組み立てられない項目(「空欄のまま出す」を止める・最終レビュー)。 */
   blocking(c: BusinessDocContext): string[];
   options: z.ZodType<Record<string, unknown>>;
@@ -90,6 +96,21 @@ function receiptDef(kind: ReceiptKind): BusinessDocDef {
 
 export const BUSINESS_DOCS: BusinessDocDef[] = [
   {
+    key: "contract_guide",
+    label: "契約のご案内",
+    group: "contract",
+    remember: true,
+    applies: () => true,
+    missing: (c, v) => contractGuideMissing(c, v?.addressee),
+    blocking: () => [],
+    options: contractGuideOptionsSchema as z.ZodType<Record<string, unknown>>,
+    defaults: (c) => ({
+      values: { addressee: defaultAddressee(c), belongings: defaultContractBelongings(c), notes: null },
+      choices: { addressee: addresseeChoices(c), addresseeMissing: addresseeMissingChoices(c) },
+    }),
+    build: (c, o) => buildContractGuide(c, contractGuideOptionsSchema.parse(o)),
+  },
+  {
     key: "settlement_statement",
     label: "精算書",
     group: "settlement",
@@ -131,6 +152,18 @@ export const BUSINESS_DOCS: BusinessDocDef[] = [
   receiptDef("deposit_receipt"),
   receiptDef("balance_receipt"),
   receiptDef("settlement_receipt"),
+  {
+    key: "completion_confirmation",
+    label: "取引完了確認書",
+    group: "settlement",
+    remember: true,
+    applies: () => true,
+    missing: (c) => completionMissing(c),
+    blocking: () => [],
+    options: completionOptionsSchema as z.ZodType<Record<string, unknown>>,
+    defaults: (c) => ({ values: { handover: defaultHandover(c) } }),
+    build: (c, o) => buildCompletion(c, completionOptionsSchema.parse(o)),
+  },
   {
     key: "power_of_attorney",
     label: "委任状",

@@ -5,6 +5,7 @@ import { FileOutput, FileText, Loader2, Plus, Trash2 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { ModalShell } from "@/components/ui/modal-shell";
 import { Field, inputCls } from "./form-parts";
+import { CHECKLIST_TEXT_MAX } from "@/lib/deals/checklist";
 import { dealsApi, dealDocumentFileUrl, DealApiError, errorText, type AvailableDocument } from "@/lib/deals/client";
 
 const RECEIPTS = new Set(["deposit_receipt", "balance_receipt", "settlement_receipt"]);
@@ -13,6 +14,7 @@ const CHECKLISTS = new Set(["checklist_contract", "checklist_settlement"]);
 const payOf = (v: unknown): Record<string, string> => (v && typeof v === "object" ? (v as Record<string, string>) : {});
 /** 書類タブのまとまり(一覧表の group と同じ順)。 */
 const GROUPS = [
+  { key: "contract", label: "契約・媒介の書類" },
   { key: "settlement", label: "決済の書類" },
   { key: "other", label: "そのほかの書類" },
   { key: "oc", label: "OC の書類" },
@@ -126,6 +128,10 @@ function IssueDialog({ dealId, doc, version, onCancel, onDone }: {
   const setKey = (i: number, patch: Partial<KeyRow>) => set("keys", keyRows.map((k, j) => (j === i ? { ...k, ...patch } : k)));
   const choices = doc.choices ?? {};
   const pay = payOf(values.pay);
+  // 契約のご案内は、選んでいる宛先の当事者が空欄かどうかで出す前の確認を作り直す(サーバーは初めの値の宛先で見る)。
+  const missing = doc.docType === "contract_guide"
+    ? [...doc.missing.filter((m) => m !== "売主" && m !== "買主"), ...(choices.addresseeMissing ?? []).filter((c) => c.value === values.addressee).map((c) => c.label)]
+    : doc.missing;
 
   const issue = async () => {
     setBusy(true);
@@ -162,7 +168,7 @@ function IssueDialog({ dealId, doc, version, onCancel, onDone }: {
         <>
           <Button variant="secondary" onClick={onCancel} disabled={busy}>入力に戻る</Button>
           <Button onClick={() => void issue()} disabled={busy || needsDecision || incomplete || doc.blocking.length > 0} loading={busy} loadingLabel="発行中">
-            {doc.missing.length ? "空欄のまま出す" : "発行する"}
+            {missing.length ? "空欄のまま出す" : "発行する"}
           </Button>
         </>
       }
@@ -171,10 +177,10 @@ function IssueDialog({ dealId, doc, version, onCancel, onDone }: {
         {doc.blocking.length > 0 && (
           <p className="text-sm text-red-600 dark:text-red-400" role="alert">{doc.blocking.join("・")}が無いと出せません。取引の画面で入れてください。</p>
         )}
-        {doc.missing.length > 0 ? (
+        {missing.length > 0 ? (
           <div className="rounded-md border border-amber-200 bg-amber-50 px-3 py-2 text-sm text-amber-900 dark:border-amber-900 dark:bg-amber-950 dark:text-amber-200" role="alert">
             <p>次の項目が空欄です。取引の画面で入れるか、空欄のまま出してください。</p>
-            <ul className="mt-1 list-disc pl-5">{doc.missing.map((m) => <li key={m}>{m}</li>)}</ul>
+            <ul className="mt-1 list-disc pl-5">{missing.map((m) => <li key={m}>{m}</li>)}</ul>
           </div>
         ) : (
           <p className="text-sm text-gray-600 dark:text-gray-400">必要な項目はそろっています。</p>
@@ -197,6 +203,30 @@ function IssueDialog({ dealId, doc, version, onCancel, onDone }: {
               <input type="date" value={str(values.receivedOn)} onChange={(e) => set("receivedOn", e.target.value)} aria-label="受領日" className={inputCls} />
             </Field>
             <p className="text-xs text-gray-500">個人の方が発行する領収書には自社の角印を付けず、署名・押印の欄を空けて出します。</p>
+          </>
+        )}
+        {doc.docType === "contract_guide" && (
+          <>
+            <Field label="宛先">
+              <select aria-label="宛先" value={str(values.addressee)} onChange={(e) => set("addressee", e.target.value)} className={inputCls}>
+                {(choices.addressee ?? []).map((c) => <option key={c.value} value={c.value}>{c.label}</option>)}
+              </select>
+            </Field>
+            <Field label="お持ちいただくもの(1行に1つ)">
+              <textarea value={str(values.belongings)} onChange={(e) => set("belongings", e.target.value || null)} maxLength={CHECKLIST_TEXT_MAX} rows={4} aria-label="お持ちいただくもの" className={inputCls} />
+            </Field>
+            <Field label="ご連絡事項(空なら載せない)">
+              <textarea value={str(values.notes)} onChange={(e) => set("notes", e.target.value || null)} maxLength={500} rows={3} aria-label="ご連絡事項" className={inputCls} />
+            </Field>
+            <p className="text-xs text-gray-500">前に発行したことがあれば、そのときの入力が初めから入っています。</p>
+          </>
+        )}
+        {doc.docType === "completion_confirmation" && (
+          <>
+            <Field label="引き渡した書類など(1行に1つ・チェック欄は空けて出す)">
+              <textarea value={str(values.handover)} onChange={(e) => set("handover", e.target.value || null)} maxLength={CHECKLIST_TEXT_MAX} rows={6} aria-label="引き渡した書類など" className={inputCls} />
+            </Field>
+            <p className="text-xs text-gray-500">署名・押印の欄は空けて出します。前に発行したことがあれば、そのときの入力が初めから入っています。</p>
           </>
         )}
         {doc.docType === "settlement_guide" && (
