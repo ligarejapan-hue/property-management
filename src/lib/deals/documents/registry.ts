@@ -22,6 +22,10 @@ import {
 } from "./business/contract-guide";
 import type { FormDef } from "./forms/types";
 import { SELLER_SURVEY_FORM } from "./forms/seller-survey";
+import { MEDIATION_FORM } from "./forms/mediation";
+import { buildMediation, mediationClientMissing, mediationDefaults, mediationMissing } from "./business/mediation";
+import { buildSaleGuide } from "./business/sale-guide";
+import { formValuesSchema } from "./forms/schema";
 import {
   SELLER_SURVEY_TITLE, buildSellerSurvey, sellerSurveyDefaults, sellerSurveyMissing, sellerSurveyOptionsSchema,
 } from "./business/seller-survey";
@@ -61,6 +65,7 @@ export interface BusinessDocDef {
 }
 
 const emptyOptions = z.object({}).strict();
+const mediationOptionsSchema = formValuesSchema(MEDIATION_FORM);
 const need = (pairs: [string, unknown][]) => pairs.filter(([, v]) => v === null || v === undefined || v === "").map(([k]) => k);
 const hasParty = (c: BusinessDocContext, role: "seller" | "buyer") => (partiesOf(c.deal, role).length ? "ok" : null);
 
@@ -135,6 +140,30 @@ export const BUSINESS_DOCS: BusinessDocDef[] = [
     options: sellerSurveyOptionsSchema as z.ZodType<Record<string, unknown>>,
     defaults: (c) => ({ values: sellerSurveyDefaults(c) }),
     build: (c, o) => buildSellerSurvey(c, sellerSurveyOptionsSchema.parse(o)),
+  },
+  {
+    key: "mediation",
+    label: "媒介契約書",
+    group: "contract",
+    remember: true,
+    form: MEDIATION_FORM,
+    applies: (c) => c.deal.businessType === "brokerage",
+    missing: (c, v) => mediationMissing(c, v),
+    blocking: () => [],
+    options: mediationOptionsSchema as z.ZodType<Record<string, unknown>>,
+    defaults: (c) => ({ values: mediationDefaults(c), choices: { clientMissing: mediationClientMissing(c) } }),
+    build: (c, o) => buildMediation(c, mediationOptionsSchema.parse(o)),
+  },
+  {
+    key: "sale_guide",
+    label: "媒介契約の前の説明書(売却用)",
+    group: "contract",
+    applies: (c) => c.deal.businessType === "brokerage" && (c.deal.tradeSide === "seller" || c.deal.tradeSide === "both"),
+    missing: () => [],
+    blocking: () => [],
+    options: emptyOptions,
+    defaults: () => ({ values: {} }),
+    build: (c) => buildSaleGuide(c),
   },
   {
     key: "settlement_statement",

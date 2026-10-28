@@ -1,6 +1,7 @@
 "use client";
 
 import type { FormDef, FormItem } from "@/lib/deals/documents/forms/types";
+import { visibleEntries } from "@/lib/deals/documents/forms/values";
 import { inputCls } from "./form-parts";
 
 type OnChange = (key: string, v: string | string[] | null) => void;
@@ -12,9 +13,26 @@ const listOf = (v: unknown): string[] => (Array.isArray(v) ? v.filter((x): x is 
  * 1つ選ぶ=セレクト(先頭が空欄=PDF では □ を並べる)・いくつでも=チェックボックス・書き込み欄。
  */
 export function DocFormFields({ form, values, onChange }: { form: FormDef; values: Record<string, unknown>; onChange: OnChange }) {
+  const tabs = form.tabs;
+  const tab = tabs ? strOf(values[tabs.key]) : "";
   return (
     <div className="space-y-3">
-      {form.entries.map((e, i) => (e.kind === "section"
+      {tabs && (
+        <div role="tablist" aria-label={tabs.label} className="flex flex-wrap gap-1 border-b border-gray-200 dark:border-gray-800">
+          {tabs.choices.map((c) => (
+            <button
+              key={c.value} type="button" role="tab" aria-selected={tab === c.value ? "true" : "false"}
+              onClick={() => onChange(tabs.key, c.value)}
+              className={`-mb-px rounded-t-md border px-3 py-1.5 text-sm ${tab === c.value
+                ? "border-gray-200 border-b-white bg-white font-semibold text-gray-900 dark:border-gray-800 dark:border-b-gray-900 dark:bg-gray-900 dark:text-gray-100"
+                : "border-transparent text-gray-500 hover:text-gray-800 dark:hover:text-gray-200"}`}
+            >
+              {c.label}
+            </button>
+          ))}
+        </div>
+      )}
+      {visibleEntries(form, values).map((e, i) => (e.kind === "section"
         ? <h4 key={`s${i}`} className="pt-2 text-sm font-semibold text-gray-700 dark:text-gray-300">{e.title}</h4>
         : <ItemFields key={e.key} item={e} values={values} onChange={onChange} />))}
     </div>

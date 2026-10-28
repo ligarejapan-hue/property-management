@@ -1,6 +1,7 @@
 import { html, raw, type SafeHtml } from "../html";
 import type { ValueRow } from "../business/common";
 import type { FormDef, FormItem, FormValues } from "./types";
+import { visibleEntries } from "./values";
 
 const FORM_CSS = `.form-choice{margin-right:4mm;white-space:nowrap}
 .form-field{margin-top:1mm}
@@ -14,9 +15,9 @@ const picked = (it: FormItem, v: FormValues): string[] => {
 };
 const str = (x: FormValues[string] | undefined) => (typeof x === "string" && x ? x : null);
 
-function sections(f: FormDef): { title: string | null; items: FormItem[] }[] {
+function sections(f: FormDef, v: FormValues): { title: string | null; items: FormItem[] }[] {
   const out: { title: string | null; items: FormItem[] }[] = [];
-  for (const e of f.entries) {
+  for (const e of visibleEntries(f, v)) {
     if (e.kind === "section") out.push({ title: e.title, items: [] });
     else {
       if (!out.length) out.push({ title: null, items: [] });
@@ -28,7 +29,7 @@ function sections(f: FormDef): { title: string | null; items: FormItem[] }[] {
 
 /** PDF の表。選ばなかった選択肢は □、選んだものは ■、書き込みが空なら下線の空欄(設計 §3.3)。 */
 export function renderFormHtml(f: FormDef, v: FormValues): SafeHtml {
-  return html`<style>${raw(FORM_CSS)}</style>${sections(f).map((s) => html`
+  return html`<style>${raw(FORM_CSS)}</style>${sections(f, v).map((s) => html`
 ${s.title ? html`<h2>${s.title}</h2>` : null}
 <table>${s.items.map((it) => {
     const on = picked(it, v);
@@ -45,7 +46,7 @@ ${it.note && on.includes(it.note.when) ? html`<div class="form-note">※ ${it.no
 
 /** Excel(値だけ)の行。区切りは見出し・選んだものはその名前(いくつでもは「・」でつなぐ)・空欄は null。 */
 export function formValueRows(f: FormDef, v: FormValues): ValueRow[] {
-  return sections(f).flatMap((s) => [
+  return sections(f, v).flatMap((s) => [
     ...(s.title ? [{ label: s.title, heading: true }] : []),
     ...s.items.flatMap((it): ValueRow[] => {
       const on = picked(it, v);
