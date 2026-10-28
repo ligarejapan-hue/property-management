@@ -50,36 +50,84 @@ const LEAD_SHEET_MAX_COLS = 200;
  */
 export const MAX_DETECT_JSON_BODY_BYTES = MAX_IMPORT_JSON_BODY_BYTES;
 
+/** 受付帳/所有者を見分けるのに読む行(見出し+50行。列の並び・見出しなしの受付帳の裏付けに足りる)。 */
+const RECEPTION_SCAN_ROWS = 51;
+
+/** シートの大きさ(行・列)。配列にする前に見る。 */
+function sheetDims(ws: XLSX.WorkSheet | undefined): { rows: number; cols: number } | null {
+  const ref = ws?.["!fullref"] ?? ws?.["!ref"];
+  if (!ref) return null;
+  const range = XLSX.utils.decode_range(ref);
+  return { rows: range.e.r + 1, cols: range.e.c + 1 };
+}
+
+/** シートの先頭 `maxRows` 行を文字の2次元配列にする(範囲を区切って作る=宣言だけ広いシートでも膨らまない)。 */
+function sheetHead(ws: XLSX.WorkSheet, maxRows: number, blankrows: boolean): string[][] {
+  const ref = ws["!ref"];
+  if (!ref) return [];
+  const range = XLSX.utils.decode_range(ref);
+  range.e.r = Math.min(range.e.r, range.s.r + maxRows - 1);
+  return XLSX.utils
+    .sheet_to_json<unknown[]>(ws, { header: 1, defval: "", blankrows, raw: false, range })
+    .map((r) => (r ?? []).map((c) => (c == null ? "" : String(c))));
+}
+
 /**
- * Excel に顧客管理表の行があるか(先頭の行だけ読む)。読めなければ 0。
- * ⚠XLSX.read は中身を丸ごと展開してから行数で切るので、先に**展開後の大きさ**を抑える
- *   (Excel まとめ取込と同じ守り・小さく圧縮された巨大ファイルでメモリを食わない)。
+ * Excel を見分ける(受付帳/所有者・顧客管理表)。**見分けるのに要る先頭の行だけ**を、大きさを確かめてから読む。
+ * ⚠取り込みの読み方(parseSheet)はシート全体を配列にするので、宣言だけ広いシート(A1:XFD1048576 など)で
+ *   大きさの守りの前に重くなる。ここでは使わない(@codex #607 P1・セキュリティ確認)。
+ *   守り: 本文の大きさ → 展開後の大きさ → シートの大きさ(Excel まとめ取込と同じ 5,000行・200列)→ 読む行の数。
  */
-function countLeadRows(xlsxBase64: string): number {
-  if (Math.floor((xlsxBase64.length * 3) / 4) > MAX_IMPORT_DECODED_BYTES) return 0;
+function inspectXlsx(xlsxBase64: string): { contentType: ImportFileType | null; leadRows: number } {
+  if (Math.floor((xlsxBase64.length * 3) / 4) > MAX_IMPORT_DECODED_BYTES) {
+    throw new ApiError(422, "ファイルが大きすぎます", "VALIDATION_ERROR");
+  }
+  const buf = Buffer.from(xlsxBase64, "base64");
+  let wb: XLSX.WorkBook;
   try {
-    const buf = Buffer.from(xlsxBase64, "base64");
     assertZipExpandsWithin(buf, MAX_XLSX_EXPANDED_BYTES);
-    const wb = XLSX.read(buf, { type: "buffer", sheetRows: LEAD_SCAN_ROWS });
-    let n = 0;
-    for (const name of wb.SheetNames) {
-      // ⚠Excel まとめ取込と同じく、シートの大きさ(行・列)を**配列にする前に**見る。遠くのセル1つで
-      //   範囲が広がったシートを配列にすると、空のセルで埋めた巨大な表ができてメモリを食う(セキュリティ確認)。
-      //   取り込みが断る大きさのシートは、顧客管理表ではないとして飛ばす。
-      const ws = wb.Sheets[name];
-      const ref = ws?.["!fullref"] ?? ws?.["!ref"];
-      if (!ref) continue;
-      const range = XLSX.utils.decode_range(ref);
-      if (range.e.r + 1 > LEAD_SHEET_MAX_ROWS || range.e.c + 1 > LEAD_SHEET_MAX_COLS) continue;
-      const aoa = XLSX.utils
-        .sheet_to_json<unknown[]>(wb.Sheets[name], { header: 1, defval: "", blankrows: true, raw: false })
-        .map((r) => (r ?? []).map((c) => (c == null ? "" : String(c))));
-      n += readLeadSheet(name, aoa).rows.length;
-      if (n > 0) break;
-    }
-    return n;
+    wb = XLSX.read(buf, { type: "buffer", sheetRows: LEAD_SCAN_ROWS });
   } catch {
-    return 0;
+    throw new ApiError(422, "Excelファイルの中身が大きすぎるか、壊れています", "VALIDATION_ERROR");
+  }
+
+  // 受付帳/所有者: 取り込みと同じく1枚目のシートの見出しと行で見る(列が多すぎるシートは見分けない)。
+  let contentType: ImportFileType | null = null;
+  const first = wb.Sheets[wb.SheetNames[0] ?? ""];
+  const firstDims = sheetDims(first);
+  if (first && firstDims && firstDims.cols <= LEAD_SHEET_MAX_COLS) {
+    const aoa = sheetHead(first, RECEPTION_SCAN_ROWS, false);
+    if (aoa.length > 0) {
+      contentType = detectImportFileTypeFromContent(aoa[0], aoa.slice(1)).type;
+    }
+  }
+
+  // 顧客管理表: 全シートを見る(1枚目が空でも後ろのシートにあることがある・@codex #607 P2)。
+  //   取り込みが断る大きさのシートは、顧客管理表ではないとして飛ばす。
+  let leadRows = 0;
+  for (const name of wb.SheetNames) {
+    const ws = wb.Sheets[name];
+    const dims = sheetDims(ws);
+    if (!ws || !dims || dims.rows > LEAD_SHEET_MAX_ROWS || dims.cols > LEAD_SHEET_MAX_COLS) continue;
+    leadRows += readLeadSheet(name, sheetHead(ws, LEAD_SCAN_ROWS, true)).rows.length;
+    if (leadRows > 0) break;
+  }
+  return { contentType, leadRows };
+}
+
+/** CSV を見分ける(取り込みと同じ読み方=文字は 10MB まで)。 */
+function inspectCsv(fileName: string, csvText: string | undefined): ImportFileType | null {
+  try {
+    const sheet = parseSheet({ fileName, csvText });
+    // 取り込みの口と同じ入力(列の並びの行)で判定する。
+    const positional = sheet.rows.map((r) => sheet.headers.map((h) => r[h] ?? ""));
+    return detectImportFileTypeFromContent(sheet.headers, positional).type;
+  } catch (e) {
+    if (!(e instanceof SheetParseError)) throw e;
+    // 大きすぎる表は、ここで断る(受け取り箱にも取り込みにも回さない)。
+    if (e.code === "INPUT_TOO_LARGE") throw new ApiError(422, e.message, "VALIDATION_ERROR");
+    // ほかの読めない表は、取り込みには回さない(人が選ぶ)。
+    return null;
   }
 }
 
@@ -91,27 +139,19 @@ function detectSheet(body: unknown): DropTarget {
   const csvText = typeof b.csvText === "string" ? b.csvText : undefined;
   const xlsxBase64 = typeof b.xlsxBase64 === "string" ? b.xlsxBase64 : undefined;
   const isXlsx = detectFileFormat(b.fileName) === "xlsx";
-  let contentType: ImportFileType | null = null;
-  try {
-    // 先に取り込みと同じ読み方で読む(大きさ・展開後の大きさの守りもここで効く)。
-    const sheet = parseSheet({ fileName: b.fileName, csvText, xlsxBase64 });
-    // 取り込みの口と同じ入力(列の並びの行)で判定する。
-    const positional = sheet.rows.map((r) => sheet.headers.map((h) => r[h] ?? ""));
-    contentType = detectImportFileTypeFromContent(sheet.headers, positional).type;
-    // 中身で決まらなければファイル名(「受付帳」「所有者」)で補う(取り込みの口と同じ順)。
-    if (contentType === "unknown" || contentType === "ambiguous") {
-      const byName = detectImportFileType(b.fileName).type;
-      if (byName === "reception" || byName === "owner") contentType = byName;
-    }
-  } catch (e) {
-    if (!(e instanceof SheetParseError)) throw e;
-    // 大きすぎる表は、ここで断る(受け取り箱にも取り込みにも回さない)。
-    if (e.code === "INPUT_TOO_LARGE") throw new ApiError(422, e.message, "VALIDATION_ERROR");
-    // ほかの読めない表は、取り込みには回さない(Excel は書類・CSV は人が選ぶ)。
+  let contentType: ImportFileType | null;
+  let leadRows = 0;
+  if (isXlsx) {
+    if (!xlsxBase64) return sheetTarget({ contentType: null, leadRows: 0, isXlsx });
+    ({ contentType, leadRows } = inspectXlsx(xlsxBase64));
+  } else {
+    contentType = inspectCsv(b.fileName, csvText);
   }
-  // 顧客管理表は Excel だけ。全シートを見る(1枚目が空でも後ろのシートにあることがある・@codex #607 P2)。
-  //   大きすぎるものは上で断った。countLeadRows も自分で大きさ・展開後の大きさを確かめてから読む。
-  const leadRows = isXlsx && xlsxBase64 ? countLeadRows(xlsxBase64) : 0;
+  // 中身で決まらなければファイル名(「受付帳」「所有者」)で補う(取り込みの口と同じ順)。
+  if (contentType === null || contentType === "unknown" || contentType === "ambiguous") {
+    const byName = detectImportFileType(b.fileName).type;
+    if (byName === "reception" || byName === "owner") contentType = byName;
+  }
   return sheetTarget({ contentType, leadRows, isXlsx });
 }
 

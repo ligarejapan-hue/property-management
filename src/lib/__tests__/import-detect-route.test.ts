@@ -108,6 +108,34 @@ describe("Excel", () => {
     expect(await target(res)).toBe("lead_excel");
   });
 
+  it("⚠1枚目のシートの範囲が広すぎる(列が200を超える)ときは、受付帳の見分けで配列にしない(@codex #607 P1)", async () => {
+    // ⚠テスト用のファイルを作る XLSX.write は宣言した範囲を全部なめるので、巨大な宣言(A1:XFD1048576)は
+    //   ここでは作らない。守りは「列・行の大きさを見てから、先頭の行だけ区切って読む」こと(route の inspectXlsx)。
+    const wb = XLSX.utils.book_new();
+    const ws = XLSX.utils.aoa_to_sheet([["所有者氏名", "所有者住所"], ["山田", "東京都"]]);
+    ws["!ref"] = "A1:HZ60";
+    XLSX.utils.book_append_sheet(wb, ws, "一覧");
+    const b64 = Buffer.from(XLSX.write(wb, { type: "buffer", bookType: "xlsx" })).toString("base64");
+    const res = await POST(jsonReq({ fileName: "list.xlsx", xlsxBase64: b64 }));
+    expect(res.status).toBe(200);
+    // 列が多すぎるシートは見分けない=書類(受け取り箱)。
+    expect(await target(res)).toBe("document");
+  });
+
+  it("⚠route は Excel の見分けに取り込みの読み方(parseSheet=シート全体を配列にする)を使わない", async () => {
+    const { readFileSync } = await import("node:fs");
+    const src = readFileSync("src/app/api/import/detect/route.ts", "utf8");
+    const xlsxPart = src.slice(src.indexOf("function inspectXlsx"), src.indexOf("function inspectCsv"));
+    expect(xlsxPart).not.toContain("parseSheet(");
+    expect(xlsxPart).toContain("assertZipExpandsWithin(buf, MAX_XLSX_EXPANDED_BYTES)");
+    expect(xlsxPart).toContain("sheetDims(");
+  });
+
+  it("受付帳/所有者の Excel も、先頭の行だけで見分ける", async () => {
+    const res = await POST(jsonReq({ fileName: "list.xlsx", xlsxBase64: xlsxBase64({ 一覧: [["所有者氏名", "所有者住所", "物件住所"], ["山田", "東京都…", "東京都…"]] }) }));
+    expect(await target(res)).toBe("owner");
+  });
+
   it("取り込めない大きさ(列が200を超える)のシートは、配列にせず飛ばす(メモリを守る)", async () => {
     const wb = XLSX.utils.book_new();
     const ws = XLSX.utils.aoa_to_sheet(LEAD);
