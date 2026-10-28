@@ -781,7 +781,7 @@ export default function PropertyDetailPage({
     const canSendInquiryMaterial = effectivePermissions.some(
       (p) => p.resource === "agent_inquiry" && p.action === "write" && p.granted,
     );
-    // 「この物件で取引を作る」。作成 API も deal:write(+物件を見られること)を要求する=見た目のため。
+    // 「この物件で取引を作成」。作成 API も deal:write(+物件を見られること)を要求する=見た目のため。
     const canCreateDeal = effectivePermissions.some(
       (p) => p.resource === "deal" && p.action === "write" && p.granted,
     );
@@ -847,7 +847,7 @@ export default function PropertyDetailPage({
   // 「その他 ▾」の中身(画面すっきり化 第3回)。出す条件は表に置いていたときと同じ。
   const moreMenuItems: MenuItem[] = [
     ...(canCreateDeal
-      ? [{ key: "new-deal", label: "この物件で取引を作る", icon: Handshake, href: `/deals/new?propertyId=${property.id}` }]
+      ? [{ key: "new-deal", label: "この物件で取引を作成", icon: Handshake, href: `/deals/new?propertyId=${property.id}` }]
       : []),
     // DM 送付履歴ページは property:read + owner:read + record-scope を要するため canReadOwner で出し分ける(403 の行き止まりを避ける)。
     ...(canReadOwner
@@ -1397,7 +1397,7 @@ function BasicTab({
         editLockHeld={editLockHeld}
       />
       {/* 契約予定になった物件は、ここから取引を作れる(発注者指示 2026-10-25)。
-          「その他」メニューの「この物件で取引を作る」と同じ行き先。 */}
+          「その他」メニューの「この物件で取引を作成」と同じ行き先。 */}
       {canCreateDeal && property.caseStatus === "contract_planned" && (
         <div className="md:col-span-2">
           <Link
@@ -1448,7 +1448,7 @@ function BasicTab({
         />
       )}
       <div className="md:col-span-2">
-        <Field label="備考" value={property.note} />
+        <Field label="備考" value={property.note} multiline />
       </div>
 
       {/* Candidates */}
@@ -2849,12 +2849,15 @@ function Field({
   label,
   value,
   mono,
+  multiline,
   badgeStyle,
   badgeLabel,
 }: {
   label: string;
   value: string | null | undefined;
   mono?: boolean;
+  /** 保存された改行どおりに出す(備考など・実機確認 2026-10-28)。 */
+  multiline?: boolean;
   badgeStyle?: string;
   badgeLabel?: string;
 }) {
@@ -2863,7 +2866,11 @@ function Field({
       <dt className="mb-1 text-xs font-medium uppercase tracking-wider text-gray-500 dark:text-gray-400">
         {label}
       </dt>
-      <dd className={`text-sm text-gray-900 dark:text-gray-100 ${mono ? "font-mono" : ""}`}>
+      <dd
+        className={`text-sm text-gray-900 dark:text-gray-100 ${mono ? "font-mono" : ""} ${
+          multiline ? "whitespace-pre-wrap break-words" : ""
+        }`}
+      >
         {badgeStyle ? (
           <span
             className={`inline-flex rounded-full px-2.5 py-0.5 text-xs font-medium ${badgeStyle}`}
@@ -2871,7 +2878,7 @@ function Field({
             {badgeLabel ?? value}
           </span>
         ) : (
-          value || "-"
+          value || "—"
         )}
       </dd>
     </div>
