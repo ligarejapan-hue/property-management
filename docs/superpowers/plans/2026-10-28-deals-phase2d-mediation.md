@@ -572,7 +572,7 @@ export const MEDIATION_FORMS: Record<MediationKind, FormDef> = {
 `src/lib/deals/documents/business/mediation.ts`:
 
 ```ts
-import { yen } from "../../format";
+import { yen } from "../../calc/format";
 import { html, raw, type SafeHtml } from "../html";
 import { documentHtml } from "../layout";
 import { MEDIATION_FORMS, MEDIATION_KIND_LABELS, REGISTER_DAYS, REPORT_FREQUENCIES, type MediationKind } from "../forms/mediation";
@@ -768,7 +768,7 @@ ${propertyTable(c, o)}
 ⚠注意点:
 - 書式によって、目印のすぐ後ろが「＿」でない所がある(全角スペースだった空欄は外れている)。`drop` は、あれば外す。
 - テストの「全部空欄で出しても、写した文面と一字も違わない」は、`fillSlots` が目印や文を落としていないことを確かめる。
-- `yen` は `src/lib/deals/format.ts` の、3桁区切りの数(円は付けない)。無ければ `common.ts` の `money` の中身に合わせて import を直し、台帳に書く。
+- `yen` は `src/lib/deals/calc/format.ts` の、3桁区切りの数(円は付けない・`common.ts` と同じ import)。
 
 - [ ] **Step 5: 一覧表と書類の名前**
 
