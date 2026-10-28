@@ -66,7 +66,7 @@ function ItemFields({ item, values, onChange }: { item: FormItem; values: Record
         </div>
       ) : (
         <select aria-label={item.label} value={strOf(values[item.key])} onChange={(ev) => onChange(item.key, ev.target.value || null)} className={inputCls}>
-          <option value="">(空欄=□ で出す)</option>
+          {!item.noPrint && <option value="">(空欄=□ で出す)</option>}
           {item.choices.map((c) => <option key={c.value} value={c.value}>{c.label}</option>)}
         </select>
       )) : null}

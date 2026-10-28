@@ -20,9 +20,13 @@ export function emptyFormValues(f: FormDef): FormValues {
   return v;
 }
 
-/** 「すべて空欄に戻す」: 全部空欄にするが、選んでいるタブはそのまま。 */
+/** 「すべて空欄に戻す」: 全部空欄にするが、選んでいるタブと PDF に出さない設定(説明のページなど)はそのまま。 */
 export function clearFormValues(f: FormDef, v: Record<string, unknown>): FormValues {
   const out = emptyFormValues(f);
+  for (const it of formItems(f)) {
+    const x = v[it.key];
+    if (it.noPrint && (typeof x === "string" || Array.isArray(x))) out[it.key] = x as string | string[];
+  }
   const tab = f.tabs ? v[f.tabs.key] : undefined;
   if (f.tabs && typeof tab === "string" && f.tabs.choices.some((c) => c.value === tab)) out[f.tabs.key] = tab;
   return out;

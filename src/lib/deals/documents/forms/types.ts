@@ -3,8 +3,11 @@
  * ⚠ただのデータにする(関数を入れない)。出せる書類の API がそのまま画面へ渡す。
  */
 export interface FormChoice { value: string; label: string }
-/** 書き込み欄。key は表の中で重ならない名前(項目の鍵とも重ならない)。after = 下線の後ろに名前を出す(「＿年」)。 */
-export interface FormField { key: string; label: string; max: number; lines?: number; after?: boolean }
+/**
+ * 書き込み欄。key は表の中で重ならない名前(項目の鍵とも重ならない)。
+ * after = 下線の後ろに名前を出す(「＿年」)・pre = 下線の前に出す書式の字(「時期：」「（資料名：」など)。
+ */
+export interface FormField { key: string; label: string; max: number; lines?: number; after?: boolean; pre?: string }
 export interface FormItem {
   kind: "item";
   key: string;
@@ -22,6 +25,8 @@ export interface FormItem {
   sub?: boolean;
   /** 入力欄だけに出し、PDF・Excel には出さない(説明のページを付けるかなどの設定)。 */
   noPrint?: boolean;
+  /** 下線の後ろに字を出す欄を、見出しと選択肢より前に出す(告知書 ⑭「方角:＿側／所有者：□売主」)。 */
+  fieldsFirst?: boolean;
 }
 export type FormEntry = { kind: "section"; title: string; only?: string[] } | FormItem;
 export interface FormDef {

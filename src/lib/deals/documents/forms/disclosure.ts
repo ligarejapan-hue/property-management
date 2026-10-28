@@ -15,6 +15,8 @@ const yy = (c: Ctx, key: string, last: "月頃" | "日" = "月頃"): FormField[]
   fl(c, `${key}Y`, "年", { max: 10, after: true }),
   ...(last === "日" ? [fl(c, `${key}M`, "月", { max: 10, after: true }), fl(c, `${key}D`, "日", { max: 10, after: true })] : [fl(c, `${key}M`, "月頃", { max: 10, after: true })]),
 ];
+/** 年月の最初の欄の前に書式の字を出す(⑥「時期：＿年＿月頃」)。 */
+const withPre = (fields: FormField[], pre: string): FormField[] => fields.map((f, i) => (i === 0 ? { ...f, pre } : f));
 /** 番号の行。 */
 const head = (c: Ctx, key: string, label: string, choices?: string[], fields?: FormField[]): FormItem =>
   ({ kind: "item", key: c.p + key, label, only: c.only, ...(choices ? { choices: cs(choices) } : {}), ...(fields ? { fields } : {}) });
@@ -55,7 +57,7 @@ function buildingItems(c: Ctx, v: { reform: string; asbestos: string; asbestosDa
     sub(c, "05c", "建築確認済証：", HAS),
     sub(c, "05d", "検査済証：", HAS),
     sub(c, "05e", "設計図書：", HAS),
-    head(c, "06", "⑥火災(ボヤ等含む)の被害", YN, [fl(c, "06When", "時期：", { max: 30 }), ...yy(c, "06")]),
+    head(c, "06", "⑥火災(ボヤ等含む)の被害", YN, withPre(yy(c, "06"), "時期：")),
     write(c, "06a", v.fireArea),
     head(c, "07", v.asbestos, YN),
     sub(c, "07a", v.asbestosDate, undefined, yy(c, "07a", "日")),
@@ -64,10 +66,10 @@ function buildingItems(c: Ctx, v: { reform: string; asbestos: string; asbestosDa
     write(c, "07d", "備考："),
     head(c, "08", "⑧建物状況調査", YN),
     sub(c, "08a", "", ["建物状況調査報告書", "建物状況調査の結果の概要"]),
-    sub(c, "08b", "作成年月日", undefined, yy(c, "08b", "日")),
+    sub(c, "08b", "作成年月日：", undefined, yy(c, "08b", "日")),
     write(c, "08c", "調査実施者："),
     head(c, "09", "⑨耐震診断及び地震に対する安全性に関する資料", YN),
-    sub(c, "09a", "（保存している資料）", ["耐震基準適合証明書", "既存住宅性能評価書", "耐震診断結果報告書", "既存住宅売買瑕疵保険の付保証明書", "その他"], [fl(c, "09aName", v.otherDoc === "split" ? "資料名：" : "その他（資料名：")], true),
+    sub(c, "09a", "（保存している資料）", ["耐震基準適合証明書", "既存住宅性能評価書", "耐震診断結果報告書", "既存住宅売買瑕疵保険の付保証明書", "その他"], [fl(c, "09aName", v.otherDoc === "split" ? ")" : "）", { after: true, pre: "（資料名：" })], true),
     head(c, "10", "⑩住宅性能評価", YN),
     sub(c, "10a", "（保存している資料）", ["設計住宅性能評価書", "建設住宅性能評価書", "既存住宅性能評価書"], undefined, true),
     head(c, "11", "⑪建物新築時の資料及び分譲業者名"),
@@ -85,7 +87,7 @@ const U: Ctx = { p: "u", only: ["unit"] };
 
 const HOUSE: FormEntry[] = [
   ...buildingItems(H, {
-    reform: "⑤増改築･修繕･リフォーム･用途変更の履歴及び資料", asbestos: "⑦石綿使用調査結果の記録", asbestosDate: "調査年月日",
+    reform: "⑤増改築･修繕･リフォーム･用途変更の履歴及び資料", asbestos: "⑦石綿使用調査結果の記録", asbestosDate: "調査年月日：",
     built: "分譲業者・宅建業者名：", fireArea: "箇所・状況:", otherDoc: "split",
   }),
   head(H, "12", "⑫境界について"),
@@ -95,13 +97,13 @@ const HOUSE: FormEntry[] = [
   sub(H, "12d", "紛争:", YN, [fl(H, "12dText", "紛争の内容：")]),
   head(H, "13", "⑬越境について"),
   sub(H, "13a", "越境：", YNU),
-  sub(H, "13b", "越境物：", ["塀", "フェンス", "擁壁", "建物", "植栽", "給水管", "排水管", "ガス管", "その他"], [fl(H, "13bOther", "その他")], true),
+  sub(H, "13b", "越境物：", ["塀", "フェンス", "擁壁", "建物", "植栽", "給水管", "排水管", "ガス管", "その他"], [fl(H, "13bOther", "）", { after: true, pre: "（" })], true),
   sub(H, "13c", "取決め書：", YN),
   sub(H, "13d", "紛争:", YN, [fl(H, "13dText", "紛争の内容：")]),
   write(H, "13e", "場所・状況："),
   head(H, "14", "⑭擁壁について", YN),
-  sub(H, "14a", "／所有者：", ["売主", "隣地所有者", "共有", "不明"], [fl(H, "14aDir", "方角:", { max: 20 })]),
-  sub(H, "14b", "／所有者：", ["売主", "隣地所有者", "共有", "不明"], [fl(H, "14bDir", "方角:", { max: 20 })]),
+  { ...sub(H, "14a", "／所有者：", ["売主", "隣地所有者", "共有", "不明"], [fl(H, "14aDir", "側", { max: 20, after: true, pre: "方角:" })]), fieldsFirst: true },
+  { ...sub(H, "14b", "／所有者：", ["売主", "隣地所有者", "共有", "不明"], [fl(H, "14bDir", "側", { max: 20, after: true, pre: "方角:" })]), fieldsFirst: true },
   sub(H, "14c", "取決め書：", YN),
   sub(H, "14d", "紛争：", YN, [fl(H, "14dText", "紛争の内容:")]),
   sub(H, "14e", "亀裂等の有無：", FOUND),
@@ -112,7 +114,7 @@ const HOUSE: FormEntry[] = [
   sub(H, "16b", "土壌汚染に関するその他の情報", YNU, [fl(H, "16bText", "内容：")]),
   head(H, "17", "⑰地中埋設物"),
   check(H, "17a", "発見していない"),
-  sub(H, "17b", "発見している／", ["旧建物基礎", "建物廃材", "浄化槽", "井戸", "その他"], [fl(H, "17bOther", "その他"), fl(H, "17bPlace", "場所・状況／")], true),
+  sub(H, "17b", "発見している／", ["旧建物基礎", "建物廃材", "浄化槽", "井戸", "その他"], [fl(H, "17bOther", "）", { after: true, pre: "（" }), fl(H, "17bPlace", "場所・状況／")], true),
   ...status(H, "18", "⑱騒音・振動・臭気等", YNU, "状況："),
   ...status(H, "19", "⑲電波障害", YNU, "状況："),
   ...status(H, "20", "⑳浸水等の被害", YNU, "状況："),

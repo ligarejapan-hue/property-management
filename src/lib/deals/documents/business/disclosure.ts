@@ -57,7 +57,8 @@ export function buildDisclosure(c: BusinessDocContext, o: FormValues): { html: s
   const [notify, received] = texts.slice(-2);
   const intro = texts.slice(0, -2);
   const name = propertyName(c);
-  const guide = o.withGuide === "付ける" ? html`
+  // 説明のページは「付けない」を選んだときだけ外す(設定が空でも付ける・初めの値は付ける)。
+  const guide = o.withGuide !== "付けない" ? html`
 <div class="page guide"><h1 style="font-size:13pt;letter-spacing:0">${src.coverTitle}</h1>${src.cover.map((p) => html`<p>${p}</p>`)}</div>
 <div class="page guide"><h1 style="font-size:13pt;letter-spacing:0">${src.guideTitle}</h1>
 ${src.guide.map((b) => (b.kind === "note" ? html`<p>${b.text}</p>` : html`<table><tr><th style="width:30%">${b.item}</th><td style="white-space:pre-wrap">${b.text}</td></tr></table>`))}</div>` : null;

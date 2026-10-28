@@ -61,6 +61,11 @@ describe("項目の表から入力欄を描く(設計 第2段階 §3.3)", () => 
     expect(out).toContain('aria-label="修理工事： 年"');
     expect(out).toContain("説明のページ");
   });
+  it("PDF に出さない設定の欄には「空欄」の選択肢を出さない(最終レビュー)", () => {
+    const F: FormDef = { key: "f", entries: [{ kind: "item", key: "g", label: "説明のページ", noPrint: true, choices: [{ value: "付ける", label: "付ける" }, { value: "付けない", label: "付けない" }] }] };
+    const out = renderToStaticMarkup(<DocFormFields form={F} values={{ g: "付ける" }} onChange={() => {}} />);
+    expect(out).not.toContain("(空欄=□ で出す)");
+  });
   it("空欄の値でも落ちない", () => {
     expect(() => render({})).not.toThrow();
   });

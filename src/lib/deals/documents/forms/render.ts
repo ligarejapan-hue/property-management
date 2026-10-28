@@ -31,13 +31,23 @@ function sections(f: FormDef, v: FormValues): { title: string | null; items: For
   return out;
 }
 
-/** 書き込み欄。after = 下線の後ろに名前(「＿年」)。名前が「：」で終わるときは「:」を重ねない。 */
+const BLANK = html`<span class="form-blank"></span>`;
+
+/**
+ * 書き込み欄。after = 下線の後ろに名前(「＿年」)・pre = 下線の前の書式の字。
+ * 名前が空のとき・「：」「／」「）」で終わるときは「:」を付けない(書式に無い字を足さない)。
+ * 書き込む行の多い欄(lines)が空なら、行の数だけ下線を出す(手で書けるように)。
+ */
 function field(fl: FormField, v: FormValues): SafeHtml {
   const t = str(v[fl.key]);
-  const value = t ? html`<span class="form-text">${t}</span>` : html`<span class="form-blank${fl.after ? " short" : ""}"></span>`;
-  return fl.after
-    ? html`<span class="form-field-inline">${value}${fl.label}</span> `
-    : html`<div class="form-field">${fl.label}${/[：:]$/.test(fl.label) ? "" : ":"}${t ? " " : ""}${value}</div>`;
+  if (fl.after) {
+    const value = t ? html`<span class="form-text">${t}</span>` : html`<span class="form-blank short"></span>`;
+    return html`<span class="form-field-inline">${fl.pre ?? ""}${value}${fl.label}</span> `;
+  }
+  const lines = !t && fl.lines && fl.lines > 1 ? fl.lines : 1;
+  const value = t ? html`<span class="form-text">${t}</span>` : html`${Array.from({ length: lines }, (_, i) => (i ? html`<br>${BLANK}` : BLANK))}`;
+  const colon = fl.label && !/[：:／）)]$/.test(fl.label) ? ":" : "";
+  return html`<div class="form-field">${fl.pre ?? ""}${fl.label}${colon}${t ? " " : ""}${value}</div>`;
 }
 
 /**
@@ -54,7 +64,9 @@ ${s.title ? html`<h2>${s.title}</h2>` : null}
     const subLabel = it.sub && it.label ? html`${it.label}` : null;
     return html`<tr><th style="width:30%">${it.sub ? "" : it.label}</th><td>
 ${it.choices?.length
-    ? html`<div>${subLabel}${it.choices.map((c) => html`<span class="form-choice">${on.includes(c.value) ? "■" : "□"} ${c.label}</span>`)}${inline.map((fl) => field(fl, v))}</div>`
+    ? it.fieldsFirst
+      ? html`<div>${inline.map((fl) => field(fl, v))}${subLabel}${it.choices.map((c) => html`<span class="form-choice">${on.includes(c.value) ? "■" : "□"} ${c.label}</span>`)}</div>`
+      : html`<div>${subLabel}${it.choices.map((c) => html`<span class="form-choice">${on.includes(c.value) ? "■" : "□"} ${c.label}</span>`)}${inline.map((fl) => field(fl, v))}</div>`
     : inline.length ? html`<div>${subLabel}${inline.map((fl) => field(fl, v))}</div>` : subLabel && !block.length ? html`<div>${subLabel}</div>` : null}
 ${block.map((fl) => field(fl, v))}
 ${it.note && on.includes(it.note.when) ? html`<div class="form-note">※ ${it.note.text}</div>` : null}

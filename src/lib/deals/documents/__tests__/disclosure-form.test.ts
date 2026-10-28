@@ -11,7 +11,7 @@ const itemsOf = (kind: string) => visibleEntries(DISCLOSURE_FORM, { kind }).filt
 /** 項目の表の文字(見出し・選択肢・書き込み欄の名前・区切りの見出し)。 */
 const textsOf = (kind: string) => [
   ...visibleEntries(DISCLOSURE_FORM, { kind }).filter((e) => e.kind === "section").map((e) => (e.kind === "section" ? e.title : "")),
-  ...itemsOf(kind).flatMap((i) => [i.label, ...(i.choices ?? []).map((c) => c.label), ...(i.fields ?? []).map((f) => f.label.replace(/[：:]$/, ""))]),
+  ...itemsOf(kind).flatMap((i) => [i.label, ...(i.choices ?? []).map((c) => c.label), ...(i.fields ?? []).flatMap((f) => [f.pre ?? "", f.label.replace(/[：:]$/, "")])]),
 ].filter(Boolean);
 
 describe("告知書の項目の表(設計 第2段階 §4.7)", () => {

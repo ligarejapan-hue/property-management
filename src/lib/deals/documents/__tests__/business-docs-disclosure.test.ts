@@ -117,4 +117,33 @@ describe("物件状況確認書(告知書・第2段階 §4.7)", () => {
       for (const t of texts) expect(squeeze(src.formCells.join("")), t).toContain(squeeze(t));
     }
   });
+
+  it("書式に無い字を足さない・欠かさない(最終レビュー)", () => {
+    const h = doc().build(ctx(), blank("house")).html;
+    // 名前の無い書き込み欄・「／」「）」で終わる名前に「:」を付けない
+    expect(h).not.toContain('>:<span class="form-blank');
+    expect(h).not.toContain("／:");
+    expect(h).not.toContain("その他:");
+    // ⑭ 方角:＿＿側／所有者：□売主
+    expect(h).toMatch(/方角:<span class="form-blank short"><\/span>側<\/span>\s*／所有者：<span class="form-choice">□ 売主/);
+    // ⑥ □無 □有 時期：＿年＿月頃(時期だけの欄は作らない)
+    expect(h).toMatch(/□ 有<\/span><span class="form-field-inline">時期：<span class="form-blank short"><\/span>年/);
+    expect(h).toContain("調査年月日：");
+    const u = doc().build(ctx(), blank("unit")).html;
+    expect(u).toContain("作成年月日：");
+    expect(u).toMatch(/□ その他<\/span><span class="form-field-inline">（資料名：<span class="form-blank short"><\/span>）/);
+    expect(u).not.toContain("その他（資料名：<span");
+  });
+
+  it("書き込む行の多い欄は、行の数だけ下線を出す(手で書けるように・最終レビュー)", () => {
+    const h = doc().build(ctx(), blank("house")).html;
+    expect(h).toContain('<span class="form-blank"></span><br><span class="form-blank"></span><br><span class="form-blank"></span>');
+  });
+
+  it("「すべて空欄に戻す」でも説明のページの設定は残す・設定が空なら付ける(最終レビュー)", async () => {
+    const { clearFormValues } = await import("../forms/values");
+    expect(clearFormValues(DISCLOSURE_FORM, { kind: "unit", withGuide: "付けない", u01c: "済" })).toMatchObject({ kind: "unit", withGuide: "付けない", u01c: null });
+    const h = doc().build(ctx(), { ...blank("house"), withGuide: null }).html;
+    expect(h).toContain(DISCLOSURE_HOUSE_SOURCE.coverTitle);
+  });
 });
