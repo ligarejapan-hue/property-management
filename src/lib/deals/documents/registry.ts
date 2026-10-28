@@ -25,6 +25,9 @@ import { SELLER_SURVEY_FORM } from "./forms/seller-survey";
 import {
   SELLER_SURVEY_TITLE, buildSellerSurvey, sellerSurveyDefaults, sellerSurveyMissing, sellerSurveyOptionsSchema,
 } from "./business/seller-survey";
+import {
+  buildPrepChecklist, defaultPrepKind, prepChecklistMissing, prepChecklistOptionsSchema, prepKindChoices,
+} from "./business/prep-checklist";
 import { buildCompletion, completionMissing, completionOptionsSchema, defaultHandover } from "./business/completion";
 import type { ChecklistPhase } from "../checklist";
 
@@ -240,6 +243,17 @@ export const BUSINESS_DOCS: BusinessDocDef[] = [
   }),
   checklistDef("contract", "checklist_contract", "書類確認書(契約時)"),
   checklistDef("settlement", "checklist_settlement", "書類確認書(決済時)"),
+  {
+    key: "prep_checklist",
+    label: "準備チェックリスト",
+    group: "checklist",
+    applies: () => true,
+    missing: (c) => prepChecklistMissing(c),
+    blocking: () => [],
+    options: prepChecklistOptionsSchema as z.ZodType<Record<string, unknown>>,
+    defaults: (c) => ({ values: { kind: defaultPrepKind(c) }, choices: { kind: prepKindChoices() } }),
+    build: (c, o) => buildPrepChecklist(c, prepChecklistOptionsSchema.parse(o)),
+  },
 ];
 
 export const BUSINESS_DOC_KEYS = BUSINESS_DOCS.map((d) => d.key);

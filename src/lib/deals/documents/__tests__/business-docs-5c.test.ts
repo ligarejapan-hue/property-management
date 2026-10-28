@@ -57,7 +57,7 @@ const unitDeal: DealView = {
 
 describe("書類確認書(段5c-1)", () => {
   it("一覧表の最後に2つ・まとまりは書類確認書・どの取引でも出る", () => {
-    expect(BUSINESS_DOCS.map((d) => d.key).slice(-2)).toEqual(CL);
+    expect(BUSINESS_DOCS.map((d) => d.key).slice(-3)).toEqual([...CL, "prep_checklist"]);
     for (const k of CL) {
       expect(doc(k).group).toBe("checklist");
       expect(doc(k).applies(ctx())).toBe(true);
