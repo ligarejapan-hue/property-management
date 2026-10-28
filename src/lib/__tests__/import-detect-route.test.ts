@@ -108,6 +108,17 @@ describe("Excel", () => {
     expect(await target(res)).toBe("lead_excel");
   });
 
+  it("取り込めない大きさ(列が200を超える)のシートは、配列にせず飛ばす(メモリを守る)", async () => {
+    const wb = XLSX.utils.book_new();
+    const ws = XLSX.utils.aoa_to_sheet(LEAD);
+    ws["!ref"] = "A1:ZZ2"; // 列が 702 まで広がった形
+    XLSX.utils.book_append_sheet(wb, ws, "一覧");
+    const b64 = Buffer.from(XLSX.write(wb, { type: "buffer", bookType: "xlsx" })).toString("base64");
+    const res = await POST(jsonReq({ fileName: "顧客管理表.xlsx", xlsxBase64: b64 }));
+    expect(res.status).toBe(200);
+    expect(await target(res)).not.toBe("lead_excel");
+  });
+
   it("1枚目のシートが空でも、後ろのシートの顧客管理表を見分ける(@codex #607 P2)", async () => {
     const res = await POST(jsonReq({ fileName: "顧客管理表.xlsx", xlsxBase64: xlsxBase64({ 空: [], 一覧: LEAD }) }));
     expect(await target(res)).toBe("lead_excel");

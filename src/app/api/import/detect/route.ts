@@ -34,6 +34,9 @@ import { pdfTarget, sheetTarget, type DropTarget } from "@/lib/import-drop/detec
  * ⚠メモリは、読む前の「展開後の大きさ」の守りで抑える(行数で抑えるのではない)。
  */
 const LEAD_SCAN_ROWS = 5_001;
+/** Excel まとめ取込が受け付けるシートの大きさ(これを超えるシートは取り込めない=見分けない)。 */
+const LEAD_SHEET_MAX_ROWS = 5_000;
+const LEAD_SHEET_MAX_COLS = 200;
 
 /**
  * 表(JSON)の本文の上限。⚠この口は大きい PDF のために proxy を通らない(proxy の 10MB の先読みが効かない)
@@ -54,6 +57,14 @@ function countLeadRows(xlsxBase64: string): number {
     const wb = XLSX.read(buf, { type: "buffer", sheetRows: LEAD_SCAN_ROWS });
     let n = 0;
     for (const name of wb.SheetNames) {
+      // ⚠Excel まとめ取込と同じく、シートの大きさ(行・列)を**配列にする前に**見る。遠くのセル1つで
+      //   範囲が広がったシートを配列にすると、空のセルで埋めた巨大な表ができてメモリを食う(セキュリティ確認)。
+      //   取り込みが断る大きさのシートは、顧客管理表ではないとして飛ばす。
+      const ws = wb.Sheets[name];
+      const ref = ws?.["!fullref"] ?? ws?.["!ref"];
+      if (!ref) continue;
+      const range = XLSX.utils.decode_range(ref);
+      if (range.e.r + 1 > LEAD_SHEET_MAX_ROWS || range.e.c + 1 > LEAD_SHEET_MAX_COLS) continue;
       const aoa = XLSX.utils
         .sheet_to_json<unknown[]>(wb.Sheets[name], { header: 1, defval: "", blankrows: true, raw: false })
         .map((r) => (r ?? []).map((c) => (c == null ? "" : String(c))));
