@@ -42,9 +42,10 @@ export async function GET(_request: Request, ctx: Ctx) {
     }) : []);
     const documents = BUSINESS_DOCS.filter((d) => d.applies(bctx)).map((d) => {
       const def = d.defaults(bctx);
+      const values = d.remember ? rememberedValues(d.options, def.values, last.get(d.key)) : def.values;
       return {
-        docType: d.key, label: d.label, group: d.group, missing: d.missing(bctx), blocking: d.blocking(bctx),
-        defaults: d.remember ? rememberedValues(d.options, def.values, last.get(d.key)) : def.values, issuers: def.issuers ?? null, choices: def.choices ?? null,
+        docType: d.key, label: d.label, group: d.group, missing: d.missing(bctx, values), blocking: d.blocking(bctx),
+        defaults: values, issuers: def.issuers ?? null, choices: def.choices ?? null,
       };
     });
     return NextResponse.json({ documents, version: deal.version }, { headers: { "Cache-Control": "no-store" } });

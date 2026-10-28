@@ -18,7 +18,7 @@ import {
 } from "./business/oc-docs";
 import { buildChecklistDoc, checklistDefaults, checklistMissing, checklistOptionsSchema } from "./business/checklist-doc";
 import {
-  addresseeChoices, buildContractGuide, contractGuideMissing, contractGuideOptionsSchema, defaultAddressee, defaultContractBelongings,
+  addresseeChoices, addresseeMissingChoices, buildContractGuide, contractGuideMissing, contractGuideOptionsSchema, defaultAddressee, defaultContractBelongings,
 } from "./business/contract-guide";
 import { buildCompletion, completionMissing, completionOptionsSchema, defaultHandover } from "./business/completion";
 import type { ChecklistPhase } from "../checklist";
@@ -37,8 +37,8 @@ export interface BusinessDocDef {
   remember?: boolean;
   /** この取引で出せるか(書類タブに出すか)。 */
   applies(c: BusinessDocContext): boolean;
-  /** 必要な項目のうち空欄のもの(出す前の確認に出す)。 */
-  missing(c: BusinessDocContext): string[];
+  /** 必要な項目のうち空欄のもの(出す前の確認に出す)。values = 画面に渡す初めの値(前回の入力を含む)。 */
+  missing(c: BusinessDocContext, values?: Record<string, unknown>): string[];
   /** 空欄のままでは組み立てられない項目(「空欄のまま出す」を止める・最終レビュー)。 */
   blocking(c: BusinessDocContext): string[];
   options: z.ZodType<Record<string, unknown>>;
@@ -101,12 +101,12 @@ export const BUSINESS_DOCS: BusinessDocDef[] = [
     group: "contract",
     remember: true,
     applies: () => true,
-    missing: (c) => contractGuideMissing(c),
+    missing: (c, v) => contractGuideMissing(c, v?.addressee),
     blocking: () => [],
     options: contractGuideOptionsSchema as z.ZodType<Record<string, unknown>>,
     defaults: (c) => ({
       values: { addressee: defaultAddressee(c), belongings: defaultContractBelongings(c), notes: null },
-      choices: { addressee: addresseeChoices(c) },
+      choices: { addressee: addresseeChoices(c), addresseeMissing: addresseeMissingChoices(c) },
     }),
     build: (c, o) => buildContractGuide(c, contractGuideOptionsSchema.parse(o)),
   },

@@ -15,7 +15,7 @@ describe("書類タブの業務書類(段5a・5b・5c)", () => {
   it("出す前の確認: 空欄の一覧・「入力に戻る」「空欄のまま出す」", () => {
     const src = read(SECTION);
     expect(src).toContain("入力に戻る");
-    expect(src).toContain('doc.missing.length ? "空欄のまま出す" : "発行する"');
+    expect(src).toContain('missing.length ? "空欄のまま出す" : "発行する"');
     expect(src).toContain("<ModalShell");
   });
   it("個人の発行者は非課税/課税を選ぶまで発行ボタンを押せない", () => {
@@ -64,6 +64,10 @@ describe("書類タブの業務書類(段5a・5b・5c)", () => {
     expect(src).toContain('aria-label="ご連絡事項"');
     expect(src).toContain('doc.docType === "completion_confirmation"');
     expect(src).toContain('aria-label="引き渡した書類など"');
+    // 宛先を選び直したら、出す前の確認もその宛先で見る(@codex)
+    expect(src).toContain("(choices.addresseeMissing ?? []).filter((c) => c.value === values.addressee)");
+    expect(src).toContain('{missing.length ? "空欄のまま出す" : "発行する"}');
+    expect(src).not.toContain('{doc.missing.length ? "空欄のまま出す" : "発行する"}');
     expect(read("src/lib/deals/client.ts")).toContain('group: "contract" | "settlement" | "other" | "oc" | "checklist";');
   });
 });

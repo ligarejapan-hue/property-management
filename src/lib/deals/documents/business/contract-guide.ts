@@ -34,14 +34,21 @@ export function defaultContractBelongings(c: BusinessDocContext): string | null 
   return labels.length ? labels.join("\n") : null;
 }
 
-/** 出す前の確認: 契約日時・契約場所・宛先(初期値の役割)の当事者。 */
-export function contractGuideMissing(c: BusinessDocContext): string[] {
+const ROLE_LABELS = { seller: "売主", buyer: "買主" } as const;
+
+/** 当事者のいない宛先(画面で宛先を選び直したとき、出す前の確認に足す)。 */
+export function addresseeMissingChoices(c: BusinessDocContext): Choice[] {
+  return (["seller", "buyer"] as const).filter((r) => !partiesOf(c.deal, r).length).map((r) => ({ value: r, label: ROLE_LABELS[r] }));
+}
+
+/** 出す前の確認: 契約日時・契約場所・宛先の当事者(宛先は前回の入力があればそれ、無ければ初期値)。 */
+export function contractGuideMissing(c: BusinessDocContext, addressee?: unknown): string[] {
   const d = c.deal;
   const out: string[] = [];
   if (!d.contractAt) out.push("契約日時");
   if (!d.contractPlace) out.push("契約場所");
-  const to = defaultAddressee(c);
-  if (!partiesOf(d, to).length) out.push(to === "seller" ? "売主" : "買主");
+  const to = addressee === "seller" || addressee === "buyer" ? addressee : defaultAddressee(c);
+  if (!partiesOf(d, to).length) out.push(ROLE_LABELS[to]);
   return out;
 }
 

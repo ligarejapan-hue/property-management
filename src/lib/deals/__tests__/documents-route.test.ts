@@ -543,6 +543,8 @@ describe("前回の入力を初めの値にする(第2段階 §3.2)", () => {
     ]);
     const body = await (await AVAILABLE(new Request("http://x"), ctx)).json();
     expect(docOf(body, "contract_guide").defaults).toEqual(prev);
+    // 前回の宛先(買主)の当事者がいない → 出す前の確認に「買主」
+    expect((docOf(body, "contract_guide") as unknown as { missing: string[] }).missing).toContain("買主");
     expect(docOf(body, "completion_confirmation").defaults).toEqual({ handover: "前回の鍵" });
     const q = pm.dealDocument.findMany.mock.calls[0][0];
     expect(q.where).toEqual({ dealId: DEAL_ID, docType: { in: ["contract_guide", "completion_confirmation"] } });

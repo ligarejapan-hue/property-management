@@ -73,6 +73,16 @@ describe("契約のご案内", () => {
     expect(doc(G).blocking(ctx({ ...deal, parties: [] }))).toEqual([]);
   });
 
+  it("空欄の確認は、選んだ宛先(前回の入力・画面で選び直した宛先)の当事者で見る(@codex)", () => {
+    const onlySeller = ctx({ ...deal, contractPlace: "架空会議室", parties: [SELLER] });
+    expect(doc(G).missing(onlySeller)).toEqual([]);
+    expect(doc(G).missing(onlySeller, { addressee: "buyer" })).toEqual(["買主"]);
+    expect(doc(G).missing(onlySeller, { addressee: "壊れた" })).toEqual([]);
+    // 画面で選び直したときのため、当事者のいない宛先を渡す
+    expect(doc(G).defaults(onlySeller).choices?.addresseeMissing).toEqual([{ value: "buyer", label: "買主" }]);
+    expect(doc(G).defaults(ctx()).choices?.addresseeMissing).toEqual([]);
+  });
+
   it("組み立て: 宛先・日時・手付金・持ち物・この後の流れ・会社と担当(エスケープする)", () => {
     const out = doc(G).build(ctx(), { addressee: "seller", belongings: "実印\n印鑑証明書", notes: null });
     expect(out.html).toContain("不動産売買契約のご案内");
@@ -158,6 +168,9 @@ describe("取引完了確認書", () => {
     expect(out.html).not.toContain(SEAL);
     expect(out.rows).toContainEqual({ label: "売主", value: "架空 一郎<i>" });
     expect(out.rows).toContainEqual({ label: "引き渡した書類など", value: "鍵\n登記識別情報" });
+    // 登録した住所・氏名とは別に、手書きの署名の空欄を当事者ごとに出す(@codex)
+    expect(out.html.match(/<td class="sign-blank">署名<\/td>/g)?.length).toBe(2);
+    expect(doc(C).build(ctx({ ...deal, parties: [] }), { handover: null }).html.match(/<td class="sign-blank">署名<\/td>/g)?.length).toBe(2);
     // 仲介でない取引(買取再販)には仲介業者の欄を出さない
     expect(doc(C).build(ctx(), { handover: null }).html).not.toContain("仲介業者");
   });
