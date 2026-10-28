@@ -7,6 +7,7 @@
  */
 import Link from "next/link";
 import { FileText, Upload, X } from "lucide-react";
+import { Button } from "@/components/ui/button";
 
 export default function HandedFileSlot({
   fileLabel,
@@ -47,15 +48,10 @@ export default function HandedFileSlot({
       </span>
       <span className="flex items-center gap-3">
         {onClear && (
-          <button
-            type="button"
-            onClick={onClear}
-            disabled={disabled}
-            className="inline-flex items-center gap-1 text-xs text-indigo-700 underline disabled:opacity-50 dark:text-indigo-300"
-          >
+          <Button type="button" variant="ghost" size="sm" onClick={onClear} disabled={disabled}>
             <X className="h-3.5 w-3.5" aria-hidden="true" />
             外す
-          </button>
+          </Button>
         )}
         <Link href="/import/drop" className="text-xs text-indigo-700 underline dark:text-indigo-300">
           別のファイルを入れる

@@ -127,12 +127,12 @@ describe("取り込み(CSV)の配線", () => {
 describe("送っている途中は「最初からやり直す」を出さない(送信中の印を消させない・@codex P1)", () => {
   it("貼り付けて物件化: 登録中は帯を出さない", () => {
     expect(read("src/app/(dashboard)/import/paste/page.tsx")).toMatch(
-      /restored && !restoredDismissed && !registering && !reading && <DraftRestoredNotice/,
+      /restored && !handed && !restoredDismissed && !registering && !reading && <DraftRestoredNotice/,
     );
   });
   it("謄本PDF: 取り込み中は帯を出さない", () => {
     expect(read("src/app/(dashboard)/import/registry-pdf/page.tsx")).toMatch(
-      /restored && !restoredDismissed && !importing && !parsing && step !== "result" &&/,
+      /restored && r0 && !restoredDismissed && !importing && !parsing && step !== "result" &&/,
     );
   });
   it("取り込み(CSV): どれかの取り込み中・結果が分からない間は帯を出さない", () => {
@@ -145,12 +145,12 @@ describe("送っている途中は「最初からやり直す」を出さない(
 describe("読み取り・下見の返事を待つ間も「最初からやり直す」を出さない(届いた結果が控えを作り直す・@codex P2)", () => {
   it("貼り付けて物件化: 読み取り中", () => {
     expect(read("src/app/(dashboard)/import/paste/page.tsx")).toMatch(
-      /restored && !restoredDismissed && !registering && !reading && <DraftRestoredNotice/,
+      /restored && !handed && !restoredDismissed && !registering && !reading && <DraftRestoredNotice/,
     );
   });
   it("謄本PDF: 解析中", () => {
     expect(read("src/app/(dashboard)/import/registry-pdf/page.tsx")).toMatch(
-      /restored && !restoredDismissed && !importing && !parsing && step !== "result" &&/,
+      /restored && r0 && !restoredDismissed && !importing && !parsing && step !== "result" &&/,
     );
   });
   it("取り込み(CSV): 下見中(①②の読み込み中は roLoading / rpLoading)", () => {

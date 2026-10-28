@@ -347,14 +347,16 @@ function RegistryPdfScreen({ draftEnabled }: { draftEnabled: boolean }) {
   // 作業中の控え(設計書 §2 S3)。
   const draftKeyValue = draftEnabled ? draftKey("registry-pdf") : null;
   const restored = useRestoredDraft(draftKeyValue, parseRegistryPdfDraft);
-  const r0 = restored?.data ?? null;
   // 「ファイルを入れる」から持ってきた謄本PDF(2026-10-28 第2段)。最初の描画で読み、描き終えたら消す。
-  //   ⚠控えが確認の画面(選び直し待ち)なら、その選び直しに使う(読み直しはしない=今までの選び直しと同じ)。
+  //   ⚠新しく持ってきた PDF は**最初から読む**(控えの読み取り結果・選んだ物件は使わない)。前の PDF の
+  //   確認の途中に新しい PDF を差し込むと、前の PDF の入力で新しい PDF を登録できてしまう(@codex #607 P1)。
+  //   取り込み中に離れた印(pendingSubmit)だけは控えから引き継ぐ(確かめるまで止める)。
   const [handed] = useState(() => peekHandoffFile("registry_pdf"));
   useEffect(() => {
     clearHandoff("registry_pdf");
   }, []);
-  const startFresh = handed !== null && (!r0 || r0.step === "upload");
+  const r0 = handed !== null ? null : (restored?.data ?? null);
+  const startFresh = handed !== null;
 
   // Step state
   const [step, setStep] = useState<Step>(r0?.step ?? "upload");
@@ -677,7 +679,8 @@ function RegistryPdfScreen({ draftEnabled }: { draftEnabled: boolean }) {
         </div>
       ) : (
         // ⚠取り込み中は出さない(「最初からやり直す」で送信中の印を消させない)。解析中も出さない(届いた結果が控えを作り直す)。
-        restored && !restoredDismissed && !importing && !parsing && step !== "result" && (
+        // 新しい PDF を持ってきたときは控えを使っていないので「前回の続き」は出さない。
+        restored && r0 && !restoredDismissed && !importing && !parsing && step !== "result" && (
           <div className="mb-4">
             <DraftRestoredNotice savedAt={restored.savedAt} onDiscard={handleReset} />
           </div>

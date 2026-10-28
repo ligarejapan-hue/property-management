@@ -53,6 +53,24 @@ describe("進んだ先の画面は、持ってきたファイルで始め、受�
     expect(src).toMatch(new RegExp(`useEffect\\(\\(\\) => \\{[\\s\\S]{0,80}${clear.replace(/[()]/g, "\\$&")}`));
   });
 
+  it("⚠新しく持ってきた PDF は最初から読む(前の PDF の確認の途中を使わない・@codex #607 P1)", () => {
+    const reg = read("src/app/(dashboard)/import/registry-pdf/page.tsx");
+    expect(reg).toContain("const r0 = handed !== null ? null : (restored?.data ?? null);");
+    // 取り込み中に離れた印だけは控えから引き継ぐ(確かめるまで止める)。
+    expect(reg).toContain("useState(restored?.pendingSubmit != null)");
+    const paste = read("src/app/(dashboard)/import/paste/page.tsx");
+    expect(paste).toContain("const r0 = handed !== null ? null : (restored?.data.review ?? null);");
+    expect(paste).toContain("useState(restored?.pendingSubmit != null)");
+    // 「r0」より前に読み出しの順番が来る(handed を先に決める)。
+    expect(paste.indexOf("peekHandoffFile(\"paste_pdf\")")).toBeLessThan(paste.indexOf("const r0 ="));
+  });
+
+  it("まとめて入れた表は、取り込みの画面へ進んで戻っても残る(@codex #607 P2)", () => {
+    expect(page).toContain("useState<Row[]>(() => loadDropBatch<Row>()");
+    expect(page).toContain("saveDropBatch(next);");
+    expect(page).toContain("取り込みの画面へ進みました");
+  });
+
   it("取り込みの画面の、ファイルを入れる入り口の枠は外した(選び直しの枠だけ残る)", () => {
     for (const f of [
       "src/app/(dashboard)/import/page.tsx",

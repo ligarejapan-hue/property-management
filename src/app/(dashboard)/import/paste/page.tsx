@@ -103,18 +103,20 @@ function PasteImportScreen({ draftEnabled }: { draftEnabled: boolean }) {
   // 作業中の控え。別のメニューへ移って戻っても続きから(設計書 2026-10-13 §2 S1)。
   const draftKeyValue = draftEnabled ? draftKey("paste") : null;
   const restored = useRestoredDraft(draftKeyValue, parsePasteDraft);
-  const r0 = restored?.data.review ?? null;
 
   // 「ファイルを入れる」から持ってきた反響の PDF(2026-10-28 第2段)。最初の描画で読み、描き終えたら消す。
-  //   ⚠控えが確認の画面(選び直し待ち)なら、その選び直しに使う(読み直しはしない)。
+  //   ⚠新しく持ってきた PDF は**最初から読む**(控えの確認の途中は使わない)。前の PDF の確認の途中に
+  //   新しい PDF を差し込むと、前の PDF の入力で新しい PDF を登録できてしまう(@codex #607 P1)。
+  //   登録中に離れた印(pendingSubmit)だけは控えから引き継ぐ(確かめるまで止める)。
   const [handed] = useState(() => peekHandoffFile("paste_pdf"));
   useEffect(() => {
     clearHandoff("paste_pdf");
   }, []);
+  const r0 = handed !== null ? null : (restored?.data.review ?? null);
 
   // ---- 入力(貼り付け or PDF) ----
   // PDF を持ってきたときは貼り付けの文章を使わない(PDF と文章はどちらか一方)。
-  const [rawText, setRawText] = useState(handed && !r0 ? "" : (restored?.data.rawText ?? ""));
+  const [rawText, setRawText] = useState(handed ? "" : (restored?.data.rawText ?? ""));
   const [pdfFile, setPdfFile] = useState<File | null>(handed);
   const [reading, setReading] = useState(false);
   const [readError, setReadError] = useState<string | null>(null);
@@ -570,7 +572,8 @@ function PasteImportScreen({ draftEnabled }: { draftEnabled: boolean }) {
         />
       ) : (
         // ⚠登録中は出さない(「最初からやり直す」で送信中の印を消させない)。読み取り中も出さない(届いた結果が控えを作り直す)。
-        restored && !restoredDismissed && !registering && !reading && <DraftRestoredNotice savedAt={restored.savedAt} onDiscard={handleDiscardDraft} />
+        // 新しい PDF を持ってきたときは控えを使っていないので「前回の続き」は出さない。
+        restored && !handed && !restoredDismissed && !registering && !reading && <DraftRestoredNotice savedAt={restored.savedAt} onDiscard={handleDiscardDraft} />
       )}
       {draftSaver.tooLarge && <DraftTooLargeNotice kind="input" />}
 

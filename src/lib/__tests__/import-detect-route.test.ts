@@ -110,6 +110,30 @@ describe("PDF", () => {
   });
 });
 
+describe("大きさの守り(この口は proxy の先読みの上限が効かない)", () => {
+  it("表(JSON)の本文が上限を超えると、読む前に断る", async () => {
+    const req = new Request("http://t/api/import/detect", {
+      method: "POST",
+      body: "{}",
+      headers: { "content-type": "application/json", "content-length": String(17 * 1024 * 1024) },
+    }) as unknown as NextRequest;
+    const res = await POST(req);
+    expect(res.status).toBeGreaterThanOrEqual(400);
+    expect(res.status).not.toBe(200);
+  });
+
+  it("中身が大きすぎる表は 422(受け取り箱にも取り込みにも回さない)", async () => {
+    const csv = "所有者氏名\n" + "あ".repeat(4 * 1024 * 1024);
+    const res = await POST(jsonReq({ fileName: "big.csv", csvText: csv }));
+    expect(res.status).toBe(422);
+  });
+
+  it("壊れた・展開すると大きすぎる Excel は、顧客管理表の見分け(XLSX.read)の前に 422 で断る(@codex #607 P1)", async () => {
+    const res = await POST(jsonReq({ fileName: "x.xlsx", xlsxBase64: Buffer.from("not a zip").toString("base64") }));
+    expect(res.status).toBe(422);
+  });
+});
+
 describe("権限", () => {
   it("取り込みの権限が無い人は 403(本文を読まない)", async () => {
     perms.value = [];

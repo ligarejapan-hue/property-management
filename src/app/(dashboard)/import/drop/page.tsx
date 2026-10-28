@@ -11,7 +11,7 @@
  * ⚠PDF は謄本かもしれない(ファイル名に所有者名が入り得る)ので、名前を出さず「◯件目のPDF」と書く。
  * ⚠受け取り箱を使えない人(現地担当など)は、書類を断って取り込みだけ使う(発注者決定)。
  */
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { Loader2 } from "lucide-react";
@@ -35,9 +35,11 @@ import {
   type HandoffTarget,
 } from "@/lib/import-drop/detect";
 import { putHandoff, type SheetEntry } from "@/lib/import-drop/handoff";
+import { loadDropBatch, saveDropBatch } from "@/lib/import-drop/batch";
 import { dropRowName, inboxErrorMessage, inboxSizeError } from "@/lib/import-drop/rows";
 
-type RowState = "checking" | "ready" | "inbox" | "inbox_done" | "error";
+/** handed = その行のファイルを持って取り込みの画面へ進んだ(戻ってきたら印を出し、もう一度開ける)。 */
+type RowState = "checking" | "ready" | "handed" | "inbox" | "inbox_done" | "error";
 
 interface Row {
   id: number;
@@ -51,8 +53,13 @@ interface Row {
 
 export default function ImportDropPage() {
   const router = useRouter();
-  const [rows, setRows] = useState<Row[]>([]);
+  // 取り込みの画面へ進んで戻っても、残りのファイルの表を出す(@codex #607 P2)。
+  //   見ている途中(checking)で離れた行は、もう続きが動かないので出し直さない。
+  const [rows, setRows] = useState<Row[]>(() => loadDropBatch<Row>().filter((r) => r.state !== "checking"));
   const [busy, setBusy] = useState(false);
+  useEffect(() => {
+    saveDropBatch(rows);
+  }, [rows]);
 
   const update = (id: number, patch: Partial<Row>) =>
     setRows((prev) => prev.map((r) => (r.id === id ? { ...r, ...patch } : r)));
@@ -123,6 +130,10 @@ export default function ImportDropPage() {
     } else {
       putHandoff({ target, file: row.file });
     }
+    // 画面が切り替わる前に、この行に「進んだ」印を付けて表を置いておく(戻ったら残りから続けられる)。
+    const next = rows.map((r) => (r.id === row.id ? { ...r, state: "handed" as const, target } : r));
+    saveDropBatch(next);
+    setRows(next);
     router.push(HANDOFF_PATHS[target]);
   };
 
@@ -236,9 +247,22 @@ function RowAction({
   if (row.target && isHandoffTarget(row.target)) {
     const target = row.target;
     return (
-      <Button type="button" size="sm" disabled={busy} onClick={() => onGo(target)}>
-        {HANDOFF_BUTTON_LABELS[target]}
-      </Button>
+      <span className="flex flex-wrap items-center gap-2">
+        {row.state === "handed" && (
+          <span className="rounded-full bg-gray-100 px-2 py-0.5 text-xs text-gray-600 dark:bg-gray-800 dark:text-gray-300">
+            取り込みの画面へ進みました
+          </span>
+        )}
+        <Button
+          type="button"
+          size="sm"
+          variant={row.state === "handed" ? "secondary" : "primary"}
+          disabled={busy}
+          onClick={() => onGo(target)}
+        >
+          {row.state === "handed" ? "もう一度開く" : HANDOFF_BUTTON_LABELS[target]}
+        </Button>
+      </span>
     );
   }
   return null;

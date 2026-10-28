@@ -15,7 +15,14 @@ import { assertImportJsonBodySize, assertImportMultipartBodySize } from "@/lib/i
 import { MAX_PDF_UPLOAD_BYTES, pdfTooLargeToAcceptMessage } from "@/lib/pdf-compress/policy";
 import { reserveLargePdfSlot } from "@/lib/pdf-compress/fit";
 import { extractHeadTextFromPdf, isPdfBuffer } from "@/lib/pdf-extract";
-import { detectFileFormat, parseSheet, SheetParseError } from "@/lib/sheet-parser";
+import {
+  detectFileFormat,
+  MAX_IMPORT_DECODED_BYTES,
+  MAX_XLSX_EXPANDED_BYTES,
+  parseSheet,
+  SheetParseError,
+} from "@/lib/sheet-parser";
+import { assertZipExpandsWithin } from "@/lib/xlsx-zip-guard";
 import { detectImportFileTypeFromContent } from "@/lib/import-content-detect";
 import { detectImportFileType, type ImportFileType } from "@/lib/import-file-type";
 import { readLeadSheet } from "@/lib/paste-import/lead-sheet";
@@ -24,10 +31,23 @@ import { pdfTarget, sheetTarget, type DropTarget } from "@/lib/import-drop/detec
 /** 顧客管理表かどうかを見るのに読む行(見出しは先頭の数行にある)。 */
 const LEAD_SCAN_ROWS = 40;
 
-/** Excel に顧客管理表の行があるか(先頭の行だけ読む)。読めなければ 0。 */
+/**
+ * 表(JSON)の本文の上限。⚠この口は大きい PDF のために proxy を通らない(proxy の 10MB の先読みが効かない)
+ * ので、表の取り込みの中身の上限(10MB・base64 で約 13.4MB)に合わせて、ここで本文を読む前に抑える。
+ */
+export const MAX_DETECT_JSON_BODY_BYTES = 16 * 1024 * 1024;
+
+/**
+ * Excel に顧客管理表の行があるか(先頭の行だけ読む)。読めなければ 0。
+ * ⚠XLSX.read は中身を丸ごと展開してから行数で切るので、先に**展開後の大きさ**を抑える
+ *   (Excel まとめ取込と同じ守り・小さく圧縮された巨大ファイルでメモリを食わない)。
+ */
 function countLeadRows(xlsxBase64: string): number {
+  if (Math.floor((xlsxBase64.length * 3) / 4) > MAX_IMPORT_DECODED_BYTES) return 0;
   try {
-    const wb = XLSX.read(Buffer.from(xlsxBase64, "base64"), { type: "buffer", sheetRows: LEAD_SCAN_ROWS });
+    const buf = Buffer.from(xlsxBase64, "base64");
+    assertZipExpandsWithin(buf, MAX_XLSX_EXPANDED_BYTES);
+    const wb = XLSX.read(buf, { type: "buffer", sheetRows: LEAD_SCAN_ROWS });
     let n = 0;
     for (const name of wb.SheetNames) {
       const aoa = XLSX.utils
@@ -50,10 +70,12 @@ function detectSheet(body: unknown): DropTarget {
   const csvText = typeof b.csvText === "string" ? b.csvText : undefined;
   const xlsxBase64 = typeof b.xlsxBase64 === "string" ? b.xlsxBase64 : undefined;
   const isXlsx = detectFileFormat(b.fileName) === "xlsx";
-  const leadRows = isXlsx && xlsxBase64 ? countLeadRows(xlsxBase64) : 0;
   let contentType: ImportFileType | null = null;
+  let parsedOk = false;
   try {
+    // 先に取り込みと同じ読み方で読む(大きさ・展開後の大きさの守りもここで効く)。
     const sheet = parseSheet({ fileName: b.fileName, csvText, xlsxBase64 });
+    parsedOk = true;
     // 取り込みの口と同じ入力(列の並びの行)で判定する。
     const positional = sheet.rows.map((r) => sheet.headers.map((h) => r[h] ?? ""));
     contentType = detectImportFileTypeFromContent(sheet.headers, positional).type;
@@ -63,9 +85,13 @@ function detectSheet(body: unknown): DropTarget {
       if (byName === "reception" || byName === "owner") contentType = byName;
     }
   } catch (e) {
-    // 読めない表は、取り込みには回さない(Excel は書類・CSV は人が選ぶ)。
     if (!(e instanceof SheetParseError)) throw e;
+    // 大きすぎる表は、ここで断る(受け取り箱にも取り込みにも回さない)。
+    if (e.code === "INPUT_TOO_LARGE") throw new ApiError(422, e.message, "VALIDATION_ERROR");
+    // ほかの読めない表は、取り込みには回さない(Excel は書類・CSV は人が選ぶ)。
   }
+  // 顧客管理表は Excel だけ。取り込みの読み方で読めた(大きさの守りを通った)ものだけ見る。
+  const leadRows = isXlsx && parsedOk && xlsxBase64 ? countLeadRows(xlsxBase64) : 0;
   return sheetTarget({ contentType, leadRows, isXlsx });
 }
 
@@ -100,7 +126,7 @@ export async function POST(request: NextRequest) {
       return apiResponse({ target: pdfTarget(text) });
     }
 
-    assertImportJsonBodySize(request);
+    assertImportJsonBodySize(request, MAX_DETECT_JSON_BODY_BYTES);
     const body = await request.json();
     return apiResponse({ target: detectSheet(body) });
   } catch (error) {
