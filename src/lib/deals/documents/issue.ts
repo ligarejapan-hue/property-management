@@ -12,6 +12,7 @@ export const DEAL_DOC_TYPES = {
   contract_guide: { label: "契約のご案内", variants: { default: "" } },
   seller_survey: { label: "売主属性調査書(社内用)", variants: { default: "" } },
   mediation: { label: "媒介契約書", variants: { default: "" } },
+  sale_guide: { label: "媒介契約の前の説明書(売却用)", variants: { default: "" } },
   settlement_statement: { label: "精算書", variants: { default: "" } },
   settlement_guide: { label: "残金決済のご案内", variants: { default: "" } },
   deposit_receipt: { label: "手付金領収書", variants: { default: "" } },

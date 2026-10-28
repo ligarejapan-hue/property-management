@@ -24,6 +24,7 @@ import type { FormDef } from "./forms/types";
 import { SELLER_SURVEY_FORM } from "./forms/seller-survey";
 import { MEDIATION_FORM } from "./forms/mediation";
 import { buildMediation, mediationDefaults, mediationMissing } from "./business/mediation";
+import { buildSaleGuide } from "./business/sale-guide";
 import { formValuesSchema } from "./forms/schema";
 import {
   SELLER_SURVEY_TITLE, buildSellerSurvey, sellerSurveyDefaults, sellerSurveyMissing, sellerSurveyOptionsSchema,
@@ -152,6 +153,17 @@ export const BUSINESS_DOCS: BusinessDocDef[] = [
     options: mediationOptionsSchema as z.ZodType<Record<string, unknown>>,
     defaults: (c) => ({ values: mediationDefaults(c) }),
     build: (c, o) => buildMediation(c, mediationOptionsSchema.parse(o)),
+  },
+  {
+    key: "sale_guide",
+    label: "媒介契約の前の説明書(売却用)",
+    group: "contract",
+    applies: (c) => c.deal.businessType === "brokerage" && (c.deal.tradeSide === "seller" || c.deal.tradeSide === "both"),
+    missing: () => [],
+    blocking: () => [],
+    options: emptyOptions,
+    defaults: () => ({ values: {} }),
+    build: (c) => buildSaleGuide(c),
   },
   {
     key: "settlement_statement",
