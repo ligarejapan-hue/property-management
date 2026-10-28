@@ -76,6 +76,13 @@ describe("書類タブの業務書類(段5a・5b・5c)", () => {
     expect(src).toContain("useDraftExists(dealDocumentDraftKey(dealId, d.docType))");
     expect(src).toContain("(入力の途中)");
   });
+  it("準備チェックリストは種類を選ぶまで発行できない(第2段階 段C)", () => {
+    const src = read(SECTION);
+    expect(src).toContain('doc.docType === "prep_checklist"');
+    expect(src).toContain('aria-label="準備チェックリストの種類"');
+    expect(src).toContain("(choices.kind ?? [])");
+    expect(src).toContain('(doc.docType === "prep_checklist" && !str(values.kind))');
+  });
   it("契約のご案内・取引完了確認書の入力欄(第2段階 段A)", () => {
     const src = read(SECTION);
     expect(src.indexOf('{ key: "contract", label: "契約・媒介の書類" }')).toBeLessThan(src.indexOf('{ key: "settlement", label: "決済の書類" }'));

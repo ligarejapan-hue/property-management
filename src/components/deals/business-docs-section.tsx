@@ -152,7 +152,8 @@ function IssueDialog({ dealId, doc, version, onCancel, onDone }: {
   // 委任状は委任する事項が1つ以上・鍵受領書は鍵の行がすべて埋まっているまで発行できない(サーバーも 422)。
   const incomplete = (doc.docType === "power_of_attorney" && !matters.length && !str(values.otherMatter).trim())
     || (doc.docType === "key_receipt" && (!keyRows.length || !keyRows.every(keyRowOk)))
-    || (doc.docType === "settlement_guide_seller" && !costRows.every(costRowOk));
+    || (doc.docType === "settlement_guide_seller" && !costRows.every(costRowOk))
+    || (doc.docType === "prep_checklist" && !str(values.kind));
   const setCost = (i: number, patch: Partial<CostRow>) => set("costs", costRows.map((r, j) => (j === i ? { ...r, ...patch } : r)));
   const setKey = (i: number, patch: Partial<KeyRow>) => set("keys", keyRows.map((k, j) => (j === i ? { ...k, ...patch } : k)));
   const choices = doc.choices ?? {};
@@ -244,6 +245,17 @@ function IssueDialog({ dealId, doc, version, onCancel, onDone }: {
               <p className="text-xs text-gray-500">選ばなかった項目は □ を並べた空欄で出ます(手で書けます)。全部空欄のまま出すと、手書き用の書式になります。前に発行したことがあれば、そのときの入力が初めから入っています。</p>
             </div>
             <DocFormFields form={doc.form} values={values} onChange={set} />
+          </>
+        )}
+        {doc.docType === "prep_checklist" && (
+          <>
+            <Field label="種類">
+              <select aria-label="準備チェックリストの種類" value={str(values.kind)} onChange={(e) => set("kind", e.target.value || null)} className={inputCls}>
+                <option value="">(選んでください)</option>
+                {(choices.kind ?? []).map((c) => <option key={c.value} value={c.value}>{c.label}</option>)}
+              </select>
+            </Field>
+            <p className="text-xs text-gray-500">項目は「取引の設定」の書類確認書・準備チェックリストの項目から入ります(「使う書類」で書類確認書だけにした項目は入りません)。済・担当の欄は空けて出します。</p>
           </>
         )}
         {doc.docType === "contract_guide" && (
