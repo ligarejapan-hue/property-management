@@ -99,3 +99,34 @@ describe("項目の表のタブ(第2段階 段D・発注者の指示「同じペ
     expect(clearFormValues(FORM, { yn: "yes" })).toEqual(emptyFormValues(FORM));
   });
 });
+
+describe("告知書のための項目の表の形(第2段階 段E)", () => {
+  const F: FormDef = {
+    key: "f",
+    tabs: { key: "kind", label: "種類", choices: [{ value: "a", label: "甲" }, { value: "b", label: "乙" }] },
+    entries: [
+      { kind: "section", title: "甲だけの見出し", only: ["a"] },
+      { kind: "item", key: "n1", label: "①雨漏り" },
+      { kind: "item", key: "n1a", label: "", sub: true, multiple: true, choices: [{ value: "現在まで雨漏りを発見していない。", label: "現在まで雨漏りを発見していない。" }] },
+      { kind: "item", key: "n1b", label: "修理工事：", sub: true, choices: [{ value: "未", label: "未" }, { value: "済", label: "済" }], fields: [{ key: "n1bY", label: "年", max: 10, after: true }, { key: "n1bM", label: "月頃", max: 10, after: true }] },
+      { kind: "item", key: "n1c", label: "", sub: true, fields: [{ key: "n1cPlace", label: "箇所：", max: 20 }] },
+      { kind: "item", key: "guide", label: "説明のページ", noPrint: true, choices: [{ value: "付ける", label: "付ける" }] },
+    ],
+  };
+  it("見出しの出し分け・下の行は項目の欄を空ける・下線の後ろに字・「：」で終わる名前に「:」を重ねない・PDF に出さない欄", () => {
+    const h = renderFormHtml(F, { ...emptyFormValues(F), n1bY: "2020" }).toString();
+    expect(h).toContain("<h2>甲だけの見出し</h2>");
+    expect(renderFormHtml(F, { ...emptyFormValues(F), kind: "b" }).toString()).not.toContain("甲だけの見出し");
+    expect(h).toContain("<th style=\"width:30%\">①雨漏り</th>");
+    expect(h).toMatch(/<th style="width:30%"><\/th><td>\s*<div>[^<]*<span class="form-choice">□ 現在まで雨漏りを発見していない。<\/span>/);
+    expect(h).toContain("修理工事：");
+    expect(h).toMatch(/<span class="form-text">2020<\/span>年/);
+    expect(h).toMatch(/<span class="form-blank short"><\/span>月頃/);
+    expect(h).toContain("箇所：<span class=\"form-blank\"></span>");
+    expect(h).not.toContain("箇所：:");
+    expect(h).not.toContain("説明のページ");
+    expect(formValueRows(F, emptyFormValues(F)).map((r) => r.label)).toEqual([
+      "甲だけの見出し", "①雨漏り 現在まで雨漏りを発見していない。", "①雨漏り 修理工事：", "①雨漏り 修理工事： 年", "①雨漏り 修理工事： 月頃", "①雨漏り 箇所：",
+    ]);
+  });
+});

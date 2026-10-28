@@ -6,7 +6,7 @@ export const formItems = (f: FormDef): FormItem[] => f.entries.filter((e): e is 
 /** 選んでいるタブで出す区切りと項目(タブが無ければ全部)。 */
 export function visibleEntries(f: FormDef, v: Record<string, unknown>): FormEntry[] {
   const tab = f.tabs ? v[f.tabs.key] : undefined;
-  return f.entries.filter((e) => e.kind === "section" || !e.only || (typeof tab === "string" && e.only.includes(tab)));
+  return f.entries.filter((e) => !e.only || (typeof tab === "string" && e.only.includes(tab)));
 }
 
 /** すべて空欄(手書き用)の値。タブは最初の選択肢。 */

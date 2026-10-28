@@ -42,8 +42,15 @@ export function DocFormFields({ form, values, onChange }: { form: FormDef; value
 function ItemFields({ item, values, onChange }: { item: FormItem; values: Record<string, unknown>; onChange: OnChange }) {
   const picked = listOf(values[item.key]);
   return (
-    <div className="space-y-1.5">
-      <p className="text-xs font-medium text-gray-600 dark:text-gray-400">{item.label}</p>
+    <div className={`space-y-1.5${item.sub ? " ml-4" : ""}`}>
+      {item.label && (
+        <p className={!item.choices?.length && !item.fields?.length
+          ? "text-sm font-semibold text-gray-700 dark:text-gray-300"
+          : "text-xs font-medium text-gray-600 dark:text-gray-400"}
+        >
+          {item.label}
+        </p>
+      )}
       {item.choices?.length ? (item.multiple ? (
         <div className="flex flex-wrap gap-x-4 gap-y-1">
           {item.choices.map((c) => (

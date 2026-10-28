@@ -3,8 +3,8 @@
  * ⚠ただのデータにする(関数を入れない)。出せる書類の API がそのまま画面へ渡す。
  */
 export interface FormChoice { value: string; label: string }
-/** 書き込み欄。key は表の中で重ならない名前(項目の鍵とも重ならない)。 */
-export interface FormField { key: string; label: string; max: number; lines?: number }
+/** 書き込み欄。key は表の中で重ならない名前(項目の鍵とも重ならない)。after = 下線の後ろに名前を出す(「＿年」)。 */
+export interface FormField { key: string; label: string; max: number; lines?: number; after?: boolean }
 export interface FormItem {
   kind: "item";
   key: string;
@@ -18,8 +18,12 @@ export interface FormItem {
   note?: { when: string; text: string };
   /** タブ(FormDef.tabs)の値がこの中のときだけ出す。無ければいつも出す。 */
   only?: string[];
+  /** 番号の行の下の行(PDF では項目の欄を空け、状況の欄の頭に見出しを出す・告知書)。 */
+  sub?: boolean;
+  /** 入力欄だけに出し、PDF・Excel には出さない(説明のページを付けるかなどの設定)。 */
+  noPrint?: boolean;
 }
-export type FormEntry = { kind: "section"; title: string } | FormItem;
+export type FormEntry = { kind: "section"; title: string; only?: string[] } | FormItem;
 export interface FormDef {
   key: string;
   /** 一番上のタブ(同じ書類の中で型を切り替える・第2段階 段D)。値は key の欄に入る(空欄にはならない)。 */
