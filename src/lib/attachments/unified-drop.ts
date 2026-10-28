@@ -44,11 +44,23 @@ export function routeForAnalysis(
     segments: readonly { from: number; to: number; kind: string | null }[];
   } | null,
 ): PdfRoute {
-  if (a === null || a.pageCount === null || a.segments.length === 0) return "ask";
-  if (a.tooManyPages) return "general";
+  // ページが多すぎて見分けていない PDF も、謄本かどうかは分からないので聞く(@codex #604 P2)。
+  if (a === null || a.pageCount === null || a.segments.length === 0 || a.tooManyPages) return "ask";
   if (a.segments.length >= 2) return "split";
   if (a.segments[0].kind === REGISTRY_KIND) return "registry";
   return a.ocr === "unavailable" || a.ocr === "failed" ? "ask" : "general";
+}
+
+/** 謄本が入っている1冊を保存するときの名前(サーバーの split と同じ)。元の名前は所有者名を含み得る。 */
+export const GENERIC_BUNDLE_NAME = "まとめてあるPDF.pdf";
+
+/**
+ * 「分けずに1つのまま保存」で送るファイル。謄本のページが入っていれば、名前を決まった名前に替える
+ * (通常の添付の口は名前を監査に残すので、所有者名を含み得る元の名前を送らない・@codex #604 P1)。
+ */
+export function wholeBundleFile(file: File, segments: readonly { kind: string | null }[]): File {
+  if (!segments.some((s) => s.kind === REGISTRY_KIND)) return file;
+  return new File([file], GENERIC_BUNDLE_NAME, { type: file.type || "application/pdf" });
 }
 
 /** 分け方の画面に出す種類の名前。 */

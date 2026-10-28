@@ -38,7 +38,7 @@ from PIL import Image  # noqa: E402
 
 MAX_PAGES = 60
 HEAD_RATIO = 0.4          # ページの上 4 割だけ読む(見出しはここにある)
-RENDER_DPI = 150
+RENDER_MAX_EDGE = 2000    # ページを画像にするときの長い辺の上限(画素)。A4 の 150dpi で 1754
 RENDER_TIMEOUT_SEC = 30
 OCR_TIMEOUT_SEC = 30
 Image.MAX_IMAGE_PIXELS = 40_000_000
@@ -104,7 +104,9 @@ def cmd_ocr(args):
         stem = os.path.join(args.workdir, "page-%03d" % n)
         try:
             subprocess.run(
-                ["pdftoppm", "-f", str(n), "-l", str(n), "-r", str(RENDER_DPI), "-gray", "-png", "-singlefile",
+                # ⚠解像度(-r)で決めると、ページの寸法が巨大な PDF で画像が際限なく大きくなる。
+                #   長い辺の画素数(-scale-to)で上限を決める(A4 を 150dpi で描いたのとほぼ同じ)。
+                ["pdftoppm", "-f", str(n), "-l", str(n), "-scale-to", str(RENDER_MAX_EDGE), "-gray", "-png", "-singlefile",
                  args.input, stem],
                 capture_output=True, timeout=RENDER_TIMEOUT_SEC, check=True,
             )

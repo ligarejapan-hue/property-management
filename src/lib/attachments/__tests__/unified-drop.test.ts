@@ -4,7 +4,14 @@
  *   PDF  → 中身を見て、まとめてあるなら分け方の確認・謄本なら謄本・ほかは通常の添付
  */
 import { describe, it, expect } from "vitest";
-import { dropKindOf, routeForAnalysis, segmentKindLabel, splitDrop } from "../unified-drop";
+import {
+  GENERIC_BUNDLE_NAME,
+  dropKindOf,
+  routeForAnalysis,
+  segmentKindLabel,
+  splitDrop,
+  wholeBundleFile,
+} from "../unified-drop";
 
 const f = (name: string, type = "") => ({ name, type });
 
@@ -44,8 +51,8 @@ describe("routeForAnalysis", () => {
     expect(routeForAnalysis({ pageCount: 2, tooManyPages: false, segments: [{ from: 1, to: 2, kind: "drawings" }] })).toBe("general");
   });
 
-  it("ページが多すぎる → いつもどおり保存(分けない)", () => {
-    expect(routeForAnalysis({ pageCount: 99, tooManyPages: true, segments: [{ from: 1, to: 99, kind: null }] })).toBe("general");
+  it("ページが多すぎて見分けていない → 謄本かどうか聞く(@codex #604 P2)", () => {
+    expect(routeForAnalysis({ pageCount: 99, tooManyPages: true, segments: [{ from: 1, to: 99, kind: null }] })).toBe("ask");
   });
 
   it("⚠中身を見られなかった(謄本かもしれない)→ 推測せず聞く", () => {
@@ -64,6 +71,21 @@ describe("routeForAnalysis", () => {
     expect(
       routeForAnalysis({ pageCount: 3, tooManyPages: false, ocr: "done", segments: [{ from: 1, to: 3, kind: null }] }),
     ).toBe("general");
+  });
+});
+
+describe("wholeBundleFile(分けずに保存するときの名前)", () => {
+  const file = new File(["%PDF-"], "山田太郎_売却資料.pdf", { type: "application/pdf" });
+
+  it("謄本のページが入っていれば、元の名前を使わず決まった名前にする(中身はそのまま)", async () => {
+    const out = wholeBundleFile(file, [{ kind: "property_summary" }, { kind: "registry" }]);
+    expect(out.name).toBe(GENERIC_BUNDLE_NAME);
+    expect(out.type).toBe("application/pdf");
+    expect(await out.text()).toBe("%PDF-");
+  });
+
+  it("謄本が入っていなければ元のファイルのまま", () => {
+    expect(wholeBundleFile(file, [{ kind: "drawings" }, { kind: null }])).toBe(file);
   });
 });
 

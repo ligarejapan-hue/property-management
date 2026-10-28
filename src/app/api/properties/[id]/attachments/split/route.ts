@@ -33,10 +33,10 @@ import {
   validateSegments,
 } from "@/lib/pdf-split/segments";
 import { reserveSplitSlot } from "@/lib/pdf-split/slot";
+// 謄本が入っている1冊を保存するときの名前(元の名前は所有者名を含み得るので使わない)。画面の「分けずに保存」と同じ。
+import { GENERIC_BUNDLE_NAME } from "@/lib/attachments/unified-drop";
 
 const PDF_MIME = "application/pdf";
-/** 謄本が入っている1冊を保存するときの名前(元の名前は所有者名を含み得るので使わない)。 */
-const GENERIC_BUNDLE_NAME = "まとめてあるPDF.pdf";
 
 interface Prepared {
   type: "general" | "registry";

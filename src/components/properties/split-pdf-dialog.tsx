@@ -42,7 +42,8 @@ export default function SplitPdfDialog({
   file: File;
   analysis: BundleAnalysisResult & { pageCount: number };
   onSave: (segments: BundleSegment[]) => Promise<void>;
-  onSaveWhole: () => Promise<void>;
+  /** 分けずに保存。今の分け方を渡す(謄本のページが入っているかで名前を替えるため)。 */
+  onSaveWhole: (segments: BundleSegment[]) => Promise<void>;
   onCancel: () => void;
 }) {
   const pageCount = analysis.pageCount;
@@ -89,7 +90,7 @@ export default function SplitPdfDialog({
     setError(null);
     try {
       if (mode === "split") await onSave(segments);
-      else await onSaveWhole();
+      else await onSaveWhole(segments);
     } catch (err) {
       setError(err instanceof Error ? err.message : "保存に失敗しました");
       setSaving(null);

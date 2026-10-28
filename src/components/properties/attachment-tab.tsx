@@ -33,7 +33,7 @@ import {
   type ScanUploadResult,
 } from "@/lib/api-client";
 import SplitPdfDialog from "@/components/properties/split-pdf-dialog";
-import { dropKindOf, routeForAnalysis, splitDrop } from "@/lib/attachments/unified-drop";
+import { dropKindOf, routeForAnalysis, splitDrop, wholeBundleFile } from "@/lib/attachments/unified-drop";
 import DocScanLauncher, { uploadOriginalsAsPhotos } from "@/components/properties/doc-scan/doc-scan-launcher";
 import ScanResultNotice, { type ScanNotice } from "@/components/properties/doc-scan/scan-result-notice";
 import { hasLittleText } from "@/lib/doc-scan/upload";
@@ -724,8 +724,9 @@ export default function AttachmentTab({
           file={splitTarget.file}
           analysis={splitTarget.analysis}
           onCancel={() => finishSplit({ kind: "cancelled" })}
-          onSaveWhole={async () => {
-            const reason = await uploadOne(splitTarget.file, "general");
+          onSaveWhole={async (segments) => {
+            // 謄本のページが入っていれば、元の名前(所有者名を含み得る)を使わずに送る。
+            const reason = await uploadOne(wholeBundleFile(splitTarget.file, segments), "general");
             if (reason !== null) throw new Error(reason);
             finishSplit({ kind: "whole" });
           }}
