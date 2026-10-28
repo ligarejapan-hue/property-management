@@ -35,6 +35,7 @@ import type { AcquireResponse, HeartbeatResponse } from "./edit-lock/ui-state";
 // 棟の選び方・つないだ結果の型のみ(apply.ts は prisma を読むサーバー側のファイル=値は import しない)。
 import type { BuildingChoice } from "./building-link/resolve";
 import type { BuildingLinkOutcome } from "./building-link/apply";
+import type { DropTarget } from "./import-drop/detect";
 import type { CatalogSearchItem } from "@/lib/mansion-catalog/search";
 
 export const USE_MOCK = process.env.NEXT_PUBLIC_USE_MOCK === "true";
@@ -5483,6 +5484,26 @@ export interface ReportInboxPage {
 
 export async function fetchReportInbox(page = 1): Promise<ReportInboxPage> {
   return apiFetch<ReportInboxPage>(`/api/report-inbox?page=${page}`);
+}
+
+/** 「ファイルを入れる」: 表(CSV・Excel)の行き先(保存しない)。中身は readFileForImport で読んだもの。 */
+export async function detectDropSheet(entry: {
+  fileName: string;
+  csvText?: string;
+  xlsxBase64?: string;
+}): Promise<{ target: DropTarget }> {
+  return apiFetch("/api/import/detect", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(entry),
+  });
+}
+
+/** 「ファイルを入れる」: PDF の行き先(保存しない)。 */
+export async function detectDropPdf(file: File): Promise<{ target: DropTarget }> {
+  const fd = new FormData();
+  fd.append("file", file);
+  return apiFetch("/api/import/detect", { method: "POST", body: fd });
 }
 
 export async function uploadReportToInbox(file: File): Promise<{ id: string; compressed: boolean }> {

@@ -2,8 +2,7 @@
 
 import Link from "next/link";
 import { usePathname } from "next/navigation";
-import { Upload, FileText, Files, ClipboardPaste, FileCheck } from "lucide-react";
-import { IMPORT_TYPE_LABELS } from "@/lib/import-labels";
+import { Upload, Files, ClipboardPaste, FileCheck } from "lucide-react";
 
 /**
  * 取込画面の入口統合コンポーネント。
@@ -16,9 +15,16 @@ import { IMPORT_TYPE_LABELS } from "@/lib/import-labels";
  * - 「いまどのモードか」を視覚化し、相互行き来を1クリックで可能にする
  */
 
-const ITEMS: { href: string; label: string; icon: React.ComponentType<{ className?: string }> }[] = [
-  { href: "/import", label: IMPORT_TYPE_LABELS.property_csv, icon: Upload },
-  { href: "/import/registry-pdf", label: IMPORT_TYPE_LABELS.registry_pdf, icon: FileText },
+// 2026-10-28: 「受付帳CSV」「謄本PDF」のタブは「ファイルを入れる」1つに替えた(左メニューとそろえる・発注者決定)。
+//   受付帳(/import)・謄本(/import/registry-pdf)の画面は「ファイルを入れる」から進んで開くので、
+//   そこでは「ファイルを入れる」のタブを選ばれた形で出す(also)。
+const ITEMS: {
+  href: string;
+  label: string;
+  icon: React.ComponentType<{ className?: string }>;
+  also?: readonly string[];
+}[] = [
+  { href: "/import/drop", label: "ファイルを入れる", icon: Upload, also: ["/import", "/import/registry-pdf"] },
   { href: "/import/registry-dm", label: "取得済みPDFを一括添付", icon: Files },
   { href: "/import/paste", label: "貼り付けて物件化", icon: ClipboardPaste },
   { href: "/import/report-inbox", label: "書類の受け取り箱", icon: FileCheck },
@@ -27,10 +33,10 @@ const ITEMS: { href: string; label: string; icon: React.ComponentType<{ classNam
 export default function ImportSwitcher() {
   const pathname = usePathname();
 
-  const isActive = (href: string) => {
+  const isActive = (it: (typeof ITEMS)[number]) => {
     // /import は /import/* と区別が必要（exact match）
-    if (href === "/import") return pathname === "/import";
-    return pathname === href || pathname.startsWith(href + "/");
+    if (it.also?.includes(pathname)) return true;
+    return pathname === it.href || pathname.startsWith(it.href + "/");
   };
 
   return (
@@ -40,7 +46,7 @@ export default function ImportSwitcher() {
     >
       {ITEMS.map((it) => {
         const Icon = it.icon;
-        const active = isActive(it.href);
+        const active = isActive(it);
         return (
           <Link
             key={it.href}

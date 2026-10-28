@@ -15,7 +15,8 @@ import { PageHeader } from "@/components/ui/page-header";
 import { Button } from "@/components/ui/button";
 import { ModalShell } from "@/components/ui/modal-shell";
 import ImportSwitcher from "@/components/import/import-switcher";
-import FileDropZone from "@/components/ui/file-drop-zone";
+import HandedFileSlot from "@/components/import/handed-file-slot";
+import { clearHandoff, peekHandoffFile } from "@/lib/import-drop/handoff";
 import {
   ExcelLeadTable,
   excelLeadRowKey,
@@ -64,14 +65,21 @@ function ExcelLeadImportScreen({ draftEnabled }: { draftEnabled: boolean }) {
   // 作業中の控え(設計書 §2 S2)。読み取った行と行ごとの結果を残す。
   const draftKeyValue = draftEnabled ? draftKey("paste-excel") : null;
   const restored = useRestoredDraft(draftKeyValue, parsePasteExcelDraft);
-  const [file, setFile] = useState<File | null>(null);
+  // 「ファイルを入れる」から持ってきた顧客管理表(2026-10-28 第2段)。最初の描画で読み、描き終えたら消す。
+  //   新しいファイルなので、控えの読み取り結果は使わない(今までの「ファイルを選び直した」と同じ)。
+  const [handed] = useState(() => peekHandoffFile("lead_excel"));
+  useEffect(() => {
+    clearHandoff("lead_excel");
+  }, []);
+  const fromDraft = handed === null ? restored : null;
+  const [file, setFile] = useState<File | null>(handed);
   /** 戻したときのファイル名(ファイル本体は戻せないが、読み取り済みなので不要)。 */
-  const [restoredFileName, setRestoredFileName] = useState<string | null>(restored?.data.fileName ?? null);
+  const [restoredFileName, setRestoredFileName] = useState<string | null>(fromDraft?.data.fileName ?? null);
   const [reading, setReading] = useState(false);
   const [readError, setReadError] = useState<string | null>(null);
-  const [rows, setRows] = useState<ExcelLeadRow[] | null>(restored ? restored.data.rows : null);
+  const [rows, setRows] = useState<ExcelLeadRow[] | null>(fromDraft ? fromDraft.data.rows : null);
   const [results, setResults] = useState<Record<string, ExcelLeadResult>>(
-    restored ? restoreExcelResults(restored.data.results, restored.data.sendingKey) : {},
+    fromDraft ? restoreExcelResults(fromDraft.data.results, fromDraft.data.sendingKey) : {},
   );
   /** いま送っている行。結果が来る前に離れたら、戻ったとき「分からない」になる(§5.2)。 */
   const [sendingKey, setSendingKey] = useState<string | null>(null);
@@ -232,8 +240,8 @@ function ExcelLeadImportScreen({ draftEnabled }: { draftEnabled: boolean }) {
         title="Excelからまとめて物件化"
         description="査定サイトの反響を書き溜めた顧客管理表（Excel）を読み、物件と所有者をまとめて登録します。似た物件や同じ名前の所有者がいる行は登録せず、「要確認」として残します。"
       />
-      {restored && !restoredDismissed && !running && !reading && (
-        <DraftRestoredNotice savedAt={restored.savedAt} onDiscard={handleDiscardDraft} />
+      {fromDraft && !restoredDismissed && !running && !reading && (
+        <DraftRestoredNotice savedAt={fromDraft.savedAt} onDiscard={handleDiscardDraft} />
       )}
       {draftSaver.tooLarge && <DraftTooLargeNotice />}
       <p className="text-sm">
@@ -246,19 +254,11 @@ function ExcelLeadImportScreen({ draftEnabled }: { draftEnabled: boolean }) {
         <h2 className="block text-sm font-medium text-gray-800 dark:text-gray-200">
           顧客管理表（.xlsx）
         </h2>
-        <FileDropZone
-          accept=".xlsx"
+        {/* ファイルを入れる枠は「ファイルを入れる」1つにまとめた(2026-10-28 発注者決定)。 */}
+        <HandedFileSlot
+          fileLabel={file?.name ?? restoredFileName}
           disabled={reading || running}
-          title="Excel(.xlsx) ファイルをここにドラッグ＆ドロップ"
-          fileName={file?.name ?? restoredFileName}
-          onFiles={(files) => {
-            setFile(files[0]);
-            setRestoredFileName(null);
-            setRows(null);
-            setResults({});
-            setReadError(null);
-          }}
-          onNoneAccepted={() => {
+          onClear={() => {
             setFile(null);
             setRestoredFileName(null);
             setRows(null);

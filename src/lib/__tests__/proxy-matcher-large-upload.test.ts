@@ -24,6 +24,7 @@ describe("proxy の matcher", () => {
     "/api/properties/0b6f6c1e-0000-4000-8000-000000000000/attachments/split-analyze",
     "/api/import/paste",
     "/api/import/paste/commit",
+    "/api/import/detect",
     "/api/report-inbox",
   ])("大きいPDFを受け取る口は proxy を通さない: %s", (p) => {
     expect(re.test(p)).toBe(false);
@@ -42,6 +43,8 @@ describe("proxy の matcher", () => {
     "/api/import/paste/excel",
     "/api/import/paste-other",
     "/api/import/jobs",
+    "/api/import/detect/x",
+    "/api/import/detect-other",
     "/api/report-inbox/search",
     "/api/report-inbox/abc/attach",
     "/api/report-inbox/abc/file",
@@ -59,7 +62,7 @@ describe("proxy の matcher", () => {
   });
 });
 
-describe("nginx の見本(アプリ全体を nginx で出す構成)も、7つの口だけ大きい送信と長い待ちを許す", () => {
+describe("nginx の見本(アプリ全体を nginx で出す構成)も、8つの口だけ大きい送信と長い待ちを許す", () => {
   const conf = readFileSync(path.join(process.cwd(), "deploy/nginx/property-management.conf.example"), "utf8");
   const m = /location ~ (\^\/api\/[^\s]+) \{([\s\S]*?)\n    \}/.exec(conf);
 
@@ -70,7 +73,7 @@ describe("nginx の見本(アプリ全体を nginx で出す構成)も、7つの
     expect(m![2]).toMatch(/proxy_send_timeout\s+300s;/);
   });
 
-  it("対象は proxy の除外と同じ7つの口だけ", () => {
+  it("対象は proxy の除外と同じ8つの口だけ", () => {
     const re = new RegExp(m![1]);
     for (const p of [
       "/api/properties/0b6f6c1e-0000-4000-8000-000000000000/attachments",
@@ -79,6 +82,7 @@ describe("nginx の見本(アプリ全体を nginx で出す構成)も、7つの
       "/api/properties/0b6f6c1e-0000-4000-8000-000000000000/attachments/split-analyze",
       "/api/import/paste",
       "/api/import/paste/commit",
+      "/api/import/detect",
       "/api/report-inbox",
     ]) {
       expect(re.test(p), p).toBe(true);
@@ -109,6 +113,7 @@ describe("proxy を通さない口は、本文を読む前に認証と大きさ�
     "src/app/api/properties/[id]/attachments/split-analyze/route.ts",
     "src/app/api/import/paste/route.ts",
     "src/app/api/import/paste/commit/route.ts",
+    "src/app/api/import/detect/route.ts",
     "src/app/api/report-inbox/route.ts",
   ])("%s", (file) => {
     const src = readFileSync(path.join(root, file), "utf8");

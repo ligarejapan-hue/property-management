@@ -15,7 +15,7 @@ describe("visibleSidebar", () => {
     expect(labels).toContain("現地調査マップ");
     expect(labels).toContain("使い方ガイド");
     expect(labels).not.toContain("物件一覧");
-    expect(labels).not.toContain("受付帳CSV取込");
+    expect(labels).not.toContain("ファイルを入れる");
     expect(labels).not.toContain("販売図面");
     expect(labels).not.toContain("ユーザー管理");
     expect(groupLabels("field_staff")).not.toContain("物件");
@@ -25,16 +25,19 @@ describe("visibleSidebar", () => {
   it("事務: 物件〜販売図面＋資料。管理者専用は出ない", () => {
     const labels = sidebarLabels("office_staff");
     expect(labels).toContain("物件一覧");
-    expect(labels).toContain("受付帳CSV取込");
+    // 2026-10-28: 取り込みのファイルの入り口は「ファイルを入れる」1つ(受付帳CSV取込・所有者CSV取込・謄本PDF取込の行は外した)。
+    expect(labels).toContain("ファイルを入れる");
+    expect(labels).not.toContain("受付帳CSV取込");
+    expect(labels).not.toContain("所有者CSV取込");
+    expect(labels).not.toContain("謄本PDF取込");
     // 柱に項目が1つ=メニューには柱の名前「販売図面」で出る(題名も同じ名前)
     expect(labels).toContain("販売図面");
     expect(labels).not.toContain("会社情報（販売図面の差出人）");
     expect(labels).not.toContain("売却DM設定");
     expect(labels).not.toContain("ユーザー管理");
     expect(labels).not.toContain("所有者補正候補");
-    // メニュー再編(2026-08-24): 事務担当も DMメニューと取り込み4種は使う。
+    // メニュー再編(2026-08-24): 事務担当も DMメニューと取り込みは使う。
     expect(labels).toContain("DMメニュー");
-    expect(labels).toContain("所有者CSV取込");
     expect(labels).toContain("物件データエラー確認");
     // ⚠添付ファイル検索は「物件」へ移したが**権限は据え置き**=事務には出ない。
     expect(labels).not.toContain("添付ファイル検索");

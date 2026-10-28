@@ -18,6 +18,8 @@ import { Button } from "@/components/ui/button";
 import ImportSwitcher from "@/components/import/import-switcher";
 import FileDropZone from "@/components/ui/file-drop-zone";
 import { FileText } from "lucide-react";
+import HandedFileSlot from "@/components/import/handed-file-slot";
+import { clearHandoff, peekHandoffFile } from "@/lib/import-drop/handoff";
 import {
   PasteImportReview,
   defaultPropertyValues,
@@ -103,9 +105,17 @@ function PasteImportScreen({ draftEnabled }: { draftEnabled: boolean }) {
   const restored = useRestoredDraft(draftKeyValue, parsePasteDraft);
   const r0 = restored?.data.review ?? null;
 
+  // 「ファイルを入れる」から持ってきた反響の PDF(2026-10-28 第2段)。最初の描画で読み、描き終えたら消す。
+  //   ⚠控えが確認の画面(選び直し待ち)なら、その選び直しに使う(読み直しはしない)。
+  const [handed] = useState(() => peekHandoffFile("paste_pdf"));
+  useEffect(() => {
+    clearHandoff("paste_pdf");
+  }, []);
+
   // ---- 入力(貼り付け or PDF) ----
-  const [rawText, setRawText] = useState(restored?.data.rawText ?? "");
-  const [pdfFile, setPdfFile] = useState<File | null>(null);
+  // PDF を持ってきたときは貼り付けの文章を使わない(PDF と文章はどちらか一方)。
+  const [rawText, setRawText] = useState(handed && !r0 ? "" : (restored?.data.rawText ?? ""));
+  const [pdfFile, setPdfFile] = useState<File | null>(handed);
   const [reading, setReading] = useState(false);
   const [readError, setReadError] = useState<string | null>(null);
 
@@ -600,19 +610,13 @@ function PasteImportScreen({ draftEnabled }: { draftEnabled: boolean }) {
 
           <div>
             <h2 className="mb-1 block text-sm font-medium text-gray-800 dark:text-gray-200">
-              PDFをアップロード
+              PDFから読み取る
             </h2>
-            <FileDropZone
-              accept="application/pdf,.pdf"
+            {/* ファイルを入れる枠は「ファイルを入れる」1つにまとめた(2026-10-28 発注者決定)。 */}
+            <HandedFileSlot
+              fileLabel={pdfFile?.name ?? null}
               disabled={reading}
-              icon={FileText}
-              title="PDFファイルをここにドラッグ＆ドロップ"
-              fileName={pdfFile?.name ?? null}
-              onFiles={(files) => {
-                setPdfFile(files[0]);
-                setRawText("");
-              }}
-              onNoneAccepted={() => setPdfFile(null)}
+              onClear={() => setPdfFile(null)}
             />
           </div>
 

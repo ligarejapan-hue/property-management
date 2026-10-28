@@ -47,7 +47,8 @@ describe("Excelまとめ取込の配線", () => {
     expect(src).toMatch(/\} catch \{\s*\/\/[^\n]*\n\s*result = \{ kind: "unknown" \};/);
   });
   it("読み取り中・登録中は「最初からやり直す」を出さない(@codex P2)", () => {
-    expect(src).toMatch(/restored && !restoredDismissed && !running && !reading && \(/);
+    // 2026-10-28: 「ファイルを入れる」から新しいファイルを持ってきたときは控えを使わない(fromDraft=null)。
+    expect(src).toMatch(/fromDraft && !restoredDismissed && !running && !reading && \(/);
   });
   it("戻したとき送信中だった行は分からない扱い", () => {
     expect(src).toContain("restoreExcelResults(");
