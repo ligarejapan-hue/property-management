@@ -295,7 +295,7 @@ describe("業務書類の発行(段5a)", () => {
     expect(body.version).toBe(3);
     const keys = body.documents.map((d: { docType: string }) => d.docType);
     // OC なしの取引には OC の4種を出さない(段5b)
-    expect(keys).toEqual(["contract_guide", "seller_survey", "settlement_statement", "settlement_guide", "settlement_guide_seller", "deposit_receipt", "balance_receipt", "settlement_receipt", "completion_confirmation", "power_of_attorney", "key_receipt", "checklist_contract", "checklist_settlement", "prep_checklist"]);
+    expect(keys).toEqual(["contract_guide", "seller_survey", "mediation", "settlement_statement", "settlement_guide", "settlement_guide_seller", "deposit_receipt", "balance_receipt", "settlement_receipt", "completion_confirmation", "power_of_attorney", "key_receipt", "checklist_contract", "checklist_settlement", "prep_checklist"]);
     const guide = body.documents.find((d: { docType: string }) => d.docType === "settlement_guide");
     expect(guide.missing).toEqual(["決済場所"]);
     const receipt = body.documents.find((d: { docType: string }) => d.docType === "deposit_receipt");
@@ -553,7 +553,7 @@ describe("前回の入力を初めの値にする(第2段階 §3.2)", () => {
     expect((docOf(body, "contract_guide") as unknown as { missing: string[] }).missing).toContain("買主");
     expect(docOf(body, "completion_confirmation").defaults).toEqual({ handover: "前回の鍵" });
     const q = pm.dealDocument.findMany.mock.calls[0][0];
-    expect(q.where).toEqual({ dealId: DEAL_ID, docType: { in: ["contract_guide", "seller_survey", "completion_confirmation"] } });
+    expect(q.where).toEqual({ dealId: DEAL_ID, docType: { in: ["contract_guide", "seller_survey", "mediation", "completion_confirmation"] } });
     expect(q.orderBy).toEqual({ version: "desc" });
     expect(q.select).toEqual({ docType: true, inputSnapshot: true });
 

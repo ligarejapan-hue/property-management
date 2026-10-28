@@ -22,6 +22,9 @@ import {
 } from "./business/contract-guide";
 import type { FormDef } from "./forms/types";
 import { SELLER_SURVEY_FORM } from "./forms/seller-survey";
+import { MEDIATION_FORM } from "./forms/mediation";
+import { buildMediation, mediationDefaults, mediationMissing } from "./business/mediation";
+import { formValuesSchema } from "./forms/schema";
 import {
   SELLER_SURVEY_TITLE, buildSellerSurvey, sellerSurveyDefaults, sellerSurveyMissing, sellerSurveyOptionsSchema,
 } from "./business/seller-survey";
@@ -61,6 +64,7 @@ export interface BusinessDocDef {
 }
 
 const emptyOptions = z.object({}).strict();
+const mediationOptionsSchema = formValuesSchema(MEDIATION_FORM);
 const need = (pairs: [string, unknown][]) => pairs.filter(([, v]) => v === null || v === undefined || v === "").map(([k]) => k);
 const hasParty = (c: BusinessDocContext, role: "seller" | "buyer") => (partiesOf(c.deal, role).length ? "ok" : null);
 
@@ -135,6 +139,19 @@ export const BUSINESS_DOCS: BusinessDocDef[] = [
     options: sellerSurveyOptionsSchema as z.ZodType<Record<string, unknown>>,
     defaults: (c) => ({ values: sellerSurveyDefaults(c) }),
     build: (c, o) => buildSellerSurvey(c, sellerSurveyOptionsSchema.parse(o)),
+  },
+  {
+    key: "mediation",
+    label: "媒介契約書",
+    group: "contract",
+    remember: true,
+    form: MEDIATION_FORM,
+    applies: (c) => c.deal.businessType === "brokerage",
+    missing: (c, v) => mediationMissing(c, v),
+    blocking: () => [],
+    options: mediationOptionsSchema as z.ZodType<Record<string, unknown>>,
+    defaults: (c) => ({ values: mediationDefaults(c) }),
+    build: (c, o) => buildMediation(c, mediationOptionsSchema.parse(o)),
   },
   {
     key: "settlement_statement",
