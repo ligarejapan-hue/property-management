@@ -17,6 +17,9 @@ import {
   landlordChangeOptionsSchema, occupiedLeases,
 } from "./business/oc-docs";
 import { buildChecklistDoc, checklistDefaults, checklistMissing, checklistOptionsSchema } from "./business/checklist-doc";
+import {
+  addresseeChoices, buildContractGuide, contractGuideMissing, contractGuideOptionsSchema, defaultAddressee, defaultContractBelongings,
+} from "./business/contract-guide";
 import type { ChecklistPhase } from "../checklist";
 
 /**
@@ -27,8 +30,10 @@ import type { ChecklistPhase } from "../checklist";
 export interface BusinessDocDef {
   key: string;
   label: string;
-  /** 書類タブのまとまり(決済の書類/そのほかの書類/OC の書類・計画 段5b の読み替え 8)。 */
-  group: "settlement" | "other" | "oc" | "checklist";
+  /** 書類タブのまとまり(契約・媒介の書類/決済の書類/そのほかの書類/OC の書類/書類確認書)。 */
+  group: "contract" | "settlement" | "other" | "oc" | "checklist";
+  /** 前回発行したときの入力を、次の発行の初めの値にする(設計 第2段階 §3.2)。 */
+  remember?: boolean;
   /** この取引で出せるか(書類タブに出すか)。 */
   applies(c: BusinessDocContext): boolean;
   /** 必要な項目のうち空欄のもの(出す前の確認に出す)。 */
@@ -89,6 +94,21 @@ function receiptDef(kind: ReceiptKind): BusinessDocDef {
 }
 
 export const BUSINESS_DOCS: BusinessDocDef[] = [
+  {
+    key: "contract_guide",
+    label: "契約のご案内",
+    group: "contract",
+    remember: true,
+    applies: () => true,
+    missing: (c) => contractGuideMissing(c),
+    blocking: () => [],
+    options: contractGuideOptionsSchema as z.ZodType<Record<string, unknown>>,
+    defaults: (c) => ({
+      values: { addressee: defaultAddressee(c), belongings: defaultContractBelongings(c), notes: null },
+      choices: { addressee: addresseeChoices(c) },
+    }),
+    build: (c, o) => buildContractGuide(c, contractGuideOptionsSchema.parse(o)),
+  },
   {
     key: "settlement_statement",
     label: "精算書",
