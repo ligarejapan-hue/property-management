@@ -159,9 +159,12 @@ function IssueDialog({ dealId, doc, version, onCancel, onDone }: {
   const choices = doc.choices ?? {};
   const pay = payOf(values.pay);
   // 契約のご案内は、選んでいる宛先の当事者が空欄かどうかで出す前の確認を作り直す(サーバーは初めの値の宛先で見る)。
+  // 準備チェックリストの種類はこの小窓で選ぶので、選んだら「物件の種別」を外す。
   const missing = doc.docType === "contract_guide"
     ? [...doc.missing.filter((m) => m !== "売主" && m !== "買主"), ...(choices.addresseeMissing ?? []).filter((c) => c.value === values.addressee).map((c) => c.label)]
-    : doc.missing;
+    : doc.docType === "prep_checklist"
+      ? doc.missing.filter((m) => m !== "物件の種別" || !str(values.kind))
+      : doc.missing;
 
   const issue = async () => {
     setBusy(true);

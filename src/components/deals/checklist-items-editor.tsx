@@ -46,7 +46,7 @@ export function ChecklistItemsEditor({ items, onChange }: { items: ChecklistItem
                         aria-label="注意事項" placeholder="注意事項" className={inputCls}
                       />
                       <SelectBox label="出す取引" value={i.scope} onChange={(v) => patch(i.id, { scope: v as ChecklistScope })} options={optionsOf(CHECKLIST_SCOPES)} />
-                      <SelectBox label="使う書類" value={i.use ?? "both"} onChange={(v) => patch(i.id, { use: v as ChecklistUse })} options={optionsOf(CHECKLIST_USES)} />
+                      <SelectBox label="使う書類" value={i.use ?? "both"} onChange={(v) => patch(i.id, { use: v === "both" ? undefined : (v as ChecklistUse) })} options={optionsOf(CHECKLIST_USES)} />
                       {group === "bring" ? (
                         <SelectBox
                           label="金額" value={i.amount ?? ""} onChange={(v) => patch(i.id, { amount: (v || null) as ChecklistAmount | null })}

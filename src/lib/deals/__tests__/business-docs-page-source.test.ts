@@ -82,6 +82,8 @@ describe("書類タブの業務書類(段5a・5b・5c)", () => {
     expect(src).toContain('aria-label="準備チェックリストの種類"');
     expect(src).toContain("(choices.kind ?? [])");
     expect(src).toContain('(doc.docType === "prep_checklist" && !str(values.kind))');
+    // 種類はこの小窓で選ぶので、選んだら出す前の確認から「物件の種別」を外す(最終レビュー)
+    expect(src).toContain('doc.missing.filter((m) => m !== "物件の種別" || !str(values.kind))');
   });
   it("契約のご案内・取引完了確認書の入力欄(第2段階 段A)", () => {
     const src = read(SECTION);
