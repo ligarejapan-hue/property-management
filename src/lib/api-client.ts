@@ -3872,10 +3872,13 @@ export async function saveSplitPdf(
   propertyId: string,
   file: File,
   segments: readonly BundleSegment[],
+  opts: { containsRegistry?: boolean } = {},
 ): Promise<{ originalId: string; parts: number; registryParts: number }> {
   const formData = new FormData();
   formData.append("file", file);
   formData.append("segments", JSON.stringify(segments));
+  // 謄本のページが入っている(人が分け目を消してつなげた場合も)=サーバーは元の名前を使わない。
+  if (opts.containsRegistry) formData.append("containsRegistry", "1");
   const res = await fetch(`/api/properties/${propertyId}/attachments/split`, { method: "POST", body: formData });
   if (!res.ok) throw await toApiError(res);
   return res.json();

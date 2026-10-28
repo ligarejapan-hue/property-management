@@ -102,7 +102,9 @@ export async function POST(request: NextRequest, { params }: { params: Promise<{
     const segments = checked.segments;
     // ⚠謄本が入っている1冊は、ファイル名に所有者名が入り得る(謄本と同じ扱い)。保存する名前は決まった名前に
     //   し、監査にも名前を残さない(@提出前レビュー P2)。中身の謄本のページは元の1冊にも残る(発注者決定)。
-    const hasRegistry = segments.some((s) => s.kind === REGISTRY_KIND);
+    //   ⚠人が分け目を消して謄本のページを前の書類につなげた場合は分け方に謄本が無いので、画面が最初に
+    //   読んだページの種類から付ける印(containsRegistry)でも見る(@codex #604 P1)。
+    const hasRegistry = segments.some((s) => s.kind === REGISTRY_KIND) || formData.get("containsRegistry") === "1";
     const baseName = hasRegistry ? GENERIC_BUNDLE_NAME : originalName;
 
     const original = Buffer.from(await file.arrayBuffer());

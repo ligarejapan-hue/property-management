@@ -55,11 +55,23 @@ export function routeForAnalysis(
 export const GENERIC_BUNDLE_NAME = "まとめてあるPDF.pdf";
 
 /**
+ * 謄本のページが入っている1冊か。**最初に読んだページの種類**と、今の分け方の**両方**で見る。
+ * ⚠人が分け目を消して謄本のページを前の書類につなげると、分け方からは謄本の印が消えるが、
+ *   謄本のページは1冊の中に残っている(@codex #604 P1)。
+ */
+export function bundleHasRegistry(
+  pageKinds: readonly (string | null)[],
+  segments: readonly { kind: string | null }[],
+): boolean {
+  return pageKinds.includes(REGISTRY_KIND) || segments.some((s) => s.kind === REGISTRY_KIND);
+}
+
+/**
  * 「分けずに1つのまま保存」で送るファイル。謄本のページが入っていれば、名前を決まった名前に替える
  * (通常の添付の口は名前を監査に残すので、所有者名を含み得る元の名前を送らない・@codex #604 P1)。
  */
-export function wholeBundleFile(file: File, segments: readonly { kind: string | null }[]): File {
-  if (!segments.some((s) => s.kind === REGISTRY_KIND)) return file;
+export function wholeBundleFile(file: File, hasRegistry: boolean): File {
+  if (!hasRegistry) return file;
   return new File([file], GENERIC_BUNDLE_NAME, { type: file.type || "application/pdf" });
 }
 

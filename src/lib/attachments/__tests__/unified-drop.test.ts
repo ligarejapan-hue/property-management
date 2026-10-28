@@ -4,8 +4,10 @@
  *   PDF  → 中身を見て、まとめてあるなら分け方の確認・謄本なら謄本・ほかは通常の添付
  */
 import { describe, it, expect } from "vitest";
+import { segmentsFromCuts } from "@/lib/pdf-split/segments";
 import {
   GENERIC_BUNDLE_NAME,
+  bundleHasRegistry,
   dropKindOf,
   routeForAnalysis,
   segmentKindLabel,
@@ -78,14 +80,35 @@ describe("wholeBundleFile(分けずに保存するときの名前)", () => {
   const file = new File(["%PDF-"], "山田太郎_売却資料.pdf", { type: "application/pdf" });
 
   it("謄本のページが入っていれば、元の名前を使わず決まった名前にする(中身はそのまま)", async () => {
-    const out = wholeBundleFile(file, [{ kind: "property_summary" }, { kind: "registry" }]);
+    const out = wholeBundleFile(file, true);
     expect(out.name).toBe(GENERIC_BUNDLE_NAME);
     expect(out.type).toBe("application/pdf");
     expect(await out.text()).toBe("%PDF-");
   });
 
   it("謄本が入っていなければ元のファイルのまま", () => {
-    expect(wholeBundleFile(file, [{ kind: "drawings" }, { kind: null }])).toBe(file);
+    expect(wholeBundleFile(file, false)).toBe(file);
+  });
+});
+
+describe("bundleHasRegistry(謄本のページが入っている1冊か)", () => {
+  const file = new File(["%PDF-"], "山田太郎_売却資料.pdf", { type: "application/pdf" });
+
+  it("今の分け方に謄本があれば true", () => {
+    expect(bundleHasRegistry([null, null], [{ kind: "drawings" }, { kind: "registry" }])).toBe(true);
+  });
+
+  it("⚠分け目を消して謄本のページを前の書類につなげても、最初に読んだページに謄本があれば true(@codex #604 P1)", () => {
+    // 案: 1=物件概要書 / 2〜3=謄本 → 人が2ページ目の前の分け目を消した=分け方は物件概要書の1つだけ
+    const pageKinds = ["property_summary", "registry", "registry"];
+    const merged = segmentsFromCuts(pageKinds, new Set(), new Map([[1, "property_summary"]]));
+    expect(merged).toEqual([{ from: 1, to: 3, kind: "property_summary" }]);
+    expect(bundleHasRegistry(pageKinds, merged)).toBe(true);
+    expect(wholeBundleFile(file, bundleHasRegistry(pageKinds, merged)).name).toBe(GENERIC_BUNDLE_NAME);
+  });
+
+  it("どちらにも謄本が無ければ false", () => {
+    expect(bundleHasRegistry(["drawings", null], [{ kind: "drawings" }])).toBe(false);
   });
 });
 

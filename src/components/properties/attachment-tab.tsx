@@ -33,7 +33,13 @@ import {
   type ScanUploadResult,
 } from "@/lib/api-client";
 import SplitPdfDialog from "@/components/properties/split-pdf-dialog";
-import { dropKindOf, routeForAnalysis, splitDrop, wholeBundleFile } from "@/lib/attachments/unified-drop";
+import {
+  bundleHasRegistry,
+  dropKindOf,
+  routeForAnalysis,
+  splitDrop,
+  wholeBundleFile,
+} from "@/lib/attachments/unified-drop";
 import DocScanLauncher, { uploadOriginalsAsPhotos } from "@/components/properties/doc-scan/doc-scan-launcher";
 import ScanResultNotice, { type ScanNotice } from "@/components/properties/doc-scan/scan-result-notice";
 import { hasLittleText } from "@/lib/doc-scan/upload";
@@ -725,13 +731,16 @@ export default function AttachmentTab({
           analysis={splitTarget.analysis}
           onCancel={() => finishSplit({ kind: "cancelled" })}
           onSaveWhole={async (segments) => {
-            // 謄本のページが入っていれば、元の名前(所有者名を含み得る)を使わずに送る。
-            const reason = await uploadOne(wholeBundleFile(splitTarget.file, segments), "general");
+            // 謄本のページが入っていれば(最初に読んだページの種類でも見る)、元の名前(所有者名を含み得る)を使わずに送る。
+            const hasRegistry = bundleHasRegistry(splitTarget.analysis.pageKinds, segments);
+            const reason = await uploadOne(wholeBundleFile(splitTarget.file, hasRegistry), "general");
             if (reason !== null) throw new Error(reason);
             finishSplit({ kind: "whole" });
           }}
           onSave={async (segments) => {
-            const r = await saveSplitPdf(propertyId, splitTarget.file, segments);
+            const r = await saveSplitPdf(propertyId, splitTarget.file, segments, {
+              containsRegistry: bundleHasRegistry(splitTarget.analysis.pageKinds, segments),
+            });
             finishSplit({ kind: "split", parts: r.parts, registryParts: r.registryParts });
           }}
         />

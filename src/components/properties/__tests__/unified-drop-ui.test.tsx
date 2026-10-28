@@ -23,7 +23,7 @@ describe("添付ファイルタブの枠は1つ", () => {
     expect(tab).toContain("analyzeBundlePdf(propertyId, file)");
     expect(tab).toContain("routeForAnalysis(analysis)");
     expect(tab).toContain('uploadOne(file, "registry")');
-    expect(tab).toContain("saveSplitPdf(propertyId, splitTarget.file, segments)");
+    expect(tab).toContain("saveSplitPdf(propertyId, splitTarget.file, segments, {");
   });
 
   it("⚠中身を見られなかったとき(謄本かもしれない)は、推測せず「謄本ですか？」と聞く", () => {
@@ -44,6 +44,11 @@ describe("添付ファイルタブの枠は1つ", () => {
     const zone = tab.slice(tab.indexOf("<FileDropZone"), tab.indexOf("/>", tab.indexOf("<FileDropZone")));
     expect(zone).toContain("hideFileNames");
     expect(tab).toContain("fileName: `${i + 1}件目`");
+  });
+
+  it("⚠謄本のページが入っているかは、最初に読んだページの種類でも見る(分けて保存・分けずに保存の両方)", () => {
+    expect(tab.match(/bundleHasRegistry\(splitTarget\.analysis\.pageKinds, segments\)/g)).toHaveLength(2);
+    expect(tab).toContain("wholeBundleFile(splitTarget.file, hasRegistry)");
   });
 
   it("謄本が増えたら親へ知らせる(基本情報の件数)", () => {

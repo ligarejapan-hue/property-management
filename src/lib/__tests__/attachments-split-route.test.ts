@@ -187,6 +187,14 @@ describe("split(分けて保存)", () => {
     expect(writeAuditLog.mock.calls[0][0].detail).toEqual({ propertyId: "p-1", fileName: "物件概要書 藤和氷川台コープ710.pdf" });
   });
 
+  it("⚠分け方に謄本が無くても、画面が「謄本のページが入っている」と知らせたら元の名前を使わない(@codex #604 P1)", async () => {
+    const segs = [{ from: 1, to: 2, kind: "property_summary" }, { from: 3, to: 5, kind: "drawings" }];
+    splitPdfByRanges.mockResolvedValueOnce({ ok: true, pageCount: 5, parts: [Buffer.from("%PDF-a"), Buffer.from("%PDF-b")] });
+    await SPLIT(await req("split", { segments: JSON.stringify(segs), containsRegistry: "1" }), params);
+    expect(rows().map((r) => r.fileName)).toEqual(["まとめてあるPDF.pdf", "まとめてあるPDF_p1-2.pdf", "まとめてあるPDF_p3-5.pdf"]);
+    for (const c of writeAuditLog.mock.calls) expect(c[0].detail).toEqual({ propertyId: "p-1" });
+  });
+
   it("60ページを超える分け方は 422(分けない)", async () => {
     const segs = [{ from: 1, to: 1, kind: null }, { from: 2, to: 61, kind: null }];
     const res = await SPLIT(await req("split", { segments: JSON.stringify(segs) }), params);
