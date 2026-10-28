@@ -27,6 +27,8 @@ import { buildMediation, mediationClientMissing, mediationDefaults, mediationMis
 import { buildSaleGuide } from "./business/sale-guide";
 import { DISCLOSURE_FORM } from "./forms/disclosure";
 import { buildDisclosure, disclosureDefaults, disclosureMissing } from "./business/disclosure";
+import { EQUIPMENT_FORM } from "./forms/equipment";
+import { buildEquipment, equipmentApplies, equipmentDefaults, equipmentMissing } from "./business/equipment";
 import { formValuesSchema } from "./forms/schema";
 import {
   SELLER_SURVEY_TITLE, buildSellerSurvey, sellerSurveyDefaults, sellerSurveyMissing, sellerSurveyOptionsSchema,
@@ -69,6 +71,7 @@ export interface BusinessDocDef {
 const emptyOptions = z.object({}).strict();
 const mediationOptionsSchema = formValuesSchema(MEDIATION_FORM);
 const disclosureOptionsSchema = formValuesSchema(DISCLOSURE_FORM);
+const equipmentOptionsSchema = formValuesSchema(EQUIPMENT_FORM);
 const need = (pairs: [string, unknown][]) => pairs.filter(([, v]) => v === null || v === undefined || v === "").map(([k]) => k);
 const hasParty = (c: BusinessDocContext, role: "seller" | "buyer") => (partiesOf(c.deal, role).length ? "ok" : null);
 
@@ -180,6 +183,19 @@ export const BUSINESS_DOCS: BusinessDocDef[] = [
     options: disclosureOptionsSchema as z.ZodType<Record<string, unknown>>,
     defaults: (c) => ({ values: disclosureDefaults(c) }),
     build: (c, o) => buildDisclosure(c, disclosureOptionsSchema.parse(o)),
+  },
+  {
+    key: "equipment",
+    label: "付帯設備表",
+    group: "contract",
+    remember: true,
+    form: EQUIPMENT_FORM,
+    applies: (c) => equipmentApplies(c),
+    missing: (c) => equipmentMissing(c),
+    blocking: () => [],
+    options: equipmentOptionsSchema as z.ZodType<Record<string, unknown>>,
+    defaults: (c) => ({ values: equipmentDefaults(c) }),
+    build: (c, o) => buildEquipment(c, equipmentOptionsSchema.parse(o)),
   },
   {
     key: "settlement_statement",
