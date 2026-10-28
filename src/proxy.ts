@@ -87,11 +87,12 @@ export default async function proxy(request: NextRequest) {
  *   ⚠外す口を増やすときも、その route が「認証 → 大きさの事前チェック → formData()」の
  *   順になっていることを確かめること(proxy-matcher-large-upload.test.ts)。
  */
+// ⚠まとめてある PDF の分け方の案(split-analyze)と、分けて保存(split)も同じ大きさの PDF を受け取る(2026-10-28)。
 export const LARGE_UPLOAD_API_PATTERN =
-  "api/properties/[^/]+/attachments$|api/properties/[^/]+/attachments/scan$|api/import/paste$|api/import/paste/commit$|api/report-inbox$";
+  "api/properties/[^/]+/attachments$|api/properties/[^/]+/attachments/scan$|api/properties/[^/]+/attachments/split$|api/properties/[^/]+/attachments/split-analyze$|api/import/paste$|api/import/paste/commit$|api/report-inbox$";
 
 export const config = {
   matcher: [
-    "/((?!_next/static|_next/image|favicon.ico|uploads/|api/properties/[^/]+/attachments$|api/properties/[^/]+/attachments/scan$|api/import/paste$|api/import/paste/commit$|api/report-inbox$).*)",
+    "/((?!_next/static|_next/image|favicon.ico|uploads/|api/properties/[^/]+/attachments$|api/properties/[^/]+/attachments/scan$|api/properties/[^/]+/attachments/split$|api/properties/[^/]+/attachments/split-analyze$|api/import/paste$|api/import/paste/commit$|api/report-inbox$).*)",
   ],
 };

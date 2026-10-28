@@ -69,8 +69,10 @@ describe("物件基本情報の謄本行", () => {
     expect(src).not.toMatch(/onRegistryMutated=\{fetchProperty\}/);
     // 添付タブ側: prop を受け取り、謄本の upload/delete 成功時に呼ぶ。
     expect(attachmentTab).toContain("onRegistryMutated");
-    // 謄本アップロード成功後に通知(type==="registry" のときだけ)。
-    expect(attachmentTab).toMatch(/type === "registry"[\s\S]{0,40}onRegistryMutated/);
+    // 謄本アップロード成功後に通知(謄本が増えたときだけ)。2026-10-28 枠を1つにしたので、
+    // 謄本として保存できた(単独の謄本・分けた中の謄本)ときに立てる印で判断する。
+    expect(attachmentTab).toMatch(/if \(r\.registry\) registryChanged = true;/);
+    expect(attachmentTab).toMatch(/if \(registryChanged\) onRegistryMutated\?\.\(\);/);
     // 謄本削除の成功時にも通知(削除対象が registry だったときだけ)。
     const del = attachmentTab.match(/const handleDelete[\s\S]*?\n {2}\};/);
     expect(del).not.toBeNull();

@@ -1,8 +1,9 @@
 import { z } from "zod";
 import {
   CHECKLIST_AMOUNTS, CHECKLIST_GROUPS, CHECKLIST_ITEM_ID, CHECKLIST_PAY_METHODS, CHECKLIST_PHASES, itemsFor,
-  type ChecklistAmount, type ChecklistGroup, type ChecklistItem, type ChecklistPayMethod, type ChecklistPhase,
+  type ChecklistAmount, type ChecklistDoc, type ChecklistGroup, type ChecklistItem, type ChecklistPayMethod, type ChecklistPhase,
 } from "../../checklist";
+import type { BASE_PROPERTY_KINDS } from "../../constants";
 import { html } from "../html";
 import { documentHtml } from "../layout";
 import { DASH, dateJa, dateTimeJa, headTable, money, namesOf, partiesOf, propertyLabel, type BusinessDocContext, type Choice, type ValueRow } from "./common";
@@ -29,12 +30,16 @@ const auto = (id: string, group: ChecklistItem["group"], label: string, amount: 
   ({ id, phase: "settlement", group, label, note: "謄本の登記の現況から自動で追加", scope: "all", amount });
 
 /**
- * その取引で出す項目(取引の物件種別の元の種別・OC の有無で出し分ける)。
+ * その取引で出す項目(取引の物件種別の元の種別・OC の有無・使う書類で出し分ける)。
  * 決済時は、謄本の乙区に権利が残っていれば抹消の3項目を足す(設計 §4.6.1)。持参の抹消費用は、設定にすでに抹消費用の金額付き項目があれば足さない。
+ * opts.use = 取り出す先の書類(初めは書類確認書)・opts.base = 元の種別を置き換える(準備チェックリストの種類)。
  */
-export function checklistItemsOf(phase: ChecklistPhase, c: BusinessDocContext): ChecklistItem[] {
-  const base = c.settings.propertyKinds.find((k) => k.key === c.deal.propertyKind)?.base ?? null;
-  const items = itemsFor(c.settings.checklistItems, phase, { base, hasOc: c.deal.hasOc });
+export function checklistItemsOf(
+  phase: ChecklistPhase, c: BusinessDocContext,
+  opts: { use?: ChecklistDoc; base?: (typeof BASE_PROPERTY_KINDS)[number] | null } = {},
+): ChecklistItem[] {
+  const base = opts.base !== undefined ? opts.base : c.settings.propertyKinds.find((k) => k.key === c.deal.propertyKind)?.base ?? null;
+  const items = itemsFor(c.settings.checklistItems, phase, { base, hasOc: c.deal.hasOc }, opts.use ?? "checklist");
   const n = c.registry?.activeRights ?? 0;
   if (phase !== "settlement" || n === 0) return items;
   return [

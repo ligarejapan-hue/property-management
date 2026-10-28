@@ -23,12 +23,23 @@ import {
   shouldClearLoading,
 } from "@/lib/property-refresh/refresh-coordinator";
 import {
+  analyzeBundlePdf,
   fetchAttachments as apiFetchAttachments,
   deleteAttachment,
+  saveSplitPdf,
   updateAttachmentKind,
   uploadFile,
+  type BundleAnalysisResult,
   type ScanUploadResult,
 } from "@/lib/api-client";
+import SplitPdfDialog from "@/components/properties/split-pdf-dialog";
+import {
+  bundleHasRegistry,
+  dropKindOf,
+  routeForAnalysis,
+  splitDrop,
+  wholeBundleFile,
+} from "@/lib/attachments/unified-drop";
 import DocScanLauncher, { uploadOriginalsAsPhotos } from "@/components/properties/doc-scan/doc-scan-launcher";
 import ScanResultNotice, { type ScanNotice } from "@/components/properties/doc-scan/scan-result-notice";
 import { hasLittleText } from "@/lib/doc-scan/upload";
@@ -48,6 +59,15 @@ import { MAX_ATTACHMENT_BYTES, MAX_PDF_UPLOAD_BYTES } from "@/lib/pdf-compress/p
 import { MAX_FILE_SIZE } from "@/lib/storage/types";
 
 type AttachmentType = "general" | "registry";
+
+/** 分け方の小窓の閉じ方。 */
+type SplitOutcome =
+  | { kind: "split"; parts: number; registryParts: number }
+  | { kind: "whole" }
+  | { kind: "cancelled" };
+
+/** 中身を確かめられなかった PDF の答え。 */
+type RegistryAnswer = "registry" | "general" | "cancelled";
 
 interface AttachmentData {
   id: string;
@@ -154,16 +174,29 @@ export default function AttachmentTab({
   const [attachments, setAttachments] = useState<AttachmentData[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
-  // 通常添付 と 謄本PDF で個別の uploading / error 状態を持つ
-  const [uploadingGeneral, setUploadingGeneral] = useState(false);
+  // ファイルを入れる枠は1つ(2026-10-28 発注者決定)。謄本もまとめてある PDF も画像もここから入れる。
+  const [uploading, setUploading] = useState(false);
   // 8MB を超える PDF を送っている間は「圧縮しています」と出す(数秒〜十数秒かかる)。
-  const [compressingGeneral, setCompressingGeneral] = useState(false);
+  const [compressing, setCompressing] = useState(false);
+  // PDF の中身を見ている間(まとめてある PDF か・謄本か)。文字の無いページは読み取るので数十秒かかることがある。
+  const [analyzing, setAnalyzing] = useState(false);
   // 複数ファイルを送っている間の「N件中M件目」(1件だけのときは null)。
-  const [uploadProgressGeneral, setUploadProgressGeneral] = useState<UploadProgress | null>(null);
-  const [uploadProgressRegistry, setUploadProgressRegistry] = useState<UploadProgress | null>(null);
-  const [uploadingRegistry, setUploadingRegistry] = useState(false);
-  const [uploadErrorGeneral, setUploadErrorGeneral] = useState<string | null>(null);
-  const [uploadErrorRegistry, setUploadErrorRegistry] = useState<string | null>(null);
+  const [uploadProgress, setUploadProgress] = useState<UploadProgress | null>(null);
+  const [uploadError, setUploadError] = useState<string | null>(null);
+  // 入れ終わったときの知らせ(写真タブへ入れた・謄本として保存した・分けて保存した)。
+  const [uploadNotice, setUploadNotice] = useState<string | null>(null);
+  // 入れた画像の行き先を聞いている間(写真タブ=既定 か 添付ファイル か・発注者決定)。
+  const [pendingImages, setPendingImages] = useState<File[] | null>(null);
+  const [imageTarget, setImageTarget] = useState<"photo" | "document">("photo");
+  // まとめてある PDF の分け方を確かめている間。閉じたら resolve で送る処理の続きへ戻る。
+  const [splitTarget, setSplitTarget] = useState<{
+    file: File;
+    analysis: BundleAnalysisResult & { pageCount: number };
+  } | null>(null);
+  const splitResolveRef = useRef<((outcome: SplitOutcome) => void) | null>(null);
+  // PDF の中身を確かめられなかったとき、謄本か通常の添付かを聞いている間(⚠ファイル名は出さない)。
+  const [askTarget, setAskTarget] = useState<File | null>(null);
+  const askResolveRef = useRef<((answer: RegistryAnswer) => void) | null>(null);
   const [deleteTargetId, setDeleteTargetId] = useState<string | null>(null);
   const [previewTarget, setPreviewTarget] = useState<AttachmentData | null>(null);
   // 種類を直している最中の添付(二重送信を防ぐ)。
@@ -222,59 +255,182 @@ export default function AttachmentTab({
   const uploadOne = async (file: File, type: AttachmentType): Promise<string | null> => {
     if (file.size <= 0) return "空ファイルはアップロードできません";
     // 種類(MIME)が空でも拡張子が .pdf なら PDF とみなす(サーバーと同じ判定・@codex PR#498 P2)。
+    // 謄本PDFは縮めない(課金した原本)ので 20MB まで。
     const compressible = type === "general" && isPdfFile(file);
     const limitMb = compressible ? MAX_PDF_MB : MAX_SIZE_MB;
     if (file.size > limitMb * 1024 * 1024) {
       return `ファイルサイズが上限 (${limitMb}MB) を超えています`;
     }
-    // 謄本PDF はクライアント側でも PDF のみ受け付け（サーバ側でも 422 で再チェック）
-    if (type === "registry" && !isPdfFile(file)) {
-      return "謄本PDFは PDF ファイルのみアップロードできます";
-    }
-    if (type === "general") {
-      setCompressingGeneral(compressible && file.size > MAX_FILE_SIZE);
-    }
+    setCompressing(compressible && file.size > MAX_FILE_SIZE);
     try {
       await uploadFile(propertyId, file, "attachment", { attachmentType: type });
       return null;
     } catch (err) {
       return err instanceof Error ? err.message : "アップロードに失敗しました";
+    } finally {
+      setCompressing(false);
     }
+  };
+
+  /** 分け方の小窓を開き、閉じるまで待つ。 */
+  const askSplit = (file: File, analysis: BundleAnalysisResult & { pageCount: number }) =>
+    new Promise<SplitOutcome>((resolve) => {
+      splitResolveRef.current = resolve;
+      setSplitTarget({ file, analysis });
+    });
+
+  /** 謄本か通常の添付かを聞き、答えるまで待つ。 */
+  const askRegistry = (file: File) =>
+    new Promise<RegistryAnswer>((resolve) => {
+      askResolveRef.current = resolve;
+      setAskTarget(file);
+    });
+
+  const finishAsk = (answer: RegistryAnswer) => {
+    const resolve = askResolveRef.current;
+    askResolveRef.current = null;
+    setAskTarget(null);
+    resolve?.(answer);
+  };
+
+  const finishSplit = (outcome: SplitOutcome) => {
+    const resolve = splitResolveRef.current;
+    splitResolveRef.current = null;
+    setSplitTarget(null);
+    resolve?.(outcome);
+  };
+
+  /**
+   * PDF は中身を見てから送る(まとめてある PDF なら分け方を確かめる・謄本なら謄本として保存)。
+   * 中身を見られなかったとき(読めない PDF・混んでいる)は、これまでどおり通常の添付で送る。
+   */
+  const uploadPdf = async (file: File): Promise<{ reason: string | null; registry: boolean; outcome: string | null }> => {
+    if (file.size <= 0) return { reason: "空ファイルはアップロードできません", registry: false, outcome: null };
+    if (file.size > MAX_PDF_MB * 1024 * 1024) {
+      return { reason: `ファイルサイズが上限 (${MAX_PDF_MB}MB) を超えています`, registry: false, outcome: null };
+    }
+    let analysis: BundleAnalysisResult | null = null;
+    setAnalyzing(true);
+    try {
+      analysis = await analyzeBundlePdf(propertyId, file);
+    } catch {
+      analysis = null;
+    } finally {
+      setAnalyzing(false);
+    }
+    let route = routeForAnalysis(analysis);
+    // 中身を確かめられなかった=謄本かもしれない。推測で通常の添付にせず、人に聞く。
+    if (route === "ask") {
+      const answer = await askRegistry(file);
+      if (answer === "cancelled") return { reason: null, registry: false, outcome: "cancelled" };
+      route = answer;
+    }
+    if (route === "split" && analysis && analysis.pageCount !== null) {
+      const outcome = await askSplit(file, { ...analysis, pageCount: analysis.pageCount });
+      if (outcome.kind === "cancelled") return { reason: null, registry: false, outcome: "cancelled" };
+      return {
+        reason: null,
+        registry: outcome.kind === "split" ? outcome.registryParts > 0 : false,
+        outcome: outcome.kind === "split" ? `${outcome.parts}つの書類に分けて保存しました（元の1冊も残しています）` : null,
+      };
+    }
+    if (route === "registry") {
+      const reason = await uploadOne(file, "registry");
+      return { reason, registry: reason === null, outcome: reason === null ? "謄本として保存しました（謄本PDFの一覧にあります）" : null };
+    }
+    return { reason: await uploadOne(file, "general"), registry: false, outcome: null };
   };
 
   /**
    * 選んだ・ドロップした**すべて**のファイルを1件ずつ順に送る(2026-10-12 ご指摘: 複数ドロップで1件しか入らない)。
    * ⚠同時に送らない(大きいPDFの圧縮はサーバーで1件ずつ・席は「処理中1+待ち1」)。
    * 1件が失敗しても残りは続け、最後に失敗した分だけをまとめて出す。
+   * ⚠PDF は謄本かもしれない(ファイル名に所有者名が入り得る)ので、失敗の知らせには名前を出さず何件目かだけ。
    */
-  const handleUploads = async (files: File[], type: AttachmentType) => {
+  const sendFiles = async (files: readonly File[], kind: "auto" | "document") => {
     if (files.length === 0) return;
-    const setUploading = type === "registry" ? setUploadingRegistry : setUploadingGeneral;
-    const setUploadError =
-      type === "registry" ? setUploadErrorRegistry : setUploadErrorGeneral;
-    const setProgress = type === "registry" ? setUploadProgressRegistry : setUploadProgressGeneral;
     setUploadError(null);
+    setUploadNotice(null);
     setUploading(true);
     const failures: UploadFailure[] = [];
-    let succeeded = 0;
+    const notices: string[] = [];
+    let changed = false;
+    let registryChanged = false;
     try {
       for (const [i, file] of files.entries()) {
-        setProgress(files.length > 1 ? { current: i + 1, total: files.length } : null);
-        const reason = await uploadOne(file, type);
-        if (reason === null) succeeded++;
-        else failures.push({ index: i + 1, fileName: file.name, reason });
+        setUploadProgress(files.length > 1 ? { current: i + 1, total: files.length } : null);
+        if (kind === "auto" && dropKindOf(file) === "pdf") {
+          const r = await uploadPdf(file);
+          if (r.reason !== null) failures.push({ index: i + 1, fileName: `${i + 1}件目`, reason: r.reason });
+          else if (r.outcome !== "cancelled") changed = true;
+          if (r.registry) registryChanged = true;
+          if (r.outcome && r.outcome !== "cancelled") notices.push(r.outcome);
+        } else {
+          const reason = await uploadOne(file, "general");
+          if (reason === null) changed = true;
+          else failures.push({ index: i + 1, fileName: file.name, reason });
+        }
       }
-      if (succeeded > 0) {
+      if (changed) {
         await fetchAttachmentsData();
-        // 謄本の増減時だけ親へ通知(基本情報の件数を取り直す)。一般添付は件数行に無関係。
-        if (type === "registry") onRegistryMutated?.();
+        // 謄本が増えたときだけ親へ通知(基本情報の件数を取り直す)。一般添付は件数行に無関係。
+        if (registryChanged) onRegistryMutated?.();
       }
-      // ⚠謄本のファイル名は所有者名を含み得るので出さない(何件目かだけ)。
-      setUploadError(uploadFailureMessage(failures, files.length, { showFileNames: type !== "registry" }));
+      setUploadError(uploadFailureMessage(failures, files.length, { showFileNames: true }));
+      setUploadNotice(notices.length > 0 ? notices.join(" / ") : null);
     } finally {
       setUploading(false);
-      setProgress(null);
-      if (type === "general") setCompressingGeneral(false);
+      setUploadProgress(null);
+    }
+  };
+
+  /** 枠に入れたファイル。画像は行き先を聞き(既定=写真)、ほかはすぐ送る。 */
+  const handleDrop = (files: File[]) => {
+    const { images, rest } = splitDrop(files);
+    if (images.length > 0) {
+      setImageTarget("photo");
+      // 聞いている途中にまた画像を入れたら、前の分に足す(前の分を捨てない)。
+      setPendingImages((prev) => [...(prev ?? []), ...images]);
+    }
+    void sendFiles(rest, "auto");
+  };
+
+  /** 画像を、選んだ行き先へ送る。写真タブへは写真の口(位置情報を消してから保存)を使う。 */
+  const sendPendingImages = async () => {
+    const images = pendingImages;
+    if (!images || uploading) return;
+    setPendingImages(null);
+    if (imageTarget === "document") {
+      await sendFiles(images, "document");
+      return;
+    }
+    setUploadError(null);
+    setUploadNotice(null);
+    setUploading(true);
+    const failures: UploadFailure[] = [];
+    try {
+      for (const [i, file] of images.entries()) {
+        setUploadProgress(images.length > 1 ? { current: i + 1, total: images.length } : null);
+        if (file.size <= 0) {
+          failures.push({ index: i + 1, fileName: file.name, reason: "空ファイルはアップロードできません" });
+          continue;
+        }
+        if (file.size > MAX_FILE_SIZE) {
+          failures.push({ index: i + 1, fileName: file.name, reason: `ファイルサイズが上限 (${MAX_FILE_SIZE / 1024 / 1024}MB) を超えています` });
+          continue;
+        }
+        try {
+          await uploadFile(propertyId, file, "photo");
+        } catch (err) {
+          failures.push({ index: i + 1, fileName: file.name, reason: err instanceof Error ? err.message : "アップロードに失敗しました" });
+        }
+      }
+      const saved = images.length - failures.length;
+      setUploadError(uploadFailureMessage(failures, images.length, { showFileNames: true }));
+      setUploadNotice(saved > 0 ? `写真タブに${saved}枚入れました` : null);
+    } finally {
+      setUploading(false);
+      setUploadProgress(null);
     }
   };
 
@@ -387,33 +543,103 @@ export default function AttachmentTab({
           />
         )}
 
-        {/* Upload area: general */}
+        {/* ファイルを入れる枠は1つ(2026-10-28 発注者決定)。謄本・まとめてある PDF・画像もここから。
+            ⚠PDF は謄本かもしれない(ファイル名に所有者名が入り得る)ので、除いた知らせにも名前を出さない。 */}
         <FileDropZone
           className="mb-3"
           accept=".pdf,.xlsx,.xls,.csv,.docx,.jpg,.jpeg,.png,.webp,.heic"
           multiple
+          hideFileNames
           title="ファイルをここにドラッグ＆ドロップ"
-          hint={`上限 ${MAX_SIZE_MB}MB / PDF, Excel, CSV, Word, 画像（8MB を超えるPDFは自動で縮めます。${MAX_PDF_MB}MBまで受け付け、縮めて${MAX_SIZE_MB}MB以下になれば保存）`}
-          onFiles={(files) => void handleUploads(files, "general")}
+          hint={`PDF, Excel, CSV, Word, 画像 / 上限 ${MAX_SIZE_MB}MB（8MB を超えるPDFは自動で縮めます。${MAX_PDF_MB}MBまで受け付け、縮めて${MAX_SIZE_MB}MB以下になれば保存）。謄本は自動で見分け、書類がまとめてあるPDFは書類ごとに分けられます。画像は写真タブか添付ファイルかを選べます。`}
+          onFiles={handleDrop}
           busy={
-            uploadingGeneral ? (
+            uploading ? (
               <>
                 <Loader2 className="h-5 w-5 animate-spin text-blue-500" />
                 <span>
-                  {uploadProgressLabel(uploadProgressGeneral)}
-                  {compressingGeneral
-                    ? "大きいPDFを圧縮して保存しています…（数十秒かかることがあります）"
-                    : "アップロード中..."}
+                  {uploadProgressLabel(uploadProgress)}
+                  {splitTarget
+                    ? "分け方を確かめています…"
+                    : askTarget
+                    ? "入れ先を選んでください…"
+                    : analyzing
+                    ? "PDFの中身を見ています…（文字の無いページがあると数十秒かかります）"
+                    : compressing
+                      ? "大きいPDFを圧縮して保存しています…（数十秒かかることがあります）"
+                      : "アップロード中..."}
                 </span>
               </>
             ) : undefined
           }
         />
 
-        {uploadErrorGeneral && (
+        {askTarget && (
+          <div className="mb-3 rounded-md border border-amber-200 bg-amber-50 p-3 text-sm text-amber-900 dark:border-amber-800 dark:bg-amber-950/40 dark:text-amber-100">
+            <p className="mb-2 font-medium">このPDFの中身を確かめられませんでした。謄本ですか？</p>
+            <p className="mb-3 text-xs">
+              謄本なら「謄本として入れる」を押してください（謄本PDFの一覧に入り、面積を読みます）。
+            </p>
+            <div className="flex flex-wrap gap-2">
+              <Button type="button" size="sm" onClick={() => finishAsk("registry")}>
+                謄本として入れる
+              </Button>
+              <Button type="button" size="sm" variant="secondary" onClick={() => finishAsk("general")}>
+                通常の添付として入れる
+              </Button>
+              <Button type="button" size="sm" variant="secondary" onClick={() => finishAsk("cancelled")}>
+                やめる
+              </Button>
+            </div>
+          </div>
+        )}
+
+        {pendingImages && (
+          <div className="mb-3 rounded-md border border-blue-200 bg-blue-50 p-3 text-sm text-blue-900 dark:border-blue-800 dark:bg-blue-950/40 dark:text-blue-100">
+            <p className="mb-2 font-medium">画像が{pendingImages.length}枚あります。どちらに入れますか？</p>
+            <div className="flex flex-wrap gap-x-6 gap-y-2" role="radiogroup" aria-label="画像の入れ先">
+              <label className="flex items-center gap-2">
+                <input
+                  type="radio"
+                  name="image-target"
+                  value="photo"
+                  checked={imageTarget === "photo"}
+                  onChange={() => setImageTarget("photo")}
+                />
+                写真タブ（現地の写真など）
+              </label>
+              <label className="flex items-center gap-2">
+                <input
+                  type="radio"
+                  name="image-target"
+                  value="document"
+                  checked={imageTarget === "document"}
+                  onChange={() => setImageTarget("document")}
+                />
+                添付ファイル（書類を撮った画像など）
+              </label>
+            </div>
+            <div className="mt-3 flex gap-2">
+              <Button type="button" size="sm" onClick={() => void sendPendingImages()} disabled={uploading}>
+                入れる
+              </Button>
+              <Button type="button" size="sm" variant="secondary" onClick={() => setPendingImages(null)} disabled={uploading}>
+                やめる
+              </Button>
+            </div>
+          </div>
+        )}
+
+        {uploadNotice && (
+          <div className="mb-3 rounded-md border border-emerald-200 bg-emerald-50 p-3 text-sm text-emerald-800 dark:border-emerald-800 dark:bg-emerald-950/40 dark:text-emerald-200">
+            {uploadNotice}
+          </div>
+        )}
+
+        {uploadError && (
           <div className="mb-3 flex items-center gap-2 rounded-md border border-red-200 bg-red-50 p-3 text-sm text-red-700 dark:border-red-800 dark:bg-red-950/40 dark:text-red-300">
             <AlertTriangle className="h-4 w-4 shrink-0" />
-            {uploadErrorGeneral}
+            {uploadError}
           </div>
         )}
 
@@ -468,33 +694,10 @@ export default function AttachmentTab({
       {/* ============================== 謄本PDF ============================== */}
       <section>
         <h3 className="mb-2 text-sm font-semibold text-gray-700 dark:text-gray-200">謄本PDF</h3>
-
-        {/* Upload area: registry */}
-        <FileDropZone
-          className="mb-3"
-          accept="application/pdf,.pdf"
-          multiple
-          hideFileNames
-          icon={FileText}
-          title="謄本PDFをここにドラッグ＆ドロップ"
-          hint={`PDF のみ / 上限 ${MAX_SIZE_MB}MB（縮めずにそのまま保存）`}
-          onFiles={(files) => void handleUploads(files, "registry")}
-          busy={
-            uploadingRegistry ? (
-              <>
-                <Loader2 className="h-5 w-5 animate-spin text-amber-500" />
-                <span>{uploadProgressLabel(uploadProgressRegistry)}アップロード中...</span>
-              </>
-            ) : undefined
-          }
-        />
-
-        {uploadErrorRegistry && (
-          <div className="mb-3 flex items-center gap-2 rounded-md border border-red-200 bg-red-50 p-3 text-sm text-red-700 dark:border-red-800 dark:bg-red-950/40 dark:text-red-300">
-            <AlertTriangle className="h-4 w-4 shrink-0" />
-            {uploadErrorRegistry}
-          </div>
-        )}
+        {/* 謄本は上の枠に入れると自動で見分けてここに入る(2026-10-28 枠を1つに)。縮めずにそのまま保存。 */}
+        <p className="mb-3 text-xs text-gray-500 dark:text-gray-400">
+          謄本は上の枠に入れると、自動で見分けてここに入ります（上限 {MAX_SIZE_MB}MB・縮めずにそのまま保存）。
+        </p>
 
         {registryAttachments.length === 0 ? (
           <div className="flex flex-col items-center py-6 text-gray-400 dark:text-gray-500">
@@ -519,6 +722,28 @@ export default function AttachmentTab({
         <div className="rounded-md border border-red-200 bg-red-50 p-3 text-sm text-red-700 dark:border-red-800 dark:bg-red-950/40 dark:text-red-300">
           {error}
         </div>
+      )}
+
+      {/* まとめてある PDF の分け方 */}
+      {splitTarget && (
+        <SplitPdfDialog
+          file={splitTarget.file}
+          analysis={splitTarget.analysis}
+          onCancel={() => finishSplit({ kind: "cancelled" })}
+          onSaveWhole={async (segments) => {
+            // 謄本のページが入っていれば(最初に読んだページの種類でも見る)、元の名前(所有者名を含み得る)を使わずに送る。
+            const hasRegistry = bundleHasRegistry(splitTarget.analysis.pageKinds, segments);
+            const reason = await uploadOne(wholeBundleFile(splitTarget.file, hasRegistry), "general");
+            if (reason !== null) throw new Error(reason);
+            finishSplit({ kind: "whole" });
+          }}
+          onSave={async (segments) => {
+            const r = await saveSplitPdf(propertyId, splitTarget.file, segments, {
+              containsRegistry: bundleHasRegistry(splitTarget.analysis.pageKinds, segments),
+            });
+            finishSplit({ kind: "split", parts: r.parts, registryParts: r.registryParts });
+          }}
+        />
       )}
 
       {/* Preview modal */}

@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import {
-  CHECKLIST_AMOUNT_KEYS, DEFAULT_CHECKLIST_ITEMS, checklistItemsSchema, itemsFor, resolveChecklistItems, type ChecklistItem,
+  CHECKLIST_AMOUNT_KEYS, CHECKLIST_USES, DEFAULT_CHECKLIST_ITEMS, usedIn, checklistItemsSchema, itemsFor, resolveChecklistItems, type ChecklistItem,
 } from "../checklist";
 
 const item = (p: Partial<ChecklistItem>): ChecklistItem => ({
@@ -56,5 +56,27 @@ describe("書類確認書の項目(段5c-1)", () => {
     expect(ids("land", false)).toEqual(["all", "land"]);
     // 種別が無い取引は「すべて」だけ(OC は取引の値で決まる)
     expect(ids(null, true)).toEqual(["all", "oc"]);
+  });
+});
+
+describe("使う書類(第2段階 §4.4)", () => {
+  const base = DEFAULT_CHECKLIST_ITEMS[0];
+  it("保存済みの項目(use が無い)は両方として読む・知らない値は断る", () => {
+    const parsed = checklistItemsSchema.parse([base]);
+    expect(parsed[0].use).toBeUndefined();
+    expect(usedIn(parsed[0], "checklist")).toBe(true);
+    expect(usedIn(parsed[0], "prep")).toBe(true);
+    expect(checklistItemsSchema.parse([{ ...base, use: "prep" }])[0].use).toBe("prep");
+    expect(checklistItemsSchema.safeParse([{ ...base, use: "other" }]).success).toBe(false);
+    expect(Object.keys(CHECKLIST_USES)).toEqual(["both", "checklist", "prep"]);
+  });
+  it("書類ごとに出し分ける(書類確認書=両方と書類確認書だけ・準備チェックリスト=両方と準備チェックリストだけ)", () => {
+    const items = [
+      { ...base, id: "a" }, { ...base, id: "b", use: "checklist" as const }, { ...base, id: "c", use: "prep" as const }, { ...base, id: "d", use: "both" as const },
+    ];
+    const deal = { base: "house" as const, hasOc: false };
+    expect(itemsFor(items, base.phase, deal).map((i) => i.id)).toEqual(["a", "b", "d"]);
+    expect(itemsFor(items, base.phase, deal, "checklist").map((i) => i.id)).toEqual(["a", "b", "d"]);
+    expect(itemsFor(items, base.phase, deal, "prep").map((i) => i.id)).toEqual(["a", "c", "d"]);
   });
 });

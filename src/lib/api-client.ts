@@ -3842,6 +3842,48 @@ export async function uploadScannedDocument(propertyId: string, pages: readonly 
   return res.json();
 }
 
+/** まとめてある PDF の分け方(1 から数えたページ・両端を含む)。kind は種類の code・"registry"(謄本)・null(その他)。 */
+export interface BundleSegment {
+  from: number;
+  to: number;
+  kind: string | null;
+}
+
+export interface BundleAnalysisResult {
+  /** 読めない PDF は null(=分けずに保存する)。 */
+  pageCount: number | null;
+  pageKinds: (string | null)[];
+  segments: BundleSegment[];
+  ocr: "done" | "unavailable" | "failed" | "skipped";
+  tooManyPages: boolean;
+}
+
+/** まとめてある PDF の分け方の案(保存はしない)。 */
+export async function analyzeBundlePdf(propertyId: string, file: File): Promise<BundleAnalysisResult> {
+  const formData = new FormData();
+  formData.append("file", file);
+  const res = await fetch(`/api/properties/${propertyId}/attachments/split-analyze`, { method: "POST", body: formData });
+  if (!res.ok) throw await toApiError(res);
+  return res.json();
+}
+
+/** まとめてある PDF を、確かめた分け方で書類ごとに保存する(元の1冊も残る)。 */
+export async function saveSplitPdf(
+  propertyId: string,
+  file: File,
+  segments: readonly BundleSegment[],
+  opts: { containsRegistry?: boolean } = {},
+): Promise<{ originalId: string; parts: number; registryParts: number }> {
+  const formData = new FormData();
+  formData.append("file", file);
+  formData.append("segments", JSON.stringify(segments));
+  // 謄本のページが入っている(人が分け目を消してつなげた場合も)=サーバーは元の名前を使わない。
+  if (opts.containsRegistry) formData.append("containsRegistry", "1");
+  const res = await fetch(`/api/properties/${propertyId}/attachments/split`, { method: "POST", body: formData });
+  if (!res.ok) throw await toApiError(res);
+  return res.json();
+}
+
 // ---------- Property Create ----------
 
 export async function createProperty(data: {
