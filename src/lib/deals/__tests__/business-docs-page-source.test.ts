@@ -55,6 +55,14 @@ describe("書類タブの業務書類(段5a・5b・5c)", () => {
   it("発行は、確認を開いたときの取引の版で送る", () => {
     expect(read(SECTION)).toContain("dealsApi.issueDocument(dealId, doc.docType, version, options)");
   });
+  it("項目の表のある書類は共通の部品で描き、「すべて空欄に戻す」を一番上に置く(第2段階 段B)", () => {
+    const src = read(SECTION);
+    expect(src).toContain("<DocFormFields form={doc.form} values={values} onChange={set} />");
+    expect(src).toContain("setValues(emptyFormValues(doc.form))");
+    expect(src.indexOf("すべて空欄に戻す")).toBeLessThan(src.indexOf("<DocFormFields"));
+    expect(read("src/lib/deals/client.ts")).toContain("form: FormDef | null;");
+    expect(read("src/app/api/deals/[id]/documents/available/route.ts")).toContain("form: d.form ?? null,");
+  });
   it("契約のご案内・取引完了確認書の入力欄(第2段階 段A)", () => {
     const src = read(SECTION);
     expect(src.indexOf('{ key: "contract", label: "契約・媒介の書類" }')).toBeLessThan(src.indexOf('{ key: "settlement", label: "決済の書類" }'));

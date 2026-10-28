@@ -9,6 +9,7 @@ import type { BusinessInputs } from "./business-schema";
 import type { BusinessPlanCalc } from "./calc/business-plan";
 import type { BusinessSectionKey } from "./business-sections";
 import type { RegistryRightsView } from "./registry-rights";
+import type { FormDef } from "@/lib/deals/documents/forms/types";
 
 /** 取引の画面から API を呼ぶ。失敗はサーバーの文言とコードを持った DealApiError にする。 */
 export class DealApiError extends Error {
@@ -44,6 +45,8 @@ export interface AvailableDocument {
   issuers: { value: string; label: string; individual: boolean }[] | null;
   /** 当事者などから選ぶ欄の選べる値(欄の名前ごと)。 */
   choices: Record<string, { value: string; label: string }[]> | null;
+  /** 項目の表(入力欄を共通の部品で描く・第2段階 段B)。無い書類は null。 */
+  form: FormDef | null;
 }
 export interface DealDocumentView {
   id: string; docType: string; variant: string; version: number; title: string;

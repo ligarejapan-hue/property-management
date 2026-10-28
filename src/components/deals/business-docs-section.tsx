@@ -5,6 +5,8 @@ import { FileOutput, FileText, Loader2, Plus, Trash2 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { ModalShell } from "@/components/ui/modal-shell";
 import { Field, inputCls } from "./form-parts";
+import { DocFormFields } from "./doc-form-fields";
+import { emptyFormValues } from "@/lib/deals/documents/forms/values";
 import { CHECKLIST_TEXT_MAX } from "@/lib/deals/checklist";
 import { dealsApi, dealDocumentFileUrl, DealApiError, errorText, type AvailableDocument } from "@/lib/deals/client";
 
@@ -203,6 +205,15 @@ function IssueDialog({ dealId, doc, version, onCancel, onDone }: {
               <input type="date" value={str(values.receivedOn)} onChange={(e) => set("receivedOn", e.target.value)} aria-label="受領日" className={inputCls} />
             </Field>
             <p className="text-xs text-gray-500">個人の方が発行する領収書には自社の角印を付けず、署名・押印の欄を空けて出します。</p>
+          </>
+        )}
+        {doc.form && (
+          <>
+            <div className="flex flex-wrap items-center gap-2">
+              <Button variant="secondary" size="sm" onClick={() => doc.form && setValues(emptyFormValues(doc.form))}>すべて空欄に戻す</Button>
+              <p className="text-xs text-gray-500">選ばなかった項目は □ を並べた空欄で出ます(手で書けます)。全部空欄のまま出すと、手書き用の書式になります。前に発行したことがあれば、そのときの入力が初めから入っています。</p>
+            </div>
+            <DocFormFields form={doc.form} values={values} onChange={set} />
           </>
         )}
         {doc.docType === "contract_guide" && (
