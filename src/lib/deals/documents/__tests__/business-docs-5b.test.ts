@@ -55,7 +55,7 @@ const OC_KEYS = ["oc_purchase_consult", "tenant_survey", "landlord_change_notice
 describe("一覧表(段5b)", () => {
   it("委任状・鍵受領書・OC の4種が足され、まとまりを持つ", () => {
     expect(BUSINESS_DOCS.map((d) => d.key)).toEqual([
-      "contract_guide", "settlement_statement", "settlement_guide", "settlement_guide_seller", "deposit_receipt", "balance_receipt", "settlement_receipt", "completion_confirmation",
+      "contract_guide", "seller_survey", "settlement_statement", "settlement_guide", "settlement_guide_seller", "deposit_receipt", "balance_receipt", "settlement_receipt", "completion_confirmation",
       "power_of_attorney", "key_receipt", ...OC_KEYS, "checklist_contract", "checklist_settlement",
     ]);
     expect(doc("power_of_attorney").group).toBe("other");

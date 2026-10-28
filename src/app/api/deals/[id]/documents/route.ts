@@ -97,8 +97,8 @@ export async function POST(request: Request, ctx: Ctx) {
       const bctx: BusinessDocContext = {
         deal, calc: computeDealCalc(deal, rateRows, settings.propertyKinds, today), settings, company, rateRows, today,
         logo: branding.logo, seal: branding.seal, staff: await loadDealStaffNames(deal),
-        // 謄本は書類確認書のときだけ読む(計画 段5c-2 の読み替え 5)。
-        registry: businessDoc.group === "checklist" ? await loadRegistryDocInfo(await registryPropertyFor(session, perms, deal.propertyId)) : undefined,
+        // 謄本は書類確認書と、謄本の状況を使う書類(売主属性調査書)のときだけ読む(計画 段5c-2 の読み替え 5・第2段階 段B)。
+        registry: businessDoc.group === "checklist" || businessDoc.usesRegistry ? await loadRegistryDocInfo(await registryPropertyFor(session, perms, deal.propertyId)) : undefined,
       };
       if (!businessDoc.applies(bctx)) throw new ApiError(422, `この取引では${businessDoc.label}を出せません`, "DOC_NOT_APPLICABLE");
       // 止める項目(賃借人がいない・金額が無いなど)は画面だけでなくサーバーでも止める(空の書類を作らない)。
