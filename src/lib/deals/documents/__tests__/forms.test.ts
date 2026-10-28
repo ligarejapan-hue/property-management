@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import type { FormDef } from "../forms/types";
-import { emptyFormValues, formItems } from "../forms/values";
+import { clearFormValues, emptyFormValues, formItems, visibleEntries } from "../forms/values";
 import { formValuesSchema } from "../forms/schema";
 import { formValueRows, renderFormHtml } from "../forms/render";
 
@@ -64,5 +64,38 @@ describe("項目の表(設計 第2段階 §3.3)", () => {
       { label: "非居住者", value: null },
       { label: "注意事項 内容", value: "メモ" },
     ]);
+  });
+});
+
+describe("項目の表のタブ(第2段階 段D・発注者の指示「同じページの中でタブで選択」)", () => {
+  const TABBED: FormDef = {
+    key: "tabbed",
+    tabs: { key: "kind", label: "型", choices: [{ value: "a", label: "甲型" }, { value: "b", label: "乙型" }] },
+    entries: [
+      { kind: "item", key: "shared", label: "共通", choices: [{ value: "x", label: "ア" }] },
+      { kind: "item", key: "onlyA", label: "甲だけ", only: ["a"], fields: [{ key: "onlyAText", label: "内容", max: 10 }] },
+      { kind: "item", key: "onlyB", label: "乙だけ", only: ["b"], choices: [{ value: "1", label: "1" }, { value: "2", label: "2" }] },
+    ],
+  };
+  it("空の値はタブの最初の選択肢・タブの鍵は形にも入る(知らない型は断る)", () => {
+    expect(emptyFormValues(TABBED)).toEqual({ kind: "a", shared: null, onlyAText: null, onlyB: null });
+    const s = formValuesSchema(TABBED);
+    expect(s.parse({}).kind).toBe("a");
+    expect(s.parse({ kind: "b", onlyB: "2" })).toMatchObject({ kind: "b", onlyB: "2" });
+    expect(s.safeParse({ kind: "c" }).success).toBe(false);
+    expect(s.safeParse({ kind: null }).success).toBe(false);
+  });
+  it("選んでいるタブの項目だけを出す(入力欄・PDF・Excel)", () => {
+    const a = { ...emptyFormValues(TABBED), onlyAText: "甲の値", onlyB: "2" };
+    expect(visibleEntries(TABBED, a).map((e) => (e.kind === "item" ? e.key : ""))).toEqual(["shared", "onlyA"]);
+    expect(visibleEntries(TABBED, { ...a, kind: "b" }).map((e) => (e.kind === "item" ? e.key : ""))).toEqual(["shared", "onlyB"]);
+    const h = renderFormHtml(TABBED, a).toString();
+    expect(h).toContain("甲の値");
+    expect(h).not.toContain("乙だけ");
+    expect(formValueRows(TABBED, a).map((r) => r.label)).toEqual(["共通", "甲だけ 内容"]);
+  });
+  it("全部空欄に戻しても、選んでいるタブはそのまま", () => {
+    expect(clearFormValues(TABBED, { kind: "b", shared: "x", onlyB: "1" })).toEqual({ kind: "b", shared: null, onlyAText: null, onlyB: null });
+    expect(clearFormValues(FORM, { yn: "yes" })).toEqual(emptyFormValues(FORM));
   });
 });

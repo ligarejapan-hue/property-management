@@ -6,7 +6,7 @@ import { Button } from "@/components/ui/button";
 import { ModalShell } from "@/components/ui/modal-shell";
 import { Field, inputCls } from "./form-parts";
 import { DocFormFields } from "./doc-form-fields";
-import { emptyFormValues } from "@/lib/deals/documents/forms/values";
+import { clearFormValues } from "@/lib/deals/documents/forms/values";
 import { useDraftAutosave, useDraftExists, useRestoredDraft } from "@/hooks/use-draft";
 import { DraftRestoredNotice, DraftTooLargeNotice } from "@/components/drafts/draft-notices";
 import { dealDocumentDraftKey, parseDealDocumentDraft, sameAsInitial, type DealDocumentDraft } from "@/lib/drafts/screens/deal-document";
@@ -244,7 +244,7 @@ function IssueDialog({ dealId, doc, version, onCancel, onDone }: {
         {doc.form && (
           <>
             <div className="flex flex-wrap items-center gap-2">
-              <Button variant="secondary" size="sm" onClick={() => doc.form && setValues(emptyFormValues(doc.form))}>すべて空欄に戻す</Button>
+              <Button variant="secondary" size="sm" onClick={() => doc.form && setValues(clearFormValues(doc.form, values))}>すべて空欄に戻す</Button>
               <p className="text-xs text-gray-500">選ばなかった項目は □ を並べた空欄で出ます(手で書けます)。全部空欄のまま出すと、手書き用の書式になります。前に発行したことがあれば、そのときの入力が初めから入っています。</p>
             </div>
             <DocFormFields form={doc.form} values={values} onChange={set} />

@@ -16,8 +16,15 @@ export interface FormItem {
   fields?: FormField[];
   /** when を選んだときだけ出す注意書き。 */
   note?: { when: string; text: string };
+  /** タブ(FormDef.tabs)の値がこの中のときだけ出す。無ければいつも出す。 */
+  only?: string[];
 }
 export type FormEntry = { kind: "section"; title: string } | FormItem;
-export interface FormDef { key: string; entries: FormEntry[] }
+export interface FormDef {
+  key: string;
+  /** 一番上のタブ(同じ書類の中で型を切り替える・第2段階 段D)。値は key の欄に入る(空欄にはならない)。 */
+  tabs?: { key: string; label: string; choices: FormChoice[] };
+  entries: FormEntry[];
+}
 /** 発行のときの値(平らな1つの表)。選ぶ項目=値か null(いくつでも=配列)・書き込み欄=文字か null。 */
 export type FormValues = Record<string, string | string[] | null>;

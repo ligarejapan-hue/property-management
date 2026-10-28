@@ -58,7 +58,8 @@ describe("書類タブの業務書類(段5a・5b・5c)", () => {
   it("項目の表のある書類は共通の部品で描き、「すべて空欄に戻す」を一番上に置く(第2段階 段B)", () => {
     const src = read(SECTION);
     expect(src).toContain("<DocFormFields form={doc.form} values={values} onChange={set} />");
-    expect(src).toContain("setValues(emptyFormValues(doc.form))");
+    // 全部空欄に戻しても、選んでいるタブ(媒介契約書の型など)はそのまま(第2段階 段D)
+    expect(src).toContain("setValues(clearFormValues(doc.form, values))");
     expect(src.indexOf("すべて空欄に戻す")).toBeLessThan(src.indexOf("<DocFormFields"));
     expect(read("src/lib/deals/client.ts")).toContain("form: FormDef | null;");
     expect(read("src/app/api/deals/[id]/documents/available/route.ts")).toContain("form: d.form ?? null,");

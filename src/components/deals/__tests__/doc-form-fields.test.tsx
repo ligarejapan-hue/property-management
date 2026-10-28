@@ -28,6 +28,24 @@ describe("項目の表から入力欄を描く(設計 第2段階 §3.3)", () => 
     expect(out).toContain("<textarea");
     expect(out).toContain('maxLength="50"');
   });
+  it("タブ: 一番上に型のタブ・選んだタブだけ選択中・そのタブの項目だけ描く", () => {
+    const TABBED: FormDef = {
+      key: "tabbed",
+      tabs: { key: "kind", label: "型", choices: [{ value: "a", label: "甲型" }, { value: "b", label: "乙型" }] },
+      entries: [
+        { kind: "item", key: "onlyA", label: "甲だけの欄", only: ["a"], fields: [{ key: "onlyAText", label: "内容", max: 10 }] },
+        { kind: "item", key: "onlyB", label: "乙だけの欄", only: ["b"], fields: [{ key: "onlyBText", label: "内容", max: 10 }] },
+      ],
+    };
+    const out = renderToStaticMarkup(<DocFormFields form={TABBED} values={{ kind: "b" }} onChange={() => {}} />);
+    expect(out).toContain('role="tablist"');
+    expect(out).toContain('aria-label="型"');
+    expect(out).toMatch(/<button[^>]*role="tab"[^>]*aria-selected="true"[^>]*>乙型<\/button>/);
+    expect(out).toMatch(/<button[^>]*role="tab"[^>]*aria-selected="false"[^>]*>甲型<\/button>/);
+    expect(out.indexOf('role="tablist"')).toBeLessThan(out.indexOf("乙だけの欄"));
+    expect(out).toContain("乙だけの欄");
+    expect(out).not.toContain("甲だけの欄");
+  });
   it("空欄の値でも落ちない", () => {
     expect(() => render({})).not.toThrow();
   });

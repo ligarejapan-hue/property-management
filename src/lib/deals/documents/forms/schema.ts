@@ -9,6 +9,7 @@ import { formItems } from "./values";
  */
 export function formValuesSchema(f: FormDef): z.ZodType<FormValues> {
   const shape: Record<string, z.ZodType> = {};
+  if (f.tabs) shape[f.tabs.key] = z.enum(f.tabs.choices.map((c) => c.value) as [string, ...string[]]).default(f.tabs.choices[0].value);
   for (const it of formItems(f)) {
     if (it.choices?.length) {
       const one = z.enum(it.choices.map((c) => c.value) as [string, ...string[]]);
