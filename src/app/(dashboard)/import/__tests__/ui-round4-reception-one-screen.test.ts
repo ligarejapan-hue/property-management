@@ -15,7 +15,7 @@ describe("受付帳CSV取込: 受付帳は1回だけ入れる", () => {
     expect(src).toContain('data-testid="reception-shared"');
     expect(src).toMatch(/const entry = \{ name: file\.name, csvText: buf\.csvText, xlsxBase64: buf\.xlsxBase64 \};\s*setRpFile\(entry\);\s*setReceptionFile\(entry\);/);
     // 「ファイルを入れる」から持ってきた受付帳は、①②の両方へ同じものを入れる(下見は捨てる)。
-    expect(src).toContain("handedReception ?? s0?.ro?.receptionFile ?? null");
+    expect(src).toContain("handedReception ?? s0?.ro?.receptionFile ?? (handedOwner ? recallReception() : null)");
     expect(src).toContain("handedReception ?? s0?.rp?.rpFile ?? null");
     expect(src).toContain("handedReception ? null : ((s0?.rp?.rpPreview as never) ?? null)");
     expect(src).toContain("roReplaced ? null : ((s0?.ro?.roPreview as never) ?? null)");
@@ -82,7 +82,9 @@ describe("①が済んだあと戻ったとき(@codex #523 P2)", () => {
 
 describe("②が済んだあと戻ったとき(@codex #523 P2・①と対称)", () => {
   it("①の控えの受付帳を②へ渡さず、②に「①のために残している」と出す", () => {
-    expect(src).toMatch(/\} \| null>\(handedReception \?\? s0\?\.ro\?\.receptionFile \?\? null\);/);
+    // 覚えておいた受付帳(recallReception)は②自身の受付帳(receptionFile)だけ=①の控えからは作らない。
+    expect(src).toContain("} | null>(handedReception ?? s0?.ro?.receptionFile ?? (handedOwner ? recallReception() : null));");
+    expect(src).toMatch(/useEffect\(\(\) => \{\s*rememberReception\(receptionFile\);\s*\}, \[receptionFile\]\);/);
     const at = src.indexOf('data-testid="owner-match-needs-reception"');
     expect(src.slice(at, at + 900)).toContain("上の受付帳は①（物件を作る）のために残しています。");
   });

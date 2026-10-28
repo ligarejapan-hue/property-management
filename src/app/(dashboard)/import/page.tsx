@@ -36,7 +36,7 @@ import {
 } from "@/lib/api-client";
 import ImportSwitcher from "@/components/import/import-switcher";
 import HandedFileSlot from "@/components/import/handed-file-slot";
-import { clearHandoff, peekHandoffEntry } from "@/lib/import-drop/handoff";
+import { clearHandoff, peekHandoffEntry, recallReception, rememberReception } from "@/lib/import-drop/handoff";
 import { draftKey } from "@/lib/drafts/draft-store";
 import { hasImportResultShape, isDefiniteSubmitFailure } from "@/lib/drafts/submit-outcome";
 import {
@@ -328,12 +328,18 @@ function ImportScreen({ draftEnabled }: { draftEnabled: boolean }) {
     name: string;
     csvText?: string;
     xlsxBase64?: string;
-  } | null>(handedReception ?? s0?.ro?.receptionFile ?? null);
+    // 所有者の一覧だけを持って戻ったとき、控えに受付帳が無ければ(大きくて控えに入らなかった等)、
+    // 画面の中で覚えておいた受付帳を使う(②の突き合わせを続けられるように・@codex #607 P2)。
+  } | null>(handedReception ?? s0?.ro?.receptionFile ?? (handedOwner ? recallReception() : null));
   const [ownerFile, setOwnerFile] = useState<{
     name: string;
     csvText?: string;
     xlsxBase64?: string;
   } | null>(handedOwner ?? s0?.ro?.ownerFile ?? null);
+  // ②の受付帳を画面の外にも覚えておく(所有者の一覧を取りに「ファイルを入れる」へ行って戻るとき用・@codex #607 P2)。
+  useEffect(() => {
+    rememberReception(receptionFile);
+  }, [receptionFile]);
   const [roPreview, setRoPreview] = useState<ReceptionOwnerPreviewResponse | null>(
     roReplaced ? null : ((s0?.ro?.roPreview as never) ?? null),
   );

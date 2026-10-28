@@ -35,6 +35,7 @@ vi.mock("@/lib/pdf-extract", async (importOriginal) => {
   return { ...actual, extractHeadTextFromPdf: extractHead };
 });
 
+import * as XLSX from "xlsx";
 import { POST } from "@/app/api/import/detect/route";
 
 function jsonReq(body: unknown) {
@@ -85,6 +86,25 @@ describe("表(CSV)", () => {
     const csv = "所有者氏名,所有者住所\n山田太郎,東京都練馬区";
     const body = await (await POST(jsonReq({ fileName: "list.csv", csvText: csv }))).json();
     expect(Object.keys(body)).toEqual(["target"]);
+  });
+});
+
+describe("Excel", () => {
+  function xlsxBase64(sheets: Record<string, string[][]>): string {
+    const wb = XLSX.utils.book_new();
+    for (const [name, aoa] of Object.entries(sheets)) XLSX.utils.book_append_sheet(wb, XLSX.utils.aoa_to_sheet(aoa), name);
+    return Buffer.from(XLSX.write(wb, { type: "buffer", bookType: "xlsx" })).toString("base64");
+  }
+  const LEAD = [["姓名", "物件所在地", "電話番号"], ["山田太郎", "東京都練馬区氷川台4-1-1", "090-0000-0000"]];
+
+  it("査定サイトの顧客管理表 → Excelから物件化", async () => {
+    const res = await POST(jsonReq({ fileName: "顧客管理表.xlsx", xlsxBase64: xlsxBase64({ 一覧: LEAD }) }));
+    expect(await target(res)).toBe("lead_excel");
+  });
+
+  it("1枚目のシートが空でも、後ろのシートの顧客管理表を見分ける(@codex #607 P2)", async () => {
+    const res = await POST(jsonReq({ fileName: "顧客管理表.xlsx", xlsxBase64: xlsxBase64({ 空: [], 一覧: LEAD }) }));
+    expect(await target(res)).toBe("lead_excel");
   });
 });
 

@@ -37,6 +37,22 @@ export function clearHandoff(target: HandoffTarget): void {
   if (slot !== null && slot.target === target) slot = null;
 }
 
+/**
+ * 受付帳の画面で入っている受付帳を、画面の外にも覚えておく(@codex #607 P2)。
+ * ⚠所有者の一覧は「ファイルを入れる」から持ってくるので、そのあいだ受付帳の画面は閉じる。受付帳が
+ *   控えの上限(150万字)を超えると控えに残らず、戻ったとき受付帳が消えて②の突き合わせができない。
+ *   控えとは別に、ここ(画面の中)で覚えておき、所有者だけを持って戻ったときに使う。
+ */
+let rememberedReception: SheetEntry | null = null;
+
+export function rememberReception(entry: SheetEntry | null): void {
+  rememberedReception = entry;
+}
+
+export function recallReception(): SheetEntry | null {
+  return rememberedReception;
+}
+
 /** PDF・Excel の画面: 渡された File(無ければ null)。 */
 export function peekHandoffFile(target: "lead_excel" | "registry_pdf" | "paste_pdf"): File | null {
   const p = peekHandoff(target);

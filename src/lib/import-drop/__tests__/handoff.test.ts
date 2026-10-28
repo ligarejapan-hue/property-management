@@ -1,5 +1,13 @@
 import { beforeEach, describe, expect, it } from "vitest";
-import { clearHandoff, peekHandoff, peekHandoffEntry, peekHandoffFile, putHandoff } from "../handoff";
+import {
+  clearHandoff,
+  peekHandoff,
+  peekHandoffEntry,
+  peekHandoffFile,
+  putHandoff,
+  recallReception,
+  rememberReception,
+} from "../handoff";
 
 const pdf = new File(["%PDF-"], "謄本.pdf", { type: "application/pdf" });
 
@@ -31,6 +39,13 @@ describe("handoff(取り込みの画面へファイルを持って進む)", () =
     putHandoff({ target: "owner", entry: { name: "所有者.csv", csvText: "所有者氏名\n山田" } });
     expect(peekHandoffEntry("reception")).toBeNull();
     expect(peekHandoffEntry("owner")).toEqual({ name: "所有者.csv", csvText: "所有者氏名\n山田" });
+  });
+
+  it("受付帳の画面の受付帳は、控えとは別に覚えておける(所有者だけ持って戻るとき用・@codex #607 P2)", () => {
+    rememberReception({ name: "受付帳.csv", csvText: "a".repeat(10) });
+    expect(recallReception()?.name).toBe("受付帳.csv");
+    rememberReception(null);
+    expect(recallReception()).toBeNull();
   });
 
   it("置けるのは1つだけ(新しく置くと前のものは捨てる)", () => {

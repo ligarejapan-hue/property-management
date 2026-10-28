@@ -71,11 +71,9 @@ function detectSheet(body: unknown): DropTarget {
   const xlsxBase64 = typeof b.xlsxBase64 === "string" ? b.xlsxBase64 : undefined;
   const isXlsx = detectFileFormat(b.fileName) === "xlsx";
   let contentType: ImportFileType | null = null;
-  let parsedOk = false;
   try {
     // 先に取り込みと同じ読み方で読む(大きさ・展開後の大きさの守りもここで効く)。
     const sheet = parseSheet({ fileName: b.fileName, csvText, xlsxBase64 });
-    parsedOk = true;
     // 取り込みの口と同じ入力(列の並びの行)で判定する。
     const positional = sheet.rows.map((r) => sheet.headers.map((h) => r[h] ?? ""));
     contentType = detectImportFileTypeFromContent(sheet.headers, positional).type;
@@ -90,8 +88,9 @@ function detectSheet(body: unknown): DropTarget {
     if (e.code === "INPUT_TOO_LARGE") throw new ApiError(422, e.message, "VALIDATION_ERROR");
     // ほかの読めない表は、取り込みには回さない(Excel は書類・CSV は人が選ぶ)。
   }
-  // 顧客管理表は Excel だけ。取り込みの読み方で読めた(大きさの守りを通った)ものだけ見る。
-  const leadRows = isXlsx && parsedOk && xlsxBase64 ? countLeadRows(xlsxBase64) : 0;
+  // 顧客管理表は Excel だけ。全シートを見る(1枚目が空でも後ろのシートにあることがある・@codex #607 P2)。
+  //   大きすぎるものは上で断った。countLeadRows も自分で大きさ・展開後の大きさを確かめてから読む。
+  const leadRows = isXlsx && xlsxBase64 ? countLeadRows(xlsxBase64) : 0;
   return sheetTarget({ contentType, leadRows, isXlsx });
 }
 
