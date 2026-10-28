@@ -26,6 +26,7 @@ export const DEAL_DOC_TYPES = {
   checklist_contract: { label: "書類確認書(契約時)", variants: { default: "" } },
   settlement_guide_seller: { label: "残金決済のご案内(売主様)", variants: { default: "" } },
   checklist_settlement: { label: "書類確認書(決済時)", variants: { default: "" } },
+  prep_checklist: { label: "準備チェックリスト", variants: { default: "" } },
 } as const;
 
 export type DealDocType = keyof typeof DEAL_DOC_TYPES;
