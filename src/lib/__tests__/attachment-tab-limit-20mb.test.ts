@@ -15,11 +15,15 @@ describe("添付タブの上限(20MB)", () => {
   });
 
   it("「圧縮しています」の表示は 8MB(縮める目標)を超えたときだけ", () => {
-    expect(src).toMatch(/setCompressingGeneral\(compressible && file\.size > MAX_FILE_SIZE\)/);
+    // 2026-10-28 枠を1つにしたので、状態の名前は setCompressing(謄本の枠の分は無くなった)。
+    expect(src).toMatch(/setCompressing\(compressible && file\.size > MAX_FILE_SIZE\)/);
   });
 
-  it("案内に 20MB まで保存できることと、8MB を超える PDF は縮めることが出る", () => {
-    expect(src).toContain("hint={`上限 ${MAX_SIZE_MB}MB / PDF, Excel, CSV, Word, 画像（8MB を超えるPDFは自動で縮めます。${MAX_PDF_MB}MBまで受け付け、縮めて${MAX_SIZE_MB}MB以下になれば保存）`}");
-    expect(src).toContain("hint={`PDF のみ / 上限 ${MAX_SIZE_MB}MB（縮めずにそのまま保存）`}");
+  it("案内に 20MB まで保存できることと、8MB を超える PDF は縮めること・謄本は縮めないことが出る", () => {
+    expect(src).toContain(
+      "上限 ${MAX_SIZE_MB}MB（8MB を超えるPDFは自動で縮めます。${MAX_PDF_MB}MBまで受け付け、縮めて${MAX_SIZE_MB}MB以下になれば保存）",
+    );
+    // 謄本の枠は無くなり、一覧の上の案内で「縮めずにそのまま保存」を伝える。
+    expect(src).toContain("（上限 {MAX_SIZE_MB}MB・縮めずにそのまま保存）");
   });
 });
