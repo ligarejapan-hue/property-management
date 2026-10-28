@@ -148,15 +148,27 @@ describe("PDF", () => {
 });
 
 describe("大きさの守り(この口は proxy の先読みの上限が効かない)", () => {
-  it("表(JSON)の本文が上限を超えると、読む前に断る", async () => {
+  it("表(JSON)の本文が上限(取り込みの口と同じ 64MB)を超えると、読む前に断る", async () => {
     const req = new Request("http://t/api/import/detect", {
       method: "POST",
       body: "{}",
-      headers: { "content-type": "application/json", "content-length": String(17 * 1024 * 1024) },
+      headers: { "content-type": "application/json", "content-length": String(65 * 1024 * 1024) },
     }) as unknown as NextRequest;
     const res = await POST(req);
     expect(res.status).toBeGreaterThanOrEqual(400);
     expect(res.status).not.toBe(200);
+  });
+
+  it("⚠引用符の多い CSV は JSON にすると膨らむが、取り込める大きさなら断らない(@codex #607 P2)", async () => {
+    // 欄はどれも `""""`(中身が " 1文字の欄)。" は JSON で \" になり2倍に膨らむ。
+    const row = Array.from({ length: 150 }, () => '""""').join(",");
+    const header = "所有者氏名,所有者住所," + Array.from({ length: 148 }, (_, i) => `c${i}`).join(",");
+    const csv = [header, ...Array.from({ length: 13_000 }, () => row)].join("\n");
+    expect(Buffer.byteLength(csv)).toBeLessThan(10 * 1024 * 1024);
+    const req = jsonReq({ fileName: "list.csv", csvText: csv });
+    expect(Number(req.headers.get("content-length"))).toBeGreaterThan(16 * 1024 * 1024);
+    const res = await POST(req);
+    expect(res.status).toBe(200);
   });
 
   it("中身が大きすぎる表は 422(受け取り箱にも取り込みにも回さない)", async () => {

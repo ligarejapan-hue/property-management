@@ -11,7 +11,11 @@ import { NextRequest } from "next/server";
 import * as XLSX from "xlsx";
 import { getApiSession, getUserPermissions, ApiError, handleApiError, apiResponse } from "@/lib/api-helpers";
 import { hasPermission } from "@/lib/permissions";
-import { assertImportJsonBodySize, assertImportMultipartBodySize } from "@/lib/import-body-size";
+import {
+  assertImportJsonBodySize,
+  assertImportMultipartBodySize,
+  MAX_IMPORT_JSON_BODY_BYTES,
+} from "@/lib/import-body-size";
 import { MAX_PDF_UPLOAD_BYTES, pdfTooLargeToAcceptMessage } from "@/lib/pdf-compress/policy";
 import { reserveLargePdfSlot } from "@/lib/pdf-compress/fit";
 import { extractHeadTextFromPdf, isPdfBuffer } from "@/lib/pdf-extract";
@@ -39,10 +43,12 @@ const LEAD_SHEET_MAX_ROWS = 5_000;
 const LEAD_SHEET_MAX_COLS = 200;
 
 /**
- * 表(JSON)の本文の上限。⚠この口は大きい PDF のために proxy を通らない(proxy の 10MB の先読みが効かない)
- * ので、表の取り込みの中身の上限(10MB・base64 で約 13.4MB)に合わせて、ここで本文を読む前に抑える。
+ * 表(JSON)の本文の上限は、取り込みの口と同じ MAX_IMPORT_JSON_BODY_BYTES(64MB)。
+ * ⚠16MB に絞ると、引用符の多い 10MB 近い CSV が JSON にしたときの膨らみ(" → \")で上限を超え、
+ *   取り込みでは受け付ける表がここで断られる(CSV を直接入れる枠はもう無い・@codex #607 P2)。
+ *   本文を読んだあとは parseSheet が中身の大きさ(10MB)・Excel の展開後の大きさで抑える。
  */
-export const MAX_DETECT_JSON_BODY_BYTES = 16 * 1024 * 1024;
+export const MAX_DETECT_JSON_BODY_BYTES = MAX_IMPORT_JSON_BODY_BYTES;
 
 /**
  * Excel に顧客管理表の行があるか(先頭の行だけ読む)。読めなければ 0。
