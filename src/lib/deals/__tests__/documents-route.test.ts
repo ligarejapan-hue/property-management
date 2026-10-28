@@ -78,6 +78,7 @@ beforeEach(() => {
   (isChromiumAvailable as Fn).mockReturnValue(true);
   (renderHtmlToPdfDocument as Fn).mockResolvedValue(Buffer.from("%PDF-1.7 test"));
   pm.deal.findUnique.mockResolvedValue(row);
+  pm.dealDocument.findMany.mockResolvedValue([]);
   pm.dealDocument.findFirst.mockResolvedValue(null);
   pm.dealDocument.create.mockImplementation(async ({ data }: { data: { version: number } }) => ({ id: DOC_ID, version: data.version }));
   pm.dealRateTable.findMany.mockResolvedValue(INITIAL_RATE_TABLES.map((t) => ({
@@ -526,5 +527,31 @@ describe("GET /api/deals/[id]/documents/[docId]/file(ファイルを開く)", ()
   it("ログインしていなければ 401 のまま", async () => {
     (getApiSession as Fn).mockRejectedValue(new ApiError(401, "未ログイン", "UNAUTHORIZED"));
     expect((await FILE(get("pdf"), fileCtx())).status).toBe(401);
+  });
+});
+
+describe("前回の入力を初めの値にする(第2段階 §3.2)", () => {
+  const SELLER = { id: "33333333-3333-4333-8333-000000000011", role: "seller", partyType: "individual", name: "架空 一郎", representative: null, address: null, phone: null, shareNum: null, shareDen: null, isSelf: false, sortOrder: 0, version: 1 };
+  const docOf = (body: { documents: { docType: string; defaults: Record<string, unknown> }[] }, k: string) => body.documents.find((d) => d.docType === k)!;
+  it("前に発行した入力を初めの値にする・覚える書類だけを新しい版から読む・形の合わない写しは捨てる", async () => {
+    pm.deal.findUnique.mockResolvedValue({ ...row, parties: [SELLER] });
+    const prev = { addressee: "buyer", belongings: "前回の持ち物", notes: "前回の連絡" };
+    pm.dealDocument.findMany.mockResolvedValue([
+      { docType: "contract_guide", inputSnapshot: { options: prev } },
+      { docType: "completion_confirmation", inputSnapshot: { options: { handover: "前回の鍵" } } },
+      { docType: "contract_guide", inputSnapshot: { options: { addressee: "seller", belongings: "古い版", notes: null } } },
+    ]);
+    const body = await (await AVAILABLE(new Request("http://x"), ctx)).json();
+    expect(docOf(body, "contract_guide").defaults).toEqual(prev);
+    expect(docOf(body, "completion_confirmation").defaults).toEqual({ handover: "前回の鍵" });
+    const q = pm.dealDocument.findMany.mock.calls[0][0];
+    expect(q.where).toEqual({ dealId: DEAL_ID, docType: { in: ["contract_guide", "completion_confirmation"] } });
+    expect(q.orderBy).toEqual({ version: "desc" });
+    expect(q.select).toEqual({ docType: true, inputSnapshot: true });
+
+    pm.dealDocument.findMany.mockResolvedValue([{ docType: "contract_guide", inputSnapshot: { options: { addressee: "landlord" } } }]);
+    const again = await (await AVAILABLE(new Request("http://x"), ctx)).json();
+    // row は両手の仲介 → 宛先の初期値は売主
+    expect(docOf(again, "contract_guide").defaults.addressee).toBe("seller");
   });
 });
