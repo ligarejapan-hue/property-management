@@ -102,6 +102,12 @@ describe("Excel", () => {
     expect(await target(res)).toBe("lead_excel");
   });
 
+  it("見出しの上に空の行が続く顧客管理表も見分ける(Excel まとめ取込と同じ範囲を読む・@codex #607 P2)", async () => {
+    const blank = Array.from({ length: 45 }, () => [""]);
+    const res = await POST(jsonReq({ fileName: "顧客管理表.xlsx", xlsxBase64: xlsxBase64({ 一覧: [...blank, ...LEAD] }) }));
+    expect(await target(res)).toBe("lead_excel");
+  });
+
   it("1枚目のシートが空でも、後ろのシートの顧客管理表を見分ける(@codex #607 P2)", async () => {
     const res = await POST(jsonReq({ fileName: "顧客管理表.xlsx", xlsxBase64: xlsxBase64({ 空: [], 一覧: LEAD }) }));
     expect(await target(res)).toBe("lead_excel");

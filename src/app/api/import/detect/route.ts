@@ -28,8 +28,12 @@ import { detectImportFileType, type ImportFileType } from "@/lib/import-file-typ
 import { readLeadSheet } from "@/lib/paste-import/lead-sheet";
 import { pdfTarget, sheetTarget, type DropTarget } from "@/lib/import-drop/detect";
 
-/** 顧客管理表かどうかを見るのに読む行(見出しは先頭の数行にある)。 */
-const LEAD_SCAN_ROWS = 40;
+/**
+ * 顧客管理表かどうかを見るのに読む行。Excel まとめ取込(/api/import/paste/excel)と同じ範囲
+ * (1シート5,000行+見出し)まで読む=取り込める表は必ず見分ける(見出しの上に空行が続く表も・@codex #607 P2)。
+ * ⚠メモリは、読む前の「展開後の大きさ」の守りで抑える(行数で抑えるのではない)。
+ */
+const LEAD_SCAN_ROWS = 5_001;
 
 /**
  * 表(JSON)の本文の上限。⚠この口は大きい PDF のために proxy を通らない(proxy の 10MB の先読みが効かない)
