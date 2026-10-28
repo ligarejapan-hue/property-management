@@ -20,6 +20,7 @@ import { buildChecklistDoc, checklistDefaults, checklistMissing, checklistOption
 import {
   addresseeChoices, buildContractGuide, contractGuideMissing, contractGuideOptionsSchema, defaultAddressee, defaultContractBelongings,
 } from "./business/contract-guide";
+import { buildCompletion, completionMissing, completionOptionsSchema, defaultHandover } from "./business/completion";
 import type { ChecklistPhase } from "../checklist";
 
 /**
@@ -151,6 +152,18 @@ export const BUSINESS_DOCS: BusinessDocDef[] = [
   receiptDef("deposit_receipt"),
   receiptDef("balance_receipt"),
   receiptDef("settlement_receipt"),
+  {
+    key: "completion_confirmation",
+    label: "取引完了確認書",
+    group: "settlement",
+    remember: true,
+    applies: () => true,
+    missing: (c) => completionMissing(c),
+    blocking: () => [],
+    options: completionOptionsSchema as z.ZodType<Record<string, unknown>>,
+    defaults: (c) => ({ values: { handover: defaultHandover(c) } }),
+    build: (c, o) => buildCompletion(c, completionOptionsSchema.parse(o)),
+  },
   {
     key: "power_of_attorney",
     label: "委任状",

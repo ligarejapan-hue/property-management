@@ -44,7 +44,7 @@ const doc = (key: string) => businessDocOf(key)!;
 
 describe("業務書類の一覧表", () => {
   it("段5a の5つ・必要な項目の空欄を返す", () => {
-    expect(BUSINESS_DOCS.filter((d) => d.group === "settlement").map((d) => d.key)).toEqual(["settlement_statement", "settlement_guide", "settlement_guide_seller", "deposit_receipt", "balance_receipt", "settlement_receipt"]);
+    expect(BUSINESS_DOCS.filter((d) => d.group === "settlement").map((d) => d.key)).toEqual(["settlement_statement", "settlement_guide", "settlement_guide_seller", "deposit_receipt", "balance_receipt", "settlement_receipt", "completion_confirmation"]);
     expect(doc("settlement_statement").missing(ctx())).toEqual([]);
     expect(doc("settlement_guide").missing(ctx({ ...deal, settlementPlace: null, parties: [SELLER] }))).toEqual(["決済場所", "買主"]);
     expect(doc("deposit_receipt").missing(ctx({ ...deal, deposit: null }))).toEqual(["手付金の金額"]);

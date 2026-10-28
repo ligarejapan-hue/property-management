@@ -105,3 +105,65 @@ describe("契約のご案内", () => {
     expect(contractGuideOptionsSchema.safeParse({ addressee: "seller", belongings: "x".repeat(501), notes: null }).success).toBe(false);
   });
 });
+
+const C = "completion_confirmation";
+const brokerDeal: DealView = {
+  ...deal, businessType: "brokerage", tradeSide: "both",
+  costs: { ...DEFAULT_COSTS, scrivener: { name: "架空司法書士事務所", address: null, tel: null, staff: "架空 書士" } },
+};
+
+describe("取引完了確認書", () => {
+  it("決済の書類の、精算金領収書のすぐ後ろに出る・前回の入力を引き継ぐ", () => {
+    const keys = BUSINESS_DOCS.map((d) => d.key);
+    expect(keys.indexOf(C)).toBe(keys.indexOf("settlement_receipt") + 1);
+    expect(doc(C).label).toBe("取引完了確認書");
+    expect(doc(C).group).toBe("settlement");
+    expect(doc(C).remember).toBe(true);
+    expect(doc(C).applies(ctx())).toBe(true);
+    expect(dealDocumentTitle(C, "default")).toBe("取引完了確認書");
+  });
+
+  it("引き渡した書類の初期値は、書類確認書(決済時)の「受け取るもの」(物件種別で出し分け)", () => {
+    expect(doc(C).defaults(ctx()).values.handover).toBe(
+      ["鍵", "登記識別情報(権利証)・登記に必要な書類", "残代金・精算金の領収書", "境界確認書・測量図"].join("\n"),
+    );
+    expect(doc(C).defaults(ctx({ ...deal, propertyKind: "unit" })).values.handover).toBe(
+      ["鍵", "登記識別情報(権利証)・登記に必要な書類", "残代金・精算金の領収書", "管理規約・使用細則"].join("\n"),
+    );
+  });
+
+  it("空欄の確認: 契約日・売主・買主", () => {
+    expect(doc(C).missing(ctx())).toEqual([]);
+    expect(doc(C).missing(ctx({ ...deal, contractAt: null, parties: [] }))).toEqual(["契約日", "売主", "買主"]);
+    expect(doc(C).blocking(ctx({ ...deal, parties: [] }))).toEqual([]);
+  });
+
+  it("組み立て: 本文・当事者の署名欄・物件・引き渡した書類(□)・司法書士・仲介業者", () => {
+    const out = doc(C).build(ctx(brokerDeal), { handover: "鍵\n登記識別情報" });
+    expect(out.html).toContain("取引完了確認書");
+    expect(out.html).toContain("2026年5月1日付で締結した下記不動産の売買契約");
+    expect(out.html).toContain("残代金の授受、物件の引渡し及び所有権移転登記の申請手続きが本日完了したことを確認します");
+    expect(out.html).toContain("架空 一郎&lt;i&gt;");
+    expect(out.html).toContain("架空県架空市1-1");
+    expect(out.html).toContain("架空 花子");
+    expect(out.html).toContain("2026年6月30日");
+    expect(out.html).toContain("試験ハイツ&lt;b&gt;");
+    expect(out.html).toContain("□ 鍵");
+    expect(out.html).toContain("□ 登記識別情報");
+    expect(out.html).toContain("架空司法書士事務所");
+    expect(out.html).toContain("仲介業者");
+    expect(out.html).toContain("架空不動産株式会社");
+    expect(out.html).not.toContain(SEAL);
+    expect(out.rows).toContainEqual({ label: "売主", value: "架空 一郎<i>" });
+    expect(out.rows).toContainEqual({ label: "引き渡した書類など", value: "鍵\n登記識別情報" });
+    // 仲介でない取引(買取再販)には仲介業者の欄を出さない
+    expect(doc(C).build(ctx(), { handover: null }).html).not.toContain("仲介業者");
+  });
+
+  it("当事者・日付・引き渡した書類が無くても落ちない(空けて出す)", () => {
+    const out = doc(C).build(ctx({ ...deal, parties: [], contractAt: null, settlementAt: null }), { handover: null });
+    expect(out.html).toContain("年　　月　　日付で締結した");
+    expect(out.html).not.toContain("□ ");
+    expect(out.rows).toContainEqual({ label: "売主", value: null });
+  });
+});
