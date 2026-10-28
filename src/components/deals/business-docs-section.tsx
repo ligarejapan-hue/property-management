@@ -13,6 +13,7 @@ const CHECKLISTS = new Set(["checklist_contract", "checklist_settlement"]);
 const payOf = (v: unknown): Record<string, string> => (v && typeof v === "object" ? (v as Record<string, string>) : {});
 /** 書類タブのまとまり(一覧表の group と同じ順)。 */
 const GROUPS = [
+  { key: "contract", label: "契約・媒介の書類" },
   { key: "settlement", label: "決済の書類" },
   { key: "other", label: "そのほかの書類" },
   { key: "oc", label: "OC の書類" },
@@ -197,6 +198,30 @@ function IssueDialog({ dealId, doc, version, onCancel, onDone }: {
               <input type="date" value={str(values.receivedOn)} onChange={(e) => set("receivedOn", e.target.value)} aria-label="受領日" className={inputCls} />
             </Field>
             <p className="text-xs text-gray-500">個人の方が発行する領収書には自社の角印を付けず、署名・押印の欄を空けて出します。</p>
+          </>
+        )}
+        {doc.docType === "contract_guide" && (
+          <>
+            <Field label="宛先">
+              <select aria-label="宛先" value={str(values.addressee)} onChange={(e) => set("addressee", e.target.value)} className={inputCls}>
+                {(choices.addressee ?? []).map((c) => <option key={c.value} value={c.value}>{c.label}</option>)}
+              </select>
+            </Field>
+            <Field label="お持ちいただくもの(1行に1つ)">
+              <textarea value={str(values.belongings)} onChange={(e) => set("belongings", e.target.value || null)} maxLength={500} rows={4} aria-label="お持ちいただくもの" className={inputCls} />
+            </Field>
+            <Field label="ご連絡事項(空なら載せない)">
+              <textarea value={str(values.notes)} onChange={(e) => set("notes", e.target.value || null)} maxLength={500} rows={3} aria-label="ご連絡事項" className={inputCls} />
+            </Field>
+            <p className="text-xs text-gray-500">前に発行したことがあれば、そのときの入力が初めから入っています。</p>
+          </>
+        )}
+        {doc.docType === "completion_confirmation" && (
+          <>
+            <Field label="引き渡した書類など(1行に1つ・チェック欄は空けて出す)">
+              <textarea value={str(values.handover)} onChange={(e) => set("handover", e.target.value || null)} maxLength={1000} rows={6} aria-label="引き渡した書類など" className={inputCls} />
+            </Field>
+            <p className="text-xs text-gray-500">署名・押印の欄は空けて出します。前に発行したことがあれば、そのときの入力が初めから入っています。</p>
           </>
         )}
         {doc.docType === "settlement_guide" && (

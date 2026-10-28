@@ -40,7 +40,7 @@ export interface UserOption { id: string; name: string; role: string }
 export interface RateTableView { id: string; kind: string; validFrom: string; validTo: string | null; content: unknown; updatedAt: string }
 /** 書類タブに出す業務書類と、出す前の確認(段5)。 */
 export interface AvailableDocument {
-  docType: string; label: string; group: "settlement" | "other" | "oc"; missing: string[]; blocking: string[]; defaults: Record<string, unknown>;
+  docType: string; label: string; group: "contract" | "settlement" | "other" | "oc" | "checklist"; missing: string[]; blocking: string[]; defaults: Record<string, unknown>;
   issuers: { value: string; label: string; individual: boolean }[] | null;
   /** 当事者などから選ぶ欄の選べる値(欄の名前ごと)。 */
   choices: Record<string, { value: string; label: string }[]> | null;
