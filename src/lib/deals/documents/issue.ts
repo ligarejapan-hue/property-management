@@ -14,6 +14,7 @@ export const DEAL_DOC_TYPES = {
   mediation: { label: "媒介契約書", variants: { default: "" } },
   sale_guide: { label: "媒介契約の前の説明書(売却用)", variants: { default: "" } },
   disclosure: { label: "物件状況確認書(告知書)", variants: { default: "" } },
+  equipment: { label: "付帯設備表", variants: { default: "" } },
   settlement_statement: { label: "精算書", variants: { default: "" } },
   settlement_guide: { label: "残金決済のご案内", variants: { default: "" } },
   deposit_receipt: { label: "手付金領収書", variants: { default: "" } },

@@ -1,7 +1,7 @@
 """
-全宅連の物件状況確認書(告知書・Excel)から文面を取り出して TS にする(設計 第2段階 §3.4・段E の計画 Task 1)。
+全宅連の物件状況確認書(告知書)と付帯設備表(Excel)から文面を取り出して TS にする(設計 第2段階 §3.4・段E/段F の計画 Task 1)。
 手元で1回動かす: python -X utf8 -I scripts/deals/extract-zentaku-disclosure.py <全宅書式のフォルダ>
-出力: src/lib/deals/documents/texts/disclosure-{house,unit}.ts(手で直さない)
+出力: src/lib/deals/documents/texts/{disclosure,equipment}-{house,unit}.ts(手で直さない)
 - シートは [表紙, 記入にあたって, 告知書の頁] の順と決めて読む
 - セルの文字は前後の空白(全角・半角)だけ外す。セルの中の改行は残す
 - 「記入にあたって」は、項目・状況の2つがそろう行を row、1つだけの行を note にする(「項目」「状況」の見出しの行は入れない)
@@ -17,13 +17,20 @@ import openpyxl
 ROOT = Path(__file__).resolve().parents[2]
 OUT = ROOT / "src/lib/deals/documents/texts"
 FILES = [
-    ("kokuchisyo_kodate.2205.xlsx", "disclosure-house.ts", "DISCLOSURE_HOUSE_SOURCE", "土地建物・土地用"),
-    ("kokuchisyo_kubun.2205 (1).xlsx", "disclosure-unit.ts", "DISCLOSURE_UNIT_SOURCE", "区分所有建物用"),
+    ("kokuchisyo_kodate.2205.xlsx", "disclosure-house.ts", "DISCLOSURE_HOUSE_SOURCE", "物件状況確認書（告知書／土地建物・土地用）"),
+    ("kokuchisyo_kubun.2205 (1).xlsx", "disclosure-unit.ts", "DISCLOSURE_UNIT_SOURCE", "物件状況確認書（告知書／区分所有建物用）"),
+    ("futaisetubi_kodate.2205.xlsx", "equipment-house.ts", "EQUIPMENT_HOUSE_SOURCE", "付帯設備表（土地建物用）"),
+    ("futaisetubi_kubun.2205 (1).xlsx", "equipment-unit.ts", "EQUIPMENT_UNIT_SOURCE", "付帯設備表（区分所有建物用）"),
 ]
 
 
 def text(v):
-    return v.strip(" \u3000") if isinstance(v, str) and v.strip(" \u3000\n") else None
+    if not isinstance(v, str):
+        return None
+    # Excel の見えない記号(_x0002_ など)を文字に戻し、改行以外の制御文字は外す(書式の見た目に無い字)
+    v = re.sub(r"_x([0-9A-Fa-f]{4})_", lambda m: chr(int(m.group(1), 16)), v)
+    v = re.sub(r"[\x00-\x09\x0b-\x1f\x7f]", "", v)
+    return v.strip(" \u3000") if v.strip(" \u3000\n") else None
 
 
 def cells(ws):
@@ -73,7 +80,7 @@ def write(src_name, out_name, const, kind, d):
     lines = [
         "// 生成: scripts/deals/extract-zentaku-disclosure.py(手で直さない)",
         "/**",
-        f" * 全宅連の書式「物件状況確認書（告知書／{kind}）」から写した文面(設計 第2段階 §3.4)。",
+        f" * 全宅連の書式「{kind}」から写した文面(設計 第2段階 §3.4)。",
         f" * 元: 全宅書式/{src_name}(作成 {d['created']}・更新 {d['modified']})。セルの文字の前後の空白だけ外した。そのほかは元のまま。",
         " */",
         'import type { DisclosureSource } from "./disclosure-types";',
