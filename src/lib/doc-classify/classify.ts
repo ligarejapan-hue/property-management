@@ -48,7 +48,16 @@ export const DOC_KINDS: readonly DocKind[] = [
   { code: "brokerage_agreement", label: "媒介契約書", stage: "pre_contract", keywords: ["媒介契約", "専任媒介", "一般媒介"] },
   { code: "appraisal_report", label: "査定書・査定報告書", stage: "pre_contract", keywords: ["査定報告", "査定書"] },
   { code: "drawings", label: "公図・測量図・建物図面", stage: "pre_contract", keywords: ["公図", "測量図", "地積測量", "建物図面", "各階平面図", "間取図", "間取り図"] },
-  { code: "tax_certificate", label: "評価証明・公課証明", stage: "pre_contract", keywords: ["評価証明", "公課証明", "固定資産評価", "名寄帳"] },
+  // ⚠「固定資産(土地・家屋)関係証明書」(評価証明の東京都の書式)は「評価証明」の語を持たない。
+  { code: "tax_certificate", label: "評価証明・公課証明", stage: "pre_contract", keywords: ["評価証明", "公課証明", "固定資産評価", "名寄帳", "固定資産(土地", "家屋)関係証明"] },
+  // まとめてある PDF の中身として届く書類(2026-10-28 発注者依頼・物件概要書 藤和氷川台コープ710)。
+  { code: "property_summary", label: "物件概要書", stage: "pre_contract", keywords: ["物件概要書"] },
+  { code: "map_zoning", label: "地図・用途地域", stage: "pre_contract", keywords: ["用途地域図", "住宅地図", "案内図", "地図データ", "zenrin"] },
+  { code: "brochure", label: "パンフレット", stage: "pre_contract", keywords: ["パンフレット", "分譲時のカタログ", "仕上表"] },
+  // ⚠1枚目は題が読めないことがある(建築敷地の地名地番の欄が先頭)。
+  { code: "ledger_certificate", label: "台帳記載事項証明", stage: "pre_contract", keywords: ["台帳記載事項証明", "記載事項証明", "建築敷地地名地番"] },
+  // 分ける前の1冊(元のファイル)。語は持たない=自動では当てない(分けて保存したときだけ付く)。
+  { code: "bundle_original", label: "まとめてあるPDF(元のファイル)", stage: "pre_contract", keywords: [] },
   // ② 管理関係(区分マンションの管理組合・管理会社の書類)
   { code: "mgmt_report", label: "重要事項調査報告書", stage: "management", keywords: ["重要事項調査報告書", "管理に係る重要事項"] },
   { code: "bylaws", label: "管理規約・使用細則", stage: "management", keywords: ["管理規約", "使用細則"] },
