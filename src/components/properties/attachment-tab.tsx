@@ -795,9 +795,11 @@ function AttachmentRow({
   const kindCheck = canEditKind && needsKindCheck(att);
   const kindLabel = docKindByCode(att.docKind)?.label ?? null;
   return (
-    <div className="flex items-center gap-3 rounded-md border border-gray-200 dark:border-gray-800 bg-white dark:bg-gray-900 p-3">
+    // スマホ幅では右の3つのアイコンを下の段の右へ回し、文字の部分(種類の欄)を行いっぱいに使う
+    // (アイコンに場所を取られて種類の欄が約90pxになり、長い名前が切れていた・実機確認 2026-10-28)。
+    <div className="flex flex-wrap items-center gap-x-3 gap-y-1 sm:flex-nowrap rounded-md border border-gray-200 dark:border-gray-800 bg-white dark:bg-gray-900 p-3">
       <Icon className="h-5 w-5 shrink-0 text-gray-500 dark:text-gray-400" />
-      <div className="min-w-0 flex-1">
+      <div className="min-w-0 flex-1 basis-[calc(100%-2rem)] sm:basis-0">
         {previewable ? (
           // data-ui=raw: ファイル名そのものが押せる文字(1行で省略表示・余白を足すと下の行とずれる)
           <button
@@ -865,6 +867,7 @@ function AttachmentRow({
           </label>
         )}
       </div>
+      <div data-testid="attachment-row-actions" className="ml-auto flex shrink-0 items-center gap-3">
       {previewable && (
         <Button
           variant="ghost"
@@ -895,6 +898,7 @@ function AttachmentRow({
       >
         <Trash2 className="h-4 w-4" />
       </Button>
+      </div>
     </div>
   );
 }

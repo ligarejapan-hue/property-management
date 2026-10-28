@@ -18,7 +18,7 @@ describe("現地調査マップ: 巡回していない時の3ボタンの並び�
 
   it("3つ並ぶとき(撮影の権限あり)は、狭い画面(sm 未満)だけ現在地ボタンの右隣から左詰め+折り返し", () => {
     expect(block).toMatch(
-      /cameraButton\.visible[\s\S]{0,200}max-sm:left-\[4\.25rem\] max-sm:right-3 max-sm:translate-x-0 max-sm:flex-wrap/,
+      /cameraButton\.visible[\s\S]{0,200}max-sm:left-\[4\.25rem\] max-sm:right-\[3\.75rem\] max-sm:translate-x-0 max-sm:flex-wrap/,
     );
   });
 

@@ -114,6 +114,7 @@ import MapRecenterButton from "@/components/field-survey/map-recenter-button";
 import { useScreenProtection } from "@/components/screen-protection/screen-protection-provider";
 import { Button } from "@/components/ui/button";
 import { X } from "lucide-react";
+import { mapTypeControlOptionsFor, useNarrowMap } from "./map-narrow-controls";
 
 // 東京駅付近を初期表示の中心にする (海外案件用ではない国内利用前提)。
 const DEFAULT_CENTER = { lat: 35.6812, lng: 139.7671 };
@@ -220,6 +221,8 @@ export default function FieldSurveyMap({
     droppedTripsExact: true,
     unrenderableTrips: 0,
   });
+  // 狭い画面では Google の「地図／航空写真」を1つのボタンにする(右上の表示切替と重ならない)。
+  const narrowMap = useNarrowMap();
   const handleTracksState = useCallback(
     (v: {
       status: CoverageStatus;
@@ -1312,6 +1315,7 @@ export default function FieldSurveyMap({
           mapId={mapId}
           gestureHandling={mapGestureHandling}
           disableDefaultUI={false}
+          mapTypeControlOptions={mapTypeControlOptionsFor(narrowMap)}
           style={{ width: "100%", height: "100%" }}
         >
           <MapDataLayer
@@ -1639,7 +1643,9 @@ export default function FieldSurveyMap({
             実機確認 2026-10-22(46): 3つ並ぶと幅約258pxの行が中央寄せになり、幅390pxでは
             左端(66px)が左下の現在地ボタン(〜76px)に約10px重なる。狭い画面(sm未満)で
             3つ並ぶときだけ中央寄せをやめ、現在地ボタンの右隣(left-[4.25rem]=68px)から
-            右端(right-3)までの幅に左詰めで並べる。入り切らない幅(320px など)では
+            右端までの幅に左詰めで並べる。右端は Google のカメラ操作ボタン(右下・幅約40px)の分
+            (right-[3.75rem]=60px)を空ける(390px で「巡回を開始」が重なった・実機確認 2026-10-28)。
+            入り切らない幅(320px など)では
             折り返す(bottom 基準なので上へ伸びる)。提出前レビュー指摘=「右へ20pxずらす」
             だけでは 360px 以下でまだ重なり、320px では右にはみ出すため、この形にした。
             ボタンの大きさ・順番は変えない。「巡回を開始」だけのときは中央のまま。 */}
@@ -1647,7 +1653,7 @@ export default function FieldSurveyMap({
           <div
             className={`pointer-events-none absolute bottom-14 left-1/2 z-10 flex -translate-x-1/2 items-start gap-2${
               cameraButton.visible
-                ? " max-sm:left-[4.25rem] max-sm:right-3 max-sm:translate-x-0 max-sm:flex-wrap"
+                ? " max-sm:left-[4.25rem] max-sm:right-[3.75rem] max-sm:translate-x-0 max-sm:flex-wrap"
                 : ""
             }`}
           >
@@ -1926,8 +1932,10 @@ function ControlPanel({
         className="pointer-events-auto shrink-0 whitespace-nowrap shadow"
       >
         {/* ラベルは短く保つ。長くなると左上の地図/航空写真ボタンに重なり
-            タップを奪う (過去に実機で発生した既知ホットスポット)。 */}
-        表示切替{hasActiveSession ? "・巡回中" : ""} {panelOpen ? "▴" : "▾"}
+            タップを奪う (過去に実機で発生した既知ホットスポット)。
+            幅 360px 未満では「・巡回中」を出さない(320px で左上の切替に重なった・実機確認
+            2026-10-28。巡回中かどうかは左上の位置記録の札で分かる)。 */}
+        表示切替{hasActiveSession ? <span className="max-[359px]:hidden">・巡回中</span> : null} {panelOpen ? "▴" : "▾"}
       </Button>
       <div
         className={`${panelOpen ? "mt-2 block" : "hidden"} pointer-events-auto min-h-0 w-56 overflow-y-auto overscroll-contain rounded-md border border-gray-200 bg-white p-3 text-sm shadow dark:border-gray-800 dark:bg-gray-900`}
