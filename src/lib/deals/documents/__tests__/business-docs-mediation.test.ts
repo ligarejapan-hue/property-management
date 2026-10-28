@@ -180,6 +180,20 @@ describe("媒介契約書(第2段階 §4.5・型はタブで選ぶ)", () => {
     expect(doc().defaults(ctx()).choices?.clientMissing).toEqual([]);
   });
 
+  it("Excel の行に、選んだ型で使う入力を全部入れる(ほかの型の欄は入れない・@codex)", () => {
+    const o = { ...blank("exclusive"), reportMethod: "email", reportFrequencyExclusive: "１週間に１", reportFrequencyDedicated: "１週間に１", registryName: "架空流通機構",
+      registerDaysExclusive: "5", inspection: "no", inspectionReason: "築古", contractDateText: "2026年11月1日", feeTiming: "決済時", otherAgents: "架空住宅 / 架空市" };
+    const rows = doc().build(ctx(), o).rows;
+    for (const r of [
+      { label: "業務の処理状況の報告の方法", value: "電子メール" }, { label: "報告の頻度", value: "１週間に１回以上" },
+      { label: "登録する指定流通機構 名称", value: "架空流通機構" }, { label: "登録までの日数(契約の翌日から・休業日を除く)", value: "5" },
+      { label: "建物状況調査を実施する者のあっせん", value: "無" }, { label: "建物状況調査を実施する者のあっせん 「無」の理由(既存の住宅のとき)", value: "築古" },
+      { label: "契約の日付 日付(例: 2026年11月1日)", value: "2026年11月1日" }, { label: "約定報酬の受領の時期 時期", value: "決済時" },
+    ]) expect(rows, r.label).toContainEqual(r);
+    expect(rows.map((r) => r.label)).not.toContain("依頼する乙以外の宅地建物取引業者(1行に1社「商号 / 所在地」) 業者");
+    expect(rows.filter((r) => r.label === "報告の頻度")).toHaveLength(1);
+  });
+
   it("一般: 依頼する乙以外の業者を行ごとに・指定流通機構への登録の有無", () => {
     const o = { ...blank("general"), otherAgents: "架空住宅 / 架空県架空市5-5\n架空商事 / 架空県架空市6-6", listing: "yes", listingName: "架空流通機構" };
     const h = doc().build(ctx(), o).html;

@@ -3,6 +3,7 @@ import { html, raw, type SafeHtml } from "../html";
 import { documentHtml } from "../layout";
 import { MEDIATION_FORM, MEDIATION_KIND_LABELS, type MediationKind } from "../forms/mediation";
 import { emptyFormValues } from "../forms/values";
+import { formValueRows } from "../forms/render";
 import type { FormValues } from "../forms/types";
 import { MEDIATION_GENERAL } from "../texts/mediation-general";
 import { MEDIATION_EXCLUSIVE } from "../texts/mediation-exclusive";
@@ -205,11 +206,8 @@ ${propertyTable(c)}
       { label: "依頼者", value: clients.map((p) => p.name).join("・") || DASH },
       { label: "所在地", value: c.deal.propertySnapshot.address },
       { label: "媒介価額", value: c.deal.price },
-      { label: "約定報酬額(税抜き)", value: str(o.feeExcl) },
-      { label: "約定報酬額(消費税)", value: str(o.feeTax) },
-      { label: "有効期間(月)", value: str(o.months) },
-      { label: "満了日", value: str(o.expiry) },
-      { label: "特約事項", value: str(o.specialTerms) },
+      // 選んだ型で使う入力を全部(ほかの型の欄は入れない・@codex)。
+      ...formValueRows(MEDIATION_FORM, o),
     ],
   };
 }
