@@ -23,7 +23,7 @@ import {
 import type { FormDef } from "./forms/types";
 import { SELLER_SURVEY_FORM } from "./forms/seller-survey";
 import { MEDIATION_FORM } from "./forms/mediation";
-import { buildMediation, mediationDefaults, mediationMissing } from "./business/mediation";
+import { buildMediation, mediationClientMissing, mediationDefaults, mediationMissing } from "./business/mediation";
 import { buildSaleGuide } from "./business/sale-guide";
 import { formValuesSchema } from "./forms/schema";
 import {
@@ -151,7 +151,7 @@ export const BUSINESS_DOCS: BusinessDocDef[] = [
     missing: (c, v) => mediationMissing(c, v),
     blocking: () => [],
     options: mediationOptionsSchema as z.ZodType<Record<string, unknown>>,
-    defaults: (c) => ({ values: mediationDefaults(c) }),
+    defaults: (c) => ({ values: mediationDefaults(c), choices: { clientMissing: mediationClientMissing(c) } }),
     build: (c, o) => buildMediation(c, mediationOptionsSchema.parse(o)),
   },
   {

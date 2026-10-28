@@ -164,7 +164,13 @@ function IssueDialog({ dealId, doc, version, onCancel, onDone }: {
     ? [...doc.missing.filter((m) => m !== "売主" && m !== "買主"), ...(choices.addresseeMissing ?? []).filter((c) => c.value === values.addressee).map((c) => c.label)]
     : doc.docType === "prep_checklist"
       ? doc.missing.filter((m) => m !== "物件の種別" || !str(values.kind))
-      : doc.missing;
+      // 媒介契約書は、選んでいる依頼の内容(売却=売主・購入=買主)で「依頼者」を作り直す。
+      : doc.docType === "mediation"
+        ? [
+          ...((choices.clientMissing ?? []).some((c) => c.value === (values.requestKind === "purchase" ? "buyer" : "seller")) ? ["依頼者"] : []),
+          ...doc.missing.filter((m) => m !== "依頼者"),
+        ]
+        : doc.missing;
 
   const issue = async () => {
     setBusy(true);

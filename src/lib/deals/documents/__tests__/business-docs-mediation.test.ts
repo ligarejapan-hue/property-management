@@ -29,10 +29,10 @@ const deal: DealView = {
   id: "d", dealNo: "2026-0051", name: "試験", businessType: "brokerage", tradeSide: "seller", status: "considering",
   assigneeId: null, licensedAgentId: null, salesStaffId: null, opsStaffId: null, propertyId: null, propertyKind: "house", hasOc: false,
   contractAt: null, contractPlace: null, settlementAt: null, settlementPlace: null,
-  price: 30_000_000, buildingTax: 1_000_000, deposit: null, taxRateBp: 1000,
+  price: 30_000_000, buildingTax: null, deposit: null, taxRateBp: 1000,
   propertySnapshot: { ...EMPTY_SNAPSHOT, buildingName: "試験ハウス<b>", address: "架空県架空市2-2", lotNumber: "2番2", landArea: 120.5, floorArea: 95.2, structure: "木造2階建", layout: "4LDK", landRight: "ownership" },
   counterpartyBroker: EMPTY_BROKER, assessments: { rows: [], landRatioBp: 10000 }, costs: DEFAULT_COSTS,
-  settlementTerms: DEFAULT_TERMS, leases: [], overrides: {}, version: 1, createdAt: "", updatedAt: "", parties: [SELLER, BUYER],
+  settlementTerms: DEFAULT_TERMS, leases: [], overrides: { buildingTax: 1_000_000 }, version: 1, createdAt: "", updatedAt: "", parties: [SELLER, BUYER],
   fundingPlan: DEFAULT_FUNDING_INPUTS, businessPlan: DEFAULT_BUSINESS_INPUTS,
 };
 const company: CompanyProfile = { nameJa: "架空不動産株式会社", license: "架空県知事(1)第00000号", tel: "03-0000-0000", fax: "", email: "", hp: "", address: "架空県架空市3-3" };
@@ -156,6 +156,28 @@ describe("媒介契約書(第2段階 §4.5・型はタブで選ぶ)", () => {
     expect(h).toContain("1,000,000円");
     // 購入の依頼なら依頼者は買主
     expect(doc().build(ctx(), { ...blank("exclusive"), requestKind: "purchase" }).html).toContain("架空 花子");
+  });
+
+  it("「有・無」は括弧の中の選んだほうだけを丸で囲む(見出しの「有無」は囲まない・最終レビュー)", () => {
+    const count = (h: string) => (h.match(/class="circle"/g) ?? []).length;
+    for (const v of ["yes", "no"]) {
+      const h = doc().build(ctx(), { ...blank("exclusive"), inspection: v }).html;
+      expect(count(h), v).toBe(2); // 所有権(別表の権利内容)と、あっせんの有・無の1つ
+      expect(h).toContain("あっせんの有無（");
+    }
+    const g = doc().build(ctx(), { ...blank("general"), listing: "no" }).html;
+    expect(g).toContain("登録の有無（");
+    expect(count(g)).toBe(2);
+  });
+
+  it("満了日が空なら「年」「月」「日」の前にそれぞれ書き込む下線を出す(最終レビュー)", () => {
+    const h = doc().build(ctx(), blank("exclusive")).html;
+    expect(h).toContain('ヶ月（<span class="blank"></span>年<span class="blank short"></span>月<span class="blank short"></span>日まで）');
+  });
+
+  it("依頼者が空欄かどうかは、選んだ依頼の内容で小窓が見直せるよう、当事者のいない役割を渡す(最終レビュー)", () => {
+    expect(doc().defaults(ctx({ ...deal, parties: [SELLER] })).choices?.clientMissing).toEqual([{ value: "buyer", label: "依頼者" }]);
+    expect(doc().defaults(ctx()).choices?.clientMissing).toEqual([]);
   });
 
   it("一般: 依頼する乙以外の業者を行ごとに・指定流通機構への登録の有無", () => {

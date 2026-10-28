@@ -8,12 +8,15 @@ import { MEDIATION_GENERAL } from "../texts/mediation-general";
 import { MEDIATION_EXCLUSIVE } from "../texts/mediation-exclusive";
 import { MEDIATION_DEDICATED } from "../texts/mediation-dedicated";
 import type { MediationText } from "../texts/mediation-types";
-import { DASH, partiesOf, type BusinessDocContext, type ValueRow } from "./common";
+import { DASH, partiesOf, type BusinessDocContext, type Choice, type ValueRow } from "./common";
 
 const TEXTS: Record<MediationKind, MediationText> = { general: MEDIATION_GENERAL, exclusive: MEDIATION_EXCLUSIVE, dedicated: MEDIATION_DEDICATED };
 const REQUEST_LABELS = { sale: "売却", purchase: "購入", exchange: "交換" } as const;
 const BLANK = html`<span class="blank"></span>`;
+/** 書式の書き込み欄(「年＿月＿日」の月・日など)の短い下線。 */
+const SHORT = html`<span class="blank short"></span>`;
 const CSS = `.blank{display:inline-block;min-width:24mm;border-bottom:1px solid #333;height:1em;vertical-align:bottom}
+.blank.short{min-width:8mm}
 .circle{border:1px solid #111;border-radius:50%;padding:0 .2em}
 .contract p{margin:1mm 0}
 .contract .item{padding-left:1em;text-indent:-1em}
@@ -45,6 +48,11 @@ export function mediationDefaults(c: BusinessDocContext): FormValues {
   };
 }
 
+/** 当事者のいない役割(依頼者の候補)。小窓が「依頼の内容」に合わせて「依頼者」の空欄の知らせを作り直す。 */
+export function mediationClientMissing(c: BusinessDocContext): Choice[] {
+  return (["seller", "buyer"] as const).filter((r) => !partiesOf(c.deal, r).length).map((r) => ({ value: r, label: "依頼者" }));
+}
+
 /** 出す前の確認: 依頼者(依頼の内容で売主か買主)・物件の所在地・売買価格。values = 前回の入力を含む初めの値。 */
 export function mediationMissing(c: BusinessDocContext, values?: Record<string, unknown>): string[] {
   const role = clientRole(values ? values.requestKind : c.deal.tradeSide === "buyer" ? "purchase" : "sale");
@@ -55,10 +63,13 @@ export function mediationMissing(c: BusinessDocContext, values?: Record<string, 
   return out;
 }
 
+/** 書式の書き込み欄「＿」を短い下線にする(手で書けるように・最終レビュー)。 */
+const withBlanks = (text: string): SafeHtml => html`${text.split("＿").map((t, i) => (i === 0 ? html`${t}` : html`${SHORT}${t}`))}`;
+
 /**
  * 段落の中の目印のすぐ後ろに値を差し込む(計画 段D の決めたこと 1)。
  * slot.after = 目印(空文字なら段落の頭)・slot.drop = 目印の後ろから外す書き込み欄(「＿」など・無ければそのまま)。
- * 目印が無いときは差し込まない。残った「＿」は外す(下線は値の空欄で出す)。
+ * 目印が無いときは差し込まない。残った「＿」は短い下線にする。
  */
 export function fillSlots(text: string, slots: { after: string; drop?: string; value: SafeHtml }[]): SafeHtml {
   const parts: (string | SafeHtml)[] = [];
@@ -67,18 +78,24 @@ export function fillSlots(text: string, slots: { after: string; drop?: string; v
     const i = s.after === "" ? 0 : rest.indexOf(s.after);
     if (i < 0) continue;
     const end = i + s.after.length;
-    parts.push(rest.slice(0, end).replace(/＿/g, ""), s.value);
+    parts.push(rest.slice(0, end), s.value);
     rest = rest.slice(end);
     if (s.drop && rest.startsWith(s.drop)) rest = rest.slice(s.drop.length);
   }
-  parts.push(rest.replace(/＿/g, ""));
-  return html`${parts.map((p) => (typeof p === "string" ? html`${p}` : p))}`;
+  parts.push(rest);
+  return html`${parts.map((p) => (typeof p === "string" ? withBlanks(p) : p))}`;
 }
 
 /** 「売却・購入・交換」「（有・無）」などの選んだほうを丸で囲む(文字は変えない)。 */
 function circled(text: string, words: string[], chosen: string | null): SafeHtml {
   const re = new RegExp(`(${words.join("|")})`, "g");
   return html`${text.split(re).map((p) => (p === chosen ? html`<span class="circle">${p}</span>` : html`${p}`))}`;
+}
+
+/** 最後の「（」から後ろ(「（有・無）」など)だけで丸を付ける(前の「有無」の字は囲まない・最終レビュー)。 */
+function circledTail(text: string, words: string[], chosen: string | null): SafeHtml {
+  const i = text.lastIndexOf("（");
+  return i < 0 ? circled(text, words, chosen) : html`${text.slice(0, i)}${circled(text.slice(i), words, chosen)}`;
 }
 
 const isItem = (p: string) => /^([一二三四五六七八九十]+|[イロハニホヘト]|注[０-９0-9]*|＊)　/.test(p);
@@ -88,9 +105,9 @@ function contractParagraph(kind: MediationKind, p: string, o: FormValues, last: 
   const freq = kind === "dedicated" ? o.reportFrequencyDedicated : o.reportFrequencyExclusive;
   const days = kind === "dedicated" ? o.registerDaysDedicated : o.registerDaysExclusive;
   if (p === "売却・購入・交換") return circled(p, ["売却", "購入", "交換"], typeof o.requestKind === "string" ? REQUEST_LABELS[o.requestKind as keyof typeof REQUEST_LABELS] ?? null : null);
-  if (p.includes("建物状況調査を実施する者のあっせんの有無")) return circled(p, ["有", "無"], yn("inspection"));
+  if (p.includes("建物状況調査を実施する者のあっせんの有無")) return circledTail(p, ["有", "無"], yn("inspection"));
   if (p === "＊") return html`＊　${val(str(o.inspectionReason))}`;
-  if (p.includes("指定流通機構への登録の有無")) return html`${circled(p.replace(/＊$/, ""), ["有", "無"], yn("listing"))}${p.endsWith("＊") ? "＊" : ""} ${val(str(o.listingName))}`;
+  if (p.includes("指定流通機構への登録の有無")) return html`${circledTail(p.replace(/＊$/, ""), ["有", "無"], yn("listing"))}${p.endsWith("＊") ? "＊" : ""} ${val(str(o.listingName))}`;
   if (p.includes("（注１）")) {
     return fillSlots(p, [
       { after: "（注１）", drop: "＿", value: val(o.reportMethod === "email" ? "電子メール" : o.reportMethod === "document" ? "文書" : null) },
@@ -146,7 +163,8 @@ function propertyTable(c: BusinessDocContext): SafeHtml {
   const d = c.deal;
   const s = d.propertySnapshot;
   const unit = c.settings.propertyKinds.find((k) => k.key === d.propertyKind)?.base === "unit";
-  const tax = d.buildingTax;
+  // 建物の消費税は取引の計算(上書きを含む)から(deal.buildingTax の列は使われていない・最終レビュー)。
+  const tax = c.calc.building.tax;
   const body = d.price !== null && tax !== null ? d.price - tax : null;
   return html`<h2>別表</h2>
 <table>
@@ -167,7 +185,7 @@ export function buildMediation(c: BusinessDocContext, o: FormValues): { html: st
   const t = TEXTS[kind];
   const at = t.contract.findIndex((p) => p.startsWith("依頼者甲は"));
   const contract = t.contract.map((p, i) => {
-    const content = contractParagraph(kind, p, o, i === t.contract.length - 1) ?? html`${p.replace(/＿/g, "")}`;
+    const content = contractParagraph(kind, p, o, i === t.contract.length - 1) ?? withBlanks(p);
     const para = html`<p class="${isItem(p) ? "item" : ""}">${content}</p>`;
     return i === at ? html`${para}${partiesBlock(c, o)}` : para;
   });
