@@ -20,6 +20,11 @@ import { buildChecklistDoc, checklistDefaults, checklistMissing, checklistOption
 import {
   addresseeChoices, addresseeMissingChoices, buildContractGuide, contractGuideMissing, contractGuideOptionsSchema, defaultAddressee, defaultContractBelongings,
 } from "./business/contract-guide";
+import type { FormDef } from "./forms/types";
+import { SELLER_SURVEY_FORM } from "./forms/seller-survey";
+import {
+  SELLER_SURVEY_TITLE, buildSellerSurvey, sellerSurveyDefaults, sellerSurveyMissing, sellerSurveyOptionsSchema,
+} from "./business/seller-survey";
 import { buildCompletion, completionMissing, completionOptionsSchema, defaultHandover } from "./business/completion";
 import type { ChecklistPhase } from "../checklist";
 
@@ -35,6 +40,10 @@ export interface BusinessDocDef {
   group: "contract" | "settlement" | "other" | "oc" | "checklist";
   /** 前回発行したときの入力を、次の発行の初めの値にする(設計 第2段階 §3.2)。 */
   remember?: boolean;
+  /** 謄本の登記の状況を使う(発行のときにも謄本を読む・書類確認書と同じ読み方)。 */
+  usesRegistry?: boolean;
+  /** 項目の表(入力画面と PDF をこの表から作る・設計 第2段階 §3.3)。画面へそのまま渡す。 */
+  form?: FormDef;
   /** この取引で出せるか(書類タブに出すか)。 */
   applies(c: BusinessDocContext): boolean;
   /** 必要な項目のうち空欄のもの(出す前の確認に出す)。values = 画面に渡す初めの値(前回の入力を含む)。 */
@@ -109,6 +118,20 @@ export const BUSINESS_DOCS: BusinessDocDef[] = [
       choices: { addressee: addresseeChoices(c), addresseeMissing: addresseeMissingChoices(c) },
     }),
     build: (c, o) => buildContractGuide(c, contractGuideOptionsSchema.parse(o)),
+  },
+  {
+    key: "seller_survey",
+    label: SELLER_SURVEY_TITLE,
+    group: "contract",
+    remember: true,
+    usesRegistry: true,
+    form: SELLER_SURVEY_FORM,
+    applies: (c) => partiesOf(c.deal, "seller").length > 0,
+    missing: (c) => sellerSurveyMissing(c),
+    blocking: () => [],
+    options: sellerSurveyOptionsSchema as z.ZodType<Record<string, unknown>>,
+    defaults: (c) => ({ values: sellerSurveyDefaults(c) }),
+    build: (c, o) => buildSellerSurvey(c, sellerSurveyOptionsSchema.parse(o)),
   },
   {
     key: "settlement_statement",

@@ -1,10 +1,15 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { FileOutput, FileText, Loader2, Plus, Trash2 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { ModalShell } from "@/components/ui/modal-shell";
 import { Field, inputCls } from "./form-parts";
+import { DocFormFields } from "./doc-form-fields";
+import { emptyFormValues } from "@/lib/deals/documents/forms/values";
+import { useDraftAutosave, useDraftExists, useRestoredDraft } from "@/hooks/use-draft";
+import { DraftRestoredNotice, DraftTooLargeNotice } from "@/components/drafts/draft-notices";
+import { dealDocumentDraftKey, parseDealDocumentDraft, sameAsInitial, type DealDocumentDraft } from "@/lib/drafts/screens/deal-document";
 import { CHECKLIST_TEXT_MAX } from "@/lib/deals/checklist";
 import { dealsApi, dealDocumentFileUrl, DealApiError, errorText, type AvailableDocument } from "@/lib/deals/client";
 
@@ -73,11 +78,7 @@ export default function BusinessDocsSection({ dealId, active, refresh, onIssued 
             <ul className="flex flex-wrap gap-2">
               {list.map((d) => (
                 <li key={d.docType}>
-                  <Button variant="secondary" size="sm" onClick={() => { setDone(null); setOpen(d); }}>
-                    <FileOutput className="h-4 w-4" />
-                    {d.label}
-                    {d.missing.length > 0 && <span className="ml-1 text-xs text-amber-700 dark:text-amber-400">(空欄 {d.missing.length})</span>}
-                  </Button>
+                  <DocButton dealId={dealId} doc={d} onOpen={() => { setDone(null); setOpen(d); }} />
                 </li>
               ))}
             </ul>
@@ -98,18 +99,46 @@ export default function BusinessDocsSection({ dealId, active, refresh, onIssued 
   );
 }
 
+/** 小窓の初めの値(前回の入力・初期値)。鍵の行の本数・諸費用の金額は入力しやすいよう文字で持ち、送るときに数にする。 */
+function initialValuesOf(doc: AvailableDocument): Record<string, unknown> {
+  if (doc.docType === "key_receipt") return { ...doc.defaults, keys: [{ label: "", count: "1" }] };
+  if (doc.docType === "settlement_guide_seller") {
+    return { ...doc.defaults, costs: (doc.defaults.costs as { label: string; amount: number }[] ?? []).map((r) => ({ label: r.label, amount: String(r.amount) })) };
+  }
+  return doc.defaults;
+}
+
+/** 書類のボタン。入力の途中の控えがあれば「(入力の途中)」を添える(サーバー描画では出さない)。 */
+function DocButton({ dealId, doc: d, onOpen }: { dealId: string; doc: AvailableDocument; onOpen: () => void }) {
+  const hasDraft = useDraftExists(dealDocumentDraftKey(dealId, d.docType));
+  return (
+    <Button variant="secondary" size="sm" onClick={onOpen}>
+      <FileOutput className="h-4 w-4" />
+      {d.label}
+      {d.missing.length > 0 && <span className="ml-1 text-xs text-amber-700 dark:text-amber-400">(空欄 {d.missing.length})</span>}
+      {hasDraft && <span className="ml-1 text-xs text-indigo-700 dark:text-indigo-300">(入力の途中)</span>}
+    </Button>
+  );
+}
+
 function IssueDialog({ dealId, doc, version, onCancel, onDone }: {
   dealId: string; doc: AvailableDocument; version: number;
   onCancel: () => void; onDone: (r: { id: string; title: string; version: number }) => void;
 }) {
-  // 鍵の行は入力しやすいよう本数を文字で持ち、送るときに数にする。
-  const [values, setValues] = useState<Record<string, unknown>>(
-    doc.docType === "key_receipt" ? { ...doc.defaults, keys: [{ label: "", count: "1" }] }
-      // 諸費用の金額は入力しやすいよう文字で持ち、送るときに数にする。
-      : doc.docType === "settlement_guide_seller"
-        ? { ...doc.defaults, costs: (doc.defaults.costs as { label: string; amount: number }[] ?? []).map((r) => ({ label: r.label, amount: String(r.amount) })) }
-        : doc.defaults,
-  );
+  // 入力の控え(別の画面へ移って戻っても続きから・設計 第2段階 §3.2)。× と「入力に戻る」は残し、発行の成功と「最初からやり直す」で消す。
+  const draftKeyValue = dealDocumentDraftKey(dealId, doc.docType);
+  const restored = useRestoredDraft(draftKeyValue, parseDealDocumentDraft);
+  const [initial] = useState(() => initialValuesOf(doc));
+  const [values, setValues] = useState<Record<string, unknown>>(() => restored?.data.values ?? initial);
+  const [restoredShown, setRestoredShown] = useState(restored != null);
+  const draftData = useMemo<DealDocumentDraft>(() => ({ rev: 1, values }), [values]);
+  const isEmpty = useMemo(() => sameAsInitial(initial), [initial]);
+  const draft = useDraftAutosave(draftKeyValue, draftData, isEmpty, restored);
+  const discardDraft = () => {
+    draft.discard();
+    setValues(initial);
+    setRestoredShown(false);
+  };
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const set = (k: string, v: unknown) => setValues((x) => ({ ...x, [k]: v }));
@@ -149,6 +178,7 @@ function IssueDialog({ dealId, doc, version, onCancel, onDone }: {
                 ? { ...values, costs: costRows.map((r) => ({ label: r.label.trim(), amount: Number(r.amount.replace(/,/g, "")) })) }
                 : values;
       const r = await dealsApi.issueDocument(dealId, doc.docType, version, options);
+      draft.close();
       onDone({ id: r.id, title: r.title, version: r.version });
     } catch (e) {
       setError(e instanceof DealApiError && e.code === "VERSION_CONFLICT"
@@ -174,6 +204,8 @@ function IssueDialog({ dealId, doc, version, onCancel, onDone }: {
       }
     >
       <div className="space-y-4">
+        {restored && restoredShown && <DraftRestoredNotice savedAt={restored.savedAt} onDiscard={discardDraft} />}
+        {draft.tooLarge && <DraftTooLargeNotice kind="input" />}
         {doc.blocking.length > 0 && (
           <p className="text-sm text-red-600 dark:text-red-400" role="alert">{doc.blocking.join("・")}が無いと出せません。取引の画面で入れてください。</p>
         )}
@@ -203,6 +235,15 @@ function IssueDialog({ dealId, doc, version, onCancel, onDone }: {
               <input type="date" value={str(values.receivedOn)} onChange={(e) => set("receivedOn", e.target.value)} aria-label="受領日" className={inputCls} />
             </Field>
             <p className="text-xs text-gray-500">個人の方が発行する領収書には自社の角印を付けず、署名・押印の欄を空けて出します。</p>
+          </>
+        )}
+        {doc.form && (
+          <>
+            <div className="flex flex-wrap items-center gap-2">
+              <Button variant="secondary" size="sm" onClick={() => doc.form && setValues(emptyFormValues(doc.form))}>すべて空欄に戻す</Button>
+              <p className="text-xs text-gray-500">選ばなかった項目は □ を並べた空欄で出ます(手で書けます)。全部空欄のまま出すと、手書き用の書式になります。前に発行したことがあれば、そのときの入力が初めから入っています。</p>
+            </div>
+            <DocFormFields form={doc.form} values={values} onChange={set} />
           </>
         )}
         {doc.docType === "contract_guide" && (

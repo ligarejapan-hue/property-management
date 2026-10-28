@@ -46,6 +46,7 @@ export async function GET(_request: Request, ctx: Ctx) {
       return {
         docType: d.key, label: d.label, group: d.group, missing: d.missing(bctx, values), blocking: d.blocking(bctx),
         defaults: values, issuers: def.issuers ?? null, choices: def.choices ?? null,
+        form: d.form ?? null,
       };
     });
     return NextResponse.json({ documents, version: deal.version }, { headers: { "Cache-Control": "no-store" } });

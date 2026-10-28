@@ -295,7 +295,7 @@ describe("業務書類の発行(段5a)", () => {
     expect(body.version).toBe(3);
     const keys = body.documents.map((d: { docType: string }) => d.docType);
     // OC なしの取引には OC の4種を出さない(段5b)
-    expect(keys).toEqual(["contract_guide", "settlement_statement", "settlement_guide", "settlement_guide_seller", "deposit_receipt", "balance_receipt", "settlement_receipt", "completion_confirmation", "power_of_attorney", "key_receipt", "checklist_contract", "checklist_settlement"]);
+    expect(keys).toEqual(["contract_guide", "seller_survey", "settlement_statement", "settlement_guide", "settlement_guide_seller", "deposit_receipt", "balance_receipt", "settlement_receipt", "completion_confirmation", "power_of_attorney", "key_receipt", "checklist_contract", "checklist_settlement"]);
     const guide = body.documents.find((d: { docType: string }) => d.docType === "settlement_guide");
     expect(guide.missing).toEqual(["決済場所"]);
     const receipt = body.documents.find((d: { docType: string }) => d.docType === "deposit_receipt");
@@ -533,6 +533,12 @@ describe("GET /api/deals/[id]/documents/[docId]/file(ファイルを開く)", ()
 describe("前回の入力を初めの値にする(第2段階 §3.2)", () => {
   const SELLER = { id: "33333333-3333-4333-8333-000000000011", role: "seller", partyType: "individual", name: "架空 一郎", representative: null, address: null, phone: null, shareNum: null, shareDen: null, isSelf: false, sortOrder: 0, version: 1 };
   const docOf = (body: { documents: { docType: string; defaults: Record<string, unknown> }[] }, k: string) => body.documents.find((d) => d.docType === k)!;
+  it("項目の表のある書類は form を返す・無い書類は null", async () => {
+    pm.deal.findUnique.mockResolvedValue({ ...row, parties: [SELLER] });
+    const body = await (await AVAILABLE(new Request("http://x"), ctx)).json();
+    expect((docOf(body, "seller_survey") as unknown as { form: { key: string } }).form.key).toBe("seller_survey");
+    expect((docOf(body, "contract_guide") as unknown as { form: null }).form).toBeNull();
+  });
   it("前に発行した入力を初めの値にする・覚える書類だけを新しい版から読む・形の合わない写しは捨てる", async () => {
     pm.deal.findUnique.mockResolvedValue({ ...row, parties: [SELLER] });
     const prev = { addressee: "buyer", belongings: "前回の持ち物", notes: "前回の連絡" };
@@ -547,7 +553,7 @@ describe("前回の入力を初めの値にする(第2段階 §3.2)", () => {
     expect((docOf(body, "contract_guide") as unknown as { missing: string[] }).missing).toContain("買主");
     expect(docOf(body, "completion_confirmation").defaults).toEqual({ handover: "前回の鍵" });
     const q = pm.dealDocument.findMany.mock.calls[0][0];
-    expect(q.where).toEqual({ dealId: DEAL_ID, docType: { in: ["contract_guide", "completion_confirmation"] } });
+    expect(q.where).toEqual({ dealId: DEAL_ID, docType: { in: ["contract_guide", "seller_survey", "completion_confirmation"] } });
     expect(q.orderBy).toEqual({ version: "desc" });
     expect(q.select).toEqual({ docType: true, inputSnapshot: true });
 
