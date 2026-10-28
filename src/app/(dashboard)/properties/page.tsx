@@ -1553,8 +1553,9 @@ function PropertiesPageInner() {
           ))}
         </select>
 
-        <label className="flex items-center gap-1 text-sm text-gray-600 dark:text-gray-300">
-          更新日:
+        {/* スマホ幅では日付欄を次の行へ折り返す(画面からはみ出さない・実機確認 2026-10-28)。 */}
+        <label className="flex max-w-full flex-wrap items-center gap-1 text-sm text-gray-600 dark:text-gray-300">
+          <span className="shrink-0 whitespace-nowrap">更新日:</span>
           <input
             type="date"
             value={updatedFromFilter}

@@ -604,7 +604,7 @@ function AttachmentRow({
               value={att.docKind ?? ""}
               disabled={kindSaving}
               onChange={(e) => onKindChange(e.target.value === "" ? null : e.target.value)}
-              className={`rounded border px-1 py-0.5 text-xs ${
+              className={`min-w-0 max-w-full rounded border px-1 py-0.5 text-xs ${
                 kindCheck
                   ? "border-amber-300 bg-amber-50 text-amber-800 dark:border-amber-700 dark:bg-amber-950/40 dark:text-amber-200"
                   : "border-gray-200 bg-white text-gray-700 dark:border-gray-700 dark:bg-gray-900 dark:text-gray-200"
