@@ -7,8 +7,8 @@ const ALL = { house: EQUIPMENT_HOUSE_SOURCE, unit: EQUIPMENT_UNIT_SOURCE };
 const hash = (v: unknown) => createHash("sha256").update(JSON.stringify(v)).digest("hex");
 /** 写した文面の指紋(設計 第2段階 §3.4)。落ちたら、全宅連の書式と見比べてから値を直す。値は生成したファイルから取って書いた。 */
 const FINGERPRINTS: Record<keyof typeof ALL, string> = {
-  house: "62f1154e8867834cf6046208d56914a0faaf08a2eeb1a1643b4ffc780442ea8d",
-  unit: "1bbb19fcfebce95967bbd6239f19acb59dd1c9c9beb6e30de0072aaa2fe2ee37",
+  house: "b1121179cb2190b6c356e729e7132803a8c89f6900c6427d221a3682d25b117e",
+  unit: "f63cf3d014cd0fc688b0b9eccce1cb1b182902a955753cc6dd9f230f5587ed13",
 };
 
 describe("全宅連の付帯設備表から写した文面", () => {
@@ -29,5 +29,15 @@ describe("全宅連の付帯設備表から写した文面", () => {
   });
   it("前の会社の名前・リースバックの語が無い", () => {
     for (const t of Object.values(ALL)) for (const w of ["インテリックス", "リースバック"]) expect(JSON.stringify(t)).not.toContain(w);
+  });
+
+  it("Excel の見えない記号(_x0002_ など・制御文字)が残っていない(最終レビュー)", async () => {
+    const { DISCLOSURE_HOUSE_SOURCE } = await import("../texts/disclosure-house");
+    const { DISCLOSURE_UNIT_SOURCE } = await import("../texts/disclosure-unit");
+    for (const t of [...Object.values(ALL), DISCLOSURE_HOUSE_SOURCE, DISCLOSURE_UNIT_SOURCE]) {
+      const s = JSON.stringify(t);
+      expect(s).not.toMatch(/_x[0-9A-Fa-f]{4}_/);
+      expect(JSON.stringify(t).replace(/\\n/g, "")).not.toMatch(/\\u00[01][0-9a-f]/);
+    }
   });
 });

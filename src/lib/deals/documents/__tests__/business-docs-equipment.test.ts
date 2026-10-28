@@ -110,4 +110,12 @@ describe("付帯設備表(第2段階 §4.8)", () => {
     expect(rows).toContainEqual({ label: "給湯関係 給湯器", value: "有" });
     expect(rows.map((r) => r.label)).not.toContain("ＴＶ共視聴設備");
   });
+
+  it("括弧の入った言葉(食器棚（造付）)も丸で囲める・書式で2行の内容は2行で出す・小さな見出し(最終レビュー)", () => {
+    const h = doc().build(ctx(), { ...blank("house"), h39D0: ["食器棚（造付）"] }).html;
+    expect(h).toContain('<span class="circle">食器棚（造付）</span>');
+    expect(h).toContain("キッチン設備");
+    const u = doc().build(ctx(), { ...blank("unit"), u21D0: ["鏡"] }).html;
+    expect(u).toMatch(/（洗面台・照明・シャワー・コンセント<br><span class="circle">鏡<\/span>・曇り止め）/);
+  });
 });

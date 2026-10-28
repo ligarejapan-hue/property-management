@@ -25,7 +25,12 @@ FILES = [
 
 
 def text(v):
-    return v.strip(" \u3000") if isinstance(v, str) and v.strip(" \u3000\n") else None
+    if not isinstance(v, str):
+        return None
+    # Excel の見えない記号(_x0002_ など)を文字に戻し、改行以外の制御文字は外す(書式の見た目に無い字)
+    v = re.sub(r"_x([0-9A-Fa-f]{4})_", lambda m: chr(int(m.group(1), 16)), v)
+    v = re.sub(r"[\x00-\x09\x0b-\x1f\x7f]", "", v)
+    return v.strip(" \u3000") if v.strip(" \u3000\n") else None
 
 
 def cells(ws):

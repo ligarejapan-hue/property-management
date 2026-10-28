@@ -46,4 +46,21 @@ describe("付帯設備表の設備の行の表(設計 第2段階 §4.8)", () => 
     expect(new Set(keys).size).toBe(keys.length);
     for (const i of formItems(EQUIPMENT_FORM).filter((i) => !i.noPrint)) expect(i.key, i.key).toMatch(i.only?.[0] === "unit" ? /^u/ : /^h/);
   });
+
+  it("書式の小さな見出し(キッチン設備など)も行の表にある(最終レビュー)", () => {
+    for (const kind of ["house", "unit"] as const) {
+      const titles = EQUIPMENT_ROWS[kind].filter((r) => r.kind === "group").map((r) => (r.kind === "group" ? r.title : ""));
+      for (const t of ["キッチン設備", "浴室設備", "洗面設備", "トイレ設備", "洗濯設備"]) expect(titles, `${kind}: ${t}`).toContain(t);
+    }
+  });
+
+  it("Excel の行の名前が重ならない(どの設備の値か分かる・最終レビュー)", async () => {
+    const { formValueRows } = await import("../forms/render");
+    const { emptyFormValues } = await import("../forms/values");
+    for (const kind of ["house", "unit"]) {
+      const labels = formValueRows(EQUIPMENT_FORM, { ...emptyFormValues(EQUIPMENT_FORM), kind }).filter((r) => !r.heading).map((r) => r.label);
+      const dup = labels.filter((l, i) => labels.indexOf(l) !== i);
+      expect(dup, kind).toEqual([]);
+    }
+  });
 });

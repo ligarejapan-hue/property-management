@@ -12,7 +12,7 @@ export interface EquipDetail { parts: string[]; options?: string[] }
  */
 export type EquipRow =
   | { kind: "table"; key: string; title: string; nameHeader: string; detailHeader: string }
-  | { kind: "group"; title: string }
+  | { kind: "group"; title: string; sub?: boolean }
   | { kind: "equip"; key: string; name: string; details?: EquipDetail[]; place?: boolean; count?: "台" | "ヶ所"; safety?: boolean }
   | { kind: "blank"; key: string }
   | { kind: "note"; key: string };
@@ -30,6 +30,7 @@ const HOUSE: EquipRow[] = [
   { kind: "equip", key: "02", name: "屋内式ガス湯沸かし器《個別》", safety: true },
   { kind: "blank", key: "03" },
   { kind: "group", title: "水廻り関係" },
+  { kind: "group", title: "キッチン設備", sub: true },
   { kind: "equip", key: "04", name: "流し台" },
   { kind: "equip", key: "05", name: "混合水栓" },
   { kind: "equip", key: "06", name: "レンジフード《換気扇》" },
@@ -40,17 +41,21 @@ const HOUSE: EquipRow[] = [
   { kind: "equip", key: "11", name: "浄水器" },
   { kind: "equip", key: "12", name: "ディスポーザー" },
   { kind: "blank", key: "13" },
+  { kind: "group", title: "浴室設備", sub: true },
   { kind: "equip", key: "14", name: "シャワー" },
   { kind: "equip", key: "15", name: "混合水栓" },
   { kind: "equip", key: "16", name: "", details: [d("浴槽（追炊き・足し湯・保温・湯張り）", ["追炊き", "足し湯", "保温", "湯張り"])] },
   { kind: "equip", key: "17", name: "", details: [d("浴室洗面台　鏡（有・無）", ["有", "無"])] },
   { kind: "equip", key: "18", name: "屋内式風呂がま《バランス釜》", safety: true },
   { kind: "equip", key: "19", name: "浴室内乾燥《浴室内乾燥（暖房）機》", safety: true },
+  { kind: "group", title: "洗面設備", sub: true },
   { kind: "equip", key: "20", name: "", details: [d(["１階（洗面台・照明・シャワー・コンセント", "・鏡・曇り止め）"], ["洗面台", "照明", "シャワー", "コンセント", "鏡", "曇り止め"])] },
   { kind: "equip", key: "21", name: "", details: [d(["２階（洗面台・照明・シャワー・コンセント", "・鏡・曇り止め）"], ["洗面台", "照明", "シャワー", "コンセント", "鏡", "曇り止め"])] },
   { kind: "blank", key: "22" },
+  { kind: "group", title: "トイレ設備", sub: true },
   { kind: "equip", key: "23", name: "", details: [d(["１階（便器・温水洗浄・保温・乾燥・", "ロータンク・手洗い・　　　）"], ["便器", "温水洗浄", "保温", "乾燥", "ロータンク", "手洗い"])] },
   { kind: "equip", key: "24", name: "", details: [d(["２階（便器・温水洗浄・保温・乾燥・", "ロータンク・手洗い・　　　）"], ["便器", "温水洗浄", "保温", "乾燥", "ロータンク", "手洗い"])] },
+  { kind: "group", title: "洗濯設備", sub: true },
   { kind: "equip", key: "25", name: "防水パン" },
   { kind: "equip", key: "26", name: "洗濯用水栓" },
   { kind: "blank", key: "27" },
@@ -96,6 +101,7 @@ const UNIT: EquipRow[] = [
   { kind: "equip", key: "03", name: "屋内式ガス湯沸かし器（個別）", safety: true },
   { kind: "blank", key: "04" },
   { kind: "group", title: "水廻り関係" },
+  { kind: "group", title: "キッチン設備", sub: true },
   { kind: "equip", key: "05", name: "流し台" },
   { kind: "equip", key: "06", name: "混合水栓" },
   { kind: "equip", key: "07", name: "レンジフード《換気扇》" },
@@ -106,15 +112,19 @@ const UNIT: EquipRow[] = [
   { kind: "equip", key: "12", name: "浄水器" },
   { kind: "equip", key: "13", name: "ディスポーザー" },
   { kind: "blank", key: "14" },
+  { kind: "group", title: "浴室設備", sub: true },
   { kind: "equip", key: "15", name: "シャワー" },
   { kind: "equip", key: "16", name: "混合水栓" },
   { kind: "equip", key: "17", name: "", details: [d("浴槽（追炊き・足し湯・保温・湯張り）", ["追炊き", "足し湯", "保温", "湯張り"])] },
   { kind: "equip", key: "18", name: "", details: [d("浴室洗面台　鏡（有・無）", ["有", "無"])] },
   { kind: "equip", key: "19", name: "屋内式風呂がま《バランス釜》", safety: true },
   { kind: "equip", key: "20", name: "浴室内乾燥（浴室内乾燥（暖房）機）", safety: true },
+  { kind: "group", title: "洗面設備", sub: true },
   { kind: "equip", key: "21", name: "", details: [d(["（洗面台・照明・シャワー・コンセント", "鏡・曇り止め）"], ["洗面台", "照明", "シャワー", "コンセント", "鏡", "曇り止め"])] },
   { kind: "blank", key: "22" },
+  { kind: "group", title: "トイレ設備", sub: true },
   { kind: "equip", key: "23", name: "", details: [d(["（便器・温水洗浄・保温・乾燥・ロータンク", "手洗い・　　　）"], ["便器", "温水洗浄", "保温", "乾燥", "ロータンク", "手洗い"])] },
+  { kind: "group", title: "洗濯設備", sub: true },
   { kind: "equip", key: "24", name: "防水パン" },
   { kind: "equip", key: "25", name: "洗濯用水栓" },
   { kind: "blank", key: "26" },
@@ -161,18 +171,22 @@ function entriesOf(kind: EquipmentKind): FormEntry[] {
   const p = kind === "house" ? "h" : "u";
   const only = [kind];
   let nameHeader = "";
+  let tableTitle = "";
+  let blanks = 0;
   const out: FormEntry[] = [];
   for (const r of EQUIPMENT_ROWS[kind]) {
     if (r.kind === "table") {
       nameHeader = r.nameHeader;
+      tableTitle = r.title;
       out.push({ kind: "section", title: r.title, only });
     } else if (r.kind === "group") {
       out.push({ kind: "item", key: `${p}g${out.length}`, label: r.title, only });
     } else if (r.kind === "note") {
-      out.push({ kind: "item", key: p + r.key, label: "備考", only, fields: [{ key: `${p}${r.key}Text`, label: "", max: 1000, lines: 3 }] });
+      // 入力欄と Excel では表の名前を頭に付ける(表１と表２の備考を見分ける・PDF は書式どおり「備考」)
+      out.push({ kind: "item", key: p + r.key, label: `${tableTitle} 備考`, only, fields: [{ key: `${p}${r.key}Text`, label: "", max: 1000, lines: 3 }] });
     } else if (r.kind === "blank") {
       out.push({
-        kind: "item", key: p + r.key, label: "", sub: true, only, choices: YN,
+        kind: "item", key: p + r.key, label: `空欄の行${++blanks}`, sub: true, only, choices: YN,
         fields: [{ key: `${p}${r.key}Name`, label: nameHeader, max: 100 }, { key: `${p}${r.key}Fault`, label: EQUIP_FAULT, max: 300 }],
       });
     } else {
@@ -184,9 +198,11 @@ function entriesOf(kind: EquipmentKind): FormEntry[] {
       const item: FormItem = { kind: "item", key: p + r.key, label: equipLabel(r), sub: true, only, choices: YN, fields };
       out.push(item);
       (r.details ?? []).forEach((dt, i) => {
-        if (dt.options?.length) out.push({ kind: "item", key: `${p}${r.key}D${i}`, label: dt.parts.join(""), sub: true, only, multiple: true, choices: cs(dt.options) });
+        const text = dt.parts.join("");
+        const label = r.name ? `${r.name} ${text}` : `${text} 〇を付けるもの`;
+        if (dt.options?.length) out.push({ kind: "item", key: `${p}${r.key}D${i}`, label, sub: true, only, multiple: true, choices: cs(dt.options) });
       });
-      if (r.safety) out.push({ kind: "item", key: `${p}${r.key}S`, label: EQUIP_SAFETY, sub: true, only, choices: YN });
+      if (r.safety) out.push({ kind: "item", key: `${p}${r.key}S`, label: `${equipLabel(r)} ${EQUIP_SAFETY}`, sub: true, only, choices: YN });
     }
   }
   return out;
