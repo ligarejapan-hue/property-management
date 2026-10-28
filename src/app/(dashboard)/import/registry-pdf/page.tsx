@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useCallback, useMemo, useRef } from "react";
+import { useState, useCallback, useEffect, useMemo, useRef } from "react";
 import { PageHeader } from "@/components/ui/page-header";
 import { Button } from "@/components/ui/button";
 import Link from "next/link";
@@ -31,6 +31,8 @@ import ImportSwitcher from "@/components/import/import-switcher";
 import { RegistryRightsCard, shouldShowRegistryRights } from "@/components/import/registry-rights-card";
 import type { RegistryRightsSummary } from "@/lib/registry-strike/analyze";
 import FileDropZone from "@/components/ui/file-drop-zone";
+import HandedFileSlot from "@/components/import/handed-file-slot";
+import { clearHandoff, peekHandoffFile } from "@/lib/import-drop/handoff";
 import { draftKey } from "@/lib/drafts/draft-store";
 import { isDefiniteSubmitFailure } from "@/lib/drafts/submit-outcome";
 import {
@@ -345,16 +347,25 @@ function RegistryPdfScreen({ draftEnabled }: { draftEnabled: boolean }) {
   // 作業中の控え(設計書 §2 S3)。
   const draftKeyValue = draftEnabled ? draftKey("registry-pdf") : null;
   const restored = useRestoredDraft(draftKeyValue, parseRegistryPdfDraft);
-  const r0 = restored?.data ?? null;
+  // 「ファイルを入れる」から持ってきた謄本PDF(2026-10-28 第2段)。最初の描画で読み、描き終えたら消す。
+  //   ⚠新しく持ってきた PDF は**最初から読む**(控えの読み取り結果・選んだ物件は使わない)。前の PDF の
+  //   確認の途中に新しい PDF を差し込むと、前の PDF の入力で新しい PDF を登録できてしまう(@codex #607 P1)。
+  //   取り込み中に離れた印(pendingSubmit)だけは控えから引き継ぐ(確かめるまで止める)。
+  const [handed] = useState(() => peekHandoffFile("registry_pdf"));
+  useEffect(() => {
+    clearHandoff("registry_pdf");
+  }, []);
+  const r0 = handed !== null ? null : (restored?.data ?? null);
+  const startFresh = handed !== null;
 
   // Step state
   const [step, setStep] = useState<Step>(r0?.step ?? "upload");
 
   // Upload step
-  const [uploadTab, setUploadTab] = useState<UploadTab>(r0?.uploadTab ?? "file");
-  const [text, setText] = useState(r0?.text ?? "");
-  const [fileName, setFileName] = useState<string | null>(r0?.fileName ?? null);
-  const [selectedFile, setSelectedFile] = useState<File | null>(null); // 実 PDF ファイル
+  const [uploadTab, setUploadTab] = useState<UploadTab>(startFresh ? "file" : (r0?.uploadTab ?? "file"));
+  const [text, setText] = useState(startFresh ? "" : (r0?.text ?? ""));
+  const [fileName, setFileName] = useState<string | null>(startFresh ? (handed?.name ?? null) : (r0?.fileName ?? null));
+  const [selectedFile, setSelectedFile] = useState<File | null>(handed); // 実 PDF ファイル
   /** 解析に使ったのがファイルか(取り込みのときもう一度ファイルが要る)。 */
   const [fromFile, setFromFile] = useState(r0?.fromFile ?? false);
 
@@ -436,13 +447,6 @@ function RegistryPdfScreen({ draftEnabled }: { draftEnabled: boolean }) {
   // Handlers
   // -------------------------------------------------------------------------
 
-  const setFileState = useCallback((file: File) => {
-    setFileName(file.name);
-    setSelectedFile(file);
-    // テキストはサーバー側で抽出するため readAsText は不要
-    // プレビュー表示用に「ファイル選択済み」をマーク
-    setText(""); // クリア（file モード時は text は使わない）
-  }, []);
 
   const handleParse = useCallback(async () => {
     setParsing(true);
@@ -675,7 +679,8 @@ function RegistryPdfScreen({ draftEnabled }: { draftEnabled: boolean }) {
         </div>
       ) : (
         // ⚠取り込み中は出さない(「最初からやり直す」で送信中の印を消させない)。解析中も出さない(届いた結果が控えを作り直す)。
-        restored && !restoredDismissed && !importing && !parsing && step !== "result" && (
+        // 新しい PDF を持ってきたときは控えを使っていないので「前回の続き」は出さない。
+        restored && r0 && !restoredDismissed && !importing && !parsing && step !== "result" && (
           <div className="mb-4">
             <DraftRestoredNotice savedAt={restored.savedAt} onDiscard={handleReset} />
           </div>
@@ -744,14 +749,10 @@ function RegistryPdfScreen({ draftEnabled }: { draftEnabled: boolean }) {
           {/* File upload tab */}
           {uploadTab === "file" && (
             <div>
-              <FileDropZone
-                size="lg"
-                accept=".pdf"
-                icon={FileText}
-                title="PDFファイルをここにドラッグ＆ドロップ"
-                fileName={fileName}
-                onFiles={(files) => setFileState(files[0])}
-                onNoneAccepted={() => {
+              {/* ファイルを入れる枠は「ファイルを入れる」1つにまとめた(2026-10-28 発注者決定)。 */}
+              <HandedFileSlot
+                fileLabel={selectedFile ? fileName : null}
+                onClear={() => {
                   setFileName(null);
                   setSelectedFile(null);
                 }}

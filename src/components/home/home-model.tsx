@@ -29,7 +29,7 @@ export const HOME_CARDS: HomeCard[] = [
   { label: "巡回履歴", href: "/field-survey/sessions", icon: ic(History), desc: "過去の記録", minRole: "field_staff" },
   { label: "物件化の完成待ち", href: "/field-survey/candidates", icon: ic(ClipboardCheck), desc: "あと少しの物件", minRole: "field_staff" },
   { label: "物件", href: "/properties", icon: ic(Building2), desc: "物件一覧・マンション棟", minRole: "office_staff" },
-  { label: "物件データ取り込み", href: "/import", icon: ic(Upload), desc: "受付帳・謄本の取込", minRole: "office_staff" },
+  { label: "物件データ取り込み", href: "/import/drop", icon: ic(Upload), desc: "受付帳・謄本・書類を入れる", minRole: "office_staff" },
   { label: "販売図面", href: "/sales-sheets/new", icon: ic(Newspaper), desc: "マイソクを作る", minRole: "office_staff" },
   // メニュー再編(2026-08-24): DM の入口はメニューページに集約したので、
   // ホームからもそこへ入る(設定だけに飛ばさない)。事務担当にも出す。

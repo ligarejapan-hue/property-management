@@ -66,8 +66,9 @@ describe("ファイル選択欄は共通のドロップ枠にそろえる", () =
         if (!/\bonNoneAccepted=/.test(m[0])) missing.push(path.relative(root, f));
       }
     }
-    // 空振りしていない(第4回 D で受付帳の枠を1つにまとめ、登記DM取込の Excel 枠も無くなったので 8→6)。
-    expect(count).toBeGreaterThanOrEqual(6);
+    // 空振りしていない(第4回 D で受付帳の枠を1つにまとめ、登記DM取込の Excel 枠も無くなったので 8→6。
+    // 2026-10-28 取り込みの枠を「ファイルを入れる」1つにまとめ、残るのは謄本・貼り付けの「選び直し」の枠だけ=6→2)。
+    expect(count).toBeGreaterThanOrEqual(2);
     expect(missing).toEqual([]);
   });
 

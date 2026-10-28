@@ -18,6 +18,8 @@ import { Button } from "@/components/ui/button";
 import ImportSwitcher from "@/components/import/import-switcher";
 import FileDropZone from "@/components/ui/file-drop-zone";
 import { FileText } from "lucide-react";
+import HandedFileSlot from "@/components/import/handed-file-slot";
+import { clearHandoff, peekHandoffFile } from "@/lib/import-drop/handoff";
 import {
   PasteImportReview,
   defaultPropertyValues,
@@ -101,11 +103,21 @@ function PasteImportScreen({ draftEnabled }: { draftEnabled: boolean }) {
   // 作業中の控え。別のメニューへ移って戻っても続きから(設計書 2026-10-13 §2 S1)。
   const draftKeyValue = draftEnabled ? draftKey("paste") : null;
   const restored = useRestoredDraft(draftKeyValue, parsePasteDraft);
-  const r0 = restored?.data.review ?? null;
+
+  // 「ファイルを入れる」から持ってきた反響の PDF(2026-10-28 第2段)。最初の描画で読み、描き終えたら消す。
+  //   ⚠新しく持ってきた PDF は**最初から読む**(控えの確認の途中は使わない)。前の PDF の確認の途中に
+  //   新しい PDF を差し込むと、前の PDF の入力で新しい PDF を登録できてしまう(@codex #607 P1)。
+  //   登録中に離れた印(pendingSubmit)だけは控えから引き継ぐ(確かめるまで止める)。
+  const [handed] = useState(() => peekHandoffFile("paste_pdf"));
+  useEffect(() => {
+    clearHandoff("paste_pdf");
+  }, []);
+  const r0 = handed !== null ? null : (restored?.data.review ?? null);
 
   // ---- 入力(貼り付け or PDF) ----
-  const [rawText, setRawText] = useState(restored?.data.rawText ?? "");
-  const [pdfFile, setPdfFile] = useState<File | null>(null);
+  // PDF を持ってきたときは貼り付けの文章を使わない(PDF と文章はどちらか一方)。
+  const [rawText, setRawText] = useState(handed ? "" : (restored?.data.rawText ?? ""));
+  const [pdfFile, setPdfFile] = useState<File | null>(handed);
   const [reading, setReading] = useState(false);
   const [readError, setReadError] = useState<string | null>(null);
 
@@ -560,7 +572,8 @@ function PasteImportScreen({ draftEnabled }: { draftEnabled: boolean }) {
         />
       ) : (
         // ⚠登録中は出さない(「最初からやり直す」で送信中の印を消させない)。読み取り中も出さない(届いた結果が控えを作り直す)。
-        restored && !restoredDismissed && !registering && !reading && <DraftRestoredNotice savedAt={restored.savedAt} onDiscard={handleDiscardDraft} />
+        // 新しい PDF を持ってきたときは控えを使っていないので「前回の続き」は出さない。
+        restored && !handed && !restoredDismissed && !registering && !reading && <DraftRestoredNotice savedAt={restored.savedAt} onDiscard={handleDiscardDraft} />
       )}
       {draftSaver.tooLarge && <DraftTooLargeNotice kind="input" />}
 
@@ -600,19 +613,13 @@ function PasteImportScreen({ draftEnabled }: { draftEnabled: boolean }) {
 
           <div>
             <h2 className="mb-1 block text-sm font-medium text-gray-800 dark:text-gray-200">
-              PDFをアップロード
+              PDFから読み取る
             </h2>
-            <FileDropZone
-              accept="application/pdf,.pdf"
+            {/* ファイルを入れる枠は「ファイルを入れる」1つにまとめた(2026-10-28 発注者決定)。 */}
+            <HandedFileSlot
+              fileLabel={pdfFile?.name ?? null}
               disabled={reading}
-              icon={FileText}
-              title="PDFファイルをここにドラッグ＆ドロップ"
-              fileName={pdfFile?.name ?? null}
-              onFiles={(files) => {
-                setPdfFile(files[0]);
-                setRawText("");
-              }}
-              onNoneAccepted={() => setPdfFile(null)}
+              onClear={() => setPdfFile(null)}
             />
           </div>
 

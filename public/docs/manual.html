@@ -220,7 +220,7 @@
 
     <div class="pn" style="text-align:center;font-size:11px;font-weight:800;color:var(--accent);letter-spacing:.08em;margin-bottom:4px">STEP 1 ・ 物件を登録する（入口は2つ）</div>
     <div class="routes">
-      <div class="route"><div class="pi">📥</div><div><b>① 受付帳（うけつけちょう）から</b><p>もらった一覧表（CSVファイル）を読み込んで登録</p><span class="use">受付帳CSV取込</span></div></div>
+      <div class="route"><div class="pi">📥</div><div><b>① 受付帳（うけつけちょう）から</b><p>もらった一覧表（CSVファイル）を読み込んで登録</p><span class="use">ファイルを入れる → 受付帳CSV取込</span></div></div>
       <div class="rplus">＋</div>
       <div class="route"><div class="pi">📸</div><div><b>② 現地で写真を撮って</b><p>実際に現場に行って撮影し、その物件を登録</p><span class="use">現地で撮影 → 物件一覧</span></div></div>
       <div class="rplus">＋</div>
@@ -231,7 +231,7 @@
     <div class="pipe">
       <div class="pstep"><div class="pi">🏢</div><div><div class="pn">STEP 1</div><h4>物件を登録</h4><p>上の2つのどちらかで、扱う土地や家をシステムに登録します。</p><span class="use">物件一覧 / 取込</span></div></div>
       <div class="parr"><span class="v">↓</span><span class="h">→</span></div>
-      <div class="pstep"><div class="pi">📄</div><div><div class="pn">STEP 2</div><h4>謄本を取る</h4><p>その土地・家の「持ち主が誰か」を役所の公式書類で確かめます。</p><span class="use">謄本PDF取込 / 所在で謄本を検索</span></div></div>
+      <div class="pstep"><div class="pi">📄</div><div><div class="pn">STEP 2</div><h4>謄本を取る</h4><p>その土地・家の「持ち主が誰か」を役所の公式書類で確かめます。</p><span class="use">ファイルを入れる → 謄本PDF取込 / 所在で謄本を検索</span></div></div>
       <div class="parr"><span class="v">↓</span><span class="h">→</span></div>
       <div class="pstep"><div class="pi">✉️</div><div><div class="pn">STEP 3</div><h4>お手紙で営業</h4><p>持ち主へ「売りませんか？」とお手紙（DM）を送ります。文章はお手元のAIで作って貼り付けます。</p><span class="use">DMの送付管理・売却促進DM</span></div></div>
       <div class="parr"><span class="v">↓</span><span class="h">→</span></div>
@@ -304,7 +304,7 @@
       <tr><td>ホーム</td><td>ログイン直後の画面。役割に合わせて、よく使う入口が並ぶ</td></tr>
       <tr><td>物件一覧 / マンション棟</td><td>扱う土地や家を一覧で見る・探す・登録する（いちばんよく使う）</td></tr>
       <tr><td>現地調査マップ / 巡回履歴 / 物件化の完成待ち</td><td>地図で現場を調べる・過去に回った記録を見る・あとで物件にする候補を確認する</td></tr>
-      <tr><td>受付帳CSV取込 / 謄本PDF取込</td><td>外部の資料（一覧表や書類）を読み込む</td></tr>
+      <tr><td>ファイルを入れる</td><td>外部の資料（一覧表や書類）を入れると、中身を見分けて受付帳・謄本などの取り込みや書類の受け取り箱へ進める</td></tr>
       <tr><td>販売図面を作成</td><td>売り出し用の1枚チラシを作る</td></tr>
       <tr><td>データ品質 / システム管理</td><td>利用者や設定の管理、データの点検（管理者だけに表示）</td></tr>
       <tr><td>資料（使い方ガイド・取り扱いマニュアル）・ヘルプ</td><td>この資料をアプリ内から開ける（メニューの一番下）</td></tr>
@@ -583,11 +583,12 @@
     <div class="proc">
       <p class="t">受付帳のCSVや、謄本のPDFを読み込む</p>
       <ol class="steps">
-        <li>メニューから「受付帳CSV取込」または「謄本PDF取込」を開きます。<span class="see"><span class="word">謄本（とうほん）</span>＝土地や家の「持ち主が誰か」を役所が証明する公式の書類。</span></li>
-        <li>ファイルを点線の枠へドラッグ＆ドロップするか、枠を押して選んで読み込みます。<span class="see">読み込んだ結果や中身は、あとで一覧で確認できます。<b>一覧に出るのは自分が読み込んだ分だけです</b>（管理者は全員分が見えます）。</span></li>
+        <li>メニュー「物件データ取り込み」→「<b>ファイルを入れる</b>」を開きます。<span class="see"><span class="word">謄本（とうほん）</span>＝土地や家の「持ち主が誰か」を役所が証明する公式の書類。</span></li>
+        <li>ファイルを点線の枠へドラッグ＆ドロップするか、枠を押して選びます（いくつでも）。<span class="see">システムが中身を見分けて「見分けた中身」に出します（この画面では保存しません）。受付帳・所有者の一覧・査定サイトの顧客管理表・謄本・反響のPDF（HOME4U・タカウル）は、行のボタン（<span class="btn">受付帳の取り込みへ</span>・<span class="btn">謄本の取り込みへ</span> など）を押すと、ファイルが入った状態でそれぞれの取り込みの画面が開きます。そのほかの書類（契約書・管理規約・画像など）は、その場で<b>書類の受け取り箱</b>に入ります。中身から決められないCSVは「受付帳として」「所有者の一覧として」「書類として受け取り箱へ」から選びます。PDFは謄本かもしれないので、表には名前を出さず「◯件目のPDF」と出ます。</span></li>
+        <li>進んだ取り込みの画面で、今までどおり下見・確認をしてから取り込みます。<span class="see">読み込んだ結果や中身は、あとで一覧で確認できます。<b>一覧に出るのは自分が読み込んだ分だけです</b>（管理者は全員分が見えます）。取り込みの画面にはファイルを入れる枠はありません。別のファイルにしたいときは「別のファイルを入れる」から「ファイルを入れる」へ戻ります（画面を再読み込みすると、持ってきたファイルは外れます）。</span></li>
       </ol>
     </div>
-    <div class="tip box"><span class="lbl">💡</span><b>受付帳CSV取込では、受付帳は1回入れるだけです</b>（2026-10）。いちばん上の「受付帳を入れる」に受付帳を入れ、取込条件（DL・新既）もそこで1回だけ選びます。そのあと「① 受付帳から物件を新規作成」で物件を作り、「② 所有者ファイルで所有者を付ける」で所有者ファイルを入れて紐づけます（①を先に）。<br>取得済みの所有者事項PDFを<b>フォルダごと</b>物件に添付するときは、「<b>取得済みPDFを一括添付</b>」（旧「登記DM取込」）の画面を使います。</div>
+    <div class="tip box"><span class="lbl">💡</span><b>受付帳CSV取込では、受付帳は1回入れるだけです</b>（2026-10）。「ファイルを入れる」で受付帳を入れて「受付帳の取り込みへ」で進むと、いちばん上の「受付帳を入れる」に受付帳が入っています。取込条件（DL・新既）もそこで1回だけ選びます。そのあと「① 受付帳から物件を新規作成」で物件を作ります。所有者ファイルは、もう一度「ファイルを入れる」に入れて「所有者の突合へ」で進むと「② 所有者ファイルで所有者を付ける」に入るので、紐づけます（①を先に）。<br>取得済みの所有者事項PDFを<b>フォルダごと</b>物件に添付するときは、「<b>取得済みPDFを一括添付</b>」（旧「登記DM取込」）の画面を使います。</div>
 
     <div class="proc">
       <p class="t">メールやPDF、ウェブページの文章を貼り付けて物件にする</p>

@@ -172,7 +172,8 @@ server {
     # ⚠本番(app.ligarejapan.com)は社内の画面・API を nginx で出さない(location / は 404・
     #   社内は Tailscale の入口)ので、この location は要らない。アプリ全体を nginx で出す構成だけで使う。
     # 2026-10-28: まとめてある PDF の分け方の案(attachments/split-analyze)と分けて保存(attachments/split)も同じ扱い。
-    location ~ ^/api/(properties/[^/]+/attachments(/scan|/split|/split-analyze)?|import/paste(/commit)?|report-inbox)$ {
+    # 2026-10-28: 「ファイルを入れる」の行き先の判定(import/detect)も同じ扱い。
+    location ~ ^/api/(properties/[^/]+/attachments(/scan|/split|/split-analyze)?|import/paste(/commit)?|import/detect|report-inbox)$ {
         client_max_body_size 52m;
         proxy_pass         http://127.0.0.1:3000;
         proxy_http_version 1.1;

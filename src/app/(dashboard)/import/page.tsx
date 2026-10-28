@@ -35,7 +35,8 @@ import {
   type StuckImportJob,
 } from "@/lib/api-client";
 import ImportSwitcher from "@/components/import/import-switcher";
-import FileDropZone from "@/components/ui/file-drop-zone";
+import HandedFileSlot from "@/components/import/handed-file-slot";
+import { clearHandoff, peekHandoffEntry, recallReception, rememberReception } from "@/lib/import-drop/handoff";
 import { draftKey } from "@/lib/drafts/draft-store";
 import { hasImportResultShape, isDefiniteSubmitFailure } from "@/lib/drafts/submit-outcome";
 import {
@@ -276,6 +277,15 @@ function ImportScreen({ draftEnabled }: { draftEnabled: boolean }) {
   const [restoreDecision] = useState(() => decideCsvImportRestore(restored));
   // 第4回 D: 受付帳は1回だけ入れる=①と②の控えを1つのファイル・1組の条件にそろえて戻す。
   const s0 = unifyReceptionDraft(restoreDecision.start);
+  // 「ファイルを入れる」から持ってきた受付帳・所有者の一覧(2026-10-28 第2段)。見分けるときに読んだ中身そのもの。
+  //   最初の描画で読み、描き終えたら消す。入れ替えたファイルの下見は控えから戻さない(違う中身で取り込ませない)。
+  const [handedReception] = useState(() => peekHandoffEntry("reception"));
+  const [handedOwner] = useState(() => peekHandoffEntry("owner"));
+  useEffect(() => {
+    clearHandoff("reception");
+    clearHandoff("owner");
+  }, []);
+  const roReplaced = handedReception !== null || handedOwner !== null;
 
   // Job history
   const [jobs, setJobs] = useState<ImportJob[]>([]);
@@ -318,13 +328,21 @@ function ImportScreen({ draftEnabled }: { draftEnabled: boolean }) {
     name: string;
     csvText?: string;
     xlsxBase64?: string;
-  } | null>(s0?.ro?.receptionFile ?? null);
+    // 所有者の一覧だけを持って戻ったとき、控えに受付帳が無ければ(大きくて控えに入らなかった等)、
+    // 画面の中で覚えておいた受付帳を使う(②の突き合わせを続けられるように・@codex #607 P2)。
+  } | null>(handedReception ?? s0?.ro?.receptionFile ?? (handedOwner ? recallReception() : null));
   const [ownerFile, setOwnerFile] = useState<{
     name: string;
     csvText?: string;
     xlsxBase64?: string;
-  } | null>(s0?.ro?.ownerFile ?? null);
-  const [roPreview, setRoPreview] = useState<ReceptionOwnerPreviewResponse | null>((s0?.ro?.roPreview as never) ?? null);
+  } | null>(handedOwner ?? s0?.ro?.ownerFile ?? null);
+  // ②の受付帳を画面の外にも覚えておく(所有者の一覧を取りに「ファイルを入れる」へ行って戻るとき用・@codex #607 P2)。
+  useEffect(() => {
+    rememberReception(receptionFile);
+  }, [receptionFile]);
+  const [roPreview, setRoPreview] = useState<ReceptionOwnerPreviewResponse | null>(
+    roReplaced ? null : ((s0?.ro?.roPreview as never) ?? null),
+  );
   const [roResult, setRoResult] = useState<ReceptionOwnerImportResponse | null>(null);
   const [roLoading, setRoLoading] = useState(false);
   // どちらのボタンの処理中か(押した側だけに「処理中」の文言を出す)
@@ -342,8 +360,10 @@ function ImportScreen({ draftEnabled }: { draftEnabled: boolean }) {
     // ⚠②の控え(ro.receptionFile)からは作り直さない。①が済むと①の控えは外れる(csvDraftAfterImport)ので、
     //   ここで②の受付帳を①へ戻すと、戻ったときに①がもう一度押せる形になり二重の取り込みへ誘う(@codex #523 P2)。
     //   ②の受付帳は共通の欄の表示(rpFile ?? receptionFile)と②だけで使う。
-  } | null>(s0?.rp?.rpFile ?? null);
-  const [rpPreview, setRpPreview] = useState<ReceptionPropertyPreviewResponse | null>((s0?.rp?.rpPreview as never) ?? null);
+  } | null>(handedReception ?? s0?.rp?.rpFile ?? null);
+  const [rpPreview, setRpPreview] = useState<ReceptionPropertyPreviewResponse | null>(
+    handedReception ? null : ((s0?.rp?.rpPreview as never) ?? null),
+  );
   const [rpResult, setRpResult] = useState<ReceptionPropertyImportResponse | null>(null);
   const [rpLoading, setRpLoading] = useState(false);
   // どちらのボタンの処理中か(ボタンの「処理中」の文言を押した側だけに出す。押せない状態は rpLoading のまま)
@@ -935,14 +955,9 @@ function ImportScreen({ draftEnabled }: { draftEnabled: boolean }) {
 
         {/* ファイル選択 (D&D) */}
         <div className="mb-3">
-          <FileDropZone
-            accept=".csv,.tsv,.txt,.xlsx"
-            onFiles={(files) => void handleReceptionFile(files[0])}
-            onNoneAccepted={() => void handleReceptionFile(null)}
-            title="CSV または Excel(.xlsx) ファイルをここにドラッグ＆ドロップ"
-            hint="受付帳のファイル — 種別は中身の列構成から自動判定します"
-            fileName={rpFile?.name ?? receptionFile?.name ?? null}
-          />
+          {/* ファイルを入れる枠は「ファイルを入れる」1つにまとめた(2026-10-28 発注者決定)。 */}
+          <HandedFileSlot fileLabel={rpFile?.name ?? receptionFile?.name ?? null} />
+          <p className="mt-1 text-xs text-gray-500 dark:text-gray-400">受付帳のファイル — 種別は中身の列構成から自動判定します</p>
         </div>
         {(rpFile || receptionFile || ownerFile || rpPreview || rpResult || roPreview || roResult) && (
           <Button
@@ -1154,14 +1169,9 @@ function ImportScreen({ draftEnabled }: { draftEnabled: boolean }) {
 
         <div className="mb-4">
           {/* 所有者 D&D */}
-          <FileDropZone
-            accept=".csv,.tsv,.txt,.xlsx"
-            onFiles={(files) => void handleOwnerFile(files[0])}
-            onNoneAccepted={() => void handleOwnerFile(null)}
-            title="CSV または Excel(.xlsx) ファイルをここにドラッグ＆ドロップ"
-            hint="所有者 — 種別は中身の列構成から自動判定します"
-            fileName={ownerFile?.name ?? null}
-          />
+          {/* ファイルを入れる枠は「ファイルを入れる」1つにまとめた(2026-10-28 発注者決定)。 */}
+          <HandedFileSlot fileLabel={ownerFile?.name ?? null} onClear={() => void handleOwnerFile(null)} />
+          <p className="mt-1 text-xs text-gray-500 dark:text-gray-400">所有者 — 種別は中身の列構成から自動判定します</p>
         </div>
 
         <div className="mb-4 flex flex-wrap items-center gap-2">

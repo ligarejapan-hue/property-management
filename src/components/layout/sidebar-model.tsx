@@ -171,17 +171,14 @@ export const SIDEBAR_GROUPS: NavGroup[] = [
     pillar: true,
     icon: ic(Upload),
     items: [
-      { label: "受付帳CSV取込", href: "/import", icon: ic(Upload), minRole: "office_staff" },
-      { label: "謄本PDF取込", href: "/import/registry-pdf", icon: ic(FileText), minRole: "office_staff" },
+      // 取り込みのファイルの入り口は1つ(2026-10-28 発注者決定)。中身を見分けて、受付帳・所有者・謄本・
+      // 顧客管理表・反響の取り込み画面へファイルを持って進む(書類は受け取り箱へ)。
+      // ⚠「受付帳CSV取込」「謄本PDF取込」「所有者CSV取込」の行は外した。画面(/import・/import/registry-pdf・
+      //   /import#owner-match)と取り込み履歴は残り、ここから進んで使う。
+      { label: "ファイルを入れる", href: "/import/drop", icon: ic(Upload), minRole: "office_staff" },
       // ⚠取込画面の中のタブからしか行けなかった。
       // 第4回 D(2026-10-16): 受付帳・所有者の取込は「受付帳CSV取込」へまとめ、PDFの一括添付だけが残った(URLは据え置き)。
       { label: "取得済みPDFを一括添付", href: "/import/registry-dm", icon: ic(Mail), minRole: "office_staff" },
-      // ⚠**アプリ内のリンクがゼロ**で、URL を直に打つしか到達手段が無かった
-      //   (2026-08-16 に発見・08-24 の再実測でも同じ)。
-      // ⚠行き先は取込画面の**該当セクション**(@codex #411 R1 P2)。/import/owners は
-      //   そこへ送るだけの転送ページで、素の /import へ送ると受付帳の取込と
-      //   見分けがつかない場所に着いてしまう。
-      { label: "所有者CSV取込", href: "/import#owner-match", icon: ic(Users), minRole: "office_staff" },
       // 社外から届いたメール・PDF・ブラウザ画面を貼って物件にする(2026-08 新設)。
       { label: "貼り付けて物件化", href: "/import/paste", icon: ic(ClipboardPaste), minRole: "office_staff" },
       // 査定サイトの報告書PDFを受け取り、候補の物件に添付する(2026-10-10)。
@@ -274,6 +271,8 @@ const PROPERTIES_NON_LIST = ["/properties/quality-check", "/properties/sale-dm"]
 const SALE_DM_INQUIRIES = "/properties/sale-dm/inquiries";
 /** 左メニューには出さず、LPメニュー(/lp)の中にだけ入口がある画面(画面すっきり化 第2回)。 */
 export const LP_TOOL_PATHS = ["/admin/sale-dm-settings", "/admin/lp-assets", "/admin/dm-scenarios"];
+/** 「ファイルを入れる」と、そこから進む受付帳・謄本の取り込み画面(2026-10-28・左メニューの行を外した画面)。 */
+export const IMPORT_DROP_PATHS = ["/import/drop", "/import", "/import/registry-pdf"];
 
 /** 同じページの中の場所を指す項目(`/import#owner-match` など)の一覧。 */
 const ANCHOR_HREFS = SIDEBAR_GROUPS.flatMap((g) => g.items)
@@ -310,6 +309,8 @@ export function isNavItemActive(
     return currentPath === href || currentPath.startsWith("/properties/");
   }
   if (href === "/import") return currentPath === "/import";
+  // 「ファイルを入れる」は、そこから進む受付帳(/import)・謄本(/import/registry-pdf)の画面でも光る(2026-10-28)。
+  if (href === "/import/drop") return IMPORT_DROP_PATHS.includes(currentPath);
   // LPメニューは、その中にだけ入口がある3画面でも光る(=DM・LP関係の見出しも自動で開く)。
   if (href === "/lp" && LP_TOOL_PATHS.some((p) => currentPath === p || currentPath.startsWith(p + "/"))) {
     return true;

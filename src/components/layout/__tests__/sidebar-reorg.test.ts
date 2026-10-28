@@ -18,6 +18,7 @@ import {
   visibleSidebar,
   isNavItemActive,
 } from "@/components/layout/sidebar-model";
+import { HANDOFF_PATHS } from "@/lib/import-drop/detect";
 
 const allItems = SIDEBAR_GROUPS.flatMap((g) => g.items);
 const byHref = (href: string) => allItems.find((i) => i.href === href);
@@ -126,18 +127,17 @@ describe("説明文が実際に画面へ出る(定義しただけで終わらせ
 });
 
 describe("⚠URL 直打ちでしか行けなかった画面を載せる", () => {
-  it("所有者CSV取込・登記DM取込・物件データエラー確認", () => {
-    // 所有者CSV取込はアプリ内のリンクがゼロだった(実測 2026-08-16 / 08-24)。
-    expect(byHref("/import#owner-match")).toBeTruthy();
+  it("登記DM取込・物件データエラー確認(所有者CSV取込は「ファイルを入れる」へまとめた・2026-10-28)", () => {
     expect(byHref("/import/registry-dm")).toBeTruthy();
     expect(byHref("/properties/quality-check")).toBeTruthy();
   });
 
-  it("⚠所有者CSV取込は、その作業がある場所まで送る(@codex #411 R1 P2)", () => {
+  it("⚠所有者の一覧は「ファイルを入れる」から、その作業がある場所まで送る(@codex #411 R1 P2)", () => {
     // ⚠素の /import へ送ると**画面の上から**入ってしまい、所有者の作業が
-    //   どこにあるか分からない(受付帳CSV取込と着地点が同じになる)。
-    //   所有者の作業は同じページの下の「② 受付帳 × 所有者 2ファイル突合」。
-    expect(byHref("/import#owner-match")).toBeTruthy();
+    //   どこにあるか分からない。所有者の作業は同じページの下の「② 所有者ファイルで所有者を付ける」。
+    // 2026-10-28: 左メニューの「所有者CSV取込」は外し、「ファイルを入れる」の「所有者の突合へ」が送る。
+    expect(byHref("/import#owner-match")).toBeUndefined();
+    expect(HANDOFF_PATHS.owner).toBe("/import#owner-match");
     expect(byHref("/import/owners")).toBeUndefined();
     // 着地点の id が実在すること(リンク切れの見張り)。
     const IMPORT_PAGE = readFileSync(
@@ -155,31 +155,36 @@ describe("⚠URL 直打ちでしか行けなかった画面を載せる", () => 
     expect(OWNERS_PAGE).toContain('redirect("/import#owner-match")');
   });
 
-  it("⚠押した項目が光る(いま見ている位置まで見る・@codex #411 R2 P2)", () => {
+  it("⚠位置(#)を指す項目は、位置まで一致したときだけ光る(@codex #411 R2 P2)", () => {
     // 押した項目とは**別の項目**が光ると、どこに居るのか分からなくなる。
-    // 位置(#)まで一致したときだけ点灯し、そのとき全体を指す項目は消す
-    // =2つ同時に光らせない。
     expect(isNavItemActive("/import#owner-match", "/import", "#owner-match")).toBe(true);
-    expect(isNavItemActive("/import", "/import", "#owner-match")).toBe(false);
-    // 位置を指定していないときは、これまでどおり全体の項目が光る。
-    expect(isNavItemActive("/import", "/import", "")).toBe(true);
     expect(isNavItemActive("/import#owner-match", "/import", "")).toBe(false);
+    expect(isNavItemActive("/import#owner-match", "/import", "#other")).toBe(false);
+    expect(isNavItemActive("/import#owner-match", "/properties", "#owner-match")).toBe(false);
     // 別の場所の位置指定に巻き込まれない(無関係なページを消さない)。
     expect(isNavItemActive("/properties", "/properties", "#somewhere")).toBe(true);
-    // 位置が違えば点かない。
-    expect(isNavItemActive("/import#owner-match", "/import", "#other")).toBe(false);
-    // 別ページでは点かない。
-    expect(isNavItemActive("/import#owner-match", "/properties", "#owner-match")).toBe(false);
-    // 第3引数を省いた既存の呼び出しは従来どおり動く(後方互換)。
-    expect(isNavItemActive("/import", "/import")).toBe(true);
   });
 
-  it("取り込み系は「物件データ取り込み」に、エラー確認は「物件」に置く", () => {
+  it("「ファイルを入れる」は、そこから進む受付帳・所有者・謄本の取り込み画面でも光る(2026-10-28)", () => {
+    expect(isNavItemActive("/import/drop", "/import/drop")).toBe(true);
+    expect(isNavItemActive("/import/drop", "/import")).toBe(true);
+    expect(isNavItemActive("/import/drop", "/import", "#owner-match")).toBe(true);
+    expect(isNavItemActive("/import/drop", "/import/registry-pdf")).toBe(true);
+    // 貼り付けて物件化・受け取り箱は、それぞれの項目が光る。
+    expect(isNavItemActive("/import/drop", "/import/paste")).toBe(false);
+    expect(isNavItemActive("/import/drop", "/import/report-inbox")).toBe(false);
+  });
+
+  it("取り込み系は「物件データ取り込み」に、エラー確認は「物件」に置く。ファイルの入り口は「ファイルを入れる」1つ(2026-10-28 発注者決定)", () => {
     const imp = group("imp")?.items.map((i) => i.href) ?? [];
-    expect(imp).toContain("/import");
-    expect(imp).toContain("/import/registry-pdf");
+    expect(imp[0]).toBe("/import/drop");
     expect(imp).toContain("/import/registry-dm");
-    expect(imp).toContain("/import#owner-match");
+    expect(imp).toContain("/import/paste");
+    expect(imp).toContain("/import/report-inbox");
+    // 外した3つ(画面と履歴は残る)。
+    expect(imp).not.toContain("/import");
+    expect(imp).not.toContain("/import/registry-pdf");
+    expect(imp).not.toContain("/import#owner-match");
     const prop = group("prop")?.items.map((i) => i.href) ?? [];
     expect(prop).toContain("/properties/quality-check");
   });
@@ -336,10 +341,8 @@ describe("⚠変えないもの", () => {
   });
 
   it("項目ごとの権限は据え置き(取り込み系は事務担当・管理系は管理者)", () => {
-    expect(byHref("/import")?.minRole).toBe("office_staff");
-    expect(byHref("/import/registry-pdf")?.minRole).toBe("office_staff");
+    expect(byHref("/import/drop")?.minRole).toBe("office_staff");
     expect(byHref("/import/registry-dm")?.minRole).toBe("office_staff");
-    expect(byHref("/import#owner-match")?.minRole).toBe("office_staff");
     expect(byHref("/properties/quality-check")?.minRole).toBe("office_staff");
     expect(byHref("/dm")?.minRole).toBe("office_staff");
     expect(byHref("/lp")?.minRole).toBe("admin");
@@ -355,8 +358,8 @@ describe("⚠変えないもの", () => {
       "/field-survey/map",
       "/field-survey/sessions",
       "/field-survey/candidates",
-      "/import",
-      "/import/registry-pdf",
+      // /import・/import/registry-pdf は 2026-10-28 に「ファイルを入れる」(/import/drop)へまとめた(画面は残る)。
+      "/import/drop",
       "/sales-sheets/new",
       "/admin/company-settings",
       // 売却DM設定(/admin/sale-dm-settings)は第2回でLPメニューの中へ(sale-dm-settings-nav-source.test.ts)。

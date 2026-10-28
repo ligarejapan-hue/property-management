@@ -41,7 +41,7 @@ const helpSections: HelpSection[] = [
   {
     title: "取込手順",
     description: (
-      <>外部の一覧や書類からまとめて登録するときは、左のメニューの「物件データ取り込み」を使います。受付帳のCSVは<RoleLink href="/import" minRole="office_staff">「受付帳CSV取込」画面</RoleLink>、謄本のPDFは<RoleLink href="/import/registry-pdf" minRole="office_staff">「謄本PDF取込」画面</RoleLink>から取り込みます。<RoleLink href="/import/paste" minRole="office_staff">「貼り付けて物件化」画面</RoleLink>では、メールやPDF、コピーしたウェブページの文章をそのまま貼り付けるだけで、読み取れた項目を自動で入力欄に埋めてくれます。登録前に内容を確認できます。</>
+      <>外部の一覧や書類からまとめて登録するときは、左のメニューの「物件データ取り込み」を使います。受付帳のCSV・所有者の一覧・査定サイトの顧客管理表・謄本のPDF・反響のPDF・そのほかの書類は、どれも<RoleLink href="/import/drop" minRole="office_staff">「ファイルを入れる」画面</RoleLink>に入れてください。中身を見分けて、それぞれの取り込みの画面へ進めます（書類は書類の受け取り箱に入ります）。<RoleLink href="/import/paste" minRole="office_staff">「貼り付けて物件化」画面</RoleLink>では、メールやコピーしたウェブページの文章をそのまま貼り付けるだけで、読み取れた項目を自動で入力欄に埋めてくれます。登録前に内容を確認できます。</>
     ),
   },
   {
