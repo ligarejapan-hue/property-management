@@ -199,6 +199,14 @@ describe("取引完了確認書", () => {
     expect(out.html).not.toContain("□ ");
     expect(out.rows).toContainEqual({ label: "売主", value: null });
   });
+
+  it("「準備チェックリストだけ」の項目は、持ち物・引き渡した書類の初期値に入れない(第2段階 段C)", () => {
+    const c = ctx();
+    const items = c.settings.checklistItems.map((i) => (i.id === "s_recv_keys" || i.id === "c_bring_stamp" ? { ...i, use: "prep" as const } : i));
+    const c2 = { ...c, settings: { ...c.settings, checklistItems: items } };
+    expect(String(doc(C).defaults(c2).values.handover)).not.toContain("鍵");
+    expect(String(doc(G).defaults(c2).values.belongings)).not.toContain("収入印紙");
+  });
 });
 
 describe("第2段階の書類の文面", () => {

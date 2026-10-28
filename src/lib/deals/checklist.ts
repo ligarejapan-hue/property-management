@@ -17,6 +17,12 @@ export const CHECKLIST_SCOPES = {
   all: "すべての取引", unit: "区分だけ", land: "土地のある物件だけ(戸建・土地・一棟)", oc: "OC ありだけ",
 } as const;
 export type ChecklistScope = keyof typeof CHECKLIST_SCOPES;
+/** その項目を使う書類(設計 第2段階 §4.4)。保存済みの項目には無い=両方として読む。 */
+export const CHECKLIST_USES = { both: "両方", checklist: "書類確認書だけ", prep: "準備チェックリストだけ" } as const;
+export type ChecklistUse = keyof typeof CHECKLIST_USES;
+/** 項目を取り出す先の書類。 */
+export type ChecklistDoc = "checklist" | "prep";
+export const usedIn = (i: { use?: ChecklistUse }, doc: ChecklistDoc): boolean => (i.use ?? "both") === "both" || i.use === doc;
 /** 持参する金額の出どころ(持参するものだけに付ける)。 */
 export const CHECKLIST_AMOUNTS = {
   deposit: "手付金", payment: "残代金・精算金(決済の計算)", registration: "登記費用", cancellation: "抹消費用", survey: "測量費",
@@ -45,6 +51,7 @@ const checklistItemSchema = z.object({
   note: text(CHECKLIST_LIMITS.note),
   scope: z.enum(keys(CHECKLIST_SCOPES)),
   amount: z.enum(keys(CHECKLIST_AMOUNTS)).nullable(),
+  use: z.enum(keys(CHECKLIST_USES)).optional(),
 }).strict().refine((i) => i.amount === null || i.group === "bring", "金額は「持参するもの」だけに付けられます");
 export type ChecklistItem = z.output<typeof checklistItemSchema>;
 
@@ -107,12 +114,13 @@ export function resolveChecklistItems(raw: unknown): ChecklistItem[] {
   return r.success ? r.data : DEFAULT_CHECKLIST_ITEMS;
 }
 
-/** その取引・時点で出す項目(並びは保存の順のまま)。 */
+/** その取引・時点・書類で出す項目(並びは保存の順のまま)。doc の初めは書類確認書。 */
 export function itemsFor(
   items: ChecklistItem[], phase: ChecklistPhase, deal: { base: (typeof BASE_PROPERTY_KINDS)[number] | null; hasOc: boolean },
+  doc: ChecklistDoc = "checklist",
 ): ChecklistItem[] {
   const ok = (s: ChecklistScope) =>
     s === "all" || (s === "unit" && deal.base === "unit") || (s === "oc" && deal.hasOc)
     || (s === "land" && (deal.base === "house" || deal.base === "land" || deal.base === "building"));
-  return items.filter((i) => i.phase === phase && ok(i.scope));
+  return items.filter((i) => i.phase === phase && ok(i.scope) && usedIn(i, doc));
 }

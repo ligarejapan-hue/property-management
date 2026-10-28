@@ -233,7 +233,7 @@ export default function DealSettingsPage() {
       </section>
 
       <section className="space-y-3">
-        <h2 className="text-sm font-semibold text-gray-700 dark:text-gray-300">書類確認書の項目</h2>
+        <h2 className="text-sm font-semibold text-gray-700 dark:text-gray-300">書類確認書・準備チェックリストの項目</h2>
         <p className="text-xs text-gray-500">
           取引の「書類」タブで出す書類確認書(契約時・決済時)の項目です。「出す取引」で区分だけ・土地のある物件だけ・OC ありだけの項目を分けられます。
           持参するものには、取引の金額(手付金・残代金と精算金・登記費用など)を付けられます。チェック欄は空欄で出します。

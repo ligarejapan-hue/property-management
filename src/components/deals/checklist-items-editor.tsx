@@ -4,15 +4,15 @@ import { Plus, RotateCcw, Trash2 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { SelectBox, inputCls, optionsOf } from "@/components/deals/form-parts";
 import {
-  CHECKLIST_AMOUNTS, CHECKLIST_GROUPS, CHECKLIST_LIMITS, CHECKLIST_PHASES, CHECKLIST_SCOPES, DEFAULT_CHECKLIST_ITEMS,
-  type ChecklistAmount, type ChecklistGroup, type ChecklistItem, type ChecklistPhase, type ChecklistScope,
+  CHECKLIST_AMOUNTS, CHECKLIST_GROUPS, CHECKLIST_LIMITS, CHECKLIST_PHASES, CHECKLIST_SCOPES, CHECKLIST_USES, DEFAULT_CHECKLIST_ITEMS,
+  type ChecklistAmount, type ChecklistGroup, type ChecklistItem, type ChecklistPhase, type ChecklistScope, type ChecklistUse,
 } from "@/lib/deals/checklist";
 
 /** 新しい項目の鍵(英小文字・数字・_)。押したときに作る。 */
 const newId = () => `u_${Date.now().toString(36)}_${Math.floor(Math.random() * 1e6).toString(36)}`;
 
 /**
- * 書類確認書の項目(取引の設定)。契約時・決済時 × 3つのまとまりごとに、項目・注意事項・出す取引・金額を直す。
+ * 書類確認書の項目(取引の設定)。準備チェックリストと共通。契約時・決済時 × 3つのまとまりごとに、項目・注意事項・出す取引・使う書類・金額を直す。
  * 金額は「持参するもの」だけ。保存は設定の画面の「保存」ボタンで一緒に送る。
  */
 export function ChecklistItemsEditor({ items, onChange }: { items: ChecklistItem[]; onChange: (items: ChecklistItem[]) => void }) {
@@ -36,7 +36,7 @@ export function ChecklistItemsEditor({ items, onChange }: { items: ChecklistItem
                 <h4 className="text-xs font-semibold text-gray-500">{CHECKLIST_GROUPS[group]}</h4>
                 <ul className="space-y-2">
                   {rows.map((i) => (
-                    <li key={i.id} className="grid items-center gap-2 sm:grid-cols-[2fr_2fr_1.4fr_1.2fr_auto]">
+                    <li key={i.id} className="grid items-center gap-2 sm:grid-cols-[2fr_2fr_1.4fr_1.2fr_1.2fr_auto]">
                       <input
                         value={i.label} onChange={(e) => patch(i.id, { label: e.target.value })} maxLength={CHECKLIST_LIMITS.label}
                         aria-label="項目" placeholder="項目" className={inputCls}
@@ -46,6 +46,7 @@ export function ChecklistItemsEditor({ items, onChange }: { items: ChecklistItem
                         aria-label="注意事項" placeholder="注意事項" className={inputCls}
                       />
                       <SelectBox label="出す取引" value={i.scope} onChange={(v) => patch(i.id, { scope: v as ChecklistScope })} options={optionsOf(CHECKLIST_SCOPES)} />
+                      <SelectBox label="使う書類" value={i.use ?? "both"} onChange={(v) => patch(i.id, { use: v as ChecklistUse })} options={optionsOf(CHECKLIST_USES)} />
                       {group === "bring" ? (
                         <SelectBox
                           label="金額" value={i.amount ?? ""} onChange={(v) => patch(i.id, { amount: (v || null) as ChecklistAmount | null })}
