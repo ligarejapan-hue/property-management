@@ -1,4 +1,6 @@
 import { describe, expect, it } from "vitest";
+import { readFileSync } from "node:fs";
+import { join } from "node:path";
 import { computeDealCalc } from "../../calc/deal-calc";
 import { DEFAULT_COSTS, DEFAULT_TERMS, EMPTY_BROKER, EMPTY_SNAPSHOT } from "../../schemas";
 import { DEFAULT_PROPERTY_KINDS } from "../../constants";
@@ -165,5 +167,14 @@ describe("取引完了確認書", () => {
     expect(out.html).toContain("年　　月　　日付で締結した");
     expect(out.html).not.toContain("□ ");
     expect(out.rows).toContainEqual({ label: "売主", value: null });
+  });
+});
+
+describe("第2段階の書類の文面", () => {
+  it("前の会社の名前・リースバックの語を使わない", () => {
+    for (const f of ["contract-guide.ts", "completion.ts"]) {
+      const src = readFileSync(join(process.cwd(), "src/lib/deals/documents/business", f), "utf8");
+      for (const w of ["インテリックス", "リースバック", "LB"]) expect(src, `${f} に ${w}`).not.toContain(w);
+    }
   });
 });
