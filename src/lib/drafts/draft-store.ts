@@ -22,6 +22,7 @@ export const DRAFT_SCREENS = [
   "paste-excel",
   "registry-pdf",
   "csv-import",
+  "deal-document",
 ] as const;
 export type DraftScreen = (typeof DRAFT_SCREENS)[number];
 

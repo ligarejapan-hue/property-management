@@ -63,6 +63,19 @@ describe("書類タブの業務書類(段5a・5b・5c)", () => {
     expect(read("src/lib/deals/client.ts")).toContain("form: FormDef | null;");
     expect(read("src/app/api/deals/[id]/documents/available/route.ts")).toContain("form: d.form ?? null,");
   });
+  it("発行の小窓の入力を控え、戻ったら続きから・発行したら消す(第2段階 §3.2)", () => {
+    const src = read(SECTION);
+    expect(src).toContain("const restored = useRestoredDraft(draftKeyValue, parseDealDocumentDraft);");
+    expect(src).toContain("useDraftAutosave(draftKeyValue, draftData, isEmpty, restored)");
+    expect(src).toContain("restored?.data.values ?? initial");
+    // 発行に成功したら控えを消してから閉じる(次に開くと前回の発行の入力が初めの値・帯は出ない)
+    expect(src).toMatch(/draft\.close\(\);\s*onDone\(/);
+    expect(src).toContain("<DraftRestoredNotice");
+    expect(src).toContain('<DraftTooLargeNotice kind="input" />');
+    // 書類ボタンに「入力の途中」
+    expect(src).toContain("useDraftExists(dealDocumentDraftKey(dealId, d.docType))");
+    expect(src).toContain("(入力の途中)");
+  });
   it("契約のご案内・取引完了確認書の入力欄(第2段階 段A)", () => {
     const src = read(SECTION);
     expect(src.indexOf('{ key: "contract", label: "契約・媒介の書類" }')).toBeLessThan(src.indexOf('{ key: "settlement", label: "決済の書類" }'));
