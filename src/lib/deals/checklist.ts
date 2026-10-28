@@ -29,6 +29,11 @@ export type ChecklistPayMethod = keyof typeof CHECKLIST_PAY_METHODS;
 
 export const CHECKLIST_ITEM_ID = /^[a-z0-9_]{1,40}$/;
 export const CHECKLIST_LIMITS = { label: 60, note: 200, items: 100 } as const;
+/**
+ * 書類確認書の項目から作る欄(契約のご案内のお持ちいただくもの・取引完了確認書の引き渡した書類など)の文字数の上限。
+ * 設定の上限いっぱい(項目名60文字×100個+改行)と、謄本から足す項目の分を入れても、初めの値のまま発行できる長さ。
+ */
+export const CHECKLIST_TEXT_MAX = (CHECKLIST_LIMITS.label + 1) * CHECKLIST_LIMITS.items + 2000;
 
 const keys = <T extends Record<string, string>>(o: T) => Object.keys(o) as [keyof T & string, ...(keyof T & string)[]];
 

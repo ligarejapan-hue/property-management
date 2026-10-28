@@ -1,15 +1,18 @@
 import { z } from "zod";
 import { text } from "../../schema-parts";
+import { CHECKLIST_TEXT_MAX } from "../../checklist";
 import { jstDateString } from "../../datetime";
 import { html } from "../html";
 import { companyBlock, documentHtml } from "../layout";
 import { checklistItemsOf } from "./checklist-doc";
 import { dateJa, dateTimeJa, headTable, money, namesOf, partiesOf, propertyLabel, type BusinessDocContext, type Choice, type ValueRow } from "./common";
 
+export { CHECKLIST_TEXT_MAX };
+
 /** 発行のときに選ぶもの(設計 第2段階 §4.1)。 */
 export const contractGuideOptionsSchema = z.object({
   addressee: z.enum(["seller", "buyer"]),
-  belongings: text(500),
+  belongings: text(CHECKLIST_TEXT_MAX),
   notes: text(500),
 }).strict();
 export type ContractGuideOptions = z.output<typeof contractGuideOptionsSchema>;

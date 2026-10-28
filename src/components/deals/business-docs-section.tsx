@@ -5,6 +5,7 @@ import { FileOutput, FileText, Loader2, Plus, Trash2 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { ModalShell } from "@/components/ui/modal-shell";
 import { Field, inputCls } from "./form-parts";
+import { CHECKLIST_TEXT_MAX } from "@/lib/deals/checklist";
 import { dealsApi, dealDocumentFileUrl, DealApiError, errorText, type AvailableDocument } from "@/lib/deals/client";
 
 const RECEIPTS = new Set(["deposit_receipt", "balance_receipt", "settlement_receipt"]);
@@ -212,7 +213,7 @@ function IssueDialog({ dealId, doc, version, onCancel, onDone }: {
               </select>
             </Field>
             <Field label="お持ちいただくもの(1行に1つ)">
-              <textarea value={str(values.belongings)} onChange={(e) => set("belongings", e.target.value || null)} maxLength={500} rows={4} aria-label="お持ちいただくもの" className={inputCls} />
+              <textarea value={str(values.belongings)} onChange={(e) => set("belongings", e.target.value || null)} maxLength={CHECKLIST_TEXT_MAX} rows={4} aria-label="お持ちいただくもの" className={inputCls} />
             </Field>
             <Field label="ご連絡事項(空なら載せない)">
               <textarea value={str(values.notes)} onChange={(e) => set("notes", e.target.value || null)} maxLength={500} rows={3} aria-label="ご連絡事項" className={inputCls} />
@@ -223,7 +224,7 @@ function IssueDialog({ dealId, doc, version, onCancel, onDone }: {
         {doc.docType === "completion_confirmation" && (
           <>
             <Field label="引き渡した書類など(1行に1つ・チェック欄は空けて出す)">
-              <textarea value={str(values.handover)} onChange={(e) => set("handover", e.target.value || null)} maxLength={1000} rows={6} aria-label="引き渡した書類など" className={inputCls} />
+              <textarea value={str(values.handover)} onChange={(e) => set("handover", e.target.value || null)} maxLength={CHECKLIST_TEXT_MAX} rows={6} aria-label="引き渡した書類など" className={inputCls} />
             </Field>
             <p className="text-xs text-gray-500">署名・押印の欄は空けて出します。前に発行したことがあれば、そのときの入力が初めから入っています。</p>
           </>

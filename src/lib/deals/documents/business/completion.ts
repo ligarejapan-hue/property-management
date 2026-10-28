@@ -4,11 +4,11 @@ import type { DealPartyView } from "../../view";
 import { html, type SafeHtml } from "../html";
 import { documentHtml } from "../layout";
 import { checklistItemsOf } from "./checklist-doc";
-import { ymdJa } from "./contract-guide";
+import { CHECKLIST_TEXT_MAX, ymdJa } from "./contract-guide";
 import { namesOf, partiesOf, propertyLabel, type BusinessDocContext, type ValueRow } from "./common";
 
 /** 発行のときに直すもの: 引き渡した書類など(1行に1つ・設計 第2段階 §4.3)。 */
-export const completionOptionsSchema = z.object({ handover: text(1000) }).strict();
+export const completionOptionsSchema = z.object({ handover: text(CHECKLIST_TEXT_MAX) }).strict();
 export type CompletionOptions = z.output<typeof completionOptionsSchema>;
 
 /** 初期値: 書類確認書(決済時)の「受け取るもの」(この取引に当てはまる項目)。 */

@@ -64,6 +64,8 @@ describe("書類タブの業務書類(段5a・5b・5c)", () => {
     expect(src).toContain('aria-label="ご連絡事項"');
     expect(src).toContain('doc.docType === "completion_confirmation"');
     expect(src).toContain('aria-label="引き渡した書類など"');
+    // 文字数の上限は、書類確認書の項目から作る初めの値が入る長さ(@codex)
+    expect(src.match(/maxLength=\{CHECKLIST_TEXT_MAX\}/g)?.length).toBe(2);
     // 宛先を選び直したら、出す前の確認もその宛先で見る(@codex)
     expect(src).toContain("(choices.addresseeMissing ?? []).filter((c) => c.value === values.addressee)");
     expect(src).toContain('{missing.length ? "空欄のまま出す" : "発行する"}');

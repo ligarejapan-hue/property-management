@@ -11,9 +11,10 @@ import { resolveDealSettings } from "../../settings";
 import type { DealPartyView, DealView } from "../../view";
 import type { CompanyProfile } from "@/lib/sales-sheet/company-profile-store";
 import type { BusinessDocContext } from "../business/common";
-import { contractGuideOptionsSchema } from "../business/contract-guide";
+import { CHECKLIST_TEXT_MAX, contractGuideOptionsSchema } from "../business/contract-guide";
 import { BUSINESS_DOCS, businessDocOf } from "../registry";
 import { dealDocumentTitle } from "../issue";
+import { CHECKLIST_LIMITS } from "../../checklist";
 
 const rateRows: RateTableRow[] = INITIAL_RATE_TABLES.map((t) => ({
   kind: t.kind, validFrom: new Date(`${t.validFrom}T00:00:00Z`), validTo: t.validTo ? new Date(`${t.validTo}T00:00:00Z`) : null, content: t.content,
@@ -41,6 +42,14 @@ const ctx = (d: DealView = deal): BusinessDocContext => ({
   staff: { sales: "架空 営業", ops: null },
 });
 const doc = (key: string) => businessDocOf(key)!;
+/** 書類確認書の設定の上限いっぱい(60文字の項目が100個)の取引(@codex)。 */
+const fullChecklistCtx = (phase: "contract" | "settlement", group: "bring" | "receive"): BusinessDocContext => {
+  const c = ctx();
+  const items = Array.from({ length: CHECKLIST_LIMITS.items }, (_, i) => ({
+    id: `x_${i}`, phase, group, label: `${i}`.padEnd(CHECKLIST_LIMITS.label, "架"), note: null, scope: "all" as const, amount: null,
+  }));
+  return { ...c, settings: { ...c.settings, checklistItems: items } };
+};
 const G = "contract_guide";
 
 describe("契約のご案内", () => {
@@ -112,9 +121,18 @@ describe("契約のご案内", () => {
     expect(out.rows).toContainEqual({ label: "宛先", value: null });
   });
 
+  it("書類確認書の項目が上限いっぱいでも、初めの値のまま発行できる(@codex)", () => {
+    const c = fullChecklistCtx("contract", "bring");
+    const v = doc(G).defaults(c).values;
+    expect(String(v.belongings).split("\n")).toHaveLength(CHECKLIST_LIMITS.items);
+    expect(doc(G).options.safeParse(v).success).toBe(true);
+    const s = fullChecklistCtx("settlement", "receive");
+    expect(doc("completion_confirmation").options.safeParse(doc("completion_confirmation").defaults(s).values).success).toBe(true);
+  });
+
   it("宛先は売主・買主だけ", () => {
     expect(contractGuideOptionsSchema.safeParse({ addressee: "agent", belongings: null, notes: null }).success).toBe(false);
-    expect(contractGuideOptionsSchema.safeParse({ addressee: "seller", belongings: "x".repeat(501), notes: null }).success).toBe(false);
+    expect(contractGuideOptionsSchema.safeParse({ addressee: "seller", belongings: "x".repeat(CHECKLIST_TEXT_MAX + 1), notes: null }).success).toBe(false);
   });
 });
 
