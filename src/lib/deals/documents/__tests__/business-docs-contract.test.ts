@@ -210,12 +210,14 @@ describe("取引完了確認書", () => {
 });
 
 describe("第2段階の書類の文面", () => {
-  it("告知書の項目の表に前の会社の語が無い", () => {
-    const src = readFileSync(join(process.cwd(), "src/lib/deals/documents/forms/disclosure.ts"), "utf8");
-    for (const w of ["インテリックス", "リースバック"]) expect(src).not.toContain(w);
+  it("告知書・付帯設備表の項目の表に前の会社の語が無い", () => {
+    for (const f of ["disclosure.ts", "equipment.ts"]) {
+      const src = readFileSync(join(process.cwd(), "src/lib/deals/documents/forms", f), "utf8");
+      for (const w of ["インテリックス", "リースバック"]) expect(src, `${f} に ${w}`).not.toContain(w);
+    }
   });
   it("前の会社の名前・リースバックの語を使わない", () => {
-    for (const f of ["contract-guide.ts", "completion.ts", "prep-checklist.ts", "mediation.ts", "sale-guide.ts", "disclosure.ts"]) {
+    for (const f of ["contract-guide.ts", "completion.ts", "prep-checklist.ts", "mediation.ts", "sale-guide.ts", "disclosure.ts", "equipment.ts"]) {
       const src = readFileSync(join(process.cwd(), "src/lib/deals/documents/business", f), "utf8");
       for (const w of ["インテリックス", "リースバック", "LB"]) expect(src, `${f} に ${w}`).not.toContain(w);
     }
