@@ -233,6 +233,38 @@ describe("createMonthlyPurchaseGate: 順番が交差しても上限を超えな�
     expect((await gate.reserve(140)).ok).toBe(false);
   });
 
+  // @codex #614 R1 P2: 残した予約はその課金の月だけ数える(翌月の枠を食わない)。
+  it("⚠retain した予約は、その月(日本時間)の間だけ数え、翌月には数えない", async () => {
+    let now = new Date("2026-10-31T14:00:00Z"); // 10/31 23:00 JST
+    const gate = createMonthlyPurchaseGate({
+      capYen: 140,
+      readSpentYen: async () => 0,
+      now: () => now,
+    });
+    const a = await gate.reserve(140);
+    if (!a.ok) throw new Error("unexpected");
+    a.hold.retain();
+    expect(gate.pendingYen()).toBe(140);
+    expect((await gate.reserve(140)).ok).toBe(false);
+    now = new Date("2026-10-31T15:00:00Z"); // 11/1 0:00 JST
+    expect(gate.pendingYen()).toBe(0);
+    expect((await gate.reserve(140)).ok).toBe(true);
+  });
+
+  it("取得中(まだ台帳も retain も無い)の予約は、月をまたいでも数え続ける", async () => {
+    let now = new Date("2026-10-31T14:59:00Z");
+    const gate = createMonthlyPurchaseGate({
+      capYen: 140,
+      readSpentYen: async () => 0,
+      now: () => now,
+    });
+    const a = await gate.reserve(140);
+    if (!a.ok) throw new Error("unexpected");
+    now = new Date("2026-10-31T15:01:00Z");
+    expect(gate.pendingYen()).toBe(140);
+    expect((await gate.reserve(140)).ok).toBe(false);
+  });
+
   it("release は何度呼んでも1回分しか外さない", async () => {
     const gate = createMonthlyPurchaseGate({
       capYen: 280,

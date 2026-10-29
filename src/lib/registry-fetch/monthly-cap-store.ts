@@ -16,7 +16,8 @@
  *     → どの判定から見ても、ある取得の額は「予約」か「台帳」の少なくとも一方に入る
  *       (両方に入る瞬間はあり得る=多めに数える側)。
  *  3. 課金したのに台帳が書けなかった取得は予約を**外さない**(retain)。
- *     → 記録の無い課金も、このプロセスが動いている限り数え続ける。
+ *     → 記録の無い課金も、このプロセスが動いている限り、**その課金の月(日本時間)の間**数え続ける
+ *       (翌月の枠は食わない=@codex #614 R1。取得中の予約は月をまたいでも数える)。
  * 総当たりの検証=__tests__/monthly-cap-store.test.ts。
  *
  * ⚠列はプロセス内だけで効く(runExclusivePurchase と同じ前提。本番は単一プロセス
@@ -68,7 +69,10 @@ export interface MonthlyPurchaseGate {
 export function createMonthlyPurchaseGate(opts: {
   capYen: number;
   readSpentYen: () => Promise<number>;
+  /** 今の時刻(テストで差し替える)。 */
+  now?: () => Date;
 }): MonthlyPurchaseGate {
+  const now = opts.now ?? (() => new Date());
   let chain: Promise<unknown> = Promise.resolve();
   const serial = <T>(fn: () => Promise<T> | T): Promise<T> => {
     // 直前が失敗しても後続は動かす(失敗で列が詰まらない・runExclusivePurchase と同型)。
@@ -79,10 +83,16 @@ export function createMonthlyPurchaseGate(opts: {
     );
     return result;
   };
-  const holds = new Set<{ yen: number }>();
+  // monthStartMs: retain した予約だけに付く「課金した月の初め」。取得中の予約には無い。
+  const holds = new Set<{ yen: number; monthStartMs?: number }>();
   const sumHolds = () => {
+    const thisMonth = jstMonthRange(now()).start.getTime();
     let s = 0;
-    for (const h of holds) s += h.yen;
+    for (const h of holds) {
+      if (h.monthStartMs === undefined || h.monthStartMs === thisMonth) s += h.yen;
+      // 前の月に残した予約はもう数えない(その月の課金として済んでいる)。
+      else if (h.monthStartMs < thisMonth) holds.delete(h);
+    }
     return s;
   };
 
@@ -101,7 +111,7 @@ export function createMonthlyPurchaseGate(opts: {
         if (!decision.allowed) {
           return { ok: false, spentYen, pendingYen, usedYen: decision.usedYen };
         }
-        const entry = { yen: priceYen };
+        const entry: { yen: number; monthStartMs?: number } = { yen: priceYen };
         holds.add(entry);
         let settled = false;
         return {
@@ -117,7 +127,9 @@ export function createMonthlyPurchaseGate(opts: {
               });
             },
             retain() {
+              if (settled) return;
               settled = true;
+              entry.monthStartMs = jstMonthRange(now()).start.getTime();
             },
           },
         };
