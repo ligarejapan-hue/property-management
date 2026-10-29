@@ -13,7 +13,7 @@ export function rememberedValues(
 }
 
 /**
- * その書類のいちばん新しい版の写しのうち、match に合うもの(rows は版の新しい順・match が無ければ最初の1つ)。
+ * その書類のいちばん新しい発行の写しのうち、match に合うもの(rows は発行の新しい順・match が無ければ最初の1つ)。
  * match には写しの options を渡す(options が無い・壊れている写しは {} として渡す)。
  */
 export function latestMatching(

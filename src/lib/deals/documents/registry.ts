@@ -53,7 +53,7 @@ export interface BusinessDocDef {
   remember?: boolean;
   /**
    * 前回の入力のうち、この取引の初めの値に合うものだけを使う(両手の取引で、買主様用を出した後も売主様用から始める)。
-   * 無ければ、いちばん新しい版の入力を使う。
+   * rememberMatch が無い書類は、いちばん新しい発行の入力を使う。合うものが無ければ初めの値のまま。
    */
   rememberMatch?(c: BusinessDocContext, options: Record<string, unknown>): boolean;
   /** 発行の出し分け(履歴の題名と版の数え方・issue.ts の variants の鍵)。無ければ default。 */

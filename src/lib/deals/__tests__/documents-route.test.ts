@@ -574,7 +574,8 @@ describe("前回の入力を初めの値にする(第2段階 §3.2)", () => {
     expect(docOf(body, "completion_confirmation").defaults).toEqual({ handover: "前回の鍵" });
     const q = pm.dealDocument.findMany.mock.calls[0][0];
     expect(q.where).toEqual({ dealId: DEAL_ID, docType: { in: ["contract_guide", "seller_survey", "mediation", "disclosure", "equipment", "completion_confirmation"] } });
-    expect(q.orderBy).toEqual({ version: "desc" });
+    // 版の番号は書き分け(売却・購入など)ごとに数え直すので、発行した日時の新しい順で探す(提出前レビュー)
+    expect(q.orderBy).toEqual([{ issuedAt: "desc" }, { version: "desc" }]);
     expect(q.select).toEqual({ docType: true, inputSnapshot: true });
 
     pm.dealDocument.findMany.mockResolvedValue([{ docType: "contract_guide", inputSnapshot: { options: { addressee: "landlord" } } }]);

@@ -38,7 +38,8 @@ export async function GET(_request: Request, ctx: Ctx) {
     // 前回の入力を初めの値にする書類だけ、発行の履歴を新しい版から読む(設計 第2段階 §3.2)。
     const rememberKeys = BUSINESS_DOCS.filter((d) => d.remember).map((d) => d.key);
     const history = rememberKeys.length ? await prisma.dealDocument.findMany({
-      where: { dealId: id, docType: { in: rememberKeys } }, orderBy: { version: "desc" }, select: { docType: true, inputSnapshot: true },
+      // 版の番号は書き分け(売却・購入など)ごとに数え直すので、発行した日時の新しい順で探す。
+      where: { dealId: id, docType: { in: rememberKeys } }, orderBy: [{ issuedAt: "desc" }, { version: "desc" }], select: { docType: true, inputSnapshot: true },
     }) : [];
     const documents = BUSINESS_DOCS.filter((d) => d.applies(bctx)).map((d) => {
       const def = d.defaults(bctx);
