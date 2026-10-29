@@ -9,6 +9,10 @@
  */
 import { ApiError } from "@/lib/api-helpers";
 import { RegistryFetchError } from "@/lib/registry-fetch";
+import {
+  MONTHLY_CAP_REACHED_CODE,
+  MONTHLY_CAP_UNAVAILABLE_CODE,
+} from "@/lib/registry-fetch/monthly-cap";
 
 /** ジョブの状態。 */
 export const JOB_STATUSES = [
@@ -138,6 +142,16 @@ export function classifyItemError(err: unknown): ItemOutcome {
 
   // route/lib の入力・認可・状態エラー(ApiError)。
   if (err instanceof ApiError) {
+    // ⚠月の上限(2026-10-29)。課金の直前に止めた=課金していない。409 の「要手動
+    //   skipped」に落とすと、来月になっても取り直せない。項目は pending のまま残し、
+    //   ジョブを一時停止する(=**残りを上限で止める**。取れた項目はそのまま)。
+    //   今月の額が読めなかった場合も同じ扱い(数えられないまま次を買わない)。
+    if (err.code === MONTHLY_CAP_REACHED_CODE) {
+      return { status: "pending", errorCode: "monthly_cap_reached", pauseJob: true, leavePending: true, cancelled: false };
+    }
+    if (err.code === MONTHLY_CAP_UNAVAILABLE_CODE) {
+      return { status: "pending", errorCode: "monthly_cap_unavailable", pauseJob: true, leavePending: true, cancelled: false };
+    }
     // ⚠provider 分類が包まれている場合は元コードで判定(charged_but_failed→paused 等)。
     if (err.providerCode) {
       return classifyByProviderCode(err.providerCode);

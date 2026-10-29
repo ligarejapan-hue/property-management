@@ -25,11 +25,11 @@ Task 7 が直した「謄本取込が所有者の法人番号を版番号を進�
 | 8 | `src/app/api/properties/sale-dm/drafts/[id]/outcome/route.ts:244` | `dmStatus`(no_send昇格。PropertyEditForm「DM判断」) | `data` に `version: { increment: 1 }` を追加 | `src/lib/__tests__/sale-dm-outcome-route.test.ts`「(Task 9) returned_undeliverable の物件連動は…」 |
 | 9 | `src/app/api/properties/[id]/clear-dm-undeliverable/route.ts:64` | `dmStatus`(`restoreDmStatus` 指定時のみ。同上) | `restoreDmStatus` 指定時のみ `data.version = { increment: 1 }` を追加(dmUndeliverableAtのみのクリアは対象外のまま) | `src/lib/__tests__/sale-dm-clear-undeliverable-route.test.ts`「(Task 9) restoreDmStatus 指定時は…」 |
 | 10 | `src/app/api/properties/[id]/dm-logs/[logId]/reaction/route.ts:276` | `dmStatus`(no_send昇格。同上) | `data` に `version: { increment: 1 }` を追加 | `src/lib/__tests__/dm-reaction-patch-route.test.ts`「(Task 9) undeliverable 連動は…」 |
-| 11 | `src/lib/registry-fetch/auto-fetch.ts:238`(`releaseSchedulingLock`) | `registryStatus`(scheduled解除。PropertyEditForm「登記状況」で編集可能) | `data` に `version: { increment: 1 }` を追加 | `src/lib/__tests__/registry-auto-fetch-api.test.ts`「8. provider失敗時に…」に追記 |
+| 11 | `src/lib/registry-fetch/auto-fetch.ts:244`(`releaseSchedulingLock`) | `registryStatus`(scheduled解除。PropertyEditForm「登記状況」で編集可能) | `data` に `version: { increment: 1 }` を追加 | `src/lib/__tests__/registry-auto-fetch-api.test.ts`「8. provider失敗時に…」に追記 |
 
 **#6/#7 の補足**: `owner-corporate-import-integration.test.ts` / `corporate-import-guard-integration.test.ts` は、この2ファイル(reception-owner・registry-pdf・owner-csv の法人番号統合)を**最初から source-assertion(正規表現でコード片を固定)方式**で検証する既存方針を取っている(ファイル冒頭のコメントに明記)。他の9件は full prisma mock による振る舞いテストにしたが、#6/#7 はこの既存ファイル群の慣習(reception-owner の corporateNumber 書込は同ファイル内に既に同種の source-assertion が複数ある)に合わせ、同じ形式で「version increment を伴う」ことを固定した。
 
-**#11 の補足**: この行は当初、`registryStatus` を「編集画面では変えられない運用フラグ」の例としてブリーフに挙げられていたが、実際に調べたところ **`registryStatus` は `src/components/properties/property-edit-form.tsx:129`(FORM_FIELDS の「登記状況」select)で編集画面から変更できる**。同じ `registryStatus` を書く他の2箇所(`src/lib/registry-pdf/process.ts:681`・`src/lib/registry-fetch/auto-fetch.ts:4294`)は既に version increment を伴っており、この解除処理(`releaseSchedulingLock`)だけが漏れていた。同じ資源・同じフィールドへの書き込みで一貫性が無かったため、要修正と判断し修正した。
+**#11 の補足**: この行は当初、`registryStatus` を「編集画面では変えられない運用フラグ」の例としてブリーフに挙げられていたが、実際に調べたところ **`registryStatus` は `src/components/properties/property-edit-form.tsx:129`(FORM_FIELDS の「登記状況」select)で編集画面から変更できる**。同じ `registryStatus` を書く他の2箇所(`src/lib/registry-pdf/process.ts:681`・`src/lib/registry-fetch/auto-fetch.ts:4311`)は既に version increment を伴っており、この解除処理(`releaseSchedulingLock`)だけが漏れていた。同じ資源・同じフィールドへの書き込みで一貫性が無かったため、要修正と判断し修正した。
 
 ## 対象外(許可・15件)
 
@@ -87,8 +87,8 @@ Task 7 が直した「謄本取込が所有者の法人番号を版番号を進�
 | `src/lib/building-link/rename.ts:121` | `property.buildingName`(棟の名前を直したとき、つながっている全部屋へ反映。段3 Task 14。部屋の行(id順 `FOR UPDATE`)→棟の行(`FOR NO KEY UPDATE`)の後・編集中の鍵が0件のときだけ同じトランザクションで書く。`version: { increment: 1 }` を伴う) |
 | `src/app/api/properties/bulk-update/route.ts:87` | `property.caseStatus`/`registryStatus`/`dmStatus`/`assignedTo` |
 | `src/lib/investigation/fetch-investigation.ts:646` | `property.zoningDistrict`/`buildingCoverageRatio`/`floorAreaRatio` |
-| `src/lib/registry-fetch/auto-fetch.ts:4294` | `property.registryStatus = scheduled`(有料取得の予約) |
-| `src/lib/registry-fetch/auto-fetch.ts:4509` | `property.registryStatus = obtained`(有料取得の確定) |
+| `src/lib/registry-fetch/auto-fetch.ts:4311` | `property.registryStatus = scheduled`(有料取得の予約) |
+| `src/lib/registry-fetch/auto-fetch.ts:4547` | `property.registryStatus = obtained`(有料取得の確定) |
 | `src/lib/registry-pdf/process.ts:190` | `owner.corporateNumber`(Task 7 で修正済) |
 | `src/lib/registry-pdf/process.ts:681` | `property.registryStatus`/`realEstateNumber`/`lotNumber`/`buildingNumber` |
 | `src/lib/registry-pdf/fill-areas.ts:62` | (2026-10-25 謄本から面積)`property.exclusiveAreaRegistry`/`landArea`/`landAreaMethod`/`totalFloorArea` の空欄補完(物件の画面の添付・一括取込・物件を指定しない取込から) |

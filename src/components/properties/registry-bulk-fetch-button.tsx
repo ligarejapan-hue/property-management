@@ -19,6 +19,11 @@ import { Button } from "@/components/ui/button";
 import { createRegistryFetchJob } from "@/lib/api-client";
 // ⚠冪等キーの張り替え判定は**サーバの照合と同じ材料**で行う（定義元は1つ）。
 import { buildBulkIdempotencySignature } from "@/lib/registry-fetch/bulk/idempotency";
+import {
+  useRegistryMonthlyUsage,
+  RegistryMonthlyUsageLine,
+} from "@/components/properties/registry-monthly-usage";
+import { canAffordCertificate } from "@/lib/registry-fetch/monthly-cap";
 
 interface Props {
   /** チェック中の物件ID(親が「今読み込んでいる物件 ∩ 選択」で確定して渡す)。 */
@@ -36,6 +41,12 @@ export function RegistryBulkFetchButton({ propertyIds, disabled }: Props) {
   // モーダルを開いたときだけ事前確認(取得済み/添付あり/所有者あり)の件数を取得する
   // (発注者要望 2026-08-08: 既に情報がある物件への課金前に気づけるようにする)。
   const preflight = useRegistryPreflight(propertyIds, open);
+  // 月の上限(2026-10-29 発注者決定=5万円/月)。開いたときに今月の利用額を読む。
+  // ⚠ここは入口の目安。サーバーもジョブの作成と各件の課金の直前に止める。
+  const monthlyUsage = useRegistryMonthlyUsage(open);
+  const capBlocked =
+    monthlyUsage.usage !== null &&
+    !canAffordCertificate(monthlyUsage.usage, certificateType);
   // 二重作成(連打/再送)防止。⚠キーは**要求内容(対象物件+種別)に紐づける**
   // (@codex #361 P2)。同じ内容の再送(通信失敗)ではキーを保ち冪等に、内容が変わったら
   // 新しいキーにローテーションする(古いキーのまま送るとサーバーが指紋不一致 409 を返し
@@ -171,6 +182,14 @@ export function RegistryBulkFetchButton({ propertyIds, disabled }: Props) {
               )}
             </fieldset>
 
+            {/* 月の上限(2026-10-29)。途中で上限に達したら、残りは取得せずに一時停止します。 */}
+            <div className="mt-3">
+              <RegistryMonthlyUsageLine state={monthlyUsage} certificateType={certificateType} />
+              <p className="text-[11px] text-gray-500 dark:text-gray-400">
+                月の上限は5万円です。途中で上限に達したときは、残りは取得せずに一時停止します（取れた分はそのまま残ります）。
+              </p>
+            </div>
+
             {error && (
               <p className="mt-3 text-sm text-red-600 dark:text-red-400">{error}</p>
             )}
@@ -188,6 +207,8 @@ export function RegistryBulkFetchButton({ propertyIds, disabled }: Props) {
                 onClick={handleConfirm}
                 disabled={
                   creating ||
+                  // 月の上限(2026-10-29)。理由は上の行に出している。
+                  capBlocked ||
                   count === 0 ||
                   preflight.pending ||
                   // ⚠何を取りに行くかが分からないうちは実行させない（fail closed）。

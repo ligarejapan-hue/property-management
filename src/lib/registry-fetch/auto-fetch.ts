@@ -28,6 +28,11 @@ import { writeAuditLog } from "@/lib/audit";
 import { canAccessPropertyRecord } from "@/lib/property-access";
 import { lockPropertyRow } from "@/lib/property-record-guard";
 import { extractTextFromPdf, isPdfBuffer } from "@/lib/pdf-extract";
+import { REGISTRY_PURCHASE_LEDGER_ACTION } from "@/lib/registry-fetch/monthly-cap";
+import {
+  reserveMonthlyPurchaseBudget,
+  type MonthlyCapHold,
+} from "@/lib/registry-fetch/monthly-cap-store";
 import {
   ZERO_RETRY_SLEEP_MS,
   resolveCleanupBound,
@@ -190,7 +195,8 @@ export interface RunRegistryAutoFetchArgs {
  * 有料取得の台帳 AuditLog action(段階②)。detail は purchaseKeyHash(鍵のsha256先頭32桁・
  * 非PII)と outcome のみ。**二重課金ガードの正**としてここを検索する。
  */
-export const REGISTRY_PURCHASE_AUDIT_ACTION = "registry_location_purchase";
+// ⚠値の定義元は monthly-cap.ts(月の上限もこの台帳で数える・2026-10-29)。
+export const REGISTRY_PURCHASE_AUDIT_ACTION = REGISTRY_PURCHASE_LEDGER_ACTION;
 
 /** 台帳の照合窓。この期間内の同一鍵の購入は再実行させない(30日)。 */
 const PURCHASE_LEDGER_WINDOW_MS = 30 * 24 * 60 * 60 * 1000;
@@ -4246,6 +4252,17 @@ export async function runRegistryAutoFetch(
   //   decidePurchaseLock に集約(優先順位=重複>指紋>実行中を総当たりで固定)。
   const fingerprintRequired =
     args.expectedFingerprint !== undefined || (isRecover && !args.locationCandidate);
+  // 4.6 月の上限(2026-10-29 発注者決定=5万円/月・日本時間の暦月)。
+  //     ⚠**課金する経路(purchaseKeyHash がある=所在の候補での購入)だけ**で判定する。
+  //     回収(課金なし)・番号取得(台帳に載らない経路)は数えも止めもしない。
+  //     ⚠判定と「予約」は monthly-cap-store の1本の列で直列にする。台帳は課金の
+  //     **後**に書かれるので、台帳だけを見ると取得中の分が抜けて並行で超える。
+  //     予約は台帳を書き終えた直後(または課金していないと確定した後)に外す。
+  //     ⚠ここは**課金より前**(物件のロックより前・外部に触れる前)。止めても失うものは無い。
+  //     超えるなら 409(MONTHLY_CAP_REACHED)で止める=課金していない。
+  const monthlyCapHold: MonthlyCapHold | null = purchaseKeyHash
+    ? await reserveMonthlyPurchaseBudget(certificateType)
+    : null;
   const lockOutcome = await prisma.$transaction(async (tx) => {
     await lockPropertyRow(tx, propertyId);
     // ⚠ここからの読みは**ロック後の新しい文**=待っている間の確定が必ず見える。
@@ -4296,7 +4313,15 @@ export async function runRegistryAutoFetch(
       data: { registryStatus: "scheduled", version: { increment: 1 } },
     });
     return { decision, previousStatus: fresh!.registryStatus };
+  }).catch((lockErr: unknown) => {
+    // ロックに失敗=課金していない。予約を外して元のエラーを返す。
+    void monthlyCapHold?.release();
+    throw lockErr;
   });
+  if (lockOutcome.decision.kind !== "proceed") {
+    // 以下の 409 はすべて課金前。予約を外す。
+    void monthlyCapHold?.release();
+  }
   if (lockOutcome.decision.kind === "duplicate_appeared") {
     // ⚠「実行中です」と誤案内しない(@codex #399 R5 P2)。待っても解決しない。
     throw new ApiError(
@@ -4323,6 +4348,13 @@ export async function runRegistryAutoFetch(
 
   // 6. provider 取得 → PDF 検証 → text 抽出 → processRegistryPdf 接続 → 成功 status。
   //    いずれの失敗でも scheduled で固着させないよう、catch で必ずロック解除する。
+  // 月の上限の予約の後始末(2026-10-29)に使う印。
+  //   providerReturned … 有料取得で provider が返った=課金済み
+  //   chargedMaybe     … 課金した(かもしれない)
+  //   ledgerRecorded   … 台帳(charged / charged_but_failed)が書けた
+  let providerReturned = false;
+  let chargedMaybe = false;
+  let ledgerRecorded = false;
   try {
     // 取得キーは非PIIのみ（realEstateNumber / 物件UUID）。所有者名は渡さない。
     // cond③: 所在検索の候補取得では server 再解決した override を優先（物件は番号未保持）。
@@ -4374,6 +4406,7 @@ export async function runRegistryAutoFetch(
       // 実況(あれば)。文字は固定文言のみ・撮影はストア側で本人限定(検索と同じ)。
       live: args.live,
     });
+    providerReturned = true;
 
     // processRegistryPdf の結果は inner try の外(成功ログ/返却)でも使うため先に宣言する。
     let result: Awaited<ReturnType<typeof processRegistryPdf>>;
@@ -4403,6 +4436,11 @@ export async function runRegistryAutoFetch(
               detail: { purchaseKeyHash, outcome: "charged", certificateType },
             },
           });
+          // ⚠台帳が確定した**直後**に予約を外す(以後は台帳の側で数えられる)。
+          //   後段(PDF検証・添付)の間も予約を持ち続けると、その間の判定が二重に数えて
+          //   上限の手前で止めすぎる。
+          ledgerRecorded = true;
+          void monthlyCapHold?.release();
         } catch {
           console.warn(
             "[registry-fetch] CRITICAL: charged but ledger persist failed; aborting before attach",
@@ -4586,6 +4624,12 @@ export async function runRegistryAutoFetch(
     // 「台帳無し×ロック無し」は再課金可能な状態そのもの。scheduled のまま残せば
     // 取得APIは 409 で止まり続ける(fail-closed)。解消は運用(状態の手動リセット)。
     let ledgerPersisted = true;
+    if (
+      providerReturned ||
+      (err instanceof RegistryFetchError && err.code === "charged_but_failed")
+    ) {
+      chargedMaybe = true;
+    }
     if (purchaseKeyHash && err instanceof RegistryFetchError && err.code === "charged_but_failed") {
       try {
         // writeAuditLog は失敗を握りつぶすため使わない(直書きで永続を確認する)。
@@ -4602,6 +4646,8 @@ export async function runRegistryAutoFetch(
             },
           },
         });
+        ledgerRecorded = true;
+        void monthlyCapHold?.release();
       } catch {
         ledgerPersisted = false;
         console.warn(
@@ -4658,5 +4704,18 @@ export async function runRegistryAutoFetch(
     // それ以外（extract 失敗の ApiError(422) / processRegistryPdf の ApiError / Prisma 例外）は
     // そのまま再 throw して route の handleApiError に正規の HTTP を返させる。
     throw err;
+  } finally {
+    // 月の上限の予約の後始末(2026-10-29)。
+    // ⚠**課金した(かもしれない)のに台帳が書けなかった**ときは予約を外さない(retain)。
+    //   記録の無い課金も、このプロセスが動いている限り今月の額に数え続ける
+    //   (物件のロックを残す fail-closed と同じ考え方)。
+    // それ以外(課金していない・台帳を書けた)は外す(何度呼んでも1回分)。
+    if (monthlyCapHold) {
+      if ((providerReturned || chargedMaybe) && !ledgerRecorded) {
+        monthlyCapHold.retain();
+      } else {
+        void monthlyCapHold.release();
+      }
+    }
   }
 }

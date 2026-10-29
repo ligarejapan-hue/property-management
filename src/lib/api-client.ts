@@ -4817,6 +4817,26 @@ export async function fetchRegistryPreflight(
   );
 }
 
+// ---------- 謄本の有料取得「今月の利用額」(2026-10-29 月の上限=5万円) ----------
+
+import type { RegistryMonthlyUsage } from "@/lib/registry-fetch/monthly-cap";
+
+/** ⚠表示の目安。本物の判定はサーバーが課金の直前に行う。 */
+export async function fetchRegistryMonthlyUsage(): Promise<RegistryMonthlyUsage> {
+  if (USE_MOCK) {
+    await mockDelay();
+    return {
+      capYen: 50_000,
+      spentYen: 0,
+      pendingYen: 0,
+      usedYen: 0,
+      prices: { owner: 140, all: 335 },
+      resetsAt: new Date().toISOString(),
+    };
+  }
+  return apiFetch<RegistryMonthlyUsage>("/api/registry-fetch/monthly-usage");
+}
+
 // ---------- 編集中の鍵(第1段の窓口5本・仕様 4章) ----------
 //
 // ⚠この節の窓口は USE_MOCK を見ない(サーバ側5本は本番に既に live)。

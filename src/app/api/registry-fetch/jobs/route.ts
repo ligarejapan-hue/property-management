@@ -10,6 +10,15 @@ import {
   requireBulkPurchaseProvider,
 } from "@/lib/registry-fetch/bulk/route-support";
 import { createBulkFetchJob } from "@/lib/registry-fetch/bulk/jobs";
+import { getMonthlyPurchaseUsage } from "@/lib/registry-fetch/monthly-cap-store";
+import {
+  MONTHLY_CAP_REACHED_CODE,
+  MONTHLY_CAP_REACHED_MESSAGE,
+  MONTHLY_CAP_UNAVAILABLE_CODE,
+  canAffordCertificate,
+  describeMonthlyUsage,
+  type RegistryMonthlyUsage,
+} from "@/lib/registry-fetch/monthly-cap";
 
 // ---------- POST /api/registry-fetch/jobs ----------
 // 謄本の一括取得ジョブを作る(薄い版)。複数物件を選んで、種類(所有者事項/全部事項)を指定。
@@ -44,6 +53,27 @@ export async function POST(request: NextRequest) {
     // 種別: 不正値は既定 owner に倒す(fail-safe: 未知の値で高い方を勝手に買わない)。
     const certRaw = (body as { certificateType?: unknown } | null)?.certificateType;
     const certificateType: "owner" | "all" = certRaw === "all" ? "all" : "owner";
+
+    // 月の上限(2026-10-29 発注者決定=5万円/月)。もう1通も入らないならジョブを作らせない。
+    // ⚠ここは入口の早期停止。各件の課金の直前にも判定する(並行する取得はそちらで数える)。
+    // ⚠今月の額が読めなければ作らない(数えられないまま始めない=fail-closed)。
+    let usage: RegistryMonthlyUsage;
+    try {
+      usage = await getMonthlyPurchaseUsage();
+    } catch {
+      throw new ApiError(
+        503,
+        "今月の有料取得額を確認できなかったため開始しませんでした（課金していません）。時間をおいてやり直してください。",
+        MONTHLY_CAP_UNAVAILABLE_CODE,
+      );
+    }
+    if (!canAffordCertificate(usage, certificateType)) {
+      throw new ApiError(
+        409,
+        `${MONTHLY_CAP_REACHED_MESSAGE}（${describeMonthlyUsage(usage.usedYen, usage.capYen)}）`,
+        MONTHLY_CAP_REACHED_CODE,
+      );
+    }
 
     // 二重作成防止キー(任意)。文字列以外は無視。
     const keyRaw = (body as { idempotencyKey?: unknown } | null)?.idempotencyKey;

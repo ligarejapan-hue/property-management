@@ -22,6 +22,10 @@ import {
 } from "@/lib/api-client";
 // ⚠理由のラベルはサーバ(作成を断る文言)と共有する=定義元は1つ。
 import { BULK_SKIP_REASON_LABEL } from "@/lib/registry-fetch/bulk/skip-reasons";
+import {
+  useRegistryMonthlyUsage,
+  RegistryMonthlyUsageLine,
+} from "@/components/properties/registry-monthly-usage";
 
 // rate_limited(順番待ち)の**フォールバック**待ち。通常はサーバーが返す retryAfterMs を使う。
 // 未指定時のみこの保守的既定(サーバーの既定最小間隔 60秒に合わせる)を使う。
@@ -42,6 +46,9 @@ export default function RegistryBulkFetchProgressPage() {
   const [error, setError] = useState<string | null>(null);
   const [notice, setNotice] = useState<string | null>(null);
   const [running, setRunning] = useState(false);
+  // 月の上限(2026-10-29)。今月の利用額を出す。1件終わるたびに取り直す(取得中の表示用)。
+  const [usageReload, setUsageReload] = useState(0);
+  const monthlyUsage = useRegistryMonthlyUsage(true, usageReload);
 
   // ループの多重起動防止 + アンマウント/中止で停止させる制御。
   const loopActiveRef = useRef(false);
@@ -79,6 +86,7 @@ export default function RegistryBulkFetchProgressPage() {
         } catch {
           // 表示更新のみの失敗=無視して処理を継続。
         }
+        setUsageReload((n) => n + 1);
 
         if (res.outcome === "drained") {
           setNotice("すべての項目の処理が終わりました。");
@@ -223,6 +231,14 @@ export default function RegistryBulkFetchProgressPage() {
         </div>
       </div>
 
+      {/* 月の上限(2026-10-29)。上限で止まったときは下の一時停止の帯に理由が出る。 */}
+      <div className="mt-3">
+        <RegistryMonthlyUsageLine
+          state={monthlyUsage}
+          certificateType={progress.certificateType === "all" ? "all" : "owner"}
+        />
+      </div>
+
       {/* 集計タイル */}
       <div className="mt-4 grid grid-cols-2 gap-2 text-sm sm:grid-cols-5">
         <Tile label="取得済み" value={c.done} tone="green" />
@@ -290,6 +306,11 @@ function pausedMessage(reason: string | null): string {
     case "service_hours":
     case "service_unavailable":
       return "登記情報サービスの利用時間外か、一時的に利用できません。時間をおいてから再開してください。";
+    // 月の上限(2026-10-29 発注者決定=5万円/月)。取れた分はそのまま・残りは pending のまま。
+    case "monthly_cap_reached":
+      return "月の上限（5万円）に達したため、残りは取得せずに一時停止しました（課金していません）。取れた分はそのまま残っています。来月1日以降に「残りの取得を再開する」で続けられます。";
+    case "monthly_cap_unavailable":
+      return "今月の有料取得額を確認できなかったため、一時停止しました（課金していません）。時間をおいてから再開してください。";
     case "provider_unavailable":
       return "謄本の有料取得が現在利用できません（設定が無効化された可能性があります）。管理者に確認してから再開してください。";
     case "charged_but_failed":

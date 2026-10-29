@@ -26,6 +26,8 @@ import {
 } from "@/lib/registry-fetch/auto-fetch";
 import type { RegistryFetchProvider } from "@/lib/registry-fetch";
 import type { RegistryCertificateType } from "@/lib/registry-fetch/types";
+import { getMonthlyPurchaseUsage } from "@/lib/registry-fetch/monthly-cap-store";
+import { canAffordCertificate } from "@/lib/registry-fetch/monthly-cap";
 import {
   classifyItemError,
   assertJobId,
@@ -249,6 +251,41 @@ export async function processNextBulkItem(args: {
         outcome: "paused",
         jobStatus: (after?.status ?? "paused") as BulkJobStatus,
         errorCode: "provider_unavailable",
+        morePending: true,
+      };
+    }
+
+    // 3d) 月の上限(2026-10-29)の事前確認。もう1通も入らないなら、検索(ログイン)もせず
+    //   ジョブを一時停止する=**残りを上限で止める**(取れた項目はそのまま・項目は掴まない)。
+    //   ⚠ここは手前の早期停止だけ。**本物の判定は課金の直前**(runRegistryAutoFetch の
+    //   予約)で、並行する取得もそちらで直列に数える。読めなかったら止めずに進む
+    //   (課金の直前の判定は読めなければ買わない=fail-closed)。
+    const capCertificateType = job0.certificateType as RegistryCertificateType;
+    let capReached = false;
+    try {
+      const usage = await getMonthlyPurchaseUsage();
+      capReached = !canAffordCertificate(usage, capCertificateType);
+    } catch {
+      capReached = false;
+    }
+    if (capReached) {
+      await prisma.registryFetchJob.updateMany({
+        where: { id: jobId, status: { not: "cancelled" } },
+        data: { status: "paused", pausedReason: "monthly_cap_reached", activeItemId: null },
+      });
+      // 中止済み(cancelled)なら上の更新は当たらない=ロックだけ外す。
+      await prisma.registryFetchJob.updateMany({
+        where: { id: jobId, activeItemId: lockToken },
+        data: { activeItemId: null },
+      });
+      const after = await prisma.registryFetchJob.findUnique({
+        where: { id: jobId },
+        select: { status: true },
+      });
+      return {
+        outcome: "paused",
+        jobStatus: (after?.status ?? "paused") as BulkJobStatus,
+        errorCode: "monthly_cap_reached",
         morePending: true,
       };
     }

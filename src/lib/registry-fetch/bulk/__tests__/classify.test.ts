@@ -140,3 +140,32 @@ describe("classifyItemError — 課金の安全に直結する対応表", () => 
     expect(o.pauseJob).toBe(false);
   });
 });
+
+describe("月の上限(2026-10-29)", () => {
+  it("⚠上限で止めた(MONTHLY_CAP_REACHED)→ 項目は pending のまま・ジョブ一時停止(残りを上限で止める)", () => {
+    const o = classifyItemError(
+      new ApiError(409, "月の上限", "REGISTRY_PURCHASE_MONTHLY_CAP_REACHED"),
+    );
+    // ⚠409 の「要手動 skipped」に落とさない(来月の再開で取れるように残す)。
+    expect(o).toEqual({
+      status: "pending",
+      errorCode: "monthly_cap_reached",
+      pauseJob: true,
+      leavePending: true,
+      cancelled: false,
+    });
+  });
+
+  it("今月の額が読めなかった(MONTHLY_CAP_UNAVAILABLE)→ 同じく一時停止(数えられないまま次を買わない)", () => {
+    const o = classifyItemError(
+      new ApiError(503, "読めない", "REGISTRY_PURCHASE_MONTHLY_CAP_UNAVAILABLE"),
+    );
+    expect(o).toEqual({
+      status: "pending",
+      errorCode: "monthly_cap_unavailable",
+      pauseJob: true,
+      leavePending: true,
+      cancelled: false,
+    });
+  });
+});
