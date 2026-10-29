@@ -317,8 +317,13 @@ export function renderFigureHtml(kind: FigureKind, opts: FigureOptions = {}): st
         `</ol><details class="more"><summary>特例の条件について</summary><div class="more-body"><p class="small-note">${esc(DEADLINE_FOOTNOTE)}</p></div></details></div>`;
     case "sale_flow":
       return `<div class="flow-box"><ol class="flow">` +
-        FLOW_STEPS.map(([t, s], i) => `<li><div><strong>${esc(t)}</strong><span>${esc(i === 0 ? FLOW_FIRST_STEP_DESC[audience] : s)}</span></div></li>`).join("") +
-        `</ol><p class="flow-total">ご相談からお引き渡しまで、3〜6か月ほどが目安です</p><p class="small-note">期間は物件やご希望の条件によって変わります。</p></div>`;
+        // 段階のあいだをつなぐ線(.flow-link)と「3〜6か月」の帯(.flow-months)は飾り(読み上げない)。
+        // 発注者承認 2026-10-29(見本 https://claude.ai/artifact/KBSnaEquPuZrpbqrNzaCRB)。
+        FLOW_STEPS.map(([t, s], i) => `<li><div><strong>${esc(t)}</strong><span>${esc(i === 0 ? FLOW_FIRST_STEP_DESC[audience] : s)}</span></div>` +
+          (i < FLOW_STEPS.length - 1 ? `<i class="flow-link" aria-hidden="true"></i>` : "") + `</li>`).join("") +
+        `</ol><p class="flow-total">ご相談からお引き渡しまで、3〜6か月ほどが目安です</p>` +
+        `<div class="flow-months" aria-hidden="true"><div class="flow-mbar"><u></u><i></i></div><div class="flow-mscale"><span>ご相談</span><span>3か月</span><span>6か月</span></div></div>` +
+        `<p class="small-note">期間は物件やご希望の条件によって変わります。</p></div>`;
     case "sell_rent_keep":
       return optionCardsHtml(LP_BRAND.options, "options");
     case "sell_rent_keep_3":

@@ -140,6 +140,28 @@ const CSS = [
   ".flow strong{display:block;font-size:15px}",
   ".flow span{display:block;font-size:13px;color:#5d594f;line-height:1.55}",
   ".flow-total{margin:8px 0 0;font-weight:700;color:#0e6b5c;font-size:16px}",
+  // 段階のあいだの線・「3〜6か月」の帯・冒頭の写真の枠・税の特例の数字の札(発注者承認 2026-10-29)
+  ".flow li{position:relative}",
+  ".flow-link{position:absolute;left:27px;bottom:-8px;width:2px;height:10px;background:#0e6b5c;border-radius:2px;z-index:2;transform-origin:top}",
+  ".flow-months{margin:10px 0 0}",
+  ".flow-mbar{position:relative;height:10px;border-radius:999px;background:#ece4d3;overflow:hidden}",
+  ".flow-mbar u{position:absolute;top:0;bottom:0;left:0;width:50%;background:#e3efe9}",
+  ".flow-mbar i{position:absolute;top:0;bottom:0;left:50%;width:50%;background:#0e6b5c;border-radius:999px}",
+  ".flow-mscale{display:flex;justify-content:space-between;font-size:12px;color:#5d594f;margin-top:4px;font-variant-numeric:tabular-nums}",
+  ".hero-zoom{display:block;width:calc(100% - 24px);margin:12px auto 0;border-radius:14px;overflow:hidden;background:#ece4d3}",
+  ".hero-zoom>.hero{width:100%;margin:0;border-radius:0}",
+  ".h1-ph{display:inline}",
+  ".tax-card{display:grid;gap:8px;background:#fffdf8;border:1px solid #e6dfd0;border-radius:14px;padding:14px;margin:4px 0 6px;box-shadow:0 1px 2px rgba(43,42,38,.04)}",
+  ".tax-card .tax-lbl{font-size:13px;font-weight:700;color:#5d594f;margin:0}",
+  `.tax-big{font-family:${SERIF};font-size:40px;line-height:1.15;font-weight:700;color:#0e6b5c;font-variant-numeric:tabular-nums;margin:0}`,
+  ".tax-big small{font-size:17px;color:#2b2a26;margin:0 4px}",
+  ".tax-card .tax-note{font-size:12.5px;color:#5d594f;margin:0}",
+  ".tax-tl{position:relative;padding-top:22px}",
+  ".tax-axis{position:relative;height:4px;border-radius:999px;background:#ece4d3}",
+  ".tax-reach{position:absolute;top:0;right:0;bottom:0;left:0;border-radius:999px;background:#0e6b5c;transform-origin:left}",
+  ".tax-ticks{display:grid;grid-template-columns:repeat(4,1fr);font-size:11.5px;line-height:1.4;color:#5d594f;margin-top:6px}",
+  ".tax-ticks span:last-child{text-align:right;color:#0e6b5c;font-weight:700}",
+  ".tax-pin{position:absolute;top:0;right:0;font-size:11px;font-weight:700;color:#fff;background:#0e6b5c;border-radius:6px;padding:1px 8px}",
   // 売る・貸す・しばらく持つ(2026-10-19 見本: 絵を左に小さく置いた1行ずつの一覧。絵は元の比率のまま)
   ".options{display:grid;grid-template-columns:1fr;gap:8px}",
   ".options.three{grid-template-columns:1fr}",
@@ -267,6 +289,7 @@ const CSS = [
   "}",
   "@media (min-width: 768px){",
   "  main{max-width:760px;padding:24px 0 calc(110px + env(safe-area-inset-bottom))}",
+  "  .hero-zoom{width:100%;margin:0}",
   "  .hero{border-radius:14px}",
   "  main>.hero{width:100%;margin:0}",
   "  .wrap{padding:24px 8px}",
@@ -327,15 +350,43 @@ const CSS = [
   ".anim .deadline.in .dl-item:nth-child(4){transition-delay:1.6s}",
   ".anim .deadline.in .dl-item.key .dl-when{animation:lp-pulse 2.2s ease-out 2.3s 2}",
   "@keyframes lp-pulse{0%{box-shadow:0 0 0 0 rgba(14,107,92,.45)}100%{box-shadow:0 0 0 14px rgba(14,107,92,0)}}",
-  // 4. 流れ: 番号が1つずつ灯る
-  ".anim .flow li{opacity:0;transform:translateY(10px);transition:opacity .5s ease,transform .5s ease}",
-  ".anim .flow li::before{transition:background .4s ease,color .4s ease}",
+  // 4. 流れ: 段階が1つ灯る→下へ線が伸びきる→次の段階、の順にゆっくり。最後に「3〜6か月」の帯が伸びる(発注者承認 2026-10-29)
+  ".anim .flow li{opacity:0;transform:translateY(10px);transition:opacity 1s ease,transform 1s ease}",
+  ".anim .flow li::before{transition:background .8s ease,color .8s ease}",
   ".anim .flow-box.in .flow li{opacity:1;transform:none}",
   ".anim .flow-box.in .flow li::before{background:#0e6b5c;color:#fffdf8}",
-  ".anim .flow-box.in .flow li:nth-child(2),.anim .flow-box.in .flow li:nth-child(2)::before{transition-delay:.35s}",
-  ".anim .flow-box.in .flow li:nth-child(3),.anim .flow-box.in .flow li:nth-child(3)::before{transition-delay:.7s}",
-  ".anim .flow-box.in .flow li:nth-child(4),.anim .flow-box.in .flow li:nth-child(4)::before{transition-delay:1.05s}",
-  ".anim .flow-box.in .flow li:nth-child(5),.anim .flow-box.in .flow li:nth-child(5)::before{transition-delay:1.4s}",
+  ".anim .flow-box.in .flow li:nth-child(1),.anim .flow-box.in .flow li:nth-child(1)::before{transition-delay:.2s}",
+  ".anim .flow-box.in .flow li:nth-child(2),.anim .flow-box.in .flow li:nth-child(2)::before{transition-delay:2.4s}",
+  ".anim .flow-box.in .flow li:nth-child(3),.anim .flow-box.in .flow li:nth-child(3)::before{transition-delay:4.6s}",
+  ".anim .flow-box.in .flow li:nth-child(4),.anim .flow-box.in .flow li:nth-child(4)::before{transition-delay:6.8s}",
+  ".anim .flow-box.in .flow li:nth-child(5),.anim .flow-box.in .flow li:nth-child(5)::before{transition-delay:9s}",
+  ".anim .flow-link{transform:scaleY(0);transition:transform 1.2s ease-in-out}",
+  ".anim .flow-box.in .flow-link{transform:none}",
+  ".anim .flow-box.in .flow li:nth-child(1) .flow-link{transition-delay:1.1s}.anim .flow-box.in .flow li:nth-child(2) .flow-link{transition-delay:3.3s}",
+  ".anim .flow-box.in .flow li:nth-child(3) .flow-link{transition-delay:5.5s}.anim .flow-box.in .flow li:nth-child(4) .flow-link{transition-delay:7.7s}",
+  ".anim .flow-mbar u,.anim .flow-mbar i{transform:scaleX(0);transform-origin:left;transition:transform 1.6s cubic-bezier(.2,.7,.2,1)}",
+  ".anim .flow-box.in .flow-mbar u{transform:none;transition-delay:10.2s}",
+  ".anim .flow-box.in .flow-mbar i{transform:none;transition-delay:11.2s}",
+  // 10. 冒頭の写真が12秒かけてほんの少し寄る(枠の中で1.06倍)・見出しが文節ごとに出る・申込ボタンのまわりが1回だけ光る(発注者承認 2026-10-29)
+  ".anim .hero-zoom>.hero.in{animation:lp-zoom 12s ease-out .3s both;transform-origin:55% 60%}",
+  "@keyframes lp-zoom{from{transform:scale(1)}to{transform:scale(1.06)}}",
+  ".anim .hero-go>h1 .h1-ph{animation:lp-phrase .7s cubic-bezier(.2,.7,.2,1) both}",
+  ".anim .hero-go>h1 .h1-ph:nth-child(1){animation-delay:.45s}.anim .hero-go>h1 .h1-ph:nth-child(2){animation-delay:.7s}.anim .hero-go>h1 .h1-ph:nth-child(3){animation-delay:.95s}",
+  ".anim .hero-go>h1 .h1-ph:nth-child(4){animation-delay:1.2s}.anim .hero-go>h1 .h1-ph:nth-child(5){animation-delay:1.45s}.anim .hero-go>h1 .h1-ph:nth-child(6){animation-delay:1.7s}",
+  ".anim .hero-go>h1 .h1-ph:nth-child(n+7){animation-delay:1.95s}",
+  "@keyframes lp-phrase{from{opacity:.12;filter:blur(3px)}to{opacity:1;filter:none}}",
+  ".anim .hero-go>.cta-row .cta:not(.secondary){animation:lp-ring 1.3s ease-out 2.2s 1 both}",
+  "@keyframes lp-ring{from{box-shadow:0 0 0 0 rgba(14,107,92,.45),0 6px 16px rgba(14,107,92,.22)}to{box-shadow:0 0 0 14px rgba(14,107,92,0),0 6px 16px rgba(14,107,92,.22)}}",
+  // 11. 税の特例: 期限の線が伸び、札が出る(数字の数え上げは MOTION_SCRIPT)
+  ".anim .tax-reach{transform:scaleX(0);transition:transform 1.2s cubic-bezier(.2,.7,.2,1) .5s}",
+  ".anim section.in .tax-reach{transform:none}",
+  ".anim .tax-pin{opacity:0;transition:opacity .4s ease 1.6s}",
+  ".anim section.in .tax-pin{opacity:1}",
+  // 12. 写真つきの節: 絵が左から入り、見出しの上の線が伸びる
+  ".anim .split .media img{opacity:.2;transform:translateX(-12px);transition:opacity .7s ease .15s,transform .7s cubic-bezier(.2,.7,.2,1) .15s}",
+  ".anim section.in .split .media img{opacity:1;transform:none}",
+  ".anim .split h2::before{transform:scaleX(0);transform-origin:left;transition:transform .6s ease-out .45s}",
+  ".anim section.in .split h2::before{transform:none}",
   // 5. 売る・貸す・持つ: 札が順に浮かび、絵がゆっくり揺れる
   ".anim .opt-card{opacity:0;transform:translateY(16px);transition:opacity .6s ease,transform .6s cubic-bezier(.2,.7,.2,1),box-shadow .3s ease}",
   ".anim .options.in .opt-card{opacity:1;transform:none}",
@@ -373,12 +424,19 @@ const MOTION_SCRIPT = [
   'var root=document.documentElement;try{',
   'root.classList.add("anim");',
   'var ts=document.querySelectorAll("main section,.cases-head,.deadline,.flow-box,.options,.network");',
-  'var io=new IntersectionObserver(function(es){for(var i=0;i<es.length;i++){if(es[i].isIntersecting){es[i].target.classList.add("in");io.unobserve(es[i].target)}}},{threshold:0,rootMargin:"0px 0px -10% 0px"});',
+  'var io=new IntersectionObserver(function(es){for(var i=0;i<es.length;i++){if(es[i].isIntersecting){es[i].target.classList.add("in");io.unobserve(es[i].target)}}},{threshold:0,rootMargin:"0px 0px -33% 0px"});',
   "for(var t=0;t<ts.length;t++){io.observe(ts[t])}",
   'var hero=document.querySelector(".hero"),wrap=document.querySelector("main>.wrap");',
   'requestAnimationFrame(function(){requestAnimationFrame(function(){if(hero){hero.classList.add("in")}if(wrap){wrap.classList.add("hero-go")}})});',
-  // 安全網: 見張りがうまく動かない閲覧アプリでも、6秒後には全部出す。途中で例外が出たら動きをやめて全部見せる。
-  'setTimeout(function(){var h=document.querySelectorAll(".anim main section,.anim .cases-head,.deadline,.flow-box,.options,.network");for(var i=0;i<h.length;i++){h[i].classList.add("in")}},6000);',
+  // 動き出しは、部品の上の端が画面の下から1/3の位置まで上がってきたとき(発注者 2026-10-29)。
+  // 安全網: 見張りがうまく動かない閲覧アプリでも、スクロール・画面の大きさ変更・読み込み完了のたびに位置を見て、
+  // 同じ位置まで来た部品には .in を付ける(画面の外の部品は先に動かさない=6秒後に全部出す仕組みはやめた)。
+  'function chk(){var h=document.querySelectorAll(".anim main section:not(.in),.anim .cases-head:not(.in),.deadline:not(.in),.flow-box:not(.in),.options:not(.in),.network:not(.in)");var lim=(window.innerHeight||document.documentElement.clientHeight)*0.67;for(var i=0;i<h.length;i++){if(h[i].getBoundingClientRect().top<lim){h[i].classList.add("in")}}}',
+  'window.addEventListener("scroll",chk,{passive:true});window.addEventListener("resize",chk);window.addEventListener("load",chk);setTimeout(chk,1500);',
+  // 税の特例の数字: 位置まで来たら 0 から数え上げ、最後の方ほどゆっくり(約4.5秒)。動かない端末では最初から最後の数字のまま。
+  'var cs=document.querySelectorAll("[data-count-to]");for(var c=0;c<cs.length;c++){(function(el){var to=Number(el.getAttribute("data-count-to"));if(!(to>0))return;var done=false;function fmt(n){return String(n).replace(/\\B(?=(\\d{3})+(?!\\d))/g,",")}',
+  'function run(){if(done)return;done=true;var t0=null;function step(t){if(t0===null){t0=t}var k=Math.min(1,(t-t0)/4500);k=1-Math.pow(1-k,6);el.textContent=fmt(Math.round(to*k));if(k<1){requestAnimationFrame(step)}}requestAnimationFrame(step)}',
+  'var o=new IntersectionObserver(function(es){for(var j=0;j<es.length;j++){if(es[j].isIntersecting){run();o.disconnect()}}},{threshold:0,rootMargin:"0px 0px -33% 0px"});o.observe(el)})(cs[c])}',
   '}catch(_){root.classList.remove("anim")}',
   "})();",
 ].join("");
@@ -698,6 +756,41 @@ function renderCaseSection(s: LpRenderInput["sections"][number], prefix: string,
 /** 文章だけの節をこの字数(空白を除く)以上なら畳む。見本の「税の特例」(約330字)は畳み、2〜3行の節は畳まない。 */
 const FOLD_TEXT_MIN = 200;
 
+/** 見出しを文節ごとの <span> に分ける(冒頭の見出しが文節ごとに出る動き用)。折り位置は jaHeadingHtml と同じ <wbr>。 */
+function headlinePhrasesHtml(text: string): string {
+  return jaHeadingHtml(text).split("<wbr>").map((c) => `<span class="h1-ph">${c}</span>`).join("<wbr>");
+}
+
+/** 税の特例の節で、本文の「…3,000万円特別控除:」の項目から名前を取る。無ければ null。 */
+const TAX_ITEM_RE = /^・?\s*([^:：\n]{1,40}3,000万円特別控除)\s*[:：]/;
+/** 期限の線は、この言い回しがある節(古い家のページ)だけに出す(相続・空き家は期限の数え方が違うため出さない)。 */
+const TAX_DEADLINE_PHRASE = "住まなくなってから3年目の年末";
+
+/**
+ * 税の特例の節の「最大3,000万円」の札(発注者承認 2026-10-29・見本 https://claude.ai/artifact/KBSnaEquPuZrpbqrNzaCRB)。
+ * 本文はこれまでどおり「くわしく読む」に畳み、その上に大事な数字だけを見せる。数字は MOTION_SCRIPT が数え上げる
+ * (動かない端末では 3,000 のまま)。見出しに「特例」が無い・本文に該当の項目が無い節には何も出さない。
+ */
+function taxCardHtml(s: LpRenderInput["sections"][number]): string {
+  if (!s.heading.includes("特例")) return "";
+  const lines = s.paragraphs.flatMap((p) => p.split("\n")).map((l) => l.trim());
+  const m = lines.map((l) => TAX_ITEM_RE.exec(l)).find((x) => x !== null);
+  if (!m) return "";
+  const label = m[1].trim();
+  const withDeadline = s.paragraphs.join("").includes(TAX_DEADLINE_PHRASE);
+  const timeline = withDeadline
+    ? `<div class="tax-tl" role="img" aria-label="${escapeHtml(TAX_DEADLINE_PHRASE)}まで"><span class="tax-pin" aria-hidden="true">期限</span>` +
+      `<div class="tax-axis" aria-hidden="true"><span class="tax-reach"></span></div>` +
+      `<div class="tax-ticks" aria-hidden="true"><span>住まなく<br />なった年</span><span>1年目</span><span>2年目</span><span>3年目の<br />年末まで</span></div></div>`
+    : "";
+  const note = withDeadline
+    ? "売却益から差し引けます。住まなくなった家も、期限までに売れば対象になります。細かい条件は「くわしく読む」をご覧ください。"
+    : "売却益から差し引ける特例があります。細かい条件は「くわしく読む」をご覧ください。";
+  return `<div class="tax-card"><p class="tax-lbl">${escapeHtml(label)}</p>` +
+    `<p class="tax-big">最大<small></small><span data-count-to="3000">3,000</span><small>万円</small></p>` +
+    `<p class="tax-note">${escapeHtml(note)}</p>${timeline}</div>`;
+}
+
 function renderSection(s: LpRenderInput["sections"][number], cta: string, fig: FigureOptions): string {
   const casePrefix = casePrefixOf(s.heading);
   if (casePrefix) return renderCaseSection(s, casePrefix, cta, fig);
@@ -715,7 +808,7 @@ function renderSection(s: LpRenderInput["sections"][number], cta: string, fig: F
   const figure = s.media?.kind === "figure" ? `<div class="figure">${renderFigureHtml(s.media.figureKind, fig)}</div>` : "";
   // 文章だけの長い節(写真・図・チェック札なし)は、見出しを残して中身を「くわしく読む」に畳む(2026-10-19 見本)。
   if (!s.media && !s.paragraphs.some((p) => isLineList(p, "□")) && s.paragraphs.join("").replace(/\s/g, "").length >= FOLD_TEXT_MIN) {
-    return `<section>${h2}<details class="more"><summary>くわしく読む</summary><div class="more-body">${body}</div></details></section>`;
+    return `<section>${h2}${taxCardHtml(s)}<details class="more"><summary>くわしく読む</summary><div class="more-body">${body}</div></details></section>`;
   }
   return `<section>${h2}${body}${figure}</section>`;
 }
@@ -735,7 +828,7 @@ export function renderLpPage(input: LpRenderInput): string {
   const pub = input.mode === "public" ? (input.public ?? null) : null;
   // 広告用の公開ページは手紙を受け取っていない人が開く=冒頭の一言を一般向けに。
   const eyebrow = input.mode === "public" ? LP_BRAND.publicEyebrow : LP_BRAND.heroEyebrow;
-  const heroCopy = `<p class="eyebrow">${escapeHtml(eyebrow)}</p><h1>${jaHeadingHtml(input.headline)}</h1>` +
+  const heroCopy = `<p class="eyebrow">${escapeHtml(eyebrow)}</p><h1>${headlinePhrasesHtml(input.headline)}</h1>` +
     (input.lead ? `<p class="lead">${escapeHtml(input.lead)}</p>` : "") +
     `<ul class="promises">${LP_BRAND.promises.map((p) => `<li>${escapeHtml(p)}</li>`).join("")}</ul>` +
     `<div class="cta-row">${cta}${telHref ? `<a class="cta secondary" href="${telHref}" data-phone-tap="1">電話で相談する</a>` : ""}</div>`;
@@ -786,7 +879,8 @@ export function renderLpPage(input: LpRenderInput): string {
   const ogMeta = pub ? ogMetaTags(input, pub) : "";
   const googleTag = pub?.google ? googleTagScripts(pub.google, pub.safeQuery) : "";
   return `<!doctype html><html lang="ja"><head><meta charset="utf-8" /><meta name="viewport" content="width=device-width,initial-scale=1" /><meta name="robots" content="${robots}" /><meta name="referrer" content="strict-origin" /><title>${escapeHtml(input.headline)}</title>${ogMeta}<style>${CSS}</style>${googleTag}</head><body>${band}${header}<main>` +
-    (input.hero ? img(input.hero, "hero", "", true) : "") +
+    // 写真は枠(.hero-zoom)の中でゆっくり寄る(発注者承認 2026-10-29)。枠の外にははみ出さない。
+    (input.hero ? `<div class="hero-zoom">${img(input.hero, "hero", "", true)}</div>` : "") +
     `<div class="wrap">${heroCopy}` +
     introHtml + sections + faq + (input.form ? formSection(input.form, telHref, input.company.phone, pub) : "") + company + unsub +
     `</div></main>${bar}<script data-lp-bar="1">${BAR_SCRIPT}</script>${script}${submitGuard}${checklistScript}<script>${MOTION_SCRIPT}${sections.includes('<div class="cases">') ? CASES_SCRIPT : ""}</script></body></html>`;
