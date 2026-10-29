@@ -8,6 +8,10 @@ export interface LpBrandImage { src: string; width: number; height: number; alt:
 
 export const LP_BRAND = {
   homepageUrl: "https://ligarejapan.com/",
+  /** 会社案内に出す所在地・免許番号・プライバシーポリシー(2026-10-29 LP点検・表記は自社HPに合わせた) */
+  address: "〒154-0011 東京都世田谷区上馬4-36-15",
+  license: "宅地建物取引業 東京都知事(1)第108344号",
+  privacyPolicyUrl: "https://ligarejapan.com/privacypolicy/",
   logo: { src: "/lp-assets/brand/logo.png", width: 1664, height: 243, alt: "Ligare Japan(株式会社リガーレジャパン)" },
   /** ヘッダーの小さな添え書き */
   tagline: "相続・空き家・不動産のご相談窓口",
