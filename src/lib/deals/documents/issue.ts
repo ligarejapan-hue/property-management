@@ -8,10 +8,11 @@ export const DEAL_DOC_TYPES = {
   funding_plan: { label: "資金計画表", variants: { purchase: "購入", sale: "売却" } },
   /** 買取再販の取引だけ(依頼書 4.2)。 */
   business_plan: { label: "事業計画書", variants: { internal: "社内用", bank: "銀行向け" } },
-  // 業務書類(段5・組み立ては registry.ts)。出し分けは無い(variant = default)。
-  contract_guide: { label: "契約のご案内", variants: { default: "" } },
+  // 業務書類(段5・組み立ては registry.ts)。出し分けが無いものは variant = default。
+  // 契約のご案内=宛先・媒介契約書=型と依頼の内容で出し分ける(両手の取引で売主様用と買主様用を履歴で見分ける)。
+  contract_guide: { label: "契約のご案内", variants: { default: "", seller: "売主様あて", buyer: "買主様あて" } },
   seller_survey: { label: "売主属性調査書(社内用)", variants: { default: "" } },
-  mediation: { label: "媒介契約書", variants: { default: "" } },
+  mediation: { label: "媒介契約書", variants: { default: "", general: "一般", exclusive: "専任", dedicated: "専属専任", general_sale: "一般・売却", general_purchase: "一般・購入", general_exchange: "一般・交換", exclusive_sale: "専任・売却", exclusive_purchase: "専任・購入", exclusive_exchange: "専任・交換", dedicated_sale: "専属専任・売却", dedicated_purchase: "専属専任・購入", dedicated_exchange: "専属専任・交換" } },
   sale_guide: { label: "媒介契約の前の説明書(売却用)", variants: { default: "" } },
   disclosure: { label: "物件状況確認書(告知書)", variants: { default: "" } },
   equipment: { label: "付帯設備表", variants: { default: "" } },

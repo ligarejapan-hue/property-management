@@ -287,6 +287,13 @@ describe("業務書類の発行(段5a)", () => {
     expect(renderHtmlToPdfDocument).toHaveBeenCalledTimes(2);
     expect((renderHtmlToPdfDocument as Fn).mock.calls[1][0]).toContain("計算明細");
   });
+  it("媒介契約書は型と依頼の内容ごとに版を数え、題名に出す(両手の取引の売却用と購入用)", async () => {
+    const res = await POST(json("POST", { docType: "mediation", version: 3, options: { kind: "exclusive", requestKind: "purchase" } }), ctx);
+    expect(res.status).toBe(201);
+    expect((await res.json()).title).toBe("媒介契約書(専任・購入)");
+    expect(pm.dealDocument.create.mock.calls[0][0].data.variant).toBe("exclusive_purchase");
+    expect(pm.dealDocument.findFirst.mock.calls[0][0].where).toEqual({ dealId: DEAL_ID, docType: "mediation", variant: "exclusive_purchase" });
+  });
   it("出せる書類と出す前の確認(空欄・初期値・選べる発行者)を返す", async () => {
     pm.deal.findUnique.mockResolvedValue({ ...settled, settlementPlace: null });
     const res = await AVAILABLE(new Request("http://x"), ctx);
@@ -539,9 +546,21 @@ describe("前回の入力を初めの値にする(第2段階 §3.2)", () => {
     expect((docOf(body, "seller_survey") as unknown as { form: { key: string } }).form.key).toBe("seller_survey");
     expect((docOf(body, "contract_guide") as unknown as { form: null }).form).toBeNull();
   });
+  it("両手の取引: 媒介契約書・契約のご案内は、取引の側に合う分(売却・売主様あて)の前回の入力を初めの値にする", async () => {
+    pm.deal.findUnique.mockResolvedValue({ ...row, parties: [SELLER] });
+    pm.dealDocument.findMany.mockResolvedValue([
+      { docType: "mediation", inputSnapshot: { options: { kind: "exclusive", requestKind: "purchase", specialTerms: "購入の特約" } } },
+      { docType: "contract_guide", inputSnapshot: { options: { addressee: "buyer", belongings: "買主の持ち物", notes: null } } },
+      { docType: "mediation", inputSnapshot: { options: { kind: "dedicated", requestKind: "sale", specialTerms: "売却の特約" } } },
+      { docType: "contract_guide", inputSnapshot: { options: { addressee: "seller", belongings: "売主の持ち物", notes: null } } },
+    ]);
+    const body = await (await AVAILABLE(new Request("http://x"), ctx)).json();
+    expect(docOf(body, "mediation").defaults).toMatchObject({ kind: "dedicated", requestKind: "sale", specialTerms: "売却の特約" });
+    expect(docOf(body, "contract_guide").defaults).toMatchObject({ addressee: "seller", belongings: "売主の持ち物" });
+  });
   it("前に発行した入力を初めの値にする・覚える書類だけを新しい版から読む・形の合わない写しは捨てる", async () => {
     pm.deal.findUnique.mockResolvedValue({ ...row, parties: [SELLER] });
-    const prev = { addressee: "buyer", belongings: "前回の持ち物", notes: "前回の連絡" };
+    const prev = { addressee: "seller", belongings: "前回の持ち物", notes: "前回の連絡" };
     pm.dealDocument.findMany.mockResolvedValue([
       { docType: "contract_guide", inputSnapshot: { options: prev } },
       { docType: "completion_confirmation", inputSnapshot: { options: { handover: "前回の鍵" } } },
@@ -549,8 +568,9 @@ describe("前回の入力を初めの値にする(第2段階 §3.2)", () => {
     ]);
     const body = await (await AVAILABLE(new Request("http://x"), ctx)).json();
     expect(docOf(body, "contract_guide").defaults).toEqual(prev);
-    // 前回の宛先(買主)の当事者がいない → 出す前の確認に「買主」
-    expect((docOf(body, "contract_guide") as unknown as { missing: string[] }).missing).toContain("買主");
+    // 両手の取引は売主様あての分の入力から始まる → 売主はいるので、出す前の確認に「買主」は出ない
+    // (宛先を買主様に選び直したときの知らせは、小窓が作り直す=段A の最終レビュー)
+    expect((docOf(body, "contract_guide") as unknown as { missing: string[] }).missing).not.toContain("買主");
     expect(docOf(body, "completion_confirmation").defaults).toEqual({ handover: "前回の鍵" });
     const q = pm.dealDocument.findMany.mock.calls[0][0];
     expect(q.where).toEqual({ dealId: DEAL_ID, docType: { in: ["contract_guide", "seller_survey", "mediation", "disclosure", "equipment", "completion_confirmation"] } });

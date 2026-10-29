@@ -222,4 +222,13 @@ describe("第2段階の書類の文面", () => {
       for (const w of ["インテリックス", "リースバック", "LB"]) expect(src, `${f} に ${w}`).not.toContain(w);
     }
   });
+
+  it("契約のご案内: 発行の履歴の題名に宛先・前回の入力は初めの宛先の分だけ(両手の取引)", () => {
+    expect(doc(G).variantOf!({ addressee: "buyer" })).toBe("buyer");
+    expect(dealDocumentTitle(G, "seller")).toBe("契約のご案内(売主様あて)");
+    expect(dealDocumentTitle(G, "buyer")).toBe("契約のご案内(買主様あて)");
+    const both = ctx({ ...deal, businessType: "brokerage", tradeSide: "both" });
+    expect(doc(G).rememberMatch!(both, { addressee: "seller" })).toBe(true);
+    expect(doc(G).rememberMatch!(both, { addressee: "buyer" })).toBe(false);
+  });
 });
