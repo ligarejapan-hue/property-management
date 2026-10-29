@@ -31,6 +31,7 @@ import { computeTsuboUnitPrice } from "./tsubo";
 import type { CompanyProfile } from "./company-profile-store";
 import { formatBuiltYearMonth } from "@/lib/built-year-month";
 import { unitBuildingFacts } from "./unit-building-facts";
+import { roomLabel } from "@/lib/room-label";
 
 /**
  * 保存する画像 src を正規化する。`PropertyPhoto.fileUrl` は storage backend に
@@ -544,7 +545,7 @@ export function buildSaleMansionDocument(input: SaleMansionInput): SalesSheetDoc
 
   // 建物名は 棟の名前 → 物件そのものの物件名 の順(buildMansionValues の buildingName と同じ)。
   // 物件名は仮の棟として包まず property.buildingName で届く(@codex P1 #452)。
-  const heading = [b.name ?? p.buildingName, p.roomNo ? `${p.roomNo}号室` : null]
+  const heading = [b.name ?? p.buildingName, roomLabel(p.roomNo)]
     .filter(Boolean)
     .join("　");
   const priceText = fmtManYen(asStr(values.price));

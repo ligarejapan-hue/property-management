@@ -210,6 +210,8 @@ function entriesOf(kind: EquipmentKind): FormEntry[] {
 
 export const EQUIPMENT_FORM: FormDef = {
   key: "equipment",
+  // 選ばない「有・無」は丸を付けずに出す(□ は出さない・2026-10-30)
+  blankStyle: "plain",
   tabs: { key: "kind", label: "種類", choices: (Object.keys(EQUIPMENT_KIND_LABELS) as EquipmentKind[]).map((k) => ({ value: k, label: EQUIPMENT_KIND_LABELS[k] })) },
   entries: [
     { kind: "item", key: "withGuide", label: "説明のページ（表紙と「ご記入にあたって」）", noPrint: true, choices: cs(["付ける", "付けない"]) },

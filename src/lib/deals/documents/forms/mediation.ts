@@ -15,6 +15,8 @@ const FIXED: MediationKind[] = ["exclusive", "dedicated"];
  */
 export const MEDIATION_FORM: FormDef = {
   key: "mediation",
+  // 選ばない選択肢は丸を付けずに、書き込み欄は下線のまま出す(□ は出さない・2026-10-30)
+  blankStyle: "plain",
   tabs: {
     key: "kind", label: "契約の型",
     choices: (Object.keys(MEDIATION_KIND_LABELS) as MediationKind[]).map((k) => ({ value: k, label: MEDIATION_KIND_LABELS[k] })),

@@ -47,6 +47,10 @@ export interface AvailableDocument {
   choices: Record<string, { value: string; label: string }[]> | null;
   /** 項目の表(入力欄を共通の部品で描く・第2段階 段B)。無い書類は null。 */
   form: FormDef | null;
+  /** 前回の入力を分けて覚える欄(媒介契約書=依頼の内容・契約のご案内=宛先)。無い書類は null。 */
+  rememberBy: string | null;
+  /** その欄の値ごとの初めの値(切り替えたらこれに入れ替える・両手の取引の売主様用と買主様用・発注者決定 2026-10-29)。 */
+  starts: Record<string, Record<string, unknown>> | null;
 }
 export interface DealDocumentView {
   id: string; docType: string; variant: string; version: number; title: string;

@@ -10,6 +10,7 @@ import { MEDIATION_EXCLUSIVE } from "../texts/mediation-exclusive";
 import { MEDIATION_DEDICATED } from "../texts/mediation-dedicated";
 import type { MediationText } from "../texts/mediation-types";
 import { DASH, partiesOf, type BusinessDocContext, type Choice, type ValueRow } from "./common";
+import { roomLabel } from "@/lib/room-label";
 
 const TEXTS: Record<MediationKind, MediationText> = { general: MEDIATION_GENERAL, exclusive: MEDIATION_EXCLUSIVE, dedicated: MEDIATION_DEDICATED };
 const REQUEST_LABELS = { sale: "売却", purchase: "購入", exchange: "交換" } as const;
@@ -23,7 +24,7 @@ const CSS = `.blank{display:inline-block;min-width:24mm;border-bottom:1px solid 
 .contract .item{padding-left:1em;text-indent:-1em}
 .clauses{font-size:8.5pt;line-height:1.45;column-count:2;column-gap:6mm}
 .clauses p{margin:0 0 1mm;text-indent:-1em;padding-left:1em}
-.clauses .heading{text-indent:0;padding-left:0;font-weight:bold;margin-top:2mm}
+.clauses .heading{text-indent:0;padding-left:0;font-weight:bold;margin-top:2mm;break-after:avoid;page-break-after:avoid}
 .page{page-break-before:always}`;
 
 const str = (v: FormValues[string] | undefined) => (typeof v === "string" && v.trim() ? v.trim() : null);
@@ -99,6 +100,31 @@ function circledTail(text: string, words: string[], chosen: string | null): Safe
   return i < 0 ? circled(text, words, chosen) : html`${text.slice(0, i)}${circled(text.slice(i), words, chosen)}`;
 }
 
+const OPEN = "(（「『【［[";
+const CLOSE = ")）」』】］]";
+
+/**
+ * 依頼する他の業者の欄(1行に1社「商号 / 所在地」)を [商号, 所在地] に分ける(2026-10-30)。
+ * 行の中の、括弧の外にある最初の「/」「／」(半角・全角)だけで切る。2つ目からの「/」と括弧の中の「/」は字のまま
+ * (「〇〇不動産(東京都港区1-2-3 A/Bビル)」を切らない)。「/」が無い行は全部を商号にする。空の行は除く。
+ */
+export function splitAgents(text: string | null): [string, string][] {
+  return (text ?? "").split(/\r?\n/).flatMap((line): [string, string][] => {
+    let depth = 0;
+    for (let i = 0; i < line.length; i++) {
+      const ch = line[i];
+      if (OPEN.includes(ch)) depth++;
+      else if (CLOSE.includes(ch)) depth = Math.max(0, depth - 1);
+      else if ((ch === "/" || ch === "／") && depth === 0) {
+        const name = line.slice(0, i).trim();
+        return name ? [[name, line.slice(i + 1).trim()]] : [];
+      }
+    }
+    const name = line.trim();
+    return name ? [[name, ""]] : [];
+  });
+}
+
 const isItem = (p: string) => /^([一二三四五六七八九十]+|[イロハニホヘト]|注[０-９0-9]*|＊)　/.test(p);
 
 function contractParagraph(kind: MediationKind, p: string, o: FormValues, last: boolean): SafeHtml | null {
@@ -137,9 +163,9 @@ function contractParagraph(kind: MediationKind, p: string, o: FormValues, last: 
   }
   if (p === "とします。") return fillSlots(p, [{ after: "", value: val(str(o.feeTiming)) }]);
   if (p === "（商号又は名称）（主たる事務所の所在地）") {
-    const rows = (str(o.otherAgents) ?? "").split("\n").map((l) => l.split("/").map((x) => x.trim())).filter((r) => r[0]);
+    const rows = splitAgents(str(o.otherAgents));
     return html`<table><tr><th>（商号又は名称）</th><th>（主たる事務所の所在地）</th></tr>
-${rows.length ? rows.map((r) => html`<tr><td>${r[0]}</td><td>${r[1] ?? ""}</td></tr>`) : html`<tr><td style="height:8mm"></td><td></td></tr>`}</table>`;
+${rows.length ? rows.map((r) => html`<tr><td>${r[0]}</td><td>${r[1]}</td></tr>`) : html`<tr><td style="height:8mm"></td><td></td></tr>`}</table>`;
   }
   if (last && /特約事項$/.test(p)) return html`${p}<div class="remarks" style="min-height:14mm;border:1px solid #999;padding:1.5mm 2mm">${str(o.specialTerms) ?? ""}</div>`;
   return null;
@@ -172,7 +198,7 @@ function propertyTable(c: BusinessDocContext): SafeHtml {
 <tr><th style="width:18%">所有者</th><td>${partiesOf(d, "seller").map((p) => html`<div>住所 ${p.address ?? ""}　氏名 ${p.name}</div>`)}</td></tr>
 <tr><th>登記名義人</th><td>住所　　　氏名</td></tr>
 <tr><th>所在地</th><td>${[s.address, s.lotNumber].filter(Boolean).join(" ")}</td></tr>
-${unit ? html`<tr><th>マンション</th><td>名称 ${s.buildingName ?? ""}　${s.roomNo ?? ""}号室<br>構造 ${s.structure ?? ""}<br>タイプ ${s.layout ?? ""}　専有面積 ${area(s.floorArea)}㎡<br>共有持分</td></tr>` : html`
+${unit ? html`<tr><th>マンション</th><td>名称 ${s.buildingName ?? ""}　${roomLabel(s.roomNo) ?? "号室"}<br>構造 ${s.structure ?? ""}<br>タイプ ${s.layout ?? ""}　専有面積 ${area(s.floorArea)}㎡<br>共有持分</td></tr>` : html`
 <tr><th>土地</th><td>実測　　㎡　公簿 ${area(s.landArea)}㎡<br>地目 宅地・田・畑・山林・雑種地・その他（　　）<br>権利内容 ${circled("所有権・借地権", ["所有権", "借地権"], s.landRight === "ownership" ? "所有権" : s.landRight ? "借地権" : null)}</td></tr>
 <tr><th>建物</th><td>建築面積　　㎡　種類<br>構造 ${s.structure ?? ""}　延面積 ${area(s.floorArea)}㎡<br>間取り ${s.layout ?? ""}</td></tr>`}
 <tr><th>媒介価額</th><td>本体価額 ${yenOrBlank(body)}<br>消費税額及び地方消費税額の合計額 ${yenOrBlank(tax)}<br>総額 ${yenOrBlank(d.price)}</td></tr>

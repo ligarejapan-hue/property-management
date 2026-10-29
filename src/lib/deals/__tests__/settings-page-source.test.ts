@@ -106,3 +106,12 @@ describe("@codex: 税率の表の編集欄は、選んだ表が変わったら�
     expect(read(PAGE)).toMatch(/<RateTableEditor\s+key=\{/);
   });
 });
+
+describe("書類確認書・準備チェックリストの項目の説明(2026-10-30)", () => {
+  it("「使う書類」(両方・書類確認書だけ・準備チェックリストだけ)の説明がある", () => {
+    const src = read(PAGE);
+    expect(src).toContain("「使う書類」で、書類確認書と準備チェックリストのどちらに載せるかを選べます");
+    expect(src).toContain("書類確認書だけ");
+    expect(src).toContain("準備チェックリストだけ");
+  });
+});

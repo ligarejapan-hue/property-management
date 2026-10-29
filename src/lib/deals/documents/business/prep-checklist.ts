@@ -47,6 +47,9 @@ export function prepStagesOf(
   });
 }
 
+/** 載る項目が1つも無いとき(全部「書類確認書だけ」など)に、頭の表の後ろに出す1行(2026-10-30)。 */
+export const PREP_EMPTY_TEXT = "この取引の準備チェックリストに載る項目はありません(「取引の設定」の書類確認書・準備チェックリストの項目の「使う書類」を見直してください)。";
+
 /** 準備チェックリスト(設計 第2段階 §4.4)。済・担当の欄は空欄(紙に手で書く)。 */
 export function buildPrepChecklist(c: BusinessDocContext, o: PrepChecklistOptions): { html: string; rows: ValueRow[] } {
   const d = c.deal;
@@ -58,11 +61,13 @@ export function buildPrepChecklist(c: BusinessDocContext, o: PrepChecklistOption
     ["契約日", due.contract], ["決済日", due.settlement],
     ["営業担当", c.staff?.sales ?? null], ["業務担当", c.staff?.ops ?? null],
   ];
-  const stages = prepStagesOf(c, o.kind);
+  // 項目の無い時点は見出しも出さない(PDF・Excel とも)。全部無ければ「載る項目はありません」の1行(2026-10-30)
+  const stages = prepStagesOf(c, o.kind).filter((s) => s.groups.some((g) => g.items.length));
   const body = html`
 <h1>${title}</h1>
 <div class="right">${dateJa(c.today)}</div>
 ${headTable(head)}
+${stages.length ? null : html`<p>${PREP_EMPTY_TEXT}</p>`}
 ${stages.map((s) => (s.groups.some((g) => g.items.length) ? html`<h2>${s.title}</h2>
 <table><tr><th>済</th><th>項目</th><th>メモ</th><th>期日</th><th>担当</th></tr>
 ${s.groups.map((g) => (g.items.length ? html`${s.groups.length > 1 ? html`<tr><th colspan="5">${CHECKLIST_GROUPS[g.group]}</th></tr>` : null}
@@ -73,6 +78,7 @@ ${g.items.map((i) => html`<tr><td style="text-align:center;width:10mm">□</td><
     rows: [
       { label: "書類", value: title },
       ...head.map(([label, value]) => ({ label, value: value ?? DASH })),
+      ...(stages.length ? [] : [{ label: "項目", value: PREP_EMPTY_TEXT }]),
       ...stages.flatMap((s) => [
         { label: s.title, heading: true },
         ...s.groups.flatMap((g) => g.items.map((i): ValueRow => ({ label: i.label, value: [i.note, due[s.phase]].filter(Boolean).join(" / ") || null }))),

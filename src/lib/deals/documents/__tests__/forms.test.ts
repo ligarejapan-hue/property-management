@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import type { FormDef } from "../forms/types";
-import { clearFormValues, emptyFormValues, formItems, visibleEntries } from "../forms/values";
+import { clearFormValues, emptyFormValues, fitFormValues, formItems, visibleEntries } from "../forms/values";
 import { formValuesSchema } from "../forms/schema";
 import { formValueRows, renderFormHtml } from "../forms/render";
 
@@ -128,5 +128,64 @@ describe("告知書のための項目の表の形(第2段階 段E)", () => {
     expect(formValueRows(F, emptyFormValues(F)).map((r) => r.label)).toEqual([
       "甲だけの見出し", "①雨漏り 現在まで雨漏りを発見していない。", "①雨漏り 修理工事：", "①雨漏り 修理工事： 年", "①雨漏り 修理工事： 月頃", "①雨漏り 箇所：",
     ]);
+  });
+});
+
+describe("小さな手直し(2026-10-30)", () => {
+  const F: FormDef = {
+    key: "f",
+    tabs: { key: "kind", label: "種類", choices: [{ value: "a", label: "甲" }, { value: "b", label: "乙" }] },
+    entries: [
+      {
+        kind: "item", key: "n5", label: "⑤リフォーム", choices: [{ value: "no", label: "実施していない" }, { value: "yes", label: "実施している" }, { value: "unknown", label: "不明" }],
+        fields: [{ key: "n5Y", label: "年", max: 10, after: true }, { key: "n5M", label: "月頃", max: 10, after: true }],
+        fieldsAt: { choice: "yes", open: "(", close: ")" },
+      },
+      { kind: "item", key: "n8", label: "", sub: true, choices: [{ value: "r", label: "報告書" }, { value: "s", label: "概要" }], around: ["（", "）"] },
+      { kind: "item", key: "n98", label: "備考：", name: "備考（①〜⑬）" },
+      { kind: "item", key: "n98a", label: "", sub: true, fields: [{ key: "n98aText", label: "", max: 100 }] },
+      { kind: "item", key: "n99", label: "備考：", name: "備考（⑭〜⑳）" },
+      { kind: "item", key: "n99a", label: "", sub: true, fields: [{ key: "n99aText", label: "", max: 100 }] },
+    ],
+  };
+  const strip = (h: string) => h.replace(/<span class="form-blank short"><\/span>/g, "＿").replace(/<[^>]+>/g, "").replace(/\s+/g, "");
+
+  it("年月の欄を「実施している」のすぐ後ろの括弧の中に出す(告知書 ⑤・書式の並び)", () => {
+    const h = strip(renderFormHtml(F, emptyFormValues(F)).toString());
+    expect(h).toContain("□実施している(＿年＿月頃)□不明");
+    const filled = renderFormHtml(F, { ...emptyFormValues(F), n5: "yes", n5Y: "2020", n5M: "4" }).toString();
+    expect(strip(filled)).toContain("■実施している(2020年4月頃)□不明");
+  });
+
+  it("選択肢を書式の括弧で1回だけ囲む(告知書 ⑧)", () => {
+    const h = strip(renderFormHtml(F, emptyFormValues(F)).toString());
+    expect(h).toContain("（□報告書□概要）");
+    expect(h).not.toContain("（（");
+    expect(h).not.toContain("））");
+  });
+
+  it("同じ字の見出しが2つあるときは、入力欄と Excel では name で見分ける(PDF は書式の字のまま)", () => {
+    const rows = formValueRows(F, emptyFormValues(F)).map((r) => r.label);
+    expect(rows).toContain("備考（①〜⑬）");
+    expect(rows).toContain("備考（⑭〜⑳）");
+    expect(new Set(rows).size).toBe(rows.length);
+    const h = renderFormHtml(F, emptyFormValues(F)).toString();
+    expect(h.match(/<th style="width:30%">備考：<\/th>/g)).toHaveLength(2);
+    expect(h).not.toContain("⑭〜⑳");
+  });
+
+  it("古い控え・写しの合わない項目だけ初めの値に戻す(知らない鍵は捨てる・合う項目は残す)", () => {
+    const base = { ...emptyFormValues(F), kind: "a", n98aText: "初めの値" };
+    const r = fitFormValues(F, { kind: "b", n5: "yes", n5Y: "2020", n8: "消えた選択肢", n98aText: "x".repeat(101), old: "前の書式の欄", n99aText: 1 }, base);
+    expect(r.values).toEqual({ ...base, kind: "b", n5: "yes", n5Y: "2020" });
+    expect(r.dropped).toBe(true);
+    expect(fitFormValues(F, { kind: "a", n5: "no" }, base)).toEqual({ values: { ...base, n5: "no" }, dropped: false });
+    // 形の検査も通る(発行のときに 422 にならない)
+    expect(formValuesSchema(F).safeParse(r.values).success).toBe(true);
+    // いくつでも選べる欄は、合う値だけ残す
+    const M: FormDef = { key: "m", entries: [{ kind: "item", key: "many", label: "x", multiple: true, choices: [{ value: "a", label: "あ" }] }] };
+    expect(fitFormValues(M, { many: ["a", "z"] }, emptyFormValues(M))).toEqual({ values: { many: ["a"] }, dropped: true });
+    // 壊れた値は全部初めの値
+    expect(fitFormValues(M, null, emptyFormValues(M))).toEqual({ values: { many: [] }, dropped: true });
   });
 });

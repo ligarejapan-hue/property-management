@@ -6,7 +6,8 @@ import { Button } from "@/components/ui/button";
 import { ModalShell } from "@/components/ui/modal-shell";
 import { Field, inputCls } from "./form-parts";
 import { DocFormFields } from "./doc-form-fields";
-import { clearFormValues } from "@/lib/deals/documents/forms/values";
+import { clearFormValues, fitFormValues } from "@/lib/deals/documents/forms/values";
+import type { FormValues } from "@/lib/deals/documents/forms/types";
 import { useDraftAutosave, useDraftExists, useRestoredDraft } from "@/hooks/use-draft";
 import { DraftRestoredNotice, DraftTooLargeNotice } from "@/components/drafts/draft-notices";
 import { dealDocumentDraftKey, parseDealDocumentDraft, sameAsInitial, type DealDocumentDraft } from "@/lib/drafts/screens/deal-document";
@@ -108,6 +109,18 @@ function initialValuesOf(doc: AvailableDocument): Record<string, unknown> {
   return doc.defaults;
 }
 
+/**
+ * 控えから続けるときの初めの値。項目の表のある書類は、書式が変わる前の控えの合わない項目だけ初めの値に戻す
+ * (そのまま送ると発行で 422 になる・2026-10-30)。dropped = 戻した項目があった(小窓で知らせる)。
+ */
+function restoredValuesOf(
+  doc: AvailableDocument, saved: Record<string, unknown> | undefined, initial: Record<string, unknown>,
+): { values: Record<string, unknown>; dropped: boolean } {
+  if (!saved) return { values: initial, dropped: false };
+  if (!doc.form) return { values: saved, dropped: false };
+  return fitFormValues(doc.form, saved, initial as FormValues);
+}
+
 /** 書類のボタン。入力の途中の控えがあれば「(入力の途中)」を添える(サーバー描画では出さない)。 */
 function DocButton({ dealId, doc: d, onOpen }: { dealId: string; doc: AvailableDocument; onOpen: () => void }) {
   const hasDraft = useDraftExists(dealDocumentDraftKey(dealId, d.docType));
@@ -129,7 +142,10 @@ function IssueDialog({ dealId, doc, version, onCancel, onDone }: {
   const draftKeyValue = dealDocumentDraftKey(dealId, doc.docType);
   const restored = useRestoredDraft(draftKeyValue, parseDealDocumentDraft);
   const [initial] = useState(() => initialValuesOf(doc));
-  const [values, setValues] = useState<Record<string, unknown>>(() => restored?.data.values ?? initial);
+  const [start] = useState(() => restoredValuesOf(doc, restored?.data.values, initial));
+  const [values, setValues] = useState<Record<string, unknown>>(start.values);
+  // 古い控えの合わない項目を初めの値に戻したことの知らせ(2026-10-30)
+  const [outdated, setOutdated] = useState(start.dropped);
   const [restoredShown, setRestoredShown] = useState(restored != null);
   const draftData = useMemo<DealDocumentDraft>(() => ({ rev: 1, values }), [values]);
   const isEmpty = useMemo(() => sameAsInitial(initial), [initial]);
@@ -138,10 +154,16 @@ function IssueDialog({ dealId, doc, version, onCancel, onDone }: {
     draft.discard();
     setValues(initial);
     setRestoredShown(false);
+    setOutdated(false);
   };
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
-  const set = (k: string, v: unknown) => setValues((x) => ({ ...x, [k]: v }));
+  const set = (k: string, v: unknown) => {
+    // 両手の取引: 依頼の内容・宛先(売主様用⇔買主様用)を切り替えたら、その分の前回の入力(無ければ初めの値)に入れ替える。
+    // 売主様用の入力を買主様用に持ち込まない(発注者決定 2026-10-29)。
+    const switched = doc.rememberBy === k && typeof v === "string" ? doc.starts?.[v] : undefined;
+    setValues((x) => (switched && x[k] !== v ? { ...switched } : { ...x, [k]: v }));
+  };
   const receipt = RECEIPTS.has(doc.docType);
   const issuer = doc.issuers?.find((i) => i.value === values.issuer) ?? null;
   // 個人の発行者は、非課税か課税かを決めるまで発行できない(設計 §4.3)。
@@ -216,6 +238,11 @@ function IssueDialog({ dealId, doc, version, onCancel, onDone }: {
       <div className="space-y-4">
         {restored && restoredShown && <DraftRestoredNotice savedAt={restored.savedAt} onDiscard={discardDraft} />}
         {draft.tooLarge && <DraftTooLargeNotice kind="input" />}
+        {outdated && (
+          <p className="rounded-md border border-amber-200 bg-amber-50 px-3 py-2 text-sm text-amber-900 dark:border-amber-900 dark:bg-amber-950 dark:text-amber-200" role="status">
+            書式が新しくなったため、前回の入力の一部を読み込めませんでした。その項目は初めの値に戻しています。確かめてから発行してください。
+          </p>
+        )}
         {doc.blocking.length > 0 && (
           <p className="text-sm text-red-600 dark:text-red-400" role="alert">{doc.blocking.join("・")}が無いと出せません。取引の画面で入れてください。</p>
         )}
@@ -251,7 +278,13 @@ function IssueDialog({ dealId, doc, version, onCancel, onDone }: {
           <>
             <div className="flex flex-wrap items-center gap-2">
               <Button variant="secondary" size="sm" onClick={() => doc.form && setValues(clearFormValues(doc.form, values))}>すべて空欄に戻す</Button>
-              <p className="text-xs text-gray-500">選ばなかった項目は □ を並べた空欄で出ます(手で書けます)。全部空欄のまま出すと、手書き用の書式になります。前に発行したことがあれば、そのときの入力が初めから入っています。</p>
+              <p className="text-xs text-gray-500">
+                {doc.form.blankStyle === "plain"
+                  ? "選ばなかった項目は丸を付けずに(書き込み欄は下線のまま)出ます(手で書けます)。"
+                  : "選ばなかった項目は □ を並べた空欄で出ます(手で書けます)。"}
+                全部空欄のまま出すと、手書き用の書式になります。前に発行したことがあれば、そのときの入力が初めから入っています。
+                {doc.rememberBy === "requestKind" && "依頼の内容を切り替えると、その依頼の内容で前に出したときの入力に入れ替わります(両手の取引の売却用・購入用)。"}
+              </p>
             </div>
             <DocFormFields form={doc.form} values={values} onChange={set} />
           </>
@@ -280,7 +313,7 @@ function IssueDialog({ dealId, doc, version, onCancel, onDone }: {
             <Field label="ご連絡事項(空なら載せない)">
               <textarea value={str(values.notes)} onChange={(e) => set("notes", e.target.value || null)} maxLength={500} rows={3} aria-label="ご連絡事項" className={inputCls} />
             </Field>
-            <p className="text-xs text-gray-500">前に発行したことがあれば、そのときの入力が初めから入っています。</p>
+            <p className="text-xs text-gray-500">前に発行したことがあれば、そのときの入力が初めから入っています。宛先を切り替えると、その宛先で前に出したときの入力に入れ替わります(両手の取引の売主様あて・買主様あて)。</p>
           </>
         )}
         {doc.docType === "completion_confirmation" && (

@@ -8,6 +8,7 @@ import { EQUIPMENT_HOUSE_SOURCE } from "../texts/equipment-house";
 import { EQUIPMENT_UNIT_SOURCE } from "../texts/equipment-unit";
 import type { DisclosureSource } from "../texts/disclosure-types";
 import type { BusinessDocContext, ValueRow } from "./common";
+import { roomLabel } from "@/lib/room-label";
 
 const SOURCES: Record<EquipmentKind, DisclosureSource> = { house: EQUIPMENT_HOUSE_SOURCE, unit: EQUIPMENT_UNIT_SOURCE };
 const CSS = `.equip th,.equip td{font-size:8.5pt;padding:.8mm 1.5mm}
@@ -75,7 +76,7 @@ ${g.rows.map((r) => rowHtml(r, kind, o, g.head.nameHeader))}</table>`)}`;
 
 function propertyName(c: BusinessDocContext): string | null {
   const s = c.deal.propertySnapshot;
-  return [s.buildingName, s.roomNo && `${s.roomNo}号室`].filter(Boolean).join(" ") || s.address || null;
+  return [s.buildingName, roomLabel(s.roomNo)].filter(Boolean).join(" ") || s.address || null;
 }
 
 const baseOf = (c: BusinessDocContext) => c.settings.propertyKinds.find((k) => k.key === c.deal.propertyKind)?.base ?? null;

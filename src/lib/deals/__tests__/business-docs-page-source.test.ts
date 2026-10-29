@@ -68,7 +68,10 @@ describe("書類タブの業務書類(段5a・5b・5c)", () => {
     const src = read(SECTION);
     expect(src).toContain("const restored = useRestoredDraft(draftKeyValue, parseDealDocumentDraft);");
     expect(src).toContain("useDraftAutosave(draftKeyValue, draftData, isEmpty, restored)");
-    expect(src).toContain("restored?.data.values ?? initial");
+    // 古い控えは、今の書式に合わない項目だけ初めの値に戻して続きから(書式が変わった後の 422 を防ぐ・2026-10-30)
+    expect(src).toContain("restoredValuesOf(doc, restored?.data.values, initial)");
+    expect(src).toContain("fitFormValues(doc.form, saved, initial as FormValues)");
+    expect(src).toContain("書式が新しくなったため、前回の入力の一部を読み込めませんでした。");
     // 発行に成功したら控えを消してから閉じる(次に開くと前回の発行の入力が初めの値・帯は出ない)
     expect(src).toMatch(/draft\.close\(\);\s*onDone\(/);
     expect(src).toContain("<DraftRestoredNotice");
@@ -81,6 +84,18 @@ describe("書類タブの業務書類(段5a・5b・5c)", () => {
     const src = read(SECTION);
     expect(src).toContain('doc.docType === "mediation"');
     expect(src).toContain('(choices.clientMissing ?? []).some((c) => c.value === (values.requestKind === "purchase" ? "buyer" : "seller"))');
+  });
+  it("両手の取引: 依頼の内容・宛先を切り替えたら、その分の前回の入力(無ければ初めの値)に入れ替える(発注者決定 2026-10-29)", () => {
+    const src = read(SECTION);
+    expect(src).toContain("doc.rememberBy === k && typeof v === \"string\" ? doc.starts?.[v] : undefined");
+    expect(read("src/lib/deals/client.ts")).toContain("starts: Record<string, Record<string, unknown>> | null;");
+    expect(read("src/app/api/deals/[id]/documents/available/route.ts")).toContain("rememberBy: d.rememberBy?.key ?? null,");
+  });
+  it("空欄の選択肢の出方の説明は書類ごと(□ で出す/丸を付けずに出す・2026-10-30)", () => {
+    const src = read(SECTION);
+    expect(src).toContain('doc.form.blankStyle === "plain"');
+    expect(src).toContain("選ばなかった項目は丸を付けずに(書き込み欄は下線のまま)出ます");
+    expect(src).toContain("選ばなかった項目は □ を並べた空欄で出ます");
   });
   it("準備チェックリストは種類を選ぶまで発行できない(第2段階 段C)", () => {
     const src = read(SECTION);

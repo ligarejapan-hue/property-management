@@ -8,6 +8,7 @@ import { DISCLOSURE_HOUSE_SOURCE } from "../texts/disclosure-house";
 import { DISCLOSURE_UNIT_SOURCE } from "../texts/disclosure-unit";
 import type { DisclosureSource } from "../texts/disclosure-types";
 import type { BusinessDocContext, ValueRow } from "./common";
+import { roomLabel } from "@/lib/room-label";
 
 const SOURCES: Record<DisclosureKind, DisclosureSource> = { house: DISCLOSURE_HOUSE_SOURCE, unit: DISCLOSURE_UNIT_SOURCE };
 
@@ -36,7 +37,7 @@ const kindOf = (o: FormValues): DisclosureKind => (o.kind === "unit" ? "unit" : 
 /** 書式の頭の「物件名」(物件名・号室。無ければ所在地)。 */
 function propertyName(c: BusinessDocContext): string | null {
   const s = c.deal.propertySnapshot;
-  return [s.buildingName, s.roomNo && `${s.roomNo}号室`].filter(Boolean).join(" ") || s.address || null;
+  return [s.buildingName, roomLabel(s.roomNo)].filter(Boolean).join(" ") || s.address || null;
 }
 
 export function disclosureDefaults(c: BusinessDocContext): FormValues {

@@ -23,6 +23,7 @@ import {
   type DriveFolderRow,
   type ReportInboxSearchRow,
 } from "@/lib/api-client";
+import { roomLabel } from "@/lib/room-label";
 
 /**
  * 管理 › ドライブ連携(書類の自動整理 第2段a・2026-10-24)。
@@ -50,7 +51,7 @@ const ERROR_MESSAGES: Record<string, string> = {
 };
 
 function propertyLabel(p: { buildingName: string | null; roomNo: string | null; address: string }): string {
-  const name = [p.buildingName, p.roomNo ? `${p.roomNo}号室` : null].filter(Boolean).join(" ");
+  const name = [p.buildingName, roomLabel(p.roomNo)].filter(Boolean).join(" ");
   return name || p.address;
 }
 

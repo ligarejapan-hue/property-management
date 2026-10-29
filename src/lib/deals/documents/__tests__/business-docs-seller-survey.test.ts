@@ -121,7 +121,9 @@ describe("売主属性調査書(社内用)", () => {
   it("前の会社の名前・リースバックの語を使わない", () => {
     for (const f of ["business/seller-survey.ts", "forms/seller-survey.ts", "forms/render.ts", "forms/schema.ts", "forms/values.ts", "forms/types.ts"]) {
       const src = readFileSync(join(process.cwd(), "src/lib/deals/documents", f), "utf8");
-      for (const w of ["インテリックス", "リースバック", "取引先マスタ", "LB"]) expect(src, `${f} に ${w}`).not.toContain(w);
+      for (const w of ["インテリックス", "リースバック", "取引先マスタ"]) expect(src, `${f} に ${w}`).not.toContain(w);
+      // 「LB」は英字の続かない単語だけを見る(LBL などの英字の中の LB は当てない・2026-10-30)
+      expect(src, `${f} に LB`).not.toMatch(/(?<![A-Za-z])LB(?![A-Za-z])/);
     }
   });
 });

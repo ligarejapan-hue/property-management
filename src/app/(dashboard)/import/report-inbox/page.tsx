@@ -37,6 +37,7 @@ import {
 import { PROPERTY_TYPE_LABELS } from "@/lib/property-types";
 import { keepSelectionIfShown } from "@/lib/report-inbox/selection";
 import { MAX_PDF_UPLOAD_BYTES } from "@/lib/pdf-compress/policy";
+import { roomLabel } from "@/lib/room-label";
 
 const MATCH_LABELS: Record<ReportInboxCandidate["match"], string> = {
   name_room: "マンション名・部屋番号が一致",
@@ -267,7 +268,7 @@ function InboxItemCard({ item, onChanged }: { item: ReportInboxItem; onChanged: 
     }
   };
 
-  const clue = [item.buildingName, item.roomNo ? `${item.roomNo}号室` : null].filter(Boolean).join(" ");
+  const clue = [item.buildingName, roomLabel(item.roomNo)].filter(Boolean).join(" ");
 
   return (
     <li className="rounded-lg border border-gray-200 bg-white p-4 dark:border-gray-800 dark:bg-gray-900">
@@ -382,7 +383,7 @@ function InboxItemCard({ item, onChanged }: { item: ReportInboxItem; onChanged: 
             />
             <span className="min-w-0">
               <span className="text-gray-800 dark:text-gray-100">
-                {[c.buildingName, c.roomNo ? `${c.roomNo}号室` : null].filter(Boolean).join(" ") || "(物件名なし)"}
+                {[c.buildingName, roomLabel(c.roomNo)].filter(Boolean).join(" ") || "(物件名なし)"}
               </span>
               <span className="ml-2 text-xs text-gray-500 dark:text-gray-400">
                 {c.address}・{PROPERTY_TYPE_LABELS[c.propertyType] ?? c.propertyType}

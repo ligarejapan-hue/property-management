@@ -52,6 +52,9 @@ const fullChecklistCtx = (phase: "contract" | "settlement", group: "bring" | "re
 };
 const G = "contract_guide";
 
+/** 単語としての「LB」(前後に英字が続かない)。 */
+const LB_WORD = /(?<![A-Za-z])LB(?![A-Za-z])/;
+
 describe("契約のご案内", () => {
   it("「契約・媒介の書類」の先頭に出て、どの取引でも出せる・前回の入力を引き継ぐ", () => {
     expect(BUSINESS_DOCS[0].key).toBe(G);
@@ -219,16 +222,21 @@ describe("第2段階の書類の文面", () => {
   it("前の会社の名前・リースバックの語を使わない", () => {
     for (const f of ["contract-guide.ts", "completion.ts", "prep-checklist.ts", "mediation.ts", "sale-guide.ts", "disclosure.ts", "equipment.ts"]) {
       const src = readFileSync(join(process.cwd(), "src/lib/deals/documents/business", f), "utf8");
-      for (const w of ["インテリックス", "リースバック", "LB"]) expect(src, `${f} に ${w}`).not.toContain(w);
+      for (const w of ["インテリックス", "リースバック"]) expect(src, `${f} に ${w}`).not.toContain(w);
+      expect(src, `${f} に LB`).not.toMatch(LB_WORD);
     }
+    // 「LB」は英字の続かない単語だけを見る(LBL・BLOB などの英字の中の LB は当てない・2026-10-30)
+    expect("LB の物件").toMatch(LB_WORD);
+    expect("LB物件").toMatch(LB_WORD);
+    for (const ok of ["LBL", "XLB", "const lb = 1"]) expect(ok).not.toMatch(LB_WORD);
   });
 
   it("契約のご案内: 発行の履歴の題名に宛先・前回の入力は初めの宛先の分だけ(両手の取引)", () => {
     expect(doc(G).variantOf!({ addressee: "buyer" })).toBe("buyer");
     expect(dealDocumentTitle(G, "seller")).toBe("契約のご案内(売主様あて)");
     expect(dealDocumentTitle(G, "buyer")).toBe("契約のご案内(買主様あて)");
-    const both = ctx({ ...deal, businessType: "brokerage", tradeSide: "both" });
-    expect(doc(G).rememberMatch!(both, { addressee: "seller" })).toBe(true);
-    expect(doc(G).rememberMatch!(both, { addressee: "buyer" })).toBe(false);
+    // 前回の入力は宛先ごとに分けて覚える(両手の取引は売主様あてから始まる・買主様あてに切り替えると買主様あての前回の入力)
+    expect(doc(G).rememberBy).toEqual({ key: "addressee", values: ["seller", "buyer"] });
+    expect(doc(G).defaults(ctx({ ...deal, businessType: "brokerage", tradeSide: "both" })).values.addressee).toBe("seller");
   });
 });
