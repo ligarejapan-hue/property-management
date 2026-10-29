@@ -202,4 +202,25 @@ describe("媒介契約書(第2段階 §4.5・型はタブで選ぶ)", () => {
     expect(h).toContain("架空県架空市6-6");
     expect(text(h)).toContain("架空流通機構");
   });
+
+  it("発行の履歴の題名に型と依頼の内容を出す(両手の取引で売却用と購入用を見分ける)", async () => {
+    const { DEAL_DOC_TYPES } = await import("../issue");
+    expect(doc().variantOf!({ kind: "exclusive", requestKind: "sale" })).toBe("exclusive_sale");
+    expect(doc().variantOf!({ kind: "dedicated", requestKind: null })).toBe("dedicated");
+    expect(dealDocumentTitle(K, "exclusive_sale")).toBe("媒介契約書(専任・売却)");
+    expect(dealDocumentTitle(K, "general_purchase")).toBe("媒介契約書(一般・購入)");
+    expect(dealDocumentTitle(K, "dedicated")).toBe("媒介契約書(専属専任)");
+    for (const kind of ["general", "exclusive", "dedicated"]) {
+      for (const requestKind of ["sale", "purchase", "exchange", null]) {
+        expect(Object.keys(DEAL_DOC_TYPES.mediation.variants)).toContain(doc().variantOf!({ kind, requestKind }));
+      }
+    }
+  });
+
+  it("前回の入力は、取引の側に合う依頼の内容の分だけを初めの値にする(両手=売却・買主側=購入)", () => {
+    const both = ctx({ ...deal, tradeSide: "both" });
+    expect(doc().rememberMatch!(both, { requestKind: "sale" })).toBe(true);
+    expect(doc().rememberMatch!(both, { requestKind: "purchase" })).toBe(false);
+    expect(doc().rememberMatch!(ctx({ ...deal, tradeSide: "buyer" }), { requestKind: "purchase" })).toBe(true);
+  });
 });

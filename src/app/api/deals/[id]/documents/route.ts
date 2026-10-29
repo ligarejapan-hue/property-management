@@ -113,7 +113,7 @@ export async function POST(request: Request, ctx: Ctx) {
         throw e;
       }
       built = {
-        variant: "default", inputs: { options: parsed }, calc: { settlement: bctx.calc.settlement }, html: out.html, compactHtml: out.compactHtml,
+        variant: businessDoc.variantOf ? businessDoc.variantOf(parsed) : "default", inputs: { options: parsed }, calc: { settlement: bctx.calc.settlement }, html: out.html, compactHtml: out.compactHtml,
         xlsx: () => buildValuesXlsx({ title: businessDoc.label, dealNo: deal.dealNo, issuedOn: today, rows: out.rows, issuerName: out.issuerName ?? company.nameJa }),
       };
     } else if (docType === "business_plan") {

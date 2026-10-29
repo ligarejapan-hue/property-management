@@ -51,6 +51,13 @@ export interface BusinessDocDef {
   group: "contract" | "settlement" | "other" | "oc" | "checklist";
   /** 前回発行したときの入力を、次の発行の初めの値にする(設計 第2段階 §3.2)。 */
   remember?: boolean;
+  /**
+   * 前回の入力のうち、この取引の初めの値に合うものだけを使う(両手の取引で、買主様用を出した後も売主様用から始める)。
+   * rememberMatch が無い書類は、いちばん新しい発行の入力を使う。合うものが無ければ初めの値のまま。
+   */
+  rememberMatch?(c: BusinessDocContext, options: Record<string, unknown>): boolean;
+  /** 発行の出し分け(履歴の題名と版の数え方・issue.ts の variants の鍵)。無ければ default。 */
+  variantOf?(options: Record<string, unknown>): string;
   /** 謄本の登記の状況を使う(発行のときにも謄本を読む・書類確認書と同じ読み方)。 */
   usesRegistry?: boolean;
   /** 項目の表(入力画面と PDF をこの表から作る・設計 第2段階 §3.3)。画面へそのまま渡す。 */
@@ -123,6 +130,8 @@ export const BUSINESS_DOCS: BusinessDocDef[] = [
     label: "契約のご案内",
     group: "contract",
     remember: true,
+    rememberMatch: (c, o) => o.addressee === defaultAddressee(c),
+    variantOf: (o) => (o.addressee === "buyer" ? "buyer" : "seller"),
     applies: () => true,
     missing: (c, v) => contractGuideMissing(c, v?.addressee),
     blocking: () => [],
@@ -152,6 +161,12 @@ export const BUSINESS_DOCS: BusinessDocDef[] = [
     label: "媒介契約書",
     group: "contract",
     remember: true,
+    // 依頼の内容の初め(売主側・両手=売却・買主側=購入)と同じ分の前回の入力から始める。
+    rememberMatch: (c, o) => o.requestKind === (c.deal.tradeSide === "buyer" ? "purchase" : "sale"),
+    variantOf: (o) => {
+      const kind = o.kind === "general" || o.kind === "dedicated" ? o.kind : "exclusive";
+      return o.requestKind === "sale" || o.requestKind === "purchase" || o.requestKind === "exchange" ? `${kind}_${o.requestKind}` : kind;
+    },
     form: MEDIATION_FORM,
     applies: (c) => c.deal.businessType === "brokerage",
     missing: (c, v) => mediationMissing(c, v),

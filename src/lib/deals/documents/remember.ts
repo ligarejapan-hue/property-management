@@ -12,6 +12,24 @@ export function rememberedValues(
   return r.success ? r.data : defaults;
 }
 
+/**
+ * その書類のいちばん新しい発行の写しのうち、match に合うもの(rows は発行の新しい順・match が無ければ最初の1つ)。
+ * match には写しの options を渡す(options が無い・壊れている写しは {} として渡す)。
+ */
+export function latestMatching(
+  rows: { docType: string; inputSnapshot: unknown }[], docType: string, match?: (options: Record<string, unknown>) => boolean,
+): unknown {
+  for (const r of rows) {
+    if (r.docType !== docType) continue;
+    if (!match) return r.inputSnapshot;
+    const s = r.inputSnapshot;
+    const o = s && typeof s === "object" && "options" in s && (s as { options: unknown }).options && typeof (s as { options: unknown }).options === "object"
+      ? (s as { options: Record<string, unknown> }).options : {};
+    if (match(o)) return r.inputSnapshot;
+  }
+  return undefined;
+}
+
 /** 書類の種類ごとに、いちばん新しい版の写し(rows は版の新しい順に並んでいること)。 */
 export function latestSnapshots(rows: { docType: string; inputSnapshot: unknown }[]): Map<string, unknown> {
   const m = new Map<string, unknown>();
