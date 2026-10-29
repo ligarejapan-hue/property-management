@@ -167,7 +167,7 @@ describe("申込欄の頭に安心の一言と電話。同意文は畳む(同意
 
   it("同意文は「個人情報の取り扱いについて」に畳み、同意のチェックと送信ボタンはその下にそのまま", () => {
     const html = renderLpPage(input());
-    expect(html).toContain('<details class="more privacy-more"><summary>個人情報の取り扱いについて</summary><div class="privacy">利用目的<br />第三者提供なし</div></details>');
+    expect(html).toContain('<details class="more privacy-more"><summary>個人情報の取り扱いについて</summary><div class="privacy">利用目的<br />第三者提供なし<br />詳しくは当社の<a href="https://ligarejapan.com/privacypolicy/" target="_blank" rel="noopener">プライバシーポリシー</a>をご覧ください。</div></details>');
     expect(html).toMatch(/<\/details><label class="consent"><input type="checkbox" name="consent" value="yes" required \/>個人情報の取り扱いに同意する<\/label>/);
   });
 });
