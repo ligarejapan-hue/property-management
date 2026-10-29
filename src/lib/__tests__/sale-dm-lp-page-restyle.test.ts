@@ -259,9 +259,51 @@ describe("動き(見本どおり・控えめ)", () => {
     expect(h).toContain('class="net-ripple"');
   });
 
-  it("画像を切り取る・拡大する動きは入れない(元の比率のまま)", () => {
+  it("画像は元の比率のまま。冒頭写真のゆっくり寄る動きだけは枠(.hero-zoom)の中で行う(発注者承認 2026-10-29)", () => {
     expect(live).not.toContain("object-fit:cover");
     expect(live).not.toMatch(/\.hero[^{]*\{[^}]*transform:scale/);
+    expect(live).toContain(".hero-zoom{display:block;");
+    expect(live).toMatch(/\.hero-zoom\{[^}]*overflow:hidden/);
+    expect(live).toContain("@keyframes lp-zoom");
+  });
+});
+
+// 発注者承認 2026-10-29(見本 https://claude.ai/artifact/KBSnaEquPuZrpbqrNzaCRB): 全LP共通の動きの追加。
+describe("LPの動き(2026-10-29 追加分)", () => {
+  it("冒頭の写真は枠で包み、大見出しは文節ごとに出す", () => {
+    const h = renderLpPage(input());
+    expect(h).toContain('<div class="hero-zoom"><img class="hero"');
+    expect(h).toContain('<h1><span class="h1-ph">');
+  });
+  it("売却の流れ: 段階のあいだの線と「3〜6か月」の帯は飾り(読み上げない)。最後の段階には線を付けない", () => {
+    const h = renderLpPage(input({ sections: [{ heading: "流れ", paragraphs: ["x"], media: { kind: "figure", figureKind: "sale_flow" } }] }));
+    const links = (h.match(/<i class="flow-link" aria-hidden="true"><\/i>/g) ?? []).length;
+    const steps = (h.match(/<ol class="flow">([\s\S]*?)<\/ol>/)?.[1].match(/<li>/g) ?? []).length;
+    expect(steps).toBeGreaterThan(1);
+    expect(links).toBe(steps - 1);
+    expect(h).toContain('<div class="flow-months" aria-hidden="true">');
+  });
+  const pad = "条件があります。".repeat(30);
+  const taxSec = (heading: string, lines: string[]) => renderLpPage(input({ sections: [{ heading, paragraphs: [lines.join("\n"), pad], media: null }] }));
+  it("税の特例の節: 本文の「…3,000万円特別控除:」から名前を取り、最大3,000万円の札を畳んだ本文の上に出す", () => {
+    const h = taxSec("税金の特例について", ["・相続した空き家の3,000万円特別控除:条件を満たせば差し引けます"]);
+    expect(h).toContain('<div class="tax-card"><p class="tax-lbl">相続した空き家の3,000万円特別控除</p>');
+    expect(h).toContain('<span data-count-to="3000">3,000</span>');
+    expect(h.indexOf('class="tax-card"')).toBeLessThan(h.indexOf("くわしく読む"));
+    expect(h).not.toContain('class="tax-tl"'); // 期限の数え方が違うページには期限の線を出さない
+  });
+  it("期限の言い回し(住まなくなってから3年目の年末)がある節だけ、期限の線を出す", () => {
+    const h = taxSec("税金の特例", ["・マイホームを売ったときの3,000万円特別控除:住まなくなってから3年目の年末までに売れば対象"]);
+    expect(h).toContain('<div class="tax-tl" role="img"');
+  });
+  it("見出しに「特例」が無い・該当の項目が無い節には札を出さない", () => {
+    expect(taxSec("税金について", ["・相続した空き家の3,000万円特別控除:x"])).not.toContain('class="tax-card"');
+    expect(taxSec("税金の特例", ["・取得費加算の特例:x"])).not.toContain('class="tax-card"');
+  });
+  it("節が画面の下から1/3に入ったら動かす(見張りが動かない閲覧アプリでもスクロールで判定)", () => {
+    const h = renderLpPage(input());
+    expect(h).toContain('rootMargin:"0px 0px -33% 0px"');
+    expect(h).toContain('window.addEventListener("scroll",chk,{passive:true})');
   });
 });
 
@@ -272,8 +314,11 @@ describe("動きで中身が見えなくならない(安全網)", () => {
     expect(h).toContain("threshold:0,");
     expect(h).not.toContain("threshold:0.18");
   });
-  it("見張りが動かない閲覧アプリ用に、時間がたてば全部出す。例外が出たら動きをやめて全部見せる", () => {
-    expect(h).toMatch(/setTimeout\(function\(\)\{var h=document\.querySelectorAll\("\.anim main section/);
+  // 2026-10-29 発注者「ページが画面の下から1/3でてきたら効果を動かして」: 6秒で全部出す安全網は、
+  // スクロール・読み込み時に位置で判定して出す方式(chk)に置き換えた(見張りが動かなくても、そこまで読めば出る)。
+  it("見張りが動かない閲覧アプリ用に、スクロール・読み込み時に位置で判定して出す。例外が出たら動きをやめて全部見せる", () => {
+    expect(h).toMatch(/function chk\(\)\{var h=document\.querySelectorAll\("\.anim main section:not\(\.in\)/);
+    expect(h).toContain('window.addEventListener("load",chk)');
     expect(h).toContain('}catch(_){root.classList.remove("anim")}');
   });
   it("絵を含む札を縮める動きは使わない(画像は拡大・縮小しない)・送付前の押せないボタンは光らせない", () => {

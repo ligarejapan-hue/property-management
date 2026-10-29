@@ -102,7 +102,8 @@ const input = (over: Partial<LpRenderInput> = {}): LpRenderInput => ({
 describe("renderLpPage: 見出し・実例の題・札・よくある質問に文節の切れ目を入れ、字の途中では折らない。見出しは読点を抜く", () => {
   const html = renderLpPage(input());
   it("h1・h2・実例の題と札は読点なし+<wbr>、質問は読点を残して <wbr>(title・OGP・写真の alt はそのまま)", () => {
-    expect(html).toContain("<h1>築年数を<wbr>重ねた<wbr>お住まいのことで<wbr>お困りではありませんか？</h1>");
+    // h1 は文節ごとに span で包んで順に出す(LPの動き・発注者承認 2026-10-29)。切れ目(<wbr>)の位置は変えない。
+    expect(html).toContain('<h1><span class="h1-ph">築年数を</span><wbr><span class="h1-ph">重ねた</span><wbr><span class="h1-ph">お住まいのことで</span><wbr><span class="h1-ph">お困りではありませんか？</span></h1>');
     expect(html).toContain("<h2>古くなった<wbr>家でも<wbr>売り方はいくつかあります</h2>");
     expect(html).toContain("<h2>修繕や<wbr>耐震工事を<wbr>始める<wbr>前に<wbr>ご相談ください</h2>");
     expect(html).toContain("<h2>登記や<wbr>税金、<wbr>片付けのことも<wbr>当社に<wbr>まとめて<wbr>ご相談ください</h2>");
@@ -113,7 +114,7 @@ describe("renderLpPage: 見出し・実例の題・札・よくある質問に�
     expect(html).toContain('alt="修繕や耐震工事を始める前に、ご相談ください"');
     const pub = renderLpPage(input({ mode: "public", public: { adParams: EMPTY_AD_PARAMS, safeQuery: "", google: null, og: { url: "https://example.test/lp/x", imageUrl: null } } }));
     expect(pub).toContain('<meta property="og:title" content="築年数を重ねたお住まいのことで、お困りではありませんか？" />');
-    expect(pub).toContain("<h1>築年数を<wbr>重ねた<wbr>お住まいのことで<wbr>お困りではありませんか？</h1>");
+    expect(pub).toContain('<h1><span class="h1-ph">築年数を</span><wbr><span class="h1-ph">重ねた</span><wbr><span class="h1-ph">お住まいのことで</span><wbr><span class="h1-ph">お困りではありませんか？</span></h1>');
   });
   it("見出しと同じ文を本文や問い合わせ欄で使う所には影響しない(本文の読点はそのまま)", () => {
     const h = renderLpPage(input({ intro: ["古くなった家でも、売り方はいくつかあります。"] }));
