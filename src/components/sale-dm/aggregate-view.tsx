@@ -22,7 +22,7 @@ function Table({ title, head, rows }: { title: string; head: string[]; rows: Arr
               {r.cells.map((c, i) => (
                 <td
                   key={i}
-                  className={`${td} ${i === 0 ? "font-semibold" : ""} ${r.danger?.includes(i) ? "font-medium text-red-700" : r.strong?.includes(i) ? "font-medium text-indigo-700" : ""}`}
+                  className={`${td} ${i === 0 ? "font-semibold" : ""} ${r.danger?.includes(i) ? "font-medium text-red-700" : r.strong?.includes(i) ? "font-medium text-iris-700" : ""}`}
                 >
                   {c}
                 </td>

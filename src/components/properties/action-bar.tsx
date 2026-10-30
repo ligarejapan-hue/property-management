@@ -63,11 +63,11 @@ interface ActionBarProps {
  *   **文言が状態と同じ** + **今の状態がその場に無い** + **2つ並ぶこと自体が状態のサイン**、
  *   という三重の読みにくさだった。同種の混乱は B-10 UI総点検でも報告があり、
  *   そのときは見出しを足しただけで足りていなかった。
- * ⚠**色は状態の意味と対応させる**(送付可=indigo / 送付不可=red / 未判断=amber)。
+ * ⚠**色は状態の意味と対応させる**(送付可=iris(テーマで変わらない藍) / 送付不可=red / 未判断=amber)。
  *   選んでいないものは無彩色にして、選択中だけが色で浮くようにする。
  */
 const DM_CHOICES = [
-  { key: "set_dm_send", value: "send", label: "送付可", selectedColor: "bg-indigo-600" },
+  { key: "set_dm_send", value: "send", label: "送付可", selectedColor: "bg-iris-600" },
   { key: "set_dm_no_send", value: "no_send", label: "送付不可", selectedColor: "bg-red-600" },
   { key: "set_dm_hold", value: "hold", label: "未判断", selectedColor: "bg-amber-600" },
 ] as const;

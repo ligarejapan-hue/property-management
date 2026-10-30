@@ -68,7 +68,7 @@ const ITEM_ICON = { clock: Clock, unlock: LockOpen, logout: LogOut, calendar: Ca
 const ITEM_TONE = {
   amber: "bg-amber-50 text-amber-600 dark:bg-amber-500/10 dark:text-amber-400",
   red: "bg-red-50 text-red-600 dark:bg-red-500/10 dark:text-red-400",
-  indigo: "bg-indigo-50 text-indigo-600 dark:bg-indigo-500/10 dark:text-indigo-400",
+  indigo: "bg-iris-50 text-iris-600 dark:bg-iris-500/10 dark:text-iris-400",
   green: "bg-green-50 text-green-700 dark:bg-green-500/10 dark:text-green-400",
 } as const;
 

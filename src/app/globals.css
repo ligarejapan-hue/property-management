@@ -2,9 +2,67 @@
 
 @custom-variant dark (&:where(.dark, .dark *));
 
+/*
+ * 見た目の設定 段階1(2026-10-31): 意味の名前の変数。名前は付録A(色)・付録B(文字サイズ)。
+ * スタンダード=今の見た目なので、値は Tailwind の色の変数(gray・indigo・white)を指すだけ。
+ * テーマ(段階2)は gray・indigo・white の元の値を差し替える=ここの変数も各画面の gray-* / indigo-* も一緒に変わる。
+ * 状態の色(ok/warn/err)・仲介/買取再販は差し替えない色(green/amber/red/固定値)を指す。
+ * 新しく作る画面・部品は bg-surface / text-fg-2 / bg-accent などの意味の名前で書く。
+ */
 :root {
   --background: #ffffff;
   --foreground: #171717;
+
+  --bg: var(--color-gray-50);
+  --surface: var(--color-white);
+  --surface-2: var(--color-gray-100);
+  --line: var(--color-gray-200);
+  --line-2: var(--color-gray-100);
+  --text: var(--color-gray-900);
+  --text-2: var(--color-gray-600);
+  --text-3: var(--color-gray-500);
+  --accent: var(--color-indigo-600);
+  --accent-ink: var(--color-white);
+  --accent-soft: var(--color-indigo-50);
+  --accent-text: var(--color-indigo-700);
+  --ok: var(--color-green-700);
+  --ok-soft: var(--color-green-50);
+  --warn: var(--color-amber-700);
+  --warn-soft: var(--color-amber-50);
+  --err: var(--color-red-600);
+  --err-soft: var(--color-red-50);
+  --side-bg: var(--color-white);
+  --side-text: var(--color-gray-700);
+  --side-strong: var(--color-gray-800);
+  --side-active-bg: var(--color-indigo-50);
+  --side-active-text: var(--color-indigo-700);
+  --side-line: var(--color-gray-200);
+  --side-hover-bg: var(--color-gray-100);
+  --side-hover-text: var(--color-gray-900);
+  --side-muted: var(--color-gray-500);
+  --side-faint: var(--color-gray-400);
+  --side-icon: var(--color-gray-400);
+  --side-muted-hover: var(--color-gray-700);
+  --logo-bg: var(--color-indigo-600);
+  --logo-ink: var(--color-white);
+  /* 仲介/買取再販(値だけ・印は別タスク)。テーマで変えない。 */
+  --c-chukai: #2563eb;
+  --c-kaitori: #d97706;
+
+  --fs: var(--text-sm);
+  --fs-sm: var(--text-xs);
+  --h1: var(--text-2xl);
+  --h2: var(--text-sm);
+  --kv: var(--text-2xl);
+  --row-py: calc(var(--spacing) * 2);
+  --pad: calc(var(--spacing) * 4);
+  --gap: calc(var(--spacing) * 4);
+  --btn-h: calc(var(--spacing) * 9);
+  --input-h: calc(var(--spacing) * 9);
+  --ic: calc(var(--spacing) * 4);
+  --border-w: 1px;
+  --r: var(--radius-lg);
+  --r-sm: var(--radius-md);
 }
 
 /*
@@ -41,9 +99,61 @@
   --animate-pm-shimmer: pm-shimmer 1.4s linear infinite;
 }
 
+/*
+ * テーマで変わらない藍の写し(Tailwind 既定の indigo と同じ値)。藍が「状態・種類の色の組の1つ」として
+ * 使われている箇所(賃貸中・お知らせの種類・送る/送らない/保留 など)はこちらで書く。
+ */
+@theme {
+  --color-iris-50: oklch(96.2% 0.018 272.314);
+  --color-iris-100: oklch(93% 0.034 272.788);
+  --color-iris-200: oklch(87% 0.065 274.039);
+  --color-iris-300: oklch(78.5% 0.115 274.713);
+  --color-iris-400: oklch(67.3% 0.182 276.935);
+  --color-iris-500: oklch(58.5% 0.233 277.117);
+  --color-iris-600: oklch(51.1% 0.262 276.966);
+  --color-iris-700: oklch(45.7% 0.24 277.023);
+  --color-iris-800: oklch(39.8% 0.195 277.366);
+  --color-iris-900: oklch(35.9% 0.144 278.697);
+  --color-iris-950: oklch(25.7% 0.09 281.288);
+}
+
 @theme inline {
   --color-background: var(--background);
   --color-foreground: var(--foreground);
+  --color-page: var(--bg);
+  --color-surface: var(--surface);
+  --color-surface-2: var(--surface-2);
+  --color-line: var(--line);
+  --color-line-2: var(--line-2);
+  --color-fg: var(--text);
+  --color-fg-2: var(--text-2);
+  --color-fg-3: var(--text-3);
+  --color-accent: var(--accent);
+  --color-accent-ink: var(--accent-ink);
+  --color-accent-soft: var(--accent-soft);
+  --color-accent-text: var(--accent-text);
+  --color-ok: var(--ok);
+  --color-ok-soft: var(--ok-soft);
+  --color-warn: var(--warn);
+  --color-warn-soft: var(--warn-soft);
+  --color-err: var(--err);
+  --color-err-soft: var(--err-soft);
+  --color-side-bg: var(--side-bg);
+  --color-side-text: var(--side-text);
+  --color-side-strong: var(--side-strong);
+  --color-side-active-bg: var(--side-active-bg);
+  --color-side-active-text: var(--side-active-text);
+  --color-side-line: var(--side-line);
+  --color-side-hover-bg: var(--side-hover-bg);
+  --color-side-hover-text: var(--side-hover-text);
+  --color-side-muted: var(--side-muted);
+  --color-side-faint: var(--side-faint);
+  --color-side-icon: var(--side-icon);
+  --color-side-muted-hover: var(--side-muted-hover);
+  --color-logo-bg: var(--logo-bg);
+  --color-logo-ink: var(--logo-ink);
+  --color-chukai: var(--c-chukai);
+  --color-kaitori: var(--c-kaitori);
   --font-sans: var(--font-app-sans), var(--font-app-sans-jp), sans-serif;
   --font-mono: var(--font-geist-mono);
 }
@@ -51,6 +161,40 @@
 .dark {
   --background: #0a0a0a;
   --foreground: #ededed;
+
+  --bg: var(--color-gray-950);
+  --surface: var(--color-gray-900);
+  --surface-2: var(--color-gray-800);
+  --line: var(--color-gray-800);
+  --line-2: var(--color-gray-800);
+  --text: var(--color-gray-100);
+  --text-2: var(--color-gray-300);
+  --text-3: var(--color-gray-400);
+  --accent: var(--color-indigo-500);
+  --accent-ink: var(--color-white);
+  --accent-soft: var(--color-indigo-900);
+  --accent-text: var(--color-indigo-300);
+  /* 状態の色はダークでも同じ色相(緑・琥珀・赤)。暗い背景で読める明るさに。 */
+  --ok: var(--color-green-400);
+  --ok-soft: var(--color-green-950);
+  --warn: var(--color-amber-400);
+  --warn-soft: var(--color-amber-950);
+  --err: var(--color-red-400);
+  --err-soft: var(--color-red-950);
+  --side-bg: var(--color-gray-900);
+  --side-text: var(--color-gray-300);
+  --side-strong: var(--color-gray-100);
+  --side-active-bg: var(--color-indigo-900);
+  --side-active-text: var(--color-indigo-300);
+  --side-line: var(--color-gray-700);
+  --side-hover-bg: var(--color-gray-800);
+  --side-hover-text: var(--color-gray-100);
+  --side-muted: var(--color-gray-400);
+  --side-faint: var(--color-gray-500);
+  --side-icon: var(--color-gray-400);
+  --side-muted-hover: var(--color-gray-200);
+  --logo-bg: var(--color-indigo-400);
+  --logo-ink: var(--color-gray-900);
 }
 
 body {

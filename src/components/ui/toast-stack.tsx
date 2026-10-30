@@ -27,7 +27,7 @@ const TONE: Record<ToastTone, { border: string; icon: string }> = {
   amber: { border: "border-l-amber-500", icon: "text-amber-600 dark:text-amber-400" },
   red: { border: "border-l-red-600 dark:border-l-red-400", icon: "text-red-600 dark:text-red-400" },
   green: { border: "border-l-green-600 dark:border-l-green-400", icon: "text-green-600 dark:text-green-400" },
-  indigo: { border: "border-l-indigo-500", icon: "text-indigo-500 dark:text-indigo-400" },
+  indigo: { border: "border-l-iris-500", icon: "text-iris-500 dark:text-iris-400" },
 };
 
 const ICONS: Record<ToastIcon, typeof Clock> = {
