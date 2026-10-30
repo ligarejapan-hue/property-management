@@ -23,6 +23,14 @@ import {
   type RegistrySearchCandidate,
 } from "@/lib/api-client";
 import RegistryLivePanel from "@/components/properties/registry-live-panel";
+import {
+  useRegistryMonthlyUsage,
+  RegistryMonthlyUsageLine,
+} from "@/components/properties/registry-monthly-usage";
+import {
+  canAffordCertificate,
+  monthlyCapBlockedReason,
+} from "@/lib/registry-fetch/monthly-cap";
 import { safeRandomId } from "@/lib/random-id";
 
 interface RegistryLocationSearchButtonProps {
@@ -189,6 +197,20 @@ export default function RegistryLocationSearchButton({
     preflightReload,
   );
   const target = preflight.targetsById.get(propertyId) ?? null;
+  // 月の上限(2026-10-29 発注者決定=5万円/月)。確認の画面を開くたびに読み直す。
+  // ⚠表示とボタンの可否は目安。本物の判定はサーバーが課金の直前に行う
+  //   (読み込めなかったときは止めない=サーバーが止める)。
+  const monthlyUsage = useRegistryMonthlyUsage(
+    canAutoFetch &&
+      purchaseEnabled &&
+      (state === "confirmSearch" || state === "confirmObtain" || state === "results"),
+  );
+  const capBlocked =
+    monthlyUsage.usage !== null &&
+    !canAffordCertificate(monthlyUsage.usage, certificateType);
+  const capBlockedReason = monthlyUsage.usage
+    ? monthlyCapBlockedReason(monthlyUsage.usage, certificateType)
+    : null;
 
   // 非 admin には導線自体を出さない（サーバ側でも 403 で二重防御）。
   if (!canAutoFetch) return null;
@@ -329,7 +351,9 @@ export default function RegistryLocationSearchButton({
       const decision = decideAfterSearch({
         candidates: res.candidates,
         cancelRequested: searchCancelledRef.current,
-        purchaseEnabled,
+        // ⚠月の上限(2026-10-29)に達していたら、候補1件でも自動で取得へ進まない
+        //   (結果を見せて止まる。押しても理由つきで押せない)。
+        purchaseEnabled: purchaseEnabled && !capBlocked,
       });
       if (decision.action === "cancelled") {
         // ⚠中止が受け付けられていた。候補があっても**課金へ進まない**。
@@ -422,6 +446,8 @@ export default function RegistryLocationSearchButton({
     // ボタンの disabled だけに頼らない(迂回への二重防御)。
     // 回収(runRecover)にはこのガードを入れない=課金しないのでスイッチと無関係。
     if (!purchaseEnabled) return;
+    // 月の上限(2026-10-29)。ボタンの disabled だけに頼らない(サーバーも課金の直前に止める)。
+    if (capBlocked) return;
     setLastAction("obtain");
     setState("obtaining");
     setErrorMsg(null);
@@ -711,8 +737,12 @@ export default function RegistryLocationSearchButton({
               </label>
             </fieldset>
           )}
-          {/* ⚠**候補が1件なら、そのまま取得（課金）まで進む**。止められるのは検索中だけ。 */}
+          {/* 月の上限(2026-10-29)。種類を選ぶとすぐ反映される(全部事項だけ入らない残りもある)。 */}
           {(!target || isSearchableTarget(target.kind)) && purchaseEnabled && (
+            <RegistryMonthlyUsageLine state={monthlyUsage} certificateType={certificateType} />
+          )}
+          {/* ⚠**候補が1件なら、そのまま取得（課金）まで進む**。止められるのは検索中だけ。 */}
+          {(!target || isSearchableTarget(target.kind)) && purchaseEnabled && !capBlocked && (
             <p className="text-amber-700 dark:text-amber-400">
               ⚠候補が1件だけ見つかった場合は、そのまま取得（有料）まで進みます。
               やめるときは検索中に「中止」を押してください（課金の後は取り消せません）。
@@ -982,6 +1012,10 @@ export default function RegistryLocationSearchButton({
             )}
           </p>
           )}
+          {/* 月の上限(2026-10-29)。上限なら下の「取得する（有料）」は押せない(理由はここ)。 */}
+          {selected && purchaseEnabled && (
+            <RegistryMonthlyUsageLine state={monthlyUsage} certificateType={certificateType} />
+          )}
           <div className="mt-1 flex flex-wrap gap-1">
             {/* 有料取得は候補を選んだときだけ(候補なしの入口は回収専用)。 */}
             {selected && (
@@ -996,15 +1030,19 @@ export default function RegistryLocationSearchButton({
               onClick={() => runObtain(undefined, approvedFromDisplay())}
               disabled={
                 !purchaseEnabled ||
+                // 月の上限(2026-10-29)。回収(課金なし)の隣のボタンは止めない。
+                capBlocked ||
                 preflight.pending ||
                 preflight.targetsUnavailable
               }
               title={
                 !purchaseEnabled
                   ? "有料取得は準備中です"
-                  : preflight.pending
-                    ? "事前確認中です"
-                    : undefined
+                  : capBlockedReason
+                    ? capBlockedReason
+                    : preflight.pending
+                      ? "事前確認中です"
+                      : undefined
               }
               loading={preflight.pending}
               loadingLabel="確認中..."

@@ -106,12 +106,12 @@ const VERSIONED: Record<string, string> = {
     "(Task 9で修正: 元は進めていなかった)",
   "src/lib/investigation/fetch-investigation.ts:646":
     "property.zoningDistrict/buildingCoverageRatio/floorAreaRatio(調査確定の書き戻し)+version increment",
-  "src/lib/registry-fetch/auto-fetch.ts:238":
+  "src/lib/registry-fetch/auto-fetch.ts:244":
     "property.registryStatus(scheduled解除=previousStatusへ戻す)+version increment" +
     "(Task 9で修正: 元は進めていなかった)",
-  "src/lib/registry-fetch/auto-fetch.ts:4294":
+  "src/lib/registry-fetch/auto-fetch.ts:4311":
     "property.registryStatus=scheduled(有料取得の予約)+version increment",
-  "src/lib/registry-fetch/auto-fetch.ts:4509":
+  "src/lib/registry-fetch/auto-fetch.ts:4547":
     "property.registryStatus=obtained(有料取得の確定)+version increment",
   "src/lib/registry-pdf/process.ts:250":
     "owner.corporateNumber(空欄補完・fillOwnerCorporateNumberIfUnlocked)+version increment" +

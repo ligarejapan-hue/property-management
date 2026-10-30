@@ -42,11 +42,16 @@ vi.mock("@/lib/registry-fetch/auto-fetch", () => ({
   runRegistryAutoFetch: vi.fn(),
   getRegistryFetchMinIntervalMs: () => 60_000,
 }));
+// 月の上限(2026-10-29)の事前確認。既定は「今月まだ0円」。
+vi.mock("@/lib/registry-fetch/monthly-cap-store", () => ({
+  getMonthlyPurchaseUsage: vi.fn(),
+}));
 
 import prisma from "@/lib/prisma";
 import { ApiError } from "@/lib/api-helpers";
 import { runRegistrySearch, resolveRegistryCandidate } from "@/lib/registry-fetch/search";
 import { runRegistryAutoFetch } from "@/lib/registry-fetch/auto-fetch";
+import { getMonthlyPurchaseUsage } from "@/lib/registry-fetch/monthly-cap-store";
 import { processNextBulkItem } from "../process";
 
 const pm = prisma as unknown as {
@@ -90,6 +95,14 @@ beforeEach(() => {
   (resolveRegistryCandidate as Mock).mockResolvedValue({
     candidate: { kind: "location", lotNumber: "1", buildingNumber: null },
     fingerprint: "fp",
+  });
+  (getMonthlyPurchaseUsage as Mock).mockResolvedValue({
+    capYen: 50_000,
+    spentYen: 0,
+    pendingYen: 0,
+    usedYen: 0,
+    prices: { owner: 140, all: 335 },
+    resetsAt: "2026-11-30T15:00:00.000Z",
   });
 });
 
@@ -333,6 +346,99 @@ describe("processNextBulkItem", () => {
     await expect(
       processNextBulkItem({ session: { id: "u2", role: "field_staff" }, jobId: JOB_ID, resolveProvider: async () => provider }),
     ).rejects.toMatchObject({ status: 403 });
+  });
+});
+
+// ---------------------------------------------------------------------------
+// 月の上限(2026-10-29 発注者決定=5万円/月)
+// ---------------------------------------------------------------------------
+describe("月の上限: 一括は残りを上限で止める(途中まで取れたものは残す)", () => {
+  function pausedAfterJob0() {
+    pm.registryFetchJob.findUnique
+      .mockResolvedValueOnce({
+        id: "job-1", requestedById: "u1", status: "processing",
+        certificateType: "owner", startedAt: new Date(), activeItemId: null,
+      })
+      .mockResolvedValueOnce({ status: "paused" });
+  }
+
+  it("⚠上限に達していたら検索(ログイン)もせず一時停止・項目は掴まず pending のまま", async () => {
+    (getMonthlyPurchaseUsage as Mock).mockResolvedValue({
+      capYen: 50_000,
+      spentYen: 49_980,
+      pendingYen: 0,
+      usedYen: 49_980,
+      prices: { owner: 140, all: 335 },
+      resetsAt: "2026-11-30T15:00:00.000Z",
+    });
+    pausedAfterJob0();
+    const res = await processNextBulkItem({ session: SESSION, jobId: JOB_ID, resolveProvider: async () => provider });
+    expect(res.outcome).toBe("paused");
+    expect(res.errorCode).toBe("monthly_cap_reached");
+    expect(res.morePending).toBe(true);
+    expect(runRegistrySearch).not.toHaveBeenCalled();
+    expect(runRegistryAutoFetch).not.toHaveBeenCalled();
+    // 項目は processing にしていない(掴んでいない)。
+    expect(pm.registryFetchJobItem.update).not.toHaveBeenCalled();
+    // ジョブは paused(理由=monthly_cap_reached)・ロックを外す・中止は上書きしない。
+    const pausedCall = pm.registryFetchJob.updateMany.mock.calls.find(
+      (c) => (c[0].data as { status?: string }).status === "paused",
+    );
+    expect(pausedCall![0].data).toMatchObject({
+      pausedReason: "monthly_cap_reached",
+      activeItemId: null,
+    });
+    expect(pausedCall![0].where).toMatchObject({ status: { not: "cancelled" } });
+  });
+
+  it("種類の値段で見る(所有者事項なら入る残りでも全部事項のジョブは止める)", async () => {
+    (getMonthlyPurchaseUsage as Mock).mockResolvedValue({
+      capYen: 50_000,
+      spentYen: 49_860,
+      pendingYen: 0,
+      usedYen: 49_860,
+      prices: { owner: 140, all: 335 },
+      resetsAt: "2026-11-30T15:00:00.000Z",
+    });
+    pm.registryFetchJob.findUnique
+      .mockResolvedValueOnce({
+        id: "job-1", requestedById: "u1", status: "processing",
+        certificateType: "all", startedAt: new Date(), activeItemId: null,
+      })
+      .mockResolvedValueOnce({ status: "paused" });
+    const res = await processNextBulkItem({ session: SESSION, jobId: JOB_ID, resolveProvider: async () => provider });
+    expect(res.errorCode).toBe("monthly_cap_reached");
+    expect(runRegistrySearch).not.toHaveBeenCalled();
+  });
+
+  it("⚠課金の直前(単発取得)で上限に止められた → 項目は pending に戻し・ジョブ paused", async () => {
+    (runRegistrySearch as Mock).mockResolvedValue({
+      searchable: true,
+      candidates: [{ candidateRef: "r1" }],
+    });
+    (runRegistryAutoFetch as Mock).mockRejectedValue(
+      new ApiError(409, "月の上限", "REGISTRY_PURCHASE_MONTHLY_CAP_REACHED"),
+    );
+    pausedAfterJob0();
+    const res = await processNextBulkItem({ session: SESSION, jobId: JOB_ID, resolveProvider: async () => provider });
+    expect(res.outcome).toBe("paused");
+    expect(res.errorCode).toBe("monthly_cap_reached");
+    expect(finalizedItemData()).toMatchObject({ status: "pending", errorCode: "monthly_cap_reached" });
+    const pausedCall = pm.registryFetchJob.updateMany.mock.calls.find(
+      (c) => (c[0].data as { status?: string }).status === "paused",
+    );
+    expect(pausedCall![0].data).toMatchObject({ pausedReason: "monthly_cap_reached" });
+  });
+
+  it("事前確認の読み出しに失敗しても止めない(課金の直前の判定が本物=そちらで止まる)", async () => {
+    (getMonthlyPurchaseUsage as Mock).mockRejectedValue(new Error("db down"));
+    (runRegistrySearch as Mock).mockResolvedValue({
+      searchable: true,
+      candidates: [{ candidateRef: "r1" }],
+    });
+    (runRegistryAutoFetch as Mock).mockResolvedValue({ attachmentId: "att-1", status: "success" });
+    const res = await processNextBulkItem({ session: SESSION, jobId: JOB_ID, resolveProvider: async () => provider });
+    expect(res.itemStatus).toBe("done");
   });
 });
 

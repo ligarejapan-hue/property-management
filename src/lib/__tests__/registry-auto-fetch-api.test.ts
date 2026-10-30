@@ -114,7 +114,8 @@ vi.mock("@/lib/prisma", () => {
     importJob: { create: vi.fn(), update: vi.fn() },
     importJobRow: { create: vi.fn() },
     attachment: { create: vi.fn(), findFirst: vi.fn(), count: vi.fn() },
-    auditLog: { findFirst: vi.fn(), create: vi.fn() },
+    // findMany = 月の上限(2026-10-29)が今月の台帳を数える読み出し。
+    auditLog: { findFirst: vi.fn(), create: vi.fn(), findMany: vi.fn() },
   };
   // link の親行ロック(#364 R10)で $transaction/$queryRaw を実行するため、
   // callback に同じ db を渡す(tx.* === pm.* で既存アサーションが効く)。
@@ -138,6 +139,15 @@ import {
   type RegistryFetchProvider,
 } from "@/lib/registry-fetch";
 import { runRegistryAutoFetch } from "@/lib/registry-fetch/auto-fetch";
+import {
+  getMonthlyPurchaseUsage,
+  __resetMonthlyPurchaseGateForTest,
+} from "@/lib/registry-fetch/monthly-cap-store";
+import {
+  MONTHLY_CAP_REACHED_CODE,
+  MONTHLY_CAP_UNAVAILABLE_CODE,
+  REGISTRY_CERTIFICATE_PRICE_YEN,
+} from "@/lib/registry-fetch/monthly-cap";
 import { RegistryFetchError } from "@/lib/registry-fetch/errors";
 import { fingerprintProperty } from "@/lib/registry-fetch/candidate-cache";
 import * as routeModule from "@/app/api/properties/[id]/registry/auto-fetch/route";
@@ -167,7 +177,7 @@ const pm = prisma as unknown as {
   importJob: { create: Mock; update: Mock };
   importJobRow: { create: Mock };
   attachment: { create: Mock; findFirst: Mock; count: Mock };
-  auditLog: { findFirst: Mock; create: Mock };
+  auditLog: { findFirst: Mock; create: Mock; findMany: Mock };
   $transaction: Mock;
   $queryRaw: Mock;
 };
@@ -247,6 +257,9 @@ beforeEach(() => {
   // 段階②の台帳(二重課金ガード)は既定「記録なし」= 通る。
   pm.auditLog.findFirst.mockResolvedValue(null);
   pm.auditLog.create.mockResolvedValue({ id: "ledger-1" });
+  // 月の上限(2026-10-29): 既定は「今月まだ0円」。予約は前のテストから持ち越さない。
+  pm.auditLog.findMany.mockResolvedValue([]);
+  __resetMonthlyPurchaseGateForTest();
   pm.property.updateMany.mockResolvedValue({ count: 1 });
   pm.property.update.mockResolvedValue({});
   pm.property.findFirst.mockResolvedValue(null);
@@ -1201,6 +1214,231 @@ describe("段階②: 地番候補の有料取得（台帳=二重課金ガード�
       ),
     ).rejects.toMatchObject({ status: 409 });
     expect(provider.fetchRegistryPdf).not.toHaveBeenCalled();
+  });
+
+  // -------------------------------------------------------------------------
+  // 月の上限(2026-10-29 発注者決定=5万円/月・日本時間の暦月)
+  // -------------------------------------------------------------------------
+  /** 今月の台帳を n 件にする。 */
+  function ledgerThisMonth(n: number, certificateType: "owner" | "all" = "owner") {
+    pm.auditLog.findMany.mockResolvedValue(
+      Array.from({ length: n }, (_, i) => ({
+        createdAt: new Date(),
+        detail: { purchaseKeyHash: `k${i}`, outcome: "charged", certificateType },
+      })),
+    );
+  }
+  const flushQueue = () => new Promise<void>((r) => setImmediate(r));
+
+  it("⚠月の上限: 今月の額+今回 が5万円を超えるなら 409 で止める（provider・ロック・台帳に触れない）", async () => {
+    // 357件 × 140円 = 49,980円。あと 140円は入らない。
+    ledgerThisMonth(357);
+    const { provider, promise } = runLocation();
+    await expect(promise).rejects.toMatchObject({
+      status: 409,
+      code: MONTHLY_CAP_REACHED_CODE,
+      message: expect.stringContaining("月の上限（5万円）に達したため取得しませんでした"),
+    });
+    expect(provider.fetchRegistryPdf).not.toHaveBeenCalled();
+    expect(pm.$transaction).not.toHaveBeenCalled();
+    expect(pm.property.update).not.toHaveBeenCalled();
+    expect(pm.auditLog.create).not.toHaveBeenCalled();
+  });
+
+  it("月の上限: ちょうど5万円になる取得は通す", async () => {
+    // 49,860円(=356件) + 140円 = 50,000円 はちょうど上限=通る。
+    ledgerThisMonth(356);
+    const { provider, promise } = runLocation();
+    await promise;
+    expect(provider.fetchRegistryPdf).toHaveBeenCalledTimes(1);
+  });
+
+  it("月の上限: 種類の値段で判定する（所有者事項は入るが全部事項は入らない残り）", async () => {
+    ledgerThisMonth(356); // 49,860円 → 残り140円
+    const all = runLocation({ certificateType: "all" });
+    await expect(all.promise).rejects.toMatchObject({
+      status: 409,
+      code: MONTHLY_CAP_REACHED_CODE,
+    });
+    expect(all.provider.fetchRegistryPdf).not.toHaveBeenCalled();
+  });
+
+  it("⚠月の上限: 今月の額が読めなければ 503 で止める（数えられないまま買わない）", async () => {
+    pm.auditLog.findMany.mockRejectedValue(new Error("db down"));
+    const { provider, promise } = runLocation();
+    await expect(promise).rejects.toMatchObject({
+      status: 503,
+      code: MONTHLY_CAP_UNAVAILABLE_CODE,
+    });
+    expect(provider.fetchRegistryPdf).not.toHaveBeenCalled();
+  });
+
+  it("月の上限: 成功したら予約は外れる（以後は台帳の側で数える）", async () => {
+    const { promise } = runLocation();
+    await promise;
+    await flushQueue();
+    expect((await getMonthlyPurchaseUsage()).pendingYen).toBe(0);
+  });
+
+  it("月の上限: 課金前の失敗なら予約は外れる", async () => {
+    const provider = successProvider();
+    provider.fetchRegistryPdf.mockRejectedValue(
+      new RegistryFetchError("provider_error"),
+    );
+    await expect(
+      runRegistryAutoFetch(
+        { session: SESSION, propertyId: PROP_ID, confirmed: true, locationCandidate: LC },
+        provider,
+      ),
+    ).rejects.toMatchObject({ status: 502 });
+    await flushQueue();
+    expect((await getMonthlyPurchaseUsage()).pendingYen).toBe(0);
+  });
+
+  it("月の上限: ロックで止まった(並行更新=課金前)ときも予約は外れる", async () => {
+    // 事前読みは version 3、ロック後の読み直しは version 4 → already_running(409)。
+    pm.property.findUnique
+      .mockResolvedValueOnce({
+        id: PROP_ID,
+        createdBy: "user-1",
+        assignedTo: null,
+        registryStatus: "unconfirmed",
+        version: 3,
+        realEstateNumber: null,
+        lotNumber: null,
+        buildingNumber: null,
+        address: "テスト市テスト町一丁目",
+      })
+      .mockResolvedValueOnce({
+        registryStatus: "unconfirmed",
+        version: 4,
+        address: "テスト市テスト町一丁目",
+        lotNumber: null,
+        buildingNumber: null,
+        realEstateNumber: null,
+        _count: { propertyOwners: 0 },
+      });
+    const { provider, promise } = runLocation();
+    await expect(promise).rejects.toMatchObject({ status: 409 });
+    expect(provider.fetchRegistryPdf).not.toHaveBeenCalled();
+    await flushQueue();
+    expect((await getMonthlyPurchaseUsage()).pendingYen).toBe(0);
+  });
+
+  it("月の上限: 課金後の失敗でも台帳(charged_but_failed)が書ければ予約は外れ、台帳の側で数える", async () => {
+    const provider = successProvider();
+    provider.fetchRegistryPdf.mockRejectedValue(
+      new RegistryFetchError("charged_but_failed"),
+    );
+    await expect(
+      runRegistryAutoFetch(
+        { session: SESSION, propertyId: PROP_ID, confirmed: true, locationCandidate: LC },
+        provider,
+      ),
+    ).rejects.toMatchObject({ status: 502 });
+    await flushQueue();
+    expect((await getMonthlyPurchaseUsage()).pendingYen).toBe(0);
+  });
+
+  it("⚠月の上限: 課金したのに台帳が書けなかったら予約を外さず数え続ける", async () => {
+    pm.auditLog.create.mockRejectedValue(new Error("db down"));
+    const { promise } = runLocation();
+    await expect(promise).rejects.toMatchObject({ status: 502 });
+    await flushQueue();
+    expect((await getMonthlyPurchaseUsage()).pendingYen).toBe(
+      REGISTRY_CERTIFICATE_PRICE_YEN.owner,
+    );
+  });
+
+  it("⚠月の上限: 取得中(予約済み・台帳はまだ)の額も数える=並行する取得は残りが無ければ止まる", async () => {
+    // 49,720円(=355件)。残り280円=所有者事項2件ぶん。1件目を provider の途中で
+    // 止めておき(=台帳はまだ書かれていない)、その間に2件目・3件目を出す。
+    // 2件目は入るが、3件目は入らない。
+    ledgerThisMonth(355);
+    let releaseFirst!: () => void;
+    const gateFirst = new Promise<void>((r) => {
+      releaseFirst = r;
+    });
+    const p1 = successProvider();
+    p1.fetchRegistryPdf.mockImplementationOnce(async () => {
+      await gateFirst;
+      return {
+        pdfBuffer: PROVIDER_PDF,
+        fileName: "registry-mock.pdf",
+        source: "mock",
+        fetchedAt: new Date(0),
+        providerRequestId: "req-1",
+      };
+    });
+    const first = runRegistryAutoFetch(
+      { session: SESSION, propertyId: PROP_ID, confirmed: true, locationCandidate: LC },
+      p1,
+    );
+    // 1件目が provider まで進むのを待つ。
+    for (let i = 0; i < 5; i++) await flushQueue();
+    expect(p1.fetchRegistryPdf).toHaveBeenCalledTimes(1);
+    expect((await getMonthlyPurchaseUsage()).pendingYen).toBe(140);
+    // 2件目も provider の途中で止めておく(⚠provider はこの同期区間の後に呼ばれる)。
+    const second = runLocation({ locationCandidate: { lotNumber: "2-2", buildingNumber: null } });
+    let releaseSecond!: () => void;
+    const gateSecond = new Promise<void>((r) => {
+      releaseSecond = r;
+    });
+    second.provider.fetchRegistryPdf.mockImplementationOnce(async () => {
+      await gateSecond;
+      return {
+        pdfBuffer: PROVIDER_PDF,
+        fileName: "registry-mock.pdf",
+        source: "mock",
+        fetchedAt: new Date(0),
+        providerRequestId: "req-2",
+      };
+    });
+    for (let i = 0; i < 5; i++) await flushQueue();
+    expect((await getMonthlyPurchaseUsage()).pendingYen).toBe(280);
+    const third = runLocation({ locationCandidate: { lotNumber: "3-3", buildingNumber: null } });
+    await expect(third.promise).rejects.toMatchObject({
+      status: 409,
+      code: MONTHLY_CAP_REACHED_CODE,
+    });
+    expect(third.provider.fetchRegistryPdf).not.toHaveBeenCalled();
+    releaseFirst();
+    releaseSecond();
+    await first;
+    await second.promise;
+  });
+
+  it("月の上限: 回収(課金なし)は上限に達していても止めず、数えもしない", async () => {
+    ledgerThisMonth(400); // 56,000円=上限超え
+    const provider = {
+      name: "mock",
+      fetchRegistryPdf: vi.fn(),
+      recoverRegistryPdf: vi.fn().mockResolvedValue({
+        pdfBuffer: PROVIDER_PDF,
+        fileName: "registry-mock.pdf",
+        source: "mock",
+        fetchedAt: new Date(0),
+        providerRequestId: "req-r",
+      }),
+    } as unknown as RegistryFetchProvider;
+    await runRegistryAutoFetch(
+      {
+        session: SESSION,
+        propertyId: PROP_ID,
+        confirmed: true,
+        mode: "recover",
+        locationCandidate: LC,
+        expectedFingerprint: fingerprintProperty({
+          address: "テスト市テスト町一丁目",
+          lotNumber: null,
+          buildingNumber: null,
+          realEstateNumber: null,
+        }),
+      },
+      provider,
+    );
+    expect(provider.recoverRegistryPdf).toHaveBeenCalledTimes(1);
+    expect(pm.auditLog.findMany).not.toHaveBeenCalled();
   });
 });
 
