@@ -45,7 +45,7 @@ export default function Header({ userName, userRole, onLogout }: HeaderProps) {
         <HeaderBell />
         {/* モバイルではテーマ切替をメニュー(ドロワー)下部へ移し、ヘッダーを 1 行に保つ */}
         <div className="hidden sm:block">
-          <ThemeToggle />
+          <ThemeToggle withDensity />
         </div>
         <div className="flex items-center gap-2">
           <span className="hidden md:inline text-sm text-gray-700 dark:text-gray-300">{userName}</span>

@@ -53,7 +53,7 @@ describe("sidebar(ドロワー) — ×ボタン被り解消 + モバイル用テ
     expect(sidebar).toContain("pl-14 pr-4 lg:pl-4");
   });
   it("ドロワー下部にモバイル用テーマ切替（lg では非表示）", () => {
-    expect(sidebar).toContain("表示テーマ");
+    expect(sidebar).toContain("表示(色・文字サイズ)");
     expect(sidebar).toMatch(/lg:hidden[\s\S]{0,200}<ThemeToggle/);
   });
   it("ナビ領域は flex-1 + overflow-y-auto（長いメニューがスクロール可能）", () => {

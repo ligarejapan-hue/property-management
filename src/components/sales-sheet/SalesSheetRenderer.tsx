@@ -202,7 +202,8 @@ export function SalesSheetRenderer({ document }: { document: SalesSheetDocument 
     overflow: "hidden",
   };
   return (
-    <div data-sales-sheet-page style={pageStyle}>
+    // 見た目の設定(2026-10-31): 画面の中に直接描く「紙」。どの色テーマでもスタンダードの色(globals.css .paper-sheet)。
+    <div data-sales-sheet-page className="paper-sheet" style={pageStyle}>
       {doc.elements.map((el) => (
         <ElementView key={el.id} el={el} />
       ))}

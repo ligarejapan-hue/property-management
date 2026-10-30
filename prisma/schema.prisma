@@ -179,6 +179,10 @@ model User {
   // 査定申込の通知メール(設計 §2.6)。null=ログイン email に送る。
   inquiryNotifyEnabled Boolean  @default(false) @map("inquiry_notify_enabled")
   inquiryNotifyEmail   String?  @map("inquiry_notify_email")
+  // 見た目の設定(2026-10-31)。null=会社の初期値。値の検証は src/lib/appearance/options.ts。
+  theme              String?
+  density            String?
+  layout             String?
   createdAt          DateTime  @default(now()) @map("created_at")
   updatedAt          DateTime  @updatedAt @map("updated_at")
 

@@ -1,6 +1,15 @@
 @import "tailwindcss";
 
-@custom-variant dark (&:where(.dark, .dark *));
+/*
+ * 見た目の設定 段階2(2026-10-31): ダークは画面だけ。印刷はどの設定でもスタンダード(白地に黒)で出す。
+ */
+@custom-variant dark {
+  @media screen {
+    &:where(.dark, .dark *) {
+      @slot;
+    }
+  }
+}
 
 /*
  * 見た目の設定 段階1(2026-10-31): 意味の名前の変数。名前は付録A(色)・付録B(文字サイズ)。
@@ -158,6 +167,7 @@
   --font-mono: var(--font-geist-mono);
 }
 
+@media screen {
 .dark {
   --background: #0a0a0a;
   --foreground: #ededed;
@@ -195,6 +205,272 @@
   --side-muted-hover: var(--color-gray-200);
   --logo-bg: var(--color-indigo-400);
   --logo-ink: var(--color-gray-900);
+}
+}
+
+/*
+ * 見た目の設定 段階2(2026-10-31): 色テーマ。付録A の値から gray・indigo の11段と white を作った(scripts/appearance/gen-themes.mjs・設計は
+ * docs/superpowers/specs/2026-10-31-appearance-settings.md)。各画面の gray-* / indigo-* / white と意味の名前の変数が一緒に変わる。
+ * ⚠必ず html に置く(下の要素に置くと :root で決まった意味の変数が追従しない)。
+ * ⚠状態の色(red/amber/green)・iris・仲介/買取再販は差し替えない。スタンダード=上の @theme のまま。ダーク=.dark のまま。
+ * 画面だけ(印刷はスタンダード)。
+ */
+@media screen {
+  html[data-theme="blue"] {
+    --color-gray-50: #F6F7F9;
+    --color-gray-100: #F1F3F5;
+    --color-gray-200: #E3E6EA;
+    --color-gray-300: #c4c8cf;
+    --color-gray-400: #a5abb3;
+    --color-gray-500: #828994;
+    --color-gray-600: #676e79;
+    --color-gray-700: #4A515C;
+    --color-gray-800: #30353d;
+    --color-gray-900: #16181D;
+    --color-gray-950: #0f1114;
+    --color-indigo-50: #E8F0FE;
+    --color-indigo-100: #d1dffc;
+    --color-indigo-200: #aec6f8;
+    --color-indigo-300: #87aaf5;
+    --color-indigo-400: #5c8af0;
+    --color-indigo-500: #3c74ed;
+    --color-indigo-600: #2563EB;
+    --color-indigo-700: #1f54c8;
+    --color-indigo-800: #1a45a5;
+    --color-indigo-900: #143681;
+    --color-indigo-950: #0f285e;
+    --color-white: #FFFFFF;
+    --side-bg: #FFFFFF;
+    --side-text: #4A515C;
+    --side-strong: #16181D;
+    --side-active-bg: #F1F3F5;
+    --side-active-text: #16181D;
+    --side-line: #E3E6EA;
+    --side-hover-bg: #F1F3F5;
+    --side-hover-text: #16181D;
+    --side-muted: #4A515C;
+    --side-faint: #777d85;
+    --side-icon: #777d85;
+    --side-muted-hover: #16181D;
+    --logo-bg: #16181D;
+  }
+  html[data-theme="washi"] {
+    --color-gray-50: #F4F1EA;
+    --color-gray-100: #EFEBE2;
+    --color-gray-200: #DCD5C8;
+    --color-gray-300: #c0b9ac;
+    --color-gray-400: #a49c90;
+    --color-gray-500: #847d71;
+    --color-gray-600: #696259;
+    --color-gray-700: #4D473F;
+    --color-gray-800: #35312b;
+    --color-gray-900: #1C1A17;
+    --color-gray-950: #141210;
+    --color-indigo-50: #F6E5DA;
+    --color-indigo-100: #eed1c2;
+    --color-indigo-200: #e3b49d;
+    --color-indigo-300: #d79374;
+    --color-indigo-400: #c96f47;
+    --color-indigo-500: #bf5526;
+    --color-indigo-600: #B7410E;
+    --color-indigo-700: #9c370c;
+    --color-indigo-800: #802e0a;
+    --color-indigo-900: #652408;
+    --color-indigo-950: #491a06;
+    --color-white: #FBF9F4;
+    --side-bg: #1C1A17;
+    --side-text: #BDB5A8;
+    --side-strong: #F4F1EA;
+    --side-active-bg: #2A2723;
+    --side-active-text: #F4F1EA;
+    --side-line: #1C1A17;
+    --side-hover-bg: #2A2723;
+    --side-hover-text: #F4F1EA;
+    --side-muted: #BDB5A8;
+    --side-faint: #958e84;
+    --side-icon: #958e84;
+    --side-muted-hover: #F4F1EA;
+    --logo-bg: #B7410E;
+  }
+  html[data-theme="navy"] {
+    --color-gray-50: #F3F4F7;
+    --color-gray-100: #F1F3F5;
+    --color-gray-200: #E3E6EA;
+    --color-gray-300: #c4c8cf;
+    --color-gray-400: #a5abb3;
+    --color-gray-500: #828994;
+    --color-gray-600: #676e79;
+    --color-gray-700: #4A515C;
+    --color-gray-800: #30353d;
+    --color-gray-900: #16181D;
+    --color-gray-950: #0f1114;
+    --color-indigo-50: #E4E9F5;
+    --color-indigo-100: #ccd4e8;
+    --color-indigo-200: #a9b5d5;
+    --color-indigo-300: #8192c0;
+    --color-indigo-400: #556ba8;
+    --color-indigo-500: #364f97;
+    --color-indigo-600: #1E3A8A;
+    --color-indigo-700: #1a3175;
+    --color-indigo-800: #152961;
+    --color-indigo-900: #11204c;
+    --color-indigo-950: #0c1737;
+    --color-white: #FFFFFF;
+    --side-bg: #0B1F3A;
+    --side-text: #A9B6CB;
+    --side-strong: #FFFFFF;
+    --side-active-bg: #16305A;
+    --side-active-text: #FFFFFF;
+    --side-line: #132B4D;
+    --side-hover-bg: #16305A;
+    --side-hover-text: #FFFFFF;
+    --side-muted: #A9B6CB;
+    --side-faint: #8290a7;
+    --side-icon: #8290a7;
+    --side-muted-hover: #FFFFFF;
+    --logo-bg: #B08D57;
+    --highlight: #8A6A35;
+  }
+  html[data-theme="forest"] {
+    --color-gray-50: #F2F4F1;
+    --color-gray-100: #EDF1EC;
+    --color-gray-200: #DCE3DA;
+    --color-gray-300: #bec6be;
+    --color-gray-400: #9faaa2;
+    --color-gray-500: #7d8a82;
+    --color-gray-600: #626f67;
+    --color-gray-700: #46534A;
+    --color-gray-800: #2f3b33;
+    --color-gray-900: #18221B;
+    --color-gray-950: #111813;
+    --color-indigo-50: #E1EEE5;
+    --color-indigo-100: #caddd0;
+    --color-indigo-200: #a7c3b2;
+    --color-indigo-300: #80a790;
+    --color-indigo-400: #55876a;
+    --color-indigo-500: #36704f;
+    --color-indigo-600: #1F5F3A;
+    --color-indigo-700: #1a5131;
+    --color-indigo-800: #164329;
+    --color-indigo-900: #113420;
+    --color-indigo-950: #0c2617;
+    --color-white: #FFFFFF;
+    --side-bg: #16301F;
+    --side-text: #9FB7A6;
+    --side-strong: #FFFFFF;
+    --side-active-bg: #24462F;
+    --side-active-text: #FFFFFF;
+    --side-line: #16301F;
+    --side-hover-bg: #24462F;
+    --side-hover-text: #FFFFFF;
+    --side-muted: #9FB7A6;
+    --side-faint: #7d9584;
+    --side-icon: #7d9584;
+    --side-muted-hover: #FFFFFF;
+    --logo-bg: #DDEBDF;
+  }
+  html[data-theme="paper"] {
+    --color-gray-50: #F3EEE6;
+    --color-gray-100: #F1EBE1;
+    --color-gray-200: #E2D8CA;
+    --color-gray-300: #c7bdaf;
+    --color-gray-400: #ada194;
+    --color-gray-500: #8f8376;
+    --color-gray-600: #756a5e;
+    --color-gray-700: #5A4F45;
+    --color-gray-800: #433a32;
+    --color-gray-900: #2B241E;
+    --color-gray-950: #1e1915;
+    --color-indigo-50: #F5E4D8;
+    --color-indigo-100: #ead0c0;
+    --color-indigo-200: #dab19d;
+    --color-indigo-300: #c89075;
+    --color-indigo-400: #b36a49;
+    --color-indigo-500: #a54f2a;
+    --color-indigo-600: #9A3B12;
+    --color-indigo-700: #83320f;
+    --color-indigo-800: #6c290d;
+    --color-indigo-900: #55200a;
+    --color-indigo-950: #3e1807;
+    --color-white: #FFFDF9;
+    --side-bg: #EDE6DB;
+    --side-text: #5A4F45;
+    --side-strong: #2B241E;
+    --side-active-bg: #FFFDF9;
+    --side-active-text: #2B241E;
+    --side-line: #E2D8CA;
+    --side-hover-bg: #FFFDF9;
+    --side-hover-text: #2B241E;
+    --side-muted: #5A4F45;
+    --side-faint: #7f756b;
+    --side-icon: #7f756b;
+    --side-muted-hover: #2B241E;
+    --logo-bg: #2B241E;
+  }
+  html[data-theme="washi"] h1,
+  html[data-theme="washi"] h2 {
+    font-family: "Noto Serif JP", "Yu Mincho", "YuMincho", "Hiragino Mincho ProN", serif;
+  }
+}
+
+/*
+ * 白い紙の見本(販売図面の編集・DM の手紙の見本など、画面の中に直接描く「紙」)。どのテーマでもスタンダードの色に戻す。
+ * iframe の見本(資金計画表・事業計画書・LP)は画面の CSS と切り離されているので不要。
+ */
+.paper-sheet {
+  --color-gray-50: oklch(98.5% 0.001 106.423);
+  --color-gray-100: oklch(97% 0.001 106.424);
+  --color-gray-200: oklch(92.3% 0.003 48.717);
+  --color-gray-300: oklch(86.9% 0.005 56.366);
+  --color-gray-400: oklch(70.9% 0.01 56.259);
+  --color-gray-500: oklch(55.3% 0.013 58.071);
+  --color-gray-600: oklch(44.4% 0.011 73.639);
+  --color-gray-700: oklch(37.4% 0.01 67.558);
+  --color-gray-800: oklch(26.8% 0.007 34.298);
+  --color-gray-900: oklch(21.6% 0.006 56.043);
+  --color-gray-950: oklch(14.7% 0.004 49.25);
+  --color-indigo-50: oklch(96.2% 0.018 272.314);
+  --color-indigo-100: oklch(93% 0.034 272.788);
+  --color-indigo-200: oklch(87% 0.065 274.039);
+  --color-indigo-300: oklch(78.5% 0.115 274.713);
+  --color-indigo-400: oklch(67.3% 0.182 276.935);
+  --color-indigo-500: oklch(58.5% 0.233 277.117);
+  --color-indigo-600: oklch(51.1% 0.262 276.966);
+  --color-indigo-700: oklch(45.7% 0.24 277.023);
+  --color-indigo-800: oklch(39.8% 0.195 277.366);
+  --color-indigo-900: oklch(35.9% 0.144 278.697);
+  --color-indigo-950: oklch(25.7% 0.09 281.288);
+  --color-white: #fff;
+  color: #171717;
+  color-scheme: light;
+}
+
+/*
+ * 見た目の設定 段階2: 文字サイズ(密度)。Tailwind の文字・余白・角丸は rem なので、html の文字の大きさで全体を伸び縮みさせる。
+ * 標準=16px(今まで)。詰める=14px(本文 約12.3px・ボタン 約32px)・大きめ=18.75px(本文 約16.4px・ボタン 約42px)。
+ * px で決めてある所(地図・帳票の見本の高さなど)は変わらない。画面だけ(印刷は標準の大きさ)。
+ */
+@media screen {
+html[data-density="compact"] {
+  font-size: 14px;
+}
+html[data-density="large"] {
+  font-size: 18.75px;
+}
+html[data-density="large"] body {
+  font-family: "BIZ UDPGothic", var(--font-app-sans), var(--font-app-sans-jp), sans-serif;
+}
+html[data-density="large"] :where(input:not([type="checkbox"]):not([type="radio"]):not([type="range"]), select, textarea) {
+  border-width: 2px;
+}
+html[data-density="large"] input:is([type="checkbox"], [type="radio"]) {
+  width: 26px;
+  height: 26px;
+}
+html[data-density="compact"] input:is([type="checkbox"], [type="radio"]) {
+  width: 16px;
+  height: 16px;
+}
 }
 
 body {
