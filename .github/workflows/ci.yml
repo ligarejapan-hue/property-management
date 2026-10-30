@@ -30,7 +30,10 @@ jobs:
 
       - run: npx prisma generate
 
+      # 型チェックが既定の上限(約2GB)を超えることがある。本番の反映(pm-deploy.sh)と同じ上限にそろえる。
       - run: npm run build
+        env:
+          NODE_OPTIONS: --max-old-space-size=3072
 
       - run: npm test
 
