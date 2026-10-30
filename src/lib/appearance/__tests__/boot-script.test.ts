@@ -1,4 +1,7 @@
 import { describe, it, expect, beforeEach } from "vitest";
+import { readFileSync } from "node:fs";
+import { fileURLToPath } from "node:url";
+import { dirname, join } from "node:path";
 import { appearanceBootScript } from "../boot-script";
 
 // 画面を描く前に走るスクリプトを、小さな偽の document / localStorage で実際に動かして確かめる。
@@ -57,6 +60,24 @@ describe("appearanceBootScript", () => {
   it("localStorage が使えない環境でも例外を出さない", () => {
     broken = true;
     expect(() => run(appearanceBootScript({ theme: "washi", density: "large", layout: "side" }))).not.toThrow();
+  });
+
+  it("端末に保存できなくても、ログイン中は DB の文字サイズ・レイアウトを付ける(@codex #618)", () => {
+    broken = true;
+    run(appearanceBootScript({ theme: "washi", density: "large", layout: "top" }));
+    expect(attrs.get("data-density")).toBe("large");
+    expect(attrs.get("data-layout")).toBe("top");
+  });
+
+  it("ログイン中は端末に残った古い値ではなく DB の値を使う", () => {
+    store.set("pm-density", "compact");
+    run(appearanceBootScript({ theme: "auto", density: "normal", layout: "side" }));
+    expect(attrs.get("data-density")).toBe("normal");
+  });
+
+  it("ログイン中の色は next-themes の初期値にも DB の値を渡す(端末に保存できなくても DB の色)", () => {
+    const layout = readFileSync(join(dirname(fileURLToPath(import.meta.url)), "..", "..", "..", "app", "layout.tsx"), "utf8");
+    expect(layout).toContain('defaultTheme={appearance ? toNextTheme(appearance.theme) : "system"}');
   });
 
   it("埋め込みに < を含めない(script を閉じられない)", () => {

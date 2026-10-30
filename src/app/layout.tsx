@@ -4,7 +4,7 @@ import { Geist_Mono, Noto_Sans_JP, Schibsted_Grotesk } from "next/font/google";
 import type { ComponentType } from "react";
 import "./globals.css";
 import { ThemeProvider } from "@/components/theme/theme-provider";
-import { NEXT_THEMES, NEXT_THEME_VALUES } from "@/lib/appearance/options";
+import { NEXT_THEMES, NEXT_THEME_VALUES, toNextTheme } from "@/lib/appearance/options";
 import { appearanceBootScript } from "@/lib/appearance/boot-script";
 import { loadAppearanceForRequest } from "@/lib/appearance/server";
 
@@ -70,7 +70,8 @@ export default async function RootLayout({
           attribute={["class", "data-theme"]}
           themes={[...NEXT_THEMES]}
           value={NEXT_THEME_VALUES}
-          defaultTheme="system"
+          // ログイン中は DB の色を初期値に(端末に保存できない環境でも DB の色になる・@codex #618)。
+          defaultTheme={appearance ? toNextTheme(appearance.theme) : "system"}
           enableSystem
           disableTransitionOnChange
         >

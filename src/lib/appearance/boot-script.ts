@@ -13,13 +13,17 @@ export const STORAGE_KEYS = { theme: "theme", density: "pm-density", layout: "pm
 export function appearanceBootScript(server: Appearance | null): string {
   const payload = server ? { t: toNextTheme(server.theme), d: server.density, l: server.layout } : null;
   const json = JSON.stringify(payload).replace(/</g, "\\u003c");
+  // 端末への書き込み・読み出しは1つずつ別に試す(1つ失敗しても残りを止めない・@codex #618)。
+  // ログイン中は DB の値をそのまま使う(端末から読み直さない)。色は next-themes の defaultTheme にも DB の値を渡している。
   return (
-    "(function(){try{" +
-    `var s=${json},ls=window.localStorage,e=document.documentElement;` +
-    `if(s){ls.setItem("${STORAGE_KEYS.theme}",s.t);ls.setItem("${STORAGE_KEYS.density}",s.d);ls.setItem("${STORAGE_KEYS.layout}",s.l);}` +
-    `var d=ls.getItem("${STORAGE_KEYS.density}"),l=ls.getItem("${STORAGE_KEYS.layout}");` +
+    "(function(){" +
+    `var s=${json},e=document.documentElement,d=null,l=null;` +
+    "function w(k,v){try{window.localStorage.setItem(k,v)}catch(_){}}" +
+    "function r(k){try{return window.localStorage.getItem(k)}catch(_){return null}}" +
+    `if(s){w("${STORAGE_KEYS.theme}",s.t);w("${STORAGE_KEYS.density}",s.d);w("${STORAGE_KEYS.layout}",s.l);d=s.d;l=s.l;}` +
+    `else{d=r("${STORAGE_KEYS.density}");l=r("${STORAGE_KEYS.layout}");}` +
     'if(d==="compact"||d==="normal"||d==="large")e.setAttribute("data-density",d);' +
     'if(l==="side"||l==="top")e.setAttribute("data-layout",l);' +
-    "}catch(_){}})();"
+    "})();"
   );
 }
