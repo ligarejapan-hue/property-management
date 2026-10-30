@@ -1,10 +1,12 @@
 import { describe, it, expect } from "vitest";
 import { DEFAULT_FUNDING_INPUTS } from "../funding-schema";
 import { DEFAULT_BUSINESS_INPUTS } from "../business-schema";
+import { agentLabel } from "@/lib/agent-inquiry/desk-form";
 import {
-  basicFormFromDeal, basicPatch, snapshotFormFromDeal, snapshotFromForm,
+  applyBrokerPick, basicFormFromDeal, basicPatch, snapshotFormFromDeal, snapshotFromForm,
   EMPTY_PARTY_FORM, partyBodyFromForm, partyFormFromView,
 } from "../forms";
+import { EMPTY_PLACE } from "../place";
 import { EMPTY_SNAPSHOT, EMPTY_BROKER, DEFAULT_ASSESSMENTS, DEFAULT_COSTS, DEFAULT_TERMS } from "../schemas";
 import type { DealView } from "../view";
 
@@ -23,15 +25,60 @@ describe("基本タブ", () => {
     const f = basicFormFromDeal(deal);
     expect(f.contractAt).toBe("2026-07-01T10:30");
     expect(basicPatch(f, deal)).toEqual({});
-    expect(basicPatch({ ...f, status: "contracted", contractAt: "2026-07-02T09:00", contractPlace: "試験区の事務所", tradeSide: "" }, deal)).toEqual({
+    expect(basicPatch({
+      ...f, status: "contracted", contractAt: "2026-07-02T09:00", tradeSide: "",
+      contractPlace: { ...EMPTY_PLACE, kind: "その他", other: "試験区の事務所" },
+    }, deal)).toEqual({
       status: "contracted", contractAt: "2026-07-02T00:00:00.000Z", contractPlace: "試験区の事務所", tradeSide: null,
     });
+  });
+  it("取引名は入力欄にも送る項目にも無い", () => {
+    const f = basicFormFromDeal(deal);
+    expect(f).not.toHaveProperty("name");
+    expect(basicPatch(f, deal)).not.toHaveProperty("name");
+  });
+  it("決済場所は銀行名と支店名をまとめて送る", () => {
+    const f = basicFormFromDeal(deal);
+    expect(basicPatch({ ...f, settlementPlace: { ...EMPTY_PLACE, kind: "銀行", bank: "試験銀行", branch: "渋谷支店" } }, deal)).toEqual({
+      settlementPlace: "試験銀行　渋谷支店",
+    });
+  });
+  it("場所を未設定に戻すと null・触らなければ送らない", () => {
+    const placed = { ...deal, contractPlace: "売主宅" };
+    const f = basicFormFromDeal(placed);
+    expect(f.contractPlace.kind).toBe("売主宅");
+    expect(basicPatch(f, placed)).toEqual({});
+    expect(basicPatch({ ...f, contractPlace: EMPTY_PLACE }, placed)).toEqual({ contractPlace: null });
+  });
+  it("今までの手入力に全角の空白があっても、開いただけでは変更にならない", () => {
+    const placed = { ...deal, contractPlace: "試験区役所　会議室" };
+    expect(basicPatch(basicFormFromDeal(placed), placed)).toEqual({});
   });
   it("相手方の仲介会社は3項目まとめて送る", () => {
     const f = basicFormFromDeal(deal);
     expect(basicPatch({ ...f, brokerCompany: "試験不動産" }, deal)).toEqual({
       counterpartyBroker: { company: "試験不動産", staff: null, tel: null },
     });
+  });
+});
+
+describe("相手方の仲介会社を業者一覧から選ぶ", () => {
+  const hit = { id: "a", companyName: "試験不動産", branchName: "渋谷支店", phone: "03-1234-5678", lastContact: null, matchedBy: "text" as const };
+  it("会社名(支店名つき)と代表電話が入る", () => {
+    const next = applyBrokerPick(basicFormFromDeal(deal), hit);
+    expect(next.brokerCompany).toBe(agentLabel(hit));
+    expect(next.brokerCompany).toContain("渋谷支店");
+    expect(next.brokerTel).toBe("03-1234-5678");
+  });
+  it("別の会社に選び直したら前の担当を消す", () => {
+    const f = { ...basicFormFromDeal(deal), brokerCompany: "前の不動産", brokerStaff: "前の担当" };
+    expect(applyBrokerPick(f, hit).brokerStaff).toBe("");
+  });
+  it("初めて選ぶときと同じ会社のときは、入れてある担当を残す", () => {
+    const f = { ...basicFormFromDeal(deal), brokerStaff: "試験 太郎" };
+    expect(applyBrokerPick(f, hit).brokerStaff).toBe("試験 太郎");
+    const same = { ...f, brokerCompany: agentLabel(hit) };
+    expect(applyBrokerPick(same, hit).brokerStaff).toBe("試験 太郎");
   });
 });
 

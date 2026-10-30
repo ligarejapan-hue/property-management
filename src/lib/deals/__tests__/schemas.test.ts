@@ -7,18 +7,19 @@ import {
 const UID = "66666666-6666-4666-8666-666666666666";
 
 describe("取引の作成", () => {
-  it("名前と事業区分があれば作れる・名前の前後の空白は落とす", () => {
-    expect(dealCreateSchema.parse({ name: " 試験の取引 ", businessType: "brokerage" })).toMatchObject({ name: "試験の取引", businessType: "brokerage" });
+  it("事業区分があれば作れる", () => {
+    expect(dealCreateSchema.parse({ businessType: "brokerage" })).toMatchObject({ businessType: "brokerage" });
   });
-  it("名前が空・事業区分が知らない値は弾く", () => {
-    expect(() => dealCreateSchema.parse({ name: "  ", businessType: "brokerage" })).toThrow();
-    expect(() => dealCreateSchema.parse({ name: "a", businessType: "leaseback" })).toThrow();
+  it("事業区分が知らない値・取引名は弾く(入力は廃止)", () => {
+    expect(() => dealCreateSchema.parse({ businessType: "leaseback" })).toThrow();
+    expect(() => dealCreateSchema.parse({ name: "a", businessType: "brokerage" })).toThrow();
   });
 });
 
 describe("取引の更新", () => {
   it("版の番号が要る・知らない項目は弾く", () => {
-    expect(() => dealUpdateSchema.parse({ name: "a" })).toThrow();
+    expect(() => dealUpdateSchema.parse({ status: "contracted" })).toThrow();
+    expect(() => dealUpdateSchema.parse({ version: 1, name: "a" })).toThrow();
     expect(() => dealUpdateSchema.parse({ version: 1, buildingTax: 100 })).toThrow();
   });
   it("空文字の場所は null にする・日時は ISO だけ", () => {

@@ -4,8 +4,11 @@ import { useState } from "react";
 import { Save } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Field, SelectBox, inputCls, optionsOf } from "./form-parts";
+import { DealBrokerSearch } from "./deal-broker-search";
+import { DealPlaceField } from "./deal-place-field";
 import { dealsApi, DealApiError, errorText, type UserOption } from "@/lib/deals/client";
-import { basicFormFromDeal, basicPatch, type BasicForm } from "@/lib/deals/forms";
+import { applyBrokerPick, basicFormFromDeal, basicPatch, type BasicForm } from "@/lib/deals/forms";
+import { placeProblem } from "@/lib/deals/place";
 import type { DealView } from "@/lib/deals/view";
 import {
   DEAL_BUSINESS_TYPE_LABELS, DEAL_STATUS_LABELS, DEAL_TRADE_SIDE_LABELS, type PropertyKindDef,
@@ -21,6 +24,7 @@ export default function DealBasicPanel({
   const userOptions = users.map((u) => ({ value: u.id, label: u.name }));
   const patch = basicPatch(form, deal);
   const dirty = Object.keys(patch).length > 0;
+  const placeBlocked = placeProblem(form.contractPlace) !== null || placeProblem(form.settlementPlace) !== null;
 
   const save = async () => {
     if (saving || !dirty) return;
@@ -49,9 +53,6 @@ export default function DealBasicPanel({
     <div className="space-y-5">
       {message && <p className="text-sm text-red-600 dark:text-red-400" role="alert">{message.text}</p>}
       <div className="grid gap-4 sm:grid-cols-2">
-        <Field label="取引名">
-          <input value={form.name} onChange={(e) => set("name", e.target.value)} maxLength={200} aria-label="取引名" className={inputCls} />
-        </Field>
         <Field label="状態">
           <SelectBox label="状態" value={form.status} onChange={(v) => set("status", v)} options={optionsOf(DEAL_STATUS_LABELS)} />
         </Field>
@@ -87,18 +88,15 @@ export default function DealBasicPanel({
         <Field label="契約日時">
           <input type="datetime-local" value={form.contractAt} onChange={(e) => set("contractAt", e.target.value)} aria-label="契約日時" className={inputCls} />
         </Field>
-        <Field label="契約場所">
-          <input value={form.contractPlace} onChange={(e) => set("contractPlace", e.target.value)} maxLength={200} aria-label="契約場所" className={inputCls} />
-        </Field>
+        <DealPlaceField label="契約場所" allowBank={false} value={form.contractPlace} onChange={(v) => set("contractPlace", v)} />
         <Field label="決済日時">
           <input type="datetime-local" value={form.settlementAt} onChange={(e) => set("settlementAt", e.target.value)} aria-label="決済日時" className={inputCls} />
         </Field>
-        <Field label="決済場所">
-          <input value={form.settlementPlace} onChange={(e) => set("settlementPlace", e.target.value)} maxLength={200} aria-label="決済場所" className={inputCls} />
-        </Field>
+        <DealPlaceField label="決済場所" allowBank value={form.settlementPlace} onChange={(v) => set("settlementPlace", v)} />
       </div>
 
       <h3 className="text-sm font-semibold text-gray-700 dark:text-gray-300">相手方の仲介会社</h3>
+      <DealBrokerSearch onPick={(hit) => setForm((f) => applyBrokerPick(f, hit))} />
       <div className="grid gap-4 sm:grid-cols-3">
         <Field label="会社名">
           <input value={form.brokerCompany} onChange={(e) => set("brokerCompany", e.target.value)} maxLength={200} aria-label="相手方の仲介会社" className={inputCls} />
@@ -111,7 +109,7 @@ export default function DealBasicPanel({
         </Field>
       </div>
 
-      <Button onClick={save} disabled={saving || !dirty || !form.name.trim()} loading={saving} loadingLabel="保存中">
+      <Button onClick={save} disabled={saving || !dirty || placeBlocked} loading={saving} loadingLabel="保存中">
         <Save className="h-4 w-4" />
         保存
       </Button>

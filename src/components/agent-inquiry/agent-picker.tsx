@@ -83,7 +83,10 @@ export function RegistryResults({
   );
 }
 
-/** 業者を探す1つの欄(代表電話・携帯・会社名のどれでも・設計 §2.2-1)。打ち終わって 250ms 後に探す。 */
+/**
+ * 業者を探す1つの欄(代表電話・携帯・会社名のどれでも・設計 §2.2-1)。打ち終わって 250ms 後に探す。
+ * onCreateNew を渡さないとき(取引の相手方の仲介会社)は「新しく登録」を出さない。
+ */
 export function AgentPicker({
   query,
   selected,
@@ -95,7 +98,7 @@ export function AgentPicker({
   selected: AgentHit | null;
   onQuery: (v: string) => void;
   onPick: (a: AgentHit) => void;
-  onCreateNew: () => void;
+  onCreateNew?: () => void;
 }) {
   const [res, setRes] = useState<(SearchResult<AgentHit> & { registry: RegistryHit[] }) | null>(null);
   const [adoptingId, setAdoptingId] = useState<string | null>(null);
@@ -143,7 +146,7 @@ export function AgentPicker({
   };
   const createNew = () => {
     queryGen.current += 1;
-    onCreateNew();
+    onCreateNew?.();
   };
   const pickRegistry = (h: RegistryHit) => {
     const asked = queryGen.current;
@@ -183,13 +186,16 @@ export function AgentPicker({
       {adoptError && <p className="text-xs text-rose-600">{adoptError}</p>}
       {searching && shown?.failed && <p className="text-xs text-rose-600">検索できませんでした(通信を確かめてください)</p>}
       {/* 探し終えてから出す=候補を見ずに押して、名簿にある業者を二重に作らない(@codex #459 R21)。 */}
-      {createAction === "empty" && (
+      {onCreateNew && createAction === "empty" && (
         // data-ui=raw: 文中の下線リンク風
         <button data-ui="raw" type="button" onClick={createNew} className="text-sm text-teal-700 underline dark:text-teal-300">
           ＋ 名簿にない業者を新しく登録
         </button>
       )}
-      {createAction === "hasHits" && (
+      {!onCreateNew && createAction === "empty" && (
+        <p className="text-xs text-gray-500">見つかりませんでした。下の欄に手で入力してください。</p>
+      )}
+      {onCreateNew && createAction === "hasHits" && (
         // data-ui=raw: 文中の下線リンク風
         <button data-ui="raw" type="button" onClick={createNew} className="text-xs text-gray-500 underline">
           上の候補に無い(別の支店など)ときだけ、新しく登録
@@ -199,7 +205,9 @@ export function AgentPicker({
         <p className="text-xs text-gray-500">
           {isPhoneCharsOnly(query)
             ? "電話番号は7桁以上入れると探します。"
-            : "会社名(2文字以上)か電話番号(7桁以上)で探すと、名簿に無いときは新しく登録できます。"}
+            : onCreateNew
+              ? "会社名(2文字以上)か電話番号(7桁以上)で探すと、名簿に無いときは新しく登録できます。"
+              : "会社名(2文字以上)か電話番号(7桁以上)で探せます。"}
         </p>
       )}
     </div>
