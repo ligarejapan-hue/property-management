@@ -16,6 +16,7 @@ import { MEDIATION_GENERAL } from "../texts/mediation-general";
 import { MEDIATION_DEDICATED } from "../texts/mediation-dedicated";
 import { BUSINESS_DOCS, businessDocOf } from "../registry";
 import { dealDocumentTitle } from "../issue";
+import { splitAgents } from "../business/mediation";
 
 const rateRows: RateTableRow[] = INITIAL_RATE_TABLES.map((t) => ({
   kind: t.kind, validFrom: new Date(`${t.validFrom}T00:00:00Z`), validTo: t.validTo ? new Date(`${t.validTo}T00:00:00Z`) : null, content: t.content,
@@ -217,10 +218,44 @@ describe("媒介契約書(第2段階 §4.5・型はタブで選ぶ)", () => {
     }
   });
 
-  it("前回の入力は、取引の側に合う依頼の内容の分だけを初めの値にする(両手=売却・買主側=購入)", () => {
-    const both = ctx({ ...deal, tradeSide: "both" });
-    expect(doc().rememberMatch!(both, { requestKind: "sale" })).toBe(true);
-    expect(doc().rememberMatch!(both, { requestKind: "purchase" })).toBe(false);
-    expect(doc().rememberMatch!(ctx({ ...deal, tradeSide: "buyer" }), { requestKind: "purchase" })).toBe(true);
+  it("前回の入力は依頼の内容ごとに分けて覚える(両手の取引の売却用・購入用・発注者決定 2026-10-29)", () => {
+    expect(doc().rememberBy).toEqual({ key: "requestKind", values: ["sale", "purchase", "exchange"] });
+    // 初めの依頼の内容は取引の側から(両手=売却・買主側=購入)
+    expect(doc().defaults(ctx({ ...deal, tradeSide: "both" })).values.requestKind).toBe("sale");
+    expect(doc().defaults(ctx({ ...deal, tradeSide: "buyer" })).values.requestKind).toBe("purchase");
+  });
+});
+
+describe("媒介契約書の小さな手直し(2026-10-30)", () => {
+  it("依頼する他の業者: 半角・全角の「/」で商号と所在地を分ける・括弧の中と2つ目からの「/」では切らない", () => {
+    expect(splitAgents("架空住宅 / 架空県架空市5-5\n架空商事／架空県架空市6-6")).toEqual([
+      ["架空住宅", "架空県架空市5-5"], ["架空商事", "架空県架空市6-6"],
+    ]);
+    expect(splitAgents("〇〇不動産(東京都港区1-2-3 A/Bビル)")).toEqual([["〇〇不動産(東京都港区1-2-3 A/Bビル)", ""]]);
+    expect(splitAgents("〇〇不動産（本店）／東京都港区1-2-3 A/Bビル")).toEqual([["〇〇不動産（本店）", "東京都港区1-2-3 A/Bビル"]]);
+    expect(splitAgents("「A/B」不動産 / 架空県")).toEqual([["「A/B」不動産", "架空県"]]);
+    expect(splitAgents("\n  \n架空住宅\n")).toEqual([["架空住宅", ""]]);
+    expect(splitAgents(null)).toEqual([]);
+    const h = doc().build(ctx(), { ...blank("general"), otherAgents: "〇〇不動産(東京都港区1-2-3 A/Bビル)" }).html;
+    expect(h).toContain("<td>〇〇不動産(東京都港区1-2-3 A/Bビル)</td><td></td>");
+  });
+
+  it("約款の見出しを段の一番下に取り残さない(見出しの後ろで段・頁を切らない)", () => {
+    const h = doc().build(ctx(), blank("exclusive")).html;
+    expect(h).toMatch(/\.clauses \.heading\{[^}]*break-after:avoid/);
+    expect(h).toMatch(/\.clauses \.heading\{[^}]*page-break-after:avoid/);
+  });
+
+  it("別表の号室: 入力に「号室」が入っていても「号室号室」にしない", () => {
+    const unitDeal = { ...deal, propertyKind: "unit", propertySnapshot: { ...deal.propertySnapshot, roomNo: "101号室" } };
+    const h = doc().build(ctx(unitDeal), blank("exclusive")).html;
+    expect(h).toContain("101号室");
+    expect(h).not.toContain("号室号室");
+    expect(doc().build(ctx({ ...unitDeal, propertySnapshot: { ...unitDeal.propertySnapshot, roomNo: "202" } }), blank("exclusive")).html).toContain("202号室");
+  });
+
+  it("選ばない選択肢は丸を付けずに出す(□ は出さない)ので、入力欄の空欄の選択肢もそう書く", () => {
+    expect(MEDIATION_FORM.blankStyle).toBe("plain");
+    expect(doc().build(ctx(), { ...blank("exclusive"), requestKind: null }).html).not.toContain("□");
   });
 });

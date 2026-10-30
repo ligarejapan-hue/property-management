@@ -11,6 +11,7 @@ import type { CompanyProfile } from "@/lib/sales-sheet/company-profile-store";
 import type { BusinessDocContext } from "../business/common";
 import { BUSINESS_DOCS, businessDocOf } from "../registry";
 import { dealDocumentTitle } from "../issue";
+import { PREP_EMPTY_TEXT } from "../business/prep-checklist";
 
 const rateRows: RateTableRow[] = INITIAL_RATE_TABLES.map((t) => ({
   kind: t.kind, validFrom: new Date(`${t.validFrom}T00:00:00Z`), validTo: t.validTo ? new Date(`${t.validTo}T00:00:00Z`) : null, content: t.content,
@@ -106,5 +107,33 @@ describe("準備チェックリスト(第2段階 §4.4)", () => {
     expect(out.html).not.toContain("2026年5月1日");
     expect(out.rows).toContainEqual({ label: "契約前", heading: true });
     expect(out.rows).toContainEqual({ label: "境界・越境の確認", value: null });
+  });
+});
+
+describe("準備チェックリストの小さな手直し(2026-10-30)", () => {
+  type Item = BusinessDocContext["settings"]["checklistItems"][number];
+  const withUse = (pick: (i: Item) => boolean) => {
+    const c = ctx();
+    return { ...c, settings: { ...c.settings, checklistItems: c.settings.checklistItems.map((i) => (pick(i) ? { ...i, use: "checklist" as const } : i)) } };
+  };
+
+  it("項目の無い時点の見出しは、PDF にも Excel にも出さない", () => {
+    // 契約時の項目を全部「書類確認書だけ」にする → 契約前・契約日は項目なし
+    const c = withUse((i) => i.phase === "contract");
+    const out = doc().build(c, { kind: "land" });
+    expect(out.html).not.toContain("<h2>契約前</h2>");
+    expect(out.rows).not.toContainEqual({ label: "契約前", heading: true });
+    expect(out.rows).not.toContainEqual({ label: "契約日", heading: true });
+    expect(out.rows).toContainEqual({ label: "決済前", heading: true });
+  });
+
+  it("全項目が「書類確認書だけ」なら、頭の表の後ろに「載る項目はありません」の1行(PDF・Excel とも)", () => {
+    const out = doc().build(withUse(() => true), { kind: "land" });
+    expect(out.html).toContain(PREP_EMPTY_TEXT);
+    expect(out.html).not.toContain("<h2>");
+    expect(out.rows).toContainEqual({ label: "項目", value: PREP_EMPTY_TEXT });
+    expect(out.rows.some((r) => r.heading)).toBe(false);
+    // 項目があるときは出さない
+    expect(doc().build(ctx(), { kind: "land" }).html).not.toContain(PREP_EMPTY_TEXT);
   });
 });

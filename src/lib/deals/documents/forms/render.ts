@@ -38,11 +38,12 @@ const BLANK = html`<span class="form-blank"></span>`;
  * 名前が空のとき・「：」「／」「）」で終わるときは「:」を付けない(書式に無い字を足さない)。
  * 書き込む行の多い欄(lines)が空なら、行の数だけ下線を出す(手で書けるように)。
  */
-function field(fl: FormField, v: FormValues): SafeHtml {
+function field(fl: FormField, v: FormValues, tight = false): SafeHtml {
   const t = str(v[fl.key]);
   if (fl.after) {
     const value = t ? html`<span class="form-text">${t}</span>` : html`<span class="form-blank short"></span>`;
-    return html`<span class="form-field-inline">${fl.pre ?? ""}${value}${fl.label}</span> `;
+    // 括弧の中(tight)では欄の間を空けない(「(＿年＿月頃)」)
+    return html`<span class="form-field-inline">${fl.pre ?? ""}${value}${fl.label}</span>${tight ? "" : " "}`;
   }
   const lines = !t && fl.lines && fl.lines > 1 ? fl.lines : 1;
   const value = t ? html`<span class="form-text">${t}</span>` : html`${Array.from({ length: lines }, (_, i) => (i ? html`<br>${BLANK}` : BLANK))}`;
@@ -62,11 +63,17 @@ ${s.title ? html`<h2>${s.title}</h2>` : null}
     const inline = (it.fields ?? []).filter((fl) => fl.after);
     const block = (it.fields ?? []).filter((fl) => !fl.after);
     const subLabel = it.sub && it.label ? html`${it.label}` : null;
+    // 年月の欄を選択肢のすぐ後ろの括弧の中に出す(告知書 ⑤)・選択肢を書式の括弧で囲む(告知書 ⑧)(2026-10-30)
+    const at = it.fieldsAt && inline.length ? it.fieldsAt : null;
+    const choices = it.choices?.map((c) => html`<span class="form-choice">${on.includes(c.value) ? "■" : "□"} ${c.label}${at?.choice === c.value
+      ? html`${at.open}${inline.map((fl) => field(fl, v, true))}${at.close}` : null}</span>`);
+    const wrapped = it.around ? html`${it.around[0]}${choices}${it.around[1]}` : html`${choices}`;
+    const rest = at ? [] : inline;
     return html`<tr><th style="width:30%">${it.sub ? "" : it.label}</th><td>
 ${it.choices?.length
     ? it.fieldsFirst
-      ? html`<div>${inline.map((fl) => field(fl, v))}${subLabel}${it.choices.map((c) => html`<span class="form-choice">${on.includes(c.value) ? "■" : "□"} ${c.label}</span>`)}</div>`
-      : html`<div>${subLabel}${it.choices.map((c) => html`<span class="form-choice">${on.includes(c.value) ? "■" : "□"} ${c.label}</span>`)}${inline.map((fl) => field(fl, v))}</div>`
+      ? html`<div>${rest.map((fl) => field(fl, v))}${subLabel}${wrapped}</div>`
+      : html`<div>${subLabel}${wrapped}${rest.map((fl) => field(fl, v))}</div>`
     : inline.length ? html`<div>${subLabel}${inline.map((fl) => field(fl, v))}</div>` : subLabel && !block.length ? html`<div>${subLabel}</div>` : null}
 ${block.map((fl) => field(fl, v))}
 ${it.note && on.includes(it.note.when) ? html`<div class="form-note">※ ${it.note.text}</div>` : null}
@@ -84,9 +91,10 @@ export function formValueRows(f: FormDef, v: FormValues): ValueRow[] {
     return [
       ...(s.title ? [{ label: s.title, heading: true }] : []),
       ...s.items.flatMap((it): ValueRow[] => {
-        if (!it.sub) head = it.label;
-        const own = it.label || (it.choices ?? []).map((c) => c.label).join("・");
-        const label = it.sub ? `${head} ${own}`.trim() : it.label;
+        // 同じ字の見出しが2つある書式は name で見分ける(区分の告知書の「備考：」・2026-10-30)
+        if (!it.sub) head = it.name ?? it.label;
+        const own = it.name ?? (it.label || (it.choices ?? []).map((c) => c.label).join("・"));
+        const label = it.sub ? `${head} ${own}`.trim() : it.name ?? it.label;
         const on = picked(it, v);
         const labels = (it.choices ?? []).filter((c) => on.includes(c.value)).map((c) => c.label);
         return [

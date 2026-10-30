@@ -37,6 +37,8 @@ const bodySchema = z.object({
   /** 業務書類で、発行のときに選ぶもの(領収書の発行者など・段5の読み替え 2)。形は書類ごとに一覧表で確かめる。 */
   options: z.record(z.string(), z.unknown()).optional(),
 }).strict();
+/** 項目の表のある書類の入力が今の書式に合わないときの知らせ(2026-10-30)。 */
+const DOC_OPTIONS_OUTDATED_MESSAGE = "書式が新しくなったため、前回の入力の一部を読み込めませんでした。小窓を開き直して入力し直してください。";
 /** 同時に発行して版の番号がぶつかったときのやり直しの回数。 */
 const VERSION_ATTEMPTS = 3;
 const isUniqueViolation = (e: unknown) => (e as { code?: string } | null)?.code === "P2002";
@@ -104,7 +106,10 @@ export async function POST(request: Request, ctx: Ctx) {
       // 止める項目(賃借人がいない・金額が無いなど)は画面だけでなくサーバーでも止める(空の書類を作らない)。
       const blocking = businessDoc.blocking(bctx);
       if (blocking.length) throw new ApiError(422, `${blocking.join("・")}が無いと${businessDoc.label}を出せません`, "DOC_BLOCKED");
-      const parsed = businessDoc.options.parse(options ?? {});
+      // 項目の表のある書類で入力が今の書式に合わない(書式が変わる前の控えから続けたなど)ときは、技術的な文でなく平易な文で断る(2026-10-30)。
+      const checked = businessDoc.options.safeParse(options ?? {});
+      if (!checked.success && businessDoc.form) throw new ApiError(422, DOC_OPTIONS_OUTDATED_MESSAGE, "DOC_OPTIONS_OUTDATED");
+      const parsed = checked.success ? checked.data : businessDoc.options.parse(options ?? {});
       let out: ReturnType<typeof businessDoc.build>;
       try {
         out = businessDoc.build(bctx, parsed);

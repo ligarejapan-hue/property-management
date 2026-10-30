@@ -2,6 +2,8 @@ import { describe, expect, it } from "vitest";
 import { renderToStaticMarkup } from "react-dom/server";
 import { DocFormFields } from "../doc-form-fields";
 import type { FormDef } from "@/lib/deals/documents/forms/types";
+import { DISCLOSURE_FORM } from "@/lib/deals/documents/forms/disclosure";
+import { EQUIPMENT_FORM } from "@/lib/deals/documents/forms/equipment";
 
 const FORM: FormDef = {
   key: "t",
@@ -58,13 +60,47 @@ describe("項目の表から入力欄を描く(設計 第2段階 §3.3)", () => 
     const out = renderToStaticMarkup(<DocFormFields form={F} values={{}} onChange={() => {}} />);
     expect(out).toContain("①雨漏り");
     expect(out).toMatch(/<div class="[^"]*ml-4[^"]*">[\s\S]*修理工事：/);
-    expect(out).toContain('aria-label="修理工事： 年"');
+    // 下の行の読み上げには上の番号の行の名前を頭に付ける(2026-10-30)
+    expect(out).toContain('aria-label="①雨漏り 修理工事： 年"');
     expect(out).toContain("説明のページ");
   });
   it("PDF に出さない設定の欄には「空欄」の選択肢を出さない(最終レビュー)", () => {
     const F: FormDef = { key: "f", entries: [{ kind: "item", key: "g", label: "説明のページ", noPrint: true, choices: [{ value: "付ける", label: "付ける" }, { value: "付けない", label: "付けない" }] }] };
     const out = renderToStaticMarkup(<DocFormFields form={F} values={{ g: "付ける" }} onChange={() => {}} />);
     expect(out).not.toContain("(空欄=□ で出す)");
+  });
+  it("空欄の選択肢の説明は実際の出方に合わせる(□ で出す書類/丸も □ も付けずに空けて出す書類・2026-10-30)", () => {
+    const PLAIN: FormDef = { ...FORM, blankStyle: "plain" };
+    const out = renderToStaticMarkup(<DocFormFields form={PLAIN} values={{}} onChange={() => {}} />);
+    expect(out).toContain("(空欄=手書き用に空けて出す)");
+    expect(out).not.toContain("□");
+    expect(render({})).toContain("(空欄=□ で出す)");
+  });
+  it("下線の後ろに字を出す欄は、見本に書式の形(計＿台)を出す・読み上げにも前の字を入れる", () => {
+    const F: FormDef = {
+      key: "f",
+      entries: [{ kind: "item", key: "ac", label: "冷暖房機", sub: true, choices: [{ value: "有", label: "有" }], fields: [{ key: "acCount", label: "台", pre: "計", max: 10, after: true }, { key: "acY", label: "年", max: 10, after: true }] }],
+    };
+    const out = renderToStaticMarkup(<DocFormFields form={F} values={{}} onChange={() => {}} />);
+    expect(out).toContain('placeholder="計＿台"');
+    expect(out).toContain('aria-label="冷暖房機 計 台"');
+    expect(out).toContain('placeholder="＿年"');
+    expect(out).toContain('aria-label="冷暖房機 年"');
+  });
+  it("入力欄の名前は name があればそれ(同じ字の見出しが2つある書式・PDF は書式の字のまま)", () => {
+    const F: FormDef = { key: "f", entries: [{ kind: "item", key: "n98", label: "備考：", name: "備考（①〜⑬）", fields: [{ key: "n98Text", label: "", max: 10 }] }] };
+    const out = renderToStaticMarkup(<DocFormFields form={F} values={{}} onChange={() => {}} />);
+    expect(out).toContain("備考（①〜⑬）");
+    expect(out).toContain('aria-label="備考（①〜⑬）"');
+  });
+  it("名前の無い下の行・付帯設備表の空欄の行も、読み上げの名前が空にならず上の項目の名前が付く(2026-10-30)", () => {
+    for (const [form, kind] of [[DISCLOSURE_FORM, "house"], [DISCLOSURE_FORM, "unit"], [EQUIPMENT_FORM, "house"], [EQUIPMENT_FORM, "unit"]] as const) {
+      const out = renderToStaticMarkup(<DocFormFields form={form} values={{ kind }} onChange={() => {}} />);
+      const labels = [...out.matchAll(/aria-label="([^"]*)"/g)].map((m) => m[1]);
+      for (const l of labels) expect(l, `${form.key}/${kind}: 「${l}」`).toMatch(/^\S(.*\S)?$/);
+      if (form === EQUIPMENT_FORM && kind === "house") expect(labels).toContain("給湯関係 空欄の行1");
+      if (form === DISCLOSURE_FORM && kind === "house") expect(labels).toContain("③建物の不具合（傾き・腐食・不具合等） 箇所・状況：");
+    }
   });
   it("空欄の値でも落ちない", () => {
     expect(() => render({})).not.toThrow();

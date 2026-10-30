@@ -52,10 +52,12 @@ export interface BusinessDocDef {
   /** 前回発行したときの入力を、次の発行の初めの値にする(設計 第2段階 §3.2)。 */
   remember?: boolean;
   /**
-   * 前回の入力のうち、この取引の初めの値に合うものだけを使う(両手の取引で、買主様用を出した後も売主様用から始める)。
-   * rememberMatch が無い書類は、いちばん新しい発行の入力を使う。合うものが無ければ初めの値のまま。
+   * 前回の入力を、この欄(key)の値ごとに分けて覚える(両手の取引の売主様用・買主様用・発注者決定 2026-10-29)。
+   * 初めの値は、初めの値の key と同じ値で出した、いちばん新しい入力(買主様用を出した後も売主様用から始める)。
+   * 小窓で key を values のほかの値に切り替えたら、その値で出した前回の入力(無ければ初めの値)に入れ替える。
+   * 無い書類は、いちばん新しい発行の入力を使う。合うものが無ければ初めの値のまま。
    */
-  rememberMatch?(c: BusinessDocContext, options: Record<string, unknown>): boolean;
+  rememberBy?: { key: string; values: readonly string[] };
   /** 発行の出し分け(履歴の題名と版の数え方・issue.ts の variants の鍵)。無ければ default。 */
   variantOf?(options: Record<string, unknown>): string;
   /** 謄本の登記の状況を使う(発行のときにも謄本を読む・書類確認書と同じ読み方)。 */
@@ -130,7 +132,7 @@ export const BUSINESS_DOCS: BusinessDocDef[] = [
     label: "契約のご案内",
     group: "contract",
     remember: true,
-    rememberMatch: (c, o) => o.addressee === defaultAddressee(c),
+    rememberBy: { key: "addressee", values: ["seller", "buyer"] },
     variantOf: (o) => (o.addressee === "buyer" ? "buyer" : "seller"),
     applies: () => true,
     missing: (c, v) => contractGuideMissing(c, v?.addressee),
@@ -162,7 +164,7 @@ export const BUSINESS_DOCS: BusinessDocDef[] = [
     group: "contract",
     remember: true,
     // 依頼の内容の初め(売主側・両手=売却・買主側=購入)と同じ分の前回の入力から始める。
-    rememberMatch: (c, o) => o.requestKind === (c.deal.tradeSide === "buyer" ? "purchase" : "sale"),
+    rememberBy: { key: "requestKind", values: ["sale", "purchase", "exchange"] },
     variantOf: (o) => {
       const kind = o.kind === "general" || o.kind === "dedicated" ? o.kind : "exclusive";
       return o.requestKind === "sale" || o.requestKind === "purchase" || o.requestKind === "exchange" ? `${kind}_${o.requestKind}` : kind;

@@ -119,3 +119,24 @@ describe("付帯設備表(第2段階 §4.8)", () => {
     expect(u).toMatch(/（洗面台・照明・シャワー・コンセント<br><span class="circle">鏡<\/span>・曇り止め）/);
   });
 });
+
+describe("付帯設備表の小さな手直し(2026-10-30)", () => {
+  it("物件名の号室: 入力に「号室」が入っていても「号室号室」にしない", () => {
+    const d = { ...deal, propertySnapshot: { ...deal.propertySnapshot, buildingName: "試験マンション", roomNo: "101号室" } };
+    const out = doc().build(ctx(d), blank("unit"));
+    expect(out.html).toContain("試験マンション 101号室");
+    expect(out.html).not.toContain("号室号室");
+    expect(out.rows).toContainEqual({ label: "物件名", value: "試験マンション 101号室" });
+  });
+
+  it("選ばない設備の有無は丸を付けずに出す(□ は出さない)ので、入力欄の空欄の選択肢もそう書く", () => {
+    expect(EQUIPMENT_FORM.blankStyle).toBe("plain");
+    expect(doc().build(ctx(), blank("house")).html).not.toContain("□");
+  });
+
+  it("空欄の行の Excel の行は上の部門の名前を頭に付け、名前が重ならない", () => {
+    const labels = doc().build(ctx(), blank("house")).rows.map((r) => r.label);
+    expect(labels).toContain("給湯関係 空欄の行1");
+    expect(new Set(labels).size).toBe(labels.length);
+  });
+});

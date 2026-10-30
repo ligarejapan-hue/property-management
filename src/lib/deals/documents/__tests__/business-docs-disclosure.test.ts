@@ -11,7 +11,7 @@ import type { CompanyProfile } from "@/lib/sales-sheet/company-profile-store";
 import type { BusinessDocContext } from "../business/common";
 import { BUSINESS_DOCS, businessDocOf } from "../registry";
 import { dealDocumentTitle } from "../issue";
-import { emptyFormValues } from "../forms/values";
+import { emptyFormValues, formItems } from "../forms/values";
 import { DISCLOSURE_FORM } from "../forms/disclosure";
 import { DISCLOSURE_HOUSE_SOURCE } from "../texts/disclosure-house";
 
@@ -147,3 +147,55 @@ describe("物件状況確認書(告知書・第2段階 §4.7)", () => {
     expect(h).toContain(DISCLOSURE_HOUSE_SOURCE.coverTitle);
   });
 });
+
+describe("告知書の小さな手直し(書式の並びに合わせる・2026-10-30)", () => {
+  const flat = (h: string) => h.replace(/<span class="form-blank short"><\/span>/g, "＿").replace(/<[^>]+>/g, "").replace(/\s+/g, "");
+
+  it("⑤ 年月は「実施している(＿年＿月頃)」の括弧の中(土地建物・区分とも)", () => {
+    for (const kind of ["house", "unit"]) {
+      const h = flat(doc().build(ctx(), blank(kind)).html);
+      expect(h, kind).toContain("□実施していない□実施している(＿年＿月頃)□不明");
+    }
+    const p = kind5("house");
+    const filled = flat(doc().build(ctx(), { ...blank("house"), [p]: "実施している", [`${p}Y`]: "2019", [`${p}M`]: "3" }).html);
+    expect(filled).toContain("■実施している(2019年3月頃)");
+  });
+
+  it("⑧ 資料の選択肢は書式どおり外側の（ ）を1回だけ", () => {
+    for (const kind of ["house", "unit"]) {
+      const h = flat(doc().build(ctx(), blank(kind)).html);
+      expect(h, kind).toContain("（□建物状況調査報告書□建物状況調査の結果の概要）");
+      expect(h, kind).not.toContain("（（");
+    }
+  });
+
+  it("⑰「発見している」は見出しでなく、□ を付けて選べる", () => {
+    const h = flat(doc().build(ctx(), blank("house")).html);
+    expect(h).toContain("□発見していない");
+    expect(h).toContain("□発見している");
+    expect(h).not.toMatch(/[^□]発見している／/);
+    const it17 = formItems(DISCLOSURE_FORM).filter((i) => i.key.startsWith("h17"));
+    expect(it17.flatMap((i) => (i.choices ?? []).map((c) => c.value))).toContain("発見している");
+    expect(it17.some((i) => i.label === "発見している／")).toBe(false);
+  });
+
+  it("区分の Excel に「備考：」が名前の同じ2行で出ない(どの範囲の備考か分かる名前)", () => {
+    const labels = doc().build(ctx(), blank("unit")).rows.map((r) => r.label);
+    expect(labels.filter((l) => l === "備考：")).toHaveLength(0);
+    expect(new Set(labels).size).toBe(labels.length);
+    // PDF は書式どおり「備考：」
+    expect(doc().build(ctx(), blank("unit")).html.match(/>備考：<\/th>/g)).toHaveLength(2);
+  });
+
+  it("物件名の号室: 入力に「号室」が入っていても「号室号室」にしない", () => {
+    const d = { ...deal, propertySnapshot: { ...deal.propertySnapshot, buildingName: "試験マンション", roomNo: "101号室" } };
+    const out = doc().build(ctx(d), blank("unit"));
+    expect(out.html).toContain("試験マンション 101号室");
+    expect(out.html).not.toContain("号室号室");
+  });
+});
+
+/** ⑤ の番号の行の鍵(土地建物=h05・区分=u05)。 */
+function kind5(kind: "house" | "unit") {
+  return kind === "house" ? "h05" : "u05";
+}

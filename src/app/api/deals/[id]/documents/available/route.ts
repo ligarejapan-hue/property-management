@@ -8,7 +8,7 @@ import { loadDealSettings } from "@/lib/deals/settings-store";
 import { jstDateString } from "@/lib/deals/datetime";
 import { computeDealCalc } from "@/lib/deals/calc/deal-calc";
 import { BUSINESS_DOCS } from "@/lib/deals/documents/registry";
-import { latestMatching, rememberedValues } from "@/lib/deals/documents/remember";
+import { rememberedStart } from "@/lib/deals/documents/remember";
 import { loadCompanyProfile } from "@/lib/sales-sheet/company-profile-store";
 import { loadDealStaffNames } from "@/lib/deals/staff-names";
 import { loadRegistryDocInfo, registryPropertyFor } from "@/lib/deals/registry-doc-info";
@@ -44,12 +44,16 @@ export async function GET(_request: Request, ctx: Ctx) {
     const documents = BUSINESS_DOCS.filter((d) => d.applies(bctx)).map((d) => {
       const def = d.defaults(bctx);
       // 取引の初めの値に合う分(両手の取引なら売主様用)の、いちばん新しい入力を使う。
-      const snapshot = d.remember ? latestMatching(history, d.key, d.rememberMatch && ((o) => d.rememberMatch!(bctx, o))) : undefined;
-      const values = d.remember ? rememberedValues(d.options, def.values, snapshot) : def.values;
+      const by = d.rememberBy;
+      const startOf = (base: Record<string, unknown>) => rememberedStart(history, d.key, d.options, base, by?.key, d.form);
+      const values = d.remember ? startOf(def.values) : def.values;
+      // 小窓で依頼の内容・宛先を切り替えたときの初めの値(その値で出した前回の入力・無ければ初めの値。発注者決定 2026-10-29)
+      const starts = d.remember && by ? Object.fromEntries(by.values.map((v) => [v, startOf({ ...def.values, [by.key]: v })])) : null;
       return {
         docType: d.key, label: d.label, group: d.group, missing: d.missing(bctx, values), blocking: d.blocking(bctx),
         defaults: values, issuers: def.issuers ?? null, choices: def.choices ?? null,
         form: d.form ?? null,
+        rememberBy: d.rememberBy?.key ?? null, starts,
       };
     });
     return NextResponse.json({ documents, version: deal.version }, { headers: { "Cache-Control": "no-store" } });

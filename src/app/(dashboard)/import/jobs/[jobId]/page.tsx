@@ -58,6 +58,7 @@ import {
 import { calcImportSummary, type ImportSummary } from "@/lib/import-summary";
 import { classifyImportError } from "@/lib/import-error-display";
 import { getImportTypeLabel } from "@/lib/import-labels";
+import { roomLabel } from "@/lib/room-label";
 
 // B2: import job detail rows の既定ページサイズ（server 側 MAX_ROW_LIMIT=100 以内）。
 const ROW_LIMIT = 50;
@@ -964,7 +965,7 @@ export default function ImportJobDetailPage() {
                         {[
                           p.lotNumber && `地番 ${p.lotNumber}`,
                           p.buildingNumber && `家屋 ${p.buildingNumber}`,
-                          p.roomNo && `${p.roomNo}号`,
+                          roomLabel(p.roomNo, "号"),
                         ]
                           .filter(Boolean)
                           .join(" / ") || (

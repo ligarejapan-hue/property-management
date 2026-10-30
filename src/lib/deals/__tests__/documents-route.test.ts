@@ -294,6 +294,16 @@ describe("業務書類の発行(段5a)", () => {
     expect(pm.dealDocument.create.mock.calls[0][0].data.variant).toBe("exclusive_purchase");
     expect(pm.dealDocument.findFirst.mock.calls[0][0].where).toEqual({ dealId: DEAL_ID, docType: "mediation", variant: "exclusive_purchase" });
   });
+  it("項目の表のある書類の入力が今の書式に合わない(古い控えなど)→ 422 は平易な文で、何も作らない(2026-10-30)", async () => {
+    const res = await POST(json("POST", { docType: "mediation", version: 3, options: { kind: "exclusive", requestKind: "purchase", removedField: "前の書式" } }), ctx);
+    expect(res.status).toBe(422);
+    const body = await res.json();
+    expect(body.error.code).toBe("DOC_OPTIONS_OUTDATED");
+    expect(body.error.message).toBe("書式が新しくなったため、前回の入力の一部を読み込めませんでした。小窓を開き直して入力し直してください。");
+    expect(body.error.message).not.toContain("removedField");
+    expect(files.size).toBe(0);
+    expect(pm.dealDocument.create).not.toHaveBeenCalled();
+  });
   it("出せる書類と出す前の確認(空欄・初期値・選べる発行者)を返す", async () => {
     pm.deal.findUnique.mockResolvedValue({ ...settled, settlementPlace: null });
     const res = await AVAILABLE(new Request("http://x"), ctx);
@@ -557,6 +567,31 @@ describe("前回の入力を初めの値にする(第2段階 §3.2)", () => {
     const body = await (await AVAILABLE(new Request("http://x"), ctx)).json();
     expect(docOf(body, "mediation").defaults).toMatchObject({ kind: "dedicated", requestKind: "sale", specialTerms: "売却の特約" });
     expect(docOf(body, "contract_guide").defaults).toMatchObject({ addressee: "seller", belongings: "売主の持ち物" });
+    // 買主様用(購入・買主様あて)に切り替えたときの初めの値も、買主様用の前回の入力から(発注者決定 2026-10-29)
+    type Starts = { rememberBy: string | null; starts: Record<string, Record<string, unknown>> | null };
+    const med = docOf(body, "mediation") as unknown as Starts;
+    expect(med.rememberBy).toBe("requestKind");
+    expect(med.starts!.purchase).toMatchObject({ kind: "exclusive", requestKind: "purchase", specialTerms: "購入の特約" });
+    expect(med.starts!.sale).toEqual(docOf(body, "mediation").defaults);
+    // 交換は出したことが無い → 売却・購入の入力は使わず、初めの値に依頼の内容だけ交換
+    expect(med.starts!.exchange).toMatchObject({ kind: "exclusive", requestKind: "exchange", specialTerms: null });
+    const cg = docOf(body, "contract_guide") as unknown as Starts;
+    expect(cg.rememberBy).toBe("addressee");
+    expect(cg.starts!.buyer).toMatchObject({ addressee: "buyer", belongings: "買主の持ち物" });
+    // 出し分けの無い書類は null
+    expect((docOf(body, "seller_survey") as unknown as Starts).starts).toBeNull();
+  });
+  it("両手の取引: 売主様用しか出していなければ、買主様用に切り替えても売主様用の入力は混ざらない", async () => {
+    pm.deal.findUnique.mockResolvedValue({ ...row, parties: [SELLER] });
+    pm.dealDocument.findMany.mockResolvedValue([
+      { docType: "contract_guide", inputSnapshot: { options: { addressee: "seller", belongings: "売主の持ち物", notes: "売主へ" } } },
+    ]);
+    const body = await (await AVAILABLE(new Request("http://x"), ctx)).json();
+    const cg = docOf(body, "contract_guide") as unknown as { defaults: Record<string, unknown>; starts: Record<string, Record<string, unknown>> };
+    expect(cg.defaults).toMatchObject({ belongings: "売主の持ち物", notes: "売主へ" });
+    expect(cg.starts.buyer.addressee).toBe("buyer");
+    expect(cg.starts.buyer.notes).toBeNull();
+    expect(cg.starts.buyer.belongings).not.toBe("売主の持ち物");
   });
   it("前に発行した入力を初めの値にする・覚える書類だけを新しい版から読む・形の合わない写しは捨てる", async () => {
     pm.deal.findUnique.mockResolvedValue({ ...row, parties: [SELLER] });
