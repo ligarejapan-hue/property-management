@@ -30,7 +30,11 @@ jobs:
 
       - run: npx prisma generate
 
+      # 2026-10-30 20時台から build が「JavaScript heap out of memory」で落ちるようになった(Node 24.22.2 を取り始めた回から・
+      # 別のブランチも同じ)。本番の反映(deploy.sh)と同じく、組み立てに使えるメモリの上限を明示する(runner は 16GB)。
       - run: npm run build
+        env:
+          NODE_OPTIONS: --max-old-space-size=4096
 
       - run: npm test
 
