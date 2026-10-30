@@ -57,8 +57,8 @@ describe("GET /api/deals", () => {
         OR: [
           { name: { contains: "試験", mode: "insensitive" } },
           { dealNo: { contains: "試験" } },
-          { propertySnapshot: { path: ["buildingName"], string_contains: "試験" } },
-          { propertySnapshot: { path: ["address"], string_contains: "試験" } },
+          { propertySnapshot: { path: ["buildingName"], string_contains: "試験", mode: "insensitive" } },
+          { propertySnapshot: { path: ["address"], string_contains: "試験", mode: "insensitive" } },
         ],
       },
       skip: 50, take: 50,

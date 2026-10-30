@@ -46,8 +46,8 @@ export async function GET(request: Request) {
             OR: [
               { name: { contains: query.q, mode: "insensitive" as const } },
               { dealNo: { contains: query.q } },
-              { propertySnapshot: { path: ["buildingName"], string_contains: query.q } },
-              { propertySnapshot: { path: ["address"], string_contains: query.q } },
+              { propertySnapshot: { path: ["buildingName"], string_contains: query.q, mode: "insensitive" as const } },
+              { propertySnapshot: { path: ["address"], string_contains: query.q, mode: "insensitive" as const } },
             ],
           }
         : {}),
