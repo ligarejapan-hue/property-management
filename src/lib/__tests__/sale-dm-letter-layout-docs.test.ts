@@ -15,7 +15,10 @@ describe("資料: 手紙の紙面(2026-10-17)", () => {
       expect(s).toContain("困りごとの箇条書き（「・」の行）の枠の右");
       expect(s).not.toContain("【イラスト】が無い文面では<b>本文の上</b>");
       expect(s).not.toContain("イラストが未登録の種類は今までの見た目のままです");
-      expect(s).toContain("最終更新: 2026-10-17");
+      // 最終更新は 2026-10-17 以降であること(日付を固定すると、資料を直すたびに落ちる)。
+      const dates = [...s.matchAll(/最終更新: (\d{4}-\d{2}-\d{2})/g)].map((m) => m[1]);
+      expect(dates.length).toBeGreaterThan(0);
+      for (const d of dates) expect(d >= "2026-10-17").toBe(true);
     });
   }
 });
