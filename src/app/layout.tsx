@@ -49,7 +49,8 @@ export default async function RootLayout({
   children: React.ReactNode;
 }>) {
   // 見た目の設定(2026-10-31): ログイン中なら DB の設定を正として、画面を描く前に付ける(別の PC でも同じ見た目・ちらつかない)。
-  const appearance = await loadAppearanceForRequest();
+  const loaded = await loadAppearanceForRequest();
+  const appearance = loaded?.appearance ?? null;
   return (
     <html
       lang="ja"
@@ -57,6 +58,7 @@ export default async function RootLayout({
       className={`${appSans.variable} ${appSansJp.variable} ${geistMono.variable} h-full antialiased`}
       data-density={appearance?.density}
       data-layout={appearance?.layout}
+      data-appearance-user={loaded?.userId}
     >
       <head>
         <script dangerouslySetInnerHTML={{ __html: appearanceBootScript(appearance) }} />

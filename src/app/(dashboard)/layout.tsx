@@ -3,6 +3,7 @@ import DashboardLayout from "@/components/layout/dashboard-layout";
 import { IdleSessionGuard } from "@/components/auth/idle-session-guard";
 import { NoticeProvider } from "@/components/notifications/notice-provider";
 import { SummaryPoller } from "@/components/notifications/summary-poller";
+import { AppearanceSync } from "@/components/theme/appearance-sync";
 
 export default function DashboardRouteLayout({
   children,
@@ -18,6 +19,8 @@ export default function DashboardRouteLayout({
         <IdleSessionGuard />
         {/* 通知 段階2: 次回対応・査定申込・謄本の一括取得の完了を、画面を開いている間に知らせる(設計書 §5)。 */}
         <SummaryPoller />
+        {/* 見た目の設定: ログイン画面から入ったとき・別の人が入ったときに、その人の色・文字サイズを反映する。 */}
+        <AppearanceSync />
         <DashboardLayout>{children}</DashboardLayout>
       </NoticeProvider>
     </SessionProvider>

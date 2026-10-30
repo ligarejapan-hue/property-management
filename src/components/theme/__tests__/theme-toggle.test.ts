@@ -23,15 +23,14 @@ describe("theme-toggle.tsx (source-assertion)", () => {
     expect(src).toContain("DENSITY_OPTIONS.map");
     expect(src).not.toMatch(/"和モダン"|"紺と金"|"明るい"|"暗い"/);
   });
-  it("選んだら DB に保存する(PATCH /api/me/preferences)", () => {
-    expect(src).toContain('"/api/me/preferences"');
-    expect(src).toContain('method: "PATCH"');
+  it("選んだら DB に保存する(保存の中身は lib/appearance/client.ts)", () => {
     expect(src).toMatch(/saveAppearance\(\{ theme: v \}\)/);
     expect(src).toMatch(/saveAppearance\(\{ density: v \}\)/);
   });
-  it("文字サイズは html の data-density を即時に変え、端末にも覚える(使えなくても落ちない)", () => {
-    expect(src).toContain('setAttribute("data-density", value)');
-    expect(src).toMatch(/try \{\s*window\.localStorage\.setItem\(STORAGE_KEYS\.density, value\);\s*\} catch/);
+  it("文字サイズは html の値を1か所の正として購読する(ヘッダーとメニューの選択欄が食い違わない・@codex #618)", () => {
+    expect(src).toMatch(/useSyncExternalStore<DensityPref>\(subscribeAppearance, readDensity,/);
+    expect(src).toContain("applyDensity(v)");
+    expect(src).not.toMatch(/useState<DensityPref>/);
   });
   it("選択欄に読み上げ用の名前がある(キーボード・読み上げで選べる)", () => {
     expect(src).toContain('aria-label="色テーマ"');

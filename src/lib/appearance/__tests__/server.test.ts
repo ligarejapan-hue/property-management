@@ -25,7 +25,7 @@ beforeEach(() => {
 
 describe("loadAppearanceForRequest", () => {
   it("ログイン中は DB の設定(個人→会社→既定)", async () => {
-    expect(await loadAppearanceForRequest()).toEqual({ theme: "navy", density: "large", layout: "side" });
+    expect(await loadAppearanceForRequest()).toEqual({ userId: "u1", appearance: { theme: "navy", density: "large", layout: "side" } });
   });
   it("本番の名前(__Secure-)の cookie でも読む", async () => {
     (cookies as Mock).mockResolvedValue(jar(["__Secure-authjs.session-token"]));
