@@ -51,6 +51,7 @@ next-env.d.ts
 !/public/uploads/.gitkeep
 
 # mock storage / tmp
+/tmp/
 /tmp/mock-storage/
 
 # claude worktrees (do not commit; .claude/ 全体は ignore しない)
