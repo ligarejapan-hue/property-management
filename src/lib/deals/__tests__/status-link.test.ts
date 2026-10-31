@@ -1,5 +1,6 @@
 import { describe, expect, it, vi } from "vitest";
 import {
+  canChangeDealAssignee,
   canChangeDealStatus,
   caseStatusForDealStatus,
   dealStatusForCaseStatus,
@@ -109,6 +110,24 @@ describe("取引の状態を変えられる人", () => {
     expect(canChangeDealStatus(office, { assigneeId: "u2" }, { assignedTo: "u3" })).toBe(false);
     expect(canChangeDealStatus(office, { assigneeId: null }, { assignedTo: null })).toBe(false);
     expect(canChangeDealStatus(office, { assigneeId: null }, null)).toBe(false);
+  });
+});
+
+describe("取引の担当者を変えられる人", () => {
+  const me = { id: "u1", role: "office_staff" };
+  it("状態を変えられる人は変えられる", () => {
+    expect(canChangeDealAssignee({ id: "x", role: "admin" }, { assigneeId: "u9", createdById: "u9" }, null)).toBe(true);
+    expect(canChangeDealAssignee(me, { assigneeId: "u1", createdById: "u9" }, null)).toBe(true);
+    expect(canChangeDealAssignee(me, { assigneeId: "u9", createdById: "u9" }, { assignedTo: "u1" })).toBe(true);
+  });
+  it("担当者が未設定なら作成者は受け持てる", () => {
+    expect(canChangeDealAssignee(me, { assigneeId: null, createdById: "u1" }, null)).toBe(true);
+  });
+  it("担当者が決まっていれば作成者でも変えられない", () => {
+    expect(canChangeDealAssignee(me, { assigneeId: "u9", createdById: "u1" }, null)).toBe(false);
+  });
+  it("作成者でも担当者でもない人は変えられない(自分を担当者にして制限をすり抜けられない)", () => {
+    expect(canChangeDealAssignee(me, { assigneeId: null, createdById: "u9" }, { assignedTo: null })).toBe(false);
   });
 });
 

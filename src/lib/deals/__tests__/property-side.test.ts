@@ -34,6 +34,18 @@ describe("propertySideRows", () => {
     expect(rows["所在階"]).toBe("0階");
   });
 
+  it("棟につながる部屋の構造・築年月は棟の値を出す", () => {
+    const rows = map(propertySideRows({
+      caseStatus: "hold", structureType: "古い構造", builtYear: 1980, builtMonth: 1,
+      building: { structureType: "RC", builtYear: 2001, builtMonth: 4 },
+    }));
+    expect(rows["構造"]).toBe("RC");
+    expect(rows["築年月"]).toBe("2001年4月");
+    const empty = map(propertySideRows({ caseStatus: "hold", structureType: "古い構造", builtYear: 1980, building: {} }));
+    expect(empty["構造"]).toBeUndefined();
+    expect(empty["築年月"]).toBeUndefined();
+  });
+
   it("知らない選択肢は値をそのまま出す", () => {
     expect(map(propertySideRows({ caseStatus: "hold", occupancyStatus: "xyz" }))["現況"]).toBe("xyz");
   });

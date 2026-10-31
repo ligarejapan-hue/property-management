@@ -32,6 +32,8 @@ export type PropertySideSource = {
   introductionRoute?: string | null;
   assignee?: { name: string } | null;
   note?: string | null;
+  /** 棟につながる部屋の構造・築年月は棟の値が正(物件の編集画面と同じ)。 */
+  building?: { structureType?: string | null; builtYear?: number | null; builtMonth?: number | null } | null;
 };
 
 const area = (v: number | null | undefined) => (v == null ? null : `${v}㎡`);
@@ -65,8 +67,8 @@ export function propertySideRows(p: PropertySideSource): { label: string; value:
     ["延床面積", area(p.totalFloorArea)],
     ["間取り", p.layoutType || null],
     ["所在階", p.floorNo == null ? null : `${p.floorNo}階`],
-    ["構造", p.structureType || null],
-    ["築年月", built(p.builtYear, p.builtMonth)],
+    ["構造", (p.building ? p.building.structureType : p.structureType) || null],
+    ["築年月", p.building ? built(p.building.builtYear, p.building.builtMonth) : built(p.builtYear, p.builtMonth)],
     ["交通", p.access || null],
     ["現況", label(OCCUPANCY_STATUS_LABELS, p.occupancyStatus)],
     ["管理費", yen(p.managementFee, "/月")],

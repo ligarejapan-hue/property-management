@@ -121,6 +121,25 @@ describe("PATCH /api/deals/[id]", () => {
       const res = await PATCH(json("PATCH", { version: 3, status: "contracted", assigneeId: USER_ID }), ctx);
       expect(res.status).toBe(403);
     });
+    it("担当でない人は自分を担当者にできない(状態の制限をすり抜けられない)", async () => {
+      pm.deal.findUnique.mockResolvedValue({ ...row(null), createdById: "someone" });
+      pm.property.findUnique.mockResolvedValue({ assignedTo: null });
+      const res = await PATCH(json("PATCH", { version: 3, assigneeId: USER_ID }), ctx);
+      expect(res.status).toBe(403);
+      expect((await res.json()).error.code).toBe("DEAL_ASSIGNEE_FORBIDDEN");
+      expect(pm.deal.updateMany).not.toHaveBeenCalled();
+    });
+    it("担当者が未設定の取引は、作成者が受け持てる", async () => {
+      pm.deal.findUnique.mockResolvedValue({ ...row(null), createdById: "u-office" });
+      pm.property.findUnique.mockResolvedValue({ assignedTo: null });
+      expect((await PATCH(json("PATCH", { version: 3, assigneeId: USER_ID }), ctx)).status).toBe(200);
+    });
+    it("読んだ版と送られた版が違えば、権限を見る前に 409", async () => {
+      pm.deal.findUnique.mockResolvedValue(row("u-office"));
+      const res = await PATCH(json("PATCH", { version: 4, status: "contracted" }), ctx);
+      expect(res.status).toBe(409);
+      expect(pm.deal.updateMany).not.toHaveBeenCalled();
+    });
     it("状態以外の項目は担当でなくても変えられる", async () => {
       pm.deal.findUnique.mockResolvedValue(row("someone"));
       const res = await PATCH(json("PATCH", { version: 3, status: "considering", contractPlace: "試験区の事務所" }), ctx);

@@ -15,8 +15,8 @@ import {
 } from "@/lib/deals/constants";
 
 export default function DealBasicPanel({
-  deal, canChangeStatus, users, kinds, onSaved,
-}: { deal: DealView; canChangeStatus: boolean; users: UserOption[]; kinds: PropertyKindDef[]; onSaved: () => Promise<void> }) {
+  deal, canChangeStatus, canChangeAssignee, users, kinds, onSaved,
+}: { deal: DealView; canChangeStatus: boolean; canChangeAssignee: boolean; users: UserOption[]; kinds: PropertyKindDef[]; onSaved: () => Promise<void> }) {
   const [form, setForm] = useState<BasicForm>(() => basicFormFromDeal(deal));
   const [saving, setSaving] = useState(false);
   const [message, setMessage] = useState<{ kind: "ok" | "err"; text: string } | null>(null);
@@ -44,8 +44,8 @@ export default function DealBasicPanel({
   };
 
   const staff = (k: "assigneeId" | "licensedAgentId" | "salesStaffId" | "opsStaffId", label: string) => (
-    <Field label={label}>
-      <SelectBox label={label} value={form[k]} onChange={(v) => set(k, v)} options={userOptions} allowEmpty />
+    <Field label={label} hint={k === "assigneeId" && !canChangeAssignee ? "管理者と担当者だけが変えられます" : undefined}>
+      <SelectBox label={label} value={form[k]} onChange={(v) => set(k, v)} options={userOptions} allowEmpty disabled={k === "assigneeId" && !canChangeAssignee} />
     </Field>
   );
 

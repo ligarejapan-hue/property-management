@@ -131,3 +131,15 @@ export function canChangeDealStatus(
 ): boolean {
   return session.role === "admin" || deal.assigneeId === session.id || property?.assignedTo === session.id;
 }
+
+/**
+ * 取引の担当者を変えられる人。状態を変えられる人に加え、担当者が未設定のときの作成者(自分の取引を受け持てる)。
+ * ⚠誰でも担当者を変えられると、自分を担当者にして状態の制限をすり抜けられる。
+ */
+export function canChangeDealAssignee(
+  session: { id: string; role: string },
+  deal: { assigneeId: string | null; createdById: string | null },
+  property: { assignedTo: string | null } | null,
+): boolean {
+  return canChangeDealStatus(session, deal, property) || (deal.assigneeId === null && deal.createdById === session.id);
+}
