@@ -235,6 +235,7 @@ model User {
   dealsSales              Deal[]                  @relation("DealSalesStaff")
   dealsOps                Deal[]                  @relation("DealOpsStaff")
   dealsCreated            Deal[]                  @relation("DealCreatedBy")
+  dealScheduleItems       DealScheduleItem[]      @relation("DealScheduleItemAssignee")
   dealDocumentsIssued     DealDocument[]          @relation("DealDocumentIssuedBy")
 
   @@map("users")
@@ -2309,6 +2310,8 @@ model Deal {
   planInputs         Json      @default("{}") @map("plan_inputs") @db.JsonB
   checklistState     Json      @default("{}") @map("checklist_state") @db.JsonB
   overrides          Json      @default("{}") @db.JsonB
+  /// 段取りの判定の控え(担保の有無・読んだ謄本の印・朝の見回りの日)。src/lib/deals/schedule-sync.ts。氏名は入れない。
+  scheduleFacts      Json      @default("{}") @map("schedule_facts") @db.JsonB
   version            Int       @default(1)
   createdById        String    @map("created_by_id") @db.Uuid
   createdAt          DateTime  @default(now()) @map("created_at")
@@ -2322,6 +2325,7 @@ model Deal {
   property      Property?      @relation(fields: [propertyId], references: [id], onDelete: SetNull)
   parties       DealParty[]
   documents     DealDocument[]
+  scheduleItems DealScheduleItem[]
 
   @@index([status, settlementAt])
   @@index([businessType])
@@ -2380,6 +2384,45 @@ model DealDocument {
   @@map("deal_documents")
 }
 
+/// 決済までの段取りの項目(src/lib/deals/schedule.ts)。ひな形から作る項目と、手で足す項目(templateKey=null)。
+model DealScheduleItem {
+  id              String    @id @default(uuid()) @db.Uuid
+  dealId          String    @map("deal_id") @db.Uuid
+  /// ひな形の項目の鍵。null=手入力(null は一意の鍵でぶつからない)。
+  templateKey     String?   @map("template_key")
+  label           String
+  /// contract/settlement。手入力は null。
+  base            String?
+  dueDate         DateTime  @map("due_date") @db.Date
+  /// 手で期限を直した(付け直しで動かさない)。
+  dueManual       Boolean   @default(false) @map("due_manual")
+  assigneeId      String?   @map("assignee_id") @db.Uuid
+  assigneeManual  Boolean   @default(false) @map("assignee_manual")
+  /// 作った時点で期限が過ぎていた項目。期限超過の通知に入れない。
+  preIntroduction Boolean   @default(false) @map("pre_introduction")
+  /// 担保の有無を判定できないまま出している。
+  mortgageUnknown Boolean   @default(false) @map("mortgage_unknown")
+  /// 完了候補の理由(doc_issued/mortgage_cleared)。
+  completionHint  String?   @map("completion_hint")
+  completedAt     DateTime? @map("completed_at")
+  /// システムが完了にした。
+  autoCompleted   Boolean   @default(false) @map("auto_completed")
+  excludedAt      DateTime? @map("excluded_at")
+  /// 手で対象外にした(条件が戻っても戻さない)。
+  excludedManual  Boolean   @default(false) @map("excluded_manual")
+  sortOrder       Int       @default(0) @map("sort_order")
+  createdAt       DateTime  @default(now()) @map("created_at")
+  updatedAt       DateTime  @updatedAt @map("updated_at")
+
+  deal     Deal  @relation(fields: [dealId], references: [id], onDelete: Cascade)
+  assignee User? @relation("DealScheduleItemAssignee", fields: [assigneeId], references: [id], onDelete: SetNull)
+
+  @@unique([dealId, templateKey])
+  @@index([dealId, dueDate])
+  @@index([assigneeId, completedAt, dueDate])
+  @@map("deal_schedule_items")
+}
+
 /// 取引の設定(1行だけ・id=singleton)。会社名・免許・電話・住所は company_profile を使う。
 model DealSettings {
   id                  String   @id @default("singleton")
@@ -2390,6 +2433,8 @@ model DealSettings {
   sealKey             String?  @map("seal_key")
   texts               Json     @default("{}") @db.JsonB
   checklistItems      Json     @default("[]") @map("checklist_items") @db.JsonB
+  /// 段取りのひな形。空なら初期のひな形(src/lib/deals/schedule.ts)。
+  scheduleTemplate    Json     @default("[]") @map("schedule_template") @db.JsonB
   propertyKinds       Json     @default("[]") @map("property_kinds") @db.JsonB
   sectionMatrix       Json     @default("{}") @map("section_matrix") @db.JsonB
   /// cap=上限で計算 / manual=手入力

@@ -18,6 +18,8 @@ import { DEAL_TEXT_LIMITS } from "@/lib/deals/schemas";
 import { DEAL_IMAGE_KINDS } from "@/lib/deals/branding";
 import { DealImageSetting } from "@/components/deals/deal-image-setting";
 import { ChecklistItemsEditor } from "@/components/deals/checklist-items-editor";
+import { ScheduleTemplateEditor } from "@/components/deals/schedule-template-editor";
+import type { ScheduleTemplateItem } from "@/lib/deals/schedule";
 import type { ChecklistItem } from "@/lib/deals/checklist";
 import { BUSINESS_SECTIONS, SECTION_RULE_LABELS, type SectionMatrix, type SectionRow } from "@/lib/deals/business-sections";
 
@@ -40,6 +42,7 @@ export default function DealSettingsPage() {
   const [notes, setNotes] = useState("");
   const [matrix, setMatrix] = useState<SectionMatrix>({});
   const [checklist, setChecklist] = useState<ChecklistItem[]>([]);
+  const [scheduleTemplate, setScheduleTemplate] = useState<ScheduleTemplateItem[]>([]);
   const [saving, setSaving] = useState(false);
   const [message, setMessage] = useState<{ kind: "ok" | "err"; text: string } | null>(null);
   const [editing, setEditing] = useState<{ table: RateTableView | null; kind: RateTableKind } | null>(null);
@@ -59,6 +62,7 @@ export default function DealSettingsPage() {
     setNotes(s.texts.funding_plan?.notes ?? "");
     setMatrix(s.sectionMatrix);
     setChecklist(s.checklistItems);
+    setScheduleTemplate(s.scheduleTemplate);
   };
   /** 種別の行。足したばかりの種別(まだ行が無い)は、元の種別の行を初期値にする。 */
   const rowOf = (k: PropertyKindDef): SectionRow => matrix[k.key] ?? matrix[k.base] ?? ALL_ON;
@@ -77,6 +81,10 @@ export default function DealSettingsPage() {
       setMessage({ kind: "err", text: "書類確認書の項目に、項目名が空の行があります。入れるか消してから保存してください。" });
       return;
     }
+    if (scheduleTemplate.some((i) => !i.label.trim())) {
+      setMessage({ kind: "err", text: "段取りのひな形に、作業名が空の行があります。入れるか消してから保存してください。" });
+      return;
+    }
     setSaving(true);
     setMessage(null);
     try {
@@ -89,6 +97,7 @@ export default function DealSettingsPage() {
         texts: { funding_plan: { greeting, notes } },
         sectionMatrix: matrixForSave(),
         checklistItems: checklist,
+        scheduleTemplate,
       });
       apply(res.settings);
       setMessage({ kind: "ok", text: "取引の設定を保存しました" });
@@ -246,6 +255,14 @@ export default function DealSettingsPage() {
         <Save className="h-4 w-4" />
         保存
       </Button>
+
+      <section className="space-y-3">
+        <h2 className="text-sm font-semibold text-gray-700 dark:text-gray-300">決済までの段取りのひな形</h2>
+        <p className="text-xs text-gray-500 dark:text-gray-400">
+          契約日・決済日が入った取引に、この項目から段取りを作ります。日数は基準日から数え、前はマイナスで入れます(例: 決済の7日前は -7)。土日になる期限は、基準日より前なら金曜、後なら月曜に寄せます。足した項目は翌朝までに決済前の取引へ足し、消した項目は作成済みの取引に残します。
+        </p>
+        <ScheduleTemplateEditor items={scheduleTemplate} onChange={setScheduleTemplate} />
+      </section>
 
       <section className="space-y-3">
         <h2 className="text-sm font-semibold text-gray-700 dark:text-gray-300">ロゴ・角印</h2>

@@ -86,9 +86,9 @@ const VERSIONED: Record<string, string> = {
   "src/app/api/properties/[id]/dm-logs/[logId]/reaction/route.ts:276":
     "property.dmStatus(undeliverable連動のno_send昇格)+version increment" +
     "(Task 9で修正: 元は進めていなかった)",
-  "src/app/api/properties/[id]/route.ts:531":
+  "src/app/api/properties/[id]/route.ts:533":
     "property の編集画面フィールド一式(編集画面の本体保存窓口)+version increment",
-  "src/app/api/properties/bulk-update/route.ts:89":
+  "src/app/api/properties/bulk-update/route.ts:90":
     "property.caseStatus/registryStatus/dmStatus/assignedTo(一括更新)+version increment",
   "src/lib/building-link/rename.ts:121":
     "property.buildingName(棟の名前を直したとき、つながっている全部屋へ反映)+version increment" +

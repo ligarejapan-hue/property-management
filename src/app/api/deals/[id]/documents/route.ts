@@ -3,6 +3,7 @@ import { z } from "zod";
 import prisma from "@/lib/prisma";
 import { ApiError, handleApiError, parseJsonBody } from "@/lib/api-helpers";
 import { writeAuditLog } from "@/lib/audit";
+import { syncDealScheduleSafe } from "@/lib/deals/schedule-sync";
 import { getStorage } from "@/lib/storage";
 import { safeRandomId } from "@/lib/random-id";
 import { isChromiumAvailable, renderHtmlToPdfDocument } from "@/lib/sales-sheet/output";
@@ -190,6 +191,9 @@ export async function POST(request: Request, ctx: Ctx) {
       await Promise.all(stored.map((k) => storage.delete(k).catch(() => undefined)));
       throw e;
     }
+
+    // 段取りの自動の完了・完了候補(失敗しても発行は止めない)。
+    await syncDealScheduleSafe(id, { userId: session.id, event: { issuedDocType: docType } });
 
     // 監査には書類の種類・版だけ(お客様名・住所・金額は残さない)。
     await writeAuditLog({

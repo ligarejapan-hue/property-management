@@ -32,6 +32,7 @@ const PANEL_LOOK: Record<Notice["kind"], Pick<NotificationPanelItem, "icon" | "t
   inquiry_new: { icon: "inbox", tone: "indigo" },
   registry_job_done: { icon: "file", tone: "green" },
   drive_sync_failed: { icon: "file", tone: "red" },
+  deal_schedule: { icon: "calendar", tone: "amber" },
 };
 
 export function toPanelItem(n: Notice, highlighted: boolean, now: Date): NotificationPanelItem {

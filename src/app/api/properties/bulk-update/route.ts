@@ -13,6 +13,7 @@ import { hasPermission } from "@/lib/permissions";
 import { recordChanges, PROPERTY_TRACKED_FIELDS } from "@/lib/change-log";
 import { CASE_STATUS_VALUES } from "@/lib/property-types";
 import { syncDealFromCaseStatus } from "@/lib/deals/status-link";
+import { syncDealScheduleAfterCaseStatus } from "@/lib/deals/schedule-sync";
 import { lockPropertyRow } from "@/lib/property-record-guard";
 
 const bulkUpdateSchema = z.object({
@@ -125,10 +126,14 @@ export async function POST(request: NextRequest) {
       });
       for (const { propertyId } of linked) {
         if (!propertyId) continue;
-        await prisma.$transaction(async (tx) => {
+        const change = await prisma.$transaction(async (tx) => {
           await lockPropertyRow(tx, propertyId);
-          await syncDealFromCaseStatus(tx, { propertyId, changedBy: session.id });
-        }).catch((e) => console.error("[bulk-update] 取引の状態をそろえられませんでした", propertyId, e));
+          return syncDealFromCaseStatus(tx, { propertyId, changedBy: session.id });
+        }).catch((e) => {
+          console.error("[bulk-update] 取引の状態をそろえられませんでした", propertyId, e);
+          return null;
+        });
+        await syncDealScheduleAfterCaseStatus(change, session.id);
       }
     }
 

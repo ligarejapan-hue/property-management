@@ -13,6 +13,8 @@ import { loadDealSettings } from "@/lib/deals/settings-store";
 import { isKnownPropertyKind } from "@/lib/deals/settings";
 import { DEAL_TRACKED_FIELDS, dealChangeValues, toDealUpdateData } from "@/lib/deals/change-values";
 import { DEAL_DETAIL_SELECT, toDealView } from "@/lib/deals/view";
+import { syncDealScheduleSafe, taxesEnteredOf } from "@/lib/deals/schedule-sync";
+import type { ScheduleEvent } from "@/lib/deals/schedule";
 import { canChangeDealAssignee, canChangeDealStatus, syncCaseStatusFromDeals } from "@/lib/deals/status-link";
 import { lockPropertyRow } from "@/lib/property-record-guard";
 
@@ -54,6 +56,7 @@ export async function PATCH(request: Request, ctx: Ctx) {
       throw new ApiError(422, "物件種別を選び直してください", "UNKNOWN_PROPERTY_KIND");
     }
 
+    let event: ScheduleEvent = {};
     await prisma.$transaction(async (tx) => {
       const cur = await tx.deal.findUnique({ where: { id }, select: { ...DEAL_DETAIL_SELECT, createdById: true } });
       if (!cur) throw new ApiError(404, "取引が見つかりません", "NOT_FOUND");
@@ -89,6 +92,11 @@ export async function PATCH(request: Request, ctx: Ctx) {
       }
       const res = await tx.deal.updateMany({ where: { id, version }, data: { ...data, version: { increment: 1 } } });
       if (res.count === 0) throw new ApiError(409, DEAL_VERSION_CONFLICT_MESSAGE, "VERSION_CONFLICT");
+      // 段取りの自動の完了は「変わったとき」だけ(完了を取り消した項目を、ほかの保存で戻さない)。
+      event = {
+        settled: patch.status === "settled" && cur.status !== "settled",
+        taxesEntered: patch.settlementTerms !== undefined && taxesEnteredOf(patch.settlementTerms) && !taxesEnteredOf(cur.settlementTerms),
+      };
       await recordChangesInTx(tx, {
         targetTable: "deals", targetId: id, changedBy: session.id,
         oldValues: dealChangeValues(cur), newValues: dealChangeValues({ ...cur, ...data }),
@@ -96,6 +104,9 @@ export async function PATCH(request: Request, ctx: Ctx) {
       });
       if (linkedPropertyId) await syncCaseStatusFromDeals(tx, { propertyId: linkedPropertyId, changedBy: session.id });
     });
+
+    // 日付・条件・担当の変更を段取りに反映する(失敗しても保存は止めない)。
+    await syncDealScheduleSafe(id, { userId: session.id, event });
 
     await writeAuditLog({
       userId: session.id, action: "deal_update", targetTable: "deals", targetId: id,

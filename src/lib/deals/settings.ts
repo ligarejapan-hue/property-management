@@ -1,6 +1,7 @@
 import { DEFAULT_PROPERTY_KINDS, type PropertyKindDef } from "./constants";
 import { resolveSectionMatrix, type SectionMatrix } from "./business-sections";
 import { DEFAULT_CHECKLIST_ITEMS, resolveChecklistItems, type ChecklistItem } from "./checklist";
+import { DEFAULT_SCHEDULE_TEMPLATE, resolveScheduleTemplate, type ScheduleTemplateItem } from "./schedule";
 import { EMPTY_BANK_ACCOUNT, bankAccountSchema, dealTextsSchema, propertyKindsSchema, type BankAccount, type DealTexts } from "./schemas";
 
 export const DEAL_SETTINGS_ID = "singleton";
@@ -15,6 +16,7 @@ export interface DealSettingsRow {
   texts?: unknown;
   sectionMatrix?: unknown;
   checklistItems?: unknown;
+  scheduleTemplate?: unknown;
   version: number;
   updatedAt: Date;
 }
@@ -33,6 +35,8 @@ export interface DealSettingsView {
   sectionMatrix: SectionMatrix;
   /** 書類確認書の項目(保存が無ければ初めの項目)。 */
   checklistItems: ChecklistItem[];
+  /** 段取りのひな形(保存が無ければ初期のひな形)。 */
+  scheduleTemplate: ScheduleTemplateItem[];
   /** 0 = 行がまだ無い。 */
   version: number;
   updatedAt: string | null;
@@ -43,7 +47,7 @@ export function resolveDealSettings(row: DealSettingsRow | null): DealSettingsVi
   if (!row) {
     return {
       representativeTitle: null, representativeName: null, bankAccount: EMPTY_BANK_ACCOUNT, propertyKinds: DEFAULT_PROPERTY_KINDS,
-      texts: {}, hasLogo: false, hasSeal: false, sectionMatrix: resolveSectionMatrix(undefined, DEFAULT_PROPERTY_KINDS), checklistItems: DEFAULT_CHECKLIST_ITEMS, version: 0, updatedAt: null,
+      texts: {}, hasLogo: false, hasSeal: false, sectionMatrix: resolveSectionMatrix(undefined, DEFAULT_PROPERTY_KINDS), checklistItems: DEFAULT_CHECKLIST_ITEMS, scheduleTemplate: DEFAULT_SCHEDULE_TEMPLATE, version: 0, updatedAt: null,
     };
   }
   const kinds = propertyKindsSchema.safeParse(row.propertyKinds);
@@ -60,6 +64,7 @@ export function resolveDealSettings(row: DealSettingsRow | null): DealSettingsVi
     hasSeal: Boolean(row.sealKey),
     sectionMatrix: resolveSectionMatrix(row.sectionMatrix, propertyKinds),
     checklistItems: resolveChecklistItems(row.checklistItems),
+    scheduleTemplate: resolveScheduleTemplate(row.scheduleTemplate),
     version: row.version,
     updatedAt: row.updatedAt.toISOString(),
   };

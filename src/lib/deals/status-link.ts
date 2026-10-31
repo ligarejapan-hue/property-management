@@ -99,25 +99,29 @@ export async function syncCaseStatusFromDeals(tx: Prisma.TransactionClient, { pr
   });
 }
 
-/** 案件ステータスを変えたあとに、取引の状態をそろえる。物件の行をロックした tx の中で呼ぶ。 */
-export async function syncDealFromCaseStatus(tx: Prisma.TransactionClient, { propertyId, changedBy }: SyncArgs): Promise<void> {
+/**
+ * 案件ステータスを変えたあとに、取引の状態をそろえる。物件の行をロックした tx の中で呼ぶ。
+ * 動かした取引を返す(呼び出し側は COMMIT のあとで段取りに反映する=syncDealScheduleAfterCaseStatus)。
+ */
+export async function syncDealFromCaseStatus(tx: Prisma.TransactionClient, { propertyId, changedBy }: SyncArgs): Promise<{ dealId: string; status: DealStatus } | null> {
   const property = await tx.property.findUnique({ where: { id: propertyId }, select: { caseStatus: true } });
-  if (!property) return;
+  if (!property) return null;
   const linked = pickLinkedDeal(await loadDeals(tx, propertyId));
-  if (!linked) return;
+  if (!linked) return null;
   const next = dealStatusForCaseStatus(property.caseStatus, linked.status);
-  if (!next) return;
+  if (!next) return null;
   const res = await tx.deal.updateMany({
     where: { id: linked.id, status: linked.status },
     data: { status: next, version: { increment: 1 } },
   });
-  if (res.count !== 1) return;
+  if (res.count !== 1) return null;
   await tx.changeLog.create({
     data: {
       targetTable: "deals", targetId: linked.id, fieldName: "status",
       oldValue: linked.status, newValue: next, source: "auto", changedBy,
     },
   });
+  return { dealId: linked.id, status: next };
 }
 
 /**

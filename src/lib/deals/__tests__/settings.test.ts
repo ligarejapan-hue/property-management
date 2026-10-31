@@ -1,3 +1,4 @@
+import { DEFAULT_SCHEDULE_TEMPLATE } from "../schedule";
 import { describe, it, expect } from "vitest";
 import { resolveDealSettings, isKnownPropertyKind } from "../settings";
 import { DEFAULT_PROPERTY_KINDS } from "../constants";
@@ -10,7 +11,7 @@ describe("取引の設定の解決", () => {
     expect(resolveDealSettings(null)).toEqual({
       representativeTitle: null, representativeName: null, bankAccount: EMPTY_BANK_ACCOUNT,
       propertyKinds: DEFAULT_PROPERTY_KINDS, texts: {}, hasLogo: false, hasSeal: false,
-      sectionMatrix: resolveSectionMatrix(undefined, DEFAULT_PROPERTY_KINDS), checklistItems: DEFAULT_CHECKLIST_ITEMS, version: 0, updatedAt: null,
+      sectionMatrix: resolveSectionMatrix(undefined, DEFAULT_PROPERTY_KINDS), checklistItems: DEFAULT_CHECKLIST_ITEMS, scheduleTemplate: DEFAULT_SCHEDULE_TEMPLATE, version: 0, updatedAt: null,
     });
   });
   it("書類確認書の項目: 保存した値を使う・空や壊れていれば初めの項目・保存は1件以上", () => {

@@ -5,7 +5,8 @@
  */
 import prisma from "@/lib/prisma";
 import { REREAD_WINDOW_MS } from "@/lib/notifications/event-cursor";
-import { loadSourceRecipients, planEditLockLossDeliveries, planNextActionDeliveries, planSourceDeliveries } from "./plan";
+import { loadSourceRecipients, planDealScheduleDeliveries, planEditLockLossDeliveries, planNextActionDeliveries, planSourceDeliveries } from "./plan";
+import { sweepDealSchedules } from "@/lib/deals/schedule-sync";
 import { sendDueDeliveries, type SendResult } from "./send";
 import {
   NEXT_ACTION_PLAN_BUDGET_MS,
@@ -20,7 +21,7 @@ import {
 import type { PushSender } from "./web-push-sender";
 
 export interface PushRunResult {
-  planned: { nextAction: number; inquiry: number; registryJob: number; editLockLost: number };
+  planned: { nextAction: number; inquiry: number; registryJob: number; editLockLost: number; dealSchedule: number };
   sent: Record<SendResult, number>;
   purged: { deliveries: number; events: number; editLockLosses: number };
 }
@@ -68,10 +69,20 @@ export async function runPushNotifications(now: Date, sender: PushSender): Promi
   const nextActionNow = new Date(Math.max(now.getTime(), Date.now()));
   const nextAction =
     Date.now() >= nextActionDeadlineMs ? 0 : await planNextActionDeliveries(nextActionNow, { deadlineMs: nextActionDeadlineMs });
+  // 段取りの朝の見回り(既存の取引の段取りもここで作る)→ 朝の通知。失敗してもほかの通知は止めない。
+  let dealSchedule = 0;
+  try {
+    if (Date.now() < nextActionDeadlineMs) {
+      await sweepDealSchedules(nextActionNow, { deadlineMs: nextActionDeadlineMs });
+      dealSchedule = await planDealScheduleDeliveries(new Date(Math.max(now.getTime(), Date.now())), { deadlineMs: nextActionDeadlineMs });
+    }
+  } catch {
+    console.warn("deal_schedule_plan_failed");
+  }
   const sent = await sendDueDeliveries(now, sender, { startedAtMs });
   // 古い記録の片付けは持ち時間の内側で、1回に1,000件まで(残りは次の実行で・@codex #472 P2)。
   const purged = pastDeadline() ? { deliveries: 0, events: 0, editLockLosses: 0 } : await purgeOldRecords(now);
-  return { planned: { nextAction, inquiry, registryJob, editLockLost }, sent, purged };
+  return { planned: { nextAction, inquiry, registryJob, editLockLost, dealSchedule }, sent, purged };
 }
 
 async function purgeOldRecords(now: Date): Promise<{ deliveries: number; events: number; editLockLosses: number }> {

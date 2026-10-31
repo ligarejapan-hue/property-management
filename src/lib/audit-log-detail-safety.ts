@@ -323,6 +323,10 @@ const ACTION_EXTRA_KEYS: Readonly<Record<string, ReadonlySet<string>>> = {
   deal_registry_rights_view: new Set(["status", "activeRights", "cautions"]),
   // 取引の数値照合を見た(謄本を読んだとき)。summary=ok|mismatch|incomplete|none と件数だけ。
   deal_crosscheck_view: new Set(["summary", "mismatches", "compared"]),
+  // 段取りの判定のために謄本を読んだ。result=yes|no|unknown だけ(件数・抵当権者は載せない)。
+  deal_schedule_registry_read: new Set(["result"]),
+  // 段取りの項目の操作。op=add|update|complete_pre・fields=変えた列の名前・count=件数。作業名は自由記述なので載せない。
+  deal_schedule_update: new Set(["op", "fields", "count"]),
   // 取引の設定のロゴ・角印。kind=logo|seal・op=set|clear・bytes/width/height=数値。ファイル名は載せない。
   deal_settings_image_update: new Set(["kind", "op", "bytes", "width", "height"]),
   // メール送信設定のテスト送信。result=sent|failed の enum / code=safeErrorCode() 由来の許可リスト一致

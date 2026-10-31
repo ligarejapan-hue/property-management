@@ -16,6 +16,7 @@ import DealDocumentsPanel from "@/components/deals/deal-documents-panel";
 import DealPropertySide from "@/components/deals/deal-property-side";
 import { DealRegistryRights } from "@/components/deals/deal-registry-rights";
 import { DealCrosscheck } from "@/components/deals/deal-crosscheck";
+import { DealSchedule } from "@/components/deals/deal-schedule";
 import { dealsApi, errorText, type DealOptions, type UserOption } from "@/lib/deals/client";
 import type { DealView } from "@/lib/deals/view";
 import type { DealCalc } from "@/lib/deals/calc/deal-calc";
@@ -135,6 +136,8 @@ export default function DealDetailPage({ params }: { params: Promise<{ id: strin
       {calcError && <p className="text-sm text-red-600 dark:text-red-400" role="alert">{calcError}</p>}
       {/* 数値照合。取引の保存・当事者の変更・書類の発行で読み直す。 */}
       <DealCrosscheck dealId={deal.id} propertyId={deal.propertyId} canOpenProperty={data.canOpenProperty} revision={k([deal.version, deal.parties, issuedTick])} onOpenTab={setSelected} />
+      {/* 決済までの段取り。取引の保存・書類の発行で読み直す。 */}
+      <DealSchedule dealId={deal.id} users={users} defaultAssignee={deal.assigneeId} revision={k([deal.version, issuedTick])} />
       {/* 物件の謄本の登記の現況(段5c-2)。物件を差し替えたら読み直す。 */}
       <DealRegistryRights key={deal.propertyId ?? "none"} dealId={deal.id} propertyId={deal.propertyId} />
       <Tabs tabs={tabs} active={tab} onChange={setSelected} idBase="deal-detail" />

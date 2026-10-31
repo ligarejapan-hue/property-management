@@ -32,6 +32,7 @@ import {
 import { isTimedNextAction, jstDateToDbDate, jstToday, nextActionDeadline, nextActionReminderSlot } from "./reminder-schedule";
 import { DRIVE_CONNECTION_ID } from "@/lib/drive/connection";
 import { driveAlertParts } from "@/lib/drive/failure-alert";
+import { addYmdDays, jstMorningSendAt, scheduleNoticeSlot } from "@/lib/deals/schedule";
 
 type PermissionList = Parameters<typeof hasPermission>[0];
 
@@ -71,11 +72,20 @@ export interface DriveSyncSummary {
   alert: { key: string; failures: number } | null;
 }
 
+export interface DealScheduleSummary {
+  today: number;
+  tomorrow: number;
+  overdue: number;
+  /** 朝9時を過ぎたら、項目・期限・対象・日ごとの印。 */
+  reminders: Array<{ key: string }>;
+}
+
 export interface NotificationSummary {
   nextActions: NextActionSummary | null;
   inquiries: InquirySummary | null;
   registryJobs: RegistryJobSummary | null;
   driveSync: DriveSyncSummary | null;
+  dealSchedule: DealScheduleSummary | null;
 }
 
 export interface SummaryInput {
@@ -96,13 +106,14 @@ export const BAD_CURSOR_CODE: Record<CursorKind, string> = {
 };
 
 export async function buildNotificationSummary(input: SummaryInput): Promise<NotificationSummary> {
-  const [nextActions, inquiries, registryJobs, driveSync] = await Promise.all([
+  const [nextActions, inquiries, registryJobs, driveSync, dealSchedule] = await Promise.all([
     nextActionSummary(input),
     inquirySummary(input),
     registryJobSummary(input),
     driveSyncSummary(input),
+    dealScheduleSummary(input),
   ]);
-  return { nextActions, inquiries, registryJobs, driveSync };
+  return { nextActions, inquiries, registryJobs, driveSync, dealSchedule };
 }
 
 // ---------- 次回対応(N4) ----------
@@ -293,6 +304,32 @@ async function registryJobSummary({ session, permissions, registryCursor, now, k
     cursorAt: read.cursor.t.getTime(),
     ...(read.initialSeen ? { initialSeenKeys: read.initialSeen.map((r) => key(r.id)) } : {}),
   };
+}
+
+// ---------- 決済までの段取り(朝の通知と同じ対象) ----------
+
+async function dealScheduleSummary({ session, permissions, now, keys }: SummaryInput): Promise<DealScheduleSummary | null> {
+  if (!hasPermission(permissions, "deal", "read")) return null;
+  const today = jstToday(now);
+  const rows = await prisma.dealScheduleItem.findMany({
+    where: {
+      assigneeId: session.id, completedAt: null, excludedAt: null,
+      dueDate: { lte: jstDateToDbDate(addYmdDays(today, 1)) },
+      deal: { status: { not: "cancelled" } },
+    },
+    select: { id: true, dueDate: true, preIntroduction: true },
+  });
+  const counts = { today: 0, tomorrow: 0, overdue: 0 };
+  const reminders: DealScheduleSummary["reminders"] = [];
+  const morning = now.getTime() >= jstMorningSendAt(today);
+  for (const r of rows) {
+    const dueDate = r.dueDate.toISOString().slice(0, 10);
+    const slot = scheduleNoticeSlot({ dueDate, completed: false, excluded: false, preIntroduction: r.preIntroduction }, today);
+    if (!slot) continue;
+    counts[slot] += 1;
+    if (morning) reminders.push({ key: seenKey(keys, session.id, "deal_schedule", [r.id, dueDate, slot, today]) });
+  }
+  return { ...counts, reminders };
 }
 
 // ---------- ドライブの見回りが続けて失敗している(第2段b の続き) ----------

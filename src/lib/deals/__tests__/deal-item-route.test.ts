@@ -1,4 +1,6 @@
 import { describe, it, expect, vi, beforeEach } from "vitest";
+const { syncDealScheduleSafe } = vi.hoisted(() => ({ syncDealScheduleSafe: vi.fn(async () => undefined) }));
+vi.mock("@/lib/deals/schedule-sync", async (orig) => ({ ...(await orig<typeof import("../schedule-sync")>()), syncDealScheduleSafe }));
 vi.mock("next/server", async () => (await import("./route-mocks")).nextServerMock());
 vi.mock("@/lib/api-helpers", async () => (await import("./route-mocks")).apiHelpersMock());
 const { writeAuditLog } = vi.hoisted(() => ({ writeAuditLog: vi.fn() }));
@@ -168,6 +170,16 @@ describe("PATCH /api/deals/[id]", () => {
       expect(pm.changeLog.create).toHaveBeenCalledWith({
         data: expect.objectContaining({ targetTable: "properties", targetId: PROP_ID, source: "auto", newValue: "contracted" }),
       });
+    });
+    it("決済済に変えたときだけ、段取りに「決済済になった」と伝える", async () => {
+      pm.deal.findUnique.mockResolvedValue({ ...detailRow, propertyId: null, status: "contracted", assigneeId: "u-office" });
+      syncDealScheduleSafe.mockClear();
+      await PATCH(json("PATCH", { version: 3, status: "settled" }), ctx);
+      expect(syncDealScheduleSafe).toHaveBeenCalledWith(DEAL_ID, expect.objectContaining({ event: expect.objectContaining({ settled: true }) }));
+      pm.deal.findUnique.mockResolvedValue({ ...detailRow, propertyId: null, status: "settled", assigneeId: "u-office" });
+      syncDealScheduleSafe.mockClear();
+      await PATCH(json("PATCH", { version: 3, contractPlace: "試験区の事務所" }), ctx);
+      expect(syncDealScheduleSafe).toHaveBeenCalledWith(DEAL_ID, expect.objectContaining({ event: expect.objectContaining({ settled: false }) }));
     });
     it("状態を変えない保存では、ロックも案件ステータスの変更もしない", async () => {
       pm.deal.findUnique.mockResolvedValue(linkedRow());

@@ -4,10 +4,10 @@
  * - ref_key(1通に含めた件の印)は ID と時刻・回の番号だけ。物件名・申込者名などは入れない。
  * - 通知の本文は種類と件数・時刻だけ(D4)。文言は段階2の画面内のポップアップと同じ関数を使う。
  */
-import { nextActionReminderBody, registryJobBody, INQUIRY_URL, NEXT_ACTION_URL } from "@/lib/notifications/summary-state";
+import { DEAL_SCHEDULE_TAG, DEAL_SCHEDULE_TITLE, DEAL_SCHEDULE_URL, dealScheduleBody, nextActionReminderBody, registryJobBody, INQUIRY_URL, NEXT_ACTION_URL } from "@/lib/notifications/summary-state";
 import { EDIT_LOCK_LOST_TITLE, editLockLostBody } from "@/lib/notifications/edit-lock-notice";
 
-export const DELIVERY_KINDS = ["next_action", "inquiry_new", "registry_job_done", "edit_lock_lost"] as const;
+export const DELIVERY_KINDS = ["next_action", "inquiry_new", "registry_job_done", "edit_lock_lost", "deal_schedule"] as const;
 export type DeliveryKind = (typeof DELIVERY_KINDS)[number];
 
 export const SOURCES = ["inquiry", "registry_job"] as const;
@@ -106,6 +106,16 @@ export function parseNextActionRefKey(key: string): { id: string; deadlineSec: n
   return { id: m[1], deadlineSec: Number(m[2]), revMs: Number(m[3]), slot: Number(m[4]) };
 }
 
+/** 段取り: deal_schedule:<項目ID>:<期限>:<対象>:<日本時間の今日>。同じ項目でも日が変われば別の件(期限超過は毎朝)。 */
+export function dealScheduleRefKey(id: string, dueDate: string, slot: string, today: string): string {
+  return `deal_schedule:${id}:${dueDate}:${slot}:${today}`;
+}
+
+export function parseDealScheduleRefKey(key: string): { id: string; dueDate: string; slot: string; today: string } | null {
+  const m = /^deal_schedule:([0-9a-f-]{36}):(\d{4}-\d{2}-\d{2}):(tomorrow|today|overdue):(\d{4}-\d{2}-\d{2})$/.exec(key);
+  return m ? { id: m[1], dueDate: m[2], slot: m[3], today: m[4] } : null;
+}
+
 export function eventRefKey(source: Source, id: string): string {
   return `${source}:${id}`;
 }
@@ -156,6 +166,10 @@ export function nextActionPayload(
     url: NEXT_ACTION_URL,
     tag: "next-action:reminder",
   };
+}
+
+export function dealSchedulePayload(bindingId: string, counts: { today: number; tomorrow: number; overdue: number }): PushPayload {
+  return { b: bindingId, title: DEAL_SCHEDULE_TITLE, body: dealScheduleBody(counts), url: DEAL_SCHEDULE_URL, tag: DEAL_SCHEDULE_TAG };
 }
 
 export function inquiryPayload(bindingId: string, count: number): PushPayload {

@@ -211,7 +211,7 @@ describe("syncCaseStatusFromDeals", () => {
 describe("syncDealFromCaseStatus", () => {
   it("取引の状態を変え、取引の版を上げ、履歴に自動で残す", async () => {
     const tx = fakeTx("hold", [{ id: "d1", status: "contracted" }]);
-    await syncDealFromCaseStatus(tx as never, ARGS);
+    expect(await syncDealFromCaseStatus(tx as never, ARGS)).toEqual({ dealId: "d1", status: "cancelled" });
     expect(tx.deal.updateMany).toHaveBeenCalledWith({
       where: { id: "d1", status: "contracted" }, data: { status: "cancelled", version: { increment: 1 } },
     });

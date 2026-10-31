@@ -45,6 +45,8 @@ vi.mock("@/lib/api-helpers", () => {
 });
 
 vi.mock("@/lib/audit", () => ({ writeAuditLog: vi.fn() }));
+const { syncAfter } = vi.hoisted(() => ({ syncAfter: vi.fn(async () => undefined) }));
+vi.mock("@/lib/deals/schedule-sync", () => ({ syncDealScheduleAfterCaseStatus: syncAfter }));
 
 vi.mock("@/lib/change-log", async () => {
   const actual = await vi.importActual<typeof import("../change-log")>(
@@ -211,6 +213,15 @@ describe("POST /api/properties/bulk-update — 既存仕様不変", () => {
       expect(pm.deal.updateMany).toHaveBeenCalledWith({
         where: { id: "d1", status: "considering" }, data: { status: "contracted", version: { increment: 1 } },
       });
+    });
+    it("連動で決済済になった取引を段取りに伝える", async () => {
+      setup();
+      syncAfter.mockClear();
+      pm.deal.findMany.mockResolvedValueOnce([{ propertyId: PID }]).mockResolvedValueOnce([{ id: "d1", status: "contracted" }]);
+      pm.property.findUnique.mockResolvedValue({ caseStatus: "sold" });
+      pm.deal.updateMany.mockResolvedValue({ count: 1 });
+      await POST(makeRequest({ propertyIds: [PID], updates: { caseStatus: "sold" } }));
+      expect(syncAfter).toHaveBeenCalledWith({ dealId: "d1", status: "settled" }, expect.any(String));
     });
     it("案件ステータス以外の一括変更では取引を見ない", async () => {
       setup();

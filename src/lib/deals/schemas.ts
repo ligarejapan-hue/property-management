@@ -8,6 +8,7 @@ import { fundingInputsSchema } from "./funding-schema";
 import { businessInputsSchema } from "./business-schema";
 import { sectionMatrixSchema } from "./business-sections";
 import { checklistItemsSchema } from "./checklist";
+import { scheduleTemplateSchema } from "./schedule";
 
 export { text, yenInt };
 
@@ -227,4 +228,6 @@ export const dealSettingsUpdateSchema = z.object({
   sectionMatrix: sectionMatrixSchema.optional(),
   /** 書類確認書の項目(1件以上)。 */
   checklistItems: checklistItemsSchema.optional(),
+  /** 段取りのひな形(1件以上)。 */
+  scheduleTemplate: scheduleTemplateSchema.optional(),
 }).strict();
