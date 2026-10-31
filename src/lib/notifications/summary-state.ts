@@ -27,6 +27,8 @@ export interface SummaryState {
   registry: CursorSection;
   /** ドライブの見回りの失敗の見た印(1日で捨てる=続いていれば次の日にまた出す)。 */
   drive: { seen: Record<string, number> };
+  /** 決済までの段取りの見た印(項目・期限・対象・日ごと)。 */
+  dealSchedule: { seen: Record<string, number> };
 }
 
 /** 窓口の応答(`lib/notifications/summary.ts` の NotificationSummary と同じ形)。 */
@@ -47,10 +49,11 @@ export interface SummaryResponse {
   } | null;
   /** 反映の前後で古いサーバーが返さないことがあるので任意。 */
   driveSync?: { alert: { key: string; failures: number } | null } | null;
+  dealSchedule?: { today: number; tomorrow: number; overdue: number; reminders: Array<{ key: string }> } | null;
 }
 
 export interface SummaryNotice {
-  kind: Extract<NoticeKind, "next_action" | "inquiry_new" | "registry_job_done" | "drive_sync_failed">;
+  kind: Extract<NoticeKind, "next_action" | "inquiry_new" | "registry_job_done" | "drive_sync_failed" | "deal_schedule">;
   tag: string;
   title: string;
   body: string;
@@ -60,6 +63,9 @@ export interface SummaryNotice {
 export const NEXT_ACTION_URL = "/home";
 export const INQUIRY_URL = "/properties/sale-dm/inquiries";
 export const DRIVE_ADMIN_URL = "/admin/drive";
+export const DEAL_SCHEDULE_URL = "/home";
+export const DEAL_SCHEDULE_TITLE = "決済までの段取り";
+export const DEAL_SCHEDULE_TAG = "deal-schedule:morning";
 
 export function emptySummaryState(): SummaryState {
   return {
@@ -68,6 +74,7 @@ export function emptySummaryState(): SummaryState {
     inquiry: { cursor: null, cursorAt: null, seen: {} },
     registry: { cursor: null, cursorAt: null, seen: {} },
     drive: { seen: {} },
+    dealSchedule: { seen: {} },
   };
 }
 
@@ -101,12 +108,14 @@ export function parseSummaryState(raw: string | null, now: number): SummaryState
   const na = (d.nextAction && typeof d.nextAction === "object" ? d.nextAction : {}) as Record<string, unknown>;
   // ドライブの欄は後から足した=前の保存値には無い(空から始める)。
   const dr = (d.drive && typeof d.drive === "object" ? d.drive : {}) as Record<string, unknown>;
+  const ds = (d.dealSchedule && typeof d.dealSchedule === "object" ? d.dealSchedule : {}) as Record<string, unknown>;
   return {
     v: 1,
     nextAction: { seen: pruneSeen(na.seen, now, REMINDER_SEEN_TTL_MS) },
     inquiry: parseSection(d.inquiry, now),
     registry: parseSection(d.registry, now),
     drive: { seen: pruneSeen(dr.seen, now, EVENT_SEEN_TTL_MS) },
+    dealSchedule: { seen: pruneSeen(ds.seen, now, REMINDER_SEEN_TTL_MS) },
   };
 }
 
@@ -178,6 +187,15 @@ export function nextActionReminderBody(
   return untimed > 0 ? `${timedText}あります。${nextActionBody(today, overdue)}` : `${timedText}あります`;
 }
 
+/** 朝の通知の文言。件数だけ(取引名・作業名は入れない)。 */
+export function dealScheduleBody(c: { today: number; tomorrow: number; overdue: number }): string {
+  const parts: string[] = [];
+  if (c.today > 0) parts.push(`今日の段取りが${c.today}件`);
+  if (c.tomorrow > 0) parts.push(`明日の段取りが${c.tomorrow}件`);
+  if (c.overdue > 0) parts.push(`期限超過が${c.overdue}件`);
+  return parts.length ? `${parts.join("、")}あります` : "決済までの段取りがあります";
+}
+
 /** カーソルは新しい方を残す(ほかのタブが先に進めていたら戻さない)。 */
 function mergeCursor(sec: CursorSection, cursor: string, cursorAt: number): CursorSection {
   if (sec.cursor !== null && sec.cursorAt !== null && sec.cursorAt > cursorAt) return sec;
@@ -196,6 +214,7 @@ export function decideSummaryNotices(
     inquiry: { ...prev.inquiry, seen: { ...prev.inquiry.seen } },
     registry: { ...prev.registry, seen: { ...prev.registry.seen } },
     drive: { seen: { ...prev.drive.seen } },
+    dealSchedule: { seen: { ...prev.dealSchedule.seen } },
   };
 
   // ---- 次回対応: まだ見ていない (次回対応, 期限, 版, 回) があれば1つにまとめて知らせる ----
@@ -266,6 +285,15 @@ export function decideSummaryNotices(
       body: `見回りが${alert.failures}回続けて失敗しています。ドライブ連携の画面で確かめてください`,
       url: DRIVE_ADMIN_URL,
     });
+  }
+
+  // ---- 決済までの段取り: 見ていない印があれば1つにまとめて知らせる ----
+  if (res.dealSchedule) {
+    const fresh = res.dealSchedule.reminders.filter((r) => !(r.key in state.dealSchedule.seen));
+    for (const r of res.dealSchedule.reminders) state.dealSchedule.seen[r.key] = state.dealSchedule.seen[r.key] ?? now;
+    if (fresh.length > 0) {
+      notices.push({ kind: "deal_schedule", tag: DEAL_SCHEDULE_TAG, title: DEAL_SCHEDULE_TITLE, body: dealScheduleBody(res.dealSchedule), url: DEAL_SCHEDULE_URL });
+    }
   }
 
   return { state, notices };

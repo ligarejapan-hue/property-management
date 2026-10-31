@@ -14,6 +14,7 @@ import { propertyRecordScopeFilter } from "@/lib/property-record-guard";
 import { canAccessPropertyRecord } from "@/lib/property-access";
 import { checkSaleDmAccessFor } from "@/lib/sale-dm-letter/route-guard";
 import { recomputeCounts } from "@/lib/registry-fetch/bulk/jobs";
+import { addYmdDays, jstMorningSendAt, scheduleNoticeSlot, type ScheduleNoticeSlot } from "@/lib/deals/schedule";
 import {
   isTimedNextAction,
   jstDateToDbDate,
@@ -102,6 +103,44 @@ export async function nextActionCounts(db: Db, r: Recipient, now: Date): Promise
     db.nextAction.count({ where: { ...base, scheduledAt: { lt: todayDb } } }),
   ]);
   return { today, overdue };
+}
+
+// ---------- 決済までの段取り ----------
+
+export interface DueDealScheduleItem {
+  id: string;
+  dueDate: string;
+  slot: ScheduleNoticeSlot;
+  today: string;
+  /** その日の朝の通知の時刻(ms)。端末の結び付けより前の朝の分は送らない。 */
+  slotTime: number;
+}
+
+/** 中止の取引・導入前の項目は入れない(導入前は scheduleNoticeSlot が外す)。 */
+export function dealScheduleDueWhere(today: string) {
+  return {
+    completedAt: null, excludedAt: null,
+    dueDate: { lte: jstDateToDbDate(addYmdDays(today, 1)) },
+    deal: { status: { not: "cancelled" } },
+  };
+}
+
+/** 今朝の通知の対象(本人が担当・未完了で、前日・当日・期限超過)。朝9時より前は空。 */
+export async function dueDealScheduleItems(db: Db, r: Recipient, now: Date): Promise<DueDealScheduleItem[]> {
+  if (!hasPermission(r.permissions, "deal", "read")) return [];
+  const today = jstToday(now);
+  const slotTime = jstMorningSendAt(today);
+  if (now.getTime() < slotTime) return [];
+  const rows = await db.dealScheduleItem.findMany({
+    where: { assigneeId: r.id, ...dealScheduleDueWhere(today) },
+    select: { id: true, dueDate: true, preIntroduction: true },
+    orderBy: [{ dueDate: "asc" }, { id: "asc" }],
+  });
+  return rows.flatMap((row) => {
+    const dueDate = row.dueDate.toISOString().slice(0, 10);
+    const slot = scheduleNoticeSlot({ dueDate, completed: false, excluded: false, preIntroduction: row.preIntroduction }, today);
+    return slot ? [{ id: row.id, dueDate, slot, today, slotTime }] : [];
+  });
 }
 
 // ---------- 査定申込(N6) ----------

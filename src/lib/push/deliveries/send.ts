@@ -17,6 +17,7 @@ import { checkPushEndpoint } from "@/lib/push/endpoint";
 import {
   canReceiveInquiryNotice,
   canReceiveRegistryNotice,
+  dueDealScheduleItems,
   dueNextActions,
   loadRecipient,
   nextActionCounts,
@@ -39,6 +40,8 @@ import {
   SEND_TX_MAX_WAIT_MS,
   SEND_TX_TIMEOUT_MS,
   EDIT_LOCK_LOSS_NOTIFY_WINDOW_MS,
+  dealSchedulePayload,
+  parseDealScheduleRefKey,
   editLockLostPayload,
   inquiryPayload,
   nextActionPayload,
@@ -111,7 +114,7 @@ export async function sendDueDeliveries(
   // 種類ごとに取り出し、1件ずつ順番に並べる(どの種類も毎回番が回る=古い溜まりで時刻の決まった知らせが
   // 回の境目を過ぎて取り消される、を防ぐ・@codex #472 P2)。並べる順は編集権限(1時間で締まる)→次回対応→
   // 申込→謄本。各種類の取り出しは枠の数まで(合計で枠を超えた分は次の実行で)。
-  const KIND_ORDER = ["edit_lock_lost", "next_action", "inquiry_new", "registry_job_done"] as const;
+  const KIND_ORDER = ["edit_lock_lost", "next_action", "deal_schedule", "inquiry_new", "registry_job_done"] as const;
   const perKind = await Promise.all(
     KIND_ORDER.map((kind) =>
       prisma.notificationDelivery.findMany({
@@ -314,6 +317,21 @@ export async function recheck(
     if (keep.length === 0) return { drop, payload: null };
     const counts = await nextActionCounts(tx, r, now);
     return { drop, payload: nextActionPayload(bindingId, keep, counts.today, counts.overdue) };
+  }
+
+  if (d.kind === "deal_schedule") {
+    // 未完了・担当が本人・取引の閲覧権限ありで、期限と対象と日が記録のときと同じ件だけ送る。
+    const parsed = d.refs.map((ref) => ({ ref, key: parseDealScheduleRefKey(ref.refKey) }));
+    const current = await dueDealScheduleItems(tx, r, now);
+    const byId = new Map(current.map((x) => [x.id, x]));
+    const drop = parsed.filter(({ key }) => {
+      const cur = key ? byId.get(key.id) : undefined;
+      return !key || !cur || cur.dueDate !== key.dueDate || cur.slot !== key.slot || cur.today !== key.today;
+    }).map((p) => p.ref.id);
+    if (drop.length === parsed.length) return { drop, payload: null };
+    const counts = { today: 0, tomorrow: 0, overdue: 0 };
+    for (const x of current) counts[x.slot] += 1;
+    return { drop, payload: dealSchedulePayload(bindingId, counts) };
   }
 
   if (d.kind === "inquiry_new") {

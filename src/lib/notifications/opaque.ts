@@ -12,7 +12,7 @@ import crypto from "crypto";
  *   その区分を初回として取り直す)。見た印も変わるので、今の次回対応の回が1回出直す。
  */
 
-export type SeenKind = "next_action" | "inquiry" | "registry_job" | "drive_sync";
+export type SeenKind = "next_action" | "inquiry" | "registry_job" | "drive_sync" | "deal_schedule";
 export type CursorKind = "inquiry" | "registry_job";
 
 export interface NotificationKeys {

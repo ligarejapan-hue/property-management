@@ -16,14 +16,18 @@ import type { EventCursor } from "@/lib/notifications/opaque";
 import {
   canReceiveInquiryNotice,
   canReceiveRegistryNotice,
+  dealScheduleDueWhere,
+  dueDealScheduleItems,
   dueNextActions,
   inquiryInScope,
   loadRecipient,
+  type DueDealScheduleItem,
   type DueNextAction,
   type Recipient,
 } from "./eligibility";
 import {
   EDIT_LOCK_LOSS_NOTIFY_WINDOW_MS,
+  dealScheduleRefKey,
   editLockLossRefKey,
   eventRefKey,
   kindOfSource,
@@ -39,6 +43,8 @@ import {
   type Source,
 } from "./rules";
 import { recordExpiredEditLockLosses } from "@/lib/edit-lock/service";
+import { jstMorningSendAt } from "@/lib/deals/schedule";
+import { jstToday } from "@/lib/notifications/reminder-schedule";
 
 type Tx = Prisma.TransactionClient;
 const TX_OPTS = { timeout: SEND_TX_TIMEOUT_MS, maxWait: SEND_TX_MAX_WAIT_MS };
@@ -198,6 +204,51 @@ export async function planNextActionDeliveries(now: Date, opts: { deadlineMs?: n
 /** 端末が今の利用者に結び付く前の回は送らない(§7.3)。 */
 export function nextActionKeysFor(due: DueNextAction[], boundAt: Date): string[] {
   return due.filter((d) => d.slotTime >= boundAt.getTime()).map((d) => nextActionRefKey(d.id, d.deadline, d.revMs, d.slot));
+}
+
+// ---------- 決済までの段取り ----------
+
+/**
+ * 朝9時から、担当者の端末ごとに前日・当日・期限超過を1通にまとめる。同じ項目・同じ日の件は1度だけ
+ * (ref_key に日が入る=期限超過は毎朝1回)。中身は送らず、件数は送る直前に数え直す。
+ */
+export async function planDealScheduleDeliveries(now: Date, opts: { deadlineMs?: number } = {}): Promise<number> {
+  const pastDeadline = () => opts.deadlineMs !== undefined && Date.now() + SEND_TX_TIMEOUT_MS >= opts.deadlineMs;
+  const today = jstToday(now);
+  if (now.getTime() < jstMorningSendAt(today) || pastDeadline()) return 0;
+  const owners = await prisma.dealScheduleItem.findMany({
+    where: { ...dealScheduleDueWhere(today), assigneeId: { not: null } }, distinct: ["assigneeId"], select: { assigneeId: true },
+  });
+  const userIds = owners.flatMap((o) => (o.assigneeId ? [o.assigneeId] : []));
+  if (userIds.length === 0) return 0;
+  const subs = await prisma.pushSubscription.findMany({
+    where: { ...activeSubscriptionWhere(now), userId: { in: userIds } }, select: { id: true, userId: true }, orderBy: { id: "asc" },
+  });
+  const byUser = new Map<string, string[]>();
+  for (const s of subs) byUser.set(s.userId, [...(byUser.get(s.userId) ?? []), s.id]);
+  let created = 0;
+  const entries = [...byUser.entries()];
+  for (const [userId, subIds] of rotateStart(entries, entries.length ? randomInt(entries.length) : 0)) {
+    if (pastDeadline()) break;
+    const r = await loadRecipient(prisma, userId);
+    if (!r) continue;
+    const due = await dueDealScheduleItems(prisma, r, now);
+    if (due.length === 0) continue;
+    for (const subId of subIds) {
+      if (pastDeadline()) break;
+      created += await prisma.$transaction(async (tx) => {
+        const s = await lockSubscription(tx, subId);
+        if (!s || s.userId !== userId || s.revokedAt || s.expiresAt <= now) return 0;
+        return createDelivery(tx, s, "deal_schedule", dealScheduleKeysFor(due, s.boundAt), now, SOURCE_REFS_PER_TX);
+      }, TX_OPTS);
+    }
+  }
+  return created;
+}
+
+/** 端末が今の利用者に結び付く前の朝の分は送らない。 */
+export function dealScheduleKeysFor(due: DueDealScheduleItem[], boundAt: Date): string[] {
+  return due.filter((d) => d.slotTime >= boundAt.getTime()).map((d) => dealScheduleRefKey(d.id, d.dueDate, d.slot, d.today));
 }
 
 // ---------- 編集権限が外れた(N2・段階4c) ----------
