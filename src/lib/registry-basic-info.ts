@@ -13,7 +13,7 @@
  * ⚠**迷ったら読まない**(空のまま=人が入れる)。古い値は下線=抹消で、文字だけでは今の値と見分けられない。
  * ⚠地番・家屋番号は謄本の取得で「買う対象」を決める番号なので、取得が読める形(isReadableChiban)だけを入れる。
  */
-import { BUILDING_CHANGE_CAUSE, BUILDING_SECTION, LAND_SECTION, REGISTRY_SECTION_END, findRegistryTable } from "@/lib/registry-area";
+import { BUILDING_CHANGE_CAUSE, BUILDING_SECTION, LAND_SECTION, REGISTRY_SECTION_END, cellsOf, findRegistryTable } from "@/lib/registry-area";
 import { isReadableChiban, toHalfWidthDigits } from "@/lib/registry-fetch/chiban-input";
 import { structuredFieldsFor } from "@/lib/paste-import/structured-fields";
 
@@ -136,18 +136,39 @@ function readLotNumber(raw: string): string | null {
   return ADDRESS_THEN_NUMBER.exec(joined)?.[1] ?? null;
 }
 
+const BUILDING_NUMBER_LABEL = /^家\s*屋\s*番\s*号$/;
+
+/**
+ * 家屋番号を表の**欄全体**から読む(地番と同じ理由・@codex P1)。
+ * ⚠見出しの欄が「家屋番号」ちょうどの行だけ(「専有部分の家屋番号」は全部屋の範囲なので読まない)。
+ * ⚠次の行に折り返している・値が2つあるなら読まない(「1番1」+「の38」の前半だけを入れない)。
+ */
+function readBuildingNumber(raw: string): string | null {
+  const lines = raw.split("\n");
+  const values = new Set<string>();
+  for (const [i, line] of lines.entries()) {
+    const cells = cellsOf(line);
+    const label = cells?.findIndex((c) => BUILDING_NUMBER_LABEL.test(c)) ?? -1;
+    if (!cells || label === -1) continue;
+    // 外字(私用領域の文字)は実物で欄の空白として出ていたので落とす(parseRegistryText と同じ)。
+    const value = (cells[label + 1] ?? "").replace(/[\uE000-\uF8FF]/g, "").trim();
+    if (value === "") continue;
+    const next = cellsOf(lines[i + 1] ?? "");
+    if (next && (next[label] ?? "") === "" && (next[label + 1] ?? "") !== "") return null;
+    values.add(value);
+  }
+  return values.size === 1 ? [...values][0] : null;
+}
+
 /**
  * 地番と家屋番号。⚠不動産番号が2つ以上ある=2件以上を1つにまとめた PDF は、どれの番号か決められないので入れない。
  */
-export function registryIdentityOf(
-  parsed: { buildingNumber?: string | null },
-  raw: string,
-): RegistryIdentity {
+export function registryIdentityOf(raw: string): RegistryIdentity {
   const numbers = new Set(
     [...toHalfWidthDigits(raw).matchAll(/不動産番号[：:\s│┃｜|]*([0-9][0-9\- ]{9,19})/g)].map((m) => m[1].replace(/[\s-]/g, "")),
   );
   if (numbers.size > 1) return { lotNumber: null, buildingNumber: null };
-  return { lotNumber: toStoredNumber(readLotNumber(raw)), buildingNumber: toStoredNumber(parsed.buildingNumber) };
+  return { lotNumber: toStoredNumber(readLotNumber(raw)), buildingNumber: toStoredNumber(readBuildingNumber(raw)) };
 }
 
 export interface RegistryBasicCurrent {

@@ -190,7 +190,7 @@ export async function fillBasicInfoFromRegistryPdfBestEffort(args: {
     const parsed = parseRegistryText(text);
     const result = await fillPropertyFromRegistry({
       propertyId: args.propertyId,
-      values: { ...registryAreasOf(parsed), ...registryIdentityOf(parsed, text), ...parseRegistryBuildingFacts(text) },
+      values: { ...registryAreasOf(parsed), ...registryIdentityOf(text), ...parseRegistryBuildingFacts(text) },
       changedBy: args.changedBy,
     });
     return { ...result, unreadable: false };

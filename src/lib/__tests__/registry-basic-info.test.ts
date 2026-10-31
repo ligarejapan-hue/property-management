@@ -7,7 +7,6 @@ import {
   registryFillNotice,
   registryIdentityOf,
 } from "../registry-basic-info";
-import { parseRegistryText } from "../pdf-registry-parser";
 
 // 架空の区分建物の全部事項(登記情報提供サービスの PDF の文字の並びをまねたもの)。
 const unit = (opts: { structure?: string[]; exclusive?: string[]; extraHead?: string[] } = {}) =>
@@ -124,35 +123,35 @@ describe("謄本から構造と築年月を読む", () => {
 describe("地番と家屋番号を、謄本の取得で読める形にする", () => {
   it("★区分: 町名を落とす・全角を半角にする(町名が残ると謄本の取得が「読めない番号」で止まる)", () => {
     const raw = unit();
-    expect(registryIdentityOf(parseRegistryText(raw), raw)).toEqual({ lotNumber: "1番1", buildingNumber: "1番1の38" });
+    expect(registryIdentityOf(raw)).toEqual({ lotNumber: "1番1", buildingNumber: "1番1の38" });
   });
 
   it("★不動産番号が2つ以上ある=2件を1つにまとめた PDF は入れない", () => {
     const raw = `${unit()}\n┃ 表 題 部 （専有部分の建物の表示） │不動産番号│０１００００００００００９┃`;
-    expect(registryIdentityOf(parseRegistryText(raw), raw)).toEqual({ lotNumber: null, buildingNumber: null });
+    expect(registryIdentityOf(raw)).toEqual({ lotNumber: null, buildingNumber: null });
   });
 
   it.each(["１番１の", "の３８", "架空一丁目 １番１－", "番１"])("★切れた番号「%s」は入れない(取得で別の登記を指す)", (v) => {
     const raw = `┃家屋番号 │${v} │ ┃`;
-    expect(registryIdentityOf(parseRegistryText(raw), raw).buildingNumber).toBeNull();
+    expect(registryIdentityOf(raw).buildingNumber).toBeNull();
   });
 
   it.each(["１番１の ３８", "架空一丁目 １番 １", "の ３８", "架空町の ３８", "架空３丁目 １番１", "架空一丁目 ３８"])(
     "★番号の途中に空白がある・町名か決められない「%s」は入れない(末尾だけ取ると別の番号になる)",
     (v) => {
       const raw = `┃家屋番号 │${v} │ ┃`;
-      expect(registryIdentityOf(parseRegistryText(raw), raw).buildingNumber).toBeNull();
+      expect(registryIdentityOf(raw).buildingNumber).toBeNull();
     },
   );
 
   it("町名が2語でも、前が町名だけなら番号を読む", () => {
     const raw = "┃家屋番号 │架空 一丁目 ５番１の３ │ ┃";
-    expect(registryIdentityOf(parseRegistryText(raw), raw).buildingNumber).toBe("5番1の3");
+    expect(registryIdentityOf(raw).buildingNumber).toBe("5番1の3");
   });
 
   it("「５番」のように番で終わる番号は入れる", () => {
     const raw = "┃家屋番号 │５番 │ ┃";
-    expect(registryIdentityOf(parseRegistryText(raw), raw).buildingNumber).toBe("5番");
+    expect(registryIdentityOf(raw).buildingNumber).toBe("5番");
   });
 
   const landDoc = (rows: string[]) =>
@@ -163,7 +162,7 @@ describe("地番と家屋番号を、謄本の取得で読める形にする", (
       ...rows,
       "┃ 権 利 部 （甲 区） （所 有 権 に 関 す る 事 項） ┃",
     ].join("\n");
-  const lotOf = (raw: string) => registryIdentityOf(parseRegistryText(raw), raw).lotNumber;
+  const lotOf = (raw: string) => registryIdentityOf(raw).lotNumber;
 
   it("★土地: 地番の欄全体を読む", () => {
     expect(lotOf(landDoc(["┃１番１ │宅地 │１００：００│ ┃"]))).toBe("1番1");
@@ -200,9 +199,26 @@ describe("地番と家屋番号を、謄本の取得で読める形にする", (
     expect(lotOf("地番 1番1 地目 宅地")).toBeNull();
   });
 
+  it("★家屋番号が次の行に折り返している・値が2つあるものは入れない", () => {
+    const wrapped = "┃家屋番号 │１番１ │ ┃\n┃ │の３８ │ ┃";
+    expect(registryIdentityOf(wrapped).buildingNumber).toBeNull();
+    const two = "┃家屋番号 │１番１ │ ┃\n┠───┼───┨\n┃家屋番号 │１番２ │ ┃";
+    expect(registryIdentityOf(two).buildingNumber).toBeNull();
+  });
+
+  it("★家屋番号の次の行が別の項目なら読む・同じ値の繰り返しは1つ", () => {
+    expect(registryIdentityOf("┃家屋番号 │１番１ │ ┃\n┃建物の名称│３０５ │ ┃").buildingNumber).toBe("1番1");
+    expect(registryIdentityOf("┃家屋番号 │１番１ │ ┃\n┠───┼───┨\n┃家屋番号 │１番１ │ ┃").buildingNumber).toBe("1番1");
+  });
+
+  it("★罫線の無い文字・「専有部分の家屋番号」(範囲)からは読まない", () => {
+    expect(registryIdentityOf("家屋番号 １番１").buildingNumber).toBeNull();
+    expect(registryIdentityOf("┃専有部分の家屋番号│１番１ │ ┃").buildingNumber).toBeNull();
+  });
+
   it("読めない形は入れない", () => {
     const raw = "┃家屋番号 │未登記 │ ┃";
-    expect(registryIdentityOf(parseRegistryText(raw), raw).buildingNumber).toBeNull();
+    expect(registryIdentityOf(raw).buildingNumber).toBeNull();
   });
 });
 

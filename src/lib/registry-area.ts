@@ -32,7 +32,7 @@ function toHalfWidth(s: string): string {
 }
 
 /** 行を罫線で列に分ける。罫線が無い行は null。 */
-function cellsOf(line: string): string[] | null {
+export function cellsOf(line: string): string[] | null {
   if (!/[│┃|｜]/.test(line)) return null;
   return line.split(/[│┃|｜]/).map((c) => c.trim());
 }
