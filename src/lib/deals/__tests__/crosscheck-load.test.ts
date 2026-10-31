@@ -253,6 +253,32 @@ describe("土地のある物件の謄本", () => {
     setup(entries);
     expect(await loadRegistryDocInfo("p", "land")).toEqual({ activeRights: 0, caution: "謄本を確認してください(全部事項の謄本が無い土地・建物があります)" });
   });
+  it("読めない所有者事項は、権限の有無によらず uncertain", async () => {
+    for (const includeOwners of [true, false]) {
+      setup([
+        ["l", "all", "2026-10-02T00:00:00Z", LAND("1番", "120.50"), summary(0)],
+        ["o", "owner", "2026-01-01T00:00:00Z", null],
+      ]);
+      expect(await loadCrosscheckRegistry("p", { kindBase: "land", includeOwners })).toMatchObject({ uncertain: "unreadable" });
+    }
+  });
+  it("複数の不動産番号が入った所有者事項は、権限の有無によらず uncertain", async () => {
+    const text = `不動産番号 1234567890123\n不動産番号 1234567890124\n${OWNER_TABLE}`;
+    for (const includeOwners of [true, false]) {
+      setup([
+        ["o", "owner", "2026-10-05T00:00:00Z", LAND("1番", "120.50"), undefined, text],
+        ["l", "all", "2026-10-01T00:00:00Z", LAND("1番", "120.50"), summary(0)],
+      ]);
+      expect(await loadCrosscheckRegistry("p", { kindBase: "land", includeOwners })).toMatchObject({ uncertain: "unclassified" });
+    }
+  });
+  it("読めるのに物件を特定できない所有者事項では止めない", async () => {
+    setup([
+      ["o", "owner", "2026-01-01T00:00:00Z", { realEstateNumber: null, address: null, lotNumber: null, buildingNumber: null, owners: [] }, undefined, OWNER_TABLE],
+      ["l", "all", "2026-10-01T00:00:00Z", LAND("1番", "120.50"), summary(0)],
+    ]);
+    expect(await loadCrosscheckRegistry("p", { kindBase: "land", includeOwners: false })).toMatchObject({ uncertain: null });
+  });
   it("全部事項がある筆の所有者事項・要らない種類の所有者事項では uncertain にしない", async () => {
     setup([
       ["o", "owner", "2026-10-05T00:00:00Z", LAND("1番", "120.50"), undefined, OWNER_TABLE],

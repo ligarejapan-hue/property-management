@@ -94,8 +94,9 @@ export async function loadLandedCertificates(
     const at = a.createdAt.toISOString();
     const pdf = await readRegistryPdf(a.fileUrl);
     if (!pdf) {
-      if (a.registryCertificateType !== "owner") unreadable = true;
-      else if (o.includeOwners) ownerCerts.push({ identity: null, createdAt: at, list: [], confirmed: false });
+      // 所有者事項でも、読めなければどの筆のものか分からない(抜けた筆かもしれない)。
+      unreadable = true;
+      if (a.registryCertificateType === "owner" && o.includeOwners) ownerCerts.push({ identity: null, createdAt: at, list: [], confirmed: false });
       continue;
     }
     const full = isFullCertificateText(pdf.text);
@@ -110,6 +111,8 @@ export async function loadLandedCertificates(
       const parsedOwner = parseRegistryText(pdf.text);
       const ownerSide = sideOf(pdf.text, parsedOwner);
       const ownerIdentity = identityOf(parsedOwner, ownerSide);
+      if (hasSeveralProperties(pdf.text)) unclassified = true;
+      // ⚠読めるのに物件を特定できない所有者事項では止めない(表だけの所有者事項で、いつまでも確認できなくなるため)。
       if (ownerIdentity && ownerSide && required.includes(ownerSide)) ownerOnly.add(ownerIdentity);
       if (o.includeOwners) {
         ownerCerts.push({
