@@ -225,8 +225,8 @@ export default function Sidebar({ userRole, currentPath }: SidebarProps) {
         {/* モバイルではヘッダーからテーマ切替をここへ移動。pb の env(safe-area-inset-bottom)で
             iPhone のホームインジケータに最下部操作が隠れないよう余白を確保(非対応環境では 0)。 */}
         <div className="shrink-0 border-t border-side-line p-4 pb-[calc(1rem+env(safe-area-inset-bottom))] lg:hidden">
-          <div className="mb-2 text-xs font-medium text-side-muted">表示テーマ</div>
-          <ThemeToggle />
+          <div className="mb-2 text-xs font-medium text-side-muted">表示(色・文字サイズ)</div>
+          <ThemeToggle withDensity />
         </div>
       </aside>
     </>

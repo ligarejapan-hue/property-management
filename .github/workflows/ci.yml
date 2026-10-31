@@ -36,7 +36,10 @@ jobs:
         env:
           NODE_OPTIONS: --max-old-space-size=4096
 
+      # 同じ理由で、テストも heap 不足で落ちた(2026-10-30 21時台)。テストの子プロセスにも同じ上限を渡す。
       - run: npm test
+        env:
+          NODE_OPTIONS: --max-old-space-size=4096
 
   # 通知の送信(段階4)の記録づくり・送信を、本物の Postgres に対して確かめる。
   # (取り合い・同時実行・カーソル・時間帯など、モックでは確かめられない所。使い捨ての DB を立てて流す)

@@ -8,45 +8,35 @@ const src = readFileSync(
   "utf8",
 );
 
+// 見た目の設定 段階2(2026-10-31): 自動/明るい/暗い の3つボタン → 色テーマ(自動+7つ)と文字サイズの選択。
 describe("theme-toggle.tsx (source-assertion)", () => {
   it("is a client component", () => {
     expect(src).toContain('"use client"');
   });
-  it("uses useTheme from next-themes", () => {
+  it("色は next-themes の setTheme で即時に切り替える(自動=system・スタンダード=light に変換)", () => {
     expect(src).toContain("useTheme");
     expect(src).toContain("next-themes");
+    expect(src).toMatch(/setTheme\(toNextTheme\(v\)\)/);
   });
-  it("calls setTheme", () => {
-    expect(src).toContain("setTheme");
+  it("選択肢は options.ts の1か所から(ここに選択肢を直書きしない)", () => {
+    expect(src).toContain("THEME_OPTIONS.map");
+    expect(src).toContain("DENSITY_OPTIONS.map");
+    expect(src).not.toMatch(/"和モダン"|"紺と金"|"明るい"|"暗い"/);
   });
-  it('has 自動 label (system)', () => {
-    expect(src).toContain("自動");
+  it("選んだら DB に保存する(保存の中身は lib/appearance/client.ts)", () => {
+    expect(src).toMatch(/saveAppearance\(\{ theme: v \}\)/);
+    expect(src).toMatch(/saveAppearance\(\{ density: v \}\)/);
   });
-  it('has 明るい label (light)', () => {
-    expect(src).toContain("明るい");
+  it("文字サイズは html の値を1か所の正として購読する(ヘッダーとメニューの選択欄が食い違わない・@codex #618)", () => {
+    expect(src).toMatch(/useSyncExternalStore<DensityPref>\(subscribeAppearance, readDensity,/);
+    expect(src).toContain("applyDensity(v)");
+    expect(src).not.toMatch(/useState<DensityPref>/);
   });
-  it('has 暗い label (dark)', () => {
-    expect(src).toContain("暗い");
+  it("選択欄に読み上げ用の名前がある(キーボード・読み上げで選べる)", () => {
+    expect(src).toContain('aria-label="色テーマ"');
+    expect(src).toContain('aria-label="文字サイズ"');
   });
   it("exports ThemeToggle function", () => {
     expect(src).toMatch(/export\s+function\s+ThemeToggle/);
-  });
-  // P2 モバイルコンパクト化: アイコン + hidden sm:inline ラベル
-  it("lucide-react から Monitor / Sun / Moon をインポートしている", () => {
-    expect(src).toContain("Monitor");
-    expect(src).toContain("Sun");
-    expect(src).toContain("Moon");
-    expect(src).toContain("lucide-react");
-  });
-  it("ラベルが hidden sm:inline クラスで小画面非表示になっている", () => {
-    expect(src).toContain("hidden sm:inline");
-  });
-  it("各ボタンに aria-label が付与されている（アクセシビリティ）", () => {
-    // aria-label={o.label} で動的付与されていることを確認
-    expect(src).toContain("aria-label={o.label}");
-    // label 文字列が OPTIONS に定義されていること
-    expect(src).toContain("自動");
-    expect(src).toContain("明るい");
-    expect(src).toContain("暗い");
   });
 });
