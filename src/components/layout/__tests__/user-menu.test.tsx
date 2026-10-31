@@ -40,6 +40,9 @@ describe("利用者メニュー", () => {
     const header = readFileSync(join(process.cwd(), "src/components/layout/header.tsx"), "utf8");
     expect(header).toMatch(/href="\/admin\/change-password"\s*className="hidden sm:flex/);
   });
+  it("背の低い画面では画面の高さで止めて中を縦に送る(下のリンクが押せない、を防ぐ)", () => {
+    expect(src).toContain("max-h-[calc(100dvh-4.5rem)] overflow-y-auto");
+  });
   it("矢印は動きを減らす設定では回さない", () => {
     expect(src).toContain("motion-reduce:transition-none");
   });

@@ -89,7 +89,8 @@ export default function UserMenu({ userName, currentPath }: { userName: string; 
         <div
           id="user-menu-panel"
           // スマホの幅ではボタンが中ほどにあり、ボタンの右端にそろえると左へはみ出す(390px で実測)→ 画面の両端に合わせる
-          className="fixed left-3 right-3 top-14 z-50 mt-1 rounded-md border border-line bg-surface p-2 shadow-lg sm:absolute sm:left-auto sm:right-0 sm:top-full sm:w-64"
+          // 背の低い画面(スマホの横向きなど)では画面の高さで止めて中を縦に送る(下のリンクが押せない・@codex #623・上部ナビと同じ)
+          className="fixed left-3 right-3 top-14 z-50 mt-1 max-h-[calc(100dvh-4.5rem)] overflow-y-auto overscroll-contain rounded-md border border-line bg-surface p-2 shadow-lg sm:absolute sm:left-auto sm:right-0 sm:top-full sm:w-64"
         >
           <fieldset>
             <legend className="px-2 pb-1 pt-0.5 text-xs font-semibold text-fg-3">色テーマ</legend>
