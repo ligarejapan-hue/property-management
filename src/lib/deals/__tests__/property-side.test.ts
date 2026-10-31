@@ -7,13 +7,13 @@ describe("propertySideRows", () => {
   it("値を画面の言葉と単位で出す", () => {
     const rows = map(propertySideRows({
       caseStatus: "contract_planned", propertyType: "unit", buildingName: "確認マンション", roomNo: "201",
-      address: "東京都確認区1-2-3", salePrice: 12300000, exclusiveArea: 50.5, exclusiveAreaRegistry: 48,
+      address: "東京都確認区1-2-3", salePrice: 3000, exclusiveArea: 50.5, exclusiveAreaRegistry: 48,
       builtYear: 2001, builtMonth: 4, occupancyStatus: "vacant", managementFee: 12000,
       assignee: { name: "担当 太郎" },
     }));
     expect(rows["案件ステータス"]).toBe("契約予定");
     expect(rows["物件名"]).toBe("確認マンション");
-    expect(rows["価格"]).toBe("12,300,000円");
+    expect(rows["価格"]).toBe("3,000万円");
     expect(rows["専有面積(壁芯)"]).toBe("50.5㎡");
     expect(rows["専有面積(登記簿)"]).toBe("48㎡");
     expect(rows["築年月"]).toBe("2001年4月");

@@ -35,7 +35,7 @@ export type PropertySideSource = {
 };
 
 const area = (v: number | null | undefined) => (v == null ? null : `${v}㎡`);
-const yen = (v: number | null | undefined, suffix = "") => (v == null ? null : `${v.toLocaleString("ja-JP")}円${suffix}`);
+const yen = (v: number | null | undefined, suffix = "") => (v == null ? null : `${Number(v).toLocaleString("ja-JP")}円${suffix}`);
 const label = (labels: Record<string, string>, v: string | null | undefined) => (v ? (labels[v] ?? v) : null);
 
 function built(year: number | null | undefined, month: number | null | undefined): string | null {
@@ -56,7 +56,8 @@ export function propertySideRows(p: PropertySideSource): { label: string; value:
     ["所在・地番", p.lotNumber || null],
     ["家屋番号", p.buildingNumber || null],
     ["不動産番号", p.realEstateNumber || null],
-    ["価格", yen(p.salePrice)],
+    // salePrice は万円で保存している(物件の編集画面の「価格(万円)」)。
+    ["価格", p.salePrice == null ? null : `${Number(p.salePrice).toLocaleString("ja-JP")}万円`],
     ["専有面積(壁芯)", area(p.exclusiveArea)],
     ["専有面積(登記簿)", area(p.exclusiveAreaRegistry)],
     ["バルコニー面積", area(p.balconyArea)],
