@@ -1,12 +1,16 @@
 import { describe, it, expect, vi, beforeEach } from "vitest";
 vi.mock("next/server", async () => (await import("./route-mocks")).nextServerMock());
 vi.mock("@/lib/api-helpers", async () => (await import("./route-mocks")).apiHelpersMock());
-const { writeAuditLog, syncDealScheduleSafe, loadScheduleItems } = vi.hoisted(() => ({
-  writeAuditLog: vi.fn(), syncDealScheduleSafe: vi.fn(async () => undefined), loadScheduleItems: vi.fn(async () => []),
+const { writeAuditLog, syncDealScheduleSafe, loadScheduleItems, lockCalls } = vi.hoisted(() => ({
+  writeAuditLog: vi.fn(), syncDealScheduleSafe: vi.fn(async () => undefined), loadScheduleItems: vi.fn(async () => []), lockCalls: [] as string[],
 }));
 vi.mock("@/lib/audit", () => ({ writeAuditLog }));
 vi.mock("@/lib/deals/schedule-sync", () => ({
   syncDealScheduleSafe, loadScheduleItems, scheduleDealTitle: (d: { name: string }) => d.name,
+  withDealLock: async (id: string, fn: (tx: unknown) => unknown) => {
+    lockCalls.push(id);
+    return fn((await import("@/lib/prisma")).default);
+  },
 }));
 vi.mock("@/lib/agent-inquiry/user-check", () => ({ assertActiveUser: vi.fn(async () => undefined) }));
 vi.mock("@/lib/prisma", () => ({
@@ -33,6 +37,7 @@ const req = (body: unknown) => new Request("http://x", { method: "POST", body: J
 
 beforeEach(() => {
   vi.clearAllMocks();
+  lockCalls.length = 0;
   (getApiSession as Fn).mockResolvedValue({ id: USER_ID, role: "office_staff" });
   (getUserPermissions as Fn).mockResolvedValue(DEAL_PERMS);
   pm.deal.findUnique.mockResolvedValue({ id: DEAL_ID, settlementAt: new Date("2026-12-16T01:00:00Z") });
@@ -76,8 +81,9 @@ describe("段取りの API", () => {
     expect((await POST(req({ label: "a", dueDate: "2026-02-30" }), ctx)).status).toBe(422);
   });
 
-  it("期限を直すと手で直した印が付き、導入前も外れる", async () => {
+  it("期限を直すと手で直した印が付き、導入前も外れる。取引の鍵を持って書く", async () => {
     await PATCH(req({ dueDate: "2026-11-20" }), itemCtx);
+    expect(lockCalls).toEqual([DEAL_ID]);
     const arg = pm.dealScheduleItem.updateMany.mock.calls[0][0];
     expect(arg.where).toEqual({ id: ITEM_ID, dealId: DEAL_ID });
     expect(arg.data).toMatchObject({ dueDate: new Date("2026-11-20T00:00:00.000Z"), dueManual: true, preIntroduction: false });
@@ -111,6 +117,7 @@ describe("段取りの API", () => {
     pm.dealScheduleItem.updateMany.mockResolvedValue({ count: 4 });
     const res = await COMPLETE_PRE(new Request("http://x", { method: "POST" }), ctx);
     expect((await res.json()).count).toBe(4);
+    expect(lockCalls).toEqual([DEAL_ID]);
     expect(pm.dealScheduleItem.updateMany.mock.calls[0][0].where).toEqual({ dealId: DEAL_ID, preIntroduction: true, completedAt: null, excludedAt: null });
     expect(writeAuditLog).toHaveBeenCalledWith(expect.objectContaining({ detail: { op: "complete_pre", count: 4 } }));
   });

@@ -1,5 +1,6 @@
 import { createHash, randomInt } from "crypto";
 import prisma from "@/lib/prisma";
+import type { Prisma } from "@/generated/prisma";
 import { writeAuditLog } from "@/lib/audit";
 import { jstDateToDbDate } from "@/lib/notifications/reminder-schedule";
 import { kindBaseOf, type BasePropertyKind } from "./constants";
@@ -99,6 +100,17 @@ function patchData(p: ScheduleItemPatch, now: Date) {
   };
 }
 
+/**
+ * 取引の行を押さえて項目を書く。同期も手の変更もこれを通す(同期が読んだあとに手で直した期限や担当を、
+ * 古い読み取りで上書きしない・@codex #626 P2)。
+ */
+export function withDealLock<T>(dealId: string, fn: (tx: Prisma.TransactionClient) => Promise<T>): Promise<T> {
+  return prisma.$transaction(async (tx) => {
+    await tx.$queryRaw`SELECT "id" FROM "deals" WHERE "id" = ${dealId}::uuid FOR UPDATE`;
+    return fn(tx);
+  });
+}
+
 /** 取引の今の日付と条件に項目を合わせ、出来事があれば自動の完了も行う。戻り値 readSkipped=読むべき謄本を読まなかった。 */
 export async function syncDealSchedule(dealId: string, o: SyncOptions = {}): Promise<{ read: boolean; readSkipped: boolean }> {
   const now = o.now ?? new Date();
@@ -136,9 +148,7 @@ export async function syncDealSchedule(dealId: string, o: SyncOptions = {}): Pro
   // 読む枠が無かった回は何も変えない(判定できない扱いで担保の項目を作らない・次の実行で読む)。
   if (readSkipped) return { read, readSkipped };
 
-  await prisma.$transaction(async (tx) => {
-    // 同じ取引の同期を順番に(同時の保存と見回りで、同じ変更を2回書かない)。
-    await tx.$queryRaw`SELECT "id" FROM "deals" WHERE "id" = ${dealId}::uuid FOR UPDATE`;
+  await withDealLock(dealId, async (tx) => {
     const d = await tx.deal.findUnique({
       where: { id: dealId },
       select: {

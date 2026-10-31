@@ -39,7 +39,7 @@ vi.mock("@/lib/api-helpers", async () => {
 import { randomUUID } from "crypto";
 import prisma from "@/lib/prisma";
 import { addYmdDays } from "@/lib/deals/schedule";
-import { sweepDealSchedules, syncDealSchedule } from "@/lib/deals/schedule-sync";
+import { sweepDealSchedules, syncDealSchedule, withDealLock } from "@/lib/deals/schedule-sync";
 import { runPushNotifications } from "@/lib/push/deliveries/run";
 import type { PushSender } from "@/lib/push/deliveries/web-push-sender";
 import type { PushPayload } from "@/lib/push/deliveries/rules";
@@ -187,6 +187,34 @@ async function main() {
     await syncDealSchedule(d, { now });
     const house = await itemsOf(d);
     check("2 条件が外れた項目は消えずに対象外", house.length === sat.length && house.find((i) => i.templateKey === "s_mgmt_notify")?.excludedAt !== null);
+  }
+
+  // ---- 2b. 同期と手の変更が重なっても、手で直した期限を上書きしない ----
+  await reset();
+  {
+    const a = await user();
+    const d = await deal(a, { contract: MON, settlement: D(65) });
+    const now = at(MON, "10:00");
+    await syncDealSchedule(d, { now });
+    await prisma.deal.update({ where: { id: d }, data: { settlementAt: at(D(72), "10:00") } });
+    let release = () => {};
+    const gate = new Promise<void>((r) => { release = r; });
+    let locked = () => {};
+    const hasLock = new Promise<void>((r) => { locked = r; });
+    const manual = withDealLock(d, async (tx) => {
+      locked();
+      await gate;
+      await tx.dealScheduleItem.updateMany({ where: { dealId: d, templateKey: "s_statement" }, data: { dueDate: new Date(`${D(26)}T00:00:00Z`), dueManual: true } });
+    });
+    await hasLock;
+    const sync = syncDealSchedule(d, { now });
+    await new Promise((r) => setTimeout(r, 300));
+    release();
+    await Promise.all([manual, sync]);
+    const row = (await itemsOf(d)).find((i) => i.templateKey === "s_statement");
+    check("2b 手で直した期限が残る", ymd(row!.dueDate) === D(26) && row!.dueManual === true, row);
+    const other = (await itemsOf(d)).find((i) => i.templateKey === "s_keys_docs");
+    check("2b ほかの項目は付け直される", ymd(other!.dueDate) === D(71), other && ymd(other.dueDate));
   }
 
   // ---- 3. 自動の完了と見回り ----

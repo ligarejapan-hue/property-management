@@ -1,11 +1,11 @@
 import { NextResponse } from "next/server";
 import { z } from "zod";
-import prisma from "@/lib/prisma";
 import { ApiError, handleApiError, parseJsonBody } from "@/lib/api-helpers";
 import { writeAuditLog } from "@/lib/audit";
 import { assertActiveUser } from "@/lib/agent-inquiry/user-check";
 import { requireDeal } from "@/lib/deals/guard";
 import { scheduleItemUpdateData, scheduleItemUpdateSchema } from "@/lib/deals/schedule-route-schemas";
+import { withDealLock } from "@/lib/deals/schedule-sync";
 
 type Ctx = { params: Promise<{ id: string; itemId: string }> };
 
@@ -18,7 +18,7 @@ export async function PATCH(request: Request, ctx: Ctx) {
     const itemId = z.string().uuid().parse(p.itemId);
     const body = scheduleItemUpdateSchema.parse(await parseJsonBody(request));
     await assertActiveUser(body.assigneeId, "INVALID_STAFF");
-    const res = await prisma.dealScheduleItem.updateMany({ where: { id: itemId, dealId: id }, data: scheduleItemUpdateData(body, new Date()) });
+    const res = await withDealLock(id, (tx) => tx.dealScheduleItem.updateMany({ where: { id: itemId, dealId: id }, data: scheduleItemUpdateData(body, new Date()) }));
     if (res.count === 0) throw new ApiError(404, "項目が見つかりません", "NOT_FOUND");
     await writeAuditLog({
       userId: session.id, action: "deal_schedule_update", targetTable: "deals", targetId: id,
