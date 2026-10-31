@@ -115,11 +115,18 @@ export async function POST(request: Request) {
         const propertyId = body.propertyId ?? null;
         const created = await prisma.$transaction(async (tx) => {
           // 案件ステータスと連動する(lib/deals/status-link.ts)。ロックは物件の行が先。
+          // ⚠案件ステータスを動かすのは、その物件を編集できる人が作ったときだけ。ロック後に担当範囲を見直す。
           let status: DealStatus = "considering";
+          let canMoveCase = false;
           if (propertyId) {
             await lockPropertyRow(tx, propertyId);
-            const current = await tx.property.findUnique({ where: { id: propertyId }, select: { caseStatus: true } });
-            if (current) status = initialDealStatusForCase(current.caseStatus);
+            const current = await tx.property.findUnique({
+              where: { id: propertyId }, select: { caseStatus: true, createdBy: true, assignedTo: true },
+            });
+            if (current) {
+              status = initialDealStatusForCase(current.caseStatus);
+              canMoveCase = hasPermission(perms, "property", "write") && canAccessPropertyRecord(session, current);
+            }
           }
           const row = await tx.deal.create({
             data: {
@@ -131,7 +138,7 @@ export async function POST(request: Request) {
             },
             select: { id: true, dealNo: true },
           });
-          if (propertyId) await syncCaseStatusFromDeals(tx, { propertyId, changedBy: session.id });
+          if (propertyId && canMoveCase) await syncCaseStatusFromDeals(tx, { propertyId, changedBy: session.id });
           return row;
         });
         await writeAuditLog({

@@ -13,7 +13,7 @@ import { loadDealSettings } from "@/lib/deals/settings-store";
 import { isKnownPropertyKind } from "@/lib/deals/settings";
 import { DEAL_TRACKED_FIELDS, dealChangeValues, toDealUpdateData } from "@/lib/deals/change-values";
 import { DEAL_DETAIL_SELECT, toDealView } from "@/lib/deals/view";
-import { syncCaseStatusFromDeals } from "@/lib/deals/status-link";
+import { canChangeDealStatus, syncCaseStatusFromDeals } from "@/lib/deals/status-link";
 import { lockPropertyRow } from "@/lib/property-record-guard";
 
 type Ctx = { params: Promise<{ id: string }> };
@@ -29,12 +29,12 @@ export async function GET(_req: Request, ctx: Ctx) {
     const id = await idOf(ctx);
     const row = await prisma.deal.findUnique({ where: { id }, select: DEAL_DETAIL_SELECT });
     if (!row) throw new ApiError(404, "取引が見つかりません", "NOT_FOUND");
-    let canOpenProperty = false;
-    if (row.propertyId && hasPermission(perms, "property", "read")) {
-      const p = await prisma.property.findUnique({ where: { id: row.propertyId }, select: { createdBy: true, assignedTo: true } });
-      canOpenProperty = !!p && canAccessPropertyRecord(session, p);
-    }
-    return NextResponse.json({ deal: toDealView(row), canOpenProperty }, { headers: NO_STORE });
+    const p = row.propertyId
+      ? await prisma.property.findUnique({ where: { id: row.propertyId }, select: { createdBy: true, assignedTo: true } })
+      : null;
+    const canOpenProperty = !!p && hasPermission(perms, "property", "read") && canAccessPropertyRecord(session, p);
+    const canChangeStatus = canChangeDealStatus(session, row, p);
+    return NextResponse.json({ deal: toDealView(row), canOpenProperty, canChangeStatus }, { headers: NO_STORE });
   } catch (error) {
     return handleApiError(error);
   }
@@ -57,8 +57,17 @@ export async function PATCH(request: Request, ctx: Ctx) {
       const cur = await tx.deal.findUnique({ where: { id }, select: DEAL_DETAIL_SELECT });
       if (!cur) throw new ApiError(404, "取引が見つかりません", "NOT_FOUND");
       // 案件ステータスと連動する(lib/deals/status-link.ts)。ロックは物件の行 → 取引の行(下の updateMany)の順。
-      const linkedPropertyId = patch.status !== undefined && patch.status !== cur.status ? cur.propertyId : null;
+      const statusChanges = patch.status !== undefined && patch.status !== cur.status;
+      const linkedPropertyId = statusChanges ? cur.propertyId : null;
       if (linkedPropertyId) await lockPropertyRow(tx, linkedPropertyId);
+      if (statusChanges) {
+        const property = linkedPropertyId
+          ? await tx.property.findUnique({ where: { id: linkedPropertyId }, select: { assignedTo: true } })
+          : null;
+        if (!canChangeDealStatus(session, cur, property)) {
+          throw new ApiError(403, "取引の状態を変えられるのは、管理者と担当者だけです", "DEAL_STATUS_FORBIDDEN");
+        }
+      }
       const data = toDealUpdateData(patch, cur.businessType);
       // 資金計画表・事業計画書は plan_inputs のそれぞれの鍵(funding / business)だけを差し替える(ほかの鍵は残す)。
       if (patch.businessPlan !== undefined && (patch.businessType ?? cur.businessType) !== "resale") {

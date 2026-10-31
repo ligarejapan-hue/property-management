@@ -143,9 +143,10 @@ describe("GET /api/deals/options", () => {
 describe("POST /api/deals — 案件ステータスとの連動", () => {
   const post = () => POST(json("POST", { businessType: "brokerage", tradeSide: "seller", propertyId: PROP_ID }));
   const withCase = (caseStatus: string) => {
+    (getUserPermissions as Fn).mockResolvedValue([...DEAL_PERMS, { resource: "property", action: "write", granted: true }]);
     pm.property.findUnique.mockReset();
     pm.property.findUnique.mockImplementation(async (a: { select: Record<string, unknown> }) =>
-      "caseStatus" in a.select && Object.keys(a.select).length === 1 ? { caseStatus } : { ...propRow, caseStatus });
+      "caseStatus" in a.select ? { caseStatus, createdBy: "u-office", assignedTo: null } : { ...propRow, caseStatus });
   };
   it("販売中の物件で作ると、取引は契約予定・案件も契約予定になる", async () => {
     withCase("on_sale");
@@ -161,6 +162,14 @@ describe("POST /api/deals — 案件ステータスとの連動", () => {
     pm.deal.findMany.mockResolvedValue([{ id: DEAL_ID, status: "settled" }]);
     await post();
     expect(pm.deal.create.mock.calls[0][0].data.status).toBe("settled");
+    expect(pm.property.updateMany).not.toHaveBeenCalled();
+  });
+  it("物件を編集できない人が作っても案件ステータスは動かさない", async () => {
+    withCase("on_sale");
+    (getUserPermissions as Fn).mockResolvedValue(DEAL_PERMS);
+    pm.deal.findMany.mockResolvedValue([{ id: DEAL_ID, status: "considering" }]);
+    const res = await post();
+    expect(res.status).toBe(201);
     expect(pm.property.updateMany).not.toHaveBeenCalled();
   });
   it("手入力の物件の取引では物件を触らない", async () => {

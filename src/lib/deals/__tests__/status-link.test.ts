@@ -1,5 +1,6 @@
 import { describe, expect, it, vi } from "vitest";
 import {
+  canChangeDealStatus,
   caseStatusForDealStatus,
   dealStatusForCaseStatus,
   initialDealStatusForCase,
@@ -90,6 +91,24 @@ describe("案件ステータス → 取引の状態", () => {
         expect(back, `${d} / ${current}`).toBeNull();
       }
     }
+  });
+});
+
+describe("取引の状態を変えられる人", () => {
+  const office = { id: "u1", role: "office_staff" };
+  it("管理者は変えられる", () => {
+    expect(canChangeDealStatus({ id: "x", role: "admin" }, { assigneeId: null }, null)).toBe(true);
+  });
+  it("その取引の担当者は変えられる", () => {
+    expect(canChangeDealStatus(office, { assigneeId: "u1" }, { assignedTo: "u2" })).toBe(true);
+  });
+  it("その物件の担当者は変えられる", () => {
+    expect(canChangeDealStatus(office, { assigneeId: "u2" }, { assignedTo: "u1" })).toBe(true);
+  });
+  it("それ以外は事務担当でも変えられない", () => {
+    expect(canChangeDealStatus(office, { assigneeId: "u2" }, { assignedTo: "u3" })).toBe(false);
+    expect(canChangeDealStatus(office, { assigneeId: null }, { assignedTo: null })).toBe(false);
+    expect(canChangeDealStatus(office, { assigneeId: null }, null)).toBe(false);
   });
 });
 

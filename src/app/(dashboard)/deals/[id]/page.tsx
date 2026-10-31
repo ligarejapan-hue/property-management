@@ -43,7 +43,7 @@ type DealTabKey = (typeof DEAL_TABS)[number]["key"];
  */
 export default function DealDetailPage({ params }: { params: Promise<{ id: string }> }) {
   const { id } = use(params);
-  const [data, setData] = useState<{ deal: DealView; canOpenProperty: boolean } | null>(null);
+  const [data, setData] = useState<{ deal: DealView; canOpenProperty: boolean; canChangeStatus: boolean } | null>(null);
   const [calc, setCalc] = useState<DealCalc | null>(null);
   const [options, setOptions] = useState<DealOptions | null>(null);
   const [users, setUsers] = useState<UserOption[]>([]);
@@ -135,7 +135,7 @@ export default function DealDetailPage({ params }: { params: Promise<{ id: strin
       <Tabs tabs={tabs} active={tab} onChange={setSelected} idBase="deal-detail" />
       <div {...tabPanelProps("deal-detail", tab)}>
         <div hidden={tab !== "basic"}>
-          <DealBasicPanel key={k(basicFormFromDeal(deal))} deal={deal} users={users} kinds={options?.propertyKinds ?? []} onSaved={reload} />
+          <DealBasicPanel key={k(basicFormFromDeal(deal))} deal={deal} canChangeStatus={data.canChangeStatus} users={users} kinds={options?.propertyKinds ?? []} onSaved={reload} />
         </div>
         <div hidden={tab !== "property"}>
           <DealPropertyPanel key={k([deal.propertySnapshot, deal.assessments])} deal={deal} canOpenProperty={data.canOpenProperty} onSaved={reload} />

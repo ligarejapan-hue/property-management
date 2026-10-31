@@ -15,8 +15,8 @@ import {
 } from "@/lib/deals/constants";
 
 export default function DealBasicPanel({
-  deal, users, kinds, onSaved,
-}: { deal: DealView; users: UserOption[]; kinds: PropertyKindDef[]; onSaved: () => Promise<void> }) {
+  deal, canChangeStatus, users, kinds, onSaved,
+}: { deal: DealView; canChangeStatus: boolean; users: UserOption[]; kinds: PropertyKindDef[]; onSaved: () => Promise<void> }) {
   const [form, setForm] = useState<BasicForm>(() => basicFormFromDeal(deal));
   const [saving, setSaving] = useState(false);
   const [message, setMessage] = useState<{ kind: "ok" | "err"; text: string } | null>(null);
@@ -53,8 +53,8 @@ export default function DealBasicPanel({
     <div className="space-y-5">
       {message && <p className="text-sm text-red-600 dark:text-red-400" role="alert">{message.text}</p>}
       <div className="grid gap-4 sm:grid-cols-2">
-        <Field label="状態" hint={deal.propertyId ? "物件の案件ステータスと連動します" : undefined}>
-          <SelectBox label="状態"value={form.status} onChange={(v) => set("status", v)} options={optionsOf(DEAL_STATUS_LABELS)} />
+        <Field label="状態" hint={!canChangeStatus ? "管理者と担当者だけが変えられます" : deal.propertyId ? "物件の案件ステータスと連動します" : undefined}>
+          <SelectBox label="状態" value={form.status} onChange={(v) => set("status", v)} options={optionsOf(DEAL_STATUS_LABELS)} disabled={!canChangeStatus} />
         </Field>
         <Field label="事業区分">
           <SelectBox label="事業区分" value={form.businessType} onChange={(v) => set("businessType", v)} options={optionsOf(DEAL_BUSINESS_TYPE_LABELS)} />

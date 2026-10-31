@@ -61,7 +61,7 @@ export const dealsApi = {
   list: (params: Record<string, string>) =>
     call<{ deals: DealListItem[]; total: number; page: number; pageSize: number }>(`/api/deals?${new URLSearchParams(params)}`),
   create: (body: Record<string, unknown>) => call<{ id: string; dealNo: string }>("/api/deals", { method: "POST", body }),
-  get: (id: string) => call<{ deal: DealView; canOpenProperty: boolean }>(`/api/deals/${id}`),
+  get: (id: string) => call<{ deal: DealView; canOpenProperty: boolean; canChangeStatus: boolean }>(`/api/deals/${id}`),
   /** 物件の謄本(全部事項)の登記の現況(確認用・段5c-2)。 */
   registryRights: (id: string) => call<{ rights: RegistryRightsView }>(`/api/deals/${id}/registry-rights`),
   update: (id: string, body: Record<string, unknown>) => call<{ version: number }>(`/api/deals/${id}`, { method: "PATCH", body }),

@@ -119,3 +119,15 @@ export async function syncDealFromCaseStatus(tx: Prisma.TransactionClient, { pro
     },
   });
 }
+
+/**
+ * 取引の状態を変えられる人=管理者・その取引の担当者・その物件の担当者(発注者決定 2026-10-31)。
+ * ⚠物件の案件ステータスの変更権限は変えていない(物件を編集できる人が変えると、取引も連動する)。
+ */
+export function canChangeDealStatus(
+  session: { id: string; role: string },
+  deal: { assigneeId: string | null },
+  property: { assignedTo: string | null } | null,
+): boolean {
+  return session.role === "admin" || deal.assigneeId === session.id || property?.assignedTo === session.id;
+}
