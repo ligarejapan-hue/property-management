@@ -221,7 +221,7 @@
     --color-gray-100: #F1F3F5;
     --color-gray-200: #E3E6EA;
     --color-gray-300: #c4c8cf;
-    --color-gray-400: #a5abb3;
+    --color-gray-400: #878e99;
     --color-gray-500: #828994;
     --color-gray-600: #676e79;
     --color-gray-700: #4A515C;
@@ -259,7 +259,7 @@
     --color-gray-100: #EFEBE2;
     --color-gray-200: #DCD5C8;
     --color-gray-300: #c0b9ac;
-    --color-gray-400: #a49c90;
+    --color-gray-400: #898175;
     --color-gray-500: #847d71;
     --color-gray-600: #696259;
     --color-gray-700: #4D473F;
@@ -297,7 +297,7 @@
     --color-gray-100: #F1F3F5;
     --color-gray-200: #E3E6EA;
     --color-gray-300: #c4c8cf;
-    --color-gray-400: #a5abb3;
+    --color-gray-400: #848b96;
     --color-gray-500: #828994;
     --color-gray-600: #676e79;
     --color-gray-700: #4A515C;
@@ -336,7 +336,7 @@
     --color-gray-100: #EDF1EC;
     --color-gray-200: #DCE3DA;
     --color-gray-300: #bec6be;
-    --color-gray-400: #9faaa2;
+    --color-gray-400: #828e87;
     --color-gray-500: #7d8a82;
     --color-gray-600: #626f67;
     --color-gray-700: #46534A;
@@ -374,7 +374,7 @@
     --color-gray-100: #F1EBE1;
     --color-gray-200: #E2D8CA;
     --color-gray-300: #c7bdaf;
-    --color-gray-400: #ada194;
+    --color-gray-400: #908477;
     --color-gray-500: #8f8376;
     --color-gray-600: #756a5e;
     --color-gray-700: #5A4F45;
@@ -486,12 +486,6 @@ html[data-density="compact"] input:is([type="checkbox"], [type="radio"]) {
 }
 html:not([data-layout="top"]) [data-shell="topnav"] {
   display: none;
-}
-/* ヘッダーの「配置」の欄は xl 以上(theme-toggle.tsx)。上部ナビの人は左サイドバーが無いぶん広いので lg 以上で出す=戻す手段を残す */
-@media (min-width: 64rem) {
-  html[data-layout="top"] [data-layout-select] {
-    display: flex;
-  }
 }
 
 body {

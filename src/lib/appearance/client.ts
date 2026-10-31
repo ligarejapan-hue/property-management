@@ -1,4 +1,12 @@
-import { DENSITY_OPTIONS, LAYOUT_OPTIONS, type AppearancePatch, type DensityPref, type LayoutPref } from "./options";
+import {
+  DENSITY_OPTIONS,
+  LAYOUT_OPTIONS,
+  type Appearance,
+  type AppearancePatch,
+  type DensityPref,
+  type LayoutPref,
+  type ThemePref,
+} from "./options";
 import { STORAGE_KEYS } from "./boot-script";
 
 // 見た目の設定: 画面側で 文字サイズ・レイアウト を付け替える/保存する部品。
@@ -46,15 +54,51 @@ export function subscribeAppearance(onChange: () => void): () => void {
   return () => window.removeEventListener(APPEARANCE_CHANGE_EVENT, onChange);
 }
 
-export async function saveAppearance(patch: AppearancePatch): Promise<boolean> {
+/** GET/PATCH /api/me/preferences の中身(段階4)。user の null=会社の標準を使う。 */
+export type PreferencesData = {
+  user: { theme: string | null; density: string | null; layout: string | null };
+  company: { theme?: string; density?: string; layout?: string };
+  allowedThemes: ThemePref[];
+  effective: Appearance;
+  canEditCompany: boolean;
+};
+
+// 設定 > 表示・利用者メニュー・スマホのメニューで共有する読み込み(画面を開いている間に何度も読みにいかない)。
+let cached: Promise<PreferencesData | null> | null = null;
+
+async function requestPreferences(init?: RequestInit): Promise<PreferencesData | null> {
   try {
-    const res = await fetch("/api/me/preferences", {
-      method: "PATCH",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify(patch),
-    });
-    return res.ok;
+    const res = await fetch("/api/me/preferences", { cache: "no-store", ...init });
+    if (!res.ok) return null;
+    return ((await res.json()) as { data?: PreferencesData }).data ?? null;
   } catch {
-    return false;
+    return null;
   }
+}
+
+/** 個人・会社の標準・選べる色テーマ。読めなければ null(次の呼び出しで読み直す)。force=必ず読み直す。 */
+export function loadPreferences(force = false): Promise<PreferencesData | null> {
+  if (!cached || force) {
+    const p = requestPreferences().then((d) => {
+      if (d === null && cached === p) cached = null;
+      return d;
+    });
+    cached = p;
+  }
+  return cached;
+}
+
+/** 保存して、保存後の中身を返す(失敗=null)。成功した中身を読み込み済みの値にする。 */
+export async function savePreferences(patch: AppearancePatch): Promise<PreferencesData | null> {
+  const data = await requestPreferences({
+    method: "PATCH",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(patch),
+  });
+  if (data) cached = Promise.resolve(data);
+  return data;
+}
+
+export async function saveAppearance(patch: AppearancePatch): Promise<boolean> {
+  return (await savePreferences(patch)) !== null;
 }

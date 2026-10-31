@@ -7,6 +7,8 @@ import {
   readLayout,
   saveAppearance,
   subscribeAppearance,
+  loadPreferences,
+  savePreferences,
 } from "../client";
 
 // 小さな偽の document / window / localStorage で、画面側の付け替えを実際に動かす。
@@ -75,11 +77,49 @@ describe("文字サイズ・レイアウトの付け替え", () => {
 
 describe("saveAppearance", () => {
   it("PATCH /api/me/preferences に送り、成否を返す(通信の失敗でも落ちない)", async () => {
-    const fetchMock = vi.fn(async () => new Response("{}", { status: 200 }));
+    const fetchMock = vi.fn(async () => Response.json({ data: { effective: {} } }));
     vi.stubGlobal("fetch", fetchMock);
     expect(await saveAppearance({ theme: "navy" })).toBe(true);
     expect(fetchMock).toHaveBeenCalledWith("/api/me/preferences", expect.objectContaining({ method: "PATCH", body: '{"theme":"navy"}' }));
     vi.stubGlobal("fetch", vi.fn(async () => { throw new Error("offline"); }));
     expect(await saveAppearance({ density: "large" })).toBe(false);
+  });
+});
+
+// 段階4: 設定 > 表示・利用者メニュー・スマホのメニューで、個人・会社の標準・選べる色を1回の読み込みで共有する。
+describe("loadPreferences / savePreferences", () => {
+  const data = (theme: string) => ({
+    user: { theme, density: null, layout: null }, company: {}, allowedThemes: ["auto", "navy"],
+    effective: { theme, density: "normal", layout: "side" }, canEditCompany: false,
+  });
+  it("1回だけ読み、続けて呼んでも同じ結果を使う(force で読み直す)", async () => {
+    const fetchMock = vi.fn(async () => Response.json({ data: data("navy") }));
+    vi.stubGlobal("fetch", fetchMock);
+    const a = await loadPreferences(true);
+    const b = await loadPreferences();
+    expect(a?.allowedThemes).toEqual(["auto", "navy"]);
+    expect(b).toBe(a);
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+    await loadPreferences(true);
+    expect(fetchMock).toHaveBeenCalledTimes(2);
+  });
+  it("読めなかったら null・次はもう一度読みにいく", async () => {
+    vi.stubGlobal("fetch", vi.fn(async () => new Response("", { status: 500 })));
+    expect(await loadPreferences(true)).toBeNull();
+    const ok = vi.fn(async () => Response.json({ data: data("auto") }));
+    vi.stubGlobal("fetch", ok);
+    expect((await loadPreferences())?.effective.theme).toBe("auto");
+    expect(ok).toHaveBeenCalledTimes(1);
+  });
+  it("保存できたら、その結果を読み込み済みの値にする(失敗は null)", async () => {
+    vi.stubGlobal("fetch", vi.fn(async () => Response.json({ data: data("navy") })));
+    const saved = await savePreferences({ theme: "navy" });
+    expect(saved?.user.theme).toBe("navy");
+    const again = vi.fn();
+    vi.stubGlobal("fetch", again);
+    expect(await loadPreferences()).toBe(saved);
+    expect(again).not.toHaveBeenCalled();
+    vi.stubGlobal("fetch", vi.fn(async () => new Response("{}", { status: 422 })));
+    expect(await savePreferences({ theme: "washi" })).toBeNull();
   });
 });

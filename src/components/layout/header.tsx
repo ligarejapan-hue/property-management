@@ -5,12 +5,13 @@ import Link from "next/link";
 import { KeyRound, LogOut } from "lucide-react";
 import StatusBadge, { USER_ROLE_INTENT, type BadgeIntent } from "@/components/ui/status-badge";
 import { ROLE_LABELS } from "@/lib/role-labels";
-import { ThemeToggle } from "@/components/theme/theme-toggle";
 import { HeaderBell } from "@/components/notifications/header-bell";
+import UserMenu from "./user-menu";
 
 interface HeaderProps {
   userName: string;
   userRole: string;
+  currentPath: string;
   onLogout: () => void;
 }
 
@@ -28,7 +29,7 @@ export function headerRoleBadge(role: string): { label: string; intent: BadgeInt
   };
 }
 
-export default function Header({ userName, userRole, onLogout }: HeaderProps) {
+export default function Header({ userName, userRole, currentPath, onLogout }: HeaderProps) {
   // v2: ロールは状態色(赤=エラー等)と衝突しない専用色(violet/sky/neutral)
   const { label: roleLabel, intent: roleIntent } = headerRoleBadge(userRole);
 
@@ -41,21 +42,21 @@ export default function Header({ userName, userRole, onLogout }: HeaderProps) {
       </h1>
 
       <div className="flex shrink-0 items-center gap-2 sm:gap-4">
-        {/* 通知 段階1: お知らせのベル(テーマ切替の左・スマホでは役職の左) */}
+        {/* 通知 段階1: お知らせのベル(利用者メニューの左) */}
         <HeaderBell />
-        {/* モバイルではテーマ切替をメニュー(ドロワー)下部へ移し、ヘッダーを 1 行に保つ */}
-        <div className="hidden sm:block">
-          <ThemeToggle withDensity withLayout />
-        </div>
+        {/* 見た目の設定 段階4: 利用者メニュー(名前を押すと 色テーマ をすぐ切り替え・「表示の設定」へ)。
+            それまでヘッダーに並べていた 色・配置・文字 の選択欄はここと 設定 > 表示 へ移した(ヘッダーが溢れない)。
+            名前は md 以上だけ(狭い幅は絵だけ・aria-label で名前を読む)。 */}
         <div className="flex items-center gap-2">
-          <span className="hidden md:inline text-sm text-gray-700 dark:text-gray-300">{userName}</span>
+          <UserMenu userName={userName} currentPath={currentPath} />
           <StatusBadge intent={roleIntent}>{roleLabel}</StatusBadge>
         </div>
         {/* パスワード変更(画面すっきり化 第1回・2026-10-15)。それまでは管理者のメニューにしか無かった。
             API(/api/me/change-password)も同日から本人の分だけ全員が使える(今のパスワードの照合は必須)。 */}
+        {/* スマホの幅では利用者メニューの中から(段階4・題名の幅を残すため) */}
         <Link
           href="/admin/change-password"
-          className="flex items-center gap-1.5 rounded-md px-2 py-1.5 text-sm text-gray-600 dark:text-gray-300 transition-colors hover:bg-gray-100 dark:hover:bg-gray-800 hover:text-gray-900 dark:hover:text-gray-100"
+          className="hidden sm:flex items-center gap-1.5 rounded-md px-2 py-1.5 text-sm text-gray-600 dark:text-gray-300 transition-colors hover:bg-gray-100 dark:hover:bg-gray-800 hover:text-gray-900 dark:hover:text-gray-100"
           title="パスワード変更"
           aria-label="パスワード変更"
         >
@@ -70,8 +71,8 @@ export default function Header({ userName, userRole, onLogout }: HeaderProps) {
           aria-label="ログアウト"
         >
           <LogOut className="h-4 w-4" />
-          {/* 文字は広い画面(xl)だけ。1024px 前後では選択欄が並んで溢れるため絵だけ(title で名前は出る) */}
-          <span className="hidden xl:inline">ログアウト</span>
+          {/* 文字は md 以上(選択欄を利用者メニューへ移して幅に余裕ができた)。狭い幅は絵だけ(aria-label で名前を読む) */}
+          <span className="hidden md:inline">ログアウト</span>
         </Button>
       </div>
     </header>

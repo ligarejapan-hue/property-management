@@ -19,7 +19,7 @@ describe("theme-toggle.tsx (source-assertion)", () => {
     expect(src).toMatch(/setTheme\(toNextTheme\(v\)\)/);
   });
   it("選択肢は options.ts の1か所から(ここに選択肢を直書きしない)", () => {
-    expect(src).toContain("THEME_OPTIONS.map");
+    expect(src).toContain("THEME_OPTIONS.filter");
     expect(src).toContain("DENSITY_OPTIONS.map");
     expect(src).not.toMatch(/"和モダン"|"紺と金"|"明るい"|"暗い"/);
   });
@@ -35,6 +35,13 @@ describe("theme-toggle.tsx (source-assertion)", () => {
   it("選択欄に読み上げ用の名前がある(キーボード・読み上げで選べる)", () => {
     expect(src).toContain('aria-label="色テーマ"');
     expect(src).toContain('aria-label="文字サイズ"');
+  });
+  it("色は会社が選べる色を絞っていればそれだけ(段階4)・「配置」はここに出さない", () => {
+    expect(src).toContain("loadPreferences()");
+    expect(src).toContain("allowed.includes(o.value)");
+    expect(src).toContain("themeChoices.map");
+    expect(src).not.toContain("withLayout");
+    expect(src).not.toContain("メニューの配置");
   });
   it("exports ThemeToggle function", () => {
     expect(src).toMatch(/export\s+function\s+ThemeToggle/);

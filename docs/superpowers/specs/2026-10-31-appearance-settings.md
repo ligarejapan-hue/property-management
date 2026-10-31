@@ -41,4 +41,20 @@
 - 出し分け = globals.css。`html[data-layout]` は描画前に付く=ちらつかない。広い画面(64rem=lg 以上)だけ。狭い幅はどちらの設定でも今までのドロワー(左上の ≡)=指示の「760px 以下は同じスマホ用」を含み、タブレット幅も今まで通り
 - ヘッダーの「配置」の選択欄は xl(1280px)以上だけ(1024px・大きめで溢れたため)。ログアウトの文字も xl 以上(絵だけでも aria-label)
 - Ctrl+K などアプリ全体のショートカットは今のアプリに無い(Ctrl+P の印刷止めは枠に関係なく同じ)
-### 段階4: 設定画面(設定 > 表示)・会社の初期値 — 未着手
+### 段階4: 設定画面(設定 > 表示)・会社の初期値
+- 画面 = `/settings/display`(「表示の設定」・だれでも自分の分)。部品 = `src/components/settings/display-settings.tsx`・見本 = `display-previews.tsx`
+  - 3つの設定を見本付きの選択肢で並べる。選択肢は本物のラジオ(fieldset+legend・矢印キーで選べる・キーボードで選んだ枠を出す)
+  - 色の見本 = ミニ画面(サイドバー・ヘッダー・カード・主ボタン)。色は各テーマの値で描く(`src/lib/appearance/swatches.ts`。5テーマは globals.css と同じ値=テストで突き合わせ・スタンダード/ダークは Tailwind の元の色)。自動はスタンダードとダークを半分ずつ
+  - 文字の見本 = 「目黒区中町 マンション 302号室」を、その設定のときの px で(rem で描くと今の大きさになり見比べられない)
+  - 押した瞬間に反映し、保存は自動。「保存しました」を小さく出して 2.5 秒で消す(失敗の知らせは消さない)
+  - 「会社の標準に戻す」= 3つとも null を保存 → 保存後の実際の値で描き直す
+- 会社の標準(管理者=user_management:write だけ・同じ画面の下の欄 `#company`)
+  - 保存 = `PUT /api/admin/appearance-defaults`(監査ログ `appearance_defaults_update`・対象 system_settings)。system_settings の `appearance.default.theme/density/layout`(null=行を消す=既定)
+  - 選べる色テーマ = `appearance.allowed.themes`(カンマ区切り・**行が無い=全部許可**=今の運用)。外した色は 設定画面・利用者メニュー・スマホのメニューの選択肢から消え、`PATCH /api/me/preferences` も 422。会社の標準の色は選べる色に入っていないと保存できない
+  - 個人の色が許可外になった人は、会社の標準の色で描く(resolveAppearance の3つ目の引数)
+  - `GET`/`PATCH /api/me/preferences` は同じ形(user・company・allowedThemes・effective・canEditCompany)。⚠PATCH の応答に canEditCompany が無いと、保存した直後に管理者の欄が消えた(実機で発見)
+- ヘッダー = 利用者メニュー(`src/components/layout/user-menu.tsx`)。名前を押すと 色テーマ をすぐ切り替え・「表示の設定」へのリンク(スマホの幅ではパスワード変更も)。段階2・3 でヘッダーに並べていた 色・配置・文字 の選択欄はここと 設定画面 へ移した(1024px でヘッダーが溢れる問題・上部ナビの人が戻せない問題が無くなった)。ログアウトの文字は md 以上
+  - スマホの幅ではメニューを画面の両端に合わせる(ボタンの右端にそろえると左へはみ出した)。鍵の絵は sm 以上だけ(題名の幅を残す)
+- スマホのメニュー(ドロワー)は今まで通り 色・文字 の選択欄+「表示の設定を開く」
+- コントラスト: 追加の5テーマの注記(gray-400)が白地で 2.3〜2.6 → `gen-themes.mjs` で白地・背景とも 3:1 以上になるまで濃くした(`contrast.mjs` に 背景との組も追加)。**スタンダード(今の見た目)の gray-400 は 2.6・ダークは基準以上**=スタンダードは今の見た目を変えるので発注者に判断をあおぐ
+- 動き: 選択肢の枠・矢印は `motion-reduce:transition-none`
