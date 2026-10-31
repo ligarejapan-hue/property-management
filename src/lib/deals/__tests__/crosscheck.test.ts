@@ -333,8 +333,16 @@ describe("土地のある物件の謄本(土地と建物の両方が要る)", ()
     expect(item(input, "seller").status).toBe("match");
     expect(item(house({ kindBase: "land", registry: { status: "none" } }), "mortgage").message).toBe("確認できない(土地の謄本がありません)");
   });
+  it("面積の合計を出せないときは謄本を比べない(不一致にせず、照合OKにもしない)", () => {
+    const input = house({ registry: both({ uncertain: "unreadable", areas: { unit: null, land: null, building: null, attachmentCreatedAt: OLD } }), documents: [doc({ price: 30_000_000 })] });
+    expect(item(input, "area_land").sources.find((s) => s.key === "registry")?.state).toBe("unverifiable");
+    expect(item(input, "area_land").status).not.toBe("mismatch");
+    const r = buildCrosscheck(input);
+    expect(r.mismatchCount).toBe(0);
+    expect(r.summary).toBe("incomplete");
+  });
   it("読めない・判定できない・多すぎる謄本があれば確認できない", () => {
-    for (const [uncertain, text] of [["unreadable", "読めない謄本"], ["unclassified", "判定できない謄本"], ["too_many", "すべてを確認できません"]] as const) {
+    for (const [uncertain, text] of [["unreadable", "読めない謄本"], ["unclassified", "判定できない謄本"], ["too_many", "すべてを確認できません"], ["no_full_certificate", "全部事項の謄本が無い"]] as const) {
       const input = house({ registry: both({ uncertain }) });
       expect(item(input, "mortgage").status).toBe("unverifiable");
       expect(item(input, "seller").message).toContain(text);

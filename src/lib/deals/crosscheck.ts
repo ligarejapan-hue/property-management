@@ -34,7 +34,7 @@ export const LANDLORD_DATE_MESSAGE = "変更日が決済日と違います(意�
 
 /** 謄本の種類。土地のある物件で、どちらが要るかを決める。 */
 export type RegistrySide = "土地" | "建物";
-export type RegistryUncertain = "unreadable" | "unclassified" | "too_many";
+export type RegistryUncertain = "unreadable" | "unclassified" | "too_many" | "no_full_certificate";
 export const LANDED_REQUIRED_SIDES: Partial<Record<BasePropertyKind, readonly RegistrySide[]>> = {
   house: ["土地", "建物"], building: ["土地", "建物"], land: ["土地"],
 };
@@ -44,6 +44,7 @@ const UNCERTAIN_TEXT: Record<RegistryUncertain, string> = {
   unreadable: "読めない謄本があります",
   unclassified: "土地か建物か判定できない謄本があります",
   too_many: "謄本が多く、すべてを確認できません",
+  no_full_certificate: "全部事項の謄本が無い土地・建物があります",
 };
 
 /** 足りない・確かめられない謄本の説明。問題が無ければ null。 */

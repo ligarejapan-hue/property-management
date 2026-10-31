@@ -87,6 +87,8 @@ export async function loadLandedCertificates(
   let unreadable = false;
   let unclassified = false;
   let readAny = false;
+  /** 所有者事項で存在が分かった筆(棟)。全部事項が無ければ担保を確かめられていない。 */
+  const ownerOnly = new Set<string>();
 
   for (const a of rows.slice(0, LANDED_CANDIDATES)) {
     const at = a.createdAt.toISOString();
@@ -105,10 +107,13 @@ export async function loadLandedCertificates(
         continue;
       }
       readAny = true;
+      const parsedOwner = parseRegistryText(pdf.text);
+      const ownerSide = sideOf(pdf.text, parsedOwner);
+      const ownerIdentity = identityOf(parsedOwner, ownerSide);
+      if (ownerIdentity && ownerSide && required.includes(ownerSide)) ownerOnly.add(ownerIdentity);
       if (o.includeOwners) {
-        const parsedOwner = parseRegistryText(pdf.text);
         ownerCerts.push({
-          identity: identityOf(parsedOwner, sideOf(pdf.text, parsedOwner)), createdAt: at,
+          identity: ownerIdentity, createdAt: at,
           list: (list ?? []).map((x) => ({ name: x.name, share: x.share })), confirmed: !!list?.length,
         });
       }
@@ -132,7 +137,8 @@ export async function loadLandedCertificates(
   }
 
   const uncertain: RegistryUncertain | null = rows.length > LANDED_CANDIDATES ? "too_many"
-    : unreadable ? "unreadable" : unclassified ? "unclassified" : null;
+    : unreadable ? "unreadable" : unclassified ? "unclassified"
+      : [...ownerOnly].some((id) => !seen.has(id)) ? "no_full_certificate" : null;
   return {
     hasRows: rows.length > 0, readAny, certs, ownerCerts,
     missing: required.filter((s) => !certs.some((c) => c.side === s)), uncertain,
@@ -205,8 +211,9 @@ async function loadLandedFacts(propertyId: string, o: { kindBase: BasePropertyKi
     certificates: certs.map((c) => ({ side: c.side, createdAt: c.createdAt })),
     areas: oldest ? {
       unit: null,
-      land: sumAreas(certs.filter((c) => c.side === "土地").map((c) => c.landArea)),
-      building: sumAreas(certs.filter((c) => c.side === "建物").map((c) => c.buildingArea)),
+      // 抜けた筆があるかもしれない合計は、正しい値と比べて不一致に見えるので出さない。
+      land: data.uncertain ? null : sumAreas(certs.filter((c) => c.side === "土地").map((c) => c.landArea)),
+      building: data.uncertain ? null : sumAreas(certs.filter((c) => c.side === "建物").map((c) => c.buildingArea)),
       attachmentCreatedAt: oldest,
     } : null,
     rights: oldest ? {

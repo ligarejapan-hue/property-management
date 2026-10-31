@@ -241,6 +241,33 @@ describe("土地のある物件の謄本", () => {
     expect(r.owners?.differsAcross).toBe(true);
     expect(r.owners?.list).toHaveLength(1);
   });
+  it("所有者事項しかない筆があれば uncertain(担保を見ていない)・権限が無い人でも同じ", async () => {
+    const entries: Parameters<typeof setup>[0] = [
+      ["o", "owner", "2026-10-05T00:00:00Z", LAND("2番", "1", "L2"), undefined, OWNER_TABLE],
+      ["l", "all", "2026-10-01T00:00:00Z", LAND("1番", "120.50"), summary(0)],
+    ];
+    setup(entries);
+    expect(await loadCrosscheckRegistry("p", { kindBase: "land", includeOwners: true })).toMatchObject({ uncertain: "no_full_certificate", missing: [] });
+    setup(entries);
+    expect(await loadCrosscheckRegistry("p", { kindBase: "land", includeOwners: false })).toMatchObject({ uncertain: "no_full_certificate" });
+    setup(entries);
+    expect(await loadRegistryDocInfo("p", "land")).toEqual({ activeRights: 0, caution: "謄本を確認してください(全部事項の謄本が無い土地・建物があります)" });
+  });
+  it("全部事項がある筆の所有者事項・要らない種類の所有者事項では uncertain にしない", async () => {
+    setup([
+      ["o", "owner", "2026-10-05T00:00:00Z", LAND("1番", "120.50"), undefined, OWNER_TABLE],
+      ["x", "owner", "2026-10-04T00:00:00Z", BLDG(), undefined, OWNER_TABLE],
+      ["l", "all", "2026-10-01T00:00:00Z", LAND("1番", "120.50"), summary(0)],
+    ]);
+    expect(await loadCrosscheckRegistry("p", { kindBase: "land", includeOwners: false })).toMatchObject({ uncertain: null });
+  });
+  it("抜けた筆があるかもしれないときは面積の合計を出さない", async () => {
+    setup([
+      ["l", "all", "2026-10-02T00:00:00Z", LAND("1番", "100.00"), summary(0)],
+      ["x", null, "2026-01-01T00:00:00Z", null],
+    ]);
+    expect(await loadCrosscheckRegistry("p", { kindBase: "land", includeOwners: false })).toMatchObject({ uncertain: "unreadable", areas: { land: null } });
+  });
   it("土地か建物か判定できない全部事項があれば uncertain", async () => {
     setup([["u", "all", "2026-10-02T00:00:00Z", { realEstateNumber: null, address: null, lotNumber: null, buildingNumber: null, owners: [] }]]);
     expect(await loadCrosscheckRegistry("p", house)).toMatchObject({ uncertain: "unclassified", missing: ["土地", "建物"] });
