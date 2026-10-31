@@ -576,7 +576,7 @@ sudo systemctl status property-management --no-pager
 > - 残すのは新しい 3 世代。消すのは反映の確認が終わってから: `ls -1t /var/backups/property-management/pre-migration/db-*.dump | tail -n +4 | xargs -r rm --`
 > - 戻すときは **ユーザーの明示指示があるときだけ**。控えより後の更新は消えるので、まず §8 のコードだけ戻す方法を検討する。今の DB に上書きしない（`pg_restore --clean` は控えに無い新しい表を消さず、途中で失敗すると新旧が混ざる）。`scripts/restore-db.sh` は `.sql.gz` 用なので、この控えには使えない。次の順で、空の DB に戻してから入れ替える（`<今のDB名>` `<アプリのDBユーザー>` は `DATABASE_URL` のもの）:
 >   1. `sudo -u postgres createdb -O <アプリのDBユーザー> pm_restore`
->   2. `pg_restore --exit-on-error --single-transaction --no-owner --no-privileges -d "<DATABASE_URL の DB名を pm_restore にし、`?` 以降を除いたもの>" <控え>`（失敗しても今の DB は変わらない。アプリのDBユーザーで接続するので、表の持ち主もそのユーザーになる）
+>   2. `pg_restore --exit-on-error --single-transaction --no-owner --no-privileges -d "<DATABASE_URL の DB名を pm_restore にし、? 以降を除いたもの>" <控え>`（失敗しても今の DB は変わらない。アプリのDBユーザーで接続するので、表の持ち主もそのユーザーになる）
 >   3. `sudo systemctl stop property-management`
 >   4. `sudo -u postgres psql -c 'ALTER DATABASE "<今のDB名>" RENAME TO pm_before_restore' -c 'ALTER DATABASE pm_restore RENAME TO "<今のDB名>"'`（`pm_before_restore` は確認が済むまで消さない）
 >   5. コードを控えの時点の版へ戻す（§8）。`sudo systemctl start property-management`
