@@ -66,8 +66,8 @@ export default function DealsPage() {
         <Field label="事業区分">
           <SelectBox label="事業区分" value={businessType} onChange={(v) => { setBusinessType(v); setPage(1); }} options={optionsOf(DEAL_BUSINESS_TYPE_LABELS)} allowEmpty />
         </Field>
-        <Field label="取引名・取引番号で探す">
-          <input value={q} onChange={(e) => { setQ(e.target.value); setPage(1); }} maxLength={100} aria-label="取引名・取引番号で探す" className={inputCls} />
+        <Field label="物件名・住所・取引番号で探す">
+          <input value={q} onChange={(e) => { setQ(e.target.value); setPage(1); }} maxLength={100} aria-label="物件名・住所・取引番号で探す" className={inputCls} />
         </Field>
         <label className="flex items-end gap-2 pb-2 text-sm">
           <input type="checkbox" checked={mine} onChange={(e) => { setMine(e.target.checked); setPage(1); }} />
@@ -87,7 +87,7 @@ export default function DealsPage() {
             <thead className="bg-gray-50 text-left text-xs text-gray-500 dark:bg-gray-900 dark:text-gray-400">
               <tr>
                 <th className="px-3 py-2">取引番号</th>
-                <th className="px-3 py-2">取引名</th>
+                <th className="px-3 py-2">物件</th>
                 <th className="px-3 py-2">事業区分</th>
                 <th className="px-3 py-2">状態</th>
                 <th className="px-3 py-2">契約</th>
@@ -100,7 +100,7 @@ export default function DealsPage() {
                 <tr key={r.id} className="border-t border-gray-100 dark:border-gray-800">
                   <td className="px-3 py-2 tabular-nums">{r.dealNo}</td>
                   <td className="px-3 py-2">
-                    <Link href={`/deals/${r.id}`} className="text-indigo-700 hover:underline dark:text-indigo-400">{r.name}</Link>
+                    <Link href={`/deals/${r.id}`} className="text-indigo-700 hover:underline dark:text-indigo-400">{r.title}</Link>
                   </td>
                   <td className="px-3 py-2">{DEAL_BUSINESS_TYPE_LABELS[r.businessType as keyof typeof DEAL_BUSINESS_TYPE_LABELS] ?? r.businessType}</td>
                   <td className="px-3 py-2">{DEAL_STATUS_LABELS[r.status as keyof typeof DEAL_STATUS_LABELS] ?? r.status}</td>

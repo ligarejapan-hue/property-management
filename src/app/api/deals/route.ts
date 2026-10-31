@@ -42,7 +42,14 @@ export async function GET(request: Request) {
       ...(query.businessType ? { businessType: query.businessType } : {}),
       ...(query.assignee ? { assigneeId: query.assignee === "me" ? session.id : query.assignee } : {}),
       ...(query.q
-        ? { OR: [{ name: { contains: query.q, mode: "insensitive" as const } }, { dealNo: { contains: query.q } }] }
+        ? {
+            OR: [
+              { name: { contains: query.q, mode: "insensitive" as const } },
+              { dealNo: { contains: query.q } },
+              { propertySnapshot: { path: ["buildingName"], string_contains: query.q, mode: "insensitive" as const } },
+              { propertySnapshot: { path: ["address"], string_contains: query.q, mode: "insensitive" as const } },
+            ],
+          }
         : {}),
     };
     const [rows, total] = await Promise.all([
@@ -105,7 +112,8 @@ export async function POST(request: Request) {
       try {
         const created = await prisma.deal.create({
           data: {
-            dealNo, name: body.name, businessType: body.businessType,
+            // 取引名の入力は廃止。列は残し、物件が未入力のときの見出しに取引番号を入れておく。
+            dealNo, name: dealNo, businessType: body.businessType,
             tradeSide: normalizeTradeSide(body.businessType, body.tradeSide),
             propertyId: body.propertyId ?? null, propertyKind, hasOc: body.hasOc ?? false,
             propertySnapshot: snapshot, taxRateBp, createdById: session.id,

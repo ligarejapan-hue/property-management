@@ -12,8 +12,8 @@ describe("取引態様", () => {
 
 describe("更新データ", () => {
   it("送られた項目だけ・日時は Date にする", () => {
-    expect(toDealUpdateData({ name: "新しい名前", contractAt: "2026-07-01T01:30:00.000Z", settlementAt: null }, "brokerage")).toEqual({
-      name: "新しい名前", contractAt: new Date("2026-07-01T01:30:00.000Z"), settlementAt: null,
+    expect(toDealUpdateData({ contractPlace: "売主宅", contractAt: "2026-07-01T01:30:00.000Z", settlementAt: null }, "brokerage")).toEqual({
+      contractPlace: "売主宅", contractAt: new Date("2026-07-01T01:30:00.000Z"), settlementAt: null,
     });
   });
   it("買取再販へ切り替えたら取引態様を空にする(態様を送っていなくても)", () => {
@@ -33,12 +33,12 @@ describe("更新データ", () => {
 
 describe("変更履歴の値", () => {
   it("追跡する項目だけ・日時は ISO 文字列", () => {
-    const v = dealChangeValues({ name: "a", contractAt: new Date("2026-07-01T01:30:00.000Z"), price: BigInt(1), propertySnapshot: {} });
-    expect(v).toEqual({ name: "a", contractAt: "2026-07-01T01:30:00.000Z", price: BigInt(1) });
+    const v = dealChangeValues({ businessType: "resale", contractAt: new Date("2026-07-01T01:30:00.000Z"), price: BigInt(1), propertySnapshot: {} });
+    expect(v).toEqual({ businessType: "resale", contractAt: "2026-07-01T01:30:00.000Z", price: BigInt(1) });
   });
   it("変わった項目だけが履歴の行になる", () => {
-    const old = dealChangeValues({ name: "a", status: "considering", contractAt: null });
-    const neu = dealChangeValues({ name: "a", status: "contracted", contractAt: null });
+    const old = dealChangeValues({ businessType: "resale", status: "considering", contractAt: null });
+    const neu = dealChangeValues({ businessType: "resale", status: "contracted", contractAt: null });
     const rows = buildChangeLogEntries({ targetTable: "deals", targetId: "d", changedBy: "u", oldValues: old, newValues: neu, trackedFields: DEAL_TRACKED_FIELDS });
     expect(rows.map((r) => [r.fieldName, r.oldValue, r.newValue])).toEqual([["status", "considering", "contracted"]]);
   });

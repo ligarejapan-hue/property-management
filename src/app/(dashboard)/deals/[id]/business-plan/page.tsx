@@ -8,6 +8,7 @@ import BusinessPlanForm from "@/components/deals/business-plan-form";
 import type { IssueNotice } from "@/components/deals/funding-plan-form";
 import { dealsApi, dealDocumentFileUrl, errorText } from "@/lib/deals/client";
 import type { DealView } from "@/lib/deals/view";
+import { dealTitle } from "@/lib/deals/deal-title";
 
 /** 事業計画書(社内用/銀行向け・買取再販だけ)。入力しながら、PDF と同じ形のプレビューを見る画面。 */
 export default function BusinessPlanPage({ params }: { params: Promise<{ id: string }> }) {
@@ -39,7 +40,7 @@ export default function BusinessPlanPage({ params }: { params: Promise<{ id: str
 
   return (
     <div className="mx-auto max-w-7xl space-y-5">
-      <PageHeader title="事業計画書" back={{ href: `/deals/${deal.id}`, to: deal.name }} description={`${deal.dealNo} ・ ${deal.name}`} />
+      <PageHeader title="事業計画書" back={{ href: `/deals/${deal.id}`, to: dealTitle(deal) }} description={`${deal.dealNo} ・ ${dealTitle(deal)}`} />
       {error && <p className="text-sm text-red-600 dark:text-red-400" role="alert">{error}</p>}
       {/* 発行の結果は画面(親)が持つ=保存のあとに入力欄が作り直されても消えない。 */}
       {notice?.kind === "ok" && (

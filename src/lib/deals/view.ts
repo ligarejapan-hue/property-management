@@ -1,4 +1,5 @@
 import type { Prisma } from "@/generated/prisma";
+import { dealTitle } from "./deal-title";
 import { readBroker, readSnapshot } from "./snapshot";
 import { readAssessments, readCosts, readLeases, readOverrides, readTerms } from "./inputs";
 import { readFundingInputs, type FundingInputs } from "./funding-schema";
@@ -10,18 +11,18 @@ const yen = (v: bigint | null) => (v === null ? null : Number(v));
 const userName = { select: { id: true, name: true } } as const;
 
 export const DEAL_LIST_SELECT = {
-  id: true, dealNo: true, name: true, businessType: true, status: true, contractAt: true, settlementAt: true,
+  id: true, dealNo: true, name: true, propertySnapshot: true, businessType: true, status: true, contractAt: true, settlementAt: true,
   assignee: userName,
 } satisfies Prisma.DealSelect;
 
 export interface DealListItem {
-  id: string; dealNo: string; name: string; businessType: string; status: string;
+  id: string; dealNo: string; title: string; businessType: string; status: string;
   contractAt: string | null; settlementAt: string | null; assigneeName: string | null;
 }
 
 export function toDealListItem(r: Prisma.DealGetPayload<{ select: typeof DEAL_LIST_SELECT }>): DealListItem {
   return {
-    id: r.id, dealNo: r.dealNo, name: r.name, businessType: r.businessType, status: r.status,
+    id: r.id, dealNo: r.dealNo, title: dealTitle({ name: r.name, propertySnapshot: readSnapshot(r.propertySnapshot) }), businessType: r.businessType, status: r.status,
     contractAt: iso(r.contractAt), settlementAt: iso(r.settlementAt), assigneeName: r.assignee?.name ?? null,
   };
 }
