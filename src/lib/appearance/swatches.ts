@@ -3,6 +3,7 @@ import type { ThemePref } from "./options";
 // 見た目の設定 段階4(2026-10-31): 設定 > 表示 の「ミニ画面」の見本に使う色。
 // 見本は今のテーマと関係なく各テーマの色で描くため、変数ではなく値で持つ(html の変数は今のテーマの値になっている)。
 // 5テーマは globals.css の html[data-theme] と同じ値(テストで突き合わせる)。スタンダード・ダークは Tailwind の元の色(16進の近い値)。
+// スタンダードの注記(muted)だけは 10-31 に濃くした値(globals.css の @theme gray-400=oklch(65.4% 0.01 56.259))。
 // 自動はスタンダードとダークを半分ずつ並べて見せる(画面側)。
 
 export type ThemeSwatch = {
@@ -19,7 +20,7 @@ export type ThemeSwatch = {
 
 export const THEME_SWATCHES: Record<Exclude<ThemePref, "auto">, ThemeSwatch> = {
   standard: {
-    page: "#fafaf9", surface: "#ffffff", line: "#e7e5e4", text: "#1c1917", muted: "#a6a09b",
+    page: "#fafaf9", surface: "#ffffff", line: "#e7e5e4", text: "#1c1917", muted: "#958f8b",
     accent: "#4f39f6", side: "#ffffff", sideText: "#44403b", sideActive: "#eef2ff",
   },
   blue: {
