@@ -231,16 +231,27 @@ describe("押した位置の追随(@codex #411 R4 P2)", () => {
     "utf8",
   );
 
+  // 見た目の設定 段階3: 位置の追い方は上部ナビと共通の use-nav-hash.ts へ移した。
+  const HOOK = readFileSync(join(process.cwd(), "src/components/layout/use-nav-hash.ts"), "utf8");
+  const TOP = readFileSync(join(process.cwd(), "src/components/layout/top-nav.tsx"), "utf8");
+
   it("⚠押した項目そのものから位置を取る(hashchange だけに頼らない)", () => {
     // アプリ内のリンクは history.pushState で遷移するため、同じページ内で
     // 位置だけ変えても hashchange は飛ばない=それだけでは追随できない。
     expect(SIDEBAR).toContain("const handleNavClick = (href: string) => {");
     expect(SIDEBAR).toContain('onClick={() => handleNavClick(item.href)}');
     const fn = SIDEBAR.slice(SIDEBAR.indexOf("const handleNavClick"), SIDEBAR.indexOf("const handleNavClick") + 400);
-    expect(fn).toContain('href.indexOf("#")');
-    expect(fn).toContain('setHash(at === -1 ? "" : href.slice(at))');
+    expect(fn).toContain("setFromHref(href)");
+    expect(HOOK).toContain('href.indexOf("#")');
+    expect(HOOK).toContain('setHash(at === -1 ? "" : href.slice(at))');
     // 直接 URL を開く/戻る・進む の受け口も残す。
-    expect(SIDEBAR).toContain('window.addEventListener("hashchange", sync)');
+    expect(HOOK).toContain('window.addEventListener("hashchange", sync)');
+  });
+
+  it("上部ナビも同じ部品で位置を追い、押した項目から位置を入れる", () => {
+    expect(SIDEBAR).toContain("useNavHash(currentPath)");
+    expect(TOP).toContain("useNavHash(currentPath)");
+    expect(TOP).toContain("setFromHref(item.href)");
   });
 });
 

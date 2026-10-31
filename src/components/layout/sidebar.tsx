@@ -1,10 +1,11 @@
 "use client";
 
 import Link from "next/link";
-import { useEffect, useState } from "react";
+import { useState } from "react";
 import { ChevronDown, ChevronRight, Menu, X, FileText } from "lucide-react";
 import { ThemeToggle } from "@/components/theme/theme-toggle";
 import { visibleSidebar, isNavItemActive, type NavGroup, type NavLeaf } from "./sidebar-model";
+import { useNavHash } from "./use-nav-hash";
 
 interface SidebarProps {
   userRole: string;
@@ -15,27 +16,13 @@ export default function Sidebar({ userRole, currentPath }: SidebarProps) {
   const [mobileOpen, setMobileOpen] = useState(false);
   const groups = visibleSidebar(userRole);
 
-  // ⚠いま見ている位置(#)。usePathname/props の currentPath は hash を含まないので
-  //   自分で追う(@codex #411 R2 P2)。初期値は空=サーバー描画と一致し、読み込み後に
-  //   実際の位置へ合わせる(描画のずれによる警告を出さない)。
-  const [hash, setHash] = useState("");
-  useEffect(() => {
-    const sync = () => setHash(window.location.hash);
-    sync();
-    // ⚠`hashchange` だけでは足りない(@codex #411 R4 P2)。アプリ内のリンクは
-    //   history.pushState で遷移するため、同じページ内で位置だけ変えても
-    //   このイベントは飛ばない。押した時点の位置は下の handleNavClick が入れる。
-    //   ここは「URL を直接開く/戻る・進む」など、押下を経由しない移動の受け口。
-    window.addEventListener("hashchange", sync);
-    return () => window.removeEventListener("hashchange", sync);
-  }, [currentPath]);
+  // いま見ている位置(#)。上部ナビと共通の use-nav-hash(@codex #411 R2/R4 の注意もそちら)。
+  const { hash, setFromHref } = useNavHash(currentPath);
 
-  // 押した項目そのものから位置を確定する。サイドバーはリンクを自分で描いて
-  // いるので、遷移の仕組みに関係なく確実に追随できる。
+  // 押した項目そのものから位置を確定する。
   const handleNavClick = (href: string) => {
     setMobileOpen(false);
-    const at = href.indexOf("#");
-    setHash(at === -1 ? "" : href.slice(at));
+    setFromHref(href);
   };
 
   const isActive = (href: string) => isNavItemActive(href, currentPath, hash);
@@ -210,8 +197,9 @@ export default function Sidebar({ userRole, currentPath }: SidebarProps) {
         <div className="fixed inset-0 z-30 bg-black/30 lg:hidden" onClick={() => setMobileOpen(false)} />
       )}
 
-      {/* Sidebar */}
+      {/* Sidebar(data-shell: 上部ナビを選んだ人には広い画面で出さない=globals.css。スマホのメニューはどちらでも同じこれ) */}
       <aside
+        data-shell="sidebar"
         className={`fixed inset-y-0 left-0 z-40 flex w-60 transform flex-col border-r border-side-line bg-side-bg transition-transform duration-200 lg:static lg:translate-x-0 ${
           mobileOpen ? "translate-x-0" : "-translate-x-full"
         }`}

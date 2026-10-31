@@ -7,6 +7,7 @@ import { useSession } from "next-auth/react";
 import { signOutWithNotificationCleanup } from "@/lib/notifications/logout";
 import Sidebar from "./sidebar";
 import Header from "./header";
+import TopNav from "./top-nav";
 import { USE_MOCK } from "@/lib/api-client";
 import ScreenProtectionProvider from "@/components/screen-protection/screen-protection-provider";
 
@@ -70,6 +71,8 @@ export default function DashboardLayout({
         <Sidebar userRole={userRole} currentPath={pathname} />
         <div className="flex flex-1 flex-col overflow-hidden">
           <Header userName={userName} userRole={userRole} onLogout={handleLogout} />
+          {/* 見た目の設定 段階3: 上部ナビ(選んだ人だけ・広い画面だけ。中身のページは同じ) */}
+          <TopNav userRole={userRole} currentPath={pathname} />
           {/*
            * v2: 超ワイド画面での行の間延びを防ぐ(1536px 上限・中央寄せ)。
            * h-full は子の % 高さ(例: field-survey/map の h-full エラー表示)を
