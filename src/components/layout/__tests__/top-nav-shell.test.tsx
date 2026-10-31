@@ -36,12 +36,10 @@ describe("枠への組み込み", () => {
     expect(t).toBeGreaterThan(h);
     expect(m).toBeGreaterThan(t);
   });
-  it("ヘッダーに「配置」の切り替え(スマホのメニューには出さない)", () => {
-    expect(header).toContain("<ThemeToggle withDensity withLayout />");
+  it("「配置」は 設定 > 表示 で選ぶ(段階4 でヘッダーの選択欄から移した・スマホのメニューには出さない)", () => {
+    expect(header).not.toContain("<ThemeToggle");
+    expect(toggle).not.toContain("メニューの配置");
     expect(sidebar).not.toContain("withLayout");
-    expect(toggle).toContain('aria-label="メニューの配置"');
-    expect(toggle).toContain("applyLayout(v);");
-    expect(toggle).toContain("saveAppearance({ layout: v })");
   });
 });
 
@@ -78,20 +76,16 @@ describe("実際の画面で見つけた点(1024px・大きめ)", () => {
   it("開閉の矢印は、動きを減らす設定では回さない", () => {
     expect(top).toContain("motion-reduce:transition-none");
   });
-  it("ヘッダーでは選択欄の見出しを広い画面(xl)だけに出す・スマホのメニューは今まで通り", () => {
-    expect(toggle).toContain('const labelClass = withLayout ? "hidden xl:inline" : "";');
-  });
 });
 
 describe("ヘッダーが溢れない(1024px・左サイドバー・大きめでログアウトが画面の外へ出た)", () => {
-  it("「配置」の欄は xl(1280px)以上だけ", () => {
-    expect(toggle).toContain('<label data-layout-select className="hidden items-center gap-1 text-xs text-fg-3 xl:flex">');
+  it("色・配置・文字の選択欄はヘッダーに並べない(段階4=利用者メニューと 設定 > 表示 へ)", () => {
+    expect(toggle).not.toContain("data-layout-select");
+    expect(css).not.toContain("data-layout-select");
+    expect(header).toContain("<UserMenu ");
   });
-  it("上部ナビを選んでいる人には lg(1024px)以上で出す(左サイドバーへ戻す手段を残す)", () => {
-    expect(css).toMatch(/@media \(min-width: 64rem\) \{\s*html\[data-layout="top"\] \[data-layout-select\] \{\s*display: flex;/);
-  });
-  it("ログアウトの文字は xl 以上だけ・絵だけでも名前が読める", () => {
-    expect(header).toContain('<span className="hidden xl:inline">ログアウト</span>');
+  it("ログアウトの文字は md 以上・絵だけでも名前が読める", () => {
+    expect(header).toContain('<span className="hidden md:inline">ログアウト</span>');
     expect(header).toContain('aria-label="ログアウト"');
   });
 });

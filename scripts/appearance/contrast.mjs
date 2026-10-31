@@ -14,6 +14,7 @@ for (const m of css.matchAll(/html\[data-theme="(\w+)"\] \{([^}]*)\}/g)) {
     ["注記 gray-500/白", g("color-gray-500"), g("color-white"), 3],
     ["注記 gray-500/背景50", g("color-gray-500"), g("color-gray-50"), 3],
     ["注記 gray-400/白", g("color-gray-400"), g("color-white"), 3],
+    ["注記 gray-400/背景50", g("color-gray-400"), g("color-gray-50"), 3],
     ["主ボタン 白/indigo-600", g("color-white"), g("color-indigo-600"), 4.5],
     ["リンク indigo-600/白", g("color-indigo-600"), g("color-white"), 4.5],
     ["選択中 indigo-700/indigo-50", g("color-indigo-700"), g("color-indigo-50"), 4.5],

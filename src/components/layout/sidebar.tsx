@@ -6,6 +6,7 @@ import { ChevronDown, ChevronRight, Menu, X, FileText } from "lucide-react";
 import { ThemeToggle } from "@/components/theme/theme-toggle";
 import { visibleSidebar, isNavItemActive, type NavGroup, type NavLeaf } from "./sidebar-model";
 import { useNavHash } from "./use-nav-hash";
+import { DISPLAY_SETTINGS_HREF } from "./user-menu";
 
 interface SidebarProps {
   userRole: string;
@@ -215,6 +216,14 @@ export default function Sidebar({ userRole, currentPath }: SidebarProps) {
         <div className="shrink-0 border-t border-side-line p-4 pb-[calc(1rem+env(safe-area-inset-bottom))] lg:hidden">
           <div className="mb-2 text-xs font-medium text-side-muted">表示(色・文字サイズ)</div>
           <ThemeToggle withDensity />
+          {/* 段階4: 見本付きで選べる 設定 > 表示 へ(配置もここで選ぶ) */}
+          <Link
+            href={DISPLAY_SETTINGS_HREF}
+            onClick={() => setMobileOpen(false)}
+            className="mt-2 inline-flex min-h-[36px] items-center text-sm text-side-text underline-offset-2 hover:underline"
+          >
+            表示の設定を開く
+          </Link>
         </div>
       </aside>
     </>

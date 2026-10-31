@@ -44,12 +44,27 @@ const T = {
 const hex = (h) => [1, 3, 5].map((i) => parseInt(h.slice(i, i + 2), 16));
 const toHex = (c) => "#" + c.map((v) => Math.round(Math.max(0, Math.min(255, v))).toString(16).padStart(2, "0")).join("");
 const mix = (a, b, t) => toHex(hex(a).map((v, i) => v + (hex(b)[i] - v) * t));
+const lum = (h) => {
+  const c = hex(h).map((v) => v / 255).map((v) => (v <= 0.03928 ? v / 12.92 : ((v + 0.055) / 1.055) ** 2.4));
+  return 0.2126 * c[0] + 0.7152 * c[1] + 0.0722 * c[2];
+};
+const ratio = (a, b) => {
+  const [x, y] = [lum(a), lum(b)].sort((p, q) => q - p);
+  return (x + 0.05) / (y + 0.05);
+};
+// 注記(gray-400)は白い面とページの背景の両方で 3:1 以上(段階4 の確認で 2.3〜2.6 だった)。線の色から注記の色へ寄せ、
+// 足りなければ補足の色(text2)の方へ少しずつ濃くする。
+const faintText = (t) => {
+  let c = mix(t.line, t.text3, 0.7);
+  for (let k = 0.05; ratio(c, t.surface) < 3.05 || ratio(c, t.bg) < 3.05; k += 0.05) c = mix(t.text3, t.text2, k);
+  return c;
+};
 
 const out = [];
 for (const [name, t] of Object.entries(T)) {
   const g = {
     50: t.bg, 100: t.surface2, 200: t.line,
-    300: mix(t.line, t.text3, 0.35), 400: mix(t.line, t.text3, 0.7), 500: mix(t.text3, t.text2, 0.12),
+    300: mix(t.line, t.text3, 0.35), 400: faintText(t), 500: mix(t.text3, t.text2, 0.12),
     600: mix(t.text3, t.text2, 0.55), 700: t.text2, 800: mix(t.text2, t.text, 0.5), 900: t.text,
     950: mix(t.text, "#000000", 0.3),
   };

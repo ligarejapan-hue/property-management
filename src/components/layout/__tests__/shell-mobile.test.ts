@@ -40,8 +40,9 @@ describe("header — モバイルで1行に収まる", () => {
   it("タイトルの左余白はハンバーガー幅を確実に避ける pl-12", () => {
     expect(header).toContain("pl-12 lg:pl-0");
   });
-  it("テーマ切替はモバイル非表示（メニューへ移動）", () => {
-    expect(header).toMatch(/hidden sm:block[^>]*>\s*<ThemeToggle/);
+  it("色・文字の選択欄はヘッダーに並べない(利用者メニューと 設定 > 表示 へ・段階4)", () => {
+    expect(header).not.toContain("<ThemeToggle");
+    expect(header).toContain("<UserMenu ");
   });
   it("ユーザー名はモバイル非表示（バッジのみ）", () => {
     expect(header).toMatch(/hidden md:inline/);

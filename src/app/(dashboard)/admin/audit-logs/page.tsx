@@ -280,6 +280,8 @@ const ACTION_LABELS: Record<string, string> = {
   deal_registry_rights_view: "取引の謄本の登記の現況を表示",
   deal_crosscheck_view: "取引の数値照合を表示",
   deal_settings_image_update: "取引の設定のロゴ・角印を変更",
+  // 見た目の設定 段階4(2026-10-31)。detail は会社の標準の値と選べる色テーマ。
+  appearance_defaults_update: "表示の会社の標準を変更",
 };
 
 const TARGET_TABLE_LABELS: Record<string, string> = {
@@ -287,6 +289,7 @@ const TARGET_TABLE_LABELS: Record<string, string> = {
   property_drive_folders: "ドライブのフォルダの紐づけ",
   deals: "取引",
   deal_settings: "取引の設定",
+  system_settings: "表示の会社の標準",
   deal_rate_tables: "取引の税率の表",
   properties: "物件",
   owners: "オーナー",

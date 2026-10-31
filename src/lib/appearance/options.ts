@@ -41,10 +41,23 @@ const pick = <T extends string>(allowed: readonly T[], ...candidates: unknown[])
 
 type Partialish = { theme?: unknown; density?: unknown; layout?: unknown } | null | undefined;
 
-/** 個人 → 会社の初期値 → 既定 の順に、選択肢にある最初の値を使う(DB の不正な値では落ちない)。 */
-export function resolveAppearance(user: Partialish, company: Partialish): Appearance {
+/**
+ * 選べる色テーマ(段階4・管理者の設定 appearance.allowed.themes=カンマ区切り)。将来用で、今は未設定=全部許可。
+ * 選択肢に無い値は捨て、一覧の並び順にそろえる。1つも残らなければ全部許可(設定の壊れで誰も選べなくならない)。
+ */
+export function parseAllowedThemes(value: string | null | undefined): ThemePref[] {
+  const listed = new Set((value ?? "").split(",").map((v) => v.trim()));
+  const allowed = THEMES.filter((t) => listed.has(t));
+  return allowed.length > 0 ? allowed : [...THEMES];
+}
+
+/**
+ * 個人 → 会社の初期値 → 既定 の順に、選択肢にある最初の値を使う(DB の不正な値では落ちない)。
+ * 色は選べる色テーマ(allowedThemes)の中から。どれも許可外なら許可の先頭。
+ */
+export function resolveAppearance(user: Partialish, company: Partialish, allowedThemes: readonly ThemePref[] = THEMES): Appearance {
   return {
-    theme: pick(THEMES, user?.theme, company?.theme) ?? DEFAULT_APPEARANCE.theme,
+    theme: pick(allowedThemes, user?.theme, company?.theme, DEFAULT_APPEARANCE.theme) ?? allowedThemes[0] ?? DEFAULT_APPEARANCE.theme,
     density: pick(DENSITIES, user?.density, company?.density) ?? DEFAULT_APPEARANCE.density,
     layout: pick(LAYOUTS, user?.layout, company?.layout) ?? DEFAULT_APPEARANCE.layout,
   };
@@ -80,6 +93,25 @@ export const appearancePatchSchema = z
   .refine((v) => Object.keys(v).length > 0, { message: "変更する項目がありません" });
 
 export type AppearancePatch = z.infer<typeof appearancePatchSchema>;
+
+/**
+ * 管理者が保存する会社の標準(段階4)。3項目は null=既定に戻す(行を消す)。選べる色テーマは1つ以上。
+ * 会社の色(null なら既定の「自動」)は選べる色の中に無ければならない(会社の標準が自分で選べない色になるのを防ぐ)。
+ */
+export const companyAppearanceSchema = z
+  .object({
+    theme: z.enum(THEMES).nullable(),
+    density: z.enum(DENSITIES).nullable(),
+    layout: z.enum(LAYOUTS).nullable(),
+    allowedThemes: z.array(z.enum(THEMES)).min(1),
+  })
+  .strict()
+  .refine((v) => v.allowedThemes.includes(v.theme ?? DEFAULT_APPEARANCE.theme), {
+    message: "会社の標準の色は、選べる色テーマに入れてください",
+    path: ["allowedThemes"],
+  });
+
+export type CompanyAppearanceInput = z.infer<typeof companyAppearanceSchema>;
 
 /**
  * next-themes の value(テーマ名 → html に付ける値)。**全テーマを書く**: next-themes は書いていないテーマの値を付けず、

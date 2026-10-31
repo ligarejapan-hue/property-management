@@ -20,6 +20,7 @@ vi.mock("@/lib/api-helpers", () => {
   return {
     ApiError: MockApiError,
     getApiSession: vi.fn(),
+    getUserPermissions: vi.fn(async () => []),
     apiResponse: (data: unknown, status = 200) => Response.json(data, { status }),
     parseJsonBody: vi.fn(async (r: Request) => r.json()),
     handleApiError: vi.fn((e: { status?: number; message?: string; code?: string; issues?: unknown }) =>
@@ -27,6 +28,7 @@ vi.mock("@/lib/api-helpers", () => {
   };
 });
 vi.mock("@/lib/auth", () => ({ auth: vi.fn() }));
+vi.mock("@/lib/permissions", () => ({ hasPermission: vi.fn(() => false) }));
 vi.mock("@/lib/prisma", () => {
   const db = {
     user: { findUnique: vi.fn(), update: vi.fn() },
@@ -37,6 +39,7 @@ vi.mock("@/lib/prisma", () => {
 
 import prisma from "@/lib/prisma";
 import { getApiSession, ApiError } from "@/lib/api-helpers";
+import { hasPermission } from "@/lib/permissions";
 import { GET, PATCH } from "../route";
 
 const db = prisma as unknown as {
@@ -49,6 +52,7 @@ const req = (body: unknown) =>
 
 beforeEach(() => {
   vi.clearAllMocks();
+  (hasPermission as Mock).mockReturnValue(false);
   (getApiSession as Mock).mockResolvedValue({ id: ME, email: "a@x", name: "A", role: "field_staff" });
   db.user.findUnique.mockResolvedValue({ theme: null, density: null, layout: null });
   db.systemSetting.findMany.mockResolvedValue([]);
@@ -64,6 +68,15 @@ describe("GET /api/me/preferences", () => {
     expect(data.user).toEqual({ theme: null, density: null, layout: null });
     expect(data.effective).toEqual({ theme: "navy", density: "normal", layout: "side" });
   });
+  it("会社の標準を変えられる人か(管理者=user_management:write)と、選べる色テーマも返す", async () => {
+    let { data } = await (await GET()).json();
+    expect(data.canEditCompany).toBe(false);
+    expect(data.allowedThemes).toHaveLength(8);
+    (hasPermission as Mock).mockReturnValue(true);
+    ({ data } = await (await GET()).json());
+    expect(data.canEditCompany).toBe(true);
+    expect(hasPermission).toHaveBeenCalledWith(expect.anything(), "user_management", "write");
+  });
   it("ログインしていなければ 401", async () => {
     (getApiSession as Mock).mockRejectedValue(new (ApiError as unknown as new (s: number, m: string) => Error)(401, "認証が必要です"));
     expect((await GET()).status).toBe(401);
@@ -76,11 +89,22 @@ describe("PATCH /api/me/preferences", () => {
     const res = await PATCH(req({ theme: "washi", density: "large" }));
     expect(res.status).toBe(200);
     expect(db.user.update).toHaveBeenCalledWith({ where: { id: ME }, data: { theme: "washi", density: "large" } });
-    expect((await res.json()).data.effective).toEqual({ theme: "washi", density: "large", layout: "side" });
+    const { data } = await res.json();
+    expect(data.effective).toEqual({ theme: "washi", density: "large", layout: "side" });
+    // GET と同じ形(保存後の応答で画面を置き換えても管理者の欄が消えない・実機で見つけた)
+    expect(data.canEditCompany).toBe(false);
+    expect(data.allowedThemes).toHaveLength(8);
   });
   it("null = 会社の標準に戻す", async () => {
     await PATCH(req({ theme: null }));
     expect(db.user.update).toHaveBeenCalledWith({ where: { id: ME }, data: { theme: null } });
+  });
+  it("会社が選べる色テーマを絞っているとき、許可外の色は保存しない(422)", async () => {
+    db.systemSetting.findMany.mockResolvedValue([{ key: "appearance.allowed.themes", value: "standard,navy" }]);
+    expect((await PATCH(req({ theme: "washi" }))).status).toBe(422);
+    expect(db.user.update).not.toHaveBeenCalled();
+    expect((await PATCH(req({ theme: "navy" }))).status).toBe(200);
+    expect((await PATCH(req({ theme: null }))).status).toBe(200);
   });
   it.each([
     [{ theme: "purple" }],

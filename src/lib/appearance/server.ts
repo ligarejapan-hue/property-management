@@ -1,16 +1,29 @@
 import { cookies } from "next/headers";
 import prisma from "@/lib/prisma";
 import { auth } from "@/lib/auth";
-import { resolveAppearance, type Appearance } from "./options";
+import {
+  THEME_OPTIONS,
+  parseAllowedThemes,
+  resolveAppearance,
+  type Appearance,
+  type CompanyAppearanceInput,
+} from "./options";
 
 // 会社全体の初期値(段階4で管理者が画面から変える)。system_settings の key/value。
+// allowedThemes = 選べる色テーマ(カンマ区切り・将来用。行が無い=全部許可)。
 export const COMPANY_APPEARANCE_KEYS = {
   theme: "appearance.default.theme",
   density: "appearance.default.density",
   layout: "appearance.default.layout",
+  allowedThemes: "appearance.allowed.themes",
 } as const;
 
-export async function loadCompanyAppearance(): Promise<{ theme?: string; density?: string; layout?: string }> {
+export async function loadCompanyAppearance(): Promise<{
+  theme?: string;
+  density?: string;
+  layout?: string;
+  allowedThemes?: string;
+}> {
   const rows = await prisma.systemSetting.findMany({
     where: { key: { in: Object.values(COMPANY_APPEARANCE_KEYS) } },
     select: { key: true, value: true },
@@ -20,7 +33,26 @@ export async function loadCompanyAppearance(): Promise<{ theme?: string; density
     theme: get(COMPANY_APPEARANCE_KEYS.theme),
     density: get(COMPANY_APPEARANCE_KEYS.density),
     layout: get(COMPANY_APPEARANCE_KEYS.layout),
+    allowedThemes: get(COMPANY_APPEARANCE_KEYS.allowedThemes),
   };
+}
+
+/** 管理者が会社の標準を保存する(段階4)。null=行を消して既定に戻す。全部の色が選べるなら制限の行も消す(=未設定)。 */
+export async function saveCompanyAppearance(input: CompanyAppearanceInput): Promise<void> {
+  const allowed = parseAllowedThemes(input.allowedThemes.join(","));
+  const values: [string, string | null][] = [
+    [COMPANY_APPEARANCE_KEYS.theme, input.theme],
+    [COMPANY_APPEARANCE_KEYS.density, input.density],
+    [COMPANY_APPEARANCE_KEYS.layout, input.layout],
+    [COMPANY_APPEARANCE_KEYS.allowedThemes, allowed.length === THEME_OPTIONS.length ? null : allowed.join(",")],
+  ];
+  const remove = values.filter(([, v]) => v === null).map(([k]) => k);
+  await prisma.$transaction([
+    ...values
+      .filter((e): e is [string, string] => e[1] !== null)
+      .map(([key, value]) => prisma.systemSetting.upsert({ where: { key }, create: { key, value }, update: { value } })),
+    ...(remove.length > 0 ? [prisma.systemSetting.deleteMany({ where: { key: { in: remove } } })] : []),
+  ]);
 }
 
 /** その人の個人の設定(未設定=null)と、会社の初期値・既定を足した実際の見た目。 */
@@ -29,10 +61,12 @@ export async function loadUserAppearance(userId: string) {
     prisma.user.findUnique({ where: { id: userId }, select: { theme: true, density: true, layout: true } }),
     loadCompanyAppearance(),
   ]);
+  const allowedThemes = parseAllowedThemes(company.allowedThemes);
   return {
     user: { theme: user?.theme ?? null, density: user?.density ?? null, layout: user?.layout ?? null },
-    company,
-    effective: resolveAppearance(user, company),
+    company: { theme: company.theme, density: company.density, layout: company.layout },
+    allowedThemes,
+    effective: resolveAppearance(user, company, allowedThemes),
   };
 }
 

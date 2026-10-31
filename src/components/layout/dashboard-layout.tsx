@@ -70,7 +70,7 @@ export default function DashboardLayout({
       <div className="flex h-screen overflow-hidden bg-page">
         <Sidebar userRole={userRole} currentPath={pathname} />
         <div className="flex flex-1 flex-col overflow-hidden">
-          <Header userName={userName} userRole={userRole} onLogout={handleLogout} />
+          <Header userName={userName} userRole={userRole} currentPath={pathname} onLogout={handleLogout} />
           {/* 見た目の設定 段階3: 上部ナビ(選んだ人だけ・広い画面だけ。中身のページは同じ) */}
           <TopNav userRole={userRole} currentPath={pathname} />
           {/*
