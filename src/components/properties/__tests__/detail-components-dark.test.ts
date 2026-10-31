@@ -19,8 +19,8 @@ describe("action-bar.tsx dark: 配色 (phase2b 2b-3)", () => {
   it("「確認した」は共通 Button の success（緑の塗りは部品側）", () => {
     expect(actionBarSrc).toContain('variant="success"');
   });
-  it("ライトモードの純 accent ボタン色（bg-indigo-600）は残っている", () => {
-    expect(actionBarSrc).toContain("bg-indigo-600");
+  it("送付可の色（テーマで変わらない藍 bg-iris-600）は残っている", () => {
+    expect(actionBarSrc).toContain("bg-iris-600");
   });
   it("ライトモードの純 accent ボタン色（bg-red-600）は残っている", () => {
     expect(actionBarSrc).toContain("bg-red-600");

@@ -49,8 +49,8 @@ export default function Sidebar({ userRole, currentPath }: SidebarProps) {
   const linkClasses = (href: string) =>
     `flex items-center gap-3 rounded-md px-3 py-2 text-sm font-medium transition-colors ${
       isActive(href)
-        ? "bg-indigo-50 text-indigo-700 dark:bg-indigo-900 dark:text-indigo-300"
-        : "text-gray-700 hover:bg-gray-100 hover:text-gray-900 dark:text-gray-300 dark:hover:bg-gray-800 dark:hover:text-gray-100"
+        ? "bg-side-active-bg text-side-active-text"
+        : "text-side-text hover:bg-side-hover-bg hover:text-side-hover-text"
     }`;
 
   // 中身が1つだけの柱は、見出しそのものをその画面へのリンクにする(開いても1行増えるだけのため)。
@@ -105,19 +105,19 @@ export default function Sidebar({ userRole, currentPath }: SidebarProps) {
             className={`flex w-full items-center gap-3 rounded-md px-3 py-2 text-sm font-medium transition-colors ${
               // 閉じていても、いまいる画面がこの中にあることは色で分かるようにする。
               here && !open
-                ? "text-indigo-700 dark:text-indigo-300"
-                : "text-gray-700 hover:bg-gray-100 hover:text-gray-900 dark:text-gray-300 dark:hover:bg-gray-800 dark:hover:text-gray-100"
+                ? "text-side-active-text"
+                : "text-side-text hover:bg-side-hover-bg hover:text-side-hover-text"
             }`}
           >
             {g.icon}
             <span className="flex-1 text-left">{g.label}</span>
-            {open ? <ChevronDown className="h-4 w-4 text-gray-400" /> : <ChevronRight className="h-4 w-4 text-gray-400" />}
+            {open ? <ChevronDown className="h-4 w-4 text-side-icon" /> : <ChevronRight className="h-4 w-4 text-side-icon" />}
           </button>
           {open && (
-            <div className="mb-1 ml-4 border-l border-gray-200 pl-2 dark:border-gray-700">
+            <div className="mb-1 ml-4 border-l border-side-line pl-2">
               {/* 一言説明は開いたときだけ出す(閉じた並びは見出しだけにして短く保つ)。 */}
               {g.description && (
-                <p className="px-3 pt-1 pb-0.5 text-[11px] leading-snug text-gray-400 dark:text-gray-500">
+                <p className="px-3 pt-1 pb-0.5 text-[11px] leading-snug text-side-faint">
                   {g.description}
                 </p>
               )}
@@ -137,7 +137,7 @@ export default function Sidebar({ userRole, currentPath }: SidebarProps) {
               data-ui="raw"
               onClick={() => setOpenMap((m) => ({ ...m, [g.key]: !open }))}
               aria-expanded={open}
-              className="flex w-full items-center gap-2 px-3 py-1 text-xs font-semibold uppercase tracking-wider text-gray-500 hover:text-gray-700 dark:text-gray-400 dark:hover:text-gray-200"
+              className="flex w-full items-center gap-2 px-3 py-1 text-xs font-semibold uppercase tracking-wider text-side-muted hover:text-side-muted-hover"
             >
               {open ? <ChevronDown className="h-3 w-3" /> : <ChevronRight className="h-3 w-3" />}
               {g.label}
@@ -146,7 +146,7 @@ export default function Sidebar({ userRole, currentPath }: SidebarProps) {
                 グループにだけ一言説明を出す。開閉ボタンの外に置く
                 (押す的を小さくしない・読み上げでボタン名が長くならない)。 */}
             {g.description && (
-              <p className="px-3 pl-8 text-[11px] leading-snug text-gray-400 dark:text-gray-500">
+              <p className="px-3 pl-8 text-[11px] leading-snug text-side-faint">
                 {g.description}
               </p>
             )}
@@ -158,11 +158,11 @@ export default function Sidebar({ userRole, currentPath }: SidebarProps) {
     return (
       <div key={g.key}>
         <div className="mt-4 mb-1">
-          <p className="px-3 py-1 text-xs font-semibold uppercase tracking-wider text-gray-500 dark:text-gray-400">
+          <p className="px-3 py-1 text-xs font-semibold uppercase tracking-wider text-side-muted">
             {g.label}
           </p>
           {g.description && (
-            <p className="px-3 text-[11px] leading-snug text-gray-400 dark:text-gray-500">
+            <p className="px-3 text-[11px] leading-snug text-side-faint">
               {g.description}
             </p>
           )}
@@ -178,7 +178,7 @@ export default function Sidebar({ userRole, currentPath }: SidebarProps) {
       {groups.map((g, i) =>
         i > 0 && groups[i - 1].pillar && !g.pillar && g.label ? (
           <div key={`${g.key}-sep`}>
-            <hr className="my-3 border-gray-200 dark:border-gray-700" />
+            <hr className="my-3 border-side-line" />
             {renderGroup(g)}
           </div>
         ) : (
@@ -195,13 +195,13 @@ export default function Sidebar({ userRole, currentPath }: SidebarProps) {
       <button
         data-ui="raw"
         onClick={() => setMobileOpen(!mobileOpen)}
-        className="fixed top-3 left-3 z-50 rounded-md bg-white dark:bg-gray-900 p-2 shadow-md lg:hidden"
+        className="fixed top-3 left-3 z-50 rounded-md bg-side-bg p-2 shadow-md lg:hidden"
         aria-label="メニューを開く"
       >
         {mobileOpen ? (
-          <X className="h-5 w-5 text-gray-700 dark:text-gray-300" />
+          <X className="h-5 w-5 text-side-text" />
         ) : (
-          <Menu className="h-5 w-5 text-gray-700 dark:text-gray-300" />
+          <Menu className="h-5 w-5 text-side-text" />
         )}
       </button>
 
@@ -212,20 +212,20 @@ export default function Sidebar({ userRole, currentPath }: SidebarProps) {
 
       {/* Sidebar */}
       <aside
-        className={`fixed inset-y-0 left-0 z-40 flex w-60 transform flex-col border-r border-gray-200 dark:border-gray-700 bg-white dark:bg-gray-900 transition-transform duration-200 lg:static lg:translate-x-0 ${
+        className={`fixed inset-y-0 left-0 z-40 flex w-60 transform flex-col border-r border-side-line bg-side-bg transition-transform duration-200 lg:static lg:translate-x-0 ${
           mobileOpen ? "translate-x-0" : "-translate-x-full"
         }`}
       >
         {/* pl-14: モバイルの固定「×」ボタン(left-3 + 36px)がタイトルに重ならない位置から始める */}
-        <div className="flex h-14 shrink-0 items-center border-b border-gray-200 dark:border-gray-700 pl-14 pr-4 lg:pl-4">
-          <FileText className="mr-2 h-5 w-5 text-indigo-600 dark:text-indigo-400" />
-          <span className="text-sm font-bold text-gray-800 dark:text-gray-100">物件管理</span>
+        <div className="flex h-14 shrink-0 items-center border-b border-side-line pl-14 pr-4 lg:pl-4">
+          <FileText className="mr-2 h-5 w-5 text-logo-bg" />
+          <span className="text-sm font-bold text-side-strong">物件管理</span>
         </div>
         <div className="min-h-0 flex-1 overflow-y-auto">{navContent}</div>
         {/* モバイルではヘッダーからテーマ切替をここへ移動。pb の env(safe-area-inset-bottom)で
             iPhone のホームインジケータに最下部操作が隠れないよう余白を確保(非対応環境では 0)。 */}
-        <div className="shrink-0 border-t border-gray-200 dark:border-gray-700 p-4 pb-[calc(1rem+env(safe-area-inset-bottom))] lg:hidden">
-          <div className="mb-2 text-xs font-medium text-gray-500 dark:text-gray-400">表示テーマ</div>
+        <div className="shrink-0 border-t border-side-line p-4 pb-[calc(1rem+env(safe-area-inset-bottom))] lg:hidden">
+          <div className="mb-2 text-xs font-medium text-side-muted">表示テーマ</div>
           <ThemeToggle />
         </div>
       </aside>

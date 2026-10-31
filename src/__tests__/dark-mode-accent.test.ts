@@ -42,8 +42,12 @@ describe("accent 暗所コントラスト: 素accent文字に dark 変種(add-on
     expect(read("app/(auth)/login/page.tsx")).toContain("text-red-600 dark:text-red-400");
   });
 
-  it("sidebar: ヘッダーアイコン text-indigo-600 に dark:text-indigo-400", () => {
-    expect(read("components/layout/sidebar.tsx")).toContain("text-indigo-600 dark:text-indigo-400");
+  // 見た目の設定 段階1(2026-10-31): サイドバーは意味の名前の変数で書く。logo-bg = ライト indigo-600 / ダーク indigo-400。
+  it("sidebar: ヘッダーアイコン text-logo-bg(ライト indigo-600・ダーク indigo-400)", () => {
+    expect(read("components/layout/sidebar.tsx")).toContain("text-logo-bg");
+    const css = read("app/globals.css").replace(/\r\n/g, "\n");
+    expect(css).toMatch(/:root \{[^}]*--logo-bg: var\(--color-indigo-600\);/);
+    expect(css).toMatch(/\.dark \{[^}]*--logo-bg: var\(--color-indigo-400\);/);
   });
 
   it("properties/[id]: アクティブタブ indigo / エラー red / 成功 green に dark 変種", () => {

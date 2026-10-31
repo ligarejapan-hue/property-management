@@ -82,7 +82,7 @@ export default function SaleDmRecipientList({
                   </span>
                 )}
                 {r.formInquiryCount > 0 && (
-                  <span className="shrink-0 rounded-full bg-indigo-100 px-1.5 py-0.5 text-[10px] font-semibold text-indigo-700">
+                  <span className="shrink-0 rounded-full bg-iris-100 px-1.5 py-0.5 text-[10px] font-semibold text-iris-700">
                     申込 {r.formInquiryCount}
                   </span>
                 )}

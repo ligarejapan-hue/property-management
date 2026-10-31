@@ -44,7 +44,7 @@ const PLACEHOLDER_COLORS = [
   "bg-yellow-200",
   "bg-pink-200",
   "bg-purple-200",
-  "bg-indigo-200",
+  "bg-iris-200",
   "bg-teal-200",
   "bg-orange-200",
 ];

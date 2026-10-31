@@ -81,7 +81,7 @@ const OCCUPANCY_LABELS = OCCUPANCY_STATUS_LABELS;
 const OCCUPANCY_COLORS: Record<string, string> = {
   vacant: "bg-green-100 text-green-800",
   occupied: "bg-blue-100 text-blue-800",
-  rented: "bg-indigo-100 text-indigo-800",
+  rented: "bg-iris-100 text-iris-800",
   unknown: "bg-gray-100 text-gray-600",
 };
 
