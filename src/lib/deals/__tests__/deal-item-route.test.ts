@@ -88,7 +88,7 @@ describe("PATCH /api/deals/[id]", () => {
   });
   it("ほかの人が先に保存していたら 409・上書きしない", async () => {
     pm.deal.updateMany.mockResolvedValue({ count: 0 });
-    const res = await PATCH(json("PATCH", { version: 2, name: "古い画面からの保存" }), ctx);
+    const res = await PATCH(json("PATCH", { version: 2, contractPlace: "古い画面からの保存" }), ctx);
     expect(res.status).toBe(409);
     expect((await res.json()).error.code).toBe("VERSION_CONFLICT");
     expect(writeAuditLog).not.toHaveBeenCalled();

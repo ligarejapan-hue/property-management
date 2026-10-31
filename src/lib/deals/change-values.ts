@@ -2,13 +2,13 @@ import type { DealUpdateInput } from "./schemas";
 
 /** 変更履歴に残す取引の項目(値が人に読める単純な項目だけ。写しなどの JSON は監査に項目名だけ残す)。 */
 export const DEAL_TRACKED_FIELDS = [
-  "name", "businessType", "tradeSide", "status", "assigneeId", "licensedAgentId", "salesStaffId", "opsStaffId",
+  "businessType", "tradeSide", "status", "assigneeId", "licensedAgentId", "salesStaffId", "opsStaffId",
   "propertyKind", "hasOc", "contractAt", "contractPlace", "settlementAt", "settlementPlace",
   "price", "deposit", "taxRateBp",
 ];
 
 const SIMPLE_KEYS = [
-  "name", "businessType", "status", "assigneeId", "licensedAgentId", "salesStaffId", "opsStaffId",
+  "businessType", "status", "assigneeId", "licensedAgentId", "salesStaffId", "opsStaffId",
   "propertyKind", "hasOc", "contractPlace", "settlementPlace", "propertySnapshot", "counterpartyBroker",
   "taxRateBp", "assessments", "costs", "settlementTerms", "leases", "overrides",
 ] as const;

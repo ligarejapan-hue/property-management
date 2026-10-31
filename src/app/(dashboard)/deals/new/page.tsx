@@ -34,7 +34,6 @@ function NewDealForm() {
   );
   const propertyId = source === "list" ? picked?.id ?? null : null;
   const [options, setOptions] = useState<DealOptions | null>(null);
-  const [name, setName] = useState("");
   const [businessType, setBusinessType] = useState("brokerage");
   const [tradeSide, setTradeSide] = useState("");
   const [propertyKind, setPropertyKind] = useState("");
@@ -52,7 +51,7 @@ function NewDealForm() {
     setError(null);
     try {
       const res = await dealsApi.create({
-        name, businessType, hasOc,
+        businessType, hasOc,
         tradeSide: businessType === "brokerage" && tradeSide ? tradeSide : null,
         propertyKind: propertyKind || null,
         ...(propertyId ? { propertyId } : {}),
@@ -102,9 +101,6 @@ function NewDealForm() {
               <PropertyPicker onPick={setPicked} />
             ))}
         </fieldset>
-        <Field label="取引名">
-          <input value={name} onChange={(e) => setName(e.target.value)} maxLength={200} aria-label="取引名" className={inputCls} />
-        </Field>
         <Field label="事業区分">
           <SelectBox label="事業区分" value={businessType} onChange={setBusinessType} options={optionsOf(DEAL_BUSINESS_TYPE_LABELS)} />
         </Field>
@@ -126,7 +122,7 @@ function NewDealForm() {
       </div>
       <Button
         onClick={save}
-        disabled={saving || !name.trim() || (source === "list" && !picked)}
+        disabled={saving || (source === "list" && !picked)}
         loading={saving}
         loadingLabel="作成中"
       >

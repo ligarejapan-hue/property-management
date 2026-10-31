@@ -19,6 +19,7 @@ import type { DealCalc } from "@/lib/deals/calc/deal-calc";
 import { basicFormFromDeal } from "@/lib/deals/forms";
 import { MONEY_OVERRIDE_KEYS, SETTLEMENT_OVERRIDE_KEYS, pickOverrides } from "@/lib/deals/money-forms";
 import { DEAL_BUSINESS_TYPE_LABELS, DEAL_STATUS_LABELS } from "@/lib/deals/constants";
+import { dealTitle } from "@/lib/deals/deal-title";
 
 // 「書類」=発行した書類の履歴(設計 §5・段3で追加)。
 const DEAL_TABS = [
@@ -93,7 +94,7 @@ export default function DealDetailPage({ params }: { params: Promise<{ id: strin
   return (
     <div className="mx-auto max-w-4xl space-y-5">
       <PageHeader
-        title={deal.name}
+        title={dealTitle(deal)}
         back={{ href: "/deals", to: "取引" }}
         actions={
           <div className="flex flex-wrap gap-2">

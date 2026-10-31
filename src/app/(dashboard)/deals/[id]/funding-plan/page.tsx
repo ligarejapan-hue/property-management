@@ -8,6 +8,7 @@ import FundingPlanForm, { type IssueNotice } from "@/components/deals/funding-pl
 import { dealsApi, dealDocumentFileUrl, errorText, type DealOptions } from "@/lib/deals/client";
 import { DEFAULT_PROPERTY_KINDS } from "@/lib/deals/constants";
 import type { DealView } from "@/lib/deals/view";
+import { dealTitle } from "@/lib/deals/deal-title";
 
 /** 資金計画表(購入/売却)。入力しながら、PDF と同じ形のプレビューを見る画面。 */
 export default function FundingPlanPage({ params }: { params: Promise<{ id: string }> }) {
@@ -43,7 +44,7 @@ export default function FundingPlanPage({ params }: { params: Promise<{ id: stri
 
   return (
     <div className="mx-auto max-w-7xl space-y-5">
-      <PageHeader title="資金計画表" back={{ href: `/deals/${deal.id}`, to: deal.name }} description={`${deal.dealNo} ・ ${deal.name}`} />
+      <PageHeader title="資金計画表" back={{ href: `/deals/${deal.id}`, to: dealTitle(deal) }} description={`${deal.dealNo} ・ ${dealTitle(deal)}`} />
       {error && <p className="text-sm text-red-600 dark:text-red-400" role="alert">{error}</p>}
       {/* 保存した入力が変わったときだけ作り直す(版の番号だけの変化では打ちかけを消さない)。 */}
       {notice?.kind === "ok" && (
