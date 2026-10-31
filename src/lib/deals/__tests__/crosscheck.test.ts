@@ -1,7 +1,7 @@
 import { describe, it, expect } from "vitest";
 import {
-  ACTIVE_MORTGAGE_MESSAGE, CROSSCHECK_NOTICE_IDS, REGISTRY_STALE_MESSAGE, SELLER_MISMATCH_MESSAGE,
-  buildCrosscheck, issueWarnings, normalizeArea, normalizeDate, normalizeName, normalizeYen, parseShare,
+  ACTIVE_MORTGAGE_MESSAGE, CROSSCHECK_NOTICE_IDS, NAME_VARIANTS, NAME_VARIANT_MESSAGE, REGISTRY_STALE_MESSAGE, SELLER_MISMATCH_MESSAGE,
+  buildCrosscheck, foldNameVariants, issueWarnings, normalizeArea, normalizeDate, normalizeName, normalizeYen, parseShare,
   type CrosscheckInput, type CrosscheckItemKey, type IssuedDocFacts, type RegistryFacts,
 } from "../crosscheck";
 
@@ -145,7 +145,10 @@ describe("売買価格", () => {
     expect(item(base({ documents: [doc({ price: 30_000_000 })] }), "price").status).toBe("match");
     const m = item(base({ documents: [doc({ price: 29_000_000 })] }), "price");
     expect(m.status).toBe("mismatch");
-    expect(m.message).toContain("発行後");
+    expect(m.message).toBe("発行後に価格が変わっています。再発行が必要か確認してください");
+  });
+  it("元のデータどうしの食い違いでなくても、価格以外は従来の文", () => {
+    expect(item(base({ documents: [doc({ settlementDate: "2026-12-01" })] }), "settlement_date").message).toContain("発行後に値が変わった");
   });
   it("値の無い過去の書類は「確認できない」(不一致にしない)", () => {
     const i = item(base({ documents: [doc()] }), "price");
@@ -278,6 +281,170 @@ describe("有効な担保", () => {
     expect(n?.count).toBe(2);
     expect(r.mismatchCount).toBe(0);
     expect(buildCrosscheck(base({ registry: rights(0) })).notices.some((x) => x.id === CROSSCHECK_NOTICE_IDS.activeMortgage)).toBe(false);
+  });
+});
+
+describe("土地のある物件の謄本(土地と建物の両方が要る)", () => {
+  const OLD = "2026-09-01T03:00:00.000Z";
+  const seller = { name: "架空太郎", shareNum: null, shareDen: null };
+  const both = (over: Partial<Extract<RegistryFacts, { status: "ok" }>> = {}) => registry({
+    missing: [], uncertain: null,
+    certificates: [{ side: "土地", createdAt: AT }, { side: "建物", createdAt: OLD }],
+    areas: { unit: null, land: "120.50", building: "91.05", attachmentCreatedAt: OLD },
+    rights: { activeRights: 0, readable: true, attachmentCreatedAt: OLD },
+    owners: { list: [{ name: "架空太郎", share: null }], confirmed: true, attachmentCreatedAt: OLD },
+    ...over,
+  });
+  const house = (over: Partial<CrosscheckInput> = {}) => base({
+    kindBase: "house", snapshot: { floorArea: 91.05, landArea: 120.5 }, sellers: [seller],
+    property: { exclusiveArea: null, exclusiveAreaRegistry: null, landArea: "120.50", landAreaMethod: "公簿", totalFloorArea: "91.05" },
+    ...over,
+  });
+  const check = (activeRights: number) => doc({ docType: "checklist_settlement", title: "書類確認書(決済時)", activeRights });
+
+  it("両方そろえば担保も売主も比べて照合OK", () => {
+    const input = house({ registry: both(), documents: [check(0)] });
+    expect(item(input, "mortgage").status).toBe("match");
+    expect(item(input, "seller").status).toBe("match");
+    expect(buildCrosscheck(input).summary).toBe("ok");
+  });
+  it("建物の謄本が無い: 担保と所有者は確認できない・照合OKにしない", () => {
+    const input = house({ registry: both({ missing: ["建物"] }), documents: [check(0)] });
+    for (const key of ["mortgage", "seller"] as const) {
+      expect(item(input, key).status).toBe("unverifiable");
+      expect(item(input, key).message).toBe("確認できない(建物の謄本がありません)");
+    }
+    const r = buildCrosscheck(input);
+    expect(r.summary).toBe("incomplete");
+    expect(r.mismatchCount).toBe(0);
+  });
+  it("土地の謄本が無いときも同じ", () => {
+    expect(item(house({ registry: both({ missing: ["土地"] }) }), "mortgage").message).toBe("確認できない(土地の謄本がありません)");
+  });
+  it("謄本が1通も無い: 両方の謄本が無いと出す・照合OKにしない", () => {
+    const input = house({ registry: { status: "none" }, documents: [doc({ price: 30_000_000 })] });
+    expect(item(input, "mortgage").message).toBe("確認できない(土地・建物の謄本がありません)");
+    expect(buildCrosscheck(input).summary).toBe("incomplete");
+    // 比べられた項目が無ければ、照合できる項目がありません。
+    expect(buildCrosscheck(house({ registry: { status: "none" } })).summary).toBe("none");
+  });
+  it("土地の取引は土地の謄本だけで足りる", () => {
+    const input = house({ kindBase: "land", registry: both() });
+    expect(item(input, "seller").status).toBe("match");
+    expect(item(house({ kindBase: "land", registry: { status: "none" } }), "mortgage").message).toBe("確認できない(土地の謄本がありません)");
+  });
+  it("読めない・判定できない・多すぎる謄本があれば確認できない", () => {
+    for (const [uncertain, text] of [["unreadable", "読めない謄本"], ["unclassified", "判定できない謄本"], ["too_many", "すべてを確認できません"]] as const) {
+      const input = house({ registry: both({ uncertain }) });
+      expect(item(input, "mortgage").status).toBe("unverifiable");
+      expect(item(input, "seller").message).toContain(text);
+      expect(buildCrosscheck(input).summary).toBe("incomplete");
+    }
+  });
+  it("謄本を読む権限が無い人にも照合OKと出さない", () => {
+    expect(buildCrosscheck(house({ registry: { status: "denied" }, sellerCompare: "denied", documents: [doc({ price: 30_000_000 })] })).summary).toBe("incomplete");
+  });
+  it("見つかった権利の注意は片方だけでも出す(分かっている分と示す)", () => {
+    const r = buildCrosscheck(house({ registry: both({ missing: ["土地"], rights: { activeRights: 1, readable: true, attachmentCreatedAt: AT } }) }));
+    const n = r.notices.find((x) => x.id === CROSSCHECK_NOTICE_IDS.activeMortgage);
+    expect(n?.count).toBe(1);
+    expect(n?.partial).toBe(true);
+  });
+  it("不一致があれば食い違いを優先する", () => {
+    expect(buildCrosscheck(house({ registry: both({ missing: ["土地"] }), price: 1, documents: [doc({ price: 2 })] })).summary).toBe("mismatch");
+  });
+  it("土地と建物で所有者や持分が違えば、持分は比べず確認できない", () => {
+    const input = house({ registry: both({ owners: { list: [{ name: "架空太郎", share: null }], confirmed: true, attachmentCreatedAt: OLD, differsAcross: true } }) });
+    const i = item(input, "seller");
+    expect(i.status).toBe("unverifiable");
+    expect(i.message).toContain("土地と建物");
+    expect(buildCrosscheck(input).summary).toBe("incomplete");
+  });
+  it("名前が足りなければ、土地と建物で違っていても不一致", () => {
+    const input = house({ registry: both({ owners: { list: [{ name: "架空太郎", share: null }, { name: "架空花子", share: null }], confirmed: true, attachmentCreatedAt: OLD, differsAcross: true } }) });
+    expect(item(input, "seller").status).toBe("mismatch");
+  });
+  it("どれか1通でも決済日より後なら売主とは比べない", () => {
+    const input = house({
+      settlementDate: "2026-09-30",
+      registry: both({ owners: { list: [{ name: "買主", share: null }], confirmed: true, attachmentCreatedAt: OLD, newestCreatedAt: AT } }),
+    });
+    expect(item(input, "seller").status).toBe("unverifiable");
+  });
+  it("謄本の日付は土地と建物を分けて出し、古いほうで注意する", () => {
+    const r = buildCrosscheck(house({ settlementDate: "2026-12-15", registry: both() }));
+    expect(r.registries).toEqual([
+      { date: "2026-09-01", usedFor: ["建物"] },
+      { date: "2026-10-01", usedFor: ["土地"] },
+    ]);
+    expect(r.notices.some((x) => x.id === CROSSCHECK_NOTICE_IDS.registryStale)).toBe(true);
+  });
+  it("種類が未選択なら必要な謄本を決められない(区分は従来どおり)", () => {
+    const input = house({ kindBase: null, registry: both(), documents: [doc({ price: 30_000_000 })] });
+    expect(item(input, "mortgage").message).toContain("物件の種類");
+    expect(buildCrosscheck(input).summary).toBe("incomplete");
+    expect(item(base({ sellers: [seller], registry: both({ certificates: undefined }) }), "seller").status).toBe("match");
+  });
+});
+
+describe("表記の違い(異体字)", () => {
+  const owners = (...names: string[]) => registry({
+    owners: { list: names.map((name) => ({ name, share: null })), confirmed: true, attachmentCreatedAt: AT },
+  });
+  const seller = (name: string, shareNum: number | null = null, shareDen: number | null = null) => ({ name, shareNum, shareDen });
+
+  it("対応表の字はそろえて比べる・表は足せる", () => {
+    for (const [a, b] of [["髙橋", "高橋"], ["山﨑", "山崎"], ["齋藤", "斎藤"], ["渡邊", "渡辺"], ["渡邉", "渡辺"]]) {
+      expect(foldNameVariants(a)).toBe(foldNameVariants(b));
+      expect(normalizeName(a)).not.toBe(normalizeName(b));
+    }
+    expect(Object.keys(NAME_VARIANTS).length).toBeGreaterThanOrEqual(4);
+  });
+  it("異体字だけの違い: 不一致にせず、件数に数えず、注意を出す", () => {
+    const r = buildCrosscheck(base({ sellers: [seller("高橋一郎")], registry: owners("髙橋一郎") }));
+    const i = r.items.find((x) => x.key === "seller");
+    expect(i?.status).toBe("notation_differs");
+    expect(i?.message).toBe(NAME_VARIANT_MESSAGE);
+    expect(NAME_VARIANT_MESSAGE).toBe("登記の表記(異体字)と違います。書類の表記を登記に合わせるか確認してください");
+    expect(r.mismatchCount).toBe(0);
+    expect(r.notices.find((x) => x.id === CROSSCHECK_NOTICE_IDS.nameVariant)?.message).toBe(NAME_VARIANT_MESSAGE);
+    expect(JSON.stringify(r)).not.toContain("髙橋");
+  });
+  it("完全に同じ字なら一致・別の字なら不一致のまま", () => {
+    expect(item(base({ sellers: [seller("髙橋一郎")], registry: owners("髙橋一郎") }), "seller").status).toBe("match");
+    expect(item(base({ sellers: [seller("田中一郎")], registry: owners("髙橋一郎") }), "seller").status).toBe("mismatch");
+  });
+  it("異体字があっても持分の違いは不一致", () => {
+    const reg = registry({ owners: { list: [{ name: "髙橋一郎", share: "3分の2" }, { name: "架空花子", share: "3分の1" }], confirmed: true, attachmentCreatedAt: AT } });
+    const i = item(base({ sellers: [seller("高橋一郎", 1, 2), seller("架空花子", 1, 2)], registry: reg }), "seller");
+    expect(i.status).toBe("mismatch");
+    expect(i.message).toContain("持分");
+  });
+  it("発行の確認には出さない(不一致ではない)", () => {
+    const r = buildCrosscheck(base({ sellers: [seller("高橋一郎")], registry: owners("髙橋一郎") }));
+    expect(issueWarnings(r, "funding_plan")).toEqual([]);
+  });
+});
+
+describe("賃貸人変更のお知らせの変更日", () => {
+  const notice = (settlementDate: string | null) => doc({ documentId: "n", docType: "landlord_change_notice", title: "賃貸人変更のお知らせ", settlementDate });
+  it("決済日と別の日は不一致でなく種類が違う", () => {
+    const r = buildCrosscheck(base({ documents: [notice("2026-12-01")] }));
+    const i = r.items.find((x) => x.key === "landlord_change_date");
+    expect(i?.status).toBe("kind_differs");
+    expect(i?.message).toBe("変更日が決済日と違います(意図したものか確認)");
+    expect(r.mismatchCount).toBe(0);
+    expect(r.items.find((x) => x.key === "settlement_date")?.status).toBe("missing");
+    expect(issueWarnings(r, "settlement_statement")).toEqual([]);
+  });
+  it("同じ日なら決済日の照合に入る(別の項目を出さない)", () => {
+    const r = buildCrosscheck(base({ documents: [notice("2026-11-30")] }));
+    expect(r.items.find((x) => x.key === "settlement_date")?.status).toBe("match");
+    expect(r.items.some((x) => x.key === "landlord_change_date")).toBe(false);
+  });
+  it("他の書類の決済日の違いは不一致のまま", () => {
+    const r = buildCrosscheck(base({ documents: [notice("2026-12-01"), doc({ settlementDate: "2026-12-01" })] }));
+    expect(r.items.find((x) => x.key === "settlement_date")?.status).toBe("mismatch");
   });
 });
 

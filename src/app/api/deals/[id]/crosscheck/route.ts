@@ -8,7 +8,7 @@ import { writeAuditLog } from "@/lib/audit";
 import { requireDeal } from "@/lib/deals/guard";
 import { DEAL_DETAIL_SELECT, toDealView } from "@/lib/deals/view";
 import { loadDealSettings } from "@/lib/deals/settings-store";
-import { DEFAULT_PROPERTY_KINDS } from "@/lib/deals/constants";
+import { kindBaseOf } from "@/lib/deals/constants";
 import { jstDateString } from "@/lib/deals/datetime";
 import { buildCrosscheck, type RegistryFacts } from "@/lib/deals/crosscheck";
 import { latestIssuedDocs, readIssuedFacts } from "@/lib/deals/crosscheck-facts";
@@ -32,8 +32,7 @@ export async function GET(_request: Request, ctx: Ctx) {
     if (!row) throw new ApiError(404, "取引が見つかりません", "NOT_FOUND");
     const deal = toDealView(row);
     const settings = await loadDealSettings();
-    const kinds = settings.propertyKinds.length ? settings.propertyKinds : DEFAULT_PROPERTY_KINDS;
-    const kindBase = kinds.find((k) => k.key === deal.propertyKind)?.base ?? null;
+    const kindBase = kindBaseOf(settings, deal.propertyKind);
 
     let property = null;
     if (deal.propertyId && hasPermission(perms, "property", "read")) {

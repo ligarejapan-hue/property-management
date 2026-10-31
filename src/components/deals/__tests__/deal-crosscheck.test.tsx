@@ -35,6 +35,34 @@ describe("照合の表示", () => {
     expect(html).toContain("照合できる項目がありません");
     expect(html).not.toContain("照合OK");
   });
+  it("土地か建物の謄本が足りない=照合OKと出さず、開いて出す", () => {
+    const html = render(input({
+      kindBase: "house", snapshot: { floorArea: 91, landArea: 120 },
+      documents: [{ documentId: "doc-1", docType: "funding_plan", variant: "purchase", version: 1, title: "資金計画表(購入)", issuedAt: "2026-10-01T00:00:00.000Z", price: 30_000_000 }],
+      property: { exclusiveArea: null, exclusiveAreaRegistry: null, landArea: "120", landAreaMethod: null, totalFloorArea: "91" },
+      registry: {
+        status: "ok", missing: ["建物"], uncertain: null, areas: null, owners: null,
+        rights: { activeRights: 1, readable: true, attachmentCreatedAt: "2026-10-05T03:00:00.000Z" },
+        certificates: [{ side: "土地", createdAt: "2026-10-05T03:00:00.000Z" }],
+      },
+    }));
+    expect(html).toContain("確認できていない項目があります");
+    expect(html).not.toContain("照合OK");
+    expect(html).toContain("<details open");
+    expect(html).toContain("確認できない(建物の謄本がありません)");
+    expect(html).toContain("照合に使った謄本: 2026/10/05 取込(土地)");
+    expect(html).toContain("読めた謄本では 1件");
+  });
+  it("異体字=表記の違いの結果と注意を、開いて出す", () => {
+    const html = render(input({
+      sellers: [{ name: "高橋一郎", shareNum: null, shareDen: null }],
+      registry: { status: "ok", areas: null, rights: null, owners: { list: [{ name: "髙橋一郎", share: null }], confirmed: true, attachmentCreatedAt: "2026-10-05T03:00:00.000Z" } },
+    }));
+    expect(html).toContain("表記の違い(異体字)");
+    expect(html).toContain(`data-notice-id="${CROSSCHECK_NOTICE_IDS.nameVariant}"`);
+    expect(html).toContain("<details open");
+    expect(html).not.toContain("髙橋");
+  });
   it("リンク: 書類は PDF・物件は見られる人だけ", () => {
     const docs = [{ documentId: "doc-9", docType: "funding_plan", variant: "purchase", version: 1, title: "資金計画表(購入)", issuedAt: "2026-10-01T00:00:00.000Z", price: 30_000_000 }];
     const html = render(input({ documents: docs }));

@@ -3,30 +3,62 @@ import type { BasePropertyKind } from "./constants";
 
 /**
  * 取引の数値照合。同じ意味の値を出どころごとに集めて比べる。純関数(読み込みは crosscheck-load.ts)。
- * - 件数に数えるのは「不一致」だけ。種類が違う・確認できない・片方が未入力は数えない。
+ * - 件数に数えるのは「不一致」だけ。種類が違う・表記の違い・確認できない・片方が未入力は数えない。
  * - 区分の床面積は登記(内法)と契約(壁芯)を分ける。実測の土地と公簿の謄本も同じ扱い。
+ * - 土地のある物件(戸建・土地・一棟)は土地と建物の全筆がそろって初めて担保と所有者を比べる。足りなければ照合OKと出さない。
  * ⚠謄本の所有者名は入力に入るが、結果には入れない(比べた結果だけを返す)。ログ・監査にも出さない。
  */
 
-export type CrosscheckStatus = "match" | "mismatch" | "missing" | "kind_differs" | "unverifiable";
+export type CrosscheckStatus = "match" | "mismatch" | "missing" | "kind_differs" | "notation_differs" | "unverifiable";
 export type CrosscheckItemKey =
   | "area_registered" | "area_wall" | "area_kinds" | "area_floor" | "area_land" | "area_land_kinds"
-  | "price" | "settlement_date" | "seller" | "mortgage";
+  | "price" | "settlement_date" | "landlord_change_date" | "seller" | "mortgage";
 
 export const CROSSCHECK_STATUS_LABELS: Record<CrosscheckStatus, string> = {
-  match: "一致", mismatch: "不一致", missing: "片方が未入力", kind_differs: "種類が違う", unverifiable: "確認できない",
+  match: "一致", mismatch: "不一致", missing: "片方が未入力", kind_differs: "種類が違う", notation_differs: "表記の違い(異体字)", unverifiable: "確認できない",
 };
 
 /** 注意の識別子。次のタスク(決済から逆算した段取り)から参照するので、変えない。 */
 export const CROSSCHECK_NOTICE_IDS = {
   activeMortgage: "crosscheck.activeMortgage",
   registryStale: "crosscheck.registryStale",
+  nameVariant: "crosscheck.nameVariant",
 } as const;
 export type CrosscheckNoticeId = (typeof CROSSCHECK_NOTICE_IDS)[keyof typeof CROSSCHECK_NOTICE_IDS];
 
 export const SELLER_MISMATCH_MESSAGE = "登記名義人と売主が一致しません。相続登記・氏名変更登記などが決済までに必要か確認してください";
 export const REGISTRY_STALE_MESSAGE = "謄本が古い可能性があります。決済前に最新の謄本で確認してください";
 export const ACTIVE_MORTGAGE_MESSAGE = "抹消書類の手配を確認してください";
+export const NAME_VARIANT_MESSAGE = "登記の表記(異体字)と違います。書類の表記を登記に合わせるか確認してください";
+export const LANDLORD_DATE_MESSAGE = "変更日が決済日と違います(意図したものか確認)";
+
+/** 謄本の種類。土地のある物件で、どちらが要るかを決める。 */
+export type RegistrySide = "土地" | "建物";
+export type RegistryUncertain = "unreadable" | "unclassified" | "too_many";
+export const LANDED_REQUIRED_SIDES: Partial<Record<BasePropertyKind, readonly RegistrySide[]>> = {
+  house: ["土地", "建物"], building: ["土地", "建物"], land: ["土地"],
+};
+export const isLandedKind = (k: BasePropertyKind | null): k is BasePropertyKind => !!k && !!LANDED_REQUIRED_SIDES[k];
+
+const UNCERTAIN_TEXT: Record<RegistryUncertain, string> = {
+  unreadable: "読めない謄本があります",
+  unclassified: "土地か建物か判定できない謄本があります",
+  too_many: "謄本が多く、すべてを確認できません",
+};
+
+/** 足りない・確かめられない謄本の説明。問題が無ければ null。 */
+export function registryGapText(missing: readonly RegistrySide[], uncertain: RegistryUncertain | null): string | null {
+  if (missing.length) return `${missing.join("・")}の謄本がありません`;
+  return uncertain ? UNCERTAIN_TEXT[uncertain] : null;
+}
+
+/**
+ * 登記でよく使う異体字と、そろえる先の字。名前の比較で「表記の違い」を見分けるためだけに使う。
+ * ⚠一致にはしない(書類の表記を登記に合わせる必要があるため)。字を足すときはこの表に足す。
+ */
+export const NAME_VARIANTS: Readonly<Record<string, string>> = {
+  "髙": "高", "﨑": "崎", "齋": "斎", "邊": "辺", "邉": "辺",
+};
 
 /** 取引の画面のタブ・物件の画面・発行した書類のどれを開くか。 */
 export type CrosscheckLink =
@@ -62,11 +94,13 @@ export interface CrosscheckNotice {
   message: string;
   /** 残っている担保の件数(activeMortgage だけ)。 */
   count?: number;
+  /** 読めた謄本だけの件数で、ほかにも残っているかもしれない。 */
+  partial?: boolean;
 }
 
 export interface CrosscheckResult {
-  /** ok=比べた項目がすべて一致 / mismatch=不一致あり / none=比べられた項目が無い */
-  summary: "ok" | "mismatch" | "none";
+  /** ok=比べた項目がすべて一致 / mismatch=不一致あり / incomplete=不一致は無いが要る謄本で確かめられていない / none=比べられた項目が無い */
+  summary: "ok" | "mismatch" | "incomplete" | "none";
   mismatchCount: number;
   comparedCount: number;
   items: CrosscheckItem[];
@@ -83,9 +117,21 @@ export type RegistryFacts =
   | { status: "denied" }
   | {
     status: "ok";
+    /** 土地のある物件で足りない謄本・確かめられない理由(それ以外の物件には無い)。 */
+    missing?: RegistrySide[];
+    uncertain?: RegistryUncertain | null;
+    /** 土地のある物件で使った謄本(種類と取り込んだ日)。 */
+    certificates?: { side: RegistrySide; createdAt: string }[];
     areas: { unit: string | null; land: string | null; building: string | null; attachmentCreatedAt: string } | null;
     rights: { activeRights: number; readable: boolean; attachmentCreatedAt: string } | null;
-    owners: { list: { name: string; share: string | null }[]; confirmed: boolean; attachmentCreatedAt: string } | null;
+    owners: {
+      list: { name: string; share: string | null }[]; confirmed: boolean;
+      /** 使った謄本のうち古いほうの日(複数のとき)。 */
+      attachmentCreatedAt: string;
+      newestCreatedAt?: string;
+      /** 土地と建物(筆)で所有者や持分が違う。 */
+      differsAcross?: boolean;
+    } | null;
   };
 
 export interface CrosscheckDocument {
@@ -173,10 +219,15 @@ export function normalizeDate(v: unknown): string | null {
   return `${m[1]}-${String(mo).padStart(2, "0")}-${String(d).padStart(2, "0")}`;
 }
 
-/** 名前の比べる形。⚠異体字(髙と高など)はそろえない=不一致に出る。 */
+/** 名前の比べる形。⚠異体字(髙と高など)はそろえない(foldNameVariants で別に見る)。 */
 export function normalizeName(v: string): string {
   return nfkc(v).toLowerCase()
     .replace(/\(株\)/g, "株式会社").replace(/\(有\)/g, "有限会社").replace(/\(同\)/g, "合同会社");
+}
+
+/** 異体字をそろえた名前。そろえて初めて同じなら「表記の違い」。 */
+export function foldNameVariants(v: string): string {
+  return [...normalizeName(v)].map((c) => NAME_VARIANTS[c] ?? c).join("");
 }
 
 const gcd = (a: number, b: number): number => (b === 0 ? a : gcd(b, a % b));
@@ -281,9 +332,11 @@ function compareItem(key: CrosscheckItemKey, label: string, sources: CrosscheckS
   if (status === "mismatch") {
     // 書類を除いた元のデータどうしが一致していれば、発行のあとに値が変わった。
     const live = sources.filter((s) => s.state === "value" && !s.docType);
-    message = new Set(live.map((s) => s.compareKey)).size <= 1
-      ? "発行後に値が変わった書類があります。発行し直すか確認してください。"
-      : "出どころの値が一致しません。正しい値を確認してください。";
+    message = new Set(live.map((s) => s.compareKey)).size > 1
+      ? "出どころの値が一致しません。正しい値を確認してください。"
+      : key === "price"
+        ? "発行後に価格が変わっています。再発行が必要か確認してください"
+        : "発行後に値が変わった書類があります。発行し直すか確認してください。";
   }
   return { key, label, status, message, sources, legacyDocuments: legacy };
 }
@@ -350,13 +403,18 @@ function priceItem(i: CrosscheckInput): CrosscheckItem {
   ], docs.legacy);
 }
 
-function dateItem(i: CrosscheckInput): CrosscheckItem {
+function dateItems(i: CrosscheckInput): CrosscheckItem[] {
   const make = (b: Base, raw: unknown) => sourceOf(b, raw, normalizeDate, dayJa);
+  const deal = make({ key: "deal", label: "取引の決済日", link: { kind: "tab", tab: "basic" } }, i.settlementDate);
   const docs = documentSources(i.documents, "settlementDate", make);
-  return compareItem("settlement_date", "決済日", [
-    make({ key: "deal", label: "取引の決済日", link: { kind: "tab", tab: "basic" } }, i.settlementDate),
-    ...docs.sources, ...legacySource(docs.legacy),
-  ], docs.legacy);
+  // 賃貸人の変更日は、翌月1日など決済日と別の日にすることがある。違っても不一致にしない。
+  const differs = (s: CrosscheckSource) => s.docType === "landlord_change_notice" && deal.state === "value" && s.state === "value" && s.compareKey !== deal.compareKey;
+  const items = [compareItem("settlement_date", "決済日", [deal, ...docs.sources.filter((s) => !differs(s)), ...legacySource(docs.legacy)], docs.legacy)];
+  for (const s of docs.sources.filter(differs)) {
+    const kinds = kindsItem("landlord_change_date", "賃貸人の変更日", LANDLORD_DATE_MESSAGE, deal, s);
+    if (kinds) items.push(kinds);
+  }
+  return items;
 }
 
 const sameShare = (a: { num: number; den: number }, b: { num: number; den: number }) => a.num === b.num && a.den === b.den;
@@ -371,9 +429,9 @@ function shareResult(i: CrosscheckInput, owners: { name: string; share: string |
     return s && !sameShare(s, WHOLE) ? "differs" : "ok";
   }
   // 同じ名前の共有者がいると、どの持分か決められない。
-  const keys = owners.map((o) => normalizeName(o.name));
+  const keys = owners.map((o) => foldNameVariants(o.name));
   if (new Set(keys).size !== keys.length) return "unread";
-  const shares = new Map(owners.map((o) => [normalizeName(o.name), parseShare(o.share)]));
+  const shares = new Map(owners.map((o) => [foldNameVariants(o.name), parseShare(o.share)]));
   if ([...shares.values()].some((s) => s === null)) return "unread";
   let unentered = false;
   for (const seller of i.sellers) {
@@ -382,10 +440,23 @@ function shareResult(i: CrosscheckInput, owners: { name: string; share: string |
       unentered = true;
       continue;
     }
-    const theirs = shares.get(normalizeName(seller.name));
+    const theirs = shares.get(foldNameVariants(seller.name));
     if (theirs && !sameShare(mine, theirs)) return "differs";
   }
   return unentered ? "unentered" : "ok";
+}
+
+/** 担保と所有者を比べるのに要る謄本が足りないときの説明。足りていれば null。 */
+function coverageGap(i: CrosscheckInput): string | null {
+  // 種類が決まらないと、土地と建物のどちらの謄本が要るか決められない(1通だけで安心させない)。
+  if (!i.kindBase) return "物件の種類が未選択のため、必要な謄本を判定できません";
+  const required = LANDED_REQUIRED_SIDES[i.kindBase];
+  if (!required) return null;
+  const r = i.registry;
+  if (r.status === "none") return registryGapText(required, null);
+  if (r.status === "unreadable") return UNCERTAIN_TEXT.unreadable;
+  if (r.status === "denied") return null;
+  return registryGapText(r.missing ?? [], r.uncertain ?? null);
 }
 
 function sellerItem(i: CrosscheckInput): CrosscheckItem {
@@ -400,6 +471,8 @@ function sellerItem(i: CrosscheckInput): CrosscheckItem {
   if (i.sellerCompare === "denied") {
     return done("unverifiable", "権限がないため確認できません。", unverifiableSource(regBase));
   }
+  const gap = coverageGap(i);
+  if (gap) return done("unverifiable", `確認できない(${gap})`, unverifiableSource(regBase));
   const reg = i.registry;
   if (reg.status === "none" || (reg.status === "ok" && !reg.owners)) {
     return done("missing", "所有者を確かめられる謄本がありません。", emptySource(regBase));
@@ -412,13 +485,26 @@ function sellerItem(i: CrosscheckInput): CrosscheckItem {
   }
   if (!i.sellers.length) return done("missing", "当事者の売主がまだ入っていません。", shown);
   // 決済のあとに取り込んだ謄本は買主の名義になっていることがある。
-  if (i.settlementDate && jstDay(reg.owners.attachmentCreatedAt) > i.settlementDate) {
+  if (i.settlementDate && jstDay(reg.owners.newestCreatedAt ?? reg.owners.attachmentCreatedAt) > i.settlementDate) {
     return done("unverifiable", "決済日より後に取り込んだ謄本のため、売主とは比べていません。", unverifiableSource(named));
   }
-  const a = i.sellers.map((s) => normalizeName(s.name)).sort();
-  const b = reg.owners.list.map((o) => normalizeName(o.name)).sort();
-  if (a.length !== b.length || a.some((n, idx) => n !== b[idx])) return done("mismatch", SELLER_MISMATCH_MESSAGE, shown);
-  switch (shareResult(i, reg.owners.list)) {
+  const ownerList = reg.owners.list;
+  const same = (norm: (v: string) => string) => {
+    const a = i.sellers.map((s) => norm(s.name)).sort();
+    const b = ownerList.map((o) => norm(o.name)).sort();
+    return a.length === b.length && a.every((n, idx) => n === b[idx]);
+  };
+  if (!same(foldNameVariants)) return done("mismatch", SELLER_MISMATCH_MESSAGE, shown);
+  if (reg.owners.differsAcross) {
+    return done("unverifiable", "名前は一致しています。土地と建物で所有者または持分が違うため、謄本を見て確認してください。", shown);
+  }
+  const share = shareResult(i, ownerList);
+  // 異体字だけの違いは一致にも不一致にもしない(書類の表記を登記に合わせるかは人が決める)。
+  if (!same(normalizeName) && share !== "differs") {
+    const note = share === "unentered" ? "当事者の持分が未入力です。" : share === "unread" ? "謄本の持分を読めなかったため、持分は比べていません。" : "";
+    return done("notation_differs", note ? `${NAME_VARIANT_MESSAGE}。${note}` : NAME_VARIANT_MESSAGE, shown);
+  }
+  switch (share) {
     case "differs": return done("mismatch", "登記名義人の持分と当事者の持分が一致しません。持分を確認してください。", shown);
     case "unentered": return done("missing", "名前は一致しています。当事者の持分が未入力です。", shown);
     case "unread": return done("match", "名前は一致しています。謄本の持分を読めなかったため、持分は比べていません。", shown);
@@ -441,6 +527,8 @@ function mortgageItem(i: CrosscheckInput): CrosscheckItem {
     : r.status !== "ok" || !r.rights || !r.rights.readable
       ? unverifiableSource(regBase)
       : count({ ...regBase, label: `${regBase.label}(${dayJa(jstDay(r.rights.attachmentCreatedAt))} 取込)` }, r.rights.activeRights);
+  const gap = coverageGap(i);
+  if (gap) return { key: "mortgage", label: "有効な担保", status: "unverifiable", message: `確認できない(${gap})`, sources: [unverifiableSource(regBase), docSource], legacyDocuments: 0 };
   const item = compareItem("mortgage", "有効な担保", [reg, docSource]);
   if (item.status === "mismatch") {
     return { ...item, message: "謄本の権利の件数と、書類確認書を発行したときの件数が違います。謄本を確認して発行し直してください。" };
@@ -460,6 +548,15 @@ function threeMonthsBefore(ymd: string): string {
 function registriesUsed(r: RegistryFacts): { date: string; usedFor: string[] }[] {
   if (r.status !== "ok") return [];
   const out: { date: string; usedFor: string[] }[] = [];
+  if (r.certificates) {
+    for (const c of r.certificates) {
+      const date = jstDay(c.createdAt);
+      const hit = out.find((x) => x.date === date);
+      if (!hit) out.push({ date, usedFor: [c.side] });
+      else if (!hit.usedFor.includes(c.side)) hit.usedFor.push(c.side);
+    }
+    return out.sort((a, b) => a.date.localeCompare(b.date));
+  }
   const add = (iso: string, use: string) => {
     const date = jstDay(iso);
     const hit = out.find((x) => x.date === date);
@@ -473,21 +570,31 @@ function registriesUsed(r: RegistryFacts): { date: string; usedFor: string[] }[]
 }
 
 export function buildCrosscheck(input: CrosscheckInput): CrosscheckResult {
-  const items = [...areaItems(input), priceItem(input), dateItem(input), sellerItem(input), mortgageItem(input)];
+  const items = [...areaItems(input), priceItem(input), ...dateItems(input), sellerItem(input), mortgageItem(input)];
   const mismatchCount = items.filter((i) => i.status === "mismatch").length;
-  const comparedCount = mismatchCount + items.filter((i) => i.status === "match").length;
+  const comparedCount = mismatchCount + items.filter((i) => i.status === "match" || i.status === "notation_differs").length;
   const registries = registriesUsed(input.registry);
   const notices: CrosscheckNotice[] = [];
   const r = input.registry;
-  if (r.status === "ok" && r.rights?.readable && r.rights.activeRights > 0) {
-    notices.push({ id: CROSSCHECK_NOTICE_IDS.activeMortgage, message: ACTIVE_MORTGAGE_MESSAGE, count: r.rights.activeRights });
+  const gap = coverageGap(input);
+  // 片方の謄本しか読めなくても、見つかった権利の手配は要る。
+  if (r.status === "ok" && r.rights && r.rights.activeRights > 0) {
+    notices.push({
+      id: CROSSCHECK_NOTICE_IDS.activeMortgage, message: ACTIVE_MORTGAGE_MESSAGE, count: r.rights.activeRights,
+      ...(gap || !r.rights.readable ? { partial: true } : {}),
+    });
   }
+  if (items.some((i) => i.status === "notation_differs")) notices.push({ id: CROSSCHECK_NOTICE_IDS.nameVariant, message: NAME_VARIANT_MESSAGE });
   if (input.settlementDate) {
     const limit = threeMonthsBefore(input.settlementDate);
     if (registries.some((x) => x.date < limit)) notices.push({ id: CROSSCHECK_NOTICE_IDS.registryStale, message: REGISTRY_STALE_MESSAGE });
   }
+  // 区分以外は、要る謄本で担保と所有者を確かめられていなければ照合OKと出さない。
+  const unconfirmed = input.kindBase !== "unit" && (
+    !!gap || r.status === "denied" || items.some((i) => i.key === "seller" && i.status === "unverifiable")
+  );
   return {
-    summary: mismatchCount > 0 ? "mismatch" : comparedCount > 0 ? "ok" : "none",
+    summary: mismatchCount > 0 ? "mismatch" : comparedCount === 0 ? "none" : unconfirmed ? "incomplete" : "ok",
     mismatchCount, comparedCount, items, notices, registries,
   };
 }

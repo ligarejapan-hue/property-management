@@ -2,12 +2,33 @@ import prisma from "@/lib/prisma";
 import { hasPermission } from "@/lib/permissions";
 import { canAccessPropertyRecord } from "@/lib/property-access";
 import type { PermissionEntry } from "@/lib/api-helpers";
+import type { BasePropertyKind } from "./constants";
+import { isLandedKind, registryGapText } from "./crosscheck";
+import { loadLandedCertificates } from "./crosscheck-load";
 import { loadDealRegistryRights } from "./registry-rights-load";
 import { registryDocInfo } from "./registry-rights";
 
-/** 書類確認書に使う形(名前なし)。読み取りが壊れても書類は出す=判定できない扱い(計画の読み替え 5)。 */
-export async function loadRegistryDocInfo(propertyId: string | null): Promise<{ activeRights: number; caution: string | null }> {
+/**
+ * 書類確認書に使う形(名前なし)。読み取りが壊れても書類は出す=判定できない扱い(計画の読み替え 5)。
+ * 土地のある物件は、土地と建物の全筆の合計(照合と同じ数え方。発行し直せば照合と合うように)。
+ */
+export async function loadRegistryDocInfo(
+  propertyId: string | null, kindBase: BasePropertyKind | null = null,
+): Promise<{ activeRights: number; caution: string | null }> {
   try {
+    if (propertyId && isLandedKind(kindBase)) {
+      const data = await loadLandedCertificates(propertyId, { kindBase, includeOwners: false });
+      if (!data.hasRows) return { activeRights: 0, caution: null };
+      const infos = data.certs.map((c) => registryDocInfo(
+        c.summary ? { status: "ok", attachmentCreatedAt: c.createdAt, summary: c.summary } : { status: "unreadable" },
+      ));
+      const gap = registryGapText(data.missing, data.uncertain);
+      const cautions = [...new Set(infos.map((i) => i.caution).filter((c): c is string => !!c))];
+      return {
+        activeRights: infos.reduce((n, i) => n + i.activeRights, 0),
+        caution: [...cautions, ...(gap ? [`謄本を確認してください(${gap})`] : [])].join("/ ") || null,
+      };
+    }
     return registryDocInfo(await loadDealRegistryRights(propertyId));
   } catch {
     return registryDocInfo({ status: "unreadable" });

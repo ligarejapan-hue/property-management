@@ -14,6 +14,7 @@ const STATUS_CLS: Record<CrosscheckStatus, string> = {
   mismatch: "bg-red-50 text-red-800 dark:bg-red-950 dark:text-red-200",
   missing: "bg-gray-100 text-gray-700 dark:bg-gray-800 dark:text-gray-300",
   kind_differs: "bg-sky-50 text-sky-800 dark:bg-sky-950 dark:text-sky-200",
+  notation_differs: "bg-violet-50 text-violet-800 dark:bg-violet-950 dark:text-violet-200",
   unverifiable: "bg-amber-50 text-amber-800 dark:bg-amber-950 dark:text-amber-200",
 };
 const LINK_CLS = "underline hover:no-underline";
@@ -64,9 +65,11 @@ export function CrosscheckPanel({ result: r, dealId, propertyId, canOpenProperty
     ? { cls: "border-red-200 bg-red-50 dark:border-red-900 dark:bg-red-950/40", icon: <AlertTriangle className="h-4 w-4 shrink-0 text-red-600" />, text: `${r.mismatchCount}件の食い違い` }
     : r.summary === "ok"
       ? { cls: "border-emerald-200 bg-emerald-50 dark:border-emerald-900 dark:bg-emerald-950/40", icon: <CheckCircle2 className="h-4 w-4 shrink-0 text-emerald-600" />, text: "照合OK" }
-      : { cls: "border-gray-200 bg-gray-50 dark:border-gray-800 dark:bg-gray-900", icon: <Info className="h-4 w-4 shrink-0 text-gray-500" />, text: "照合できる項目がありません" };
+      : r.summary === "incomplete"
+        ? { cls: "border-amber-200 bg-amber-50 dark:border-amber-900 dark:bg-amber-950/40", icon: <AlertTriangle className="h-4 w-4 shrink-0 text-amber-600" />, text: "確認できていない項目があります" }
+        : { cls: "border-gray-200 bg-gray-50 dark:border-gray-800 dark:bg-gray-900", icon: <Info className="h-4 w-4 shrink-0 text-gray-500" />, text: "照合できる項目がありません" };
   return (
-    <details open={r.summary === "mismatch"} className={`rounded-lg border px-3 py-2 text-sm ${head.cls}`}>
+    <details open={r.summary === "mismatch" || r.summary === "incomplete" || r.notices.length > 0} className={`rounded-lg border px-3 py-2 text-sm ${head.cls}`}>
       <summary className="flex cursor-pointer flex-wrap items-center gap-2 font-semibold">
         {head.icon}
         {head.text}
@@ -77,7 +80,7 @@ export function CrosscheckPanel({ result: r, dealId, propertyId, canOpenProperty
           {r.notices.map((n) => (
             <li key={n.id} data-notice-id={n.id} className="flex items-start gap-2 rounded-md border border-amber-200 bg-amber-50 px-2 py-1 text-xs text-amber-900 dark:border-amber-900 dark:bg-amber-950 dark:text-amber-200">
               <AlertTriangle className="mt-0.5 h-3.5 w-3.5 shrink-0" />
-              <span>{n.message}{n.count ? `(残っている権利 ${n.count}件)` : ""}</span>
+              <span>{n.message}{n.count ? (n.partial ? `(読めた謄本では ${n.count}件。ほかにも残っているかもしれません)` : `(残っている権利 ${n.count}件)`) : ""}</span>
             </li>
           ))}
         </ul>

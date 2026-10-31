@@ -1,23 +1,235 @@
 import prisma from "@/lib/prisma";
 import { parseRegistryText } from "@/lib/pdf-registry-parser";
 import { parseRegistryOwnerTable } from "@/lib/registry-owner-table";
-import { isFullCertificateText, summarizeRegistryRights } from "@/lib/registry-strike";
+import { isFullCertificateText, summarizeRegistryRights, type RegistryRightsSummary } from "@/lib/registry-strike";
 import type { BasePropertyKind } from "./constants";
-import type { RegistryFacts } from "./crosscheck";
+import {
+  LANDED_REQUIRED_SIDES, foldNameVariants, isLandedKind, normalizeArea, normalizeName, parseShare,
+  type RegistryFacts, type RegistrySide, type RegistryUncertain,
+} from "./crosscheck";
 import { readRegistryPdf } from "./registry-rights-load";
 
 /** 見る添付の数(新しい順)。全部事項と所有者事項が混ざるので、登記の現況より少し多めに見る。 */
 const CANDIDATES = 8;
+/** 土地のある物件で見る添付の上限。全筆を見るため途中で止められない。超えたら「確認できない」に倒す。 */
+const LANDED_CANDIDATES = 20;
+
+type Owner = { name: string; share: string | null };
+
+/** 土地・建物の1筆(1棟)ぶんの最新の全部事項。⚠summary に氏名が入る。 */
+export interface LandedCertificate {
+  side: RegistrySide;
+  identity: string;
+  createdAt: string;
+  landArea: string | null;
+  buildingArea: string | null;
+  summary: RegistryRightsSummary | null;
+}
+
+export interface LandedCertificates {
+  /** 謄本の添付が1通でもあったか。 */
+  hasRows: boolean;
+  /** 何か1通でも読めたか。 */
+  readAny: boolean;
+  certs: LandedCertificate[];
+  /** 所有者事項(新しい順)。identity が null=どの物件のものか読めない。⚠list に氏名が入る。 */
+  ownerCerts: { identity: string | null; createdAt: string; list: Owner[]; confirmed: boolean }[];
+  missing: RegistrySide[];
+  uncertain: RegistryUncertain | null;
+}
+
+/**
+ * 土地か建物か。表題部(権利部より前)の見出しで決める。
+ * ⚠全文を見ない: 土地の謄本でも、共同担保目録に建物の「家屋番号」が載っていることが多い。
+ */
+function sideOf(text: string, p: ReturnType<typeof parseRegistryText>): RegistrySide | null {
+  const title = text.split(/権\s*利\s*部/)[0];
+  if (/家\s*屋\s*番\s*号/.test(title)) return "建物";
+  if (/地\s*番|地\s*積/.test(title)) return "土地";
+  // 表題部の見出しを読めないときだけ、読み取れた値から決める。
+  if (p.buildingFloorArea) return "建物";
+  if (p.landAreaRegistry || p.lotNumber) return "土地";
+  return p.buildingNumber ? "建物" : null;
+}
+
+/** 同じ物件かを見分ける鍵。不動産番号が無ければ所在と、その種類の番号(地番か家屋番号)。 */
+function identityOf(p: ReturnType<typeof parseRegistryText>, side: RegistrySide | null): string | null {
+  if (p.realEstateNumber) return `no:${p.realEstateNumber}`;
+  const number = side === "建物" ? p.buildingNumber : side === "土地" ? p.lotNumber : null;
+  // 土地の地番と建物の家屋番号は同じ「1番」になることがあるので、種類も鍵に入れる。
+  return p.address && number ? `at:${side}:${p.address}|${number}` : null;
+}
+
+/** 1つの PDF に別々の不動産番号がある=複数の筆(棟)をまとめた PDF。 */
+function hasSeveralProperties(text: string): boolean {
+  const numbers = [...text.normalize("NFKC").matchAll(/不動産番号[:\s]*([0-9\- ]{10,20})/g)].map((m) => m[1].replace(/\D/g, ""));
+  return new Set(numbers).size > 1;
+}
+
+/**
+ * 土地のある物件(戸建・土地・一棟)の謄本を集める。筆(棟)ごとに最新の全部事項を1通ずつ。
+ * 抜けた筆を見落とさないよう、読めない謄本・土地か建物か判定できない謄本があれば uncertain を返す。
+ * ⚠結果には氏名が入る。ログ・監査に出さない。includeOwners=false なら所有者事項の氏名を持たない。
+ */
+export async function loadLandedCertificates(
+  propertyId: string, o: { kindBase: BasePropertyKind; includeOwners: boolean },
+): Promise<LandedCertificates> {
+  const rows = await prisma.attachment.findMany({
+    where: { propertyId, type: "registry", isDeleted: false },
+    orderBy: { createdAt: "desc" },
+    take: LANDED_CANDIDATES + 1,
+    select: { fileUrl: true, registryCertificateType: true, createdAt: true },
+  });
+  const required = LANDED_REQUIRED_SIDES[o.kindBase] ?? [];
+  const certs: LandedCertificate[] = [];
+  const ownerCerts: LandedCertificates["ownerCerts"] = [];
+  const seen = new Set<string>();
+  let unreadable = false;
+  let unclassified = false;
+  let readAny = false;
+
+  for (const a of rows.slice(0, LANDED_CANDIDATES)) {
+    const at = a.createdAt.toISOString();
+    const pdf = await readRegistryPdf(a.fileUrl);
+    if (!pdf) {
+      if (a.registryCertificateType !== "owner") unreadable = true;
+      else if (o.includeOwners) ownerCerts.push({ identity: null, createdAt: at, list: [], confirmed: false });
+      continue;
+    }
+    const full = isFullCertificateText(pdf.text);
+    if (!full) {
+      const list = parseRegistryOwnerTable(pdf.text);
+      if (!list?.length && a.registryCertificateType !== "owner") {
+        // 全部事項とも所有者事項とも読めない謄本は、抜けた筆かもしれないので読み飛ばさない。
+        unreadable = true;
+        continue;
+      }
+      readAny = true;
+      if (o.includeOwners) {
+        const parsedOwner = parseRegistryText(pdf.text);
+        ownerCerts.push({
+          identity: identityOf(parsedOwner, sideOf(pdf.text, parsedOwner)), createdAt: at,
+          list: (list ?? []).map((x) => ({ name: x.name, share: x.share })), confirmed: !!list?.length,
+        });
+      }
+      continue;
+    }
+    readAny = true;
+    const parsed = parseRegistryText(pdf.text);
+    const side = sideOf(pdf.text, parsed);
+    const identity = identityOf(parsed, side);
+    if (!side || !identity || hasSeveralProperties(pdf.text)) {
+      unclassified = true;
+      continue;
+    }
+    if (!required.includes(side) || seen.has(identity)) continue;
+    seen.add(identity);
+    certs.push({
+      side, identity, createdAt: at,
+      landArea: parsed.landAreaRegistry ?? null, buildingArea: parsed.buildingFloorArea ?? null,
+      summary: await summarizeRegistryRights({ pdf: pdf.body, text: pdf.text }),
+    });
+  }
+
+  const uncertain: RegistryUncertain | null = rows.length > LANDED_CANDIDATES ? "too_many"
+    : unreadable ? "unreadable" : unclassified ? "unclassified" : null;
+  return {
+    hasRows: rows.length > 0, readAny, certs, ownerCerts,
+    missing: required.filter((s) => !certs.some((c) => c.side === s)), uncertain,
+  };
+}
+
+/** 筆(棟)ごとの面積の合計。読めない筆が1つでもあれば null。 */
+function sumAreas(values: (string | null)[]): string | null {
+  let total = 0;
+  for (const v of values) {
+    const n = normalizeArea(v);
+    if (n === null) return null;
+    total += n;
+  }
+  return values.length ? `${Math.floor(total / 100)}.${String(total % 100).padStart(2, "0")}` : null;
+}
+
+const ownerKey = (list: Owner[]) => list
+  .map((x) => {
+    const share = parseShare(x.share);
+    return `${normalizeName(x.name)}:${share ? `${share.num}/${share.den}` : "-"}`;
+  })
+  .sort().join("\n");
+
+function ownersFacts(data: LandedCertificates): Extract<RegistryFacts, { status: "ok" }>["owners"] {
+  if (!data.certs.length) return null;
+  const oldest = data.certs.reduce((m, c) => (c.createdAt < m ? c.createdAt : m), data.certs[0].createdAt);
+  const usedOwnerCerts = new Set<LandedCertificates["ownerCerts"][number]>();
+  // ownerCerts は新しい順なので、同じ物件で最初に当たったものが最新。
+  const sets = data.certs.map((c) => {
+    const newer = data.ownerCerts.find((x) => x.identity === c.identity && x.createdAt > c.createdAt);
+    if (newer) {
+      usedOwnerCerts.add(newer);
+      return { list: newer.list, confirmed: newer.confirmed };
+    }
+    return {
+      list: (c.summary?.currentOwners ?? []).map((x) => ({ name: x.name, share: x.share })),
+      confirmed: !!c.summary && c.summary.hasKouku && c.summary.ownersConfirmed,
+    };
+  });
+  // どの全部事項のものか結びつかない新しい所有者事項は、黙って捨てず名義に足す(違えば不一致に出る)。
+  for (const x of data.ownerCerts) {
+    if (x.createdAt > oldest && !data.certs.some((c) => c.identity === x.identity)) {
+      usedOwnerCerts.add(x);
+      sets.push({ list: x.list, confirmed: x.confirmed });
+    }
+  }
+  const merged = new Map<string, Owner>();
+  for (const s of sets) for (const x of s.list) if (!merged.has(foldNameVariants(x.name))) merged.set(foldNameVariants(x.name), x);
+  const dates = [...data.certs.map((c) => c.createdAt), ...[...usedOwnerCerts].map((x) => x.createdAt)];
+  return {
+    list: [...merged.values()],
+    confirmed: sets.every((s) => s.confirmed),
+    attachmentCreatedAt: oldest,
+    newestCreatedAt: dates.reduce((m, d) => (d > m ? d : m), dates[0]),
+    differsAcross: new Set(sets.map((s) => ownerKey(s.list))).size > 1,
+  };
+}
+
+async function loadLandedFacts(propertyId: string, o: { kindBase: BasePropertyKind; includeOwners: boolean }): Promise<RegistryFacts> {
+  const data = await loadLandedCertificates(propertyId, o);
+  if (!data.hasRows) return { status: "none" };
+  if (!data.readAny) return { status: "unreadable" };
+  const { certs } = data;
+  const oldest = certs.length ? certs.reduce((m, c) => (c.createdAt < m ? c.createdAt : m), certs[0].createdAt) : null;
+  return {
+    status: "ok",
+    missing: data.missing,
+    uncertain: data.uncertain,
+    certificates: certs.map((c) => ({ side: c.side, createdAt: c.createdAt })),
+    areas: oldest ? {
+      unit: null,
+      land: sumAreas(certs.filter((c) => c.side === "土地").map((c) => c.landArea)),
+      building: sumAreas(certs.filter((c) => c.side === "建物").map((c) => c.buildingArea)),
+      attachmentCreatedAt: oldest,
+    } : null,
+    rights: oldest ? {
+      activeRights: certs.reduce((n, c) => n + (c.summary?.activeRights.length ?? 0), 0),
+      readable: certs.every((c) => !!c.summary?.hasKouku),
+      attachmentCreatedAt: oldest,
+    } : null,
+    owners: o.includeOwners ? ownersFacts(data) : null,
+  };
+}
 
 /**
  * 照合に使う謄本の値を集める(読み取りの部品は変えず、呼ぶだけ)。
- * - 面積・担保は全部事項だけ(所有者事項には載らない)。担保は登記の現況と同じ「全部事項の最新の1件」。
+ * - 土地のある物件(戸建・土地・一棟)は、土地と建物それぞれの全筆を読む(loadLandedCertificates)。
+ * - それ以外の面積・担保は全部事項だけ(所有者事項には載らない)。担保は登記の現況と同じ「全部事項の最新の1件」。
  * - 売主名と比べる所有者は、いちばん新しい謄本から。読み取りが怪しければ confirmed=false(比べない)。
  * ⚠結果には氏名が入る。ログ・監査に出さない(例外の中身も出さない)。includeOwners=false なら氏名を持たない。
  */
 export async function loadCrosscheckRegistry(
   propertyId: string, o: { kindBase: BasePropertyKind | null; includeOwners: boolean },
 ): Promise<RegistryFacts> {
+  if (isLandedKind(o.kindBase)) return loadLandedFacts(propertyId, { kindBase: o.kindBase, includeOwners: o.includeOwners });
+
   const rows = await prisma.attachment.findMany({
     where: { propertyId, type: "registry", isDeleted: false },
     orderBy: { createdAt: "desc" },
@@ -27,18 +239,13 @@ export async function loadCrosscheckRegistry(
   if (!rows.length) return { status: "none" };
 
   const needUnit = o.kindBase === "unit";
-  const needLand = o.kindBase === "land" || o.kindBase === "house" || o.kindBase === "building";
-  const needBuilding = o.kindBase === "house" || o.kindBase === "building";
   let unit: string | null = null;
-  let land: string | null = null;
-  let building: string | null = null;
   let areaDate: string | null = null;
   let rights: Extract<RegistryFacts, { status: "ok" }>["rights"] = null;
   let owners: Extract<RegistryFacts, { status: "ok" }>["owners"] = null;
   let readAny = false;
 
-  const areasDone = () => (!needUnit || unit !== null) && (!needLand || land !== null) && (!needBuilding || building !== null);
-  const done = () => rights !== null && (!o.includeOwners || owners !== null) && areasDone();
+  const done = () => rights !== null && (!o.includeOwners || owners !== null) && (!needUnit || unit !== null);
 
   for (const a of rows) {
     const at = a.createdAt.toISOString();
@@ -61,11 +268,7 @@ export async function loadCrosscheckRegistry(
     if (full) {
       const parsed = parseRegistryText(pdf.text);
       if (needUnit) unit ??= parsed.unitFloorArea ?? null;
-      if (needLand) land ??= parsed.landAreaRegistry ?? null;
-      if (needBuilding) building ??= parsed.buildingFloorArea ?? null;
       areaDate ??= at;
-      // 面積が2通の謄本に分かれるときは、古いほうの日付を出す(古い謄本の注意が漏れないように)。
-      if (at < areaDate) areaDate = at;
       if (rights === null || (o.includeOwners && owners === null)) {
         const summary = await summarizeRegistryRights({ pdf: pdf.body, text: pdf.text });
         rights ??= summary
@@ -92,7 +295,7 @@ export async function loadCrosscheckRegistry(
   if (!readAny) return { status: "unreadable" };
   return {
     status: "ok",
-    areas: areaDate ? { unit, land, building, attachmentCreatedAt: areaDate } : null,
+    areas: areaDate ? { unit, land: null, building: null, attachmentCreatedAt: areaDate } : null,
     rights,
     owners,
   };

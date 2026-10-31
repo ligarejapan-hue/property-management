@@ -321,7 +321,7 @@ const ACTION_EXTRA_KEYS: Readonly<Record<string, ReadonlySet<string>>> = {
   deal_document_issue: new Set(["docType", "variant", "version", "formats"]),
   // 取引の物件の謄本の登記の現況を見た(設計 §4.6.1)。status=ok|unreadable・activeRights/cautions=件数だけ。権利者名・順位の中身は載せない。
   deal_registry_rights_view: new Set(["status", "activeRights", "cautions"]),
-  // 取引の数値照合を見た(謄本を読んだとき)。summary=ok|mismatch|none と件数だけ。
+  // 取引の数値照合を見た(謄本を読んだとき)。summary=ok|mismatch|incomplete|none と件数だけ。
   deal_crosscheck_view: new Set(["summary", "mismatches", "compared"]),
   // 取引の設定のロゴ・角印。kind=logo|seal・op=set|clear・bytes/width/height=数値。ファイル名は載せない。
   deal_settings_image_update: new Set(["kind", "op", "bytes", "width", "height"]),
