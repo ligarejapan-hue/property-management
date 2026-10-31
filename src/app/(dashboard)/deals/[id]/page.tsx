@@ -141,7 +141,7 @@ export default function DealDetailPage({ params }: { params: Promise<{ id: strin
       {/* 決済までの段取り。取引の保存・書類の発行で読み直す。 */}
       <DealSchedule dealId={deal.id} users={users} defaultAssignee={deal.assigneeId} revision={k([deal.version, issuedTick, docLinkTick])} />
       {/* お客様の書類提出。当事者の変更で読み直す。操作したら段取りも読み直す(完了候補・受領の進み具合)。 */}
-      <DealDocLinks dealId={deal.id} revision={k([deal.version, deal.parties.map((p) => p.id)])} onChanged={() => setDocLinkTick((t) => t + 1)} />
+      <DealDocLinks dealId={deal.id} revision={k([deal.version, deal.parties])} onChanged={() => setDocLinkTick((t) => t + 1)} />
       {/* 物件の謄本の登記の現況(段5c-2)。物件を差し替えたら読み直す。 */}
       <DealRegistryRights key={deal.propertyId ?? "none"} dealId={deal.id} propertyId={deal.propertyId} />
       <Tabs tabs={tabs} active={tab} onChange={setSelected} idBase="deal-detail" />
