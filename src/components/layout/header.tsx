@@ -45,7 +45,7 @@ export default function Header({ userName, userRole, onLogout }: HeaderProps) {
         <HeaderBell />
         {/* モバイルではテーマ切替をメニュー(ドロワー)下部へ移し、ヘッダーを 1 行に保つ */}
         <div className="hidden sm:block">
-          <ThemeToggle withDensity />
+          <ThemeToggle withDensity withLayout />
         </div>
         <div className="flex items-center gap-2">
           <span className="hidden md:inline text-sm text-gray-700 dark:text-gray-300">{userName}</span>
@@ -67,9 +67,11 @@ export default function Header({ userName, userRole, onLogout }: HeaderProps) {
           onClick={onLogout}
           className="text-gray-600 dark:text-gray-300"
           title="ログアウト"
+          aria-label="ログアウト"
         >
           <LogOut className="h-4 w-4" />
-          <span className="hidden sm:inline">ログアウト</span>
+          {/* 文字は広い画面(xl)だけ。1024px 前後では選択欄が並んで溢れるため絵だけ(title で名前は出る) */}
+          <span className="hidden xl:inline">ログアウト</span>
         </Button>
       </div>
     </header>

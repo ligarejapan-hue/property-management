@@ -473,6 +473,27 @@ html[data-density="compact"] input:is([type="checkbox"], [type="radio"]) {
 }
 }
 
+/*
+ * 見た目の設定 段階3: ナビの位置(左サイドバー/上部ナビ)。html の data-layout は画面を描く前に付く(boot-script)=一瞬別の配置が出ない。
+ * 出し分けるのは広い画面(lg=64rem 以上=今までサイドバーが常に出ていた幅)だけ。それより狭い幅は、
+ * どちらの設定でも今までのメニュー(左上の ≡ で開くドロワー=sidebar.tsx)を使う。
+ * (メディアクエリの rem はブラウザの既定 16px で決まる=文字サイズの設定で切り替わる幅は動かない)
+ */
+@media (min-width: 64rem) {
+  html[data-layout="top"] [data-shell="sidebar"] {
+    display: none;
+  }
+}
+html:not([data-layout="top"]) [data-shell="topnav"] {
+  display: none;
+}
+/* ヘッダーの「配置」の欄は xl 以上(theme-toggle.tsx)。上部ナビの人は左サイドバーが無いぶん広いので lg 以上で出す=戻す手段を残す */
+@media (min-width: 64rem) {
+  html[data-layout="top"] [data-layout-select] {
+    display: flex;
+  }
+}
+
 body {
   background: var(--background);
   color: var(--foreground);
