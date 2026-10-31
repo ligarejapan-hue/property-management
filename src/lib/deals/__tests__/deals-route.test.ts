@@ -3,15 +3,19 @@ vi.mock("next/server", async () => (await import("./route-mocks")).nextServerMoc
 vi.mock("@/lib/api-helpers", async () => (await import("./route-mocks")).apiHelpersMock());
 const { writeAuditLog } = vi.hoisted(() => ({ writeAuditLog: vi.fn() }));
 vi.mock("@/lib/audit", () => ({ writeAuditLog }));
-vi.mock("@/lib/prisma", () => ({
-  default: {
+vi.mock("@/lib/prisma", () => {
+  const db: Record<string, unknown> = {
     deal: { findMany: vi.fn(async () => []), count: vi.fn(async () => 0), findFirst: vi.fn(async () => null), create: vi.fn() },
-    property: { findUnique: vi.fn(async () => null) },
+    property: { findUnique: vi.fn(async () => null), updateMany: vi.fn(async () => ({ count: 1 })) },
+    changeLog: { create: vi.fn(async () => ({})) },
     dealSettings: { findUnique: vi.fn(async () => null) },
     dealRateTable: { findMany: vi.fn(async () => []) },
     companyProfile: { findUnique: vi.fn(async () => null) },
-  },
-}));
+    $queryRaw: vi.fn(async () => [{ id: "locked" }]),
+  };
+  db.$transaction = vi.fn(async (fn: (tx: unknown) => unknown) => fn(db));
+  return { default: db };
+});
 
 import prismaMock from "@/lib/prisma";
 import { getApiSession, getUserPermissions } from "@/lib/api-helpers";
@@ -23,7 +27,9 @@ import { GET as OPTIONS } from "../../../app/api/deals/options/route";
 type Fn = ReturnType<typeof vi.fn>;
 const pm = prismaMock as never as {
   deal: { findMany: Fn; count: Fn; findFirst: Fn; create: Fn };
-  property: { findUnique: Fn };
+  property: { findUnique: Fn; updateMany: Fn };
+  changeLog: { create: Fn };
+  $queryRaw: Fn;
   dealSettings: { findUnique: Fn };
   dealRateTable: { findMany: Fn };
   companyProfile: { findUnique: Fn };
@@ -131,5 +137,36 @@ describe("GET /api/deals/options", () => {
     const body = await (await OPTIONS()).json();
     expect(body.propertyKinds.map((k: { key: string }) => k.key)).toEqual(["unit", "house", "land", "building"]);
     expect(body.selfParty).toEqual({ name: "試験不動産株式会社", representative: "代表取締役 試験 太郎", address: "東京都試験区1-1", phone: "03-0000-0000" });
+  });
+});
+
+describe("POST /api/deals — 案件ステータスとの連動", () => {
+  const post = () => POST(json("POST", { businessType: "brokerage", tradeSide: "seller", propertyId: PROP_ID }));
+  const withCase = (caseStatus: string) => {
+    pm.property.findUnique.mockReset();
+    pm.property.findUnique.mockImplementation(async (a: { select: Record<string, unknown> }) =>
+      "caseStatus" in a.select && Object.keys(a.select).length === 1 ? { caseStatus } : { ...propRow, caseStatus });
+  };
+  it("販売中の物件で作ると、取引は契約予定・案件も契約予定になる", async () => {
+    withCase("on_sale");
+    pm.deal.findMany.mockResolvedValue([{ id: DEAL_ID, status: "considering" }]);
+    const res = await post();
+    expect(res.status).toBe(201);
+    expect(pm.deal.create.mock.calls[0][0].data.status).toBe("considering");
+    expect(pm.property.updateMany).toHaveBeenCalledWith({ where: { id: PROP_ID, caseStatus: "on_sale" }, data: { caseStatus: "contract_planned" } });
+    expect(pm.$queryRaw.mock.invocationCallOrder[0]).toBeLessThan(pm.deal.create.mock.invocationCallOrder[0]);
+  });
+  it("決済完了の物件で作ると、取引は決済済で始まり案件は変えない", async () => {
+    withCase("sold");
+    pm.deal.findMany.mockResolvedValue([{ id: DEAL_ID, status: "settled" }]);
+    await post();
+    expect(pm.deal.create.mock.calls[0][0].data.status).toBe("settled");
+    expect(pm.property.updateMany).not.toHaveBeenCalled();
+  });
+  it("手入力の物件の取引では物件を触らない", async () => {
+    await POST(json("POST", { businessType: "brokerage", tradeSide: "seller" }));
+    expect(pm.deal.create.mock.calls[0][0].data.status).toBe("considering");
+    expect(pm.$queryRaw).not.toHaveBeenCalled();
+    expect(pm.property.updateMany).not.toHaveBeenCalled();
   });
 });

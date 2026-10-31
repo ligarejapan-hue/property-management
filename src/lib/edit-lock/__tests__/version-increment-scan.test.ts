@@ -86,9 +86,9 @@ const VERSIONED: Record<string, string> = {
   "src/app/api/properties/[id]/dm-logs/[logId]/reaction/route.ts:276":
     "property.dmStatus(undeliverable連動のno_send昇格)+version increment" +
     "(Task 9で修正: 元は進めていなかった)",
-  "src/app/api/properties/[id]/route.ts:530":
+  "src/app/api/properties/[id]/route.ts:531":
     "property の編集画面フィールド一式(編集画面の本体保存窓口)+version increment",
-  "src/app/api/properties/bulk-update/route.ts:87":
+  "src/app/api/properties/bulk-update/route.ts:89":
     "property.caseStatus/registryStatus/dmStatus/assignedTo(一括更新)+version increment",
   "src/lib/building-link/rename.ts:121":
     "property.buildingName(棟の名前を直したとき、つながっている全部屋へ反映)+version increment" +
@@ -241,6 +241,12 @@ const ALLOWED_WITHOUT_VERSION: Record<string, AllowedEntry> = {
       "property.caseStatus のみ(案件ステータスの自動の切り替え 2026-10-20)。caseStatus は編集ウィンドウ" +
       "(FORM_FIELDS)に無い=鍵を持つ人の保存が上書きしない。版を進めると、所有者の申込などで編集中の人の保存が" +
       "409 で負ける(D9 と同じ理由)ので進めない。プルダウンの保存は人の選択が後勝ちでよい",
+    keys: ["caseStatus"],
+  },
+  "src/lib/deals/status-link.ts:89": {
+    reason:
+      "property.caseStatus のみ(取引の状態との連動 2026-10-31)。case-status-auto.ts と同じ理由で版を進めない" +
+      "=caseStatus は編集ウィンドウに無く、取引の保存で物件の編集中の人を 409 にしない",
     keys: ["caseStatus"],
   },
 };

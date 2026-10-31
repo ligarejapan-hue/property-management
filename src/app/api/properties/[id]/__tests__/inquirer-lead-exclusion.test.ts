@@ -56,7 +56,12 @@ type PrismaMock = {
   $transaction: Mock;
 };
 const prismaMock = prisma as unknown as PrismaMock;
-const txMock = { property: { updateMany: vi.fn() }, $queryRaw: vi.fn(async () => []) };
+const txMock = {
+  property: { updateMany: vi.fn(), findUnique: vi.fn(async () => ({ caseStatus: "hold" })) },
+  deal: { findMany: vi.fn(async (): Promise<{ id: string; status: string }[]> => []), updateMany: vi.fn(async () => ({ count: 1 })) },
+  changeLog: { create: vi.fn(async () => ({})) },
+  $queryRaw: vi.fn(async () => []),
+};
 
 const P = (resource: string, action: string) => ({ resource, action, granted: true });
 const PERMS_EDITOR = [P("property", "read"), P("property", "write"), P("owner", "read"), P("owner_name", "full")];
@@ -292,5 +297,20 @@ describe("PATCH /api/properties/[id] — 除外申請", () => {
     (getUserPermissions as Mock).mockResolvedValue(PERMS_NO_OWNER);
     const res = await PATCH(patchReq({ version: 1, leadExclusionStatus: "requested" }), ctx);
     expect(res.status).toBe(200);
+  });
+});
+
+describe("PATCH /api/properties/[id] — 取引の状態との連動", () => {
+  it("案件ステータスを変えると、同じ保存の中で取引の状態をそろえる", async () => {
+    txMock.deal.findMany.mockResolvedValueOnce([{ id: "d1", status: "contracted" }]);
+    const res = await PATCH(patchReq({ version: 1, caseStatus: "hold" }), ctx);
+    expect(res.status).toBe(200);
+    expect(txMock.deal.updateMany).toHaveBeenCalledWith({
+      where: { id: "d1", status: "contracted" }, data: { status: "cancelled", version: { increment: 1 } },
+    });
+  });
+  it("案件ステータスを変えない保存では取引を見ない", async () => {
+    await PATCH(patchReq({ version: 1, inquirerName: "佐藤一郎" }), ctx);
+    expect(txMock.deal.findMany).not.toHaveBeenCalled();
   });
 });

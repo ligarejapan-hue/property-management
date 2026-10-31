@@ -60,8 +60,13 @@ vi.mock("@/lib/prisma", () => ({
   default: {
     property: {
       findMany: vi.fn(),
+      findUnique: vi.fn(),
       updateMany: vi.fn(),
     },
+    deal: { findMany: vi.fn(async () => []), updateMany: vi.fn() },
+    changeLog: { create: vi.fn() },
+    $queryRaw: vi.fn(async () => []),
+    $transaction: vi.fn(),
   },
 }));
 
@@ -71,7 +76,10 @@ import { recordChanges, PROPERTY_TRACKED_FIELDS } from "@/lib/change-log";
 import { POST } from "../../app/api/properties/bulk-update/route";
 
 const pm = prisma as unknown as {
-  property: { findMany: Mock; updateMany: Mock };
+  property: { findMany: Mock; findUnique: Mock; updateMany: Mock };
+  deal: { findMany: Mock; updateMany: Mock };
+  changeLog: { create: Mock };
+  $transaction: Mock;
 };
 const recordChangesMock = recordChanges as unknown as Mock;
 
@@ -184,6 +192,41 @@ describe("POST /api/properties/bulk-update — 既存仕様不変", () => {
     const upArg = pm.property.updateMany.mock.calls[0][0];
     expect(upArg.where).toEqual({ id: { in: [VALID_IDS[0]] } });
     expect(upArg.data).toMatchObject({ dmStatus: "send", version: { increment: 1 } });
+  });
+
+  describe("取引の状態との連動", () => {
+    const PID = "11111111-1111-4111-8111-111111111111";
+    const setup = () => {
+      pm.property.findMany.mockResolvedValue([{ id: PID, caseStatus: "on_sale", registryStatus: "unconfirmed", dmStatus: "send", assignedTo: null }]);
+      pm.property.updateMany.mockResolvedValue({ count: 1 });
+      pm.$transaction.mockImplementation(async (fn: (tx: unknown) => unknown) => fn(prisma));
+    };
+    it("案件ステータスを変えた物件の取引をそろえる", async () => {
+      setup();
+      pm.deal.findMany.mockResolvedValueOnce([{ propertyId: PID }]).mockResolvedValueOnce([{ id: "d1", status: "considering" }]);
+      pm.property.findUnique.mockResolvedValue({ caseStatus: "contracted" });
+      pm.deal.updateMany.mockResolvedValue({ count: 1 });
+      const res = await POST(makeRequest({ propertyIds: [PID], updates: { caseStatus: "contracted" } }));
+      expect(res.status).toBe(200);
+      expect(pm.deal.updateMany).toHaveBeenCalledWith({
+        where: { id: "d1", status: "considering" }, data: { status: "contracted", version: { increment: 1 } },
+      });
+    });
+    it("案件ステータス以外の一括変更では取引を見ない", async () => {
+      setup();
+      pm.deal.findMany.mockClear();
+      await POST(makeRequest({ propertyIds: [PID], updates: { dmStatus: "hold" } }));
+      expect(pm.deal.findMany).not.toHaveBeenCalled();
+    });
+    it("そろえるのに失敗しても一括変更は成功のまま", async () => {
+      setup();
+      pm.deal.findMany.mockResolvedValueOnce([{ propertyId: PID }]);
+      pm.$transaction.mockRejectedValueOnce(new Error("boom"));
+      const spy = vi.spyOn(console, "error").mockImplementation(() => {});
+      const res = await POST(makeRequest({ propertyIds: [PID], updates: { caseStatus: "contracted" } }));
+      expect(res.status).toBe(200);
+      spy.mockRestore();
+    });
   });
 
   it("field_staff は自分の物件のみ（where に OR scope を付与）", async () => {

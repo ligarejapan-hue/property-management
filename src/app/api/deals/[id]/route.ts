@@ -13,6 +13,8 @@ import { loadDealSettings } from "@/lib/deals/settings-store";
 import { isKnownPropertyKind } from "@/lib/deals/settings";
 import { DEAL_TRACKED_FIELDS, dealChangeValues, toDealUpdateData } from "@/lib/deals/change-values";
 import { DEAL_DETAIL_SELECT, toDealView } from "@/lib/deals/view";
+import { syncCaseStatusFromDeals } from "@/lib/deals/status-link";
+import { lockPropertyRow } from "@/lib/property-record-guard";
 
 type Ctx = { params: Promise<{ id: string }> };
 const NO_STORE = { "Cache-Control": "no-store" };
@@ -54,6 +56,9 @@ export async function PATCH(request: Request, ctx: Ctx) {
     await prisma.$transaction(async (tx) => {
       const cur = await tx.deal.findUnique({ where: { id }, select: DEAL_DETAIL_SELECT });
       if (!cur) throw new ApiError(404, "取引が見つかりません", "NOT_FOUND");
+      // 案件ステータスと連動する(lib/deals/status-link.ts)。ロックは物件の行 → 取引の行(下の updateMany)の順。
+      const linkedPropertyId = patch.status !== undefined && patch.status !== cur.status ? cur.propertyId : null;
+      if (linkedPropertyId) await lockPropertyRow(tx, linkedPropertyId);
       const data = toDealUpdateData(patch, cur.businessType);
       // 資金計画表・事業計画書は plan_inputs のそれぞれの鍵(funding / business)だけを差し替える(ほかの鍵は残す)。
       if (patch.businessPlan !== undefined && (patch.businessType ?? cur.businessType) !== "resale") {
@@ -73,6 +78,7 @@ export async function PATCH(request: Request, ctx: Ctx) {
         oldValues: dealChangeValues(cur), newValues: dealChangeValues({ ...cur, ...data }),
         trackedFields: DEAL_TRACKED_FIELDS, source: "manual",
       });
+      if (linkedPropertyId) await syncCaseStatusFromDeals(tx, { propertyId: linkedPropertyId, changedBy: session.id });
     });
 
     await writeAuditLog({

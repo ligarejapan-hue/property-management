@@ -12,6 +12,8 @@ import { writeAuditLog } from "@/lib/audit";
 import { hasPermission } from "@/lib/permissions";
 import { recordChanges, PROPERTY_TRACKED_FIELDS } from "@/lib/change-log";
 import { CASE_STATUS_VALUES } from "@/lib/property-types";
+import { syncDealFromCaseStatus } from "@/lib/deals/status-link";
+import { lockPropertyRow } from "@/lib/property-record-guard";
 
 const bulkUpdateSchema = z.object({
   propertyIds: z
@@ -111,6 +113,24 @@ export async function POST(request: NextRequest) {
         }),
       ),
     );
+
+    // 案件ステータスを変えた物件は、取引の状態もそろえる(lib/deals/status-link.ts)。
+    // 物件の更新は確定済みなので、そろえられなくても一括変更そのものは失敗にしない。
+    if (updateFields.caseStatus !== undefined) {
+      const changedIds = currentProperties.filter((p) => p.caseStatus !== updateFields.caseStatus).map((p) => p.id);
+      const linked = changedIds.length === 0 ? [] : await prisma.deal.findMany({
+        where: { propertyId: { in: changedIds } },
+        select: { propertyId: true },
+        distinct: ["propertyId"],
+      });
+      for (const { propertyId } of linked) {
+        if (!propertyId) continue;
+        await prisma.$transaction(async (tx) => {
+          await lockPropertyRow(tx, propertyId);
+          await syncDealFromCaseStatus(tx, { propertyId, changedBy: session.id });
+        }).catch((e) => console.error("[bulk-update] 取引の状態をそろえられませんでした", propertyId, e));
+      }
+    }
 
     await writeAuditLog({
       userId: session.id,

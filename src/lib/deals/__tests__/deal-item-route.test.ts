@@ -7,8 +7,10 @@ const { recordChangesInTx } = vi.hoisted(() => ({ recordChangesInTx: vi.fn() }))
 vi.mock("@/lib/change-log", async (orig) => ({ ...(await orig<typeof import("@/lib/change-log")>()), recordChangesInTx }));
 vi.mock("@/lib/prisma", () => {
   const db: Record<string, unknown> = {
-    deal: { findUnique: vi.fn(async () => null), updateMany: vi.fn(async () => ({ count: 1 })) },
-    property: { findUnique: vi.fn(async () => null) },
+    deal: { findUnique: vi.fn(async () => null), findMany: vi.fn(async () => []), updateMany: vi.fn(async () => ({ count: 1 })) },
+    property: { findUnique: vi.fn(async () => null), updateMany: vi.fn(async () => ({ count: 1 })) },
+    changeLog: { create: vi.fn(async () => ({})) },
+    $queryRaw: vi.fn(async () => [{ id: "locked" }]),
     dealSettings: { findUnique: vi.fn(async () => null) },
     user: { findUnique: vi.fn(async () => ({ isActive: true })) },
   };
@@ -26,8 +28,10 @@ import { POST as REFRESH } from "../../../app/api/deals/[id]/refresh-property/ro
 
 type Fn = ReturnType<typeof vi.fn>;
 const pm = prismaMock as never as {
-  deal: { findUnique: Fn; updateMany: Fn };
-  property: { findUnique: Fn };
+  deal: { findUnique: Fn; findMany: Fn; updateMany: Fn };
+  property: { findUnique: Fn; updateMany: Fn };
+  changeLog: { create: Fn };
+  $queryRaw: Fn;
   user: { findUnique: Fn };
 };
 const ctx = { params: Promise.resolve({ id: DEAL_ID }) };
@@ -85,6 +89,42 @@ describe("PATCH /api/deals/[id]", () => {
     expect(writeAuditLog).toHaveBeenCalledWith(expect.objectContaining({
       action: "deal_update", targetId: DEAL_ID, detail: { fields: ["assigneeId", "contractPlace", "status"] },
     }));
+  });
+  describe("案件ステータスとの連動", () => {
+    const linkedRow = () => ({ ...detailRow, propertyId: PROP_ID, status: "considering" });
+    it("状態を変えると、物件の行を先にロックして案件ステータスをそろえる", async () => {
+      pm.deal.findUnique.mockResolvedValue(linkedRow());
+      pm.property.findUnique.mockResolvedValue({ caseStatus: "contract_planned" });
+      pm.deal.findMany.mockResolvedValue([{ id: DEAL_ID, status: "contracted" }]);
+      const res = await PATCH(json("PATCH", { version: 3, status: "contracted" }), ctx);
+      expect(res.status).toBe(200);
+      expect(pm.property.updateMany).toHaveBeenCalledWith({
+        where: { id: PROP_ID, caseStatus: "contract_planned" }, data: { caseStatus: "contracted" },
+      });
+      expect(pm.$queryRaw.mock.invocationCallOrder[0]).toBeLessThan(pm.deal.updateMany.mock.invocationCallOrder[0]);
+      expect(pm.changeLog.create).toHaveBeenCalledWith({
+        data: expect.objectContaining({ targetTable: "properties", targetId: PROP_ID, source: "auto", newValue: "contracted" }),
+      });
+    });
+    it("状態を変えない保存では、ロックも案件ステータスの変更もしない", async () => {
+      pm.deal.findUnique.mockResolvedValue(linkedRow());
+      await PATCH(json("PATCH", { version: 3, status: "considering", contractPlace: "試験区の事務所" }), ctx);
+      expect(pm.$queryRaw).not.toHaveBeenCalled();
+      expect(pm.property.updateMany).not.toHaveBeenCalled();
+    });
+    it("物件とつながっていない取引では何もしない", async () => {
+      pm.deal.findUnique.mockResolvedValue({ ...detailRow, propertyId: null, status: "considering" });
+      await PATCH(json("PATCH", { version: 3, status: "settled" }), ctx);
+      expect(pm.$queryRaw).not.toHaveBeenCalled();
+      expect(pm.property.updateMany).not.toHaveBeenCalled();
+    });
+    it("版の番号で断られたら案件ステータスも変えない", async () => {
+      pm.deal.findUnique.mockResolvedValue(linkedRow());
+      pm.deal.updateMany.mockResolvedValue({ count: 0 });
+      const res = await PATCH(json("PATCH", { version: 2, status: "contracted" }), ctx);
+      expect(res.status).toBe(409);
+      expect(pm.property.updateMany).not.toHaveBeenCalled();
+    });
   });
   it("ほかの人が先に保存していたら 409・上書きしない", async () => {
     pm.deal.updateMany.mockResolvedValue({ count: 0 });
