@@ -22,8 +22,14 @@ describe("添付ファイルタブの枠は1つ", () => {
   it("PDF は先に中身を見て、まとめてあれば分け方・謄本なら謄本として送る", () => {
     expect(tab).toContain("analyzeBundlePdf(propertyId, file)");
     expect(tab).toContain("routeForAnalysis(analysis)");
-    expect(tab).toContain('uploadOne(file, "registry")');
+    expect(tab).toContain('uploadOne(file, "registry", ');
     expect(tab).toContain("saveSplitPdf(propertyId, splitTarget.file, segments, {");
+  });
+
+  it("★「この謄本から基本情報に反映」は謄本の行だけ・所有者事項には出さない・編集できる人だけ", () => {
+    expect(tab).toContain('isRegistry && att.registryCertificateType !== "owner" && onApplyRegistry && (');
+    expect(tab).toContain("onApplyRegistry={canApplyRegistry ? () => void handleApplyRegistry(att.id) : undefined}");
+    expect(tab).toContain("この謄本から基本情報に反映");
   });
 
   it("⚠中身を見られなかったとき(謄本かもしれない)は、推測せず「謄本ですか？」と聞く", () => {

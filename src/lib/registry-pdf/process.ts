@@ -28,7 +28,8 @@ import { normalizeName, normalizeAddress } from "@/lib/normalize";
 import { pickReusableAddresslessOwner } from "@/lib/registry-pdf/owner-reuse";
 import { parseRegistryText } from "@/lib/pdf-registry-parser";
 import { planRegistryAreaFill, registryAreasOf, type RegistryAreaCurrent } from "@/lib/registry-area";
-import { fillPropertyAreasFromRegistry } from "@/lib/registry-pdf/fill-areas";
+import { fillPropertyFromRegistry } from "@/lib/registry-pdf/fill-areas";
+import { parseRegistryBuildingFacts } from "@/lib/registry-basic-info";
 import {
   FULL_CERTIFICATE_OWNERS_UNDETERMINED_WARNING,
   hasDeterminedOwners,
@@ -1030,6 +1031,17 @@ export async function processRegistryPdf(
         resultAction = "updated";
       }
 
+      // 構造と築年月(2026-11-01): 上の更新のあとに同じ決まりで空の欄へ(棟に紐づく部屋は棟へ)。
+      if (!args.ownersOnly) {
+        const factsFill = await fillPropertyFromRegistry({
+          propertyId,
+          values: parseRegistryBuildingFacts(text),
+          changedBy: session.id,
+        });
+        if (factsFill.filled.length > 0) resultAction = "updated";
+        if (factsFill.skippedByEditLock) propertyFillSkippedByEditLock = true;
+      }
+
       targetPropertyId = propertyId;
 
       // A-2c: owner 反映を Mode A/B 共通関数へ委譲（挙動は従来の Mode A と同一）。
@@ -1151,20 +1163,21 @@ export async function processRegistryPdf(
         }
       }
 
-      // 面積(2026-10-25): 空の欄だけ埋める(Mode A と同じ決まり・fill-areas.ts)。
+      // 面積(2026-10-25)・構造と築年月(2026-11-01): 空の欄だけ埋める(Mode A と同じ決まり・fill-areas.ts)。
       // ⚠強い一致(不動産番号・住所の完全一致)か新しく作った物件だけ。弱い住所の部分一致では
       //   別の物件に書きうるので書かない。担当外の物件にも書かない(所有者の反映と同じ)。
       if (!args.ownersOnly && targetPropertyId && canReflectOwners) {
         const areas = registryAreasOf(parsed);
-        if (areas.unitFloorArea || areas.landArea || areas.buildingFloorArea) {
+        const facts = parseRegistryBuildingFacts(text);
+        if (areas.unitFloorArea || areas.landArea || areas.buildingFloorArea || facts.structureType || facts.builtYear) {
           const targetProp = await prisma.property.findUnique({
             where: { id: targetPropertyId },
             select: { createdBy: true, assignedTo: true },
           });
           if (targetProp && canAccessPropertyRecord(session, targetProp)) {
-            const areaFill = await fillPropertyAreasFromRegistry({
+            const areaFill = await fillPropertyFromRegistry({
               propertyId: targetPropertyId,
-              areas,
+              values: { ...areas, ...facts },
               changedBy: session.id,
             });
             if (areaFill.skippedByEditLock) propertyFillSkippedByEditLock = true;

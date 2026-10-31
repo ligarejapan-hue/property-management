@@ -1127,6 +1127,7 @@ export default function PropertyDetailPage({
             // loading を立てて添付タブを一旦アンマウントし、GET が一時失敗すると
             // 成功した添付操作ごとページをエラーに差し替えてしまう(@codex #429 P2)。
             onRegistryMutated={refreshPropertyQuietly}
+            canApplyRegistry={canWriteProperty}
           />
         )}
         {activeTab === "history" && (
