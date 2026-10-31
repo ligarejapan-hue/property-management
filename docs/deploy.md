@@ -537,6 +537,15 @@ sudo -u www-data env HOME=/var/www npm_config_cache=/var/www/.npm npm ci --inclu
 set -a && source /etc/property-management/app.env && set +a
 sudo -E -u www-data env HOME=/var/www npm_config_cache=/var/www/.npm npx prisma generate
 
+# 3.5 DB のバックアップ（migration がある反映では必須。足すだけの migration でも取る）
+#     root のシェルで実行する。詳しくは下の「migration の前のバックアップ」。失敗したらここで止める。
+sudo -u www-data git diff --name-only ORIG_HEAD HEAD -- prisma/migrations   # 何か出たら migration あり
+install -d -m 700 -o root -g root /var/backups/property-management/pre-migration
+OUT=/var/backups/property-management/pre-migration/db-$(date +%Y%m%d-%H%M%S).dump
+( umask 077; pg_dump "${DATABASE_URL%%\?*}" -Fc --no-owner --no-privileges -f "$OUT" ) \
+  && pg_restore --list "$OUT" > /dev/null \
+  && ls -lh "$OUT"
+
 # 4. マイグレーション（スキーマ変更がある場合）
 sudo -E -u www-data env HOME=/var/www npm_config_cache=/var/www/.npm npx prisma migrate deploy
 
@@ -559,6 +568,14 @@ sudo systemctl restart property-management
 sudo systemctl status property-management --no-pager
 ```
 
+> **migration の前のバックアップ（ユーザー指示 2026-11-01）**: migration がある反映では、`prisma migrate deploy` の直前に手順 3.5 を流す。**足すだけの migration でも省略しない**。毎日 03:30 の自動の控えでは代えない（その時点からの更新が戻せないため）。
+>
+> - `pg_dump` か `pg_restore --list` が失敗したら、`migrate deploy` へ進まない。原因を直してから取り直す。ここまでなら本番は旧プロセスのまま動いている。
+> - `DATABASE_URL` の `?schema=...` は `pg_dump` が受け付けないので `${DATABASE_URL%%\?*}` で切る。`scripts/backup-db.sh` は `?schema=` 付きの URL では失敗するので、この手順では使わない。
+> - 控えには個人情報がすべて入る。root だけが読める場所に置き、手元に持ち出さない。この控えは社外へは送られない。
+> - 残すのは新しい 3 世代。消すのは反映の確認が終わってから: `ls -1t /var/backups/property-management/pre-migration/db-*.dump | tail -n +4 | xargs -r rm --`
+> - 戻すときは **ユーザーの明示指示があるときだけ**、サービスを止めてから `pg_restore --clean --if-exists --no-owner --no-privileges -d "${DATABASE_URL%%\?*}" <控え>`。控えより後の更新は消えるので、まず §8 のコードだけ戻す方法を検討する。`scripts/restore-db.sh` は `.sql.gz` 用なので、この控えには使えない。
+>
 > **注意（build と devDependencies）**: `next build` は TypeScript 型チェックを行い、`typescript` / `@types/*`
 > やルートの `vitest.config.ts`（`import "vitest/config"`）の解決に **devDependencies を必要とする**。
 > このため build 時は **`npm ci --include=dev`** で入れる。`app.env` を source 済みの環境では
@@ -586,6 +603,7 @@ sudo systemctl status property-management --no-pager
 - SSH をインターネットに開けない（Tailscale 内だけで接続）。
 - deploy ユーザーは `pm-deploy` 以外を実行できない（authorized_keys の `command=` と sudoers で二重に制限）。
 - migration は既定で流さない。未適用の migration があると、build と再起動の前に止まる（`migrate` を有効にして起動し直す）。
+- **`pm-deploy` は DB のバックアップを取らない。** `migrate` を有効にして起動する前に、§6 の手順 3.5 のバックアップを VPS で取る（足すだけの migration でも取る）。
 - **⚠ リポジトリを非公開にした 2026-10-31 以降、この経路はまだ動かしていない。** GitHub のプランによっては非公開リポジトリで Environment の secrets を使えないので、使う前に確かめる。§6 を手で流す方法は使える。
 - Actions のログは外に出してよい形に保つ（公開だった時期の決まりを続ける）。ログには工程名と結果だけを出し、各コマンドの出力は VPS の `/var/log/pm-deploy/<日時>.log`（root のみ）に残す。失敗時はそのファイルを見る。
 - 失敗時はサービスを再起動しない。ただし build 後（再起動・応答確認）で失敗した場合は、§6・§8 を見て手で確認する。
@@ -654,7 +672,7 @@ sudo rm /home/deploy/deploy_key /home/deploy/deploy_key.pub
 
 #### 反映のしかた
 
-- 画面から: Actions → **Deploy (production)** → Run workflow（branch は `main`）→ confirm に `deploy`、migration があるときだけ `migrate` にチェック → Run。
+- 画面から: Actions → **Deploy (production)** → Run workflow（branch は `main`）→ confirm に `deploy`、migration があるときだけ `migrate` にチェック（先に §6 の手順 3.5 でバックアップを取る）→ Run。
 - Claude Code から（ユーザーの明示指示があるときだけ）:
   ```bash
   gh api repos/ligarejapan-hue/property-management/actions/workflows/deploy.yml/dispatches \
@@ -963,7 +981,7 @@ sudo systemctl status property-management --no-pager
 ```
 
 > スキーマ変更がない場合はステップ 2 不要。  
-> デプロイ前に `pg_dump` でバックアップを取っておくこと。
+> migration がある反映では、§6 の手順 3.5 で直前にバックアップを取っておくこと。
 
 ### 8.1 広告用のご案内ページ(2026-10-20・migration `20261020090000_lp_public_page`)より前へ戻すとき
 
