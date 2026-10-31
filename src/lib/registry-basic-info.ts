@@ -13,7 +13,7 @@
  * ⚠**迷ったら読まない**(空のまま=人が入れる)。古い値は下線=抹消で、文字だけでは今の値と見分けられない。
  * ⚠地番・家屋番号は謄本の取得で「買う対象」を決める番号なので、取得が読める形(isReadableChiban)だけを入れる。
  */
-import { BUILDING_CHANGE_CAUSE, BUILDING_SECTION, REGISTRY_SECTION_END, findRegistryTable } from "@/lib/registry-area";
+import { BUILDING_CHANGE_CAUSE, BUILDING_SECTION, LAND_SECTION, REGISTRY_SECTION_END, findRegistryTable } from "@/lib/registry-area";
 import { isReadableChiban, toHalfWidthDigits } from "@/lib/registry-fetch/chiban-input";
 import { structuredFieldsFor } from "@/lib/paste-import/structured-fields";
 
@@ -110,18 +110,44 @@ function toStoredNumber(value: string | null | undefined): string | null {
   return isReadableChiban(tail) ? tail : null;
 }
 
+const SITE_SECTION = /敷\s*地\s*権\s*の\s*目\s*的/;
+/** 番号だけの文字。⚠途中の空白を許さない(「1番 1」を「1番」にしない)。 */
+const NUMBER_ONLY = /^[0-9][0-9番の\u30ce\-‐‑‒–—―−ー－]*$/;
+/** 所在及び地番の欄: 町名(数字なし)に番号が続く形だけ(空白で区切られていてもよい)。 */
+const ADDRESS_THEN_NUMBER = /^[^0-9]*?\s*([0-9][0-9番の\u30ce\-‐‑‒–—―−ー－]*)$/;
+
+/**
+ * 地番を表の**欄全体**から読む(謄本の取得で買う対象を決めるので、parseRegistryText の緩い読み取りを使わない・@codex P1)。
+ * - 土地: 表題部の①地番の欄。数字のある行がちょうど1つ(2つ以上=分筆などの履歴で決められない)。
+ * - 区分: 敷地権の目的である土地の表示の②所在及び地番の欄。土地がちょうど1筆のときだけ(符号の列で数える。行の折り返しはつなげる)。
+ * ⚠欄全体が番号の形でなければ読まない=途中で切れた値を入れない。
+ */
+function readLotNumber(raw: string): string | null {
+  const land = findRegistryTable(raw, LAND_SECTION, /地\s*番.*地\s*目/, /地\s*番/, REGISTRY_SECTION_END);
+  if (land) {
+    const cells = land.rows.map((c) => (c[land.col] ?? "").trim()).filter((c) => /[0-9]/.test(c));
+    return cells.length === 1 && NUMBER_ONLY.test(cells[0]) ? cells[0] : null;
+  }
+  const site = findRegistryTable(raw, SITE_SECTION, /所\s*在\s*及\s*び\s*地\s*番/, /所\s*在\s*及\s*び\s*地\s*番/, REGISTRY_SECTION_END);
+  if (!site || site.col < 1) return null;
+  const parcels = site.rows.filter((c) => /[0-9]/.test(c[site.col - 1] ?? "")).length;
+  if (parcels !== 1) return null;
+  const joined = site.rows.map((c) => (c[site.col] ?? "").trim()).filter((c) => !BLANK.test(c)).join("");
+  return ADDRESS_THEN_NUMBER.exec(joined)?.[1] ?? null;
+}
+
 /**
  * 地番と家屋番号。⚠不動産番号が2つ以上ある=2件以上を1つにまとめた PDF は、どれの番号か決められないので入れない。
  */
 export function registryIdentityOf(
-  parsed: { lotNumber?: string | null; buildingNumber?: string | null },
+  parsed: { buildingNumber?: string | null },
   raw: string,
 ): RegistryIdentity {
   const numbers = new Set(
     [...toHalfWidthDigits(raw).matchAll(/不動産番号[：:\s│┃｜|]*([0-9][0-9\- ]{9,19})/g)].map((m) => m[1].replace(/[\s-]/g, "")),
   );
   if (numbers.size > 1) return { lotNumber: null, buildingNumber: null };
-  return { lotNumber: toStoredNumber(parsed.lotNumber), buildingNumber: toStoredNumber(parsed.buildingNumber) };
+  return { lotNumber: toStoredNumber(readLotNumber(raw)), buildingNumber: toStoredNumber(parsed.buildingNumber) };
 }
 
 export interface RegistryBasicCurrent {

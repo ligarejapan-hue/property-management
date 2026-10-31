@@ -102,7 +102,7 @@ export function findRegistryTable(raw: string, section: RegExp, header: RegExp, 
   return { rows, col, causeCol };
 }
 
-const LAND_SECTION = /^(?!.*敷\s*地\s*権).*土\s*地\s*の\s*表\s*示/;
+export const LAND_SECTION = /^(?!.*敷\s*地\s*権).*土\s*地\s*の\s*表\s*示/;
 export const BUILDING_SECTION = /主\s*で\s*あ\s*る\s*建\s*物\s*の\s*表\s*示/;
 export const REGISTRY_SECTION_END = /表\s*題\s*部|附\s*属\s*建\s*物\s*の\s*表\s*示|権\s*利\s*部|甲\s*区|乙\s*区|共\s*同\s*担\s*保/;
 

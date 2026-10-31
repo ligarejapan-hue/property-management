@@ -155,6 +155,51 @@ describe("地番と家屋番号を、謄本の取得で読める形にする", (
     expect(registryIdentityOf(parseRegistryText(raw), raw).buildingNumber).toBe("5番");
   });
 
+  const landDoc = (rows: string[]) =>
+    [
+      "┃ 表 題 部 （土地の表示） │調製│余白 │不動産番号│０１００００００００００３┃",
+      "┃所 在│世田谷区架空一丁目 │ ┃",
+      "┃① 地 番 │② 地 目 │③ 地 積 ㎡ │ 原因及びその日付〔登記の日付〕 ┃",
+      ...rows,
+      "┃ 権 利 部 （甲 区） （所 有 権 に 関 す る 事 項） ┃",
+    ].join("\n");
+  const lotOf = (raw: string) => registryIdentityOf(parseRegistryText(raw), raw).lotNumber;
+
+  it("★土地: 地番の欄全体を読む", () => {
+    expect(lotOf(landDoc(["┃１番１ │宅地 │１００：００│ ┃"]))).toBe("1番1");
+    expect(lotOf(landDoc(["┃１番１の２ │宅地 │１００：００│ ┃"]))).toBe("1番1の2");
+    expect(lotOf(landDoc(["┃１２３番 │宅地 │１００：００│ ┃", "┃ │ │：│〔昭和５０年１月５日〕 ┃"]))).toBe("123番");
+  });
+
+  it("★土地: 途中に空白がある・地番が2つある(履歴)ものは入れない", () => {
+    expect(lotOf(landDoc(["┃１番 １ │宅地 │１００：００│ ┃"]))).toBeNull();
+    expect(lotOf(landDoc(["┃１番１ │宅地 │１００：００│ ┃", "┃１番５ │宅地 │５０：００│分筆 ┃"]))).toBeNull();
+  });
+
+  const siteDoc = (rows: string[]) =>
+    [
+      "┃ 表 題 部 （敷地権の目的である土地の表示） ┃",
+      "┃①土地の符号│②所在及び地番 │③地目│④地積 ㎡ │登記の日付 ┃",
+      ...rows,
+      "┃ 表 題 部 （専有部分の建物の表示） │不動産番号│０１００００００００００１┃",
+    ].join("\n");
+
+  it("★区分: 敷地が1筆なら読む(行の折り返しはつなげる)", () => {
+    expect(lotOf(siteDoc(["┃ １ │世田谷区架空一丁目１番１ │宅地 │１０００：００│ ┃"]))).toBe("1番1");
+    expect(lotOf(siteDoc(["┃ １ │世田谷区架空一丁目 │宅地 │１０００：００│ ┃", "┃ │１番１ │ │ │ ┃"]))).toBe("1番1");
+  });
+
+  it("★区分: 敷地が2筆・途中に空白・町名に数字があるものは入れない", () => {
+    expect(lotOf(siteDoc(["┃ １ │世田谷区架空一丁目１番１ │宅地 │１０００：００│ ┃", "┃ ２ │世田谷区架空一丁目１番２ │宅地 │５００：００│ ┃"]))).toBeNull();
+    expect(lotOf(siteDoc(["┃ １ │世田谷区架空一丁目１番 １ │宅地 │１０００：００│ ┃"]))).toBeNull();
+    expect(lotOf(siteDoc(["┃ １ │世田谷区架空３丁目１番１ │宅地 │１０００：００│ ┃"]))).toBeNull();
+  });
+
+  it("★敷地の欄が無い謄本(古い区分・建物)・罫線の無い文字からは読まない", () => {
+    expect(lotOf(house(["┃居宅 │木造２階建 │ ５０：００│昭和５０年１月１日新築 ┃"]))).toBeNull();
+    expect(lotOf("地番 1番1 地目 宅地")).toBeNull();
+  });
+
   it("読めない形は入れない", () => {
     const raw = "┃家屋番号 │未登記 │ ┃";
     expect(registryIdentityOf(parseRegistryText(raw), raw).buildingNumber).toBeNull();
