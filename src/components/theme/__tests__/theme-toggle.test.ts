@@ -43,6 +43,10 @@ describe("theme-toggle.tsx (source-assertion)", () => {
     expect(src).not.toContain("withLayout");
     expect(src).not.toContain("メニューの配置");
   });
+  it("選べる色が変わったら一覧を合わせる(スマホのメニューは作り直されない・@codex #623)", () => {
+    expect(src).toContain("window.addEventListener(PREFERENCES_SAVED_EVENT, onUpdate)");
+    expect(src).toContain("window.removeEventListener(PREFERENCES_SAVED_EVENT, onUpdate)");
+  });
   it("exports ThemeToggle function", () => {
     expect(src).toMatch(/export\s+function\s+ThemeToggle/);
   });

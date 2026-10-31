@@ -12,6 +12,8 @@ import {
 import {
   applyDensity,
   loadPreferences,
+  PREFERENCES_SAVED_EVENT,
+  type PreferencesData,
   readDensity,
   saveAppearance,
   subscribeAppearance,
@@ -37,8 +39,12 @@ export function ThemeToggle({ withDensity = false }: { withDensity?: boolean }) 
     void loadPreferences().then((d) => {
       if (alive && d) setAllowed(d.allowedThemes);
     });
+    // 管理者が選べる色を変えたとき(設定 > 表示 で保存→読み直し)も一覧を合わせる。スマホのメニューは画面を移っても作り直されない(@codex #623)
+    const onUpdate = (e: Event) => setAllowed((e as CustomEvent<PreferencesData>).detail.allowedThemes);
+    window.addEventListener(PREFERENCES_SAVED_EVENT, onUpdate);
     return () => {
       alive = false;
+      window.removeEventListener(PREFERENCES_SAVED_EVENT, onUpdate);
     };
   }, []);
   const density = useSyncExternalStore<DensityPref>(subscribeAppearance, readDensity, () => "normal");

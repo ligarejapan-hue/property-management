@@ -100,8 +100,12 @@ describe("loadPreferences / savePreferences", () => {
     expect(a?.allowedThemes).toEqual(["auto", "navy"]);
     expect(b).toBe(a);
     expect(fetchMock).toHaveBeenCalledTimes(1);
+    const heard = vi.fn();
+    target.addEventListener("pm-preferences-saved", (e) => heard((e as CustomEvent).detail));
     await loadPreferences(true);
     expect(fetchMock).toHaveBeenCalledTimes(2);
+    // 読み直したときも合図を出す(管理者が選べる色を変えた直後にスマホのメニューが追随する)
+    expect(heard).toHaveBeenCalledTimes(1);
   });
   it("読めなかったら null・次はもう一度読みにいく", async () => {
     vi.stubGlobal("fetch", vi.fn(async () => new Response("", { status: 500 })));
