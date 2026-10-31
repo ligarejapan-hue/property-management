@@ -243,9 +243,9 @@ sudo vim /etc/property-management/app.env
 > **リポジトリは非公開（2026-10-31〜）。** サーバーは www-data の読み取り専用の鍵（`/var/www/.ssh/id_ed25519`・GitHub の Deploy keys に read only で登録）で取得する。`<repository-url>` は `git@github.com:ligarejapan-hue/property-management.git`。鍵を置く前は取得できない（`could not read Username` または `Permission denied (publickey)`）。作り直すときは、鍵を作り、公開鍵だけを Deploy keys に登録し、`known_hosts` には `gh api meta` の ssh_keys の値を入れる。
 
 ```bash
-sudo git clone <repository-url> /opt/property-management
+sudo install -d -o www-data -g www-data /opt/property-management
+sudo -u www-data env HOME=/var/www git clone <repository-url> /opt/property-management
 cd /opt/property-management
-sudo chown -R www-data:www-data /opt/property-management
 
 # www-data の npm キャッシュディレクトリを作成（初回のみ・未作成の場合）
 sudo mkdir -p /var/www/.npm
