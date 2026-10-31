@@ -36,7 +36,7 @@ describe("新しい取引 → 物件を一覧から選ぶ", () => {
     expect(src).toMatch(/const propertyId = source === "list" \? picked\?\.id \?\? null : null;/);
   });
   it("一覧から選ぶのに未選択なら作成できない", () => {
-    expect(src).toMatch(/disabled=\{saving \|\| !name\.trim\(\) \|\| \(source === "list" && !picked\)\}/);
+    expect(src).toMatch(/disabled=\{saving \|\| \(source === "list" && !picked\)\}/);
   });
   it("空のときは契約予定の物件を出す(物件検索の caseStatus)", () => {
     expect(src).toMatch(/caseStatus: "contract_planned"/);

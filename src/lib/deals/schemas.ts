@@ -127,7 +127,6 @@ export const overridesSchema = z.partialRecord(z.enum(OVERRIDE_KEYS), yenInt);
 export type Overrides = z.output<typeof overridesSchema>;
 
 export const dealCreateSchema = z.object({
-  name: z.string().trim().min(1).max(200),
   businessType: z.enum(DEAL_BUSINESS_TYPES),
   tradeSide: z.enum(DEAL_TRADE_SIDES).nullable().optional(),
   propertyId: z.string().uuid().nullable().optional(),
@@ -139,7 +138,6 @@ export type DealCreateInput = z.output<typeof dealCreateSchema>;
 
 export const dealUpdateSchema = z.object({
   version: z.number().int().positive(),
-  name: z.string().trim().min(1).max(200).optional(),
   businessType: z.enum(DEAL_BUSINESS_TYPES).optional(),
   tradeSide: z.enum(DEAL_TRADE_SIDES).nullable().optional(),
   status: z.enum(DEAL_STATUSES).optional(),
