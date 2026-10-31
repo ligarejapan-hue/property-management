@@ -6,7 +6,10 @@ import { DOC_FILES_PER_LINK, DOC_FILES_PER_REQUEST, DOC_REQUEST_STATUSES, isDocL
 import type { PublicRequestView } from "./public-page";
 
 /** ⚠お客様のページへ渡す値はこの select だけで決まる。取引から読むのは状態だけ(住所・氏名・金額を読まない)。 */
-const LINK_SELECT = { id: true, dealId: true, partyId: true, expiresAt: true, revokedAt: true, deal: { select: { status: true } } } as const;
+const LINK_SELECT = {
+  id: true, dealId: true, partyRole: true, expiresAt: true, revokedAt: true,
+  party: { select: { role: true, isSelf: true } }, deal: { select: { status: true } },
+} as const;
 const statusOf = (s: string): DocRequestStatus => ((DOC_REQUEST_STATUSES as readonly string[]).includes(s) ? (s as DocRequestStatus) : "pending");
 
 export async function loadOpenLink(publicId: string, now: Date) {

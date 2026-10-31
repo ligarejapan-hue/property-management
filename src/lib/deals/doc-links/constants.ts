@@ -34,9 +34,9 @@ export const DOC_REQUEST_PUBLIC_LABELS: Record<DocRequestStatus, string> = {
 export const DOC_FILE_REVIEW_STATES = ["unreviewed", "received", "rejected", "deal_cancelled_unreviewed"] as const;
 export type DocFileReviewState = (typeof DOC_FILE_REVIEW_STATES)[number];
 
-export type DocLinkState = "active" | "expired" | "revoked" | "party_removed";
+export type DocLinkState = "active" | "expired" | "revoked" | "party_changed";
 export const DOC_LINK_STATE_LABELS: Record<DocLinkState, string> = {
-  active: "有効", expired: "期限切れ", revoked: "無効", party_removed: "当事者を消したため無効",
+  active: "有効", expired: "期限切れ", revoked: "無効", party_changed: "当事者が変わったため無効",
 };
 
 /** お客様が提出できる取引の状態(中止・決済済では止める)。 */
@@ -53,17 +53,18 @@ export function docLinkExpiresAt(now: Date, days: number): Date {
 export const docLinkExpiresOn = (expiresAt: Date): string =>
   new Date(expiresAt.getTime() - 1 + JST_OFFSET_MS).toISOString().slice(0, 10);
 
+export interface DocLinkGate { partyRole: string; party: { role: string; isSelf: boolean } | null; revokedAt: Date | null; expiresAt: Date }
+
 /** リンクの今の状態。期限ちょうどは切れた扱い。 */
-export function docLinkStateOf(link: { partyId: string | null; revokedAt: Date | null; expiresAt: Date }, now: Date): DocLinkState {
-  if (!link.partyId) return "party_removed";
+export function docLinkStateOf(link: DocLinkGate, now: Date): DocLinkState {
+  // 当事者を消した・自社にした・売主と買主を入れ替えた=発行した相手ではなくなった(動かさない)。
+  if (!link.party || link.party.isSelf || link.party.role !== link.partyRole) return "party_changed";
   if (link.revokedAt) return "revoked";
   return link.expiresAt.getTime() <= now.getTime() ? "expired" : "active";
 }
 
 /** お客様がこのリンクで見て・提出してよいか。 */
-export function isDocLinkOpen(
-  link: { partyId: string | null; revokedAt: Date | null; expiresAt: Date; deal: { status: string } }, now: Date,
-): boolean {
+export function isDocLinkOpen(link: DocLinkGate & { deal: { status: string } }, now: Date): boolean {
   return docLinkStateOf(link, now) === "active" && isDealOpenForDocs(link.deal.status);
 }
 

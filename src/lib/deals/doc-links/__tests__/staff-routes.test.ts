@@ -18,7 +18,7 @@ vi.mock("@/lib/prisma", () => {
     deal: { findUnique: vi.fn() },
     dealDocLink: { findMany: vi.fn(async () => []), findFirst: vi.fn(async () => null), create: vi.fn(async () => ({ id: "l1" })), update: vi.fn(async () => ({ id: "l1" })), updateMany: vi.fn(async () => ({ count: 1 })) },
     dealDocRequest: { deleteMany: vi.fn(async () => ({ count: 0 })), createMany: vi.fn(async () => ({ count: 1 })), findFirst: vi.fn(), update: vi.fn(async () => ({})), findMany: vi.fn(async () => []) },
-    dealDocFile: { updateMany: vi.fn(async () => ({ count: 2 })), findFirst: vi.fn() },
+    dealDocFile: { updateMany: vi.fn(async () => ({ count: 2 })), findFirst: vi.fn(), findMany: vi.fn(async () => []) },
     dealSettings: { findUnique: vi.fn(async () => null) },
     companyProfile: { findUnique: vi.fn(async () => null) },
     $queryRaw: vi.fn(async () => []),
@@ -43,7 +43,8 @@ const pm = prismaMock as never as {
   deal: { findUnique: Fn };
   dealDocLink: { findMany: Fn; findFirst: Fn; create: Fn; update: Fn; updateMany: Fn };
   dealDocRequest: { deleteMany: Fn; createMany: Fn; findFirst: Fn; update: Fn; findMany: Fn };
-  dealDocFile: { updateMany: Fn; findFirst: Fn };
+  dealDocFile: { updateMany: Fn; findFirst: Fn; findMany: Fn };
+  $queryRaw: Fn;
 };
 const SECRET = "s".repeat(40);
 const LINK_ID = "55555555-5555-4555-8555-555555555555";
@@ -70,6 +71,7 @@ beforeEach(() => {
   pm.dealDocLink.findMany.mockResolvedValue([]);
   pm.dealDocLink.updateMany.mockResolvedValue({ count: 1 });
   pm.dealDocRequest.findFirst.mockResolvedValue({ status: "submitted" });
+  pm.dealDocFile.findMany.mockResolvedValue([{ id: FILE_ID }]);
 });
 
 describe("発行", () => {
@@ -142,7 +144,7 @@ describe("発行", () => {
 
 describe("提出状況の一覧", () => {
   const link = {
-    id: LINK_ID, partyId: PARTY_ID, partyRole: "seller", publicId: "A".repeat(22), expiresAt: new Date(Date.now() + 86_400_000), revokedAt: null, party: { name: "試験 太郎" },
+    id: LINK_ID, partyId: PARTY_ID, partyRole: "seller", publicId: "A".repeat(22), expiresAt: new Date(Date.now() + 86_400_000), revokedAt: null, party: { name: "試験 太郎", role: "seller", isSelf: false },
     requests: [{ id: REQUEST_ID, checklistItemId: "s_bring_id", label: "本人確認書類", status: "submitted", rejectReason: null, files: [{ id: FILE_ID, mimeType: "image/jpeg", fileSize: 10, reviewState: "unreviewed", createdAt: new Date() }] }],
   };
   beforeEach(() => {
@@ -158,6 +160,20 @@ describe("提出状況の一覧", () => {
     expect(body.links[0].requests[0].files[0].id).toBe(FILE_ID);
     expect(body.parties.map((p: { name: string }) => p.name)).toEqual(["試験 太郎"]);
     expect(body.available).toBe(true);
+  });
+  it("編集権限がなければ差し戻しの理由を返さない", async () => {
+    pm.dealDocLink.findMany.mockResolvedValue([{ ...link, requests: [{ ...link.requests[0], status: "rejected", rejectReason: "試験 太郎さんの文字が読めません" }] }]);
+    expect(JSON.stringify(await (await GET(new Request("http://x"), dealCtx)).json())).toContain("文字が読めません");
+    (getUserPermissions as Fn).mockResolvedValue(READ_ONLY);
+    const body = await (await GET(new Request("http://x"), dealCtx)).json();
+    expect(JSON.stringify(body)).not.toContain("文字が読めません");
+    expect(body.links[0].requests[0].status).toBe("rejected");
+  });
+  it("売主を買主に変えたリンクは URL を出さない", async () => {
+    pm.dealDocLink.findMany.mockResolvedValue([{ ...link, party: { name: "試験 太郎", role: "buyer", isSelf: false } }]);
+    const body = await (await GET(new Request("http://x"), dealCtx)).json();
+    expect(body.links[0].state).toBe("party_changed");
+    expect(body.links[0].url).toBeNull();
   });
   it("編集権限がなければ URL を返さない", async () => {
     (getUserPermissions as Fn).mockResolvedValue(READ_ONLY);
@@ -196,6 +212,9 @@ describe("無効化", () => {
     const res = await REVOKE(new Request("http://x", { method: "POST" }), ctx);
     expect(res.status).toBe(200);
     expect(pm.dealDocLink.updateMany).toHaveBeenCalledWith({ where: { id: LINK_ID, dealId: DEAL_ID, revokedAt: null }, data: { revokedAt: expect.any(Date) } });
+    // 提出と同じ取引の行を押さえてから書く。
+    expect(pm.$queryRaw).toHaveBeenCalled();
+    expect(pm.$queryRaw.mock.invocationCallOrder[0]).toBeLessThan(pm.dealDocLink.updateMany.mock.invocationCallOrder[0]);
     expect(writeAuditLog).toHaveBeenCalledWith({ userId: "u-office", action: "deal_doc_link_revoke", targetTable: "deals", targetId: DEAL_ID, detail: { count: 1 } });
   });
   it("別の取引のリンクや無効済みは 404", async () => {
@@ -208,7 +227,7 @@ describe("無効化", () => {
 describe("受領・差し戻し", () => {
   const ctx = { params: Promise.resolve({ id: DEAL_ID, requestId: REQUEST_ID }) };
   it("受領するとファイルの状態も受領にする", async () => {
-    const res = await REVIEW(jsonRequest("POST", { action: "receive" }), ctx);
+    const res = await REVIEW(jsonRequest("POST", { action: "receive", fileIds: [FILE_ID] }), ctx);
     expect(res.status).toBe(200);
     expect(pm.dealDocRequest.update.mock.calls[0][0].data).toMatchObject({ status: "received", rejectReason: null, reviewedById: "u-office" });
     expect(pm.dealDocFile.updateMany.mock.calls[0][0]).toMatchObject({
@@ -218,9 +237,9 @@ describe("受領・差し戻し", () => {
     expect(writeAuditLog).toHaveBeenCalledWith({ userId: "u-office", action: "deal_doc_receive", targetTable: "deals", targetId: DEAL_ID, detail: { count: 2 } });
   });
   it("差し戻しは理由が要る。理由は監査に入れない", async () => {
-    expect((await REVIEW(jsonRequest("POST", { action: "reject", reason: "  " }), ctx)).status).toBe(422);
-    expect((await REVIEW(jsonRequest("POST", { action: "reject" }), ctx)).status).toBe(422);
-    const res = await REVIEW(jsonRequest("POST", { action: "reject", reason: "試験 太郎さんの文字が読めません" }), ctx);
+    expect((await REVIEW(jsonRequest("POST", { action: "reject", fileIds: [FILE_ID], reason: "  " }), ctx)).status).toBe(422);
+    expect((await REVIEW(jsonRequest("POST", { action: "reject", fileIds: [FILE_ID] }), ctx)).status).toBe(422);
+    const res = await REVIEW(jsonRequest("POST", { action: "reject", fileIds: [FILE_ID], reason: "試験 太郎さんの文字が読めません" }), ctx);
     expect(res.status).toBe(200);
     expect(pm.dealDocRequest.update.mock.calls[0][0].data).toMatchObject({ status: "rejected", rejectReason: "試験 太郎さんの文字が読めません" });
     expect(pm.dealDocFile.updateMany.mock.calls[0][0].data).toMatchObject({ reviewState: "rejected" });
@@ -229,17 +248,36 @@ describe("受領・差し戻し", () => {
   });
   it("中身の権限がなければ 403", async () => {
     canOpenReferralDocument.mockReturnValue(false);
-    expect((await REVIEW(jsonRequest("POST", { action: "receive" }), ctx)).status).toBe(403);
+    expect((await REVIEW(jsonRequest("POST", { action: "receive", fileIds: [FILE_ID] }), ctx)).status).toBe(403);
     expect(pm.dealDocRequest.update).not.toHaveBeenCalled();
   });
   it("確認待ちでなければ 409(二重に押しても動かない)", async () => {
     pm.dealDocRequest.findFirst.mockResolvedValue({ status: "received" });
-    expect((await REVIEW(jsonRequest("POST", { action: "receive" }), ctx)).status).toBe(409);
+    expect((await REVIEW(jsonRequest("POST", { action: "receive", fileIds: [FILE_ID] }), ctx)).status).toBe(409);
     expect(pm.dealDocFile.updateMany).not.toHaveBeenCalled();
+  });
+  it("画面に出ていたファイルの組と違えば 409(見ていないファイルを受領にしない)", async () => {
+    const NEW_FILE = "88888888-8888-4888-8888-888888888888";
+    // 見たあとにお客様が1つ足した
+    pm.dealDocFile.findMany.mockResolvedValue([{ id: FILE_ID }, { id: NEW_FILE }]);
+    const res = await REVIEW(jsonRequest("POST", { action: "receive", fileIds: [FILE_ID] }), ctx);
+    expect(res.status).toBe(409);
+    expect((await res.json()).error.code).toBe("FILES_CHANGED");
+    expect(pm.dealDocRequest.update).not.toHaveBeenCalled();
+    expect(pm.dealDocFile.updateMany).not.toHaveBeenCalled();
+    // 差し戻しのあとで出し直された(同じ確認待ちでもファイルが違う)
+    pm.dealDocFile.findMany.mockResolvedValue([{ id: NEW_FILE }]);
+    expect((await REVIEW(jsonRequest("POST", { action: "reject", fileIds: [FILE_ID], reason: "x" }), ctx)).status).toBe(409);
+    expect(pm.dealDocRequest.update).not.toHaveBeenCalled();
+    expect(writeAuditLog).not.toHaveBeenCalled();
+  });
+  it("ファイルの組を送らなければ 422", async () => {
+    expect((await REVIEW(jsonRequest("POST", { action: "receive" }), ctx)).status).toBe(422);
+    expect((await REVIEW(jsonRequest("POST", { action: "receive", fileIds: [] }), ctx)).status).toBe(422);
   });
   it("別の取引の書類は 404", async () => {
     pm.dealDocRequest.findFirst.mockResolvedValue(null);
-    expect((await REVIEW(jsonRequest("POST", { action: "receive" }), ctx)).status).toBe(404);
+    expect((await REVIEW(jsonRequest("POST", { action: "receive", fileIds: [FILE_ID] }), ctx)).status).toBe(404);
     expect(pm.dealDocRequest.findFirst.mock.calls[0][0].where).toEqual({ id: REQUEST_ID, link: { dealId: DEAL_ID } });
   });
 });

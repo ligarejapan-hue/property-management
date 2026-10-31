@@ -38,7 +38,7 @@ const TOKEN = buildDocLinkToken(PUBLIC_ID, Buffer.from(SECRET));
 const REQUEST_ID = "44444444-4444-4444-8444-444444444444";
 const DEAL_ID = "11111111-1111-4111-8111-111111111111";
 const FUTURE = new Date(Date.now() + 86_400_000);
-const openLink = { id: "l1", dealId: DEAL_ID, partyId: "p1", expiresAt: FUTURE, revokedAt: null, deal: { status: "contracted" } };
+const openLink = { id: "l1", dealId: DEAL_ID, partyRole: "seller", party: { role: "seller", isSelf: false }, expiresAt: FUTURE, revokedAt: null, deal: { status: "contracted" } };
 
 let ipSeq = 0;
 const nextIp = () => `10.0.${Math.floor(++ipSeq / 200)}.${ipSeq % 200}`;
@@ -99,13 +99,14 @@ describe("お客様のページ", () => {
     await page();
     const select = pm.dealDocLink.findUnique.mock.calls[0][0].select;
     expect(select.deal).toEqual({ select: { status: true } });
-    expect(Object.keys(select).sort()).toEqual(["deal", "dealId", "expiresAt", "id", "partyId", "revokedAt"]);
+    expect(select.party).toEqual({ select: { role: true, isSelf: true } });
+    expect(Object.keys(select).sort()).toEqual(["deal", "dealId", "expiresAt", "id", "party", "partyRole", "revokedAt"]);
     const reqSelect = pm.dealDocRequest.findMany.mock.calls[0][0].select;
     expect(Object.keys(reqSelect).sort()).toEqual(["_count", "id", "label", "status"]);
     expect(JSON.stringify(reqSelect)).not.toMatch(/storageKey|rejectReason|fileName/);
   });
   it("値が DB に入っていても、余計な値が画面に出ない", async () => {
-    pm.dealDocLink.findUnique.mockResolvedValue({ ...openLink, deal: { status: "contracted", price: 30_000_000, name: "東京都試験区1-1 試験 太郎" }, party: { name: "試験 太郎", address: "東京都試験区1-1" } });
+    pm.dealDocLink.findUnique.mockResolvedValue({ ...openLink, deal: { status: "contracted", price: 30_000_000, name: "東京都試験区1-1 試験 太郎" }, party: { role: "seller", isSelf: false, name: "試験 太郎", address: "東京都試験区1-1" } });
     pm.dealDocRequest.findMany.mockResolvedValue([{ id: REQUEST_ID, label: "本人確認書類", status: "rejected", rejectReason: "試験 太郎の差し戻しの理由", _count: { files: 0 } }]);
     const html = await (await page()).text();
     for (const secret of ["試験 太郎", "東京都試験区", "30000000", "差し戻しの理由"]) expect(html).not.toContain(secret);
@@ -114,7 +115,9 @@ describe("お客様のページ", () => {
   it.each([
     ["期限切れ", { ...openLink, expiresAt: new Date(Date.now() - 1000) }],
     ["無効化", { ...openLink, revokedAt: new Date() }],
-    ["当事者を消した", { ...openLink, partyId: null }],
+    ["当事者を消した", { ...openLink, party: null }],
+    ["売主を買主に変えた", { ...openLink, party: { role: "buyer", isSelf: false } }],
+    ["自社にした", { ...openLink, party: { role: "seller", isSelf: true } }],
     ["中止の取引", { ...openLink, deal: { status: "cancelled" } }],
     ["決済済の取引", { ...openLink, deal: { status: "settled" } }],
     ["行が無い", null],

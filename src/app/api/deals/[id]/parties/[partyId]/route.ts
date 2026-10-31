@@ -4,6 +4,7 @@ import prisma from "@/lib/prisma";
 import { ApiError, handleApiError, parseJsonBody } from "@/lib/api-helpers";
 import { writeAuditLog } from "@/lib/audit";
 import { requireDeal, DEAL_VERSION_CONFLICT_MESSAGE } from "@/lib/deals/guard";
+import { withDealLock } from "@/lib/deals/schedule-sync";
 import { partyUpdateSchema } from "@/lib/deals/schemas";
 
 type Ctx = { params: Promise<{ id: string; partyId: string }> };
@@ -26,10 +27,11 @@ export async function PATCH(request: Request, ctx: Ctx) {
     const { session } = await requireDeal("write");
     const { dealId, partyId } = await ids(ctx);
     const { version, ...patch } = partyUpdateSchema.parse(await parseJsonBody(request));
-    const res = await prisma.dealParty.updateMany({
+    // ⚠役割や自社の印を変えると提出用リンクが使えなくなる。提出と同じ取引の行を押さえて書く。
+    const res = await withDealLock(dealId, (tx) => tx.dealParty.updateMany({
       where: { id: partyId, dealId, version },
       data: { ...patch, version: { increment: 1 } },
-    });
+    }));
     if (res.count === 0) await missOrConflict(dealId, partyId);
     await writeAuditLog({
       userId: session.id, action: "deal_party_update", targetTable: "deals", targetId: dealId,
@@ -46,7 +48,8 @@ export async function DELETE(request: Request, ctx: Ctx) {
     const { session } = await requireDeal("write");
     const { dealId, partyId } = await ids(ctx);
     const version = z.coerce.number().int().positive().parse(new URL(request.url).searchParams.get("version"));
-    const res = await prisma.dealParty.deleteMany({ where: { id: partyId, dealId, version } });
+    // ⚠当事者を消すと提出用リンクも使えなくなる。提出と同じ取引の行を押さえて消す(消したあとで提出が通らない)。
+    const res = await withDealLock(dealId, (tx) => tx.dealParty.deleteMany({ where: { id: partyId, dealId, version } }));
     if (res.count === 0) await missOrConflict(dealId, partyId);
     await writeAuditLog({
       userId: session.id, action: "deal_party_delete", targetTable: "deals", targetId: dealId, detail: { fields: [] },

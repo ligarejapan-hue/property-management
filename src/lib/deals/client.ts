@@ -77,7 +77,7 @@ export const dealsApi = {
   docLinks: (id: string) => call<DocLinksResponse>(`/api/deals/${id}/doc-links`),
   issueDocLink: (id: string, body: { partyId: string; itemIds: string[]; days: number; rotate: boolean }) => call<{ ok: true }>(`/api/deals/${id}/doc-links`, { method: "POST", body }),
   revokeDocLink: (id: string, linkId: string) => call<{ ok: true }>(`/api/deals/${id}/doc-links/${linkId}/revoke`, { method: "POST" }),
-  reviewDocRequest: (id: string, requestId: string, body: { action: "receive" } | { action: "reject"; reason: string }) =>
+  reviewDocRequest: (id: string, requestId: string, body: { action: "receive"; fileIds: string[] } | { action: "reject"; fileIds: string[]; reason: string }) =>
     call<{ ok: true }>(`/api/deals/${id}/doc-links/requests/${requestId}`, { method: "POST", body }),
   docFileUrl: (id: string, fileId: string) => `/api/deals/${id}/doc-links/files/${fileId}`,
   completePreScheduleItems: (id: string) => call<{ count: number }>(`/api/deals/${id}/schedule/complete-pre`, { method: "POST" }),

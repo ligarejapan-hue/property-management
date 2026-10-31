@@ -42,12 +42,14 @@ describe("トークン", () => {
 
 describe("リンクの状態", () => {
   const now = new Date("2026-11-02T00:00:00Z");
-  const base = { partyId: "p", revokedAt: null, expiresAt: new Date("2026-11-03T00:00:00Z"), deal: { status: "contracted" } };
+  const base = { partyRole: "seller", party: { role: "seller", isSelf: false }, revokedAt: null, expiresAt: new Date("2026-11-03T00:00:00Z"), deal: { status: "contracted" } };
   it("有効なのは期限内・無効化なし・当事者あり・取引が動いているときだけ", () => {
     expect(isDocLinkOpen(base, now)).toBe(true);
     expect(isDocLinkOpen({ ...base, expiresAt: now }, now)).toBe(false);
     expect(isDocLinkOpen({ ...base, revokedAt: now }, now)).toBe(false);
-    expect(isDocLinkOpen({ ...base, partyId: null }, now)).toBe(false);
+    expect(isDocLinkOpen({ ...base, party: null }, now)).toBe(false);
+    expect(isDocLinkOpen({ ...base, party: { role: "seller", isSelf: true } }, now)).toBe(false);
+    expect(isDocLinkOpen({ ...base, party: { role: "buyer", isSelf: false } }, now)).toBe(false);
     expect(isDocLinkOpen({ ...base, deal: { status: "cancelled" } }, now)).toBe(false);
     expect(isDocLinkOpen({ ...base, deal: { status: "settled" } }, now)).toBe(false);
   });
@@ -55,14 +57,15 @@ describe("リンクの状態", () => {
     expect(docLinkStateOf(base, now)).toBe("active");
     expect(docLinkStateOf({ ...base, expiresAt: new Date("2026-11-01T00:00:00Z") }, now)).toBe("expired");
     expect(docLinkStateOf({ ...base, revokedAt: now }, now)).toBe("revoked");
-    expect(docLinkStateOf({ ...base, partyId: null, revokedAt: now }, now)).toBe("party_removed");
+    expect(docLinkStateOf({ ...base, party: null, revokedAt: now }, now)).toBe("party_changed");
+    expect(docLinkStateOf({ ...base, party: { role: "buyer", isSelf: false } }, now)).toBe("party_changed");
   });
   it("期限は日本時間の日の終わりまで。文面の日付と実際に切れる時刻がそろう", () => {
     // 日本時間 11/1 10:00 に 14 日で発行 → 11/15 いっぱい使える。
     const expires = docLinkExpiresAt(new Date("2026-11-01T01:00:00Z"), 14);
     expect(expires.toISOString()).toBe("2026-11-15T15:00:00.000Z");
     expect(docLinkExpiresOn(expires)).toBe("2026-11-15");
-    const open = { partyId: "p", revokedAt: null, expiresAt: expires, deal: { status: "contracted" } };
+    const open = { ...base, expiresAt: expires };
     expect(isDocLinkOpen(open, new Date("2026-11-15T14:59:59Z"))).toBe(true);
     expect(isDocLinkOpen(open, new Date("2026-11-15T15:00:00Z"))).toBe(false);
     // 日本時間の 0 時台(UTC では前の日)でも日本時間の日で数える。

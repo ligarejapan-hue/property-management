@@ -3,15 +3,18 @@ vi.mock("next/server", async () => (await import("./route-mocks")).nextServerMoc
 vi.mock("@/lib/api-helpers", async () => (await import("./route-mocks")).apiHelpersMock());
 const { writeAuditLog } = vi.hoisted(() => ({ writeAuditLog: vi.fn() }));
 vi.mock("@/lib/audit", () => ({ writeAuditLog }));
-vi.mock("@/lib/prisma", () => ({
-  default: {
+vi.mock("@/lib/prisma", () => {
+  const db: Record<string, unknown> = {
     deal: { findUnique: vi.fn(async () => ({ id: "d" })) },
     dealParty: {
       count: vi.fn(async () => 0), create: vi.fn(), findFirst: vi.fn(async () => null),
       updateMany: vi.fn(async () => ({ count: 1 })), deleteMany: vi.fn(async () => ({ count: 1 })),
     },
-  },
-}));
+    $queryRaw: vi.fn(async () => []),
+  };
+  db.$transaction = vi.fn(async (fn: (tx: unknown) => unknown) => fn(db));
+  return { default: db };
+});
 
 import prismaMock from "@/lib/prisma";
 import { getApiSession, getUserPermissions } from "@/lib/api-helpers";
@@ -76,6 +79,8 @@ describe("当事者を直す・消す", () => {
     const res = await DELETE(new Request(`http://x/api?version=4`, { method: "DELETE" }), pctx);
     expect(res.status).toBe(200);
     expect(pm.dealParty.deleteMany).toHaveBeenCalledWith({ where: { id: PARTY_ID, dealId: DEAL_ID, version: 4 } });
+    // 提出用リンクが使えなくなるので、提出と同じ取引の行を押さえてから消す。
+    expect((prismaMock as never as { $queryRaw: ReturnType<typeof vi.fn> }).$queryRaw).toHaveBeenCalled();
     expect(writeAuditLog).toHaveBeenCalledWith(expect.objectContaining({ action: "deal_party_delete", targetId: DEAL_ID }));
   });
 });

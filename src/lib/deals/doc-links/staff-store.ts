@@ -68,7 +68,7 @@ export async function loadDocLinksView(dealId: string, perms: PermissionEntry[],
       where: { dealId },
       orderBy: { createdAt: "asc" },
       select: {
-        id: true, partyId: true, partyRole: true, publicId: true, expiresAt: true, revokedAt: true, party: { select: { name: true } },
+        id: true, partyId: true, partyRole: true, publicId: true, expiresAt: true, revokedAt: true, party: { select: { name: true, role: true, isSelf: true } },
         requests: {
           orderBy: [{ sortOrder: "asc" }, { id: "asc" }],
           select: {
@@ -86,7 +86,8 @@ export async function loadDocLinksView(dealId: string, perms: PermissionEntry[],
   const links: DocLinkView[] = rows.map((l) => {
     const state = docLinkStateOf(l, now);
     const requests: DocLinkRequestView[] = l.requests.map((r) => ({
-      id: r.id, checklistItemId: r.checklistItemId, label: r.label, status: statusOf(r.status), rejectReason: r.rejectReason,
+      // 差し戻しの理由は担当者が自由に書く文字。取引を見るだけの人には返さない。
+      id: r.id, checklistItemId: r.checklistItemId, label: r.label, status: statusOf(r.status), rejectReason: canManage ? r.rejectReason : null,
       fileCount: r.files.length,
       // ファイルの一覧(開く入口)は、開ける人にだけ返す。
       files: canReview ? r.files.map((f) => ({ id: f.id, mimeType: f.mimeType, fileSize: f.fileSize, reviewState: f.reviewState as DocFileReviewState, createdAt: f.createdAt.toISOString() })) : [],

@@ -21,7 +21,7 @@ export interface DocLinkActions {
   busy: boolean;
   onIssue: (body: { partyId: string; itemIds: string[]; days: number; rotate: boolean }) => Promise<boolean>;
   onRevoke: (linkId: string) => void;
-  onReview: (requestId: string, body: { action: "receive" } | { action: "reject"; reason: string }) => void;
+  onReview: (requestId: string, body: { action: "receive"; fileIds: string[] } | { action: "reject"; fileIds: string[]; reason: string }) => void;
   onCopy: (text: string, what: string) => void;
 }
 
@@ -29,6 +29,8 @@ function RequestRow({ dealId, r, canReview, actions }: { dealId: string; r: DocL
   const [rejecting, setRejecting] = useState(false);
   const [reason, setReason] = useState("");
   const current = r.files.filter((f) => f.reviewState !== "rejected");
+  // 今この画面に出ているファイルについての判断として送る(間に増えたらサーバーが断る)。
+  const fileIds = r.files.filter((f) => f.reviewState === "unreviewed" || f.reviewState === "deal_cancelled_unreviewed").map((f) => f.id);
   return (
     <li className="space-y-1 py-2" data-doc-request={r.id}>
       <div className="flex flex-wrap items-center gap-2">
@@ -50,12 +52,12 @@ function RequestRow({ dealId, r, canReview, actions }: { dealId: string; r: DocL
       {canReview && r.status === "submitted" && (rejecting ? (
         <div className="flex flex-wrap items-center gap-2">
           <input value={reason} onChange={(e) => setReason(e.target.value)} maxLength={DOC_LINK_REJECT_REASON_MAX} aria-label={`${r.label}の差し戻しの理由`} placeholder="差し戻しの理由(例:文字が読めません)" className={`${inputCls} max-w-md`} />
-          <Button variant="secondary" size="sm" disabled={actions.busy || !reason.trim()} onClick={() => actions.onReview(r.id, { action: "reject", reason: reason.trim() })}>差し戻す</Button>
+          <Button variant="secondary" size="sm" disabled={actions.busy || !reason.trim()} onClick={() => actions.onReview(r.id, { action: "reject", fileIds, reason: reason.trim() })}>差し戻す</Button>
           <Button variant="ghost" size="sm" disabled={actions.busy} onClick={() => setRejecting(false)}>やめる</Button>
         </div>
       ) : (
         <div className="flex flex-wrap gap-2">
-          <Button size="sm" disabled={actions.busy} onClick={() => actions.onReview(r.id, { action: "receive" })}>受領</Button>
+          <Button size="sm" disabled={actions.busy} onClick={() => actions.onReview(r.id, { action: "receive", fileIds })}>受領</Button>
           <Button variant="ghost" size="sm" disabled={actions.busy} onClick={() => setRejecting(true)}>差し戻し</Button>
         </div>
       ))}
