@@ -253,6 +253,16 @@ describe("土地のある物件の謄本", () => {
     setup(entries);
     expect(await loadRegistryDocInfo("p", "land")).toEqual({ activeRights: 0, caution: "謄本を確認してください(全部事項の謄本が無い土地・建物があります)" });
   });
+  it("要らない種類の所有者事項は名義に足さない(土地の取引の建物)", async () => {
+    setup([
+      ["x", "owner", "2026-10-05T00:00:00Z", BLDG(), undefined, OWNER_TABLE],
+      ["l", "all", "2026-10-01T00:00:00Z", LAND("1番", "120.50"), summary(0, [{ name: "土地の名義", share: null }])],
+    ]);
+    const r = await loadCrosscheckRegistry("p", { kindBase: "land", includeOwners: true });
+    if (r.status !== "ok") throw new Error("not ok");
+    expect(r.owners?.list.map((o) => o.name)).toEqual(["土地の名義"]);
+    expect(r.owners?.newestCreatedAt).toBe("2026-10-01T00:00:00.000Z");
+  });
   it("読めない所有者事項は、権限の有無によらず uncertain", async () => {
     for (const includeOwners of [true, false]) {
       setup([

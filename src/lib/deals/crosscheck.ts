@@ -592,7 +592,11 @@ export function buildCrosscheck(input: CrosscheckInput): CrosscheckResult {
   }
   // 区分以外は、要る謄本で担保と所有者を確かめられていなければ照合OKと出さない。
   const unconfirmed = input.kindBase !== "unit" && (
-    !!gap || r.status === "denied" || items.some((i) => i.key === "seller" && i.status === "unverifiable")
+    !!gap || r.status === "denied" || items.some((i) => (
+      (i.key === "seller" && i.status === "unverifiable")
+      // 謄本の権利を読めないとき。過去の書類の側だけが確認できないのは謄本の問題ではない。
+      || (i.key === "mortgage" && i.sources.some((s) => s.key === "registry" && s.state === "unverifiable"))
+    ))
   );
   return {
     summary: mismatchCount > 0 ? "mismatch" : comparedCount === 0 ? "none" : unconfirmed ? "incomplete" : "ok",

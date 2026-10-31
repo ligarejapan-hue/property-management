@@ -114,7 +114,8 @@ export async function loadLandedCertificates(
       if (hasSeveralProperties(pdf.text)) unclassified = true;
       // ⚠読めるのに物件を特定できない所有者事項では止めない(表だけの所有者事項で、いつまでも確認できなくなるため)。
       if (ownerIdentity && ownerSide && required.includes(ownerSide)) ownerOnly.add(ownerIdentity);
-      if (o.includeOwners) {
+      // 要らない種類と判定できた所有者事項(土地の取引の建物など)は、名義に入れない。
+      if (o.includeOwners && (!ownerSide || required.includes(ownerSide))) {
         ownerCerts.push({
           identity: ownerIdentity, createdAt: at,
           list: (list ?? []).map((x) => ({ name: x.name, share: x.share })), confirmed: !!list?.length,

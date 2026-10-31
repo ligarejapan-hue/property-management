@@ -358,6 +358,18 @@ describe("土地のある物件の謄本(土地と建物の両方が要る)", ()
     expect(n?.count).toBe(1);
     expect(n?.partial).toBe(true);
   });
+  it("謄本の権利を読めなければ、売主が一致しても照合OKにしない", () => {
+    const input = house({ registry: both({ rights: { activeRights: 0, readable: false, attachmentCreatedAt: OLD } }), documents: [doc({ price: 30_000_000 })] });
+    expect(item(input, "seller").status).toBe("match");
+    expect(item(input, "mortgage").status).toBe("unverifiable");
+    expect(buildCrosscheck(input).summary).toBe("incomplete");
+  });
+  it("過去の書類確認書で件数が残っていないだけなら、謄本の問題ではないので照合OKのまま", () => {
+    const legacy = doc({ docType: "checklist_settlement", title: "書類確認書(決済時)" });
+    const input = house({ registry: both(), documents: [legacy, doc({ documentId: "doc-2", price: 30_000_000 })] });
+    expect(item(input, "mortgage").status).toBe("unverifiable");
+    expect(buildCrosscheck(input).summary).toBe("ok");
+  });
   it("不一致があれば食い違いを優先する", () => {
     expect(buildCrosscheck(house({ registry: both({ missing: ["土地"] }), price: 1, documents: [doc({ price: 2 })] })).summary).toBe("mismatch");
   });
