@@ -79,14 +79,16 @@
  * 既存の gray-* ユーティリティ(bg/text/border/divide 等)を温かみのある
  * stone スケールへ再マップする(Tailwind v4 公式の @theme 上書き手法)。
  * tsx 側のクラス名は無変更で、ニュートラル全体のトーンだけが変わる。
- * 値は同梱 tailwindcss の --color-stone-* と同一。
+ * 値は同梱 tailwindcss の --color-stone-* と同一(gray-400 だけ例外=下)。
+ * gray-400(注記)は 2026-10-31 に明るさを 70.9%→65.4% へ(白地 2.59→3.19・背景 2.48→3.06・発注者「直す」)。
+ * ダークは .dark で元の値に戻す(基準以上だった=見た目を変えない)。紙の見本(.paper-sheet)も元の値のまま。
  */
 @theme {
   --color-gray-50: oklch(98.5% 0.001 106.423);
   --color-gray-100: oklch(97% 0.001 106.424);
   --color-gray-200: oklch(92.3% 0.003 48.717);
   --color-gray-300: oklch(86.9% 0.005 56.366);
-  --color-gray-400: oklch(70.9% 0.01 56.259);
+  --color-gray-400: oklch(65.4% 0.01 56.259);
   --color-gray-500: oklch(55.3% 0.013 58.071);
   --color-gray-600: oklch(44.4% 0.011 73.639);
   --color-gray-700: oklch(37.4% 0.01 67.558);
@@ -171,6 +173,8 @@
 .dark {
   --background: #0a0a0a;
   --foreground: #ededed;
+  /* 注記の色はスタンダードだけ濃くした(上の @theme)。ダークは元の stone-400 のまま。 */
+  --color-gray-400: oklch(70.9% 0.01 56.259);
 
   --bg: var(--color-gray-950);
   --surface: var(--color-gray-900);
@@ -415,6 +419,7 @@
 
 /*
  * 白い紙の見本(販売図面の編集・DM の手紙の見本など、画面の中に直接描く「紙」)。どのテーマでもスタンダードの色に戻す。
+ * gray-400 は元の stone-400 のまま(10-31 に画面の注記だけ濃くした・印刷物の見た目は変えない)。
  * iframe の見本(資金計画表・事業計画書・LP)は画面の CSS と切り離されているので不要。
  */
 .paper-sheet {
