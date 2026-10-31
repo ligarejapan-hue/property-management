@@ -137,6 +137,19 @@ describe("地番と家屋番号を、謄本の取得で読める形にする", (
     expect(registryIdentityOf(parseRegistryText(raw), raw).buildingNumber).toBeNull();
   });
 
+  it.each(["１番１の ３８", "架空一丁目 １番 １", "の ３８", "架空町の ３８", "架空３丁目 １番１", "架空一丁目 ３８"])(
+    "★番号の途中に空白がある・町名か決められない「%s」は入れない(末尾だけ取ると別の番号になる)",
+    (v) => {
+      const raw = `┃家屋番号 │${v} │ ┃`;
+      expect(registryIdentityOf(parseRegistryText(raw), raw).buildingNumber).toBeNull();
+    },
+  );
+
+  it("町名が2語でも、前が町名だけなら番号を読む", () => {
+    const raw = "┃家屋番号 │架空 一丁目 ５番１の３ │ ┃";
+    expect(registryIdentityOf(parseRegistryText(raw), raw).buildingNumber).toBe("5番1の3");
+  });
+
   it("「５番」のように番で終わる番号は入れる", () => {
     const raw = "┃家屋番号 │５番 │ ┃";
     expect(registryIdentityOf(parseRegistryText(raw), raw).buildingNumber).toBe("5番");
@@ -153,6 +166,7 @@ const VALUES = { lotNumber: "1番1", buildingNumber: "1番1の38", structureType
 const current = (over: Record<string, unknown> = {}) => ({
   propertyType: "apartment_unit",
   buildingId: null as string | null,
+  registryStatus: "unconfirmed",
   lotNumber: null as string | null,
   buildingNumber: null as string | null,
   structureType: null as string | null,
@@ -182,6 +196,14 @@ describe("物件のどの欄を埋めるか", () => {
 
   it("編集画面に欄の無い種別には構造と築年月を入れない", () => {
     expect(planPropertyBasicFill(VALUES, current({ propertyType: "store" }))).toEqual({ lotNumber: "1番1", buildingNumber: "1番1の38" });
+  });
+
+  it("★謄本の自動取得中: 地番・家屋番号は入れない(構造と築年月は入れる)", () => {
+    expect(planPropertyBasicFill(VALUES, current({ registryStatus: "scheduled" }))).toEqual({
+      structureType: "木造2階建",
+      builtYear: 1985,
+      builtMonth: 5,
+    });
   });
 
   it("読めなかった値では何も書かない", () => {

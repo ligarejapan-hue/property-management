@@ -93,12 +93,20 @@ export function parseRegistryBuildingFacts(raw: string): RegistryBuildingFacts {
   return { structureType: readStructure(table(BUILDING_SECTION, STRUCTURE_COL)), ...(built ?? { builtYear: null, builtMonth: null }) };
 }
 
+const TRAILING_SEPARATOR = /(番地|番|の|\u30ce|[\-‐‑‒–—―−ー－])$/;
+
 /** 謄本に書かれた番号を、取得が読める形にする(町名を落とす・半角に)。読めなければ null。 */
 function toStoredNumber(value: string | null | undefined): string | null {
   if (!value) return null;
-  const tail = toHalfWidthDigits(value).trim().split(/\s+/).pop() ?? "";
+  const tokens = toHalfWidthDigits(value).trim().split(/\s+/);
+  const tail = tokens.pop() ?? "";
   // ⚠切れた番号を入れない(「1番1の」「の38」は読める形として通るが、正規化すると別の番号を指し、謄本の取得で別の登記を買う)。
   if (!/^[0-9]/.test(tail) || /[の\u30ce\-‐‑‒–—―−ー－]$/.test(tail)) return null;
+  // ⚠前の語は町名だけ。数字や区切りが残っていれば番号の途中の空白=末尾だけ取ると別の番号になる(「1番1の 38」→38・@codex P1)。
+  // 町名を落とすときは、番号だと分かる形(番・ハイフン)の末尾だけ受ける(「架空町の 38」を 38 にしない)。
+  if (tokens.length > 0 && (tokens.some((t) => /[0-9]/.test(t) || TRAILING_SEPARATOR.test(t)) || !/[番\-‐‑‒–—―−ー－]/.test(tail))) {
+    return null;
+  }
   return isReadableChiban(tail) ? tail : null;
 }
 
@@ -119,6 +127,7 @@ export function registryIdentityOf(
 export interface RegistryBasicCurrent {
   propertyType: string;
   buildingId: string | null;
+  registryStatus: string;
   lotNumber: string | null;
   buildingNumber: string | null;
   structureType: string | null;
@@ -144,13 +153,17 @@ function planFacts(values: RegistryBuildingFacts, current: RegistryBuildingFacts
 /**
  * 物件のどの欄を埋めるか。**空の欄だけ**。
  * ⚠土地には家屋番号を入れない(家屋番号があると謄本の取得が建物へ切り替わる)。
+ * ⚠謄本の自動取得中(scheduled)は地番・家屋番号を入れない。取得は控えた番号で書類を選ぶので、途中で変わると
+ *   別の対象になった物件へ添付される(物件の編集 API と同じ守り・@codex P1)。取得の完了時に同じ空欄が埋まる。
  * ⚠構造・築年月: 棟に紐づく部屋は棟の値が正なので書かない(planBuildingFactsFill)。編集画面に欄が無い種別にも書かない。
  */
 export function planPropertyBasicFill(values: RegistryBasicValues, current: RegistryBasicCurrent): RegistryBasicFill {
   const out: RegistryBasicFill = {};
-  if (isEmpty(current.lotNumber) && values.lotNumber) out.lotNumber = values.lotNumber;
-  if (current.propertyType !== "land" && isEmpty(current.buildingNumber) && values.buildingNumber) {
-    out.buildingNumber = values.buildingNumber;
+  if (current.registryStatus !== "scheduled") {
+    if (isEmpty(current.lotNumber) && values.lotNumber) out.lotNumber = values.lotNumber;
+    if (current.propertyType !== "land" && isEmpty(current.buildingNumber) && values.buildingNumber) {
+      out.buildingNumber = values.buildingNumber;
+    }
   }
   if (current.buildingId === null && structuredFieldsFor(current.propertyType).has("builtYear")) {
     Object.assign(out, planFacts(values, current));

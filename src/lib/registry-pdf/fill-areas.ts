@@ -42,6 +42,7 @@ const PROPERTY_SELECT = {
   landAreaMethod: true,
   totalFloorArea: true,
   buildingId: true,
+  registryStatus: true,
   lotNumber: true,
   buildingNumber: true,
   structureType: true,

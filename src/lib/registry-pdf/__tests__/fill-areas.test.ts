@@ -46,6 +46,7 @@ const HOUSE = {
   landAreaMethod: null,
   totalFloorArea: null,
   buildingId: null,
+  registryStatus: "unconfirmed",
   lotNumber: null,
   buildingNumber: null,
   structureType: null,
@@ -159,6 +160,17 @@ describe("地番・家屋番号・構造・築年月", () => {
     const r = await fillPropertyFromRegistry({ propertyId: "p-1", values: VALUES, changedBy: "u-1" });
     expect(r.filled).toEqual([]);
     expect(recordChanges).not.toHaveBeenCalled();
+  });
+
+  it("★ロックを待つ間に謄本の自動取得が始まったら、読み直した状態で地番・家屋番号を止める", async () => {
+    pm.property.findUnique
+      .mockResolvedValueOnce({ ...UNIT })
+      .mockResolvedValueOnce({ ...UNIT, registryStatus: "scheduled" });
+    await fillPropertyFromRegistry({ propertyId: "p-1", values: VALUES, changedBy: "u-1" });
+    const data = pm.property.updateMany.mock.calls[0][0].data;
+    expect(data).not.toHaveProperty("lotNumber");
+    expect(data).not.toHaveProperty("buildingNumber");
+    expect(data).toMatchObject({ structureType: "RC造5階建" });
   });
 
   it("★不動産番号は渡されても書かない", async () => {

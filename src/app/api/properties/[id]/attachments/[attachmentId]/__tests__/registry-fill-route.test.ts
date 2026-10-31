@@ -62,7 +62,7 @@ beforeEach(() => {
   perms.list = ALL;
   canAccessPropertyRecord.mockReturnValue(true);
   db.property.findUnique.mockResolvedValue({ id: "p-1", assignedTo: null, createdBy: "u-1" });
-  db.attachment.findFirst.mockResolvedValue({ id: "a-1", fileUrl: "/uploads/a.pdf" });
+  db.attachment.findFirst.mockResolvedValue({ id: "a-1", fileUrl: "/uploads/properties/p-1/registry/a.pdf" });
   storage.read.mockResolvedValue({ body: Buffer.from("pdf") });
   fill.mockResolvedValue({ filled: ["lotNumber", "builtYear"], skippedByEditLock: false, unreadable: false });
 });
@@ -102,6 +102,21 @@ describe("この謄本から基本情報に反映", () => {
     expect((await call()).status).toBe(403);
     expect(fill).not.toHaveBeenCalled();
   });
+
+  it.each([
+    "/uploads/properties/p-2/registry/a.pdf",
+    "/uploads/report-inbox/a.pdf",
+    "/uploads/properties/p-1x/registry/a.pdf",
+    "/uploads/properties/p-1/../p-2/registry/a.pdf",
+  ])(
+    "★別の場所を指す添付(%s)は読まない=404",
+    async (fileUrl) => {
+      db.attachment.findFirst.mockResolvedValue({ id: "a-1", fileUrl });
+      expect((await call()).status).toBe(404);
+      expect(storage.read).not.toHaveBeenCalled();
+      expect(fill).not.toHaveBeenCalled();
+    },
+  );
 
   it("実体が無い=404", async () => {
     storage.read.mockResolvedValue(null);

@@ -13,6 +13,7 @@ import { hasPermission } from "@/lib/permissions";
 import { canAccessPropertyRecord } from "@/lib/property-access";
 import { writeAuditLog } from "@/lib/audit";
 import { getStorage } from "@/lib/storage";
+import { isValidStorageKey } from "@/lib/storage/key-validation";
 import { fillBasicInfoFromRegistryPdfBestEffort } from "@/lib/registry-pdf/fill-areas";
 import { registryFillNotice } from "@/lib/registry-basic-info";
 
@@ -46,7 +47,10 @@ export async function POST(
 
     const storage = getStorage();
     const key = storage.keyFromUrl(attachment.fileUrl);
-    const file = key ? await storage.read(key) : null;
+    // ⚠この物件の保存場所のファイルだけを読む。添付の JSON の口は fileUrl をそのまま保存するので、別の物件の謄本を
+    //   指す行を作れる。読むと別の物件の地番などがこの物件に入る。謄本を作る経路の key はすべて properties/<物件ID>/ の下。
+    // ⚠前方一致だけだと「properties/<物件ID>/../別の物件/…」が通るので、「..」を含む key も弾く。
+    const file = isValidStorageKey(key) && key.startsWith(`properties/${propertyId}/`) ? await storage.read(key) : null;
     if (!file) throw new ApiError(404, "謄本の実体が見つかりません", "REGISTRY_FILE_MISSING");
 
     await writeAuditLog({
