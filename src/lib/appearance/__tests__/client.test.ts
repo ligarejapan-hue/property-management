@@ -115,6 +115,32 @@ describe("loadPreferences / savePreferences", () => {
     expect((await loadPreferences())?.effective.theme).toBe("auto");
     expect(ok).toHaveBeenCalledTimes(1);
   });
+  it("開いたときの読み込みが保存より遅れて届いても、古い中身で上書きしない(@codex #623)", async () => {
+    let releaseGet: (r: Response) => void = () => {};
+    vi.stubGlobal("fetch", vi.fn((_u: string, init?: RequestInit) =>
+      init?.method === "PATCH"
+        ? Promise.resolve(Response.json({ data: data("navy") }))
+        : new Promise<Response>((r) => { releaseGet = r; })));
+    const heard = vi.fn();
+    target.addEventListener("pm-preferences-saved", (e) => heard((e as CustomEvent).detail.user.theme));
+    const load = loadPreferences(true);
+    const saved = await savePreferences({ theme: "navy" });
+    releaseGet(Response.json({ data: data("") }));
+    expect(await load).toBe(saved);
+    expect(heard.mock.calls).toEqual([["navy"]]);
+    expect(await loadPreferences()).toBe(saved);
+  });
+  it("保存の返事が逆の順に届いても、先に始めた方で上書きしない", async () => {
+    const releases: ((r: Response) => void)[] = [];
+    vi.stubGlobal("fetch", vi.fn(() => new Promise<Response>((r) => releases.push(r))));
+    const first = savePreferences({ theme: "washi" });
+    const second = savePreferences({ theme: "navy" });
+    releases[1](Response.json({ data: data("navy") }));
+    await second;
+    releases[0](Response.json({ data: data("washi") }));
+    expect((await first)?.user.theme).toBe("washi");
+    expect((await loadPreferences())?.user.theme).toBe("navy");
+  });
   it("保存できたら、その結果を読み込み済みの値にする(失敗は null)", async () => {
     vi.stubGlobal("fetch", vi.fn(async () => Response.json({ data: data("navy") })));
     const heard = vi.fn();

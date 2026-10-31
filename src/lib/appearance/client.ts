@@ -70,6 +70,21 @@ export type PreferencesData = {
 
 // 設定 > 表示・利用者メニュー・スマホのメニューで共有する読み込み(画面を開いている間に何度も読みにいかない)。
 let cached: Promise<PreferencesData | null> | null = null;
+// 読み込み・保存の通し番号。返事は届く順がばらばらなので、後から始めたものの結果をすでに使っていたら古い返事は使わない
+// (開いたときの読み込みが保存より遅れて届き、「会社の標準を使用中」に戻って見えた・@codex #623)。
+let requestSeq = 0;
+let appliedSeq = 0;
+let latest: PreferencesData | null = null;
+
+/** 新しい中身を使う(より新しい返事をもう使っていれば false=使わない)。 */
+function accept(seq: number, data: PreferencesData): boolean {
+  if (seq < appliedSeq) return false;
+  appliedSeq = seq;
+  latest = data;
+  cached = Promise.resolve(data);
+  window.dispatchEvent(new CustomEvent(PREFERENCES_SAVED_EVENT, { detail: data }));
+  return true;
+}
 
 async function requestPreferences(init?: RequestInit): Promise<PreferencesData | null> {
   try {
@@ -84,10 +99,14 @@ async function requestPreferences(init?: RequestInit): Promise<PreferencesData |
 /** 個人・会社の標準・選べる色テーマ。読めなければ null(次の呼び出しで読み直す)。force=必ず読み直す。 */
 export function loadPreferences(force = false): Promise<PreferencesData | null> {
   if (!cached || force) {
+    const seq = ++requestSeq;
     const p = requestPreferences().then((d) => {
-      if (d === null && cached === p) cached = null;
-      if (d) window.dispatchEvent(new CustomEvent(PREFERENCES_SAVED_EVENT, { detail: d }));
-      return d;
+      if (d === null) {
+        if (cached === p) cached = null;
+        return null;
+      }
+      // 後から始めた読み込み・保存の結果をもう使っていたら、そちら(新しい方)を返す
+      return accept(seq, d) ? d : latest;
     });
     cached = p;
   }
@@ -96,15 +115,14 @@ export function loadPreferences(force = false): Promise<PreferencesData | null> 
 
 /** 保存して、保存後の中身を返す(失敗=null)。成功した中身を読み込み済みの値にする。 */
 export async function savePreferences(patch: AppearancePatch): Promise<PreferencesData | null> {
+  const seq = ++requestSeq;
   const data = await requestPreferences({
     method: "PATCH",
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify(patch),
   });
-  if (data) {
-    cached = Promise.resolve(data);
-    window.dispatchEvent(new CustomEvent(PREFERENCES_SAVED_EVENT, { detail: data }));
-  }
+  // 保存そのものは成功(呼び出し側の「保存しました」用に返す)。共有の値と合図は、より新しい返事が無いときだけ
+  if (data) accept(seq, data);
   return data;
 }
 
