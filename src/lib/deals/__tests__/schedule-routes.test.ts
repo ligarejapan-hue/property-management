@@ -17,6 +17,7 @@ vi.mock("@/lib/prisma", () => ({
   default: {
     deal: { findUnique: vi.fn() },
     dealScheduleItem: { create: vi.fn(), updateMany: vi.fn(), findMany: vi.fn() },
+    dealDocLink: { findMany: vi.fn(async () => []) },
   },
 }));
 

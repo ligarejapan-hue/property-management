@@ -17,6 +17,7 @@ import DealPropertySide from "@/components/deals/deal-property-side";
 import { DealRegistryRights } from "@/components/deals/deal-registry-rights";
 import { DealCrosscheck } from "@/components/deals/deal-crosscheck";
 import { DealSchedule } from "@/components/deals/deal-schedule";
+import { DealDocLinks } from "@/components/deals/deal-doc-links";
 import { dealsApi, errorText, type DealOptions, type UserOption } from "@/lib/deals/client";
 import type { DealView } from "@/lib/deals/view";
 import type { DealCalc } from "@/lib/deals/calc/deal-calc";
@@ -55,6 +56,7 @@ export default function DealDetailPage({ params }: { params: Promise<{ id: strin
   const [calcError, setCalcError] = useState<string | null>(null);
   // 書類を発行したら照合を読み直す。
   const [issuedTick, setIssuedTick] = useState(0);
+  const [docLinkTick, setDocLinkTick] = useState(0);
 
   /** 取引と計算は別々に読み直す。計算だけ失敗しても取引(版の番号)は新しくする(最終レビュー M-3)。 */
   const loadCalc = useCallback(async () => {
@@ -137,7 +139,9 @@ export default function DealDetailPage({ params }: { params: Promise<{ id: strin
       {/* 数値照合。取引の保存・当事者の変更・書類の発行で読み直す。 */}
       <DealCrosscheck dealId={deal.id} propertyId={deal.propertyId} canOpenProperty={data.canOpenProperty} revision={k([deal.version, deal.parties, issuedTick])} onOpenTab={setSelected} />
       {/* 決済までの段取り。取引の保存・書類の発行で読み直す。 */}
-      <DealSchedule dealId={deal.id} users={users} defaultAssignee={deal.assigneeId} revision={k([deal.version, issuedTick])} />
+      <DealSchedule dealId={deal.id} users={users} defaultAssignee={deal.assigneeId} revision={k([deal.version, issuedTick, docLinkTick])} />
+      {/* お客様の書類提出。当事者の変更で読み直す。操作したら段取りも読み直す(完了候補・受領の進み具合)。 */}
+      <DealDocLinks dealId={deal.id} revision={k([deal.version, deal.parties.map((p) => p.id)])} onChanged={() => setDocLinkTick((t) => t + 1)} />
       {/* 物件の謄本の登記の現況(段5c-2)。物件を差し替えたら読み直す。 */}
       <DealRegistryRights key={deal.propertyId ?? "none"} dealId={deal.id} propertyId={deal.propertyId} />
       <Tabs tabs={tabs} active={tab} onChange={setSelected} idBase="deal-detail" />

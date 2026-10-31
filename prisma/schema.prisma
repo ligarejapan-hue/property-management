@@ -237,6 +237,8 @@ model User {
   dealsCreated            Deal[]                  @relation("DealCreatedBy")
   dealScheduleItems       DealScheduleItem[]      @relation("DealScheduleItemAssignee")
   dealDocumentsIssued     DealDocument[]          @relation("DealDocumentIssuedBy")
+  dealDocLinksCreated     DealDocLink[]           @relation("DealDocLinkCreatedBy")
+  dealDocRequestsReviewed DealDocRequest[]        @relation("DealDocRequestReviewedBy")
 
   @@map("users")
 }
@@ -2326,6 +2328,7 @@ model Deal {
   parties       DealParty[]
   documents     DealDocument[]
   scheduleItems DealScheduleItem[]
+  docLinks      DealDocLink[]
 
   @@index([status, settlementAt])
   @@index([businessType])
@@ -2354,10 +2357,78 @@ model DealParty {
   createdAt      DateTime @default(now()) @map("created_at")
   updatedAt      DateTime @updatedAt @map("updated_at")
 
-  deal Deal @relation(fields: [dealId], references: [id], onDelete: Cascade)
+  deal     Deal          @relation(fields: [dealId], references: [id], onDelete: Cascade)
+  docLinks DealDocLink[]
 
   @@index([dealId, role, sortOrder])
   @@map("deal_parties")
+}
+
+/// お客様の書類提出の提出用リンク(売主・買主ごとに1つ)。src/lib/deals/doc-links/。
+/// トークンは保存しない(publicId と署名鍵から作る)。作り直すと publicId が変わり、古い URL は使えなくなる。
+model DealDocLink {
+  id          String    @id @default(uuid()) @db.Uuid
+  dealId      String    @map("deal_id") @db.Uuid
+  /// 当事者を消すと空になる=リンクは使えなくなる。
+  partyId     String?   @map("party_id") @db.Uuid
+  partyRole   String    @map("party_role")
+  publicId    String    @unique @map("public_id")
+  expiresAt   DateTime  @map("expires_at")
+  revokedAt   DateTime? @map("revoked_at")
+  createdById String    @map("created_by_id") @db.Uuid
+  createdAt   DateTime  @default(now()) @map("created_at")
+  updatedAt   DateTime  @updatedAt @map("updated_at")
+
+  deal      Deal             @relation(fields: [dealId], references: [id], onDelete: Restrict)
+  party     DealParty?       @relation(fields: [partyId], references: [id], onDelete: SetNull)
+  createdBy User             @relation("DealDocLinkCreatedBy", fields: [createdById], references: [id])
+  requests  DealDocRequest[]
+
+  @@unique([dealId, partyId])
+  @@map("deal_doc_links")
+}
+
+/// 提出してもらう書類1つ。status=pending/submitted/received/rejected。理由はお客様のページに出さない。
+model DealDocRequest {
+  id              String    @id @default(uuid()) @db.Uuid
+  linkId          String    @map("link_id") @db.Uuid
+  checklistItemId String    @map("checklist_item_id")
+  /// 発行したときの項目名(設定の項目名を変えても、お客様に見せた名前のまま)。
+  label           String
+  sortOrder       Int       @default(0) @map("sort_order")
+  status          String    @default("pending")
+  rejectReason    String?   @map("reject_reason")
+  reviewedById    String?   @map("reviewed_by_id") @db.Uuid
+  reviewedAt      DateTime? @map("reviewed_at")
+  createdAt       DateTime  @default(now()) @map("created_at")
+  updatedAt       DateTime  @updatedAt @map("updated_at")
+
+  link       DealDocLink    @relation(fields: [linkId], references: [id], onDelete: Cascade)
+  reviewedBy User?          @relation("DealDocRequestReviewedBy", fields: [reviewedById], references: [id], onDelete: SetNull)
+  files      DealDocFile[]
+
+  @@unique([linkId, checklistItemId])
+  @@map("deal_doc_requests")
+}
+
+/// 届いたファイル。元のファイル名は保存しない。保存キーは deals/ の下=/uploads からは開けない。
+/// reviewState=unreviewed/received/rejected/deal_cancelled_unreviewed(未確認のまま取引が中止)。
+/// 後で消す仕組みが reviewState と reviewStateAt を使う。⚠received は自動で消さない(法令の保存期間に関わる)。
+model DealDocFile {
+  id            String   @id @default(uuid()) @db.Uuid
+  requestId     String   @map("request_id") @db.Uuid
+  storageKey    String   @unique @map("storage_key")
+  mimeType      String   @map("mime_type")
+  fileSize      Int      @map("file_size")
+  reviewState   String   @default("unreviewed") @map("review_state")
+  reviewStateAt DateTime @default(now()) @map("review_state_at")
+  createdAt     DateTime @default(now()) @map("created_at")
+
+  request DealDocRequest @relation(fields: [requestId], references: [id], onDelete: Restrict)
+
+  @@index([requestId])
+  @@index([reviewState, reviewStateAt])
+  @@map("deal_doc_files")
 }
 
 /// 書類の発行履歴(段3から使う)。再発行しても前の版は消さない。

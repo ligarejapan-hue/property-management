@@ -12,6 +12,7 @@ vi.mock("@/lib/prisma", () => {
     deal: { findUnique: vi.fn(async () => null), findMany: vi.fn(async () => []), updateMany: vi.fn(async () => ({ count: 1 })) },
     property: { findUnique: vi.fn(async () => null), updateMany: vi.fn(async () => ({ count: 1 })) },
     changeLog: { create: vi.fn(async () => ({})) },
+    dealDocFile: { updateMany: vi.fn(async () => ({ count: 0 })) },
     $queryRaw: vi.fn(async () => [{ id: "locked" }]),
     dealSettings: { findUnique: vi.fn(async () => null) },
     user: { findUnique: vi.fn(async () => ({ isActive: true })) },
@@ -33,6 +34,7 @@ const pm = prismaMock as never as {
   deal: { findUnique: Fn; findMany: Fn; updateMany: Fn };
   property: { findUnique: Fn; updateMany: Fn };
   changeLog: { create: Fn };
+  dealDocFile: { updateMany: Fn };
   $queryRaw: Fn;
   user: { findUnique: Fn };
 };
@@ -192,6 +194,11 @@ describe("PATCH /api/deals/[id]", () => {
       await PATCH(json("PATCH", { version: 3, status: "settled" }), ctx);
       expect(pm.$queryRaw).not.toHaveBeenCalled();
       expect(pm.property.updateMany).not.toHaveBeenCalled();
+    });
+    it("中止にしたら、未確認の提出ファイルに印を付ける", async () => {
+      pm.deal.findUnique.mockResolvedValue({ ...detailRow, propertyId: null, status: "contracted", assigneeId: "u-office" });
+      await PATCH(json("PATCH", { version: 3, status: "cancelled" }), ctx);
+      expect(pm.dealDocFile.updateMany).toHaveBeenCalledWith(expect.objectContaining({ data: expect.objectContaining({ reviewState: "deal_cancelled_unreviewed" }) }));
     });
     it("版の番号で断られたら案件ステータスも変えない", async () => {
       pm.deal.findUnique.mockResolvedValue(linkedRow());

@@ -34,6 +34,11 @@ const nextConfig: NextConfig = {
           { key: "Strict-Transport-Security", value: "max-age=31536000" },
         ],
       },
+      // お客様の書類提出。URL のトークンを外へ漏らさない。⚠ここの値は route の応答ヘッダより強いので、route だけでは足りない(後ろの指定が勝つ)。
+      {
+        source: "/submit/:path*",
+        headers: [{ key: "Referrer-Policy", value: "no-referrer" }],
+      },
     ];
   },
 };

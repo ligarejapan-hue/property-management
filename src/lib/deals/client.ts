@@ -11,6 +11,7 @@ import type { BusinessSectionKey } from "./business-sections";
 import type { RegistryRightsView } from "./registry-rights";
 import type { CrosscheckResult } from "./crosscheck";
 import type { ScheduleItemView } from "./schedule-sync";
+import type { DocLinksResponse, DocProgress } from "./doc-links/staff-store";
 import type { FormDef } from "@/lib/deals/documents/forms/types";
 
 /** 取引の画面から API を呼ぶ。失敗はサーバーの文言とコードを持った DealApiError にする。 */
@@ -70,9 +71,15 @@ export const dealsApi = {
   crosscheck: (id: string) => call<{ crosscheck: CrosscheckResult }>(`/api/deals/${id}/crosscheck`),
   update: (id: string, body: Record<string, unknown>) => call<{ version: number }>(`/api/deals/${id}`, { method: "PATCH", body }),
   /** 決済までの段取り。 */
-  schedule: (id: string) => call<{ items: ScheduleItemView[]; today: string; settlementDate: string | null }>(`/api/deals/${id}/schedule`),
+  schedule: (id: string) => call<{ items: ScheduleItemView[]; today: string; settlementDate: string | null; docProgress: DocProgress[] }>(`/api/deals/${id}/schedule`),
   addScheduleItem: (id: string, body: Record<string, unknown>) => call<{ id: string }>(`/api/deals/${id}/schedule`, { method: "POST", body }),
   updateScheduleItem: (id: string, itemId: string, body: Record<string, unknown>) => call<{ ok: true }>(`/api/deals/${id}/schedule/${itemId}`, { method: "PATCH", body }),
+  docLinks: (id: string) => call<DocLinksResponse>(`/api/deals/${id}/doc-links`),
+  issueDocLink: (id: string, body: { partyId: string; itemIds: string[]; days: number; rotate: boolean }) => call<{ ok: true }>(`/api/deals/${id}/doc-links`, { method: "POST", body }),
+  revokeDocLink: (id: string, linkId: string) => call<{ ok: true }>(`/api/deals/${id}/doc-links/${linkId}/revoke`, { method: "POST" }),
+  reviewDocRequest: (id: string, requestId: string, body: { action: "receive" } | { action: "reject"; reason: string }) =>
+    call<{ ok: true }>(`/api/deals/${id}/doc-links/requests/${requestId}`, { method: "POST", body }),
+  docFileUrl: (id: string, fileId: string) => `/api/deals/${id}/doc-links/files/${fileId}`,
   completePreScheduleItems: (id: string) => call<{ count: number }>(`/api/deals/${id}/schedule/complete-pre`, { method: "POST" }),
   refreshProperty: (id: string, version: number) =>
     call<{ version: number }>(`/api/deals/${id}/refresh-property`, { method: "POST", body: { version } }),

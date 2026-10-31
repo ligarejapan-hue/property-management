@@ -47,6 +47,19 @@ describe("決済までの段取りの見た目", () => {
     expect(html).toContain("対象外になりました");
     expect(html).toContain("戻す");
   });
+  it("提出書類の受領の進み具合を出す。全部受領ならそのことを出す", () => {
+    const html = renderToStaticMarkup(
+      <DealScheduleView items={[]} today="2026-12-01" settlementDate={null} users={[]} actions={{ onUpdate: () => {}, onCompletePre: () => {} }} docProgress={[
+        { partyRole: "seller", partyName: "試験 太郎", total: 3, received: 3 },
+        { partyRole: "buyer", partyName: null, total: 2, received: 1 },
+      ]} />,
+    );
+    expect(html).toContain("売主 試験 太郎:必要な書類がすべて受領になりました(3/3)");
+    expect(html).toContain("買主:提出書類の受領 1/2");
+  });
+  it("提出用リンクの完了候補を出す", () => {
+    expect(render([item({ completionHint: "doc_link_issued" })])).toContain("提出用リンクを発行しました");
+  });
   it("完了候補の知らせを出す", () => {
     const html = render([item({ completionHint: "mortgage_cleared" })]);
     expect(html).toContain("抹消済みの謄本を取り込みました");

@@ -81,7 +81,9 @@ export function checklistDefaults(phase: ChecklistPhase, c: BusinessDocContext):
 const joinParts = (...xs: (string | null | undefined)[]) => xs.filter(Boolean).join(" ") || null;
 const box = html`<td style="text-align:center;width:12mm">□</td>`;
 
-/** 書類確認書(設計 §4.6)。チェック欄は空欄(紙に手で付ける)。最後の行は承認欄。 */
+const checkedBox = html`<td style="text-align:center;width:12mm">✓</td>`;
+
+/** 書類確認書(設計 §4.6)。チェック欄は空欄(紙に手で付ける)。お客様の提出で受領した項目だけ ✓ を印字する。最後の行は承認欄。 */
 export function buildChecklistDoc(phase: ChecklistPhase, c: BusinessDocContext, o: ChecklistOptions): { html: string; rows: ValueRow[] } {
   const d = c.deal;
   const title = `書類確認書(${CHECKLIST_PHASES[phase]})`;
@@ -101,6 +103,8 @@ export function buildChecklistDoc(phase: ChecklistPhase, c: BusinessDocContext, 
   const items = checklistItemsOf(phase, c);
   const of = (g: ChecklistGroup) => items.filter((i) => i.group === g);
   const payOf = (i: ChecklistItem) => CHECKLIST_PAY_METHODS[o.pay[i.id] ?? "cash"];
+  const received = (i: ChecklistItem) => phase === "settlement" && (c.receivedItemIds?.has(i.id) ?? false);
+  const confirmBox = (i: ChecklistItem) => (received(i) ? checkedBox : box);
 
   const prepare = of("prepare");
   const bring = of("bring");
@@ -114,10 +118,10 @@ ${prepare.length ? html`<h2>${CHECKLIST_GROUPS.prepare}</h2>
 ${prepare.map((i) => html`<tr><td>${i.label}</td>${box}${box}<td>${i.note ?? ""}</td></tr>`)}</table>` : null}
 ${bring.length ? html`<h2>${CHECKLIST_GROUPS.bring}</h2>
 <table><tr><th>項目</th><th style="width:24%">金額</th><th style="width:14%">払い方</th><th style="width:12mm">確認</th><th style="width:26%">注意事項</th></tr>
-${bring.map((i) => html`<tr><td>${i.label}</td><td class="num">${i.amount ? money(checklistAmount(i.amount, c)) : ""}</td><td>${i.amount ? payOf(i) : ""}</td>${box}<td>${i.note ?? ""}</td></tr>`)}</table>` : null}
+${bring.map((i) => html`<tr><td>${i.label}</td><td class="num">${i.amount ? money(checklistAmount(i.amount, c)) : ""}</td><td>${i.amount ? payOf(i) : ""}</td>${confirmBox(i)}<td>${i.note ?? ""}</td></tr>`)}</table>` : null}
 ${receive.length ? html`<h2>${CHECKLIST_GROUPS.receive}</h2>
 <table><tr><th>項目</th><th style="width:12mm">確認</th><th style="width:28%">注意事項</th><th style="width:24%">メモ</th></tr>
-${receive.map((i) => html`<tr><td>${i.label}</td>${box}<td>${i.note ?? ""}</td><td></td></tr>`)}</table>` : null}
+${receive.map((i) => html`<tr><td>${i.label}</td>${confirmBox(i)}<td>${i.note ?? ""}</td><td></td></tr>`)}</table>` : null}
 <table style="margin-top:6mm"><tr><th style="width:33%">営業担当</th><th style="width:33%">業務担当</th><th>承認</th></tr>
 <tr><td style="height:16mm"></td><td></td><td></td></tr></table>`;
 
@@ -131,7 +135,7 @@ ${receive.map((i) => html`<tr><td>${i.label}</td>${box}<td>${i.note ?? ""}</td><
         { label: CHECKLIST_GROUPS[g], heading: true },
         ...list.map((i): ValueRow => (i.amount
           ? { label: `持参: ${i.label}`, value: checklistAmount(i.amount, c) }
-          : { label: i.label, value: i.note })),
+          : { label: i.label, value: received(i) ? ["受領済み", i.note].filter(Boolean).join(" ") : i.note })),
         ...list.filter((i) => i.amount).map((i): ValueRow => ({ label: `払い方: ${i.label}`, value: payOf(i) })),
       ];
     }),

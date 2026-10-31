@@ -22,6 +22,7 @@ vi.mock("@/lib/prisma", () => ({
   default: {
     deal: { findUnique: vi.fn() },
     dealDocument: { findFirst: vi.fn(), findMany: vi.fn(), create: vi.fn() },
+    dealDocRequest: { findMany: vi.fn(async () => []) },
     dealRateTable: { findMany: vi.fn(async () => []) },
     dealSettings: { findUnique: vi.fn(async () => null) },
     companyProfile: { findUnique: vi.fn(async () => ({ nameJa: "架空不動産株式会社" })) },
@@ -398,6 +399,16 @@ describe("書類確認書の発行(段5c-1)", () => {
     expect(h).toContain("残金から");
     expect(pm.user.findMany.mock.calls[0][0].where.id.in.sort()).toEqual([SALES, OPS]);
     expect(pm.dealDocument.create.mock.calls[0][0].data.inputSnapshot).toEqual({ options });
+  });
+  it("お客様の提出で受領した項目だけ、確認欄に ✓ を印字する(決済時だけ)", async () => {
+    const { default: db } = await import("@/lib/prisma");
+    (db.dealDocRequest.findMany as unknown as Fn).mockResolvedValueOnce([{ checklistItemId: "s_bring_id", status: "received" }, { checklistItemId: "s_bring_seal", status: "submitted" }]);
+    pm.deal.findUnique.mockResolvedValue({ ...row, settlementAt: new Date("2026-06-30T01:00:00Z") });
+    const res = await POST(json("POST", { docType: "checklist_settlement", version: 3, options: { pay: {} } }), ctx);
+    expect(res.status).toBe(201);
+    const h = (renderHtmlToPdfDocument as Fn).mock.calls[0][0] as string;
+    expect(h.match(/✓/g)?.length).toBe(1);
+    expect(h).toMatch(/本人確認書類<\/td>[\s\S]*?✓/);
   });
   it("担当が無ければユーザーを読まない・知らない払い方は 422", async () => {
     const ok = await POST(json("POST", { docType: "checklist_contract", version: 3, options: { pay: {} } }), ctx);

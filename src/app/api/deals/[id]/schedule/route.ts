@@ -8,6 +8,7 @@ import { requireDeal } from "@/lib/deals/guard";
 import { jstDateString } from "@/lib/deals/datetime";
 import { loadScheduleItems, syncDealScheduleSafe } from "@/lib/deals/schedule-sync";
 import { scheduleAddSchema } from "@/lib/deals/schedule-route-schemas";
+import { loadDocProgress } from "@/lib/deals/doc-links/staff-store";
 
 type Ctx = { params: Promise<{ id: string }> };
 const NO_STORE = { "Cache-Control": "no-store" };
@@ -24,12 +25,13 @@ export async function GET(_request: Request, ctx: Ctx) {
     const deal = await prisma.deal.findUnique({ where: { id }, select: { id: true } });
     if (!deal) throw new ApiError(404, "取引が見つかりません", "NOT_FOUND");
     await syncDealScheduleSafe(id, { now, userId: session.id });
-    const [items, fresh] = await Promise.all([
+    const [items, fresh, docProgress] = await Promise.all([
       loadScheduleItems(id),
       prisma.deal.findUnique({ where: { id }, select: { settlementAt: true } }),
+      loadDocProgress(id),
     ]);
     return NextResponse.json(
-      { items, today: jstDateString(now), settlementDate: fresh?.settlementAt ? jstDateString(fresh.settlementAt) : null },
+      { items, today: jstDateString(now), settlementDate: fresh?.settlementAt ? jstDateString(fresh.settlementAt) : null, docProgress },
       { headers: NO_STORE },
     );
   } catch (error) {

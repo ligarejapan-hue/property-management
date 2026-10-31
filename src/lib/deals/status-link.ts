@@ -121,7 +121,21 @@ export async function syncDealFromCaseStatus(tx: Prisma.TransactionClient, { pro
       oldValue: linked.status, newValue: next, source: "auto", changedBy,
     },
   });
+  await syncDealDocRetention(tx, linked.id, linked.status, next);
   return { dealId: linked.id, status: next };
+}
+
+/**
+ * 取引が中止になった・中止から戻ったときに、未確認のファイルの状態を付け替える(後で消す仕組みが使う)。
+ * 状態の変更と同じ tx の中で呼ぶ。取引の状態を変える経路を足したら、ここも呼ぶこと。
+ */
+export async function syncDealDocRetention(tx: Prisma.TransactionClient, dealId: string, from: string, to: string, now: Date = new Date()): Promise<void> {
+  if ((from === "cancelled") === (to === "cancelled")) return;
+  const [before, after] = to === "cancelled" ? ["unreviewed", "deal_cancelled_unreviewed"] : ["deal_cancelled_unreviewed", "unreviewed"];
+  await tx.dealDocFile.updateMany({
+    where: { reviewState: before, request: { link: { dealId } } },
+    data: { reviewState: after, reviewStateAt: now },
+  });
 }
 
 /**

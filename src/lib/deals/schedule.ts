@@ -28,8 +28,10 @@ export const PRE_INTRODUCTION_NOTE = "済んでいれば完了にしてくださ
 export const COMPLETION_HINTS = {
   doc_issued: "書類を発行しました。送付・受け取りが済んだら完了にしてください",
   mortgage_cleared: "抹消済みの謄本を取り込みました。完了にしてよいか確認してください",
+  doc_link_issued: "提出用リンクを発行しました。案内が済んだら完了にしてください",
 } as const;
 export type CompletionHint = keyof typeof COMPLETION_HINTS;
+export const isCompletionHint = (v: string | null): v is CompletionHint => v !== null && Object.prototype.hasOwnProperty.call(COMPLETION_HINTS, v);
 /** 担保の有無。unknown=判定できない(物件が手入力・謄本が無い・読めない・足りない)。 */
 export type MortgageState = "yes" | "no" | "unknown";
 
@@ -85,6 +87,7 @@ const COMPLETE_ON_ISSUE: Readonly<Record<string, string>> = { settlement_stateme
 const HINT_ON_ISSUE: Readonly<Record<string, string>> = {
   settlement_guide: "s_final", settlement_guide_seller: "s_final", key_receipt: "s_key_receipt", landlord_change_notice: "s_tenant_notice",
 };
+const SELLER_DOCS_KEY = "s_seller_docs";
 const SETTLE_KEY = "s_settle";
 const TAX_KEY = "s_tax";
 
@@ -273,6 +276,8 @@ export interface ScheduleEvent {
   settled?: boolean;
   /** 固定資産税と都市計画税の両方が入った。 */
   taxesEntered?: boolean;
+  /** 売主の提出用リンクを発行した。 */
+  docLinkIssued?: boolean;
 }
 
 export type ScheduleEventUpdate = { id: string; data: { completed: true; auto: true } | { completionHint: CompletionHint } };
@@ -290,6 +295,7 @@ export function applyScheduleEvents(
     if (i.completed || i.excluded || !i.templateKey) return [];
     if (complete.has(i.templateKey)) return [{ id: i.id, data: { completed: true, auto: true } }];
     if (i.templateKey === hint && i.completionHint !== "doc_issued") return [{ id: i.id, data: { completionHint: "doc_issued" } }];
+    if (e.docLinkIssued && i.templateKey === SELLER_DOCS_KEY && i.completionHint !== "doc_link_issued") return [{ id: i.id, data: { completionHint: "doc_link_issued" } }];
     return [];
   });
 }

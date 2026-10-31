@@ -9,6 +9,8 @@ import {
   COMPLETION_HINTS, MORTGAGE_UNKNOWN_NOTE, PRE_INTRODUCTION_NOTE, SCHEDULE_GROUPS, SCHEDULE_LIMITS, addYmdDays, scheduleBadge, scheduleGroupOf, type ScheduleGroup,
 } from "@/lib/deals/schedule";
 import type { ScheduleItemView } from "@/lib/deals/schedule-sync";
+import { DOC_LINK_ROLE_LABELS } from "@/lib/deals/doc-links/constants";
+import type { DocProgress } from "@/lib/deals/doc-links/staff-store";
 
 const BADGE_CLS = {
   done: "bg-green-100 text-green-800 dark:bg-green-950 dark:text-green-300",
@@ -73,8 +75,9 @@ function ItemRow({ item, today, users, actions }: { item: ScheduleItemView; toda
 
 /** 「決済までの段取り」の見た目。時期ごとにまとめ、期限超過・あと何日・完了が分かるようにする。 */
 export function DealScheduleView({
-  items, today, settlementDate, users, actions, addForm,
+  items, today, settlementDate, users, actions, addForm, docProgress = [],
 }: {
+  docProgress?: DocProgress[];
   items: ScheduleItemView[];
   today: string;
   settlementDate: string | null;
@@ -107,6 +110,16 @@ export function DealScheduleView({
       {items.length === 0 && (
         <p className="mt-2 text-xs text-gray-600 dark:text-gray-400">契約日か決済日を入れると、段取りを作ります。</p>
       )}
+      {docProgress.map((p, i) => {
+        const who = `${DOC_LINK_ROLE_LABELS[p.partyRole]}${p.partyName ? ` ${p.partyName}` : ""}`;
+        return p.received === p.total ? (
+          <p key={i} className="mt-2 rounded-md border border-green-200 bg-green-50 px-2 py-1.5 text-xs text-green-900 dark:border-green-900 dark:bg-green-950 dark:text-green-200">
+            {who}:必要な書類がすべて受領になりました({p.received}/{p.total})
+          </p>
+        ) : (
+          <p key={i} className="mt-2 text-xs text-gray-600 dark:text-gray-400">{who}:提出書類の受領 {p.received}/{p.total}</p>
+        );
+      })}
       {pre > 0 && (
         <div className="mt-2 flex flex-wrap items-center justify-between gap-2 rounded-md border border-amber-200 bg-amber-50 px-2 py-1.5 text-xs text-amber-900 dark:border-amber-900 dark:bg-amber-950 dark:text-amber-200">
           <span>段取りを作る前に期限が過ぎていた項目が{pre}件あります。{PRE_INTRODUCTION_NOTE}。</span>
@@ -159,7 +172,7 @@ function AddItemForm({ today, users, defaultAssignee, busy, onAdd }: {
 
 /** 読んで出す。取引の保存・書類の発行で読み直す。 */
 export function DealSchedule({ dealId, users, defaultAssignee, revision }: { dealId: string; users: UserOption[]; defaultAssignee: string | null; revision: string }) {
-  const [data, setData] = useState<{ items: ScheduleItemView[]; today: string; settlementDate: string | null } | null>(null);
+  const [data, setData] = useState<{ items: ScheduleItemView[]; today: string; settlementDate: string | null; docProgress: DocProgress[] } | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
 
@@ -196,7 +209,7 @@ export function DealSchedule({ dealId, users, defaultAssignee, revision }: { dea
     <div className="space-y-1">
       {error && <p className="text-sm text-red-600 dark:text-red-400" role="alert">{error}</p>}
       <DealScheduleView
-        items={data.items} today={data.today} settlementDate={data.settlementDate} users={users}
+        items={data.items} today={data.today} settlementDate={data.settlementDate} users={users} docProgress={data.docProgress}
         actions={{
           busy,
           onUpdate: (itemId, body) => void run(() => dealsApi.updateScheduleItem(dealId, itemId, body)),

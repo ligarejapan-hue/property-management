@@ -10,7 +10,7 @@ import { jstDateString } from "./datetime";
 import { dealTitle } from "./deal-title";
 import { loadDealSettings } from "./settings-store";
 import {
-  applyScheduleEvents, mortgageStateOf, reconcileSchedule, type CompletionHint, type MortgageState, type ScheduleEvent,
+  applyScheduleEvents, isCompletionHint, mortgageStateOf, reconcileSchedule, type CompletionHint, type MortgageState, type ScheduleEvent,
   type ScheduleItemPatch, type ScheduleItemState,
 } from "./schedule";
 import type { PropertySnapshot } from "./schemas";
@@ -88,7 +88,7 @@ const stateOf = (r: {
 }): ScheduleItemState => ({
   id: r.id, templateKey: r.templateKey, dueDate: r.dueDate.toISOString().slice(0, 10), dueManual: r.dueManual, assigneeId: r.assigneeId, assigneeManual: r.assigneeManual,
   completed: r.completedAt !== null, excluded: r.excludedAt !== null, excludedManual: r.excludedManual, preIntroduction: r.preIntroduction, mortgageUnknown: r.mortgageUnknown,
-  completionHint: r.completionHint === "doc_issued" || r.completionHint === "mortgage_cleared" ? (r.completionHint as CompletionHint) : null,
+  completionHint: isCompletionHint(r.completionHint) ? r.completionHint : null,
 });
 
 function patchData(p: ScheduleItemPatch, now: Date) {

@@ -42,6 +42,13 @@ server {
         return 301 https://$host$request_uri;
     }
 
+    # お客様の書類提出のトークンを http に残さない。
+    location ^~ /submit/ {
+        access_log off;
+        error_log /dev/null crit;
+        return 301 https://$host$request_uri;
+    }
+
     # LP掲載写真(/lp-assets/<publicId>)自体はPIIではないが、公開ページの
     # Referrer-Policy: same-origin により Referer ヘッダに参照元ページのURL
     # (=/t/<token>)がそのまま載るため、/t/ と同様にログへ残さない。
@@ -156,6 +163,38 @@ server {
         proxy_set_header   X-Forwarded-Proto $scheme;
         proxy_read_timeout  60s;
         proxy_send_timeout  60s;
+    }
+
+    # お客様の書類提出(/submit/<トークン> と /submit/<トークン>/upload だけ)。URL のトークンが提出の権限そのものなのでログに残さない。
+    # ⚠トークンの形は src/lib/deals/doc-links/token.ts と同じ。公開ホスト(app.ligarejapan.com)の vhost にも足す。
+    # ⚠次の3つで、別の道へ抜けられないようにしている:
+    #  1. $request_uri(送られたままの形)も同じ形か確かめる。../ や %2e や %2f が入っていれば 404。
+    #  2. アプリへ渡すのは正規化した $uri だけ(送られたままの URL を渡さない・クエリも渡さない)。
+    #  3. 形に合わない /submit/ の道は下の location で 404(前方一致に ^~ を付けない=この正規表現が先に効く)。
+    location ~ "^/submit/[A-Za-z0-9_-]{22}\.[A-Za-z0-9_-]{43}(/upload)?$" {
+        access_log off;
+        error_log /dev/null crit;
+
+        if ($request_uri !~ "^/submit/[A-Za-z0-9_-]{22}\.[A-Za-z0-9_-]{43}(/upload)?(\?.*)?$") {
+            return 404;
+        }
+
+        # アプリの上限(8MB+multipart の上乗せ)と proxy の 10MB に合わせる。
+        client_max_body_size 10m;
+
+        proxy_pass         http://127.0.0.1:3000$uri;
+        proxy_http_version 1.1;
+        proxy_set_header   Host              $host;
+        proxy_set_header   X-Real-IP         $remote_addr;
+        proxy_set_header   X-Forwarded-For   $proxy_add_x_forwarded_for;
+        proxy_set_header   X-Forwarded-Proto $scheme;
+        proxy_read_timeout  60s;
+        proxy_send_timeout  60s;
+    }
+    location /submit/ {
+        access_log off;
+        error_log /dev/null crit;
+        return 404;
     }
 
     # 画面を閉じていても届く通知の送信の口(timer 専用・通知 段階4b)は外から呼ばせない。
