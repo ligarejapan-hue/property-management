@@ -4,7 +4,7 @@
 # - VPS に root 所有で /usr/local/sbin/pm-deploy として置き、反映専用ユーザー deploy から sudo で呼ぶ。
 #   （リポジトリ内のこのファイルを直接 sudo で実行しない。更新時は §6.1 の手順で置き直す）
 # - GitHub Actions（.github/workflows/deploy.yml）から SSH 経由で呼ばれる。
-# - リポジトリが公開のため Actions のログは誰でも読める。標準出力には工程名と結果だけを出し、
+# - Actions のログは外に出してよい形に保つ。標準出力には工程名と結果だけを出し、
 #   各コマンドの出力は /var/log/pm-deploy/ （root のみ読める）に残す。
 #
 # 使い方:

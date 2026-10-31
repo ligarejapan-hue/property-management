@@ -35,7 +35,7 @@
   ```
 - [ ] `DATABASE_URL` が本番 DB を指していること
 - [ ] `NEXTAUTH_URL` が本番 HTTPS ドメインになっていること
-- [ ] `.env` ファイルが公開リポジトリにコミットされていないこと（`.gitignore` 確認）
+- [ ] `.env` ファイルがリポジトリにコミットされていないこと（`.gitignore` 確認）
 - [ ] `NODE_ENV=production` で seed を実行していること（テスト用ユーザー・サンプルデータは作成されない）
 - [ ] 初期管理者の初回ログイン後にパスワードを変更済みであること（`mustChangePassword=true` で作成）
 
@@ -240,10 +240,12 @@ sudo vim /etc/property-management/app.env
 > 例: `sudo -u www-data env HOME=/var/www npm_config_cache=/var/www/.npm npm ci --include=dev`
 > （DB 接続が必要な `npx prisma` / `npm run build` 等は `-E` を残して `sudo -E -u www-data env HOME=/var/www npm_config_cache=/var/www/.npm ...` とする）
 
+> **リポジトリは非公開（2026-10-31〜）。** サーバーは www-data の読み取り専用の鍵（`/var/www/.ssh/id_ed25519`・GitHub の Deploy keys に read only で登録）で取得する。`<repository-url>` は `git@github.com:ligarejapan-hue/property-management.git`。鍵を置く前は取得できない（`could not read Username` または `Permission denied (publickey)`）。作り直すときは、鍵を作り、公開鍵だけを Deploy keys に登録し、`known_hosts` には `gh api meta` の ssh_keys の値を入れる。
+
 ```bash
-sudo git clone <repository-url> /opt/property-management
+sudo install -d -o www-data -g www-data /opt/property-management
+sudo -u www-data env HOME=/var/www git clone <repository-url> /opt/property-management
 cd /opt/property-management
-sudo chown -R www-data:www-data /opt/property-management
 
 # www-data の npm キャッシュディレクトリを作成（初回のみ・未作成の場合）
 sudo mkdir -p /var/www/.npm
@@ -584,7 +586,8 @@ sudo systemctl status property-management --no-pager
 - SSH をインターネットに開けない（Tailscale 内だけで接続）。
 - deploy ユーザーは `pm-deploy` 以外を実行できない（authorized_keys の `command=` と sudoers で二重に制限）。
 - migration は既定で流さない。未適用の migration があると、build と再起動の前に止まる（`migrate` を有効にして起動し直す）。
-- **リポジトリが公開のため Actions のログは誰でも読める。** ログには工程名と結果だけを出し、各コマンドの出力は VPS の `/var/log/pm-deploy/<日時>.log`（root のみ）に残す。失敗時はそのファイルを見る。
+- **⚠ リポジトリを非公開にした 2026-10-31 以降、この経路はまだ動かしていない。** GitHub のプランによっては非公開リポジトリで Environment の secrets を使えないので、使う前に確かめる。§6 を手で流す方法は使える。
+- Actions のログは外に出してよい形に保つ（公開だった時期の決まりを続ける）。ログには工程名と結果だけを出し、各コマンドの出力は VPS の `/var/log/pm-deploy/<日時>.log`（root のみ）に残す。失敗時はそのファイルを見る。
 - 失敗時はサービスを再起動しない。ただし build 後（再起動・応答確認）で失敗した場合は、§6・§8 を見て手で確認する。
 
 #### 一回だけの準備
