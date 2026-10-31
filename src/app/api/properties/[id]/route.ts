@@ -40,6 +40,7 @@ import {
   jstTodayDateOnly,
   normalizeLeadExclusionPatch,
 } from "@/lib/lead-exclusion";
+import { syncDealFromCaseStatus } from "@/lib/deals/status-link";
 
 // ---------- GET /api/properties/[id] ----------
 
@@ -540,6 +541,10 @@ export async function PATCH(
           version: { increment: 1 },
         },
       });
+      // 案件ステータスを変えたら取引の状態もそろえる(lib/deals/status-link.ts・物件の行はロック済み)。
+      if (res.count > 0 && persistedFields.caseStatus !== undefined && persistedFields.caseStatus !== current.caseStatus) {
+        await syncDealFromCaseStatus(tx, { propertyId: id, changedBy: session.id });
+      }
       // ⚠**書けたときだけ**棟へつなぐ(0件=版番号違い・取得中は下で 409)。
       // ⚠ロック順は「物件の行(上の lockPropertyRow)→ アドバイザリロック(apply の中)」。
       //   apply は版番号を進めない=この更新と同じトランザクションで呼ぶ。

@@ -11,7 +11,8 @@ export const DEAL_TRADE_SIDE_LABELS: Record<DealTradeSide, string> = { seller: "
 export const DEAL_STATUSES = ["considering", "contracted", "settled", "cancelled"] as const;
 export type DealStatus = (typeof DEAL_STATUSES)[number];
 export const DEAL_STATUS_LABELS: Record<DealStatus, string> = {
-  considering: "検討中", contracted: "契約済", settled: "決済済", cancelled: "中止",
+  // 保存する値 considering はそのまま=データの移し替えなし・古い版へ戻しても読める(発注者決定 2026-10-31)。
+  considering: "契約予定", contracted: "契約済", settled: "決済済", cancelled: "中止",
 };
 
 export const DEAL_PARTY_ROLES = ["seller", "buyer", "agent", "tenant"] as const;

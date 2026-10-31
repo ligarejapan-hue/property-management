@@ -2,7 +2,8 @@
 
 import { use, useCallback, useEffect, useState } from "react";
 import Link from "next/link";
-import { BarChart3, Calculator, Loader2 } from "lucide-react";
+import { BarChart3, Calculator, Loader2, PanelRight } from "lucide-react";
+import { Button } from "@/components/ui/button";
 import { PageHeader } from "@/components/ui/page-header";
 import { Tabs, tabPanelProps } from "@/components/ui/tabs";
 import DealBasicPanel from "@/components/deals/deal-basic-panel";
@@ -12,6 +13,7 @@ import DealMoneyPanel from "@/components/deals/deal-money-panel";
 import DealSettlementPanel from "@/components/deals/deal-settlement-panel";
 import DealOcPanel from "@/components/deals/deal-oc-panel";
 import DealDocumentsPanel from "@/components/deals/deal-documents-panel";
+import DealPropertySide from "@/components/deals/deal-property-side";
 import { DealRegistryRights } from "@/components/deals/deal-registry-rights";
 import { DealCrosscheck } from "@/components/deals/deal-crosscheck";
 import { dealsApi, errorText, type DealOptions, type UserOption } from "@/lib/deals/client";
@@ -42,11 +44,12 @@ type DealTabKey = (typeof DEAL_TABS)[number]["key"];
  */
 export default function DealDetailPage({ params }: { params: Promise<{ id: string }> }) {
   const { id } = use(params);
-  const [data, setData] = useState<{ deal: DealView; canOpenProperty: boolean } | null>(null);
+  const [data, setData] = useState<{ deal: DealView; canOpenProperty: boolean; canChangeStatus: boolean; canChangeAssignee: boolean } | null>(null);
   const [calc, setCalc] = useState<DealCalc | null>(null);
   const [options, setOptions] = useState<DealOptions | null>(null);
   const [users, setUsers] = useState<UserOption[]>([]);
   const [selected, setSelected] = useState<DealTabKey>("basic");
+  const [sideRequested, setSideRequested] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [calcError, setCalcError] = useState<string | null>(null);
   // 書類を発行したら照合を読み直す。
@@ -93,14 +96,23 @@ export default function DealDetailPage({ params }: { params: Promise<{ id: strin
   // OC を外したあとに OC タブを選んでいたら、基本タブを出す。
   const tab: DealTabKey = tabs.some((t) => t.key === selected) ? selected : "basic";
   const k = (v: unknown) => JSON.stringify(v);
+  const propertyId = data.canOpenProperty && deal.propertyId ? deal.propertyId : null;
+  const sideOpen = sideRequested && propertyId !== null;
 
   return (
-    <div className="mx-auto max-w-4xl space-y-5">
+    <div className={`mx-auto space-y-5 ${sideOpen ? "max-w-7xl" : "max-w-4xl"}`}>
       <PageHeader
         title={dealTitle(deal)}
         back={{ href: "/deals", to: "取引" }}
         actions={
           <div className="flex flex-wrap gap-2">
+            {/* 開く権限がある人にだけ出す。 */}
+            {data.canOpenProperty && deal.propertyId && (
+              <Button variant="secondary" size="sm" onClick={() => setSideRequested((v) => !v)} aria-pressed={sideOpen}>
+                <PanelRight className="h-4 w-4" />
+                物件情報を見る
+              </Button>
+            )}
             <Link href={`/deals/${deal.id}/funding-plan`} className={HEADER_LINK_CLS}>
               <Calculator className="h-4 w-4" />
               資金計画表
@@ -116,6 +128,9 @@ export default function DealDetailPage({ params }: { params: Promise<{ id: strin
         }
         description={`${deal.dealNo} ・ ${DEAL_BUSINESS_TYPE_LABELS[deal.businessType as keyof typeof DEAL_BUSINESS_TYPE_LABELS] ?? deal.businessType} ・ ${DEAL_STATUS_LABELS[deal.status as keyof typeof DEAL_STATUS_LABELS] ?? deal.status}`}
       />
+      {/* 開閉しても同じ位置に描く=入力中のパネルを作り直さない。 */}
+      <div className={sideOpen ? "grid items-start gap-5 lg:grid-cols-[minmax(0,1fr)_22rem]" : ""}>
+      <div className="min-w-0 space-y-5">
       {error && <p className="text-sm text-red-600 dark:text-red-400" role="alert">{error}</p>}
       {calcError && <p className="text-sm text-red-600 dark:text-red-400" role="alert">{calcError}</p>}
       {/* 数値照合。取引の保存・当事者の変更・書類の発行で読み直す。 */}
@@ -125,7 +140,7 @@ export default function DealDetailPage({ params }: { params: Promise<{ id: strin
       <Tabs tabs={tabs} active={tab} onChange={setSelected} idBase="deal-detail" />
       <div {...tabPanelProps("deal-detail", tab)}>
         <div hidden={tab !== "basic"}>
-          <DealBasicPanel key={k(basicFormFromDeal(deal))} deal={deal} users={users} kinds={options?.propertyKinds ?? []} onSaved={reload} />
+          <DealBasicPanel key={k(basicFormFromDeal(deal))} deal={deal} canChangeStatus={data.canChangeStatus} canChangeAssignee={data.canChangeAssignee} users={users} kinds={options?.propertyKinds ?? []} onSaved={reload} />
         </div>
         <div hidden={tab !== "property"}>
           <DealPropertyPanel key={k([deal.propertySnapshot, deal.assessments])} deal={deal} canOpenProperty={data.canOpenProperty} onSaved={reload} />
@@ -147,6 +162,11 @@ export default function DealDetailPage({ params }: { params: Promise<{ id: strin
         <div hidden={tab !== "documents"}>
           <DealDocumentsPanel dealId={deal.id} active={tab === "documents"} resale={deal.businessType === "resale"} onIssued={() => setIssuedTick((t) => t + 1)} />
         </div>
+      </div>
+      </div>
+      {sideOpen && propertyId && (
+        <DealPropertySide key={`${propertyId}:${deal.status}`} propertyId={propertyId} onClose={() => setSideRequested(false)} />
+      )}
       </div>
     </div>
   );
