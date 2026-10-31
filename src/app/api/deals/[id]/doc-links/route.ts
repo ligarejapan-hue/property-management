@@ -61,11 +61,11 @@ export async function POST(request: Request, ctx: Ctx) {
     const now = new Date();
     const expiresAt = docLinkExpiresAt(now, body.days);
     await withDealLock(id, async (tx) => {
-      const cur = await tx.dealDocLink.findFirst({ where: { dealId: id, partyId: party.id }, select: { id: true, revokedAt: true } });
+      const cur = await tx.dealDocLink.findFirst({ where: { dealId: id, partyId: party.id }, select: { id: true, revokedAt: true, partyRole: true } });
       const link = cur
         ? await tx.dealDocLink.update({
             where: { id: cur.id },
-            data: { expiresAt, revokedAt: null, partyRole: party.role, ...(body.rotate || cur.revokedAt ? { publicId: newDocLinkPublicId() } : {}) },
+            data: { expiresAt, revokedAt: null, partyRole: party.role, ...(body.rotate || cur.revokedAt || cur.partyRole !== party.role ? { publicId: newDocLinkPublicId() } : {}) },
             select: { id: true },
           })
         : await tx.dealDocLink.create({

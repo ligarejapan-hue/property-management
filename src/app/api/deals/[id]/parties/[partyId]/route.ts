@@ -27,11 +27,21 @@ export async function PATCH(request: Request, ctx: Ctx) {
     const { session } = await requireDeal("write");
     const { dealId, partyId } = await ids(ctx);
     const { version, ...patch } = partyUpdateSchema.parse(await parseJsonBody(request));
-    // ⚠役割や自社の印を変えると提出用リンクが使えなくなる。提出と同じ取引の行を押さえて書く。
-    const res = await withDealLock(dealId, (tx) => tx.dealParty.updateMany({
-      where: { id: partyId, dealId, version },
-      data: { ...patch, version: { increment: 1 } },
-    }));
+    // ⚠役割や自社の印を変えたら提出用リンクを無効にする(元に戻しても古いリンクを生き返らせない)。提出と同じ取引の行を押さえて書く。
+    const res = await withDealLock(dealId, async (tx) => {
+      const before = patch.role !== undefined || patch.isSelf !== undefined
+        ? await tx.dealParty.findFirst({ where: { id: partyId, dealId, version }, select: { role: true, isSelf: true } })
+        : null;
+      const updated = await tx.dealParty.updateMany({
+        where: { id: partyId, dealId, version },
+        data: { ...patch, version: { increment: 1 } },
+      });
+      const changed = before && ((patch.role !== undefined && patch.role !== before.role) || (patch.isSelf !== undefined && patch.isSelf !== before.isSelf));
+      if (updated.count > 0 && changed) {
+        await tx.dealDocLink.updateMany({ where: { dealId, partyId, revokedAt: null }, data: { revokedAt: new Date() } });
+      }
+      return updated;
+    });
     if (res.count === 0) await missOrConflict(dealId, partyId);
     await writeAuditLog({
       userId: session.id, action: "deal_party_update", targetTable: "deals", targetId: dealId,

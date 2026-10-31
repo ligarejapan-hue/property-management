@@ -127,14 +127,18 @@ describe("発行", () => {
     expect((await ISSUE(jsonRequest("POST", issueBody), dealCtx)).status).toBe(403);
   });
   it("発行し直しは同じ URL のまま。作り直しと、無効にしたリンクだけ URL を変える", async () => {
-    pm.dealDocLink.findFirst.mockResolvedValue({ id: "l1", revokedAt: null });
+    pm.dealDocLink.findFirst.mockResolvedValue({ id: "l1", revokedAt: null, partyRole: "seller" });
     await ISSUE(jsonRequest("POST", issueBody), dealCtx);
     expect(pm.dealDocLink.update.mock.calls[0][0].data).not.toHaveProperty("publicId");
     await ISSUE(jsonRequest("POST", { ...issueBody, rotate: true }), dealCtx);
     expect(pm.dealDocLink.update.mock.calls[1][0].data.publicId).toMatch(/^[A-Za-z0-9_-]{22}$/);
-    pm.dealDocLink.findFirst.mockResolvedValue({ id: "l1", revokedAt: new Date() });
+    pm.dealDocLink.findFirst.mockResolvedValue({ id: "l1", revokedAt: new Date(), partyRole: "seller" });
     await ISSUE(jsonRequest("POST", issueBody), dealCtx);
     expect(pm.dealDocLink.update.mock.calls[2][0].data).toMatchObject({ revokedAt: null, publicId: expect.any(String) });
+    // 役割が変わった相手へ発行し直すときも、古い URL を使い回さない
+    pm.dealDocLink.findFirst.mockResolvedValue({ id: "l1", revokedAt: null, partyRole: "buyer" });
+    await ISSUE(jsonRequest("POST", issueBody), dealCtx);
+    expect(pm.dealDocLink.update.mock.calls[3][0].data.publicId).toMatch(/^[A-Za-z0-9_-]{22}$/);
   });
   it("外した書類は、何も届いていないものだけ消す", async () => {
     await ISSUE(jsonRequest("POST", issueBody), dealCtx);
