@@ -33,6 +33,12 @@ export const DEFAULT_PROPERTY_KINDS: PropertyKindDef[] = BASE_PROPERTY_KINDS.map
   key: k, label: BASE_PROPERTY_KIND_LABELS[k], base: k,
 }));
 
+/** 取引の物件種別の「元」の種別。未選択・設定から消えた種別は null。 */
+export function kindBaseOf(settings: { propertyKinds: PropertyKindDef[] }, key: string | null): BasePropertyKind | null {
+  const kinds = settings.propertyKinds.length ? settings.propertyKinds : DEFAULT_PROPERTY_KINDS;
+  return kinds.find((k) => k.key === key)?.base ?? null;
+}
+
 export const LAND_RIGHTS = ["ownership", "leasehold"] as const;
 export type LandRight = (typeof LAND_RIGHTS)[number];
 export const LAND_RIGHT_LABELS: Record<LandRight, string> = { ownership: "所有権", leasehold: "借地権" };

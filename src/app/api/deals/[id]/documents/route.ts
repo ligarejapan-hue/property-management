@@ -23,7 +23,9 @@ import { pdfPageCount } from "@/lib/deals/documents/business/pdf-pages";
 import type { BusinessDocContext } from "@/lib/deals/documents/business/common";
 import { computeDealCalc } from "@/lib/deals/calc/deal-calc";
 import { loadDealStaffNames } from "@/lib/deals/staff-names";
+import { kindBaseOf } from "@/lib/deals/constants";
 import { loadRegistryDocInfo, registryPropertyFor } from "@/lib/deals/registry-doc-info";
+import { CROSSCHECK_FACTS_KEY, buildCrosscheckFacts } from "@/lib/deals/crosscheck-facts";
 import {
   DEAL_DOC_MIME, DEAL_DOC_TYPE_KEYS, dealDocumentBaseName, dealDocumentKey, dealDocumentTitle, type DealDocFormat,
 } from "@/lib/deals/documents/issue";
@@ -95,13 +97,15 @@ export async function POST(request: Request, ctx: Ctx) {
     // 担当者の名前は業務書類(書類確認書の頭)にだけ使う。
     // 書類の種類ごとに、保存済みの入力 → 計算と HTML → Excel を作る(保存・版・後片付けは共通)。
     let built: { variant: string; inputs: object; calc: object; html: string; compactHtml?: string; xlsx: () => Promise<Buffer> };
+    let docRegistry: BusinessDocContext["registry"];
     if (businessDoc) {
       const bctx: BusinessDocContext = {
         deal, calc: computeDealCalc(deal, rateRows, settings.propertyKinds, today), settings, company, rateRows, today,
         logo: branding.logo, seal: branding.seal, staff: await loadDealStaffNames(deal),
         // 謄本は書類確認書と、謄本の状況を使う書類(売主属性調査書)のときだけ読む(計画 段5c-2 の読み替え 5・第2段階 段B)。
-        registry: businessDoc.group === "checklist" || businessDoc.usesRegistry ? await loadRegistryDocInfo(await registryPropertyFor(session, perms, deal.propertyId)) : undefined,
+        registry: businessDoc.group === "checklist" || businessDoc.usesRegistry ? await loadRegistryDocInfo(await registryPropertyFor(session, perms, deal.propertyId), kindBaseOf(settings, deal.propertyKind)) : undefined,
       };
+      docRegistry = bctx.registry;
       if (!businessDoc.applies(bctx)) throw new ApiError(422, `この取引では${businessDoc.label}を出せません`, "DOC_NOT_APPLICABLE");
       // 止める項目(賃借人がいない・金額が無いなど)は画面だけでなくサーバーでも止める(空の書類を作らない)。
       const blocking = businessDoc.blocking(bctx);
@@ -168,7 +172,9 @@ export async function POST(request: Request, ctx: Ctx) {
           created = await prisma.dealDocument.create({
             data: {
               dealId: id, docType, variant, version: (latest?.version ?? 0) + 1, issuedById: session.id,
-              inputSnapshot: inputs as object, calcSnapshot: calc as object, pdfKey, xlsxKey, fileBaseName,
+              inputSnapshot: inputs as object,
+              // 照合に使う値(価格・決済日・面積・担保の件数)を発行時のまま残す。名前・住所は入れない。
+              calcSnapshot: { ...calc, [CROSSCHECK_FACTS_KEY]: buildCrosscheckFacts(docType, deal, docRegistry) } as object, pdfKey, xlsxKey, fileBaseName,
             },
             select: { id: true, version: true },
           });

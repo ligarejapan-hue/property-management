@@ -14,6 +14,7 @@ import type { BusinessPlanCalc } from "@/lib/deals/calc/business-plan";
 import type { BusinessSectionKey } from "@/lib/deals/business-sections";
 import type { DealView } from "@/lib/deals/view";
 import type { IssueNotice } from "./funding-plan-form";
+import { useIssueCrosscheck } from "./use-issue-crosscheck";
 
 const PREVIEW_DELAY_MS = 600;
 const MAX_COMPARABLES = 10;
@@ -68,6 +69,7 @@ export default function BusinessPlanForm({ deal, onSaved, onIssue }: {
     setForm((f) => ({ ...f, [k]: v }));
   };
 
+  const crosscheck = useIssueCrosscheck(deal.id, "business_plan");
   /** 保存する。issue のときは、保存した入力で PDF と Excel を発行する(サーバーは保存済みの入力を使う)。 */
   const save = async (issue: boolean) => {
     if (!parsed.value) {
@@ -250,12 +252,13 @@ export default function BusinessPlanForm({ deal, onSaved, onIssue }: {
             <Save className="h-4 w-4" />
             保存
           </Button>
-          <Button onClick={() => void save(true)} disabled={saving !== false} loading={saving === "issue"} loadingLabel="発行中">
+          <Button onClick={() => void crosscheck.guard(() => void save(true))} disabled={saving !== false || crosscheck.checking} loading={saving === "issue"} loadingLabel="発行中">
             <FileOutput className="h-4 w-4" />
             保存して発行(PDF・Excel)
           </Button>
         </div>
       </fieldset>
+      {crosscheck.dialog}
 
       <div className="space-y-2">
         <h3 className="text-sm font-semibold text-gray-700 dark:text-gray-300">プレビュー</h3>

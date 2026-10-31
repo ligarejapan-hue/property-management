@@ -13,6 +13,7 @@ import { DraftRestoredNotice, DraftTooLargeNotice } from "@/components/drafts/dr
 import { dealDocumentDraftKey, parseDealDocumentDraft, sameAsInitial, type DealDocumentDraft } from "@/lib/drafts/screens/deal-document";
 import { CHECKLIST_TEXT_MAX } from "@/lib/deals/checklist";
 import { dealsApi, dealDocumentFileUrl, DealApiError, errorText, type AvailableDocument } from "@/lib/deals/client";
+import { useIssueCrosscheck } from "./use-issue-crosscheck";
 
 const RECEIPTS = new Set(["deposit_receipt", "balance_receipt", "settlement_receipt"]);
 const str = (v: unknown) => (typeof v === "string" ? v : "");
@@ -156,7 +157,10 @@ function IssueDialog({ dealId, doc, version, onCancel, onDone }: {
     setRestoredShown(false);
     setOutdated(false);
   };
-  const [busy, setBusy] = useState(false);
+  const crosscheck = useIssueCrosscheck(dealId, doc.docType);
+  const [issuing, setBusy] = useState(false);
+  // 発行の前の照合を読んでいる間も押せない。
+  const busy = issuing || crosscheck.checking;
   const [error, setError] = useState<string | null>(null);
   const set = (k: string, v: unknown) => {
     // 両手の取引: 依頼の内容・宛先(売主様用⇔買主様用)を切り替えたら、その分の前回の入力(無ければ初めの値)に入れ替える。
@@ -229,7 +233,7 @@ function IssueDialog({ dealId, doc, version, onCancel, onDone }: {
       footer={
         <>
           <Button variant="secondary" onClick={onCancel} disabled={busy}>入力に戻る</Button>
-          <Button onClick={() => void issue()} disabled={busy || needsDecision || incomplete || doc.blocking.length > 0} loading={busy} loadingLabel="発行中">
+          <Button onClick={() => void crosscheck.guard(() => void issue())} disabled={busy || needsDecision || incomplete || doc.blocking.length > 0} loading={busy} loadingLabel="発行中">
             {missing.length ? "空欄のまま出す" : "発行する"}
           </Button>
         </>
@@ -451,6 +455,7 @@ function IssueDialog({ dealId, doc, version, onCancel, onDone }: {
           </>
         )}
         {error && <p className="text-sm text-red-600 dark:text-red-400" role="alert">{error}</p>}
+        {crosscheck.dialog}
       </div>
     </ModalShell>
   );

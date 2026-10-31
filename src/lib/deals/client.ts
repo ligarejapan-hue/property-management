@@ -9,6 +9,7 @@ import type { BusinessInputs } from "./business-schema";
 import type { BusinessPlanCalc } from "./calc/business-plan";
 import type { BusinessSectionKey } from "./business-sections";
 import type { RegistryRightsView } from "./registry-rights";
+import type { CrosscheckResult } from "./crosscheck";
 import type { FormDef } from "@/lib/deals/documents/forms/types";
 
 /** 取引の画面から API を呼ぶ。失敗はサーバーの文言とコードを持った DealApiError にする。 */
@@ -64,6 +65,8 @@ export const dealsApi = {
   get: (id: string) => call<{ deal: DealView; canOpenProperty: boolean }>(`/api/deals/${id}`),
   /** 物件の謄本(全部事項)の登記の現況(確認用・段5c-2)。 */
   registryRights: (id: string) => call<{ rights: RegistryRightsView }>(`/api/deals/${id}/registry-rights`),
+  /** 数値照合(確認用)。 */
+  crosscheck: (id: string) => call<{ crosscheck: CrosscheckResult }>(`/api/deals/${id}/crosscheck`),
   update: (id: string, body: Record<string, unknown>) => call<{ version: number }>(`/api/deals/${id}`, { method: "PATCH", body }),
   refreshProperty: (id: string, version: number) =>
     call<{ version: number }>(`/api/deals/${id}/refresh-property`, { method: "POST", body: { version } }),

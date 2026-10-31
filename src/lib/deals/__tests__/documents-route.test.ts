@@ -105,6 +105,8 @@ describe("POST /api/deals/[id]/documents(発行)", () => {
     expect(data).toMatchObject({ dealId: DEAL_ID, docType: "funding_plan", variant: "purchase", version: 1, issuedById: USER_ID });
     expect(data.inputSnapshot).toEqual(funding);
     expect(data.calcSnapshot.purchase.loans[0].monthly).toBe(112_914);
+    // 照合に使う値を発行時のまま残す(その書類が使う値だけ・名前は入れない)。
+    expect(data.calcSnapshot.crosscheckFacts).toEqual({ price: 30_000_000 });
     expect((renderHtmlToPdfDocument as Fn).mock.calls[0][0]).toContain("架空 太郎");
   });
 
