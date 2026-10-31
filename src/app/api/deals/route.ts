@@ -7,7 +7,9 @@ import { writeAuditLog } from "@/lib/audit";
 import { canAccessPropertyRecord } from "@/lib/property-access";
 import { requireDeal } from "@/lib/deals/guard";
 import { dealCreateSchema, EMPTY_SNAPSHOT } from "@/lib/deals/schemas";
-import { DEAL_BUSINESS_TYPES, DEAL_STATUSES } from "@/lib/deals/constants";
+import { DEAL_BUSINESS_TYPES, DEAL_STATUSES, type DealStatus } from "@/lib/deals/constants";
+import { initialDealStatusForCase, syncCaseStatusFromDeals } from "@/lib/deals/status-link";
+import { lockPropertyRow } from "@/lib/property-record-guard";
 import { jstYear, nextDealNo } from "@/lib/deals/deal-no";
 import { jstDateString } from "@/lib/deals/datetime";
 import { buildSnapshotFromProperty, SNAPSHOT_PROPERTY_SELECT } from "@/lib/deals/snapshot";
@@ -110,15 +112,34 @@ export async function POST(request: Request) {
       });
       const dealNo = nextDealNo(year, latest?.dealNo ?? null);
       try {
-        const created = await prisma.deal.create({
-          data: {
-            // 取引名の入力は廃止。列は残し、物件が未入力のときの見出しに取引番号を入れておく。
-            dealNo, name: dealNo, businessType: body.businessType,
-            tradeSide: normalizeTradeSide(body.businessType, body.tradeSide),
-            propertyId: body.propertyId ?? null, propertyKind, hasOc: body.hasOc ?? false,
-            propertySnapshot: snapshot, taxRateBp, createdById: session.id,
-          },
-          select: { id: true, dealNo: true },
+        const propertyId = body.propertyId ?? null;
+        const created = await prisma.$transaction(async (tx) => {
+          // 案件ステータスと連動する(lib/deals/status-link.ts)。ロックは物件の行が先。
+          // ⚠案件ステータスを動かすのは、その物件を編集できる人が作ったときだけ。ロック後に担当範囲を見直す。
+          let status: DealStatus = "considering";
+          let canMoveCase = false;
+          if (propertyId) {
+            await lockPropertyRow(tx, propertyId);
+            const current = await tx.property.findUnique({
+              where: { id: propertyId }, select: { caseStatus: true, createdBy: true, assignedTo: true },
+            });
+            if (current) {
+              status = initialDealStatusForCase(current.caseStatus);
+              canMoveCase = hasPermission(perms, "property", "write") && canAccessPropertyRecord(session, current);
+            }
+          }
+          const row = await tx.deal.create({
+            data: {
+              // 取引名の入力は廃止。列は残し、物件が未入力のときの見出しに取引番号を入れておく。
+              dealNo, name: dealNo, businessType: body.businessType, status,
+              tradeSide: normalizeTradeSide(body.businessType, body.tradeSide),
+              propertyId, propertyKind, hasOc: body.hasOc ?? false,
+              propertySnapshot: snapshot, taxRateBp, createdById: session.id,
+            },
+            select: { id: true, dealNo: true },
+          });
+          if (propertyId && canMoveCase) await syncCaseStatusFromDeals(tx, { propertyId, changedBy: session.id });
+          return row;
         });
         await writeAuditLog({
           userId: session.id, action: "deal_create", targetTable: "deals", targetId: created.id,

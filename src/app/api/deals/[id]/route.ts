@@ -15,6 +15,8 @@ import { DEAL_TRACKED_FIELDS, dealChangeValues, toDealUpdateData } from "@/lib/d
 import { DEAL_DETAIL_SELECT, toDealView } from "@/lib/deals/view";
 import { syncDealScheduleSafe, taxesEnteredOf } from "@/lib/deals/schedule-sync";
 import type { ScheduleEvent } from "@/lib/deals/schedule";
+import { canChangeDealAssignee, canChangeDealStatus, syncCaseStatusFromDeals } from "@/lib/deals/status-link";
+import { lockPropertyRow } from "@/lib/property-record-guard";
 
 type Ctx = { params: Promise<{ id: string }> };
 const NO_STORE = { "Cache-Control": "no-store" };
@@ -27,14 +29,15 @@ export async function GET(_req: Request, ctx: Ctx) {
   try {
     const { session, perms } = await requireDeal("read");
     const id = await idOf(ctx);
-    const row = await prisma.deal.findUnique({ where: { id }, select: DEAL_DETAIL_SELECT });
+    const row = await prisma.deal.findUnique({ where: { id }, select: { ...DEAL_DETAIL_SELECT, createdById: true } });
     if (!row) throw new ApiError(404, "取引が見つかりません", "NOT_FOUND");
-    let canOpenProperty = false;
-    if (row.propertyId && hasPermission(perms, "property", "read")) {
-      const p = await prisma.property.findUnique({ where: { id: row.propertyId }, select: { createdBy: true, assignedTo: true } });
-      canOpenProperty = !!p && canAccessPropertyRecord(session, p);
-    }
-    return NextResponse.json({ deal: toDealView(row), canOpenProperty }, { headers: NO_STORE });
+    const p = row.propertyId
+      ? await prisma.property.findUnique({ where: { id: row.propertyId }, select: { createdBy: true, assignedTo: true } })
+      : null;
+    const canOpenProperty = !!p && hasPermission(perms, "property", "read") && canAccessPropertyRecord(session, p);
+    const canChangeStatus = canChangeDealStatus(session, row, p);
+    const canChangeAssignee = canChangeDealAssignee(session, row, p);
+    return NextResponse.json({ deal: toDealView(row), canOpenProperty, canChangeStatus, canChangeAssignee }, { headers: NO_STORE });
   } catch (error) {
     return handleApiError(error);
   }
@@ -55,8 +58,26 @@ export async function PATCH(request: Request, ctx: Ctx) {
 
     let event: ScheduleEvent = {};
     await prisma.$transaction(async (tx) => {
-      const cur = await tx.deal.findUnique({ where: { id }, select: DEAL_DETAIL_SELECT });
+      const cur = await tx.deal.findUnique({ where: { id }, select: { ...DEAL_DETAIL_SELECT, createdById: true } });
       if (!cur) throw new ApiError(404, "取引が見つかりません", "NOT_FOUND");
+      // 権限の判定に使う行と、書き込む行を同じ版にそろえる(下の updateMany も同じ版を条件にする)。
+      if (cur.version !== version) throw new ApiError(409, DEAL_VERSION_CONFLICT_MESSAGE, "VERSION_CONFLICT");
+      // 案件ステータスと連動する(lib/deals/status-link.ts)。ロックは物件の行 → 取引の行(下の updateMany)の順。
+      const statusChanges = patch.status !== undefined && patch.status !== cur.status;
+      const linkedPropertyId = statusChanges ? cur.propertyId : null;
+      if (linkedPropertyId) await lockPropertyRow(tx, linkedPropertyId);
+      const assigneeChanges = patch.assigneeId !== undefined && patch.assigneeId !== cur.assigneeId;
+      if (statusChanges || assigneeChanges) {
+        const property = cur.propertyId
+          ? await tx.property.findUnique({ where: { id: cur.propertyId }, select: { assignedTo: true } })
+          : null;
+        if (statusChanges && !canChangeDealStatus(session, cur, property)) {
+          throw new ApiError(403, "取引の状態を変えられるのは、管理者と担当者だけです", "DEAL_STATUS_FORBIDDEN");
+        }
+        if (assigneeChanges && !canChangeDealAssignee(session, cur, property)) {
+          throw new ApiError(403, "取引の担当者を変えられるのは、管理者と担当者だけです", "DEAL_ASSIGNEE_FORBIDDEN");
+        }
+      }
       const data = toDealUpdateData(patch, cur.businessType);
       // 資金計画表・事業計画書は plan_inputs のそれぞれの鍵(funding / business)だけを差し替える(ほかの鍵は残す)。
       if (patch.businessPlan !== undefined && (patch.businessType ?? cur.businessType) !== "resale") {
@@ -81,6 +102,7 @@ export async function PATCH(request: Request, ctx: Ctx) {
         oldValues: dealChangeValues(cur), newValues: dealChangeValues({ ...cur, ...data }),
         trackedFields: DEAL_TRACKED_FIELDS, source: "manual",
       });
+      if (linkedPropertyId) await syncCaseStatusFromDeals(tx, { propertyId: linkedPropertyId, changedBy: session.id });
     });
 
     // 日付・条件・担当の変更を段取りに反映する(失敗しても保存は止めない)。

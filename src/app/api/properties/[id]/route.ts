@@ -40,6 +40,8 @@ import {
   jstTodayDateOnly,
   normalizeLeadExclusionPatch,
 } from "@/lib/lead-exclusion";
+import { syncDealFromCaseStatus } from "@/lib/deals/status-link";
+import { syncDealScheduleAfterCaseStatus } from "@/lib/deals/schedule-sync";
 
 // ---------- GET /api/properties/[id] ----------
 
@@ -500,6 +502,7 @@ export async function PATCH(
     //   版番号もここで見る(読み取り後に別の更新が入った場合も弾く)。
     // ⚠**編集の鍵の確認は物件行をロックした後・書き込みの前**に行う(Task 6)。
     //   順序: トランザクション開始 → 行ロック → 鍵の確認 → 条件つき更新。
+    let linkedDealChange: Awaited<ReturnType<typeof syncDealFromCaseStatus>> = null;
     const guardedUpdate = await prisma.$transaction(async (tx) => {
       await lockPropertyRow(tx, id);
       await assertNotEditLockedByOther(tx, {
@@ -540,6 +543,10 @@ export async function PATCH(
           version: { increment: 1 },
         },
       });
+      // 案件ステータスを変えたら取引の状態もそろえる(lib/deals/status-link.ts・物件の行はロック済み)。
+      if (res.count > 0 && persistedFields.caseStatus !== undefined && persistedFields.caseStatus !== current.caseStatus) {
+        linkedDealChange = await syncDealFromCaseStatus(tx, { propertyId: id, changedBy: session.id });
+      }
       // ⚠**書けたときだけ**棟へつなぐ(0件=版番号違い・取得中は下で 409)。
       // ⚠ロック順は「物件の行(上の lockPropertyRow)→ アドバイザリロック(apply の中)」。
       //   apply は版番号を進めない=この更新と同じトランザクションで呼ぶ。
@@ -653,6 +660,9 @@ export async function PATCH(
     }
 
     // Write audit log
+    // 連動で取引の状態が動いたら段取りにも反映する(失敗しても保存は止めない)。
+    await syncDealScheduleAfterCaseStatus(linkedDealChange, session.id);
+
     await writeAuditLog({
       userId: session.id,
       action: "update",

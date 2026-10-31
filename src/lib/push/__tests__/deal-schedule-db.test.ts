@@ -39,7 +39,7 @@ vi.mock("@/lib/api-helpers", async () => {
 import { randomUUID } from "crypto";
 import prisma from "@/lib/prisma";
 import { addYmdDays } from "@/lib/deals/schedule";
-import { sweepDealSchedules, syncDealSchedule, withDealLock } from "@/lib/deals/schedule-sync";
+import { sweepDealSchedules, syncDealSchedule, syncDealScheduleAfterCaseStatus, withDealLock } from "@/lib/deals/schedule-sync";
 import { runPushNotifications } from "@/lib/push/deliveries/run";
 import type { PushSender } from "@/lib/push/deliveries/web-push-sender";
 import type { PushPayload } from "@/lib/push/deliveries/rules";
@@ -229,6 +229,10 @@ async function main() {
     await prisma.dealScheduleItem.update({ where: { id: it1!.id }, data: { completedAt: null, autoCompleted: false } });
     await syncDealSchedule(d, { now: at(MON, "11:00") });
     check("3 取り消した完了は、次の同期で戻らない", (await itemsOf(d)).find((i) => i.templateKey === "s_statement")?.completedAt === null);
+
+    await prisma.deal.update({ where: { id: d }, data: { status: "settled" } });
+    await syncDealScheduleAfterCaseStatus({ dealId: d, status: "settled" }, a);
+    check("3 案件ステータスの連動で決済済になれば「決済・引渡し」が完了", (await itemsOf(d)).find((i) => i.templateKey === "s_settle")?.autoCompleted === true);
 
     const future = await deal(a, { settlement: D(37) });
     const past = await deal(a, { settlement: D(-6) });

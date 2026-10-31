@@ -214,6 +214,12 @@ export async function syncDealScheduleSafe(dealId: string, o: SyncOptions = {}):
   }
 }
 
+/** 案件ステータスの連動で取引の状態が動いたあとに呼ぶ(決済済になったら「決済・引渡し」を完了にする)。 */
+export function syncDealScheduleAfterCaseStatus(change: { dealId: string; status: string } | null | undefined, userId: string): Promise<void> {
+  if (!change) return Promise.resolve();
+  return syncDealScheduleSafe(change.dealId, { userId, event: { settled: change.status === "settled" } });
+}
+
 /** 朝の見回りを始める時刻(日本時間 6:00=9:00 の通知の前に済ませる)。 */
 const SWEEP_START_HOUR_JST = 6;
 const SWEEP_DEALS_PER_RUN = 20;

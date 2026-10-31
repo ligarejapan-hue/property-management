@@ -10,7 +10,7 @@ import { jstDateString, isoToJstLocal, jstLocalToIso, formatJstDateTime } from "
 describe("選択肢", () => {
   it("状態は4つで、日本語名がある", () => {
     expect(DEAL_STATUSES).toEqual(["considering", "contracted", "settled", "cancelled"]);
-    expect(DEAL_STATUS_LABELS).toEqual({ considering: "検討中", contracted: "契約済", settled: "決済済", cancelled: "中止" });
+    expect(DEAL_STATUS_LABELS).toEqual({ considering: "契約予定", contracted: "契約済", settled: "決済済", cancelled: "中止" });
   });
   it("事業区分・取引態様・当事者の役割の日本語名", () => {
     expect(DEAL_BUSINESS_TYPE_LABELS).toEqual({ brokerage: "仲介", resale: "買取再販" });
