@@ -78,23 +78,34 @@ const loadDeals = (tx: Prisma.TransactionClient, propertyId: string) =>
 
 type SyncArgs = { propertyId: string; changedBy: string };
 
+/** 今の取引の並びで連動させると、案件ステータスがどう動くか。動かないときは null。 */
+async function plannedCaseMove(tx: Prisma.TransactionClient, propertyId: string): Promise<{ from: CaseStatus; to: CaseStatusValue } | null> {
+  const property = await tx.property.findUnique({ where: { id: propertyId }, select: { caseStatus: true } });
+  if (!property) return null;
+  const linked = pickLinkedDeal(await loadDeals(tx, propertyId));
+  if (!linked) return null;
+  const to = caseStatusForDealStatus(linked.status, property.caseStatus);
+  return to ? { from: property.caseStatus, to } : null;
+}
+
+/** 連動させたら案件ステータスが動く場面か(読むだけ)。物件の編集権限がなくて連動させないときの知らせに使う。 */
+export async function caseStatusWouldMove(tx: Prisma.TransactionClient, propertyId: string): Promise<boolean> {
+  return (await plannedCaseMove(tx, propertyId)) !== null;
+}
+
 /** 取引の状態を変えた・取引を作ったあとに、案件ステータスをそろえる。物件の行をロックした tx の中で呼ぶ。 */
 export async function syncCaseStatusFromDeals(tx: Prisma.TransactionClient, { propertyId, changedBy }: SyncArgs): Promise<void> {
-  const property = await tx.property.findUnique({ where: { id: propertyId }, select: { caseStatus: true } });
-  if (!property) return;
-  const linked = pickLinkedDeal(await loadDeals(tx, propertyId));
-  if (!linked) return;
-  const next = caseStatusForDealStatus(linked.status, property.caseStatus);
-  if (!next) return;
+  const move = await plannedCaseMove(tx, propertyId);
+  if (!move) return;
   const res = await tx.property.updateMany({
-    where: { id: propertyId, caseStatus: property.caseStatus },
-    data: { caseStatus: next as CaseStatus },
+    where: { id: propertyId, caseStatus: move.from },
+    data: { caseStatus: move.to as CaseStatus },
   });
   if (res.count !== 1) return;
   await tx.changeLog.create({
     data: {
       targetTable: "properties", targetId: propertyId, fieldName: "caseStatus",
-      oldValue: property.caseStatus, newValue: next, source: "auto", changedBy,
+      oldValue: move.from, newValue: move.to, source: "auto", changedBy,
     },
   });
 }
@@ -127,6 +138,7 @@ export async function syncDealFromCaseStatus(tx: Prisma.TransactionClient, { pro
 /**
  * 取引の状態を変えられる人=管理者・その取引の担当者・その物件の担当者(発注者決定 2026-10-31)。
  * ⚠物件の案件ステータスの変更権限は変えていない(物件を編集できる人が変えると、取引も連動する)。
+ * ⚠取引の状態を変えられても、物件を編集できない人のときは案件ステータスを動かさない(発注者決定 2026-11-01)。
  */
 export function canChangeDealStatus(
   session: { id: string; role: string },

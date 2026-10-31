@@ -45,7 +45,8 @@ type DealTabKey = (typeof DEAL_TABS)[number]["key"];
  */
 export default function DealDetailPage({ params }: { params: Promise<{ id: string }> }) {
   const { id } = use(params);
-  const [data, setData] = useState<{ deal: DealView; canOpenProperty: boolean; canChangeStatus: boolean; canChangeAssignee: boolean } | null>(null);
+  const [data, setData] = useState<{ deal: DealView; canOpenProperty: boolean; canChangeStatus: boolean; canChangeAssignee: boolean; canMoveCaseStatus: boolean } | null>(null);
+  const [caseStatusNotChanged, setCaseStatusNotChanged] = useState(false);
   const [calc, setCalc] = useState<DealCalc | null>(null);
   const [options, setOptions] = useState<DealOptions | null>(null);
   const [users, setUsers] = useState<UserOption[]>([]);
@@ -143,7 +144,12 @@ export default function DealDetailPage({ params }: { params: Promise<{ id: strin
       <Tabs tabs={tabs} active={tab} onChange={setSelected} idBase="deal-detail" />
       <div {...tabPanelProps("deal-detail", tab)}>
         <div hidden={tab !== "basic"}>
-          <DealBasicPanel key={k(basicFormFromDeal(deal))} deal={deal} canChangeStatus={data.canChangeStatus} canChangeAssignee={data.canChangeAssignee} users={users} kinds={options?.propertyKinds ?? []} onSaved={reload} />
+          {caseStatusNotChanged && (
+            <p className="mb-4 rounded-md border border-amber-300 bg-amber-50 px-3 py-2 text-sm text-amber-900 dark:border-amber-800 dark:bg-amber-950 dark:text-amber-200" role="status">
+              物件の編集権限がないため、案件ステータスは変更していません
+            </p>
+          )}
+          <DealBasicPanel key={k(basicFormFromDeal(deal))} deal={deal} canChangeStatus={data.canChangeStatus} canChangeAssignee={data.canChangeAssignee} canMoveCaseStatus={data.canMoveCaseStatus} users={users} kinds={options?.propertyKinds ?? []} onSaved={reload} onCaseStatusNotChanged={setCaseStatusNotChanged} />
         </div>
         <div hidden={tab !== "property"}>
           <DealPropertyPanel key={k([deal.propertySnapshot, deal.assessments])} deal={deal} canOpenProperty={data.canOpenProperty} onSaved={reload} />

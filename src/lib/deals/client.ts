@@ -63,12 +63,12 @@ export const dealsApi = {
   list: (params: Record<string, string>) =>
     call<{ deals: DealListItem[]; total: number; page: number; pageSize: number }>(`/api/deals?${new URLSearchParams(params)}`),
   create: (body: Record<string, unknown>) => call<{ id: string; dealNo: string }>("/api/deals", { method: "POST", body }),
-  get: (id: string) => call<{ deal: DealView; canOpenProperty: boolean; canChangeStatus: boolean; canChangeAssignee: boolean }>(`/api/deals/${id}`),
+  get: (id: string) => call<{ deal: DealView; canOpenProperty: boolean; canChangeStatus: boolean; canChangeAssignee: boolean; canMoveCaseStatus: boolean }>(`/api/deals/${id}`),
   /** 物件の謄本(全部事項)の登記の現況(確認用・段5c-2)。 */
   registryRights: (id: string) => call<{ rights: RegistryRightsView }>(`/api/deals/${id}/registry-rights`),
   /** 数値照合(確認用)。 */
   crosscheck: (id: string) => call<{ crosscheck: CrosscheckResult }>(`/api/deals/${id}/crosscheck`),
-  update: (id: string, body: Record<string, unknown>) => call<{ version: number }>(`/api/deals/${id}`, { method: "PATCH", body }),
+  update: (id: string, body: Record<string, unknown>) => call<{ version: number; caseStatusNotChanged?: boolean }>(`/api/deals/${id}`, { method: "PATCH", body }),
   /** 決済までの段取り。 */
   schedule: (id: string) => call<{ items: ScheduleItemView[]; today: string; settlementDate: string | null }>(`/api/deals/${id}/schedule`),
   addScheduleItem: (id: string, body: Record<string, unknown>) => call<{ id: string }>(`/api/deals/${id}/schedule`, { method: "POST", body }),
