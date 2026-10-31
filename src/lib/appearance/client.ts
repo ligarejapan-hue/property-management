@@ -14,6 +14,8 @@ import { STORAGE_KEYS } from "./boot-script";
 // 付け替えたら合図(イベント)を出し、表示中の選択欄すべてに知らせる。
 
 export const APPEARANCE_CHANGE_EVENT = "pm-appearance-change";
+/** 保存できたときの合図(detail=保存後の中身)。設定 > 表示 が、利用者メニューなど別の場所での保存に追随する(@codex #623)。 */
+export const PREFERENCES_SAVED_EVENT = "pm-preferences-saved";
 /** ルートの layout が「この人の設定で描いた」印に付ける html の属性(ログイン中の人の id)。 */
 export const APPEARANCE_USER_ATTR = "data-appearance-user";
 
@@ -95,7 +97,10 @@ export async function savePreferences(patch: AppearancePatch): Promise<Preferenc
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify(patch),
   });
-  if (data) cached = Promise.resolve(data);
+  if (data) {
+    cached = Promise.resolve(data);
+    window.dispatchEvent(new CustomEvent(PREFERENCES_SAVED_EVENT, { detail: data }));
+  }
   return data;
 }
 

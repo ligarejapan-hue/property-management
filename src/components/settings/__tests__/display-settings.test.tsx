@@ -78,7 +78,14 @@ describe("押した瞬間に反映・保存は自動", () => {
   });
   it("続けて選んだとき、古い保存の応答で表示を上書きしない", () => {
     expect(settings).toContain("const seq = ++saveSeq.current;");
-    expect(settings).toContain("if (seq !== saveSeq.current) return saved;");
+    expect(settings).toContain("if (seq !== saveSeq.current) return null;");
+  });
+  it("「会社の標準に戻す」の応答も、後の選択があれば反映しない(save が null)", () => {
+    expect(settings).toMatch(/const saved = await save\(\{ theme: null, density: null, layout: null \}\);\s*if \(saved\) applyAll/);
+  });
+  it("利用者メニューなど別の場所での保存に追随する(戻すボタンが押せないまま、を防ぐ)", () => {
+    expect(settings).toContain("window.addEventListener(PREFERENCES_SAVED_EVENT, onSaved)");
+    expect(settings).toContain("window.removeEventListener(PREFERENCES_SAVED_EVENT, onSaved)");
   });
   it("色は会社が選べる色だけを出す", () => {
     expect(settings).toContain("THEME_OPTIONS.filter((o) => allowed.includes(o.value))");

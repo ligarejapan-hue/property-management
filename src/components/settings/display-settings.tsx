@@ -25,6 +25,7 @@ import {
   readLayout,
   savePreferences,
   subscribeAppearance,
+  PREFERENCES_SAVED_EVENT,
   type PreferencesData,
 } from "@/lib/appearance/client";
 import { ThemePreview, DensityPreview, LayoutPreview } from "./display-previews";
@@ -137,9 +138,15 @@ export default function DisplaySettings() {
       if (d) setPrefs(d);
       else setLoadFailed(true);
     });
+    // 利用者メニュー・スマホのメニューで保存したときも表示(会社の標準を使用中か・戻すボタン)を合わせる(@codex #623)
+    const onSaved = (e: Event) => {
+      if (alive) setPrefs((e as CustomEvent<PreferencesData>).detail);
+    };
+    window.addEventListener(PREFERENCES_SAVED_EVENT, onSaved);
     return () => {
       alive = false;
       clearTimeout(timer.current);
+      window.removeEventListener(PREFERENCES_SAVED_EVENT, onSaved);
     };
   }, []);
 
@@ -163,7 +170,8 @@ export default function DisplaySettings() {
   const save = async (patch: AppearancePatch) => {
     const seq = ++saveSeq.current;
     const saved = await savePreferences(patch);
-    if (seq !== saveSeq.current) return saved;
+    // 後から別の選択をしていたら、この応答は使わない(null=呼び出し側も反映しない・@codex #623)
+    if (seq !== saveSeq.current) return null;
     if (saved) {
       setPrefs(saved);
       show({ kind: "ok", text: "保存しました" });

@@ -113,8 +113,12 @@ describe("loadPreferences / savePreferences", () => {
   });
   it("保存できたら、その結果を読み込み済みの値にする(失敗は null)", async () => {
     vi.stubGlobal("fetch", vi.fn(async () => Response.json({ data: data("navy") })));
+    const heard = vi.fn();
+    target.addEventListener("pm-preferences-saved", (e) => heard((e as CustomEvent).detail));
     const saved = await savePreferences({ theme: "navy" });
     expect(saved?.user.theme).toBe("navy");
+    // 別の場所(利用者メニュー)での保存を 設定 > 表示 が受け取れる
+    expect(heard).toHaveBeenCalledWith(saved);
     const again = vi.fn();
     vi.stubGlobal("fetch", again);
     expect(await loadPreferences()).toBe(saved);
