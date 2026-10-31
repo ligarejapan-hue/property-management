@@ -7,7 +7,7 @@ import type { DealRegistryState } from "./registry-rights";
 /** 見る添付の数(全部事項を探して新しい順に)。 */
 const CANDIDATES = 5;
 
-async function readPdf(fileUrl: string): Promise<{ body: Buffer; text: string } | null> {
+export async function readRegistryPdf(fileUrl: string): Promise<{ body: Buffer; text: string } | null> {
   try {
     // 保存場所の鍵が壊れている・読めないときも「読めない」扱い(例外の中身は出さない)。
     const storage = getStorage();
@@ -38,7 +38,7 @@ export async function loadDealRegistryRights(propertyId: string | null): Promise
     select: { id: true, fileUrl: true, registryCertificateType: true, createdAt: true },
   });
   for (const a of rows) {
-    const pdf = await readPdf(a.fileUrl);
+    const pdf = await readRegistryPdf(a.fileUrl);
     if (!pdf) {
       // 全部事項と分かっている添付が読めなければ判定できない。種別が空なら次を見る。
       if (a.registryCertificateType === "all") return { status: "unreadable" };

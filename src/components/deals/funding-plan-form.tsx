@@ -12,6 +12,7 @@ import {
 import type { FundingPlanCalc } from "@/lib/deals/calc/funding-plan";
 import type { BasePropertyKind } from "@/lib/deals/constants";
 import type { DealView } from "@/lib/deals/view";
+import { useIssueCrosscheck } from "./use-issue-crosscheck";
 
 const MAX_LOANS = 3;
 const PREVIEW_DELAY_MS = 600;
@@ -70,6 +71,7 @@ export default function FundingPlanForm({ deal, kindBase, onSaved, onIssue }: {
   const setP = <K extends keyof Purchase>(k: K, v: Purchase[K]) => setForm((f) => ({ ...f, purchase: { ...f.purchase, [k]: v } }));
   const setS = <K extends keyof Sale>(k: K, v: Sale[K]) => setForm((f) => ({ ...f, sale: { ...f.sale, [k]: v } }));
 
+  const crosscheck = useIssueCrosscheck(deal.id, "funding_plan");
   /** 保存する。issue のときは、保存した入力で PDF と Excel を発行する(サーバーは保存済みの入力を使う)。 */
   const save = async (issue: boolean) => {
     if (!parsed.value) {
@@ -245,12 +247,13 @@ export default function FundingPlanForm({ deal, kindBase, onSaved, onIssue }: {
             <Save className="h-4 w-4" />
             保存
           </Button>
-          <Button onClick={() => void save(true)} disabled={saving !== false} loading={saving === "issue"} loadingLabel="発行中">
+          <Button onClick={() => void crosscheck.guard(() => void save(true))} disabled={saving !== false || crosscheck.checking} loading={saving === "issue"} loadingLabel="発行中">
             <FileOutput className="h-4 w-4" />
             保存して発行(PDF・Excel)
           </Button>
         </div>
       </fieldset>
+      {crosscheck.dialog}
 
       <div className="space-y-2">
         <h3 className="text-sm font-semibold text-gray-700 dark:text-gray-300">プレビュー</h3>

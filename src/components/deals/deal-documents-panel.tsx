@@ -15,7 +15,7 @@ const LINK_CLS =
  * 書類タブ(設計 §5)。発行した書類の履歴と、書類を作る画面への入口・決済の書類の発行(段5)。
  * 履歴はタブを開いたときに読み直す(資金計画表の画面で発行して戻ってきたときも新しいものが出る)。
  */
-export default function DealDocumentsPanel({ dealId, active, resale }: { dealId: string; active: boolean; resale: boolean }) {
+export default function DealDocumentsPanel({ dealId, active, resale, onIssued }: { dealId: string; active: boolean; resale: boolean; onIssued?: () => void }) {
   const [docs, setDocs] = useState<DealDocumentView[] | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [loading, setLoading] = useState(false);
@@ -34,6 +34,7 @@ export default function DealDocumentsPanel({ dealId, active, resale }: { dealId:
   const reload = () => {
     setLoading(true);
     setTick((t) => t + 1);
+    onIssued?.();
   };
 
   return (

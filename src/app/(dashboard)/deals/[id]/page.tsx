@@ -13,6 +13,7 @@ import DealSettlementPanel from "@/components/deals/deal-settlement-panel";
 import DealOcPanel from "@/components/deals/deal-oc-panel";
 import DealDocumentsPanel from "@/components/deals/deal-documents-panel";
 import { DealRegistryRights } from "@/components/deals/deal-registry-rights";
+import { DealCrosscheck } from "@/components/deals/deal-crosscheck";
 import { dealsApi, errorText, type DealOptions, type UserOption } from "@/lib/deals/client";
 import type { DealView } from "@/lib/deals/view";
 import type { DealCalc } from "@/lib/deals/calc/deal-calc";
@@ -48,6 +49,8 @@ export default function DealDetailPage({ params }: { params: Promise<{ id: strin
   const [selected, setSelected] = useState<DealTabKey>("basic");
   const [error, setError] = useState<string | null>(null);
   const [calcError, setCalcError] = useState<string | null>(null);
+  // 書類を発行したら照合を読み直す。
+  const [issuedTick, setIssuedTick] = useState(0);
 
   /** 取引と計算は別々に読み直す。計算だけ失敗しても取引(版の番号)は新しくする(最終レビュー M-3)。 */
   const loadCalc = useCallback(async () => {
@@ -115,6 +118,8 @@ export default function DealDetailPage({ params }: { params: Promise<{ id: strin
       />
       {error && <p className="text-sm text-red-600 dark:text-red-400" role="alert">{error}</p>}
       {calcError && <p className="text-sm text-red-600 dark:text-red-400" role="alert">{calcError}</p>}
+      {/* 数値照合。取引の保存・当事者の変更・書類の発行で読み直す。 */}
+      <DealCrosscheck dealId={deal.id} propertyId={deal.propertyId} canOpenProperty={data.canOpenProperty} revision={k([deal.version, deal.parties, issuedTick])} onOpenTab={setSelected} />
       {/* 物件の謄本の登記の現況(段5c-2)。物件を差し替えたら読み直す。 */}
       <DealRegistryRights key={deal.propertyId ?? "none"} dealId={deal.id} propertyId={deal.propertyId} />
       <Tabs tabs={tabs} active={tab} onChange={setSelected} idBase="deal-detail" />
@@ -140,7 +145,7 @@ export default function DealDetailPage({ params }: { params: Promise<{ id: strin
           </div>
         )}
         <div hidden={tab !== "documents"}>
-          <DealDocumentsPanel dealId={deal.id} active={tab === "documents"} resale={deal.businessType === "resale"} />
+          <DealDocumentsPanel dealId={deal.id} active={tab === "documents"} resale={deal.businessType === "resale"} onIssued={() => setIssuedTick((t) => t + 1)} />
         </div>
       </div>
     </div>
