@@ -240,3 +240,38 @@ describe("実物の謄本の並び(2026-11-01 本番で確認)", () => {
     expect(r.value).toBeNull();
   });
 });
+
+// 実物(本番の謄本で確認 2026-11-01): 古い謄本の「移記」の行では、余白が外字(私用領域の文字)で出て、後ろに「：」が付くことがある。
+describe("移記の行の外字の余白", () => {
+  const ITEKI = "";
+  const iteki = [
+    `┃${ITEKI} │${ITEKI} │${ITEKI} ：│昭和６３年法務省令第３７号附則第２条第 ┃`,
+    "┃ │ │ ：│２項の規定により移記 ┃",
+    "┃ │ │ ：│平成９年３月１日 ┃",
+  ];
+
+  it("★土地: 移記の行があっても地積を読む", () => {
+    const r = parseLandArea(land(["┃１番１ │宅地 │１２０：５０│昭和５０年１月１日 ┃", "┃ │ │ ：│〔昭和５０年１月５日〕 ┃", ...iteki]));
+    expect(r).toEqual({ value: "120.50", skippedReason: null });
+  });
+
+  it("★土地: 移記の行があっても、数字が2つなら今までどおり読まない", () => {
+    const r = parseLandArea(land(["┃１番１ │宅地 │１２０：５０│昭和５０年１月１日 ┃", "┃ │ │１００：００│昭和６０年１月１日 ┃", ...iteki]));
+    expect(r.value).toBeNull();
+  });
+
+  it("★建物: 移記の行があっても各階の床面積を足す", () => {
+    const r = parseBuildingFloorArea(house([
+      "┃居宅 │木造 │１階 ５０：００│平成５年４月１日新築 ┃",
+      "┃ │ │２階 ４０：５０│ ┃",
+      `┃${ITEKI} │${ITEKI} │${ITEKI} ：│昭和６３年法務省令第３７号附則第２条第 ┃`,
+      "┃ │ │ ：│２項の規定により移記 ┃",
+    ]));
+    expect(r).toEqual({ value: "90.50", skippedReason: null });
+  });
+
+  it("外字のほかに文字や数字がある欄は空にしない(読めないまま)", () => {
+    expect(parseLandArea(land([`┃１番１ │宅地 │１２０：５０│ ┃`, `┃ │ │${ITEKI}９９：００│ ┃`])).value).toBeNull();
+    expect(parseLandArea(land([`┃１番１ │宅地 │１２０：５０│ ┃`, `┃ │ │あ│ ┃`])).value).toBeNull();
+  });
+});

@@ -37,8 +37,16 @@ export function cellsOf(line: string): string[] | null {
   return line.split(/[│┃|｜]/).map((c) => c.trim());
 }
 
-// ⚠小数点だけの欄も空(実物: 原因の日付が折り返した行の地積の欄に「：」だけが出る・本番の謄本で確認 2026-11-01)。
-const BLANK = /^(余\s*白)?$|^[:：・．.]$/;
+/**
+ * 表の欄が空か。⚠実物で確認した形(本番の謄本 2026-11-01):
+ * - 原因の日付が折り返した行の地積の欄に「：」だけが出る
+ * - 古い謄本の「移記」の行では余白が外字(私用領域の文字)で出て、後ろに「：」が付くことがある
+ * 外字のほかに文字や数字が残る欄は空にしない。
+ */
+export function isBlankRegistryCell(cell: string): boolean {
+  return /^[:：・．.]?$/.test(cell.replace(/余\s*白|[-\s]/g, ""));
+}
+
 const NUM = "([0-9]{1,7})(?:[ \\t]*[:：・．.][ \\t]*([0-9]{2}))?";
 const PLAIN_AREA = new RegExp(`^${NUM}$`);
 const FLOOR_AREA = /^(地[ \t]*下[ \t]*)?([0-9]{1,3})[ \t]*階[ \t]*([0-9]{1,6})(?:[ \t]*[:：・．.][ \t]*|[ \t]+)([0-9]{2})$/;
@@ -113,7 +121,7 @@ export function parseLandArea(raw: string): RegistryAreaResult {
   const values: number[] = [];
   for (const cells of table.rows) {
     const cell = (cells[table.col] ?? "").replace(/㎡/g, "").trim();
-    if (BLANK.test(cell)) continue;
+    if (isBlankRegistryCell(cell)) continue;
     const m = PLAIN_AREA.exec(cell);
     if (!m) return { value: null, skippedReason: "地積が読めません" };
     values.push(toHundredths(m[1], m[2]));
@@ -133,7 +141,7 @@ export function parseBuildingFloorArea(raw: string): RegistryAreaResult {
   for (const cells of table.rows) {
     if (table.causeCol !== -1 && BUILDING_CHANGE_CAUSE.test(cells[table.causeCol] ?? "")) return history;
     const cell = (cells[table.col] ?? "").replace(/㎡/g, "").trim();
-    if (BLANK.test(cell)) continue;
+    if (isBlankRegistryCell(cell)) continue;
     const f = FLOOR_AREA.exec(cell);
     if (f) {
       const floor = `${f[1] ? "B" : ""}${Number(f[2])}`;
