@@ -115,11 +115,58 @@ const NUMBER_ONLY = /^[0-9][0-9番の\u30ce\-‐‑‒–—―−ー－]*$/;
 /** 所在及び地番の欄: 町名(数字なし)に番号が続く形だけ(空白で区切られていてもよい)。 */
 const ADDRESS_THEN_NUMBER = /^[^0-9]*?\s*([0-9][0-9番の\u30ce\-‐‑‒–—―−ー－]*)$/;
 
+const SHOZAI_LABEL = /^所\s*在$/;
+/** 建物の所在の欄: 町名に地番が1つ続く形だけ。⚠前の語に番・読点・及びがあれば地番が2つ以上(「二番地、1番地1」を 1番地1 にしない)。 */
+const SHOZAI_THEN_NUMBER = /^[^0-9番、,，及]*?\s*([0-9][0-9番地のノ\-‐‑‒–—―−ー－]*)$/;
+
+/**
+ * 建物の謄本の表題部の「所在」の欄から地番を読む(2026-11-02 発注者「地番は謄本上の所在です」)。
+ * 実物の形は「町名 1番地1」。地番の書き方(1番1)にして返す。
+ * ⚠読むのは一棟の建物の表示・主である建物の表示の所在の行が1つだけのとき。
+ * ⚠次の行に続き・右の欄に原因がある=折り返しか変更の履歴なので読まない(古い所在で別の登記を買わない)。
+ */
+function readLotFromShozai(raw: string): string | null {
+  const lines = toHalfWidthDigits(raw).split("\n");
+  const isBuildingSection = (l: string) => ONE_BUILDING_SECTION.test(l) || BUILDING_SECTION.test(l);
+  if (lines.filter(isBuildingSection).length !== 1) return null;
+  let value: string | null = null;
+  let label = -1;
+  // ⚠所在の行のあとに別の項目が見えないなら読まない(文字が途中で切れていると、続きの行を見落とす)。
+  let closed = false;
+  for (const line of lines.slice(lines.findIndex(isBuildingSection) + 1)) {
+    if (REGISTRY_SECTION_END.test(line)) {
+      closed = true;
+      break;
+    }
+    const cells = cellsOf(line);
+    if (!cells) continue;
+    const at = cells.findIndex((c) => SHOZAI_LABEL.test(c));
+    if (at !== -1) {
+      if (value !== null) return null;
+      if (!isBlankRegistryCell(cells[at + 2] ?? "")) return null;
+      value = cells[at + 1] ?? "";
+      label = at;
+    } else if (value !== null) {
+      if ((cells[label] ?? "") !== "") {
+        closed = true;
+        break;
+      }
+      if (!isBlankRegistryCell(cells[label + 1] ?? "") || !isBlankRegistryCell(cells[label + 2] ?? "")) return null;
+    }
+  }
+  if (value === null || !closed) return null;
+  // 外字は実物で欄の空白として出ていたので、端だけ落とす(番号の途中の外字は読まない)。
+  const number = SHOZAI_THEN_NUMBER.exec(value.replace(/^[-\s]+|[-\s]+$/g, ""))?.[1];
+  return number ? number.replace(/番地/g, "番") : null;
+}
+
 /**
  * 地番を表の**欄全体**から読む(謄本の取得で買う対象を決めるので、parseRegistryText の緩い読み取りを使わない・@codex P1)。
  * - 土地: 表題部の①地番の欄。数字のある行がちょうど1つ(2つ以上=分筆などの履歴で決められない)。
  * - 区分: 敷地権の目的である土地の表示の②所在及び地番の欄。土地がちょうど1筆のときだけ(符号の列で数える。行の折り返しはつなげる)。
+ * - 敷地権の欄が無い区分・戸建など: 表題部の所在の欄(readLotFromShozai)。
  * ⚠欄全体が番号の形でなければ読まない=途中で切れた値を入れない。
+ * ⚠土地の表・敷地権の欄がある謄本は、そこで決められなくても所在へ逃げない(2筆の区分が1筆目で入ってしまう)。
  */
 function readLotNumber(raw: string): string | null {
   const land = findRegistryTable(raw, LAND_SECTION, /地\s*番.*地\s*目/, /地\s*番/, REGISTRY_SECTION_END);
@@ -127,6 +174,11 @@ function readLotNumber(raw: string): string | null {
     const cells = land.rows.map((c) => (c[land.col] ?? "").trim()).filter((c) => /[0-9]/.test(c));
     return cells.length === 1 && NUMBER_ONLY.test(cells[0]) ? cells[0] : null;
   }
+  if (raw.split("\n").some((l) => SITE_SECTION.test(l) || LAND_SECTION.test(l))) return readLotFromSite(raw);
+  return readLotFromShozai(raw);
+}
+
+function readLotFromSite(raw: string): string | null {
   const site = findRegistryTable(raw, SITE_SECTION, /所\s*在\s*及\s*び\s*地\s*番/, /所\s*在\s*及\s*び\s*地\s*番/, REGISTRY_SECTION_END);
   if (!site || site.col < 1) return null;
   const parcels = site.rows.filter((c) => /[0-9]/.test(c[site.col - 1] ?? "")).length;
