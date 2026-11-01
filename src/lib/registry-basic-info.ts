@@ -13,7 +13,7 @@
  * ⚠**迷ったら読まない**(空のまま=人が入れる)。古い値は下線=抹消で、文字だけでは今の値と見分けられない。
  * ⚠地番・家屋番号は謄本の取得で「買う対象」を決める番号なので、取得が読める形(isReadableChiban)だけを入れる。
  */
-import { BUILDING_CHANGE_CAUSE, BUILDING_SECTION, LAND_SECTION, REGISTRY_SECTION_END, cellsOf, findRegistryTable } from "@/lib/registry-area";
+import { BUILDING_CHANGE_CAUSE, BUILDING_SECTION, LAND_SECTION, REGISTRY_SECTION_END, cellsOf, findRegistryTable, isBlankRegistryCell } from "@/lib/registry-area";
 import { isReadableChiban, toHalfWidthDigits } from "@/lib/registry-fetch/chiban-input";
 import { structuredFieldsFor } from "@/lib/paste-import/structured-fields";
 
@@ -40,7 +40,6 @@ const TABLE_HEADER = /床\s*面\s*積/;
 const STRUCTURE_COL = /構\s*造/;
 const CAUSE_COL = /原\s*因/;
 const OWNER_ROW = /^所\s*有\s*者/;
-const BLANK = /^(余\s*白)?$/;
 /** 階建・平家建の書き方がちょうど1つ=今の構造が1つに決まる。 */
 const STOREYS = /階建|平[家屋]建/g;
 const ENDS_WITH_STOREYS = /(階建|平[家屋]建)$/;
@@ -60,7 +59,7 @@ function readStructure(table: Table | null): string | null {
     if (OWNER_ROW.test(cells.find((c) => c !== "") ?? "")) break;
     if (table.causeCol !== -1 && BUILDING_CHANGE_CAUSE.test(cells[table.causeCol] ?? "")) return null;
     const cell = (cells[table.col] ?? "").trim();
-    if (!BLANK.test(cell)) joined += cell;
+    if (!isBlankRegistryCell(cell)) joined += cell;
   }
   const value = joined.replace(/\s/g, "");
   // ⚠階建で終わること=後ろに別の行(氏名・住所)が付いたものを構造にしない。
@@ -132,7 +131,7 @@ function readLotNumber(raw: string): string | null {
   if (!site || site.col < 1) return null;
   const parcels = site.rows.filter((c) => /[0-9]/.test(c[site.col - 1] ?? "")).length;
   if (parcels !== 1) return null;
-  const joined = site.rows.map((c) => (c[site.col] ?? "").trim()).filter((c) => !BLANK.test(c)).join("");
+  const joined = site.rows.map((c) => (c[site.col] ?? "").trim()).filter((c) => !isBlankRegistryCell(c)).join("");
   return ADDRESS_THEN_NUMBER.exec(joined)?.[1] ?? null;
 }
 

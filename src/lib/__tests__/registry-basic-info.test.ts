@@ -315,3 +315,41 @@ describe("画面に出す案内", () => {
     expect(registryFillNotice(r, { manual: true })).toContain("新しく入れる項目はありません");
   });
 });
+
+// 実物(本番の謄本で確認 2026-11-01): 古い謄本の「移記」の行では、余白が外字(私用領域の文字)で出る。
+describe("移記の行の外字の余白", () => {
+  const ITEKI = "";
+
+  it("★区分: 構造が2行に折り返し、移記の行があっても構造を読む", () => {
+    const f = parseRegistryBuildingFacts(unit({
+      structure: [
+        "┃鉄骨鉄筋コンクリート・鉄筋コ │ １階 ５００：００│余白 ┃",
+        "┃ンクリート造陸屋根８階建 │ ２階 ４８０：１２│ ┃",
+        `┃${ITEKI} │${ITEKI} ：│昭和６３年法務省令第３７号附則第２条第 ┃`,
+        "┃ │ ：│２項の規定により移記 ┃",
+        "┃ │ ：│平成９年３月１日 ┃",
+      ],
+    }));
+    expect(f.structureType).toBe("鉄骨鉄筋コンクリート・鉄筋コンクリート造陸屋根8階建");
+  });
+
+  it("★戸建: 「建」だけ次の行に折り返し、移記の行があっても構造を読む", () => {
+    const f = parseRegistryBuildingFacts(house([
+      "┃居宅 │木・鉄骨造スレート葺３階 │１階 ５０：００│平成５年４月１日新築 ┃",
+      "┃ │建 │２階 ４０：００│ ┃",
+      `┃${ITEKI} │${ITEKI} │${ITEKI} ：│昭和６３年法務省令第３７号附則第２条第 ┃`,
+      "┃ │ │ ：│２項の規定により移記 ┃",
+    ]));
+    expect(f.structureType).toBe("木・鉄骨造スレート葺3階建");
+    expect(f.builtYear).toBe(1993);
+    expect(f.builtMonth).toBe(4);
+  });
+
+  it("外字のほかに文字がある欄は空にしない(階建で終わらないので読まない)", () => {
+    const f = parseRegistryBuildingFacts(house([
+      "┃居宅 │木造スレート葺２階建 │１階 ５０：００│平成５年４月１日新築 ┃",
+      `┃ │別棟 │ │ ┃`,
+    ]));
+    expect(f.structureType).toBeNull();
+  });
+});
