@@ -32,17 +32,18 @@ function toHalfWidth(s: string): string {
 }
 
 /** 行を罫線で列に分ける。罫線が無い行は null。 */
-function cellsOf(line: string): string[] | null {
+export function cellsOf(line: string): string[] | null {
   if (!/[│┃|｜]/.test(line)) return null;
   return line.split(/[│┃|｜]/).map((c) => c.trim());
 }
 
-const BLANK = /^(余\s*白)?$/;
+// ⚠小数点だけの欄も空(実物: 原因の日付が折り返した行の地積の欄に「：」だけが出る・本番の謄本で確認 2026-11-01)。
+const BLANK = /^(余\s*白)?$|^[:：・．.]$/;
 const NUM = "([0-9]{1,7})(?:[ \\t]*[:：・．.][ \\t]*([0-9]{2}))?";
 const PLAIN_AREA = new RegExp(`^${NUM}$`);
 const FLOOR_AREA = /^(地[ \t]*下[ \t]*)?([0-9]{1,3})[ \t]*階[ \t]*([0-9]{1,6})(?:[ \t]*[:：・．.][ \t]*|[ \t]+)([0-9]{2})$/;
 /** 建物の床面積が変わったことを示しうる登記の原因の語。 */
-const BUILDING_CHANGE_CAUSE = /増\s*築|変\s*更|更\s*正|錯\s*誤|取\s*壊|合\s*体|合\s*併|分\s*割|区\s*分/;
+export const BUILDING_CHANGE_CAUSE = /増\s*築|変\s*更|更\s*正|錯\s*誤|取\s*壊|合\s*体|合\s*併|分\s*割|区\s*分/;
 
 const toHundredths = (int: string, frac: string | undefined) => Number(int) * 100 + Number(frac ?? "0");
 const format = (h: number) => `${Math.floor(h / 100)}.${String(h % 100).padStart(2, "0")}`;
@@ -60,7 +61,7 @@ interface Table {
  * 表題部の1つの表を探す。`section` で始まる行のあと、`header` を含む見出しの行の列で、
  * `end` に当たる行(次の表題部・権利部など)の手前までを返す。
  */
-function findTable(raw: string, section: RegExp, header: RegExp, colLabel: RegExp, end: RegExp): Table | null {
+export function findRegistryTable(raw: string, section: RegExp, header: RegExp, colLabel: RegExp, end: RegExp): Table | null {
   const lines = toHalfWidth(raw).split("\n");
   // 見出しが2行に折り返されても「敷地権の目的である土地の表示」を土地の表としない(前の行も見る)。
   const isSection = (i: number) =>
@@ -101,13 +102,13 @@ function findTable(raw: string, section: RegExp, header: RegExp, colLabel: RegEx
   return { rows, col, causeCol };
 }
 
-const LAND_SECTION = /^(?!.*敷\s*地\s*権).*土\s*地\s*の\s*表\s*示/;
-const BUILDING_SECTION = /主\s*で\s*あ\s*る\s*建\s*物\s*の\s*表\s*示/;
-const SECTION_END = /表\s*題\s*部|附\s*属\s*建\s*物\s*の\s*表\s*示|権\s*利\s*部|甲\s*区|乙\s*区|共\s*同\s*担\s*保/;
+export const LAND_SECTION = /^(?!.*敷\s*地\s*権).*土\s*地\s*の\s*表\s*示/;
+export const BUILDING_SECTION = /主\s*で\s*あ\s*る\s*建\s*物\s*の\s*表\s*示/;
+export const REGISTRY_SECTION_END = /表\s*題\s*部|附\s*属\s*建\s*物\s*の\s*表\s*示|権\s*利\s*部|甲\s*区|乙\s*区|共\s*同\s*担\s*保/;
 
 /** 土地の謄本の地積。 */
 export function parseLandArea(raw: string): RegistryAreaResult {
-  const table = findTable(raw, LAND_SECTION, /地\s*番.*地\s*積|地\s*積.*地\s*番/, /地\s*積/, SECTION_END);
+  const table = findRegistryTable(raw, LAND_SECTION, /地\s*番.*地\s*積|地\s*積.*地\s*番/, /地\s*積/, REGISTRY_SECTION_END);
   if (!table) return { value: null, skippedReason: "土地の表示が読めません" };
   const values: number[] = [];
   for (const cells of table.rows) {
@@ -124,7 +125,7 @@ export function parseLandArea(raw: string): RegistryAreaResult {
 
 /** 建物(区分でない)の謄本の床面積の合計(各階の合計・附属建物は入れない)。 */
 export function parseBuildingFloorArea(raw: string): RegistryAreaResult {
-  const table = findTable(raw, BUILDING_SECTION, /床\s*面\s*積/, /床\s*面\s*積/, SECTION_END);
+  const table = findRegistryTable(raw, BUILDING_SECTION, /床\s*面\s*積/, /床\s*面\s*積/, REGISTRY_SECTION_END);
   if (!table) return { value: null, skippedReason: "建物の表示が読めません" };
   const history: RegistryAreaResult = { value: null, skippedReason: "床面積に変更の履歴があり、今の値を決められません" };
   const byFloor = new Map<string, number>();

@@ -29,6 +29,7 @@ import {
   saveSplitPdf,
   updateAttachmentKind,
   uploadFile,
+  applyRegistryBasicInfo,
   type BundleAnalysisResult,
   type ScanUploadResult,
 } from "@/lib/api-client";
@@ -55,6 +56,7 @@ import {
   type UploadProgress,
 } from "@/lib/attachments/multi-upload";
 import { registryDisplayName } from "@/lib/attachments/registry-display-name";
+import { isRegistryWarningNotice } from "@/lib/registry-basic-info";
 import { MAX_ATTACHMENT_BYTES, MAX_PDF_UPLOAD_BYTES } from "@/lib/pdf-compress/policy";
 import { MAX_FILE_SIZE } from "@/lib/storage/types";
 
@@ -62,7 +64,7 @@ type AttachmentType = "general" | "registry";
 
 /** 分け方の小窓の閉じ方。 */
 type SplitOutcome =
-  | { kind: "split"; parts: number; registryParts: number }
+  | { kind: "split"; parts: number; registryParts: number; registryNotice?: string | null }
   | { kind: "whole" }
   | { kind: "cancelled" };
 
@@ -151,6 +153,7 @@ export default function AttachmentTab({
   onRegistryMutated,
   caseStatus = null,
   occupancyStatus = null,
+  canApplyRegistry = false,
 }: {
   /** 現況。賃貸中(rented)のときだけ「⑤ 賃貸関係」のフォルダを空でも出す。 */
   occupancyStatus?: string | null;
@@ -170,6 +173,8 @@ export default function AttachmentTab({
    * このタブ自身の一覧は fetchAttachmentsData で別途更新される。
    */
   onRegistryMutated?: () => void;
+  /** 「この謄本から基本情報に反映」を出すか(物件を編集できる人だけ)。 */
+  canApplyRegistry?: boolean;
 }) {
   const [attachments, setAttachments] = useState<AttachmentData[]>([]);
   const [loading, setLoading] = useState(true);
@@ -198,6 +203,7 @@ export default function AttachmentTab({
   const [askTarget, setAskTarget] = useState<File | null>(null);
   const askResolveRef = useRef<((answer: RegistryAnswer) => void) | null>(null);
   const [deleteTargetId, setDeleteTargetId] = useState<string | null>(null);
+  const [applyingRegistryId, setApplyingRegistryId] = useState<string | null>(null);
   const [previewTarget, setPreviewTarget] = useState<AttachmentData | null>(null);
   // 種類を直している最中の添付(二重送信を防ぐ)。
   const [kindSavingId, setKindSavingId] = useState<string | null>(null);
@@ -251,8 +257,15 @@ export default function AttachmentTab({
     void fetchAttachmentsData({ silent: true });
   }, [refreshToken, fetchAttachmentsData]);
 
-  /** 1件を確かめて送る。失敗の理由を返す(成功は null)。一覧の読み直しは呼び出し側でまとめて行う。 */
-  const uploadOne = async (file: File, type: AttachmentType): Promise<string | null> => {
+  /**
+   * 1件を確かめて送る。失敗の理由を返す(成功は null)。一覧の読み直しは呼び出し側でまとめて行う。
+   * onRegistryNotice: 謄本を基本情報へ反映した結果の案内(読めなかった理由もここに来る)。
+   */
+  const uploadOne = async (
+    file: File,
+    type: AttachmentType,
+    onRegistryNotice?: (notice: string) => void,
+  ): Promise<string | null> => {
     if (file.size <= 0) return "空ファイルはアップロードできません";
     // 種類(MIME)が空でも拡張子が .pdf なら PDF とみなす(サーバーと同じ判定・@codex PR#498 P2)。
     // 謄本PDFは縮めない(課金した原本)ので 20MB まで。
@@ -263,7 +276,8 @@ export default function AttachmentTab({
     }
     setCompressing(compressible && file.size > MAX_FILE_SIZE);
     try {
-      await uploadFile(propertyId, file, "attachment", { attachmentType: type });
+      const saved = await uploadFile(propertyId, file, "attachment", { attachmentType: type });
+      if (saved.registryNotice) onRegistryNotice?.(saved.registryNotice);
       return null;
     } catch (err) {
       return err instanceof Error ? err.message : "アップロードに失敗しました";
@@ -331,12 +345,22 @@ export default function AttachmentTab({
       return {
         reason: null,
         registry: outcome.kind === "split" ? outcome.registryParts > 0 : false,
-        outcome: outcome.kind === "split" ? `${outcome.parts}つの書類に分けて保存しました（元の1冊も残しています）` : null,
+        outcome:
+          outcome.kind === "split"
+            ? [`${outcome.parts}つの書類に分けて保存しました（元の1冊も残しています）`, outcome.registryNotice].filter(Boolean).join(" / ")
+            : null,
       };
     }
     if (route === "registry") {
-      const reason = await uploadOne(file, "registry");
-      return { reason, registry: reason === null, outcome: reason === null ? "謄本として保存しました（謄本PDFの一覧にあります）" : null };
+      let notice: string | null = null;
+      const reason = await uploadOne(file, "registry", (n) => {
+        notice = n;
+      });
+      return {
+        reason,
+        registry: reason === null,
+        outcome: reason === null ? ["謄本として保存しました（謄本PDFの一覧にあります）", notice].filter(Boolean).join(" / ") : null,
+      };
     }
     return { reason: await uploadOne(file, "general"), registry: false, outcome: null };
   };
@@ -431,6 +455,23 @@ export default function AttachmentTab({
     } finally {
       setUploading(false);
       setUploadProgress(null);
+    }
+  };
+
+  /** 添付済みの謄本から基本情報の空の欄を埋める。結果(入れた欄・読めない理由)は枠の下の知らせに出す。 */
+  const handleApplyRegistry = async (id: string) => {
+    if (applyingRegistryId !== null) return;
+    setApplyingRegistryId(id);
+    setUploadError(null);
+    setUploadNotice(null);
+    try {
+      const r = await applyRegistryBasicInfo(propertyId, id);
+      setUploadNotice(r.notice);
+      if (r.filled.length > 0) onRegistryMutated?.();
+    } catch (err) {
+      setUploadError(err instanceof Error ? err.message : "基本情報に反映できませんでした");
+    } finally {
+      setApplyingRegistryId(null);
     }
   };
 
@@ -631,7 +672,13 @@ export default function AttachmentTab({
         )}
 
         {uploadNotice && (
-          <div className="mb-3 rounded-md border border-emerald-200 bg-emerald-50 p-3 text-sm text-emerald-800 dark:border-emerald-800 dark:bg-emerald-950/40 dark:text-emerald-200">
+          <div
+            className={
+              isRegistryWarningNotice(uploadNotice)
+                ? "mb-3 rounded-md border border-amber-200 bg-amber-50 p-3 text-sm text-amber-800 dark:border-amber-800 dark:bg-amber-950/40 dark:text-amber-200"
+                : "mb-3 rounded-md border border-emerald-200 bg-emerald-50 p-3 text-sm text-emerald-800 dark:border-emerald-800 dark:bg-emerald-950/40 dark:text-emerald-200"
+            }
+          >
             {uploadNotice}
           </div>
         )}
@@ -712,6 +759,8 @@ export default function AttachmentTab({
                 att={att}
                 onPreviewClick={() => setPreviewTarget(att)}
                 onDeleteClick={() => setDeleteTargetId(att.id)}
+                onApplyRegistry={canApplyRegistry ? () => void handleApplyRegistry(att.id) : undefined}
+                applyingRegistry={applyingRegistryId === att.id}
               />
             ))}
           </div>
@@ -741,7 +790,7 @@ export default function AttachmentTab({
             const r = await saveSplitPdf(propertyId, splitTarget.file, segments, {
               containsRegistry: bundleHasRegistry(splitTarget.analysis.pageKinds, segments),
             });
-            finishSplit({ kind: "split", parts: r.parts, registryParts: r.registryParts });
+            finishSplit({ kind: "split", parts: r.parts, registryParts: r.registryParts, registryNotice: r.registryNotice });
           }}
         />
       )}
@@ -770,6 +819,8 @@ function AttachmentRow({
   onDeleteClick,
   onKindChange,
   kindSaving = false,
+  onApplyRegistry,
+  applyingRegistry = false,
 }: {
   att: AttachmentData;
   onPreviewClick: () => void;
@@ -777,6 +828,9 @@ function AttachmentRow({
   /** 通常添付だけ: 種類を人が決め直す(null=その他)。謄本の行では渡さない。 */
   onKindChange?: (docKind: string | null) => void;
   kindSaving?: boolean;
+  /** 謄本の行だけ: 「この謄本から基本情報に反映」。 */
+  onApplyRegistry?: () => void;
+  applyingRegistry?: boolean;
 }) {
   const Icon = getFileIcon(att.mimeType);
   const previewable = getPreviewKind(att) !== null;
@@ -823,6 +877,21 @@ function AttachmentRow({
           {att.uploader.name} ·{" "}
           {new Date(att.createdAt).toLocaleDateString("ja-JP")}
         </p>
+        {/* 所有者事項には基本情報に入れる項目が無い(本番の実物で確認)ので出さない。所有者は所有者タブから。 */}
+        {isRegistry && att.registryCertificateType !== "owner" && onApplyRegistry && (
+          <Button
+            variant="ghost"
+            size="sm"
+            disabled={applyingRegistry}
+            loading={applyingRegistry}
+            loadingLabel="読み取り中…"
+            onClick={onApplyRegistry}
+            title="謄本を読み取り、基本情報の空いている欄に入れます（入っている欄は変えません）"
+            className="mt-1 h-6 px-2 text-xs text-indigo-600 dark:text-indigo-400"
+          >
+            この謄本から基本情報に反映
+          </Button>
+        )}
         {canEditKind && onKindChange && (
           <label className="mt-1 flex flex-wrap items-center gap-1 text-xs text-gray-500 dark:text-gray-400">
             <span>種類:</span>

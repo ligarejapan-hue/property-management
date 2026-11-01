@@ -12,7 +12,8 @@
 import { randomUUID } from "node:crypto";
 import { NextRequest } from "next/server";
 import prisma from "@/lib/prisma";
-import { fillAreasFromRegistryPdfBestEffort } from "@/lib/registry-pdf/fill-areas";
+import { fillBasicInfoFromRegistryPdfBestEffort } from "@/lib/registry-pdf/fill-areas";
+import { registryFillNotice } from "@/lib/registry-basic-info";
 import { lockPropertyRow } from "@/lib/property-record-guard";
 import { getApiSession, getUserPermissions, ApiError, handleApiError, apiResponse } from "@/lib/api-helpers";
 import { writeAuditLog } from "@/lib/audit";
@@ -222,10 +223,14 @@ export async function POST(request: NextRequest, { params }: { params: Promise<{
       });
     }
 
-    // 謄本の部分は、添付と同じく面積を読んで物件の空の欄に入れる(読めなくても保存は成功のまま)。
+    // 謄本の部分は、添付と同じく読んで物件の空の欄に入れる(読めなくても保存は成功のまま・読めないことは画面に出す)。
+    const registryNotices = new Set<string>();
     for (const p of prepared) {
       if (p.type === "registry") {
-        await fillAreasFromRegistryPdfBestEffort({ propertyId, pdf: p.buffer, changedBy: session.id });
+        const notice = registryFillNotice(
+          await fillBasicInfoFromRegistryPdfBestEffort({ propertyId, pdf: p.buffer, changedBy: session.id }),
+        );
+        if (notice) registryNotices.add(notice);
       }
     }
 
@@ -234,6 +239,7 @@ export async function POST(request: NextRequest, { params }: { params: Promise<{
         originalId,
         parts: created.length - 1,
         registryParts: prepared.filter((p) => p.type === "registry").length,
+        registryNotice: registryNotices.size > 0 ? [...registryNotices].join(" / ") : null,
       },
       201,
     );
