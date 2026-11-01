@@ -24,6 +24,8 @@ export interface BusinessDocContext {
   staff?: { sales: string | null; ops: string | null };
   /** 物件の謄本(全部事項)の登記の現況(書類確認書だけ・名前は入れない・計画 段5c-2)。 */
   registry?: { activeRights: number; caution: string | null };
+  /** お客様の提出ですべて受領になった項目(書類確認書の確認欄に ✓ を付ける)。 */
+  receivedItemIds?: ReadonlySet<string>;
 }
 
 /** Excel(値だけ)の1行。見出しは value 無し。 */

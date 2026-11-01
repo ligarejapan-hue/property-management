@@ -17,6 +17,7 @@ const ALLOWED: Record<string, string> = {
   "src/components/field-survey/field-survey-map.tsx": "現地調査の撮影ボタン(スマホのカメラ)",
   "src/components/field-survey/pin-create-modal.tsx": "現地調査の撮影ボタン(スマホのカメラ)",
   "src/components/field-survey/pin-detail-panel.tsx": "現地調査の撮影ボタン(スマホのカメラ)",
+  "src/lib/deals/doc-links/public-page.ts": "お客様のページはサーバーが返す HTML で、共通の枠(React の部品)を使えない",
   "src/components/properties/doc-scan/doc-scan-dialog.tsx": "書類を撮る画面で、画面の中のカメラが開けない端末だけ OS のカメラで撮る",
 };
 

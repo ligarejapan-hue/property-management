@@ -589,6 +589,29 @@ sudo systemctl status property-management --no-pager
 > `next` / `@prisma/client` は `dependencies` のため prune 後も残る。
 > （`@tailwindcss/postcss` / `tailwindcss` も build 時必須だが `dependencies` 側にあるため prune の影響を受けない。）
 
+### 6.0a お客様の書類提出（`/submit/`）を初めて反映するとき
+
+migration `20261102100000_add_deal_doc_links`（表を 3 つ足すだけ）があるので、手順 3.5 のバックアップを取る。環境変数と nginx は**ユーザーが承認・実施する**。
+
+1. **環境変数**: `DEAL_DOC_LINK_SECRET`（32 文字以上・`openssl rand -base64 32` で作る）を `/etc/property-management/app.env` に足して再起動する。無いあいだは提出のページが 404 で、発行もできない（既定の鍵は持たない）。変えると発行済みのリンクはすべて使えなくなる。
+2. **nginx**: 公開ホストの vhost に、`deploy/nginx/property-management.conf.example` の `/submit/` の 2 つの location と、80 番側の 1 つを足す。`nginx -t` のあと `systemctl reload nginx`。
+3. **確かめる**（`<token>` は 有効なリンクのトークン。`--path-as-is` で `..` をそのまま送る）。ログに残さないよう、トークンはシェルの履歴に残さない:
+   ```bash
+   B=https://app.ligarejapan.com
+   curl -s -o /dev/null -w '%{http_code}\n' "$B/submit/<token>"                                   # 200
+   curl -sI "$B/submit/<token>" | grep -iE 'referrer-policy|x-robots-tag|content-security-policy|nosniff|cache-control'
+   curl -s -o /dev/null -w '%{http_code}\n' "$B/submit/abc"                                       # 404
+   curl -s -o /dev/null -w '%{http_code}\n' "$B/submit/"                                          # 404
+   curl -s -o /dev/null -w '%{http_code}\n' --path-as-is "$B/submit/<token>/../../api/health"     # 404
+   curl -s -o /dev/null -w '%{http_code}\n' --path-as-is "$B/api/health/..%2f..%2fsubmit/<token>" # 404
+   curl -s -o /dev/null -w '%{http_code}\n' --path-as-is "$B/submit/<token>/%2e%2e/upload"        # 404
+   curl -s -o /dev/null -w '%{http_code}\n' --path-as-is "$B/submit/<token>%2Fupload"             # 404
+   curl -s -o /dev/null -w '%{http_code}\n' "$B/api/deals"                                        # 404
+   curl -s -o /dev/null -w '%{http_code}\n' "$B/uploads/probe"                                    # 404
+   ```
+- 届いたファイルは保存先の `deals/<取引>/submissions/` に入り、`/uploads` からは開けない。保存ファイルの社外控えの対象に入る。
+- 届いたファイルは自動では消えない。`deal_doc_files.review_state` と `review_state_at` に状態が残る。
+
 ### 6.1 GitHub Actions からの反映（`.github/workflows/deploy.yml`）
 
 §6 の手順を 1 本のスクリプト（`deploy/vps/pm-deploy.sh`）にまとめ、GitHub Actions の手動起動から実行できるようにしたもの。§6 を手で流す方法もそのまま使える。

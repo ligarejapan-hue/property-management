@@ -60,6 +60,7 @@ const txMock = {
   property: { updateMany: vi.fn(), findUnique: vi.fn(async () => ({ caseStatus: "hold" })) },
   deal: { findMany: vi.fn(async (): Promise<{ id: string; status: string }[]> => []), updateMany: vi.fn(async () => ({ count: 1 })) },
   changeLog: { create: vi.fn(async () => ({})) },
+  dealDocFile: { updateMany: vi.fn(async () => ({ count: 0 })) },
   $queryRaw: vi.fn(async () => []),
 };
 

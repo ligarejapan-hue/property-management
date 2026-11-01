@@ -15,7 +15,7 @@ import { DEAL_TRACKED_FIELDS, dealChangeValues, toDealUpdateData } from "@/lib/d
 import { DEAL_DETAIL_SELECT, toDealView } from "@/lib/deals/view";
 import { syncDealScheduleSafe, taxesEnteredOf } from "@/lib/deals/schedule-sync";
 import type { ScheduleEvent } from "@/lib/deals/schedule";
-import { canChangeDealAssignee, canChangeDealStatus, caseStatusWouldMove, syncCaseStatusFromDeals } from "@/lib/deals/status-link";
+import { canChangeDealAssignee, canChangeDealStatus, caseStatusWouldMove, syncCaseStatusFromDeals, syncDealDocRetention } from "@/lib/deals/status-link";
 import { lockPropertyRow } from "@/lib/property-record-guard";
 
 type Ctx = { params: Promise<{ id: string }> };
@@ -97,6 +97,7 @@ export async function PATCH(request: Request, ctx: Ctx) {
       }
       const res = await tx.deal.updateMany({ where: { id, version }, data: { ...data, version: { increment: 1 } } });
       if (res.count === 0) throw new ApiError(409, DEAL_VERSION_CONFLICT_MESSAGE, "VERSION_CONFLICT");
+      if (statusChanges && patch.status) await syncDealDocRetention(tx, id, cur.status, patch.status);
       // 段取りの自動の完了は「変わったとき」だけ(完了を取り消した項目を、ほかの保存で戻さない)。
       event = {
         settled: patch.status === "settled" && cur.status !== "settled",

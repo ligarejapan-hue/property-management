@@ -281,6 +281,11 @@ const ACTION_LABELS: Record<string, string> = {
   deal_crosscheck_view: "取引の数値照合を表示",
   deal_schedule_registry_read: "段取りの判定のために謄本を読み取り",
   deal_schedule_update: "決済までの段取りを更新",
+  deal_doc_link_issue: "お客様の提出用リンクを発行",
+  deal_doc_link_revoke: "お客様の提出用リンクを無効化",
+  deal_doc_submit: "お客様が書類を提出",
+  deal_doc_receive: "提出された書類を受領",
+  deal_doc_reject: "提出された書類を差し戻し",
   deal_settings_image_update: "取引の設定のロゴ・角印を変更",
   // 見た目の設定 段階4(2026-10-31)。detail は会社の標準の値と選べる色テーマ。
   appearance_defaults_update: "表示の会社の標準を変更",

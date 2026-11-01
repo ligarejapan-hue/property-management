@@ -8,6 +8,7 @@ import {
   initialDealStatusForCase,
   pickLinkedDeal,
   syncCaseStatusFromDeals,
+  syncDealDocRetention,
   syncDealFromCaseStatus,
 } from "../status-link";
 import { CASE_STATUS_VALUES } from "@/lib/property-types";
@@ -169,9 +170,40 @@ function fakeTx(caseStatus: string, deals: { id: string; status: string }[]) {
       updateMany: vi.fn(async () => ({ count: 1 })),
     },
     changeLog: { create: vi.fn(async () => ({})) },
+    dealDocFile: { updateMany: vi.fn(async () => ({ count: 0 })) },
   };
 }
 const ARGS = { propertyId: "p1", changedBy: "u1" };
+
+describe("syncDealDocRetention(未確認のまま中止を残す)", () => {
+  const now = new Date("2026-11-02T00:00:00Z");
+  it("中止になったら、未確認のファイルだけ印を付ける", async () => {
+    const tx = fakeTx("hold", []);
+    await syncDealDocRetention(tx as never, "d1", "contracted", "cancelled", now);
+    expect(tx.dealDocFile.updateMany).toHaveBeenCalledWith({
+      where: { reviewState: "unreviewed", request: { link: { dealId: "d1" } } },
+      data: { reviewState: "deal_cancelled_unreviewed", reviewStateAt: now },
+    });
+  });
+  it("中止から戻ったら、印を戻す", async () => {
+    const tx = fakeTx("hold", []);
+    await syncDealDocRetention(tx as never, "d1", "cancelled", "considering", now);
+    expect(tx.dealDocFile.updateMany).toHaveBeenCalledWith({
+      where: { reviewState: "deal_cancelled_unreviewed", request: { link: { dealId: "d1" } } },
+      data: { reviewState: "unreviewed", reviewStateAt: now },
+    });
+  });
+  it("中止をまたがない変更では何もしない", async () => {
+    const tx = fakeTx("hold", []);
+    await syncDealDocRetention(tx as never, "d1", "considering", "contracted", now);
+    expect(tx.dealDocFile.updateMany).not.toHaveBeenCalled();
+  });
+  it("案件ステータスの連動で中止になっても印を付ける", async () => {
+    const tx = fakeTx("hold", [{ id: "d1", status: "contracted" }]);
+    await syncDealFromCaseStatus(tx as never, ARGS);
+    expect(tx.dealDocFile.updateMany).toHaveBeenCalledWith(expect.objectContaining({ data: expect.objectContaining({ reviewState: "deal_cancelled_unreviewed" }) }));
+  });
+});
 
 describe("syncCaseStatusFromDeals", () => {
   it("案件を変え、物件の版は上げず、履歴に自動で残す", async () => {

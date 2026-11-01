@@ -13,7 +13,8 @@ import type { NextRequest } from "next/server";
 // "/lp/" = 広告用の公開ページ(DMの種類ごとの公開名・設計 2026-10-20)とその申込の受け口。宛先を持たない。
 //   ⚠管理画面の LPメニューは "/lp"(完全一致)=前方一致 "/lp/" には当たらない。(dashboard)/lp の下に
 //   画面を増やすと公開されてしまうため、lp-public-scan.test.ts が「直下は page.tsx だけ」を守る。
-const PUBLIC_PATHS = ["/login", "/api/auth", "/_next", "/favicon.ico", "/uploads", "/t/", "/u/", "/lp-assets/", "/icons/", "/lp/"];
+// "/submit/" = お客様の書類提出(トークンの署名を route 側で検証・ログインなし)。nginx は正規表現でトークンの形だけを通す。
+const PUBLIC_PATHS = ["/login", "/api/auth", "/_next", "/favicon.ico", "/uploads", "/t/", "/u/", "/lp-assets/", "/icons/", "/lp/", "/submit/"];
 
 // 完全一致で公開するパス。前方一致（startsWith）だと /api/health-xxx 等まで認証免除が
 // 広がってしまうため、必要最小の範囲（完全一致）でのみ公開する。

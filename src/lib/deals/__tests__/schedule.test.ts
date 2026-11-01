@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import {
-  DEFAULT_SCHEDULE_TEMPLATE, addYmdDays, applyScheduleEvents, computeDueDate, mortgageStateOf, reconcileSchedule, resolveScheduleTemplate,
+  COMPLETION_HINTS, DEFAULT_SCHEDULE_TEMPLATE, addYmdDays, applyScheduleEvents, computeDueDate, isCompletionHint, mortgageStateOf, reconcileSchedule, resolveScheduleTemplate,
   scheduleBadge, scheduleEligible, scheduleGroupOf, scheduleNoticeSlot, scheduleTemplateSchema, shiftOffWeekend, jstMorningSendAt,
   type ReconcileDeal, type ScheduleItemState,
 } from "../schedule";
@@ -356,4 +356,26 @@ describe("担保の判定は照合の結果を読むだけ", () => {
     expect(mortgageStateOf(cc(ok(1, true, { missing: ["建物"] }), "house"))).toBe("yes");
   });
   it("物件の種類が未選択なら判定できない", () => expect(mortgageStateOf(cc(ok(0), null))).toBe("unknown"));
+});
+
+describe("提出用リンクと段取り", () => {
+  const row = (over: Partial<Parameters<typeof applyScheduleEvents>[0][number]> = {}) => ({ id: "1", templateKey: "s_seller_docs", completed: false, excluded: false, completionHint: null, ...over });
+  it("売主のリンクを発行したら「売主に決済時の必要書類を案内」を完了候補にする(完了にはしない)", () => {
+    expect(applyScheduleEvents([row()], { docLinkIssued: true })).toEqual([{ id: "1", data: { completionHint: "doc_link_issued" } }]);
+    expect(COMPLETION_HINTS.doc_link_issued).toContain("提出用リンク");
+  });
+  it("ほかの項目・完了済み・対象外・すでに候補のものは動かさない", () => {
+    expect(applyScheduleEvents([row({ templateKey: "s_tax" })], { docLinkIssued: true })).toEqual([]);
+    expect(applyScheduleEvents([row({ completed: true })], { docLinkIssued: true })).toEqual([]);
+    expect(applyScheduleEvents([row({ excluded: true })], { docLinkIssued: true })).toEqual([]);
+    expect(applyScheduleEvents([row({ completionHint: "doc_link_issued" })], { docLinkIssued: true })).toEqual([]);
+  });
+  it("書類確認書の発行で完了になる動きは残す", () => {
+    expect(applyScheduleEvents([row({ completionHint: "doc_link_issued" })], { issuedDocType: "checklist_settlement" })).toEqual([{ id: "1", data: { completed: true, auto: true } }]);
+  });
+  it("完了候補の値を見分ける", () => {
+    expect(isCompletionHint("doc_link_issued")).toBe(true);
+    expect(isCompletionHint("toString")).toBe(false);
+    expect(isCompletionHint(null)).toBe(false);
+  });
 });
