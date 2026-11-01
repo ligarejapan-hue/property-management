@@ -19,6 +19,8 @@ import { DEAL_IMAGE_KINDS } from "@/lib/deals/branding";
 import { DealImageSetting } from "@/components/deals/deal-image-setting";
 import { ChecklistItemsEditor } from "@/components/deals/checklist-items-editor";
 import { ScheduleTemplateEditor } from "@/components/deals/schedule-template-editor";
+import { RequestTemplateEditor } from "@/components/deals/request-template-editor";
+import { requestTemplatesSaveSchema, type RequestTemplate } from "@/lib/deals/request-drafts/templates";
 import type { ScheduleTemplateItem } from "@/lib/deals/schedule";
 import type { ChecklistItem } from "@/lib/deals/checklist";
 import { BUSINESS_SECTIONS, SECTION_RULE_LABELS, type SectionMatrix, type SectionRow } from "@/lib/deals/business-sections";
@@ -43,6 +45,7 @@ export default function DealSettingsPage() {
   const [matrix, setMatrix] = useState<SectionMatrix>({});
   const [checklist, setChecklist] = useState<ChecklistItem[]>([]);
   const [scheduleTemplate, setScheduleTemplate] = useState<ScheduleTemplateItem[]>([]);
+  const [requestTemplates, setRequestTemplates] = useState<RequestTemplate[]>([]);
   const [saving, setSaving] = useState(false);
   const [message, setMessage] = useState<{ kind: "ok" | "err"; text: string } | null>(null);
   const [editing, setEditing] = useState<{ table: RateTableView | null; kind: RateTableKind } | null>(null);
@@ -63,6 +66,7 @@ export default function DealSettingsPage() {
     setMatrix(s.sectionMatrix);
     setChecklist(s.checklistItems);
     setScheduleTemplate(s.scheduleTemplate);
+    setRequestTemplates(s.requestTemplates);
   };
   /** 種別の行。足したばかりの種別(まだ行が無い)は、元の種別の行を初期値にする。 */
   const rowOf = (k: PropertyKindDef): SectionRow => matrix[k.key] ?? matrix[k.base] ?? ALL_ON;
@@ -85,6 +89,11 @@ export default function DealSettingsPage() {
       setMessage({ kind: "err", text: "段取りのひな形に、作業名が空の行があります。入れるか消してから保存してください。" });
       return;
     }
+    const requestCheck = requestTemplatesSaveSchema.safeParse(requestTemplates);
+    if (!requestCheck.success) {
+      setMessage({ kind: "err", text: requestCheck.error.issues[0].message });
+      return;
+    }
     setSaving(true);
     setMessage(null);
     try {
@@ -98,6 +107,7 @@ export default function DealSettingsPage() {
         sectionMatrix: matrixForSave(),
         checklistItems: checklist,
         scheduleTemplate,
+        requestTemplates,
       });
       apply(res.settings);
       setMessage({ kind: "ok", text: "取引の設定を保存しました" });
@@ -251,11 +261,6 @@ export default function DealSettingsPage() {
         <ChecklistItemsEditor items={checklist} onChange={setChecklist} />
       </section>
 
-      <Button onClick={save} disabled={saving} loading={saving} loadingLabel="保存中">
-        <Save className="h-4 w-4" />
-        保存
-      </Button>
-
       <section className="space-y-3">
         <h2 className="text-sm font-semibold text-gray-700 dark:text-gray-300">決済までの段取りのひな形</h2>
         <p className="text-xs text-gray-500 dark:text-gray-400">
@@ -263,6 +268,19 @@ export default function DealSettingsPage() {
         </p>
         <ScheduleTemplateEditor items={scheduleTemplate} onChange={setScheduleTemplate} />
       </section>
+
+      <section className="space-y-3">
+        <h2 className="text-sm font-semibold text-gray-700 dark:text-gray-300">外部への依頼文のひな形</h2>
+        <p className="text-xs text-gray-500 dark:text-gray-400">
+          取引の「決済までの段取り」で、結びつけた項目に「依頼文を作る」を出します。値が無い欄と、氏名・住所を見る権限がない人の欄は空で差し込みます。システムからは送りません。
+        </p>
+        <RequestTemplateEditor items={requestTemplates} scheduleItems={scheduleTemplate} onChange={setRequestTemplates} />
+      </section>
+
+      <Button onClick={save} disabled={saving} loading={saving} loadingLabel="保存中">
+        <Save className="h-4 w-4" />
+        保存
+      </Button>
 
       <section className="space-y-3">
         <h2 className="text-sm font-semibold text-gray-700 dark:text-gray-300">ロゴ・角印</h2>

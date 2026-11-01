@@ -12,6 +12,7 @@ import type { RegistryRightsView } from "./registry-rights";
 import type { CrosscheckResult } from "./crosscheck";
 import type { ScheduleItemView } from "./schedule-sync";
 import type { DocLinksResponse, DocProgress } from "./doc-links/staff-store";
+import type { RequestDraftCopyView, RequestDraftResponse } from "./request-drafts/store";
 import type { FormDef } from "@/lib/deals/documents/forms/types";
 
 /** 取引の画面から API を呼ぶ。失敗はサーバーの文言とコードを持った DealApiError にする。 */
@@ -71,7 +72,12 @@ export const dealsApi = {
   crosscheck: (id: string) => call<{ crosscheck: CrosscheckResult }>(`/api/deals/${id}/crosscheck`),
   update: (id: string, body: Record<string, unknown>) => call<{ version: number; caseStatusNotChanged?: boolean }>(`/api/deals/${id}`, { method: "PATCH", body }),
   /** 決済までの段取り。 */
-  schedule: (id: string) => call<{ items: ScheduleItemView[]; today: string; settlementDate: string | null; docProgress: DocProgress[] }>(`/api/deals/${id}/schedule`),
+  schedule: (id: string) => call<{ items: ScheduleItemView[]; today: string; settlementDate: string | null; docProgress: DocProgress[]; requestDraftCopies: RequestDraftCopyView[] }>(`/api/deals/${id}/schedule`),
+  requestDraft: (id: string, itemId: string, q: { templateId?: string; recipientId?: string }) => {
+    const qs = new URLSearchParams(q).toString();
+    return call<RequestDraftResponse>(`/api/deals/${id}/schedule/${itemId}/request-draft${qs ? `?${qs}` : ""}`);
+  },
+  logRequestDraftCopy: (id: string, itemId: string, templateId: string) => call<{ ok: true }>(`/api/deals/${id}/schedule/${itemId}/request-draft`, { method: "POST", body: { templateId } }),
   addScheduleItem: (id: string, body: Record<string, unknown>) => call<{ id: string }>(`/api/deals/${id}/schedule`, { method: "POST", body }),
   updateScheduleItem: (id: string, itemId: string, body: Record<string, unknown>) => call<{ ok: true }>(`/api/deals/${id}/schedule/${itemId}`, { method: "PATCH", body }),
   docLinks: (id: string) => call<DocLinksResponse>(`/api/deals/${id}/doc-links`),

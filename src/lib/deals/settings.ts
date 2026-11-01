@@ -2,6 +2,7 @@ import { DEFAULT_PROPERTY_KINDS, type PropertyKindDef } from "./constants";
 import { resolveSectionMatrix, type SectionMatrix } from "./business-sections";
 import { DEFAULT_CHECKLIST_ITEMS, resolveChecklistItems, type ChecklistItem } from "./checklist";
 import { DEFAULT_SCHEDULE_TEMPLATE, resolveScheduleTemplate, type ScheduleTemplateItem } from "./schedule";
+import { DEFAULT_REQUEST_TEMPLATES, resolveRequestTemplates, type RequestTemplate } from "./request-drafts/templates";
 import { EMPTY_BANK_ACCOUNT, bankAccountSchema, dealTextsSchema, propertyKindsSchema, type BankAccount, type DealTexts } from "./schemas";
 
 export const DEAL_SETTINGS_ID = "singleton";
@@ -17,6 +18,7 @@ export interface DealSettingsRow {
   sectionMatrix?: unknown;
   checklistItems?: unknown;
   scheduleTemplate?: unknown;
+  requestTemplates?: unknown;
   version: number;
   updatedAt: Date;
 }
@@ -37,6 +39,8 @@ export interface DealSettingsView {
   checklistItems: ChecklistItem[];
   /** 段取りのひな形(保存が無ければ初期のひな形)。 */
   scheduleTemplate: ScheduleTemplateItem[];
+  /** 外部への依頼文のひな形(保存が無ければ初めのひな形)。 */
+  requestTemplates: RequestTemplate[];
   /** 0 = 行がまだ無い。 */
   version: number;
   updatedAt: string | null;
@@ -47,7 +51,7 @@ export function resolveDealSettings(row: DealSettingsRow | null): DealSettingsVi
   if (!row) {
     return {
       representativeTitle: null, representativeName: null, bankAccount: EMPTY_BANK_ACCOUNT, propertyKinds: DEFAULT_PROPERTY_KINDS,
-      texts: {}, hasLogo: false, hasSeal: false, sectionMatrix: resolveSectionMatrix(undefined, DEFAULT_PROPERTY_KINDS), checklistItems: DEFAULT_CHECKLIST_ITEMS, scheduleTemplate: DEFAULT_SCHEDULE_TEMPLATE, version: 0, updatedAt: null,
+      texts: {}, hasLogo: false, hasSeal: false, sectionMatrix: resolveSectionMatrix(undefined, DEFAULT_PROPERTY_KINDS), checklistItems: DEFAULT_CHECKLIST_ITEMS, scheduleTemplate: DEFAULT_SCHEDULE_TEMPLATE, requestTemplates: DEFAULT_REQUEST_TEMPLATES, version: 0, updatedAt: null,
     };
   }
   const kinds = propertyKindsSchema.safeParse(row.propertyKinds);
@@ -65,6 +69,7 @@ export function resolveDealSettings(row: DealSettingsRow | null): DealSettingsVi
     sectionMatrix: resolveSectionMatrix(row.sectionMatrix, propertyKinds),
     checklistItems: resolveChecklistItems(row.checklistItems),
     scheduleTemplate: resolveScheduleTemplate(row.scheduleTemplate),
+    requestTemplates: resolveRequestTemplates(row.requestTemplates),
     version: row.version,
     updatedAt: row.updatedAt.toISOString(),
   };

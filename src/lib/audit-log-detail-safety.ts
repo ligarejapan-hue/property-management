@@ -327,6 +327,8 @@ const ACTION_EXTRA_KEYS: Readonly<Record<string, ReadonlySet<string>>> = {
   deal_schedule_registry_read: new Set(["result"]),
   // 段取りの項目の操作。op=add|update|complete_pre・fields=変えた列の名前・count=件数。作業名は自由記述なので載せない。
   deal_schedule_update: new Set(["op", "fields", "count"]),
+  // 依頼文をコピーした。templateKey/itemKey=ひな形と段取りの項目の鍵だけ。文面・宛先・氏名・リンクは載せない。
+  deal_request_draft_copy: new Set(["templateKey", "itemKey"]),
   // 取引の設定のロゴ・角印。kind=logo|seal・op=set|clear・bytes/width/height=数値。ファイル名は載せない。
   deal_settings_image_update: new Set(["kind", "op", "bytes", "width", "height"]),
   // メール送信設定のテスト送信。result=sent|failed の enum / code=safeErrorCode() 由来の許可リスト一致

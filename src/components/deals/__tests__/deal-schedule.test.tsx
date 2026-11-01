@@ -5,6 +5,20 @@ import { parseOffsetDays, ScheduleTemplateEditor } from "../schedule-template-ed
 import { DEFAULT_SCHEDULE_TEMPLATE, MORTGAGE_UNKNOWN_NOTE, PRE_INTRODUCTION_NOTE } from "@/lib/deals/schedule";
 import type { ScheduleItemView } from "@/lib/deals/schedule-sync";
 import { HomeDealScheduleView } from "@/components/home/home-deal-schedule";
+import { RequestDraftBlanks } from "../deal-request-draft";
+import { RequestTemplateEditor, scheduleItemOptions } from "../request-template-editor";
+import { DEFAULT_REQUEST_TEMPLATES } from "@/lib/deals/request-drafts/templates";
+
+describe("依頼文のひな形の編集", () => {
+  it("差し込み欄の一覧・相手・結びつきを出す", () => {
+    const html = renderToStaticMarkup(<RequestTemplateEditor items={DEFAULT_REQUEST_TEMPLATES} scheduleItems={DEFAULT_SCHEDULE_TEMPLATE} onChange={() => {}} />);
+    for (const s of ["使える差し込み欄", "物件名", "提出用リンク", "結びつける段取りの項目", "初めのひな形に戻す", "司法書士に決済日時と登記を依頼"]) expect(html).toContain(s);
+  });
+  it("段取りのひな形から消した項目を結んでいても、外れたことが分かる", () => {
+    expect(scheduleItemOptions([{ id: "a", label: "A" }], "gone").map((o) => o.label)).toEqual(["結びつけない", "A", "(段取りのひな形から消した項目)"]);
+    expect(scheduleItemOptions([{ id: "a", label: "A" }], "a")).toHaveLength(2);
+  });
+});
 
 const item = (o: Partial<ScheduleItemView> = {}): ScheduleItemView => ({
   id: "a", label: "精算書を作成", base: "settlement", dueDate: "2026-12-09", dueManual: false, isManual: false, assigneeId: "u1", assigneeName: "担当 太郎",
@@ -56,6 +70,32 @@ describe("決済までの段取りの見た目", () => {
     );
     expect(html).toContain("売主 試験 太郎:必要な書類がすべて受領になりました(3/3)");
     expect(html).toContain("買主:提出書類の受領 1/2");
+  });
+  describe("依頼文を作る", () => {
+    const actions = { onUpdate: () => {}, onCompletePre: () => {}, onOpenDraft: () => {} };
+    const view = (items: ScheduleItemView[], copies: { at: string; userName: string | null; templateLabel: string }[] = []) => renderToStaticMarkup(
+      <DealScheduleView items={items} today="2026-12-01" settlementDate="2026-12-16" users={[]} actions={actions} requestDraftCopies={copies} />,
+    );
+    it("ひな形が結びついた項目にだけボタンを出す", () => {
+      expect(view([item({ requestTemplates: 1 })])).toContain("依頼文を作る");
+      expect(view([item({ requestTemplates: 0 })])).not.toContain("依頼文を作る");
+      expect(view([item({ isManual: true })])).not.toContain("依頼文を作る");
+    });
+    it("対象外の項目には出さない", () => {
+      expect(view([item({ requestTemplates: 1, excluded: true })])).not.toContain("依頼文を作る");
+    });
+    it("コピーの履歴に誰が・いつ・どのひな形かを出す", () => {
+      const html = view([item()], [{ at: "2026-12-01T01:30:00.000Z", userName: "担当 太郎", templateLabel: "司法書士へ" }]);
+      expect(html).toContain("依頼文のコピー履歴");
+      expect(html).toContain("2026/12/01 10:30 担当 太郎 司法書士へ");
+    });
+    it("履歴が無ければ見出しも出さない", () => expect(view([item()])).not.toContain("依頼文のコピー履歴"));
+    it("空の欄を理由つきで知らせる", () => {
+      const html = renderToStaticMarkup(<RequestDraftBlanks blanks={[{ field: "決済場所", reason: "missing" }, { field: "売主住所", reason: "permission" }]} />);
+      expect(html).toContain("決済場所(未入力)");
+      expect(html).toContain("売主住所(権限なし)");
+      expect(renderToStaticMarkup(<RequestDraftBlanks blanks={[]} />)).toBe("");
+    });
   });
   it("提出用リンクの完了候補を出す", () => {
     expect(render([item({ completionHint: "doc_link_issued" })])).toContain("提出用リンクを発行しました");
