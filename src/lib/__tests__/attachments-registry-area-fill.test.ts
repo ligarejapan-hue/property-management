@@ -71,10 +71,10 @@ vi.mock("@/lib/prisma", () => {
   return { default: db };
 });
 
-const { fillAreasFromRegistryPdfBestEffort } = vi.hoisted(() => ({
-  fillAreasFromRegistryPdfBestEffort: vi.fn(async () => ({ filled: [], skippedByEditLock: false })),
+const { fillBasicInfoFromRegistryPdfBestEffort } = vi.hoisted(() => ({
+  fillBasicInfoFromRegistryPdfBestEffort: vi.fn(async () => ({ filled: [] as string[], skippedByEditLock: false, unreadable: false })),
 }));
-vi.mock("@/lib/registry-pdf/fill-areas", () => ({ fillAreasFromRegistryPdfBestEffort }));
+vi.mock("@/lib/registry-pdf/fill-areas", () => ({ fillBasicInfoFromRegistryPdfBestEffort }));
 
 import { POST } from "@/app/api/properties/[id]/attachments/route";
 
@@ -101,15 +101,22 @@ describe("謄本PDFの添付で面積を入れる", () => {
   it("★謄本を添付したら、その PDF を読んで面積を入れる(添付は 201)", async () => {
     const res = await POST(await req("謄本.pdf", "application/pdf", "registry"), params);
     expect(res.status).toBe(201);
-    expect(fillAreasFromRegistryPdfBestEffort).toHaveBeenCalledTimes(1);
-    const arg = (fillAreasFromRegistryPdfBestEffort.mock.calls[0] as unknown as [{ propertyId: string; pdf: Buffer; changedBy: string }])[0];
+    expect(fillBasicInfoFromRegistryPdfBestEffort).toHaveBeenCalledTimes(1);
+    const arg = (fillBasicInfoFromRegistryPdfBestEffort.mock.calls[0] as unknown as [{ propertyId: string; pdf: Buffer; changedBy: string }])[0];
     expect(arg.propertyId).toBe("p-1");
     expect(arg.changedBy).toBe("u-admin");
     expect(Buffer.compare(arg.pdf, PDF_HEAD)).toBe(0);
   });
 
+  it("★読めない謄本: 添付は成功のまま、反映されないことを応答に載せる", async () => {
+    fillBasicInfoFromRegistryPdfBestEffort.mockResolvedValueOnce({ filled: [], skippedByEditLock: false, unreadable: true });
+    const res = await POST(await req("謄本.pdf", "application/pdf", "registry"), params);
+    expect(res.status).toBe(201);
+    expect((await res.json()).registryNotice).toContain("基本情報には反映されません");
+  });
+
   it("謄本以外の添付では読まない", async () => {
     await POST(await req("売買契約書.pdf", "application/pdf"), params);
-    expect(fillAreasFromRegistryPdfBestEffort).not.toHaveBeenCalled();
+    expect(fillBasicInfoFromRegistryPdfBestEffort).not.toHaveBeenCalled();
   });
 });

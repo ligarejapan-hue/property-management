@@ -57,7 +57,7 @@ vi.mock("@/lib/pdf-extract", async (importOriginal) => {
 });
 // 謄本の面積の補完(2026-10-25)は別の部品=ここでは差し替える(このファイルは書類の判別だけを見る)。
 vi.mock("@/lib/registry-pdf/fill-areas", () => ({
-  fillAreasFromRegistryPdfBestEffort: vi.fn(async () => ({ filled: [], skippedByEditLock: false })),
+  fillBasicInfoFromRegistryPdfBestEffort: vi.fn(async () => ({ filled: [], skippedByEditLock: false })),
 }));
 vi.mock("@/lib/prisma", () => {
   const db: Record<string, unknown> = {

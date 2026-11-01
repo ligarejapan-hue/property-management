@@ -3,6 +3,7 @@ import {
   canChangeDealAssignee,
   canChangeDealStatus,
   caseStatusForDealStatus,
+  caseStatusWouldMove,
   dealStatusForCaseStatus,
   initialDealStatusForCase,
   pickLinkedDeal,
@@ -237,6 +238,23 @@ describe("syncCaseStatusFromDeals", () => {
     tx.property.updateMany.mockResolvedValueOnce({ count: 0 });
     await syncCaseStatusFromDeals(tx as never, ARGS);
     expect(tx.changeLog.create).not.toHaveBeenCalled();
+  });
+});
+
+describe("caseStatusWouldMove", () => {
+  it("動く場面では true・何も書かない", async () => {
+    const tx = fakeTx("on_sale", [{ id: "d1", status: "contracted" }]);
+    expect(await caseStatusWouldMove(tx as never, "p1")).toBe(true);
+    expect(tx.property.updateMany).not.toHaveBeenCalled();
+    expect(tx.changeLog.create).not.toHaveBeenCalled();
+  });
+  it("同じ値・除外のように動かない場面では false", async () => {
+    expect(await caseStatusWouldMove(fakeTx("contracted", [{ id: "d1", status: "contracted" }]) as never, "p1")).toBe(false);
+    expect(await caseStatusWouldMove(fakeTx("lead_excluded", [{ id: "d1", status: "contracted" }]) as never, "p1")).toBe(false);
+  });
+  it("連動する取引がほかにあれば、その取引の状態で決める", async () => {
+    const tx = fakeTx("contracted", [{ id: "new", status: "cancelled" }, { id: "old", status: "contracted" }]);
+    expect(await caseStatusWouldMove(tx as never, "p1")).toBe(false);
   });
 });
 

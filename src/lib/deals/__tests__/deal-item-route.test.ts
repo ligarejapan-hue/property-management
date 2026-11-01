@@ -159,7 +159,44 @@ describe("PATCH /api/deals/[id]", () => {
   });
   describe("案件ステータスとの連動", () => {
     const linkedRow = () => ({ ...detailRow, propertyId: PROP_ID, status: "considering", assigneeId: "u-office" });
+    const CAN_EDIT_PROPERTY = [...DEAL_PERMS, { resource: "property", action: "write", granted: true }];
+    describe("物件の編集権限がない人", () => {
+      it("取引の状態だけ変え、案件ステータスは動かさず、そのことを返す", async () => {
+        pm.deal.findUnique.mockResolvedValue(linkedRow());
+        pm.property.findUnique.mockResolvedValue({ createdBy: "x", assignedTo: null, caseStatus: "contract_planned" });
+        pm.deal.findMany.mockResolvedValue([{ id: DEAL_ID, status: "contracted" }]);
+        const res = await PATCH(json("PATCH", { version: 3, status: "contracted" }), ctx);
+        expect(res.status).toBe(200);
+        expect(await res.json()).toEqual({ version: 4, caseStatusNotChanged: true });
+        expect(pm.deal.updateMany.mock.calls[0][0].data).toMatchObject({ status: "contracted" });
+        expect(pm.property.updateMany).not.toHaveBeenCalled();
+        expect(pm.changeLog.create).not.toHaveBeenCalled();
+      });
+      it("編集権限があっても担当範囲の外の物件(現地担当)なら動かさない", async () => {
+        (getApiSession as Fn).mockResolvedValue({ id: "u-field", role: "field_staff" });
+        (getUserPermissions as Fn).mockResolvedValue(CAN_EDIT_PROPERTY);
+        pm.deal.findUnique.mockResolvedValue({ ...linkedRow(), assigneeId: "u-field" });
+        pm.property.findUnique.mockResolvedValue({ createdBy: "x", assignedTo: "y", caseStatus: "contract_planned" });
+        pm.deal.findMany.mockResolvedValue([{ id: DEAL_ID, status: "contracted" }]);
+        const res = await PATCH(json("PATCH", { version: 3, status: "contracted" }), ctx);
+        expect(await res.json()).toEqual({ version: 4, caseStatusNotChanged: true });
+        expect(pm.property.updateMany).not.toHaveBeenCalled();
+      });
+      it("もともと動かない場面(除外など)では、ずれの知らせを出さない", async () => {
+        pm.deal.findUnique.mockResolvedValue(linkedRow());
+        pm.property.findUnique.mockResolvedValue({ createdBy: "x", assignedTo: null, caseStatus: "lead_excluded" });
+        pm.deal.findMany.mockResolvedValue([{ id: DEAL_ID, status: "contracted" }]);
+        expect(await (await PATCH(json("PATCH", { version: 3, status: "contracted" }), ctx)).json()).toEqual({ version: 4 });
+      });
+      it("GET は案件ステータスが動くかどうかも返す", async () => {
+        pm.property.findUnique.mockResolvedValue({ createdBy: "u-office", assignedTo: null });
+        expect((await (await GET(new Request("http://x"), ctx)).json()).canMoveCaseStatus).toBe(false);
+        (getUserPermissions as Fn).mockResolvedValue(CAN_EDIT_PROPERTY);
+        expect((await (await GET(new Request("http://x"), ctx)).json()).canMoveCaseStatus).toBe(true);
+      });
+    });
     it("状態を変えると、物件の行を先にロックして案件ステータスをそろえる", async () => {
+      (getUserPermissions as Fn).mockResolvedValue(CAN_EDIT_PROPERTY);
       pm.deal.findUnique.mockResolvedValue(linkedRow());
       pm.property.findUnique.mockResolvedValue({ caseStatus: "contract_planned" });
       pm.deal.findMany.mockResolvedValue([{ id: DEAL_ID, status: "contracted" }]);

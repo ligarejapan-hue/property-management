@@ -3826,6 +3826,13 @@ export async function uploadFile(
   return res.json();
 }
 
+/** 「この謄本から基本情報に反映」。notice=画面に出す結果(入れた欄・読めない理由)。 */
+export async function applyRegistryBasicInfo(propertyId: string, attachmentId: string): Promise<{ filled: string[]; notice: string | null }> {
+  const res = await fetch(`/api/properties/${propertyId}/attachments/${attachmentId}/registry-fill`, { method: "POST" });
+  if (!res.ok) throw await toApiError(res);
+  return res.json();
+}
+
 export interface ScanUploadResult {
   id: string;
   docKind: string | null;
@@ -3874,7 +3881,7 @@ export async function saveSplitPdf(
   file: File,
   segments: readonly BundleSegment[],
   opts: { containsRegistry?: boolean } = {},
-): Promise<{ originalId: string; parts: number; registryParts: number }> {
+): Promise<{ originalId: string; parts: number; registryParts: number; registryNotice?: string | null }> {
   const formData = new FormData();
   formData.append("file", file);
   formData.append("segments", JSON.stringify(segments));

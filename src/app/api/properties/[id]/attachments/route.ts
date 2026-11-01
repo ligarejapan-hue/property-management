@@ -2,7 +2,8 @@ import { randomUUID } from "node:crypto";
 import { NextRequest } from "next/server";
 import { z } from "zod";
 import prisma from "@/lib/prisma";
-import { fillAreasFromRegistryPdfBestEffort } from "@/lib/registry-pdf/fill-areas";
+import { fillBasicInfoFromRegistryPdfBestEffort } from "@/lib/registry-pdf/fill-areas";
+import { registryFillNotice } from "@/lib/registry-basic-info";
 import { lockPropertyRow } from "@/lib/property-record-guard";
 import {
   getApiSession,
@@ -328,13 +329,16 @@ export async function POST(
       },
     });
 
-    // 謄本PDFを添付したら、面積を読んで物件の空の欄に入れる(2026-10-25 発注者「謄本を読み込んだ時も
-    // 自動で面積を反映させたい」)。⚠添付そのものは成功させる=読めない・失敗しても添付は残す(ログだけ)。
+    // 謄本PDFを添付したら、面積・地番・家屋番号・構造・築年月を読んで空の欄に入れる(2026-10-25・11-01 発注者)。
+    // ⚠添付そのものは成功させる=読めない・失敗しても添付は残す(読めないことは画面に出す)。
+    let registryNotice: string | null = null;
     if (registryBuffer) {
-      await fillAreasFromRegistryPdfBestEffort({ propertyId, pdf: registryBuffer, changedBy: session.id });
+      registryNotice = registryFillNotice(
+        await fillBasicInfoFromRegistryPdfBestEffort({ propertyId, pdf: registryBuffer, changedBy: session.id }),
+      );
     }
 
-    return apiResponse(normalizeFileUrlsInRecord(attachment), 201);
+    return apiResponse({ ...normalizeFileUrlsInRecord(attachment), registryNotice }, 201);
   } catch (error) {
     return handleApiError(error);
   } finally {

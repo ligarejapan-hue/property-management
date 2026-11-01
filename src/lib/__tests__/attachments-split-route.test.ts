@@ -57,7 +57,7 @@ vi.mock("@/lib/pdf-split/run", () => ({ splitPdfByRanges }));
 const { analyzeBundlePdf } = vi.hoisted(() => ({ analyzeBundlePdf: vi.fn() }));
 vi.mock("@/lib/pdf-split/analyze", () => ({ analyzeBundlePdf }));
 const { fillAreas } = vi.hoisted(() => ({ fillAreas: vi.fn(async () => ({ filled: [], skippedByEditLock: false })) }));
-vi.mock("@/lib/registry-pdf/fill-areas", () => ({ fillAreasFromRegistryPdfBestEffort: fillAreas }));
+vi.mock("@/lib/registry-pdf/fill-areas", () => ({ fillBasicInfoFromRegistryPdfBestEffort: fillAreas }));
 vi.mock("@/lib/prisma", () => {
   let n = 0;
   const db: Record<string, unknown> = {
@@ -153,7 +153,7 @@ describe("split(分けて保存)", () => {
   it("元の1冊+分けた書類を保存する。謄本は謄本として・ほかは人が決めた種類で名前をそろえる", async () => {
     const res = await SPLIT(await req("split", { segments: JSON.stringify(SEGMENTS) }), params);
     expect(res.status).toBe(201);
-    expect(await res.json()).toEqual({ originalId: "a-1", parts: 3, registryParts: 1 });
+    expect(await res.json()).toEqual({ originalId: "a-1", parts: 3, registryParts: 1, registryNotice: null });
     expect(splitPdfByRanges).toHaveBeenCalledWith(expect.any(Buffer), SEGMENTS);
 
     const [orig, summary, drawings, registry] = rows();
