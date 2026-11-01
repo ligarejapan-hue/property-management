@@ -1,7 +1,7 @@
 "use client";
 
 import { useCallback, useEffect, useState } from "react";
-import { ListChecks, Plus } from "lucide-react";
+import { FileText, ListChecks, Plus } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { SelectBox, inputCls } from "@/components/deals/form-parts";
 import { dealsApi, errorText, type UserOption } from "@/lib/deals/client";
@@ -11,6 +11,9 @@ import {
 import type { ScheduleItemView } from "@/lib/deals/schedule-sync";
 import { DOC_LINK_ROLE_LABELS } from "@/lib/deals/doc-links/constants";
 import type { DocProgress } from "@/lib/deals/doc-links/staff-store";
+import { formatJstDateTime } from "@/lib/deals/datetime";
+import type { RequestDraftCopyView } from "@/lib/deals/request-drafts/store";
+import { RequestDraftDialog } from "@/components/deals/deal-request-draft";
 
 const BADGE_CLS = {
   done: "bg-green-100 text-green-800 dark:bg-green-950 dark:text-green-300",
@@ -23,6 +26,7 @@ const BADGE_CLS = {
 export type ScheduleActions = {
   onUpdate: (itemId: string, body: Record<string, unknown>) => void;
   onCompletePre: () => void;
+  onOpenDraft?: (item: ScheduleItemView) => void;
   busy?: boolean;
 };
 
@@ -55,6 +59,14 @@ function ItemRow({ item, today, users, actions }: { item: ScheduleItemView; toda
           {item.dueManual && !item.isManual && <span className="text-gray-500 dark:text-gray-400">期限を手で変更</span>}
         </p>
         {notes.map((n) => <p key={n} className="pl-5 text-xs text-amber-800 dark:text-amber-300">{n}</p>)}
+        {!!item.requestTemplates && !item.excluded && actions.onOpenDraft && (
+          <p className="pl-5">
+            <Button variant="ghost" size="sm" onClick={() => actions.onOpenDraft?.(item)}>
+              <FileText className="h-4 w-4" />
+              依頼文を作る
+            </Button>
+          </p>
+        )}
       </div>
       <input
         key={item.dueDate} type="date" defaultValue={item.dueDate} aria-label={`${item.label}の期限`} className={inputCls} disabled={actions.busy || item.completed}
@@ -75,9 +87,10 @@ function ItemRow({ item, today, users, actions }: { item: ScheduleItemView; toda
 
 /** 「決済までの段取り」の見た目。時期ごとにまとめ、期限超過・あと何日・完了が分かるようにする。 */
 export function DealScheduleView({
-  items, today, settlementDate, users, actions, addForm, docProgress = [],
+  items, today, settlementDate, users, actions, addForm, docProgress = [], requestDraftCopies = [],
 }: {
   docProgress?: DocProgress[];
+  requestDraftCopies?: RequestDraftCopyView[];
   items: ScheduleItemView[];
   today: string;
   settlementDate: string | null;
@@ -143,6 +156,14 @@ export function DealScheduleView({
         </section>
       )}
       {addForm}
+      {requestDraftCopies.length > 0 && (
+        <section className="mt-3 border-t border-gray-100 pt-3 dark:border-gray-800">
+          <h3 className="text-xs font-semibold text-gray-500 dark:text-gray-400">依頼文のコピー履歴</h3>
+          <ul className="mt-1 space-y-0.5 text-xs text-gray-600 dark:text-gray-400">
+            {requestDraftCopies.map((c, i) => <li key={i}>{formatJstDateTime(c.at)} {c.userName ?? "(不明)"} {c.templateLabel}</li>)}
+          </ul>
+        </section>
+      )}
     </details>
   );
 }
@@ -172,9 +193,10 @@ function AddItemForm({ today, users, defaultAssignee, busy, onAdd }: {
 
 /** 読んで出す。取引の保存・書類の発行で読み直す。 */
 export function DealSchedule({ dealId, users, defaultAssignee, revision }: { dealId: string; users: UserOption[]; defaultAssignee: string | null; revision: string }) {
-  const [data, setData] = useState<{ items: ScheduleItemView[]; today: string; settlementDate: string | null; docProgress: DocProgress[] } | null>(null);
+  const [data, setData] = useState<{ items: ScheduleItemView[]; today: string; settlementDate: string | null; docProgress: DocProgress[]; requestDraftCopies: RequestDraftCopyView[] } | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
+  const [draftItem, setDraftItem] = useState<ScheduleItemView | null>(null);
 
   const load = useCallback(async () => {
     const res = await dealsApi.schedule(dealId);
@@ -209,9 +231,10 @@ export function DealSchedule({ dealId, users, defaultAssignee, revision }: { dea
     <div className="space-y-1">
       {error && <p className="text-sm text-red-600 dark:text-red-400" role="alert">{error}</p>}
       <DealScheduleView
-        items={data.items} today={data.today} settlementDate={data.settlementDate} users={users} docProgress={data.docProgress}
+        items={data.items} today={data.today} settlementDate={data.settlementDate} users={users} docProgress={data.docProgress} requestDraftCopies={data.requestDraftCopies}
         actions={{
           busy,
+          onOpenDraft: setDraftItem,
           onUpdate: (itemId, body) => void run(() => dealsApi.updateScheduleItem(dealId, itemId, body)),
           onCompletePre: () => void run(() => dealsApi.completePreScheduleItems(dealId)),
         }}
@@ -222,6 +245,12 @@ export function DealSchedule({ dealId, users, defaultAssignee, revision }: { dea
           />
         }
       />
+      {draftItem && (
+        <RequestDraftDialog
+          dealId={dealId} itemId={draftItem.id} itemLabel={draftItem.label} onClose={() => setDraftItem(null)}
+          onCopied={() => { load().catch(() => {}); }}
+        />
+      )}
     </div>
   );
 }

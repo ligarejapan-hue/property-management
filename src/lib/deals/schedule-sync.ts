@@ -14,6 +14,7 @@ import {
   type ScheduleItemPatch, type ScheduleItemState,
 } from "./schedule";
 import type { PropertySnapshot } from "./schemas";
+import { templatesForItem, type RequestTemplate } from "./request-drafts/templates";
 
 /**
  * 段取りと DB をつなぐ。判定は schedule.ts の純関数。
@@ -274,9 +275,11 @@ export interface ScheduleItemView {
   preIntroduction: boolean;
   mortgageUnknown: boolean;
   completionHint: CompletionHint | null;
+  /** 結びついた依頼文のひな形の数。 */
+  requestTemplates?: number;
 }
 
-export async function loadScheduleItems(dealId: string): Promise<ScheduleItemView[]> {
+export async function loadScheduleItems(dealId: string, requestTemplates: readonly RequestTemplate[] = []): Promise<ScheduleItemView[]> {
   const rows = await prisma.dealScheduleItem.findMany({
     where: { dealId }, orderBy: [{ dueDate: "asc" }, { sortOrder: "asc" }, { createdAt: "asc" }],
     include: { assignee: { select: { name: true } } },
@@ -286,6 +289,7 @@ export async function loadScheduleItems(dealId: string): Promise<ScheduleItemVie
     return {
       id: r.id, label: r.label, base: r.base, dueDate: s.dueDate, dueManual: r.dueManual, isManual: r.templateKey === null, assigneeId: r.assigneeId, assigneeName: r.assignee?.name ?? null,
       completed: s.completed, autoCompleted: r.autoCompleted, excluded: s.excluded, preIntroduction: r.preIntroduction, mortgageUnknown: r.mortgageUnknown, completionHint: s.completionHint,
+      requestTemplates: templatesForItem(requestTemplates, r.templateKey).length,
     };
   });
 }

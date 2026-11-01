@@ -9,6 +9,7 @@ import { businessInputsSchema } from "./business-schema";
 import { sectionMatrixSchema } from "./business-sections";
 import { checklistItemsSchema } from "./checklist";
 import { scheduleTemplateSchema } from "./schedule";
+import { requestTemplatesSaveSchema } from "./request-drafts/templates";
 
 export { text, yenInt };
 
@@ -230,4 +231,6 @@ export const dealSettingsUpdateSchema = z.object({
   checklistItems: checklistItemsSchema.optional(),
   /** 段取りのひな形(1件以上)。 */
   scheduleTemplate: scheduleTemplateSchema.optional(),
+  /** 外部への依頼文のひな形(1件以上)。 */
+  requestTemplates: requestTemplatesSaveSchema.optional(),
 }).strict();

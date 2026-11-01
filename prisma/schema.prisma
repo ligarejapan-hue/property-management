@@ -2506,6 +2506,8 @@ model DealSettings {
   checklistItems      Json     @default("[]") @map("checklist_items") @db.JsonB
   /// 段取りのひな形。空なら初期のひな形(src/lib/deals/schedule.ts)。
   scheduleTemplate    Json     @default("[]") @map("schedule_template") @db.JsonB
+  /// 外部への依頼文のひな形。空なら初めのひな形(src/lib/deals/request-drafts/templates.ts)。
+  requestTemplates    Json     @default("[]") @map("request_templates") @db.JsonB
   propertyKinds       Json     @default("[]") @map("property_kinds") @db.JsonB
   sectionMatrix       Json     @default("{}") @map("section_matrix") @db.JsonB
   /// cap=上限で計算 / manual=手入力
