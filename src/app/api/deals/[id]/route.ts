@@ -15,7 +15,7 @@ import { DEAL_TRACKED_FIELDS, dealChangeValues, toDealUpdateData } from "@/lib/d
 import { DEAL_DETAIL_SELECT, toDealView } from "@/lib/deals/view";
 import { syncDealScheduleSafe, taxesEnteredOf } from "@/lib/deals/schedule-sync";
 import type { ScheduleEvent } from "@/lib/deals/schedule";
-import { canChangeDealAssignee, canChangeDealStatus, syncCaseStatusFromDeals } from "@/lib/deals/status-link";
+import { canChangeDealAssignee, canChangeDealStatus, caseStatusWouldMove, syncCaseStatusFromDeals } from "@/lib/deals/status-link";
 import { lockPropertyRow } from "@/lib/property-record-guard";
 
 type Ctx = { params: Promise<{ id: string }> };
@@ -37,7 +37,8 @@ export async function GET(_req: Request, ctx: Ctx) {
     const canOpenProperty = !!p && hasPermission(perms, "property", "read") && canAccessPropertyRecord(session, p);
     const canChangeStatus = canChangeDealStatus(session, row, p);
     const canChangeAssignee = canChangeDealAssignee(session, row, p);
-    return NextResponse.json({ deal: toDealView(row), canOpenProperty, canChangeStatus, canChangeAssignee }, { headers: NO_STORE });
+    const canMoveCaseStatus = !!p && hasPermission(perms, "property", "write") && canAccessPropertyRecord(session, p);
+    return NextResponse.json({ deal: toDealView(row), canOpenProperty, canChangeStatus, canChangeAssignee, canMoveCaseStatus }, { headers: NO_STORE });
   } catch (error) {
     return handleApiError(error);
   }
@@ -46,7 +47,7 @@ export async function GET(_req: Request, ctx: Ctx) {
 /** 基本・物件の写し・相手方の仲介会社の変更(版の番号で 409・送っていない項目は触らない)。 */
 export async function PATCH(request: Request, ctx: Ctx) {
   try {
-    const { session } = await requireDeal("write");
+    const { session, perms } = await requireDeal("write");
     const id = await idOf(ctx);
     const { version, ...patch } = dealUpdateSchema.parse(await parseJsonBody(request));
     for (const key of ["assigneeId", "licensedAgentId", "salesStaffId", "opsStaffId"] as const) {
@@ -57,6 +58,7 @@ export async function PATCH(request: Request, ctx: Ctx) {
     }
 
     let event: ScheduleEvent = {};
+    let caseStatusNotChanged = false;
     await prisma.$transaction(async (tx) => {
       const cur = await tx.deal.findUnique({ where: { id }, select: { ...DEAL_DETAIL_SELECT, createdById: true } });
       if (!cur) throw new ApiError(404, "取引が見つかりません", "NOT_FOUND");
@@ -67,10 +69,13 @@ export async function PATCH(request: Request, ctx: Ctx) {
       const linkedPropertyId = statusChanges ? cur.propertyId : null;
       if (linkedPropertyId) await lockPropertyRow(tx, linkedPropertyId);
       const assigneeChanges = patch.assigneeId !== undefined && patch.assigneeId !== cur.assigneeId;
+      let canMoveCase = false;
       if (statusChanges || assigneeChanges) {
         const property = cur.propertyId
-          ? await tx.property.findUnique({ where: { id: cur.propertyId }, select: { assignedTo: true } })
+          ? await tx.property.findUnique({ where: { id: cur.propertyId }, select: { createdBy: true, assignedTo: true } })
           : null;
+        // ⚠案件ステータスを動かすのは、その物件を編集できる人だけ。ロック後に担当範囲を見る(作成時と同じ)。
+        canMoveCase = !!property && hasPermission(perms, "property", "write") && canAccessPropertyRecord(session, property);
         if (statusChanges && !canChangeDealStatus(session, cur, property)) {
           throw new ApiError(403, "取引の状態を変えられるのは、管理者と担当者だけです", "DEAL_STATUS_FORBIDDEN");
         }
@@ -102,7 +107,10 @@ export async function PATCH(request: Request, ctx: Ctx) {
         oldValues: dealChangeValues(cur), newValues: dealChangeValues({ ...cur, ...data }),
         trackedFields: DEAL_TRACKED_FIELDS, source: "manual",
       });
-      if (linkedPropertyId) await syncCaseStatusFromDeals(tx, { propertyId: linkedPropertyId, changedBy: session.id });
+      if (linkedPropertyId) {
+        if (canMoveCase) await syncCaseStatusFromDeals(tx, { propertyId: linkedPropertyId, changedBy: session.id });
+        else caseStatusNotChanged = await caseStatusWouldMove(tx, linkedPropertyId);
+      }
     });
 
     // 日付・条件・担当の変更を段取りに反映する(失敗しても保存は止めない)。
@@ -112,7 +120,7 @@ export async function PATCH(request: Request, ctx: Ctx) {
       userId: session.id, action: "deal_update", targetTable: "deals", targetId: id,
       detail: { fields: Object.keys(patch).sort() },
     });
-    return NextResponse.json({ version: version + 1 }, { headers: NO_STORE });
+    return NextResponse.json({ version: version + 1, ...(caseStatusNotChanged ? { caseStatusNotChanged: true } : {}) }, { headers: NO_STORE });
   } catch (error) {
     return handleApiError(error);
   }

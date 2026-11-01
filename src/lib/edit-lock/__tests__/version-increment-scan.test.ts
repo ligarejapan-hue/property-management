@@ -243,7 +243,7 @@ const ALLOWED_WITHOUT_VERSION: Record<string, AllowedEntry> = {
       "409 で負ける(D9 と同じ理由)ので進めない。プルダウンの保存は人の選択が後勝ちでよい",
     keys: ["caseStatus"],
   },
-  "src/lib/deals/status-link.ts:89": {
+  "src/lib/deals/status-link.ts:100": {
     reason:
       "property.caseStatus のみ(取引の状態との連動 2026-10-31)。case-status-auto.ts と同じ理由で版を進めない" +
       "=caseStatus は編集ウィンドウに無く、取引の保存で物件の編集中の人を 409 にしない",
