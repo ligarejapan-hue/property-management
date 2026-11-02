@@ -8,6 +8,10 @@ describe("検索の書き方の違い", () => {
     expect(searchVariants("自由が丘")).toEqual(expect.arrayContaining(["自由ケ丘", "自由ヶ丘"]));
   });
 
+  it("★打った字は必ず候補に残す(ヵ も)", () => {
+    expect(searchVariants("三ヵ月ビル")).toEqual(expect.arrayContaining(["三ヵ月ビル", "三ケ月ビル", "三ヶ月ビル"]));
+  });
+
   it("★全角と半角の数字を同じものとして探す", () => {
     expect(searchVariants("１番１")).toEqual(expect.arrayContaining(["1番1", "１番１"]));
     expect(searchVariants("1-2")).toEqual(expect.arrayContaining(["1-2", "１－２"]));

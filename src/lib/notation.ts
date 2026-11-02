@@ -33,7 +33,8 @@ function keVariants(q: string): string[] {
   const positions = [...q.matchAll(KE_IN_PLACE_NAME)].map((m) => m.index).slice(0, MAX_KE);
   let out = [q];
   for (const at of positions) {
-    out = out.flatMap((s) => KE_LETTERS.map((k) => s.slice(0, at) + k + s.slice(at + 1)));
+    // ⚠打った字も必ず残す(「三ヵ月ビル」が元の書き方で見つからなくなる・@codex)。
+    out = out.flatMap((s) => [...new Set([q[at], ...KE_LETTERS])].map((k) => s.slice(0, at) + k + s.slice(at + 1)));
   }
   return out;
 }
