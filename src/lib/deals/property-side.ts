@@ -32,8 +32,20 @@ export type PropertySideSource = {
   introductionRoute?: string | null;
   assignee?: { name: string } | null;
   note?: string | null;
+  /** 所有者。⚠値はサーバーが表示レベルで伏せたもの。owner:read がなければ owner は id だけ。 */
+  propertyOwners?: SideOwnerLink[];
   /** 棟につながる部屋の構造・築年月は棟の値が正(物件の編集画面と同じ)。 */
   building?: { structureType?: string | null; builtYear?: number | null; builtMonth?: number | null } | null;
+};
+
+export type SideOwnerLink = {
+  id?: string;
+  isPrimary?: boolean;
+  relationship?: string | null;
+  owner: {
+    id?: string; name?: string | null; nameKana?: string | null; address?: string | null; currentAddress?: string | null;
+    phone?: string | null; email?: string | null; note?: string | null;
+  };
 };
 
 const area = (v: number | null | undefined) => (v == null ? null : `${v}㎡`);
@@ -78,4 +90,34 @@ export function propertySideRows(p: PropertySideSource): { label: string; value:
     ["備考", p.note || null],
   ];
   return rows.flatMap(([l, value]) => (value ? [{ label: l, value }] : []));
+}
+
+export type OwnerSideView =
+  | { kind: "forbidden" }
+  | { kind: "none" }
+  | { kind: "ok"; owners: { key: string; rows: { label: string; value: string }[] }[] };
+
+/** 当事者タブの横に出す所有者情報。主な所有者が先。伏せられた値はそのまま・値が無い行は出さない。 */
+export function ownerSideView(links: SideOwnerLink[] | undefined): OwnerSideView {
+  const list = links ?? [];
+  if (list.length === 0) return { kind: "none" };
+  if (list.every((l) => !("name" in l.owner))) return { kind: "forbidden" };
+  const ordered = [...list.filter((l) => l.isPrimary), ...list.filter((l) => !l.isPrimary)];
+  return {
+    kind: "ok",
+    owners: ordered.map((l, i) => {
+      const rows: [string, string | null | undefined][] = [
+        ["氏名(法人名)", l.owner.name],
+        ["フリガナ", l.owner.nameKana],
+        ["主な所有者", l.isPrimary ? "はい" : null],
+        ["続柄", l.relationship],
+        ["登記上の住所", l.owner.address],
+        ["現住所", l.owner.currentAddress],
+        ["電話", l.owner.phone],
+        ["メール", l.owner.email],
+        ["備考", l.owner.note],
+      ];
+      return { key: l.id ?? String(i), rows: rows.flatMap(([label, value]) => (value ? [{ label, value }] : [])) };
+    }),
+  };
 }

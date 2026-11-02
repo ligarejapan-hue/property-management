@@ -121,6 +121,8 @@ interface PropertyEditFormProps {
   property: PropertyData;
   /** 問い合わせ者の欄を出すか(owner:read と owner_name の書き込み権限がある人だけ)。 */
   canEditInquirer?: boolean;
+  /** true=小窓にせず、置かれた場所に並べて出す(取引の画面の横の欄)。 */
+  embedded?: boolean;
   onClose: () => void;
   /** 保存できたら呼ぶ。棟へつないだ結果(buildingLink)があれば渡す(物件詳細の上に知らせを出す)。 */
   onSaved: (result?: { buildingLink?: BuildingLinkOutcome | null }) => void;
@@ -427,6 +429,7 @@ const FORM_FIELDS: FormField[] = [
 export default function PropertyEditForm({
   property,
   canEditInquirer = false,
+  embedded = false,
   onClose,
   onSaved,
 }: PropertyEditFormProps) {
@@ -731,9 +734,9 @@ export default function PropertyEditForm({
   const sections = [...new Set(allFields.map((f) => f.section))];
 
   return (
-    <div className="fixed inset-0 z-50 flex items-start justify-center overflow-y-auto bg-black/50 py-8">
+    <div className={embedded ? "" : "fixed inset-0 z-50 flex items-start justify-center overflow-y-auto bg-black/50 py-8"}>
       <div
-        className="mx-4 w-full max-w-3xl rounded-lg bg-white dark:bg-gray-900 shadow-xl"
+        className={embedded ? "w-full bg-white dark:bg-gray-900" : "mx-4 w-full max-w-3xl rounded-lg bg-white dark:bg-gray-900 shadow-xl"}
         onClick={(e) => e.stopPropagation()}
         // ⚠入力・キー・ポインタの一番外側でnoteActivityを呼ぶ(期限切れの取り直しの
         //   引き金・仕様6.2)。帯の文字の選択・コピー自体はブロックしない(bubbling

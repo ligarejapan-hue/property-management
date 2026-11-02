@@ -114,7 +114,7 @@ export default function DealPropertyPanel({
       {confirming && (
         <ConfirmDialog
           title="物件から取り直しますか？"
-          message="物件の今の情報で、この画面の項目を上書きします。ここで手直しした内容は消えます。"
+          message="物件の今の情報で、この画面の項目を上書きします。ここで手直しした内容は消えます。精算の管理費・修繕積立金も、物件に値があれば置き換えます。"
           confirmLabel="取り直す"
           onConfirm={() => { setConfirming(false); void run(() => dealsApi.refreshProperty(deal.id, deal.version)); }}
           onCancel={() => setConfirming(false)}

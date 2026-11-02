@@ -1,7 +1,7 @@
 "use client";
 
 import { useState } from "react";
-import { Building2, Plus, Save, Trash2 } from "lucide-react";
+import { Building2, Plus, Save, Trash2, UserPlus } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { ConfirmDialog } from "@/components/ui/confirm-dialog";
 import { Field, SelectBox, inputCls, optionsOf } from "./form-parts";
@@ -17,8 +17,8 @@ const conflictText = (e: unknown) =>
 
 /** 当事者(売主・買主・代理人・賃借人)。1件ずつ開いて直す。 */
 export default function DealPartiesPanel({
-  deal, selfParty, onSaved,
-}: { deal: DealView; selfParty: DealOptions["selfParty"] | null; onSaved: () => Promise<void> }) {
+  deal, selfParty, canFillSellers = false, onSaved,
+}: { deal: DealView; selfParty: DealOptions["selfParty"] | null; canFillSellers?: boolean; onSaved: () => Promise<void> }) {
   /** null=閉じている / "new"=新しく足す / それ以外=直している当事者の id */
   const [editing, setEditing] = useState<string | null>(null);
   const [form, setForm] = useState<PartyForm>(EMPTY_PARTY_FORM);
@@ -84,10 +84,19 @@ export default function DealPartiesPanel({
       )}
 
       {editing === null ? (
-        <Button variant="secondary" onClick={() => open(null)}>
-          <Plus className="h-4 w-4" />
-          当事者を足す
-        </Button>
+        <div className="flex flex-wrap gap-2">
+          <Button variant="secondary" onClick={() => open(null)}>
+            <Plus className="h-4 w-4" />
+            当事者を足す
+          </Button>
+          {/* 売主が空のときだけ。手で入れた売主は上書きしない。 */}
+          {canFillSellers && !deal.parties.some((p) => p.role === "seller") && (
+            <Button variant="secondary" disabled={busy} onClick={() => void run(() => dealsApi.fillSellersFromOwners(deal.id))}>
+              <UserPlus className="h-4 w-4" />
+              物件の所有者を売主に入れる
+            </Button>
+          )}
+        </div>
       ) : (
         <div className="space-y-4 rounded-lg border border-gray-200 p-4 dark:border-gray-800">
           <div className="grid gap-4 sm:grid-cols-2">

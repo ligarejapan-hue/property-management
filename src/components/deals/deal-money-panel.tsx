@@ -5,7 +5,7 @@ import { Plus, Save, Trash2 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Field, OverrideField, YenInput, inputCls } from "./form-parts";
 import { dealsApi, DealApiError, errorText } from "@/lib/deals/client";
-import { MONEY_OVERRIDE_KEYS, bpToPercentText, invalidYenLabels, mergeOverrides, parseYen, percentTextToBp, textify, untextify, yenText } from "@/lib/deals/money-forms";
+import { MONEY_OVERRIDE_KEYS, bpToPercentText, depositFromBrokerageCap, invalidYenLabels, mergeOverrides, parseYen, percentTextToBp, textify, untextify, yenText } from "@/lib/deals/money-forms";
 import type { DealView } from "@/lib/deals/view";
 import type { DealCalc } from "@/lib/deals/calc/deal-calc";
 import type { Costs, Overrides } from "@/lib/deals/schemas";
@@ -82,6 +82,7 @@ export default function DealMoneyPanel({ deal, calc, onSaved }: { deal: DealView
   };
 
   const remaining = calc?.settlement.remaining ?? null;
+  const depositCap = depositFromBrokerageCap(price, calc?.brokerageTiers ?? null, costs.lowCostSpecial);
   const stamp = calc?.contractStamp ?? null;
 
   return (
@@ -93,7 +94,12 @@ export default function DealMoneyPanel({ deal, calc, onSaved }: { deal: DealView
 
       <section className="grid gap-4 sm:grid-cols-3">
         <Field label="売買価格(税込)"><YenInput label="売買価格" value={price} onChange={setPrice} /></Field>
-        <Field label="手付金"><YenInput label="手付金" value={deposit} onChange={setDeposit} /></Field>
+        <Field label="手付金">
+          <YenInput label="手付金" value={deposit} onChange={setDeposit} />
+          <Button variant="secondary" size="sm" className="mt-1" disabled={depositCap === null} onClick={() => { if (depositCap !== null) setDeposit(depositCap); }}>
+            仲介手数料の上限を入れる
+          </Button>
+        </Field>
         <Field label="消費税率(%)">
           <input inputMode="decimal" value={taxRate} onChange={(e) => setTaxRate(e.target.value)} aria-label="消費税率" className={inputCls} />
         </Field>

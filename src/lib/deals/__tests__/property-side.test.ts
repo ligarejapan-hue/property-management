@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { propertySideRows } from "../property-side";
+import { ownerSideView, propertySideRows } from "../property-side";
 
 const map = (rows: { label: string; value: string }[]) => Object.fromEntries(rows.map((r) => [r.label, r.value]));
 
@@ -48,5 +48,25 @@ describe("propertySideRows", () => {
 
   it("知らない選択肢は値をそのまま出す", () => {
     expect(map(propertySideRows({ caseStatus: "hold", occupancyStatus: "xyz" }))["現況"]).toBe("xyz");
+  });
+});
+
+describe("ownerSideView", () => {
+  it("権限がなく owner が id だけなら、権限がないと出す", () => {
+    expect(ownerSideView([{ owner: { id: "o1" } }])).toEqual({ kind: "forbidden" });
+  });
+  it("所有者がいなければ none", () => {
+    expect(ownerSideView([])).toEqual({ kind: "none" });
+    expect(ownerSideView(undefined)).toEqual({ kind: "none" });
+  });
+  it("主な所有者を先にして、サーバーが伏せた値をそのまま出す・値が無い行は出さない", () => {
+    const view = ownerSideView([
+      { id: "a", owner: { name: "乙", address: "東京都***", phone: null } },
+      { id: "b", isPrimary: true, owner: { name: "甲", currentAddress: "神奈川県" } },
+    ]);
+    if (view.kind !== "ok") throw new Error(view.kind);
+    expect(view.owners.map((o) => o.key)).toEqual(["b", "a"]);
+    expect(map(view.owners[1].rows)).toEqual({ "氏名(法人名)": "乙", 登記上の住所: "東京都***" });
+    expect(map(view.owners[0].rows)["現住所"]).toBe("神奈川県");
   });
 });
