@@ -1,6 +1,6 @@
 import { describe, it, expect } from "vitest";
-import { buildSnapshotFromProperty, readSnapshot, readBroker, termsWithPropertyFees } from "../snapshot";
-import { DEFAULT_TERMS, EMPTY_SNAPSHOT, EMPTY_BROKER } from "../schemas";
+import { buildSnapshotFromProperty, readSnapshot, readBroker } from "../snapshot";
+import { EMPTY_SNAPSHOT, EMPTY_BROKER } from "../schemas";
 
 const prop = {
   propertyType: "apartment_unit", address: "東京都試験区試験町1-2-3", lotNumber: "試験町100番1", buildingNumber: "100番1の201",
@@ -41,17 +41,5 @@ describe("物件の値が写しの範囲を外れているとき(最終レビュ
     expect(s.access).toBeNull();
     expect(s.roomNo).toBe("201");
     expect(readSnapshot(s)).toEqual(s);
-  });
-});
-
-describe("termsWithPropertyFees", () => {
-  it("物件の値を入れて、ほかの条件は残す", () => {
-    const terms = { ...DEFAULT_TERMS, fixedAssetTax: 1000, others: [{ label: "x", sellerToBuyer: 1, buyerToSeller: 0 }] };
-    const next = termsWithPropertyFees(terms, { managementFee: 12000, repairReserveFee: 0 });
-    expect(next).toEqual({ ...terms, managementFee: 12000, repairReserve: 0 });
-  });
-  it("物件に値がない項目と、決まりに合わない値は今の値を残す", () => {
-    const terms = { ...DEFAULT_TERMS, managementFee: 5, repairReserve: 6 };
-    expect(termsWithPropertyFees(terms, { managementFee: null, repairReserveFee: -1 })).toEqual(terms);
   });
 });

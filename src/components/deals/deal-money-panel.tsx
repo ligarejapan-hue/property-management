@@ -1,11 +1,11 @@
 "use client";
 
 import { useState } from "react";
-import { Plus, Save, Trash2 } from "lucide-react";
+import { Calculator, Plus, Save, Trash2 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Field, OverrideField, YenInput, inputCls } from "./form-parts";
 import { dealsApi, DealApiError, errorText } from "@/lib/deals/client";
-import { MONEY_OVERRIDE_KEYS, bpToPercentText, depositFromBrokerageCap, invalidYenLabels, mergeOverrides, parseYen, percentTextToBp, textify, untextify, yenText } from "@/lib/deals/money-forms";
+import { MONEY_OVERRIDE_KEYS, bpToPercentText, invalidYenLabels, mergeOverrides, parseYen, percentTextToBp, textify, untextify, yenText } from "@/lib/deals/money-forms";
 import type { DealView } from "@/lib/deals/view";
 import type { DealCalc } from "@/lib/deals/calc/deal-calc";
 import type { Costs, Overrides } from "@/lib/deals/schemas";
@@ -32,7 +32,9 @@ export default function DealMoneyPanel({ deal, calc, onSaved }: { deal: DealView
   const validity = (label: string) => (ok: boolean) =>
     setBadOverrides((xs) => (ok ? xs.filter((x) => x !== label) : xs.includes(label) ? xs : [...xs, label]));
   const [error, setError] = useState<string | null>(null);
-  const setOverride = (key: keyof Overrides, v: number | undefined) =>
+  // 手で直す欄の文字ごと消すために、欄を作り直す。
+  const [brokerageReset, setBrokerageReset] = useState(0);
+  const setOverride =(key: keyof Overrides, v: number | undefined) =>
     setOverrides((o) => {
       const next = { ...o };
       if (v === undefined) delete next[key];
@@ -41,7 +43,7 @@ export default function DealMoneyPanel({ deal, calc, onSaved }: { deal: DealView
     });
   const scr = (k: keyof Costs["scrivener"], v: string) => setCosts((c) => ({ ...c, scrivener: { ...c.scrivener, [k]: v.trim() === "" ? null : v } }));
 
-  const save = async () => {
+  const save = async (nextOverrides: Overrides = overrides, bads: string[] = badOverrides) => {
     const taxRateBp = percentTextToBp(taxRate);
     if (taxRateBp === null) {
       setError("消費税率は数字で入れてください(例 10)");
@@ -53,7 +55,7 @@ export default function DealMoneyPanel({ deal, calc, onSaved }: { deal: DealView
         ["売買価格", price], ["手付金", deposit], ["登記費用", fees.registrationFee], ["抹消費用", fees.cancellationFee], ["測量費", fees.surveyFee],
       ]),
       ...parsedOthers.flatMap((p) => p.bad),
-      ...badOverrides,
+      ...bads,
     ];
     if (bad.length > 0) {
       setError(`${bad.join("・")}は数字で入れてください(例 30000000)。保存していません。`);
@@ -71,7 +73,7 @@ export default function DealMoneyPanel({ deal, calc, onSaved }: { deal: DealView
           others: parsedOthers.map((p) => p.value).filter((o) => o.label.trim() !== ""),
         },
         // ほかのタブ(精算)の上書きは、今の保存済みの値を残す(最終レビュー I-2)。
-        overrides: mergeOverrides(deal.overrides, overrides, MONEY_OVERRIDE_KEYS),
+        overrides: mergeOverrides(deal.overrides, nextOverrides, MONEY_OVERRIDE_KEYS),
       });
       await onSaved();
     } catch (e) {
@@ -81,8 +83,22 @@ export default function DealMoneyPanel({ deal, calc, onSaved }: { deal: DealView
     }
   };
 
+  /** 手で直した額を消して、今の売買価格と料率表で計算し直す。計算はサーバーなので保存する(2026-11-02 発注者)。 */
+  const recalcBrokerage = () => {
+    if (parseYen(price) === null) {
+      setError("売買価格を入れてください。");
+      return;
+    }
+    const nextOverrides = { ...overrides };
+    delete nextOverrides.brokerageFee;
+    const bads = badOverrides.filter((x) => x !== "仲介手数料");
+    setOverrides(nextOverrides);
+    setBadOverrides(bads);
+    setBrokerageReset((t) => t + 1);
+    void save(nextOverrides, bads);
+  };
+
   const remaining = calc?.settlement.remaining ?? null;
-  const depositCap = depositFromBrokerageCap(price, calc?.brokerageTiers ?? null, costs.lowCostSpecial);
   const stamp = calc?.contractStamp ?? null;
 
   return (
@@ -94,12 +110,7 @@ export default function DealMoneyPanel({ deal, calc, onSaved }: { deal: DealView
 
       <section className="grid gap-4 sm:grid-cols-3">
         <Field label="売買価格(税込)"><YenInput label="売買価格" value={price} onChange={setPrice} /></Field>
-        <Field label="手付金">
-          <YenInput label="手付金" value={deposit} onChange={setDeposit} />
-          <Button variant="secondary" size="sm" className="mt-1" disabled={depositCap === null} onClick={() => { if (depositCap !== null) setDeposit(depositCap); }}>
-            仲介手数料の上限を入れる
-          </Button>
-        </Field>
+        <Field label="手付金"><YenInput label="手付金" value={deposit} onChange={setDeposit} /></Field>
         <Field label="消費税率(%)">
           <input inputMode="decimal" value={taxRate} onChange={(e) => setTaxRate(e.target.value)} aria-label="消費税率" className={inputCls} />
         </Field>
@@ -112,7 +123,14 @@ export default function DealMoneyPanel({ deal, calc, onSaved }: { deal: DealView
           <input type="checkbox" checked={costs.lowCostSpecial} onChange={(e) => setCosts((c) => ({ ...c, lowCostSpecial: e.target.checked }))} />
           低廉な空家等の特例(800万円以下は上限30万円＋税)
         </label>
-        <OverrideField label="仲介手数料" onValidity={validity("仲介手数料")} computed={calc?.brokerage?.computedExcl ?? null} override={overrides.brokerageFee} onChange={(v) => setOverride("brokerageFee", v)} />
+        <OverrideField key={brokerageReset} label="仲介手数料" onValidity={validity("仲介手数料")} computed={calc?.brokerage?.computedExcl ?? null} override={overrides.brokerageFee} onChange={(v) => setOverride("brokerageFee", v)} />
+        <div className="flex flex-wrap items-center gap-3">
+          <Button variant="secondary" size="sm" onClick={recalcBrokerage} disabled={saving}>
+            <Calculator className="h-4 w-4" />
+            正規の料率で計算する
+          </Button>
+          <span className="text-xs text-gray-500">今の売買価格で計算し直して、このタブの内容を保存します(手で直した手数料は消えます)。</span>
+        </div>
         <p className="text-sm">税込: <b className="tabular-nums">{calc?.brokerage ? `${yenText(calc.brokerage.incl)}円` : "—"}</b></p>
       </section>
 

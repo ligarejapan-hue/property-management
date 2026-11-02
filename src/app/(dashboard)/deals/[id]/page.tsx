@@ -25,6 +25,7 @@ import { basicFormFromDeal } from "@/lib/deals/forms";
 import { MONEY_OVERRIDE_KEYS, SETTLEMENT_OVERRIDE_KEYS, pickOverrides } from "@/lib/deals/money-forms";
 import { DEAL_BUSINESS_TYPE_LABELS, DEAL_STATUS_LABELS } from "@/lib/deals/constants";
 import { dealTitle } from "@/lib/deals/deal-title";
+// 横の物件の編集が鍵のヘッダを送るので、合言葉の一生をこの画面でも持つ。
 import { useEditScreenToken } from "@/hooks/use-edit-screen-token";
 
 // 「書類」=発行した書類の履歴(設計 §5・段3で追加)。
@@ -47,17 +48,14 @@ type DealTabKey = (typeof DEAL_TABS)[number]["key"];
  */
 export default function DealDetailPage({ params }: { params: Promise<{ id: string }> }) {
   const { id } = use(params);
-  // 横の欄の物件の編集が鍵のヘッダを送る=複製のタブの確認と応答器をこの画面にも張る。
   useEditScreenToken();
-  const [data, setData] = useState<{ deal: DealView; canOpenProperty: boolean; canChangeStatus: boolean; canChangeAssignee: boolean; canMoveCaseStatus: boolean; canFillSellers: boolean; canEditInquirer: boolean } | null>(null);
+  const [data, setData] = useState<{ deal: DealView; canOpenProperty: boolean; canChangeStatus: boolean; canChangeAssignee: boolean; canMoveCaseStatus: boolean } | null>(null);
   const [caseStatusNotChanged, setCaseStatusNotChanged] = useState(false);
   const [calc, setCalc] = useState<DealCalc | null>(null);
   const [options, setOptions] = useState<DealOptions | null>(null);
   const [users, setUsers] = useState<UserOption[]>([]);
   const [selected, setSelected] = useState<DealTabKey>("basic");
   const [sideRequested, setSideRequested] = useState(false);
-  // 当事者タブでは所有者情報を自動で横に出す。一度閉じたら、押して開くまで出さない。
-  const [partiesSideClosed, setPartiesSideClosed] = useState(false);
   const [sideEditing, setSideEditing] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [calcError, setCalcError] = useState<string | null>(null);
@@ -107,9 +105,10 @@ export default function DealDetailPage({ params }: { params: Promise<{ id: strin
   const tab: DealTabKey = tabs.some((t) => t.key === selected) ? selected : "basic";
   const k = (v: unknown) => JSON.stringify(v);
   const propertyId = data.canOpenProperty && deal.propertyId ? deal.propertyId : null;
-  const sideOpen = propertyId !== null && (sideRequested || (tab === "parties" && !partiesSideClosed));
-  const closeSide = () => { setSideRequested(false); if (tab === "parties") setPartiesSideClosed(true); };
-  const openSide = () => { setSideRequested(true); setPartiesSideClosed(false); };
+  const sideOpen = sideRequested && propertyId !== null;
+  const sideView = tab === "parties" ? "owners" : "property";
+  // 編集の入力欄は狭いと使いにくいので、編集中だけ左右を半分ずつにする。
+  const sideGrid = sideEditing ? "lg:grid-cols-2" : "lg:grid-cols-[minmax(0,1fr)_22rem]";
 
   return (
     <div className={`mx-auto space-y-5 ${sideOpen ? "max-w-7xl" : "max-w-4xl"}`}>
@@ -120,9 +119,9 @@ export default function DealDetailPage({ params }: { params: Promise<{ id: strin
           <div className="flex flex-wrap gap-2">
             {/* 開く権限がある人にだけ出す。 */}
             {data.canOpenProperty && deal.propertyId && (
-              <Button variant="secondary" size="sm" disabled={sideEditing} onClick={sideOpen ? closeSide : openSide} aria-pressed={sideOpen}>
+              <Button variant="secondary" size="sm" onClick={() => setSideRequested((v) => !v)} aria-pressed={sideOpen}>
                 <PanelRight className="h-4 w-4" />
-                物件情報を見る
+                {sideView === "owners" ? "所有者情報を見る" : "物件情報を見る"}
               </Button>
             )}
             <Link href={`/deals/${deal.id}/funding-plan`} className={HEADER_LINK_CLS}>
@@ -141,7 +140,7 @@ export default function DealDetailPage({ params }: { params: Promise<{ id: strin
         description={`${deal.dealNo} ・ ${DEAL_BUSINESS_TYPE_LABELS[deal.businessType as keyof typeof DEAL_BUSINESS_TYPE_LABELS] ?? deal.businessType} ・ ${DEAL_STATUS_LABELS[deal.status as keyof typeof DEAL_STATUS_LABELS] ?? deal.status}`}
       />
       {/* 開閉しても同じ位置に描く=入力中のパネルを作り直さない。 */}
-      <div className={sideOpen ? `grid items-start gap-5 ${sideEditing ? "lg:grid-cols-2" : "lg:grid-cols-[minmax(0,1fr)_22rem]"}` : ""}>
+      <div className={sideOpen ? `grid items-start gap-5 ${sideGrid}` : ""}>
       <div className="min-w-0 space-y-5">
       {error && <p className="text-sm text-red-600 dark:text-red-400" role="alert">{error}</p>}
       {calcError && <p className="text-sm text-red-600 dark:text-red-400" role="alert">{calcError}</p>}
@@ -167,7 +166,7 @@ export default function DealDetailPage({ params }: { params: Promise<{ id: strin
           <DealPropertyPanel key={k([deal.propertySnapshot, deal.assessments])} deal={deal} canOpenProperty={data.canOpenProperty} onSaved={reload} />
         </div>
         <div hidden={tab !== "parties"}>
-          <DealPartiesPanel deal={deal} selfParty={options?.selfParty ?? null} canFillSellers={data.canFillSellers} onSaved={reload} />
+          <DealPartiesPanel deal={deal} selfParty={options?.selfParty ?? null} canOpenProperty={data.canOpenProperty} onSaved={reload} />
         </div>
         <div hidden={tab !== "money"}>
           <DealMoneyPanel key={k([deal.price, deal.deposit, deal.taxRateBp, deal.costs, pickOverrides(deal.overrides, MONEY_OVERRIDE_KEYS)])} deal={deal} calc={calc} onSaved={reload} />
@@ -187,8 +186,12 @@ export default function DealDetailPage({ params }: { params: Promise<{ id: strin
       </div>
       {sideOpen && propertyId && (
         <DealPropertySide
-          key={propertyId} propertyId={propertyId} revision={deal.status} mode={tab === "parties" ? "owners" : "property"}
-          canEdit={data.canMoveCaseStatus} canEditInquirer={data.canEditInquirer} onEditingChange={setSideEditing} onSaved={() => setIssuedTick((t) => t + 1)} onClose={closeSide}
+          key={`${propertyId}:${deal.status}`}
+          propertyId={propertyId}
+          view={sideView}
+          canEdit={data.canMoveCaseStatus}
+          onEditingChange={setSideEditing}
+          onClose={() => { setSideRequested(false); setSideEditing(false); }}
         />
       )}
       </div>

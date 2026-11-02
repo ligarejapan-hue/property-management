@@ -7,14 +7,13 @@ import { writeAuditLog } from "@/lib/audit";
 import { canAccessPropertyRecord } from "@/lib/property-access";
 import { requireDeal } from "@/lib/deals/guard";
 import { DEFAULT_TERMS, dealCreateSchema, EMPTY_SNAPSHOT, type SettlementTerms } from "@/lib/deals/schemas";
-import { fillSellersFromOwners, sellerAccessOf } from "@/lib/deals/seller-from-owners";
-import { resolveCompanyProfile } from "@/lib/sales-sheet/company-profile-store";
 import { DEAL_BUSINESS_TYPES, DEAL_STATUSES, type DealStatus } from "@/lib/deals/constants";
 import { initialDealStatusForCase, syncCaseStatusFromDeals } from "@/lib/deals/status-link";
 import { lockPropertyRow } from "@/lib/property-record-guard";
 import { jstYear, nextDealNo } from "@/lib/deals/deal-no";
 import { jstDateString } from "@/lib/deals/datetime";
-import { buildSnapshotFromProperty, SNAPSHOT_PROPERTY_SELECT, termsWithPropertyFees } from "@/lib/deals/snapshot";
+import { buildSnapshotFromProperty, settlementFeesFromProperty, SNAPSHOT_PROPERTY_SELECT } from "@/lib/deals/snapshot";
+import { addSellersFromOwners, sellerAccessOf } from "@/lib/deals/seller-from-owners";
 import { propertyKindFromPropertyType } from "@/lib/deals/property-kind";
 import { loadDealSettings } from "@/lib/deals/settings-store";
 import { isKnownPropertyKind } from "@/lib/deals/settings";
@@ -85,7 +84,7 @@ export async function POST(request: Request) {
 
     let snapshot = body.propertySnapshot ?? EMPTY_SNAPSHOT;
     let propertyKind = body.propertyKind ?? null;
-    let settlementTerms: SettlementTerms | null = null;
+    let settlementTerms: SettlementTerms | undefined;
     if (body.propertyId) {
       if (!hasPermission(perms, "property", "read")) {
         throw new ApiError(403, "物件を見る権限がありません", "FORBIDDEN");
@@ -97,7 +96,8 @@ export async function POST(request: Request) {
       }
       snapshot = buildSnapshotFromProperty(p);
       propertyKind = propertyKind ?? propertyKindFromPropertyType(p.propertyType);
-      settlementTerms = termsWithPropertyFees(DEFAULT_TERMS, p);
+      const fees = settlementFeesFromProperty(p);
+      if (Object.keys(fees).length > 0) settlementTerms = { ...DEFAULT_TERMS, ...fees };
     }
 
     const settings = await loadDealSettings();
@@ -109,10 +109,6 @@ export async function POST(request: Request) {
     const rateRows = await prisma.dealRateTable.findMany({ where: { kind: "consumption_tax" } });
     const taxRateBp = consumptionTaxRateBp(rateRows, jstDateString(now));
     const year = jstYear(now);
-    const sellerAccess = sellerAccessOf(perms);
-    const companyName = body.propertyId && sellerAccess.name
-      ? resolveCompanyProfile(await prisma.companyProfile.findUnique({ where: { id: "singleton" } })).nameJa
-      : "";
 
     for (let attempt = 1; ; attempt++) {
       const latest = await prisma.deal.findFirst({
@@ -147,23 +143,16 @@ export async function POST(request: Request) {
             },
             select: { id: true, dealNo: true },
           });
+          // 売主は物件の今の所有者。違う場合は当事者タブで手で直す。
+          if (propertyId) await addSellersFromOwners(tx, { dealId: row.id, propertyId, access: sellerAccessOf(perms) });
           if (propertyId && canMoveCase) await syncCaseStatusFromDeals(tx, { propertyId, changedBy: session.id });
-          const sellers = propertyId
-            ? await fillSellersFromOwners(tx, { dealId: row.id, propertyId, access: sellerAccess, companyName })
-            : null;
-          return { row, sellerCount: sellers?.count ?? 0 };
+          return row;
         });
         await writeAuditLog({
-          userId: session.id, action: "deal_create", targetTable: "deals", targetId: created.row.id,
+          userId: session.id, action: "deal_create", targetTable: "deals", targetId: created.id,
           detail: { fields: Object.keys(body).sort() },
         });
-        if (created.sellerCount > 0) {
-          await writeAuditLog({
-            userId: session.id, action: "deal_party_create", targetTable: "deals", targetId: created.row.id,
-            detail: { count: created.sellerCount },
-          });
-        }
-        return NextResponse.json(created.row, { status: 201, headers: NO_STORE });
+        return NextResponse.json(created, { status: 201, headers: NO_STORE });
       } catch (e) {
         if (isUniqueViolation(e) && attempt < DEAL_NO_ATTEMPTS) continue;
         if (isUniqueViolation(e)) throw new ApiError(409, "ほかの人が同時に作成しました。もう一度「作成」を押してください。", "DEAL_NO_BUSY");

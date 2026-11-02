@@ -6,13 +6,16 @@ import { hasPermission } from "@/lib/permissions";
 import { writeAuditLog } from "@/lib/audit";
 import { canAccessPropertyRecord } from "@/lib/property-access";
 import { requireDeal, DEAL_VERSION_CONFLICT_MESSAGE } from "@/lib/deals/guard";
+import { buildSnapshotFromProperty, settlementFeesFromProperty, SNAPSHOT_PROPERTY_SELECT } from "@/lib/deals/snapshot";
 import { readTerms } from "@/lib/deals/inputs";
-import { buildSnapshotFromProperty, SNAPSHOT_PROPERTY_SELECT, termsWithPropertyFees } from "@/lib/deals/snapshot";
 
 type Ctx = { params: Promise<{ id: string }> };
 const bodySchema = z.object({ version: z.number().int().positive() }).strict();
 
-/** 「物件から取り直す」: 物件の今の値で写しを上書きする(写しに手で直した分も上書きされる=画面で確認してから押す)。精算の管理費・修繕積立金も、物件に値があれば入れる。 */
+/**
+ * 「物件から取り直す」: 物件の今の値で写しと精算の管理費・修繕積立金を上書きする(手で直した分も上書きされる=画面で確認してから押す)。
+ * ⚠精算の条件は読んでから書く。版の条件つきの更新なので、間に別の保存が入れば 409 になり、古い条件で戻さない。
+ */
 export async function POST(request: Request, ctx: Ctx) {
   try {
     const { session, perms } = await requireDeal("write");
@@ -25,17 +28,20 @@ export async function POST(request: Request, ctx: Ctx) {
     const p = await prisma.property.findUnique({ where: { id: deal.propertyId }, select: SNAPSHOT_PROPERTY_SELECT });
     if (!p || !canAccessPropertyRecord(session, p)) throw new ApiError(404, "物件が見つかりません", "PROPERTY_NOT_FOUND");
 
-    const terms = readTerms(deal.settlementTerms);
-    const nextTerms = termsWithPropertyFees(terms, p);
-    const feesChanged = nextTerms.managementFee !== terms.managementFee || nextTerms.repairReserve !== terms.repairReserve;
+    const fees = settlementFeesFromProperty(p);
+    const hasFees = Object.keys(fees).length > 0;
     const res = await prisma.deal.updateMany({
       where: { id, version },
-      data: { propertySnapshot: buildSnapshotFromProperty(p), ...(feesChanged ? { settlementTerms: nextTerms } : {}), version: { increment: 1 } },
+      data: {
+        propertySnapshot: buildSnapshotFromProperty(p),
+        ...(hasFees ? { settlementTerms: { ...readTerms(deal.settlementTerms), ...fees } } : {}),
+        version: { increment: 1 },
+      },
     });
     if (res.count === 0) throw new ApiError(409, DEAL_VERSION_CONFLICT_MESSAGE, "VERSION_CONFLICT");
     await writeAuditLog({
       userId: session.id, action: "deal_property_refresh", targetTable: "deals", targetId: id,
-      detail: { fields: feesChanged ? ["propertySnapshot", "settlementTerms"] : ["propertySnapshot"] },
+      detail: { fields: hasFees ? ["propertySnapshot", "settlementTerms"] : ["propertySnapshot"] },
     });
     return NextResponse.json({ version: version + 1 }, { headers: { "Cache-Control": "no-store" } });
   } catch (error) {

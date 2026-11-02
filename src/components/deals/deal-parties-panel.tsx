@@ -17,15 +17,16 @@ const conflictText = (e: unknown) =>
 
 /** 当事者(売主・買主・代理人・賃借人)。1件ずつ開いて直す。 */
 export default function DealPartiesPanel({
-  deal, selfParty, canFillSellers = false, onSaved,
-}: { deal: DealView; selfParty: DealOptions["selfParty"] | null; canFillSellers?: boolean; onSaved: () => Promise<void> }) {
+  deal, selfParty, canOpenProperty, onSaved,
+}: { deal: DealView; selfParty: DealOptions["selfParty"] | null; canOpenProperty: boolean; onSaved: () => Promise<void> }) {
   /** null=閉じている / "new"=新しく足す / それ以外=直している当事者の id */
   const [editing, setEditing] = useState<string | null>(null);
   const [form, setForm] = useState<PartyForm>(EMPTY_PARTY_FORM);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [deleting, setDeleting] = useState<DealPartyView | null>(null);
-  const set = <K extends keyof PartyForm>(k: K, v: PartyForm[K]) => setForm((f) => ({ ...f, [k]: v }));
+  const [notice, setNotice] = useState<string | null>(null);
+  const set =<K extends keyof PartyForm>(k: K, v: PartyForm[K]) => setForm((f) => ({ ...f, [k]: v }));
 
   const open = (p: DealPartyView | null) => {
     setError(null);
@@ -43,6 +44,7 @@ export default function DealPartiesPanel({
     if (busy) return;
     setBusy(true);
     setError(null);
+    setNotice(null);
     try {
       await fn();
       setEditing(null);
@@ -60,10 +62,15 @@ export default function DealPartiesPanel({
       ? dealsApi.updateParty(deal.id, current.id, { version: current.version, ...body })
       : dealsApi.addParty(deal.id, body)));
   };
+  const addSellers = () => run(async () => {
+    const { added } = await dealsApi.addSellersFromOwners(deal.id);
+    setNotice(added > 0 ? `物件の所有者 ${added}人を売主に入れました。違う場合は「直す」で直してください。` : "新しく入れる所有者はいません(すでに売主に入っているか、物件に所有者がいません)。");
+  });
 
   return (
     <div className="space-y-4">
       {error && <p className="text-sm text-red-600 dark:text-red-400" role="alert">{error}</p>}
+      {notice && <p className="text-sm text-gray-700 dark:text-gray-300" role="status">{notice}</p>}
       {deal.parties.length === 0 && editing === null && (
         <p className="text-sm text-gray-500 dark:text-gray-400">当事者はまだいません。「当事者を足す」から入れられます。</p>
       )}
@@ -89,9 +96,9 @@ export default function DealPartiesPanel({
             <Plus className="h-4 w-4" />
             当事者を足す
           </Button>
-          {/* 売主が空のときだけ。手で入れた売主は上書きしない。 */}
-          {canFillSellers && !deal.parties.some((p) => p.role === "seller") && (
-            <Button variant="secondary" disabled={busy} onClick={() => void run(() => dealsApi.fillSellersFromOwners(deal.id))}>
+          {/* 物件を開ける人だけ(API も同じ範囲)。足すだけで、入っている売主は変えない。 */}
+          {canOpenProperty && deal.propertyId && (
+            <Button variant="secondary" onClick={() => void addSellers()} disabled={busy}>
               <UserPlus className="h-4 w-4" />
               物件の所有者を売主に入れる
             </Button>

@@ -1,88 +1,94 @@
-import type { Prisma } from "@/generated/prisma";
+/**
+ * 物件の所有者を取引の売主に入れる(2026-11-02 発注者「売主は物件の所有者情報を自動反映。違う場合は手作業で直す」)。
+ * 物件から取引を作るときと、当事者タブのボタンで使う。
+ *
+ * ⚠足すだけ。入っている売主は書き換えない(手で直した内容を消さない)。
+ * ⚠所有者情報の表示レベルで、そのまま見られる項目だけ(依頼文の差し込みと同じ決まり・一部表示の人の操作で伏せた値を広げない)。
+ * ⚠住所は現住所があれば現住所(お客様に連絡がつく住所)。無ければ登記上の住所。
+ */
 import type { PermissionEntry } from "@/lib/api-helpers";
 import { hasPermission, isMaskFreeLevel, resolveOwnerDisplayConfig } from "@/lib/permissions";
-import { partyInputSchema } from "./schemas";
+import { foldNameVariants } from "./crosscheck";
+import type { Prisma } from "@/generated/prisma";
 
-/**
- * 物件の所有者を取引の売主に入れる。
- * ⚠氏名・住所・電話は、所有者情報の表示レベルでそのまま見られる人の操作のときだけ入れる(伏せた値を保存しない)。
- * ⚠作った値は DB に入れるだけ。監査・console には出さない。
- */
 export interface SellerAccess { name: boolean; address: boolean; phone: boolean }
 
 export function sellerAccessOf(perms: PermissionEntry[]): SellerAccess {
-  const canReadOwner = hasPermission(perms, "owner", "read");
+  const canRead = hasPermission(perms, "owner", "read");
   const levels = resolveOwnerDisplayConfig(perms);
   return {
-    name: canReadOwner && isMaskFreeLevel(levels.name),
-    address: canReadOwner && isMaskFreeLevel(levels.address),
-    phone: canReadOwner && isMaskFreeLevel(levels.phone),
+    name: canRead && isMaskFreeLevel(levels.name),
+    address: canRead && isMaskFreeLevel(levels.address),
+    phone: canRead && isMaskFreeLevel(levels.phone),
   };
 }
 
 export const SELLER_OWNER_SELECT = {
-  isPrimary: true,
-  owner: { select: { name: true, address: true, currentAddress: true, phone: true, corporateNumber: true, companyRegistryNumber: true } },
+  name: true, phone: true, address: true, currentAddress: true, corporateNumber: true, companyRegistryNumber: true,
 } as const;
 
-export interface SellerSourceLink {
-  isPrimary: boolean;
-  owner: {
-    name: string; address: string | null; currentAddress: string | null; phone: string | null;
-    corporateNumber: string | null; companyRegistryNumber: string | null;
-  };
+export interface OwnerForSeller {
+  name: string; phone: string | null; address: string | null; currentAddress: string | null;
+  corporateNumber: string | null; companyRegistryNumber: string | null;
 }
 
-const CORPORATE_NAME = /株式会社|有限会社|合同会社|合資会社|合名会社|社団法人|財団法人|医療法人|社会福祉法人|学校法人|宗教法人|NPO法人|[（(][株有][）)]/;
-const sameName = (a: string, b: string) => a.replace(/\s/g, "") === b.replace(/\s/g, "");
-const filled = (v: string | null) => (v && v.trim() ? v.trim() : null);
-
-/** 欄の決まりに収まる値だけ。⚠途中で切らない(切った住所を正しい値に見せない)。 */
-function fitting(role: { name: string; address: string | null; phone: string | null; partyType: "individual" | "corporation" }) {
-  const base = { role: "seller" as const, partyType: role.partyType, name: role.name, isSelf: false };
-  if (!partyInputSchema.safeParse(base).success) return null;
-  const ok = (extra: object) => partyInputSchema.safeParse({ ...base, ...extra }).success;
-  return {
-    ...base,
-    address: role.address !== null && ok({ address: role.address }) ? role.address : null,
-    phone: role.phone !== null && ok({ phone: role.phone }) ? role.phone : null,
-  };
+export interface SellerParty {
+  role: "seller"; partyType: "individual" | "corporation"; name: string;
+  address: string | null; phone: string | null; isSelf: false;
 }
 
-/** 売主の行を作る。主な所有者が先。持分は物件に数字がないので空。自社の名前の所有者は入れない。 */
-export function sellerRowsFromOwners(links: SellerSourceLink[], access: SellerAccess, companyName: string) {
+const CORPORATE_NAME = /株式会社|有限会社|合同会社|合資会社|合名会社|[(（][株有][)）]|一般社団法人|一般財団法人|公益社団法人|公益財団法人|医療法人|学校法人|宗教法人|社会福祉法人|特定非営利活動法人|NPO法人|ＮＰＯ法人|独立行政法人/;
+/** 当事者の欄の上限(schemas.ts の partyFields と同じ)。 */
+const MAX_NAME = 200;
+const MAX_ADDRESS = 300;
+const MAX_PHONE = 50;
+
+const fit = (v: string | null | undefined, max: number): string | null => {
+  const t = v?.trim();
+  return t && t.length <= max ? t : null;
+};
+
+/** 足す売主を決める。純関数。`existingNames` はすでに入っている売主の氏名。 */
+export function sellerPartiesFromOwners(owners: OwnerForSeller[], existingNames: string[], access: SellerAccess): SellerParty[] {
   if (!access.name) return [];
-  const ordered = [...links.filter((l) => l.isPrimary), ...links.filter((l) => !l.isPrimary)];
-  return ordered
-    .filter((l) => !sameName(l.owner.name, companyName))
-    .flatMap(({ owner }) => {
-      const row = fitting({
-        name: owner.name.trim(),
-        partyType: owner.corporateNumber || owner.companyRegistryNumber || CORPORATE_NAME.test(owner.name) ? "corporation" : "individual",
-        address: access.address ? filled(owner.currentAddress) ?? filled(owner.address) : null,
-        phone: access.phone ? filled(owner.phone) : null,
-      });
-      return row ? [row] : [];
-    })
-    .map((row, sortOrder) => ({ ...row, sortOrder }));
+  const seen = new Set(existingNames.map(foldNameVariants));
+  const out: SellerParty[] = [];
+  for (const o of owners) {
+    const name = fit(o.name, MAX_NAME);
+    if (!name) continue;
+    const key = foldNameVariants(name);
+    if (seen.has(key)) continue;
+    seen.add(key);
+    out.push({
+      role: "seller",
+      partyType: o.corporateNumber || o.companyRegistryNumber || CORPORATE_NAME.test(name) ? "corporation" : "individual",
+      name,
+      address: access.address ? fit(o.currentAddress?.trim() ? o.currentAddress : o.address, MAX_ADDRESS) : null,
+      phone: access.phone ? fit(o.phone, MAX_PHONE) : null,
+      isSelf: false,
+    });
+  }
+  return out;
 }
 
-export type FillSellersResult = { status: "filled" | "sellers_exist" | "no_owners" | "forbidden"; count: number };
-
-/** 売主が1人もいないときだけ足す(自社を売主にした取引も、手で入れた売主も上書きしない)。呼び元は取引の行を握って呼ぶ。 */
-export async function fillSellersFromOwners(
+/** 今の所有者を売主に足し、足した人数を返す。⚠取引の行をロックする=同時に押されても同じ人を2回足さない。 */
+export async function addSellersFromOwners(
   tx: Prisma.TransactionClient,
-  input: { dealId: string; propertyId: string; access: SellerAccess; companyName: string },
-): Promise<FillSellersResult> {
-  if (!input.access.name) return { status: "forbidden", count: 0 };
-  if ((await tx.dealParty.count({ where: { dealId: input.dealId, role: "seller" } })) > 0) return { status: "sellers_exist", count: 0 };
+  o: { dealId: string; propertyId: string; access: SellerAccess },
+): Promise<number> {
+  if (!o.access.name) return 0;
+  await tx.$queryRaw`SELECT "id" FROM "deals" WHERE "id" = ${o.dealId}::uuid FOR UPDATE`;
   const links = await tx.propertyOwner.findMany({
-    where: { propertyId: input.propertyId, owner: { isArchived: false } },
-    select: SELLER_OWNER_SELECT,
-    orderBy: { createdAt: "asc" },
+    where: { propertyId: o.propertyId, endDate: null, owner: { isArchived: false } },
+    orderBy: [{ isPrimary: "desc" }, { createdAt: "asc" }],
+    select: { owner: { select: SELLER_OWNER_SELECT } },
   });
-  const rows = sellerRowsFromOwners(links, input.access, input.companyName);
-  if (rows.length === 0) return { status: "no_owners", count: 0 };
-  await tx.dealParty.createMany({ data: rows.map((r) => ({ ...r, dealId: input.dealId })) });
-  return { status: "filled", count: rows.length };
+  const existing = await tx.dealParty.findMany({ where: { dealId: o.dealId, role: "seller" }, select: { name: true } });
+  const parties = sellerPartiesFromOwners(links.map((l) => l.owner), existing.map((p) => p.name), o.access);
+  if (parties.length > 0) {
+    await tx.dealParty.createMany({
+      data: parties.map((p, i) => ({ ...p, dealId: o.dealId, sortOrder: existing.length + i })),
+    });
+  }
+  return parties.length;
 }

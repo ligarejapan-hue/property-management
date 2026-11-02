@@ -101,9 +101,7 @@ export default function DealSettlementPanel({ deal, calc, onSaved }: { deal: Dea
       {kindBase === "unit" && (
         <section className="space-y-3">
           <h3 className="text-sm font-semibold text-gray-700 dark:text-gray-300">管理費等(月額)</h3>
-          {deal.propertyId && (
-            <p className="text-xs text-gray-500 dark:text-gray-400">物件の管理費・修繕積立金は、取引を物件から作るときと、物件タブの「物件から取り直す」で入ります。</p>
-          )}
+          {deal.propertyId && <p className="text-xs text-gray-500">管理費と修繕積立金は、物件から作ったときと、「物件」タブの「物件から取り直す」で物件の値が入ります。</p>}
           <div className="grid gap-4 sm:grid-cols-4">
             <Field label="管理費"><YenInput label="管理費" value={money.managementFee} onChange={(v) => setMoney((m) => ({ ...m, managementFee: v }))} /></Field>
             <Field label="修繕積立金"><YenInput label="修繕積立金" value={money.repairReserve} onChange={(v) => setMoney((m) => ({ ...m, repairReserve: v }))} /></Field>

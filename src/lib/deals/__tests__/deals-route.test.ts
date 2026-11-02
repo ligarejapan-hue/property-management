@@ -8,8 +8,8 @@ vi.mock("@/lib/prisma", () => {
     deal: { findMany: vi.fn(async () => []), count: vi.fn(async () => 0), findFirst: vi.fn(async () => null), create: vi.fn() },
     property: { findUnique: vi.fn(async () => null), updateMany: vi.fn(async () => ({ count: 1 })) },
     changeLog: { create: vi.fn(async () => ({})) },
-    dealParty: { count: vi.fn(async () => 0), createMany: vi.fn(async () => ({ count: 1 })) },
     propertyOwner: { findMany: vi.fn(async () => []) },
+    dealParty: { findMany: vi.fn(async () => []), createMany: vi.fn(async () => ({ count: 0 })) },
     dealSettings: { findUnique: vi.fn(async () => null) },
     dealRateTable: { findMany: vi.fn(async () => []) },
     companyProfile: { findUnique: vi.fn(async () => null) },
@@ -30,8 +30,6 @@ type Fn = ReturnType<typeof vi.fn>;
 const pm = prismaMock as never as {
   deal: { findMany: Fn; count: Fn; findFirst: Fn; create: Fn };
   property: { findUnique: Fn; updateMany: Fn };
-  dealParty: { count: Fn; createMany: Fn };
-  propertyOwner: { findMany: Fn };
   changeLog: { create: Fn };
   $queryRaw: Fn;
   dealSettings: { findUnique: Fn };
@@ -76,6 +74,39 @@ describe("GET /api/deals", () => {
   });
   it("知らない状態は 422", async () => {
     expect((await LIST(new Request("http://x/api/deals?status=lease"))).status).toBe(422);
+  });
+});
+
+describe("POST /api/deals 物件から入れる項目", () => {
+  const db = pm as never as { propertyOwner: { findMany: Fn }; dealParty: { createMany: Fn } };
+  const ownerRow = { owner: { name: "試験 太郎", phone: "03-0", address: "東京都試験区1", currentAddress: null, corporateNumber: null, companyRegistryNumber: null } };
+
+  it("★所有者を売主に入れる(見られる人が作ったとき)・監査に氏名を出さない", async () => {
+    (getUserPermissions as Fn).mockResolvedValue([...DEAL_PERMS, { resource: "owner", action: "read", granted: true }, { resource: "owner_name", action: "full", granted: true }, { resource: "owner_address", action: "full", granted: true }]);
+    pm.property.findUnique.mockResolvedValue(propRow);
+    db.propertyOwner.findMany.mockResolvedValue([ownerRow]);
+    const res = await POST(json("POST", { businessType: "brokerage", propertyId: PROP_ID }));
+    expect(res.status).toBe(201);
+    const data = db.dealParty.createMany.mock.calls[0][0].data;
+    expect(data).toEqual([expect.objectContaining({ dealId: DEAL_ID, role: "seller", name: "試験 太郎", address: "東京都試験区1", sortOrder: 0 })]);
+    expect(JSON.stringify((writeAuditLog as Fn).mock.calls[0][0])).not.toContain("試験 太郎");
+  });
+
+  it("★所有者を読めない人が作ったときは入れない", async () => {
+    pm.property.findUnique.mockResolvedValue(propRow);
+    db.propertyOwner.findMany.mockResolvedValue([ownerRow]);
+    expect((await POST(json("POST", { businessType: "brokerage", propertyId: PROP_ID }))).status).toBe(201);
+    expect(db.dealParty.createMany).not.toHaveBeenCalled();
+  });
+
+  it("★区分は管理費・修繕積立金を精算へ入れる・無ければ入れない", async () => {
+    pm.property.findUnique.mockResolvedValue({ ...propRow, managementFee: 12000, repairReserveFee: 8000 });
+    await POST(json("POST", { businessType: "brokerage", propertyId: PROP_ID }));
+    expect(pm.deal.create.mock.calls[0][0].data.settlementTerms).toMatchObject({ managementFee: 12000, repairReserve: 8000, taxStart: "01-01" });
+    pm.deal.create.mockClear();
+    pm.property.findUnique.mockResolvedValue(propRow);
+    await POST(json("POST", { businessType: "brokerage", propertyId: PROP_ID }));
+    expect(pm.deal.create.mock.calls[0][0].data).not.toHaveProperty("settlementTerms");
   });
 });
 
@@ -181,46 +212,5 @@ describe("POST /api/deals — 案件ステータスとの連動", () => {
     expect(pm.deal.create.mock.calls[0][0].data.status).toBe("considering");
     expect(pm.$queryRaw).not.toHaveBeenCalled();
     expect(pm.property.updateMany).not.toHaveBeenCalled();
-  });
-});
-
-describe("物件から作るときの売主と管理費", () => {
-  const OWNER_PERMS = [
-    ...DEAL_PERMS,
-    { resource: "owner", action: "read", granted: true },
-    { resource: "owner_name", action: "full", granted: true },
-    { resource: "owner_address", action: "partial", granted: true },
-    { resource: "owner_phone", action: "full", granted: true },
-  ];
-  const owner = { isPrimary: true, owner: { name: "売主 太郎", address: "東京都", currentAddress: null, phone: "03-0000-0000", corporateNumber: null, companyRegistryNumber: null } };
-  const body = { businessType: "brokerage", propertyId: PROP_ID };
-  beforeEach(() => {
-    pm.property.findUnique.mockResolvedValue({ ...propRow, caseStatus: "negotiating", managementFee: 12000, repairReserveFee: 8000 });
-    pm.propertyOwner.findMany.mockResolvedValue([owner]);
-  });
-
-  it("所有者の氏名を見られる人なら売主に入れる。一部表示の住所は入れない。監査は件数だけ", async () => {
-    (getUserPermissions as Fn).mockResolvedValue(OWNER_PERMS);
-    expect((await POST(json("POST", body))).status).toBe(201);
-    const row = pm.dealParty.createMany.mock.calls[0][0].data[0];
-    expect(row).toMatchObject({ dealId: DEAL_ID, role: "seller", name: "売主 太郎", address: null, phone: "03-0000-0000" });
-    const audits = (writeAuditLog as Fn).mock.calls.map((c) => c[0]);
-    expect(audits).toContainEqual(expect.objectContaining({ action: "deal_party_create", detail: { count: 1 } }));
-    expect(JSON.stringify(audits)).not.toContain("売主 太郎");
-  });
-  it("所有者を見る権限がなければ、取引は作るが所有者を読まない", async () => {
-    expect((await POST(json("POST", body))).status).toBe(201);
-    expect(pm.propertyOwner.findMany).not.toHaveBeenCalled();
-    expect(pm.dealParty.createMany).not.toHaveBeenCalled();
-  });
-  it("物件の管理費・修繕積立金を精算の条件に入れる", async () => {
-    expect((await POST(json("POST", body))).status).toBe(201);
-    expect(pm.deal.create.mock.calls[0][0].data.settlementTerms).toMatchObject({ managementFee: 12000, repairReserve: 8000 });
-  });
-  it("手入力の物件の取引には売主も管理費も入れない", async () => {
-    (getUserPermissions as Fn).mockResolvedValue(OWNER_PERMS);
-    expect((await POST(json("POST", { businessType: "brokerage" }))).status).toBe(201);
-    expect(pm.dealParty.createMany).not.toHaveBeenCalled();
-    expect(pm.deal.create.mock.calls[0][0].data).not.toHaveProperty("settlementTerms");
   });
 });

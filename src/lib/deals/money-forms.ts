@@ -1,4 +1,3 @@
-import { brokerageFee, type BrokerageTiers } from "./calc/brokerage";
 import { yen } from "./calc/format";
 import type { OverrideKey, Overrides } from "./schemas";
 
@@ -12,16 +11,6 @@ export function parseYen(s: string): number | null {
 }
 
 export const yenText = (n: number | null) => (n === null ? "" : yen(n));
-
-/**
- * 手付金のボタンの値=仲介手数料の上限(税抜)。手で直した手数料は使わない。
- * 入力中の売買価格で出す。価格が読めない・0円・表がないときは null(押せない)。
- */
-export function depositFromBrokerageCap(priceText: string, tiers: BrokerageTiers | null, lowCostSpecial: boolean): string | null {
-  const price = parseYen(priceText);
-  if (!price || !tiers) return null;
-  return String(brokerageFee(price, tiers, { lowCostSpecial, taxRateBp: 0 }).excl);
-}
 
 /** 1/100 % の整数 → 画面の % の文字(1000 → "10"・850 → "8.5")。 */
 export const bpToPercentText = (bp: number) => String(bp / 100);

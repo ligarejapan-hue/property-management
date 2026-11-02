@@ -270,6 +270,7 @@ const ACTION_LABELS: Record<string, string> = {
   deal_update: "取引を更新",
   deal_property_refresh: "取引の物件を取り直し",
   deal_party_create: "取引の当事者を追加",
+  deal_party_from_owners: "物件の所有者を売主に追加",
   deal_party_update: "取引の当事者を更新",
   deal_party_delete: "取引の当事者を削除",
   deal_settings_update: "取引の設定を変更",

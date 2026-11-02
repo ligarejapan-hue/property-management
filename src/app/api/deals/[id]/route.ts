@@ -2,8 +2,7 @@ import { NextResponse } from "next/server";
 import { z } from "zod";
 import prisma from "@/lib/prisma";
 import { ApiError, handleApiError, parseJsonBody } from "@/lib/api-helpers";
-import { hasExplicitWritePerm, hasPermission } from "@/lib/permissions";
-import { sellerAccessOf } from "@/lib/deals/seller-from-owners";
+import { hasPermission } from "@/lib/permissions";
 import { writeAuditLog } from "@/lib/audit";
 import { recordChangesInTx } from "@/lib/change-log";
 import { canAccessPropertyRecord } from "@/lib/property-access";
@@ -39,11 +38,7 @@ export async function GET(_req: Request, ctx: Ctx) {
     const canChangeStatus = canChangeDealStatus(session, row, p);
     const canChangeAssignee = canChangeDealAssignee(session, row, p);
     const canMoveCaseStatus = !!p && hasPermission(perms, "property", "write") && canAccessPropertyRecord(session, p);
-    // 物件の所有者を売主に入れるボタン(所有者の氏名をそのまま見られる人だけ)。
-    const canFillSellers = canOpenProperty && hasPermission(perms, "deal", "write") && sellerAccessOf(perms).name;
-    // 横の欄の物件の編集で、問い合わせ者の欄を出すか(物件の画面と同じ条件)。
-    const canEditInquirer = hasPermission(perms, "owner", "read") && hasExplicitWritePerm(perms, "owner_name");
-    return NextResponse.json({ deal: toDealView(row), canOpenProperty, canChangeStatus, canChangeAssignee, canMoveCaseStatus, canFillSellers, canEditInquirer }, { headers: NO_STORE });
+    return NextResponse.json({ deal: toDealView(row), canOpenProperty, canChangeStatus, canChangeAssignee, canMoveCaseStatus }, { headers: NO_STORE });
   } catch (error) {
     return handleApiError(error);
   }

@@ -1,17 +1,30 @@
 import { PROPERTY_TYPE_LABELS } from "@/lib/property-types";
 import {
   EMPTY_BROKER, EMPTY_SNAPSHOT, counterpartyBrokerSchema, propertySnapshotSchema,
-  type CounterpartyBroker, type PropertySnapshot, type SettlementTerms,
+  type CounterpartyBroker, type PropertySnapshot,
 } from "./schemas";
-import { yenInt } from "./schema-parts";
 
 /** 写しに使う物件の列(+現地担当の範囲判定に使う createdBy/assignedTo)。 */
 export const SNAPSHOT_PROPERTY_SELECT = {
   propertyType: true, address: true, lotNumber: true, buildingNumber: true, buildingName: true, roomNo: true,
   exclusiveArea: true, totalFloorArea: true, landArea: true, structureType: true, builtYear: true, builtMonth: true,
-  access: true, layoutType: true, createdBy: true, assignedTo: true,
-  managementFee: true, repairReserveFee: true,
+  access: true, layoutType: true, createdBy: true, assignedTo: true, managementFee: true, repairReserveFee: true,
 } as const;
+
+/**
+ * 物件 → 精算の管理費・修繕積立金(2026-11-02 発注者「物件の情報から取得」)。
+ * ⚠区分だけ(精算の画面に欄があるのも区分だけ。ほかの種別に入れると事業計画書の月額に混ざる)。
+ * ⚠物件が空の項目は返さない=取引で手入れした額を空で消さない。
+ */
+export function settlementFeesFromProperty(p: {
+  propertyType: string; managementFee: number | null; repairReserveFee: number | null;
+}): { managementFee?: number; repairReserve?: number } {
+  if (p.propertyType !== "apartment_unit" && p.propertyType !== "unit") return {};
+  return {
+    ...(p.managementFee != null ? { managementFee: p.managementFee } : {}),
+    ...(p.repairReserveFee != null ? { repairReserve: p.repairReserveFee } : {}),
+  };
+}
 
 type Num = { toString(): string } | number | string | null;
 interface SnapshotSource {
@@ -39,19 +52,6 @@ export function buildSnapshotFromProperty(p: SnapshotSource): PropertySnapshot {
     floorArea: num(isUnit ? p.exclusiveArea : p.totalFloorArea), landArea: num(p.landArea), landRight: null,
     access: str(p.access), layout: str(p.layoutType),
   });
-}
-
-/**
- * 物件の管理費・修繕積立金を精算の条件に入れる。物件に値がない項目は今の値を残す。ほかの条件には触らない。
- * ⚠条件の決まりに合わない値は入れない(読むときに条件全部が初期値へ落ちるのを防ぐ)。
- * 棟には管理費の列がないので、見るのは物件の値だけ。
- */
-export function termsWithPropertyFees(
-  terms: SettlementTerms,
-  p: { managementFee: number | null; repairReserveFee: number | null },
-): SettlementTerms {
-  const fee = (v: number | null, current: number | null) => (yenInt.safeParse(v).success ? (v as number) : current);
-  return { ...terms, managementFee: fee(p.managementFee, terms.managementFee), repairReserve: fee(p.repairReserveFee, terms.repairReserve) };
 }
 
 type Parser = { safeParse(v: unknown): { success: boolean; data?: unknown } };
