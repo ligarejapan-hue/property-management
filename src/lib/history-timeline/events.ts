@@ -6,7 +6,7 @@ import { dmMethodLabel } from "@/lib/dm-method-labels";
 import { REACTION_LABELS } from "@/lib/dm-reaction/core";
 import { redactPropertyChangeValue } from "@/lib/inquirer-name";
 import type { OwnerMemoBodyVisibility } from "@/lib/owner-memo";
-import { maskValue } from "@/lib/permissions";
+import { isMaskFreeLevel, maskValue, type OwnerDisplayConfigShape } from "@/lib/permissions";
 import { CHANGE_FIELD_LABELS } from "@/lib/property-change-labels";
 import { propertyDetailHref } from "@/lib/property-detail-tab";
 import { CASE_STATUS_LABELS } from "@/lib/property-types";
@@ -131,11 +131,29 @@ export function nextActionCreatedEvent(r: { id: string; content: string; created
   });
 }
 
-/** 完了にした人は記録されていない=誰かは出さない。 */
-export function nextActionCompletedEvent(r: { id: string; content: string; completedAt: Date | null }, propertyId: string) {
+/** 完了にした人=監査ログから。見つからなければ出さない。 */
+export function nextActionCompletedEvent(r: { id: string; content: string; completedAt: Date | null }, propertyId: string, actor: string | null = null) {
   return event("next_action", `${r.id}:completed`, r.completedAt as Date, {
-    title: "次にやることを完了", detail: r.content, href: propertyDetailHref(propertyId, "actions"),
+    title: "次にやることを完了", actor, detail: r.content, href: propertyDetailHref(propertyId, "actions"),
   });
+}
+
+/** 操作の監査は保存のあとに書かれる。この幅に入る最初の記録をその操作とみなす。 */
+const AUDIT_AFTER_MS = 60_000;
+
+export interface AuditActor { createdAt: Date; user: Named | null }
+
+/**
+ * その時刻の操作をした人。見つからなければ null。
+ * ⚠完了の時刻より前の記録は見ない(完了→取り消し→別の人が完了、で前の人を出さない・@codex P2)。
+ * ⚠同じ項目をもう一度押した記録を拾わないよう、最初の1件だけ。
+ */
+export function actorOfAudit(at: Date, audits: readonly AuditActor[]): string | null {
+  const from = at.getTime();
+  const to = from + AUDIT_AFTER_MS;
+  const inRange = audits.filter((a) => a.createdAt.getTime() >= from && a.createdAt.getTime() <= to);
+  inRange.sort((a, b) => a.createdAt.getTime() - b.createdAt.getTime());
+  return inRange[0]?.user?.name ?? null;
 }
 
 const INVESTIGATION_LABELS: Record<string, string> = {
@@ -150,10 +168,16 @@ export function investigationEvent(r: { id: string; action: string; note: string
   });
 }
 
-/** 段取りの完了は行に「誰が」が無い=出さない。 */
-export function scheduleEvent(r: { id: string; label: string; completedAt: Date | null; autoCompleted: boolean }, deal: DealRef) {
+/** 段取りの完了。誰が=監査ログから(記録が無い過去の分は出さない)。 */
+export function scheduleEvent(r: { id: string; label: string; completedAt: Date | null; autoCompleted: boolean }, deal: DealRef, actor: string | null = null) {
   return event("schedule", r.id, r.completedAt as Date, {
-    title: `段取りを完了:${r.label}${r.autoCompleted ? "(自動)" : ""}`, ...dealFields(deal),
+    title: `段取りを完了:${r.label}${r.autoCompleted ? "(自動)" : ""}`, actor: r.autoCompleted ? null : actor, ...dealFields(deal),
+  });
+}
+
+export function scheduleUndoEvent(r: { id: string; createdAt: Date; user: Named | null }, label: string | null, deal: DealRef) {
+  return event("schedule", `${r.id}:undo`, r.createdAt, {
+    title: label ? `段取りの完了を取り消し:${label}` : "段取りの完了を取り消し", actor: r.user?.name ?? null, ...dealFields(deal),
   });
 }
 
@@ -179,11 +203,11 @@ export function docFileEvent(r: { id: string; createdAt: Date; request: { label:
   });
 }
 
-export function docReviewEvent(r: { id: string; label: string; status: string; rejectReason: string | null; reviewedAt: Date | null; reviewedBy: Named | null }, deal: DealRef, canManage: boolean) {
-  const rejected = r.status === "rejected";
-  return event("doc_review", r.id, r.reviewedAt as Date, {
-    title: `${rejected ? "差し戻し" : "受領"}:${r.label}`, actor: r.reviewedBy?.name ?? null,
-    detail: rejected && canManage ? r.rejectReason : null, ...dealFields(deal),
+export function docReviewEvent(r: { id: string; action: string; reason: string | null; createdAt: Date; reviewedBy: Named | null; request: { label: string } }, deal: DealRef, canManage: boolean) {
+  const rejected = r.action === "rejected";
+  return event("doc_review", r.id, r.createdAt, {
+    title: `${rejected ? "差し戻し" : "受領"}:${r.request.label}`, actor: r.reviewedBy?.name ?? null,
+    detail: rejected && canManage ? r.reason : null, ...dealFields(deal),
   });
 }
 
@@ -209,8 +233,18 @@ const DEAL_FIELD_LABELS: Record<string, string> = {
   settlementAt: "決済日", settlementPlace: "決済場所", price: "売買価格", deposit: "手付金", taxRateBp: "消費税率",
 };
 const TABLE_LABELS: Record<string, string> = {
-  properties: "物件の情報", buildings: "棟の情報", property_owners: "所有者とのつながり", deals: "取引の情報",
+  properties: "物件の情報", buildings: "棟の情報", property_owners: "所有者とのつながり", deals: "取引の情報", owners: "所有者の情報",
 };
+/** 所有者本体の変更履歴に出す項目と、見せ方を決める表示レベル。⚠ここに無い項目は出さない。 */
+const OWNER_CHANGE_FIELDS: Record<string, { label: string; level: keyof OwnerDisplayConfigShape }> = {
+  name: { label: "氏名", level: "name" }, nameKana: { label: "フリガナ", level: "nameKana" }, phone: { label: "電話番号", level: "phone" },
+  zip: { label: "登記上の郵便番号", level: "zip" }, address: { label: "登記上の住所", level: "address" },
+  currentZip: { label: "現住所の郵便番号", level: "zip" }, currentAddress: { label: "現住所", level: "address" },
+  note: { label: "備考", level: "note" }, email: { label: "メール", level: "email" },
+  corporateNumber: { label: "法人番号", level: "corporateNumber" }, companyRegistryNumber: { label: "会社法人等番号", level: "corporateNumber" },
+};
+/** つながりを解除した印。⚠値は所有者の ID なので出さない。 */
+const OWNER_UNLINK_FIELDS = new Set(["_unlinked_from_property", "_deleted_via_mislink_correction", "_deleted_via_merge"]);
 /** 値が人の ID の項目(名前に直す)。それ以外の ID の値は出さない。 */
 const USER_VALUE_FIELDS = new Set(["assignedTo", "assigneeId", "licensedAgentId", "salesStaffId", "opsStaffId"]);
 const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
@@ -227,6 +261,7 @@ export interface ChangeContext {
   userNames: ReadonlyMap<string, string>;
   inquirerLevel: string | null;
   ownerNote: OwnerMemoBodyVisibility;
+  ownerLevels: OwnerDisplayConfigShape;
 }
 
 /** 名前に直す人の ID(値は変更履歴に残っている)。 */
@@ -237,6 +272,7 @@ export function userIdsInChanges(rows: readonly ChangeRow[]): string[] {
 
 function fieldLabel(row: ChangeRow): string {
   if (row.targetTable === "deals") return DEAL_FIELD_LABELS[row.fieldName] ?? row.fieldName;
+  if (row.targetTable === "owners") return OWNER_CHANGE_FIELDS[row.fieldName]?.label ?? row.fieldName;
   return CHANGE_FIELD_LABELS[row.fieldName] ?? row.fieldName;
 }
 
@@ -262,6 +298,14 @@ function visibleRow(row: ChangeRow, ctx: ChangeContext): { row: ChangeRow; hideV
       hideValues: false,
     };
   }
+  // 所有者本体: 項目ごとの表示レベルで、そのまま見られる人にだけ値を出す。非表示なら行を出さない。
+  if (row.targetTable === "owners") {
+    const field = OWNER_CHANGE_FIELDS[row.fieldName];
+    if (!field) return null;
+    const level = ctx.ownerLevels[field.level];
+    if (level === "hidden") return null;
+    return isMaskFreeLevel(level) ? { row, hideValues: false } : { row: { ...row, oldValue: null, newValue: null }, hideValues: true };
+  }
   // ⚠つながりの備考は自由記述の生値。経緯では owner_note のレベルでも絞る(発注者決定 2026-11-02)。
   if (row.targetTable === "property_owners" && row.fieldName === "note") {
     if (ctx.ownerNote === "hidden") return null;
@@ -283,7 +327,13 @@ export function changeEvents(rows: readonly ChangeRow[], ctx: ChangeContext): { 
     else groups.set(key, [row]);
   }
   const events: TimelineEvent[] = [];
+  const ownerTabHref = ctx.propertyId ? propertyDetailHref(ctx.propertyId, "owner") : null;
   for (const group of groups.values()) {
+    const unlink = group.find((r) => OWNER_UNLINK_FIELDS.has(r.fieldName));
+    if (unlink) {
+      events.push(event("owner_change", unlink.id, unlink.changedAt, { title: "所有者の紐づけを解除", actor: unlink.changer.name, href: ownerTabHref }));
+      continue;
+    }
     const visible = group.flatMap((r) => visibleRow(r, ctx) ?? []);
     if (visible.length === 0) continue;
     const first = visible[0].row;
@@ -296,11 +346,12 @@ export function changeEvents(rows: readonly ChangeRow[], ctx: ChangeContext): { 
       ? change(visible[0])
       : visible.map((v, i) => { const c = change(v); return c ? `${labels[i]}:${c}` : labels[i]; }).join("\n");
     const deal = first.targetTable === "deals" ? ctx.dealsById.get(first.targetId) : undefined;
-    events.push(event(first.targetTable === "property_owners" ? "owner_change" : "change", first.id, first.changedAt, {
-      title: single ? `${labels[0]}を変更` : `${table}を変更(${shown})`,
+    const ofOwner = first.targetTable === "owners";
+    events.push(event(first.targetTable === "property_owners" || ofOwner ? "owner_change" : "change", first.id, first.changedAt, {
+      title: single ? `${ofOwner ? "所有者の" : ""}${labels[0]}を変更` : `${table}を変更(${shown})`,
       // 自動の切り替えは、記録上の人が手で変えたように見せない(変更履歴タブと同じ)。
       actor: first.source === "auto" ? "自動" : first.changer.name, detail,
-      ...(deal ? dealFields(deal) : { href: ctx.propertyId ? propertyDetailHref(ctx.propertyId, "history") : null }),
+      ...(deal ? dealFields(deal) : { href: ofOwner ? ownerTabHref : ctx.propertyId ? propertyDetailHref(ctx.propertyId, "history") : null }),
     }));
   }
   return { events };

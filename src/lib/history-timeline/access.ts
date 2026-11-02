@@ -1,6 +1,6 @@
 import type { PermissionEntry } from "@/lib/api-helpers";
 import { resolveOwnerMemoBodyVisibility, type OwnerMemoBodyVisibility } from "@/lib/owner-memo";
-import { hasPermission, resolveOwnerDisplayConfig } from "@/lib/permissions";
+import { hasPermission, resolveOwnerDisplayConfig, type OwnerDisplayConfigShape } from "@/lib/permissions";
 import { canAccessPropertyRecord, type PropertyAccessRecord } from "@/lib/property-access";
 
 export interface TimelineAccess {
@@ -10,6 +10,8 @@ export interface TimelineAccess {
   ownerLinks: boolean;
   /** つながりの備考の値の見せ方(owner_note のレベル)。 */
   ownerNote: OwnerMemoBodyVisibility;
+  /** 所有者本体の変更履歴の、項目ごとの表示レベル。 */
+  ownerLevels: OwnerDisplayConfigShape;
   /** 所有者メモの見せ方。hidden=読まない。 */
   memo: OwnerMemoBodyVisibility;
   /** DM の記録(元の画面=property:read+owner:read)。 */
@@ -43,6 +45,7 @@ export function timelineAccess(
     property: propertyOk,
     ownerLinks: propertyOk && ownerRead,
     ownerNote: noteVisibility,
+    ownerLevels: config,
     memo: propertyOk && ownerRead ? noteVisibility : "hidden",
     dm: propertyOk && ownerRead,
     noteLevel: config.note,
