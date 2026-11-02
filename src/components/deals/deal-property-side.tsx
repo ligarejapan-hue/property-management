@@ -58,12 +58,13 @@ export function DealOwnerSideBody({ state }: { state: LoadState }) {
 /**
  * 取引の画面の横に並べる物件の情報。広い画面は右に並び、狭い画面は上に重なる。
  * 当事者タブでは所有者を出す。編集できる人には基本情報の編集を出す(鍵・下書きは物件の画面と同じ部品)。
- * key に取引の状態を入れて開き直す=連動で変わった案件ステータスを読み直す。
+ * revision(取引の状態)が変わったら読み直す=連動で変わった案件ステータスを出す。編集中の入力は作り直さない。
  */
 export default function DealPropertySide({
-  propertyId, view = "property", canEdit = false, onEditingChange, onClose,
+  propertyId, revision, view = "property", canEdit = false, onEditingChange, onClose,
 }: {
   propertyId: string;
+  revision?: string;
   view?: "property" | "owners";
   canEdit?: boolean;
   onEditingChange?: (editing: boolean) => void;
@@ -83,9 +84,10 @@ export default function DealPropertySide({
     let alive = true;
     load()
       .then((property) => { if (alive) setState({ kind: "ok", property }); })
-      .catch(() => { if (alive) setState({ kind: "error" }); });
+      // 読み直しの失敗で、編集中の入力を消さない。
+      .catch(() => { if (alive) setState((s) => (s.kind === "ok" ? s : { kind: "error" })); });
     return () => { alive = false; };
-  }, [load]);
+  }, [load, revision]);
 
   const changeEditing = (next: boolean) => {
     setEditing(next);

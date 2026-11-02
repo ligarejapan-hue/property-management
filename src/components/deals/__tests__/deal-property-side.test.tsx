@@ -43,7 +43,15 @@ describe("取引の詳しい画面", () => {
     expect(src).toMatch(/<div className=\{sideOpen \?/);
   });
   it("連動で変わる案件ステータスを、取引の状態が変わったら読み直す", () => {
-    expect(src).toMatch(/key=\{`\$\{propertyId\}:\$\{deal\.status\}`\}/);
+    expect(src).toMatch(/revision=\{deal\.status\}/);
+    // key に状態を入れると、編集中の入力ごと作り直してしまう。
+    expect(src).toMatch(/key=\{propertyId\}/);
+  });
+  it("当事者タブでは所有者を自動で横に出す・閉じたら開き直さない", () => {
+    expect(src).toMatch(/tab === "parties" && !partiesSideClosed/);
+  });
+  it("編集中は開閉のボタンを止める", () => {
+    expect(src).toMatch(/disabled=\{sideEditing\}/);
   });
 });
 
