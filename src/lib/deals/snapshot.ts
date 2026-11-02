@@ -8,8 +8,23 @@ import {
 export const SNAPSHOT_PROPERTY_SELECT = {
   propertyType: true, address: true, lotNumber: true, buildingNumber: true, buildingName: true, roomNo: true,
   exclusiveArea: true, totalFloorArea: true, landArea: true, structureType: true, builtYear: true, builtMonth: true,
-  access: true, layoutType: true, createdBy: true, assignedTo: true,
+  access: true, layoutType: true, createdBy: true, assignedTo: true, managementFee: true, repairReserveFee: true,
 } as const;
+
+/**
+ * 物件 → 精算の管理費・修繕積立金(2026-11-02 発注者「物件の情報から取得」)。
+ * ⚠区分だけ(精算の画面に欄があるのも区分だけ。ほかの種別に入れると事業計画書の月額に混ざる)。
+ * ⚠物件が空の項目は返さない=取引で手入れした額を空で消さない。
+ */
+export function settlementFeesFromProperty(p: {
+  propertyType: string; managementFee: number | null; repairReserveFee: number | null;
+}): { managementFee?: number; repairReserve?: number } {
+  if (p.propertyType !== "apartment_unit" && p.propertyType !== "unit") return {};
+  return {
+    ...(p.managementFee != null ? { managementFee: p.managementFee } : {}),
+    ...(p.repairReserveFee != null ? { repairReserve: p.repairReserveFee } : {}),
+  };
+}
 
 type Num = { toString(): string } | number | string | null;
 interface SnapshotSource {

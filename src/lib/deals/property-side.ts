@@ -34,7 +34,41 @@ export type PropertySideSource = {
   note?: string | null;
   /** 棟につながる部屋の構造・築年月は棟の値が正(物件の編集画面と同じ)。 */
   building?: { structureType?: string | null; builtYear?: number | null; builtMonth?: number | null } | null;
+  propertyOwners?: OwnerSideSource[];
 };
+
+/** 所有者。⚠API が権限で伏せた値のまま出す。所有者を読めない人には id しか届かない。 */
+export type OwnerSideSource = {
+  isPrimary?: boolean;
+  owner: {
+    id: string;
+    name?: string | null;
+    nameKana?: string | null;
+    phone?: string | null;
+    email?: string | null;
+    zip?: string | null;
+    address?: string | null;
+    currentZip?: string | null;
+    currentAddress?: string | null;
+  };
+};
+
+const withZip = (zip: string | null | undefined, address: string | null | undefined) =>
+  address ? (zip ? `〒${zip} ${address}` : address) : null;
+
+/** 所有者1人の行。値が無い行は出さない。 */
+export function ownerSideRows(po: OwnerSideSource): { label: string; value: string }[] {
+  const o = po.owner;
+  const rows: [string, string | null][] = [
+    ["氏名・名称", o.name || null],
+    ["フリガナ", o.nameKana || null],
+    ["登記上の住所", withZip(o.zip, o.address)],
+    ["現住所", withZip(o.currentZip, o.currentAddress)],
+    ["電話", o.phone || null],
+    ["メール", o.email || null],
+  ];
+  return rows.flatMap(([l, value]) => (value ? [{ label: l, value }] : []));
+}
 
 const area = (v: number | null | undefined) => (v == null ? null : `${v}㎡`);
 const yen = (v: number | null | undefined, suffix = "") => (v == null ? null : `${Number(v).toLocaleString("ja-JP")}円${suffix}`);

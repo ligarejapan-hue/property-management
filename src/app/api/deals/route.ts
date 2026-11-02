@@ -6,13 +6,14 @@ import { hasPermission } from "@/lib/permissions";
 import { writeAuditLog } from "@/lib/audit";
 import { canAccessPropertyRecord } from "@/lib/property-access";
 import { requireDeal } from "@/lib/deals/guard";
-import { dealCreateSchema, EMPTY_SNAPSHOT } from "@/lib/deals/schemas";
+import { DEFAULT_TERMS, dealCreateSchema, EMPTY_SNAPSHOT, type SettlementTerms } from "@/lib/deals/schemas";
 import { DEAL_BUSINESS_TYPES, DEAL_STATUSES, type DealStatus } from "@/lib/deals/constants";
 import { initialDealStatusForCase, syncCaseStatusFromDeals } from "@/lib/deals/status-link";
 import { lockPropertyRow } from "@/lib/property-record-guard";
 import { jstYear, nextDealNo } from "@/lib/deals/deal-no";
 import { jstDateString } from "@/lib/deals/datetime";
-import { buildSnapshotFromProperty, SNAPSHOT_PROPERTY_SELECT } from "@/lib/deals/snapshot";
+import { buildSnapshotFromProperty, settlementFeesFromProperty, SNAPSHOT_PROPERTY_SELECT } from "@/lib/deals/snapshot";
+import { addSellersFromOwners, sellerAccessOf } from "@/lib/deals/seller-from-owners";
 import { propertyKindFromPropertyType } from "@/lib/deals/property-kind";
 import { loadDealSettings } from "@/lib/deals/settings-store";
 import { isKnownPropertyKind } from "@/lib/deals/settings";
@@ -83,6 +84,7 @@ export async function POST(request: Request) {
 
     let snapshot = body.propertySnapshot ?? EMPTY_SNAPSHOT;
     let propertyKind = body.propertyKind ?? null;
+    let settlementTerms: SettlementTerms | undefined;
     if (body.propertyId) {
       if (!hasPermission(perms, "property", "read")) {
         throw new ApiError(403, "物件を見る権限がありません", "FORBIDDEN");
@@ -94,6 +96,8 @@ export async function POST(request: Request) {
       }
       snapshot = buildSnapshotFromProperty(p);
       propertyKind = propertyKind ?? propertyKindFromPropertyType(p.propertyType);
+      const fees = settlementFeesFromProperty(p);
+      if (Object.keys(fees).length > 0) settlementTerms = { ...DEFAULT_TERMS, ...fees };
     }
 
     const settings = await loadDealSettings();
@@ -135,9 +139,12 @@ export async function POST(request: Request) {
               tradeSide: normalizeTradeSide(body.businessType, body.tradeSide),
               propertyId, propertyKind, hasOc: body.hasOc ?? false,
               propertySnapshot: snapshot, taxRateBp, createdById: session.id,
+              ...(settlementTerms ? { settlementTerms } : {}),
             },
             select: { id: true, dealNo: true },
           });
+          // 売主は物件の今の所有者。違う場合は当事者タブで手で直す。
+          if (propertyId) await addSellersFromOwners(tx, { dealId: row.id, propertyId, access: sellerAccessOf(perms) });
           if (propertyId && canMoveCase) await syncCaseStatusFromDeals(tx, { propertyId, changedBy: session.id });
           return row;
         });

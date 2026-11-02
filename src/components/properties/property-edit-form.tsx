@@ -124,6 +124,8 @@ interface PropertyEditFormProps {
   onClose: () => void;
   /** 保存できたら呼ぶ。棟へつないだ結果(buildingLink)があれば渡す(物件詳細の上に知らせを出す)。 */
   onSaved: (result?: { buildingLink?: BuildingLinkOutcome | null }) => void;
+  /** 小窓にせず、置かれた場所に並べる(取引の画面の横)。 */
+  embedded?: boolean;
 }
 
 interface FormField {
@@ -429,6 +431,7 @@ export default function PropertyEditForm({
   canEditInquirer = false,
   onClose,
   onSaved,
+  embedded = false,
 }: PropertyEditFormProps) {
   // 作業中の入力の控え(設計書 2026-10-13 §2 S5)。変えた欄だけ+基にした版番号。
   // ⚠版が違えば重ねない(mergeDraftIntoInitial)=ほかの人の保存を古い入力で上書きしない。
@@ -731,9 +734,9 @@ export default function PropertyEditForm({
   const sections = [...new Set(allFields.map((f) => f.section))];
 
   return (
-    <div className="fixed inset-0 z-50 flex items-start justify-center overflow-y-auto bg-black/50 py-8">
+    <div className={embedded ? "" : "fixed inset-0 z-50 flex items-start justify-center overflow-y-auto bg-black/50 py-8"}>
       <div
-        className="mx-4 w-full max-w-3xl rounded-lg bg-white dark:bg-gray-900 shadow-xl"
+        className={embedded ? "w-full bg-white dark:bg-gray-900" : "mx-4 w-full max-w-3xl rounded-lg bg-white dark:bg-gray-900 shadow-xl"}
         onClick={(e) => e.stopPropagation()}
         // ⚠入力・キー・ポインタの一番外側でnoteActivityを呼ぶ(期限切れの取り直しの
         //   引き金・仕様6.2)。帯の文字の選択・コピー自体はブロックしない(bubbling
@@ -758,7 +761,7 @@ export default function PropertyEditForm({
         </div>
 
         {/* Body */}
-        <div className="max-h-[70vh] overflow-y-auto px-6 py-4">
+        <div className={embedded ? "py-4" : "max-h-[70vh] overflow-y-auto px-6 py-4"}>
           {/* ⚠(task5 review round1 Critical — fail open) 鍵が取れなくても保存は
               通常どおり行える、という別の通知。lock.state は idle のまま(新しい
               state kindは増やさない)なので、EditLockBanner とは別に出す。
