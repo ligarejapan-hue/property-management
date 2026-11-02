@@ -1,3 +1,4 @@
+import { containsVariants } from "@/lib/notation";
 import { NextRequest } from "next/server";
 import prisma from "@/lib/prisma";
 import {
@@ -49,7 +50,7 @@ export async function GET(request: NextRequest) {
     if (keyword) {
       const or: object[] = [];
       if (searchable(displayConfig.name)) {
-        or.push({ name: { contains: keyword, mode: "insensitive" } });
+        or.push(...containsVariants("name", keyword, "insensitive"));
       }
       if (searchable(displayConfig.nameKana)) {
         or.push({ nameKana: { contains: keyword, mode: "insensitive" } });
@@ -64,9 +65,9 @@ export async function GET(request: NextRequest) {
         }
       }
       if (searchable(displayConfig.address)) {
-        or.push({ address: { contains: keyword, mode: "insensitive" } });
+        or.push(...containsVariants("address", keyword, "insensitive"));
         // ⚠現住所も同じ規則で検索対象にする（登記上と現住所で扱いを変えない）。
-        or.push({ currentAddress: { contains: keyword, mode: "insensitive" } });
+        or.push(...containsVariants("currentAddress", keyword, "insensitive"));
       }
       // 検索できる項目が1つも無ければ、DB を引かずに空で返す（無駄クエリも避ける）。
       if (or.length === 0) {

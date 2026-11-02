@@ -20,6 +20,11 @@ describe("rename", () => {
     expect(isBuildingRename("A", undefined)).toBe(false);
     expect(isBuildingRename("A", "B")).toBe(true);
   });
+  it("★数字が全角の名前は、そのまま保存しても半角に変わるので名前の変更として扱う(部屋にも反映する)", () => {
+    expect(isBuildingRename("第１ビル", "第１ビル")).toBe(true);
+    expect(isBuildingRename("第1ビル", "第１ビル")).toBe(false);
+    expect(renamePropagateConfirmMessage("第１ビル", "第１ビル", 2)).toBe("部屋2件の物件名も「第1ビル」に直します。よろしいですか？");
+  });
   it("保存済みの名前に余白があれば、余白を落とした保存は名前の変更として扱う(部屋にも反映する)", () => {
     expect(isBuildingRename(" A ", "A")).toBe(true);
     expect(isBuildingRename(" A ", " A ")).toBe(true);

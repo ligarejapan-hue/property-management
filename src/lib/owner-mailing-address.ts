@@ -22,6 +22,7 @@
  * このモジュールが持つ。`dm-export.ts` は互換のため再エクスポートするが、
  * 定義元はここ（dm-export がこの関数を使うため、逆向きに import すると循環する）。
  */
+import { toHalfWidthDigits } from "@/lib/registry-fetch/chiban-input";
 
 /**
  * グルーピング用に郵便番号を正規化する（比較専用・出力には使わない）。
@@ -35,6 +36,7 @@ export function normalizeZipForGroup(zip: string | null | undefined): string {
 
 /**
  * グルーピング用に住所を正規化する（比較専用）。
+ *  - 全角の数字を半角へ（全角と半角が混ざるあいだ、同じ住所を2通にしない）
  *  - trim / 連続する空白（半角・全角・タブ・改行）を 1 つの半角空白へ畳む
  * 空文字（実質「住所なし」）の場合は "" を返す。
  */
@@ -42,7 +44,7 @@ export function normalizeAddressForGroup(
   address: string | null | undefined,
 ): string {
   if (typeof address !== "string") return "";
-  return address.replace(/[\s　]+/g, " ").trim();
+  return toHalfWidthDigits(address).replace(/[\s　]+/g, " ").trim();
 }
 
 /** 送付に使う宛先。`source` は表示・判定用（この PR では保存しない）。 */

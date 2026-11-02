@@ -1,3 +1,4 @@
+import { containsVariants, searchVariants } from "@/lib/notation";
 import { NextResponse } from "next/server";
 import { z } from "zod";
 import prisma from "@/lib/prisma";
@@ -47,10 +48,10 @@ export async function GET(request: Request) {
       ...(query.q
         ? {
             OR: [
-              { name: { contains: query.q, mode: "insensitive" as const } },
+              ...containsVariants("name", query.q, "insensitive"),
               { dealNo: { contains: query.q } },
-              { propertySnapshot: { path: ["buildingName"], string_contains: query.q, mode: "insensitive" as const } },
-              { propertySnapshot: { path: ["address"], string_contains: query.q, mode: "insensitive" as const } },
+              ...searchVariants(query.q).map((v) => ({ propertySnapshot: { path: ["buildingName"], string_contains: v, mode: "insensitive" as const } })),
+              ...searchVariants(query.q).map((v) => ({ propertySnapshot: { path: ["address"], string_contains: v, mode: "insensitive" as const } })),
             ],
           }
         : {}),

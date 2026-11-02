@@ -232,6 +232,8 @@ describe("回収の入口(画面)", () => {
     // 条件付き更新が0件のときは必ず 409 で返す(黙って成功にしない)。
     expect(patch).toContain("if (guardedUpdate.count === 0) {");
     expect(patch).toContain("REGISTRY_FETCH_IN_PROGRESS");
+    // 全角のまま送っても保存で半角に変わる=鍵が変わるので、保存される形で比べる(@codex)。
+    expect(patch).toContain('savedTextValue("property", f, String(next ?? ""))');
     expect(patch).toContain('"realEstateNumber",');
   });
 

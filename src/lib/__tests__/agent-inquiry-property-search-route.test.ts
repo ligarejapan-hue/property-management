@@ -49,6 +49,17 @@ describe("受付の窓の物件検索", () => {
     const addressVariants = or.filter((c) => c.address).map((c) => c.address!.contains).sort();
     expect(addressVariants).toEqual(["本町3", "本町３"].sort());
   });
+  it("★全角英字・半角カナの候補を残し、ケ・ヶも同じ扱いにする(@codex)", async () => {
+    const contains = async (q: string) => {
+      pm.property.findMany.mockClear();
+      await SEARCH(url(q));
+      const or = whereOf().AND[0].OR as { address?: { contains: string } }[];
+      return or.filter((c) => c.address).map((c) => c.address!.contains);
+    };
+    expect(await contains("ＡＢＣ")).toContain("ABC");
+    expect(await contains("ｻﾝﾊｲﾂ")).toContain("サンハイツ");
+    expect(await contains("井土ヶ谷")).toContain("井土ケ谷");
+  });
   it("空白区切りは語ごとに AND", async () => {
     await SEARCH(url("サンライズ　305"));
     expect(whereOf().AND).toHaveLength(2);

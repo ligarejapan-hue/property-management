@@ -1,3 +1,4 @@
+import { toHalfWidthDigits } from "@/lib/registry-fetch/chiban-input";
 import { PROPERTY_TYPE_LABELS } from "@/lib/property-types";
 import {
   EMPTY_BROKER, EMPTY_SNAPSHOT, counterpartyBrokerSchema, propertySnapshotSchema,
@@ -39,6 +40,8 @@ const num = (v: Num): number | null => {
   return Number.isFinite(n) ? n : null;
 };
 const str = (v: string | null) => (v && v.trim() ? v.trim() : null);
+/** 住所・番号の数字は半角で写す(発注者「数字を半角で統一」)。 */
+const strHalf = (v: string | null) => { const s = str(v); return s && toHalfWidthDigits(s); };
 
 /** 物件 → 写し。住居表示の専用欄は無いので住所を当てる(設計 §1)。土地の権利は物件に無い=空。 */
 export function buildSnapshotFromProperty(p: SnapshotSource): PropertySnapshot {
@@ -46,8 +49,8 @@ export function buildSnapshotFromProperty(p: SnapshotSource): PropertySnapshot {
   // 写しの範囲を外れた値(和暦の年・長すぎる交通 など)は、ここで空にする。保存したあとに
   // readSnapshot で読めず、画面で空に見えて次の保存で消える、を防ぐ(保存したものは必ず読める)。
   return readSnapshot({
-    buildingName: str(p.buildingName), roomNo: str(p.roomNo), address: str(p.address), lotNumber: str(p.lotNumber),
-    buildingNumber: str(p.buildingNumber), propertyTypeLabel: PROPERTY_TYPE_LABELS[p.propertyType] ?? null,
+    buildingName: strHalf(p.buildingName), roomNo: strHalf(p.roomNo), address: strHalf(p.address), lotNumber: strHalf(p.lotNumber),
+    buildingNumber: strHalf(p.buildingNumber), propertyTypeLabel: PROPERTY_TYPE_LABELS[p.propertyType] ?? null,
     structure: str(p.structureType), builtYear: p.builtYear, builtMonth: p.builtMonth,
     floorArea: num(isUnit ? p.exclusiveArea : p.totalFloorArea), landArea: num(p.landArea), landRight: null,
     access: str(p.access), layout: str(p.layoutType),

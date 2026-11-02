@@ -1,3 +1,4 @@
+import { containsVariants } from "@/lib/notation";
 import { NextRequest } from "next/server";
 import prisma from "@/lib/prisma";
 import {
@@ -54,13 +55,13 @@ export async function POST(request: NextRequest) {
     const ownerSearchConditions: object[] = [];
     if (hasOwnerRead && displayConfig) {
       if (SEARCHABLE_LEVELS.has(displayConfig.name)) {
-        ownerSearchConditions.push({ name: { contains: q, mode: "insensitive" } });
+        ownerSearchConditions.push(...containsVariants("name", q, "insensitive"));
       }
       if (SEARCHABLE_LEVELS.has(displayConfig.address)) {
-        ownerSearchConditions.push({ address: { contains: q, mode: "insensitive" } });
+        ownerSearchConditions.push(...containsVariants("address", q, "insensitive"));
         // ⚠現住所も同じ規則で検索対象にする(生値のときだけ)。
         //   入口ごとに足し忘れると「現住所で探せない画面」が残る。
-        ownerSearchConditions.push({ currentAddress: { contains: q, mode: "insensitive" } });
+        ownerSearchConditions.push(...containsVariants("currentAddress", q, "insensitive"));
       }
       if (SEARCHABLE_LEVELS.has(displayConfig.zip)) {
         ownerSearchConditions.push({ zip: { contains: q } });
@@ -112,10 +113,10 @@ export async function POST(request: NextRequest) {
           ...fieldStaffScope,
           {
             OR: [
-              { address: { contains: q, mode: "insensitive" } },
-              { lotNumber: { contains: q, mode: "insensitive" } },
+              ...containsVariants("address", q, "insensitive"),
+              ...containsVariants("lotNumber", q, "insensitive"),
               { realEstateNumber: { contains: q, mode: "insensitive" } },
-              { buildingNumber: { contains: q, mode: "insensitive" } },
+              ...containsVariants("buildingNumber", q, "insensitive"),
               ...ownerOrCondition,
               ...mgmtOrCondition,
             ],

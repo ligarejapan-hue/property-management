@@ -1,3 +1,4 @@
+import { savedTextValue } from "@/lib/notation";
 import { NextRequest } from "next/server";
 import prisma from "@/lib/prisma";
 import {
@@ -359,7 +360,7 @@ export async function PATCH(
     const touchesRegistryKey = REGISTRY_KEY_FIELDS.some((f) => {
       if (!(f in updateFields)) return false;
       const next = (updateFields as Record<string, unknown>)[f];
-      return String(next ?? "").trim() !== String(current[f] ?? "").trim();
+      return savedTextValue("property", f, String(next ?? "")).trim() !== String(current[f] ?? "").trim();
     });
     if (touchesRegistryKey && current.registryStatus === "scheduled") {
       throw new ApiError(
@@ -478,7 +479,7 @@ export async function PATCH(
         : oldVal != null ? String(oldVal) : null;
       const newStr = isDateOnly
         ? dateOnlyString(newVal as Date | null)
-        : newVal != null ? String(newVal) : null;
+        : newVal != null ? savedTextValue("property", key, String(newVal)) : null;
       if (oldStr !== newStr) {
         changeLogs.push({
           targetTable: "properties",

@@ -1,3 +1,4 @@
+import { containsVariants } from "@/lib/notation";
 import { NextRequest } from "next/server";
 import prisma from "@/lib/prisma";
 import type { Prisma } from "@/generated/prisma";
@@ -64,7 +65,7 @@ export async function GET(request: NextRequest) {
     const catalogQuery = Promise.all([
       target.areaKey === null ? Promise.resolve([]) : catalogRead({ nameKey, areaKey: target.areaKey }),
       catalogRead({ nameKey }),
-      catalogRead({ OR: [{ nameKey: { contains: nameKey } }, { name: { contains: name, mode: "insensitive" } }] }),
+      catalogRead({ OR: [{ nameKey: { contains: nameKey } }, ...containsVariants("name", name, "insensitive"),] }),
     ]).then((groups) => {
       const seenCatalog = new Set<string>();
       return groups.flat().filter((c) => !seenCatalog.has(c.id) && seenCatalog.add(c.id));
@@ -82,7 +83,7 @@ export async function GET(request: NextRequest) {
           OR: [
             { nameKey },
             { nameKey: { contains: nameKey } },
-            { name: { contains: name, mode: "insensitive" } },
+            ...containsVariants("name", name, "insensitive"),
           ],
         },
         select,
