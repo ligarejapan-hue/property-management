@@ -218,9 +218,22 @@ describe("並び順と上限", () => {
     expect(r.nextBefore).toBe(t);
   });
 
-  it("読み切れなかった出どころがあれば、上限以下でも続きがあると返す", () => {
-    const r = mergeTimeline([ev("a", "2026-01-01T00:00:00.000Z")], 10, true);
-    expect(r.nextBefore).toBe("2026-01-01T00:00:00.000Z");
+  it("読み切っていない時刻より古い行は出さず、その時刻から続きを読む", () => {
+    const floor = "2026-02-01T00:00:00.000Z";
+    const r = mergeTimeline([ev("new", "2026-03-01T00:00:00.000Z"), ev("edge", floor), ev("old", "2026-01-01T00:00:00.000Z")], 10, floor);
+    expect(r.events.map((e) => e.id)).toEqual(["new", "edge"]);
+    expect(r.nextBefore).toBe(floor);
+  });
+
+  it("上限で切れるなら、読み切っていない時刻より手前の行から続きを読む", () => {
+    const floor = "2026-01-01T00:00:00.000Z";
+    const r = mergeTimeline([ev("a", "2026-03-01T00:00:00.000Z"), ev("b", "2026-02-01T00:00:00.000Z"), ev("c", floor)], 2, floor);
+    expect(r.nextBefore).toBe("2026-02-01T00:00:00.000Z");
+  });
+
+  it("見える行が1つも無くても、読み切っていない時刻から先へ進める", () => {
+    const floor = "2026-01-01T00:00:00.000Z";
+    expect(mergeTimeline([], 10, floor)).toEqual({ events: [], nextBefore: floor });
   });
 });
 

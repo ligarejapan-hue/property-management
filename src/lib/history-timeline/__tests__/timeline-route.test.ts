@@ -178,6 +178,20 @@ describe("読む上限の境目", () => {
     expect(body.events.map((e: { title: string }) => e.title)).toContain("売主の提出用リンクを無効化");
   });
 
+  it("変更履歴を読み切っていなければ、ほかの出どころがその時刻を追い越さない", async () => {
+    // 300行の変更が少ない行にまとまり、古いコメントが追い越す形。
+    const floorAt = new Date("2026-10-10T00:00:00Z");
+    const rows = Array.from({ length: 300 }, (_, i) => ({
+      id: `c${i}`, targetTable: "properties", targetId: PID, fieldName: "address", oldValue: "a", newValue: "b", source: "manual",
+      changedAt: floorAt, changer: { name: "担当A" },
+    }));
+    pm.changeLog.findMany.mockResolvedValue(rows);
+    pm.comment.findMany.mockResolvedValue([{ ...commentRow, createdAt: new Date("2026-10-01T00:00:00Z") }]);
+    const body = await (await propertyGET(req(`/api/properties/${PID}/timeline`), propCtx)).json();
+    expect(body.events.map((e: { source: string }) => e.source)).not.toContain("comment");
+    expect(body.nextBefore).toBe(floorAt.toISOString());
+  });
+
   it("内見は予定日のある分と無い分を別々に日時順で読む", async () => {
     pm.agentViewing.findMany.mockImplementation((async (args: { where: { scheduledAt?: unknown } }) => (args.where.scheduledAt === null ? [] : [{
       id: "v1", scheduledAt: new Date("2026-10-22T00:00:00Z"), createdAt: new Date("2026-01-01T00:00:00Z"), canceledAt: null, resultNote: null, attendant: null,

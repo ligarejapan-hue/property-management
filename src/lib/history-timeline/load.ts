@@ -204,7 +204,7 @@ async function loadDealEvents(deals: TimelineDeal[], access: TimelineAccess, wan
 }
 
 /** 変更履歴(物件・棟・つながり・取引)。 */
-async function loadChangeEvents(scope: TimelineScope, deals: TimelineDeal[], access: TimelineAccess, wants: (s: TimelineSource) => boolean, before: Date): Promise<{ events: TimelineEvent[]; truncated: boolean }> {
+async function loadChangeEvents(scope: TimelineScope, deals: TimelineDeal[], access: TimelineAccess, wants: (s: TimelineSource) => boolean, before: Date): Promise<{ events: TimelineEvent[]; floor: string | null }> {
   const targets: Record<string, unknown>[] = [];
   if (access.property && scope.propertyId && wants("change")) {
     targets.push({ targetTable: "properties", targetId: scope.propertyId });
@@ -215,7 +215,7 @@ async function loadChangeEvents(scope: TimelineScope, deals: TimelineDeal[], acc
     if (links.length > 0) targets.push({ targetTable: "property_owners", targetId: { in: links.map((l) => l.id) } });
   }
   if (deals.length > 0 && wants("change")) targets.push({ targetTable: "deals", targetId: { in: deals.map((d) => d.id) } });
-  if (targets.length === 0) return { events: [], truncated: false };
+  if (targets.length === 0) return { events: [], floor: null };
 
   const rows: ChangeRow[] = await readWithTies(before, CHANGE_TAKE, "changedAt", (changedAt, n) => prisma.changeLog.findMany({
     where: { OR: targets, changedAt }, orderBy: { changedAt: "desc" }, take: n,
@@ -233,7 +233,8 @@ async function loadChangeEvents(scope: TimelineScope, deals: TimelineDeal[], acc
     inquirerLevel: access.inquirerLevel,
     ownerNote: access.ownerNote,
   });
-  return { events, truncated: rows.length >= CHANGE_TAKE };
+  // 上限まで読んだ=ここより古い変更はまだ読んでいない(まとめると行が減るので、ほかの出どころに追い越されうる)。
+  return { events, floor: rows.length >= CHANGE_TAKE ? rows[rows.length - 1].changedAt.toISOString() : null };
 }
 
 async function loadEvents(scope: TimelineScope, access: TimelineAccess, filter: TimelineFilter, before: Date, limit: number) {
@@ -246,7 +247,7 @@ async function loadEvents(scope: TimelineScope, access: TimelineAccess, filter: 
     loadDealEvents(deals, access, wants, before, take),
     loadChangeEvents(scope, deals, access, wants, before),
   ]);
-  return mergeTimeline([...propertyEvents, ...dealEvents, ...changes.events], limit, changes.truncated);
+  return mergeTimeline([...propertyEvents, ...dealEvents, ...changes.events], limit, changes.floor);
 }
 
 const isOpenDeal = (status: string) => status !== "cancelled" && status !== "settled";

@@ -310,15 +310,19 @@ export function changeEvents(rows: readonly ChangeRow[], ctx: ChangeContext): { 
 
 /**
  * 新しい順に並べて上限で切る。同じ時刻の行は境目で分けない(続きは「その時刻より前」で読むため)。
- * truncated=読み切れなかった出どころがある(上限以下でも続きがある)。
+ * floor=ここまでしか読み切っていない出どころの時刻。それより古い行はこのページに出さない
+ * (先へ進むと、読んでいない行を「その時刻より前」の読み込みが飛ばしてしまう・@codex P2)。
  */
-export function mergeTimeline(events: readonly TimelineEvent[], limit: number, truncated = false): { events: TimelineEvent[]; nextBefore: string | null } {
-  const sorted = [...events].sort((a, b) => (a.at === b.at ? a.id.localeCompare(b.id) : a.at < b.at ? 1 : -1));
+export function mergeTimeline(events: readonly TimelineEvent[], limit: number, floor: string | null = null): { events: TimelineEvent[]; nextBefore: string | null } {
+  const sorted = events
+    .filter((e) => floor === null || e.at >= floor)
+    .sort((a, b) => (a.at === b.at ? a.id.localeCompare(b.id) : a.at < b.at ? 1 : -1));
   let end = Math.min(limit, sorted.length);
   while (end > 0 && end < sorted.length && sorted[end].at === sorted[end - 1].at) end += 1;
   const page = sorted.slice(0, end);
-  const more = end < sorted.length || truncated;
-  return { events: page, nextBefore: more && page.length > 0 ? page[page.length - 1].at : null };
+  if (end < sorted.length) return { events: page, nextBefore: page[page.length - 1].at };
+  // このページで出し切った。floor があれば、その時刻より前に続きがある。
+  return { events: page, nextBefore: floor };
 }
 
 // ---------- 直近の状況 ----------
