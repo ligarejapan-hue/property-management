@@ -326,6 +326,15 @@ describe("足した記録", () => {
     expect(actorOfAudit(done, [])).toBeNull();
   });
 
+  it("★完了→取り消し→別の人が完了(すぐあと)でも、今の完了の人を出す", () => {
+    const current = at("2026-10-14T00:00:03Z");
+    expect(actorOfAudit(current, [
+      audit("2026-10-14T00:00:01Z", "前の人"), audit("2026-10-14T00:00:03.200Z", "今の人"),
+    ])).toBe("今の人");
+    // 今の完了の記録が無ければ、前の人を出さず空にする。
+    expect(actorOfAudit(current, [audit("2026-10-14T00:00:01Z", "前の人")])).toBeNull();
+  });
+
   it("★段取りの完了に人を出す・自動の完了には出さない・取り消しの行", () => {
     const row = { id: "s1", label: "鍵の受領", completedAt: at("2026-10-14T00:00:00Z"), autoCompleted: false };
     expect(scheduleEvent(row, DEAL, "担当B").actor).toBe("担当B");
