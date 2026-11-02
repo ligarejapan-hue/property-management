@@ -1,3 +1,4 @@
+import { containsVariants } from "@/lib/notation";
 import { NextRequest } from "next/server";
 import { z } from "zod";
 import prisma from "@/lib/prisma";
@@ -47,8 +48,8 @@ export async function GET(request: NextRequest) {
     const where = q.length >= 2
       ? {
           OR: [
-            { name: { contains: q, mode: "insensitive" as const } },
-            { address: { contains: q, mode: "insensitive" as const } },
+            ...containsVariants("name", q, "insensitive"),
+            ...containsVariants("address", q, "insensitive"),
           ],
         }
       : {};
@@ -69,8 +70,8 @@ export async function GET(request: NextRequest) {
           where: {
             building: { is: null },
             OR: [
-              { name: { contains: q, mode: "insensitive" as const } },
-              { address: { contains: q, mode: "insensitive" as const } },
+              ...containsVariants("name", q, "insensitive"),
+              ...containsVariants("address", q, "insensitive"),
             ],
           },
           select: { id: true, name: true, address: true, builtYear: true, builtMonth: true, totalFloors: true, totalUnits: true, managementCompany: true },

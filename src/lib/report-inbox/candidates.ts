@@ -6,6 +6,7 @@
  * いちばん強い手がかりは「マンション名(表記をそろえた形)+部屋番号」。所在地は書き方が
  * 揺れる(報告書「4丁目12ー3」・物件「4-12-3」)ので、ゆるい形で比べて補助に使う。
  */
+import { containsVariants } from "@/lib/notation";
 import { Prisma } from "@/generated/prisma";
 import { buildingNameKey } from "@/lib/building-identity";
 import { addressSearchPrefix, toFullWidth } from "@/lib/paste-import/normalize";
@@ -287,8 +288,8 @@ export async function searchPropertiesForReport(
           const room = t.replace(/号室?$/, "");
           return {
             OR: [
-              { address: { contains: t, mode: "insensitive" } },
-              { buildingName: { contains: t, mode: "insensitive" } },
+              ...containsVariants("address", t, "insensitive"),
+              ...containsVariants("buildingName", t, "insensitive"),
               // ⚠部屋番号は「101」「１０１」「101号」「101 号室」など書き方がまちまち(@codex PR#500 10巡目)。
               //   半角・全角の両方で「含む」かを見る(建物名などの他の語と AND なので広がりすぎない)。
               ...(room !== ""

@@ -1,3 +1,4 @@
+import { containsVariants } from "@/lib/notation";
 import { NextRequest } from "next/server";
 import prisma from "@/lib/prisma";
 import {
@@ -58,11 +59,11 @@ export async function GET(request: NextRequest) {
             ? [
                 {
                   OR: [
-                    { address: { contains: q, mode: "insensitive" as const } },
-                    { lotNumber: { contains: q, mode: "insensitive" as const } },
+                    ...containsVariants("address", q, "insensitive"),
+                    ...containsVariants("lotNumber", q, "insensitive"),
                     { realEstateNumber: { contains: q, mode: "insensitive" as const } },
                     { externalLinkKey: { contains: q, mode: "insensitive" as const } },
-                    { buildingName: { contains: q, mode: "insensitive" as const } },
+                    ...containsVariants("buildingName", q, "insensitive"),
                   ],
                 },
               ]

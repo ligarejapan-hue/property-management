@@ -1,3 +1,4 @@
+import { searchVariants } from "@/lib/notation";
 import { NextResponse } from "next/server";
 import prisma from "@/lib/prisma";
 import { handleApiError } from "@/lib/api-helpers";
@@ -9,7 +10,7 @@ const MAX_TERMS = 4;
 
 // 1語につき全角/半角の候補ごとに4項目を OR(DB の値は正規化していないため)。
 const termWhere = (t: string) => ({
-  OR: widthVariants(t).flatMap((v) => [
+  OR: searchVariants(t).flatMap((v) => [
     { buildingName: { contains: v, mode: "insensitive" as const } },
     { building: { name: { contains: v, mode: "insensitive" as const } } },
     { roomNo: { contains: v } },

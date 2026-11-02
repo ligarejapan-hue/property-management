@@ -9,6 +9,7 @@
  *    （挙動が変わると既存テスト properties-route-mgmt-id.test.ts が落ちる）
  *  - PII（mgmtId 生値・所有者名など）はここでは扱わず、呼び出し側の責務とする。
  */
+import { containsVariants } from "@/lib/notation";
 import {
   buildResendCandidateWhere,
   getResendCooldownDays,
@@ -118,12 +119,12 @@ export async function buildPropertyListWhere(
 
   if (keyword) {
     where.OR = [
-      { address: { contains: keyword, mode: "insensitive" } },
-      { lotNumber: { contains: keyword, mode: "insensitive" } },
+      ...containsVariants("address", keyword, "insensitive"),
+      ...containsVariants("lotNumber", keyword, "insensitive"),
       { realEstateNumber: { contains: keyword, mode: "insensitive" } },
-      { buildingNumber: { contains: keyword, mode: "insensitive" } },
+      ...containsVariants("buildingNumber", keyword, "insensitive"),
       // 物件名(マンション名)で覚えていることが多い(従業員の指摘 2026-10-24)。
-      { buildingName: { contains: keyword, mode: "insensitive" } },
+      ...containsVariants("buildingName", keyword, "insensitive"),
     ];
   }
 

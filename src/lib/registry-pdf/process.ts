@@ -13,6 +13,7 @@
  * 入力 text は呼び出し側（route の multipart→extractTextFromPdf / text 貼り付け）で
  * 抽出済みのものを受け取る。pdfBuffer は multipart のときのみ非 null（Attachment 保存用）。
  */
+import { containsVariants } from "@/lib/notation";
 import { randomUUID } from "node:crypto";
 import { z } from "zod";
 import prisma from "@/lib/prisma";
@@ -1089,7 +1090,7 @@ export async function processRegistryPdf(
 
       if (!matchedProperty && parsed.address) {
         matchedProperty = await prisma.property.findFirst({
-          where: { address: { contains: parsed.address } },
+          where: { OR: containsVariants("address", parsed.address) },
           select: { id: true, address: true, realEstateNumber: true },
         });
         if (matchedProperty) {

@@ -1,3 +1,4 @@
+import { containsVariants } from "@/lib/notation";
 import { NextRequest } from "next/server";
 import prisma from "@/lib/prisma";
 import {
@@ -72,7 +73,7 @@ export async function GET(request: NextRequest) {
 
     const orClauses: Prisma.OwnerWhereInput[] = [];
     if (searchableFields.name)
-      orClauses.push({ name: { contains: q, mode: "insensitive" } });
+      orClauses.push(...containsVariants("name", q, "insensitive"));
     if (searchableFields.nameKana)
       orClauses.push({ nameKana: { contains: q, mode: "insensitive" } });
     if (searchableFields.phone) {
@@ -85,9 +86,9 @@ export async function GET(request: NextRequest) {
       }
     }
     if (searchableFields.address) {
-      orClauses.push({ address: { contains: q, mode: "insensitive" } });
+      orClauses.push(...containsVariants("address", q, "insensitive"));
       // ⚠現住所も同じ規則で検索対象にする(owner_address が生値のときだけ)。
-      orClauses.push({ currentAddress: { contains: q, mode: "insensitive" } });
+      orClauses.push(...containsVariants("currentAddress", q, "insensitive"));
     }
     if (searchableFields.externalLinkKey)
       orClauses.push({ externalLinkKey: { contains: q, mode: "insensitive" } });

@@ -231,7 +231,9 @@ describe("searchPropertiesForReport(手で探す)", () => {
       {
         OR: [
           { address: { contains: "302号室", mode: "insensitive" } },
+          { address: { contains: "３０２号室", mode: "insensitive" } },
           { buildingName: { contains: "302号室", mode: "insensitive" } },
+          { buildingName: { contains: "３０２号室", mode: "insensitive" } },
           { roomNo: { contains: "302" } },
           { roomNo: { contains: "３０２" } },
         ],
