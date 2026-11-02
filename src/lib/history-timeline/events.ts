@@ -312,8 +312,12 @@ export function changeEvents(rows: readonly ChangeRow[], ctx: ChangeContext): { 
  * 新しい順に並べて上限で切る。同じ時刻の行は境目で分けない(続きは「その時刻より前」で読むため)。
  * floor=ここまでしか読み切っていない出どころの時刻。それより古い行はこのページに出さない
  * (先へ進むと、読んでいない行を「その時刻より前」の読み込みが飛ばしてしまう・@codex P2)。
+ * more=読む上限に届いた出どころがある(同じ時刻の行で全部を出し切っても、もっと古い行が残っている・@codex P2)。
  */
-export function mergeTimeline(events: readonly TimelineEvent[], limit: number, floor: string | null = null): { events: TimelineEvent[]; nextBefore: string | null } {
+export function mergeTimeline(
+  events: readonly TimelineEvent[], limit: number, opts: { floor?: string | null; more?: boolean } = {},
+): { events: TimelineEvent[]; nextBefore: string | null } {
+  const floor = opts.floor ?? null;
   const sorted = events
     .filter((e) => floor === null || e.at >= floor)
     .sort((a, b) => (a.at === b.at ? a.id.localeCompare(b.id) : a.at < b.at ? 1 : -1));
@@ -322,7 +326,8 @@ export function mergeTimeline(events: readonly TimelineEvent[], limit: number, f
   const page = sorted.slice(0, end);
   if (end < sorted.length) return { events: page, nextBefore: page[page.length - 1].at };
   // このページで出し切った。floor があれば、その時刻より前に続きがある。
-  return { events: page, nextBefore: floor };
+  const last = page.length > 0 ? page[page.length - 1].at : null;
+  return { events: page, nextBefore: floor ?? (opts.more ? last : null) };
 }
 
 // ---------- 直近の状況 ----------

@@ -52,9 +52,10 @@ type TimeRange = { lt: Date } | { equals: Date };
  * ⚠続きは「その時刻より前」で読むので、同じ時刻の行が上限で切れると二度と出ない(まとめて完了にした段取りなど・@codex P2)。
  */
 async function readWithTies<T extends { id: string }>(
-  before: Date, take: number, timeKey: string, query: (range: TimeRange, take: number) => Promise<T[]>,
+  before: Date, take: number, timeKey: string, query: (range: TimeRange, take: number) => Promise<T[]>, onCap?: () => void,
 ): Promise<T[]> {
   const rows = await query({ lt: before }, take);
+  if (rows.length >= take) onCap?.();
   const last = rows.length >= take ? (rows[rows.length - 1] as unknown as Record<string, Date | null>)[timeKey] : null;
   if (!last) return rows;
   const seen = new Set(rows.map((r) => r.id));
@@ -63,9 +64,9 @@ async function readWithTies<T extends { id: string }>(
 }
 
 /** 物件の出どころ。⚠ access で閉じた出どころはクエリを流さない。 */
-async function loadPropertyEvents(propertyId: string, access: TimelineAccess, wants: (s: TimelineSource) => boolean, before: Date, take: number): Promise<TimelineEvent[]> {
+async function loadPropertyEvents(propertyId: string, access: TimelineAccess, wants: (s: TimelineSource) => boolean, before: Date, take: number, onCap: () => void): Promise<TimelineEvent[]> {
   const tasks: Promise<TimelineEvent[]>[] = [];
-  const read = <T extends { id: string }>(timeKey: string, query: (range: TimeRange, take: number) => Promise<T[]>) => readWithTies(before, take, timeKey, query);
+  const read = <T extends { id: string }>(timeKey: string, query: (range: TimeRange, take: number) => Promise<T[]>) => readWithTies(before, take, timeKey, query, onCap);
 
   if (wants("comment")) {
     tasks.push(read("createdAt", (createdAt, n) => prisma.comment.findMany({
@@ -143,12 +144,12 @@ async function loadPropertyEvents(propertyId: string, access: TimelineAccess, wa
 }
 
 /** 取引の出どころ。 */
-async function loadDealEvents(deals: TimelineDeal[], access: TimelineAccess, wants: (s: TimelineSource) => boolean, before: Date, take: number): Promise<TimelineEvent[]> {
+async function loadDealEvents(deals: TimelineDeal[], access: TimelineAccess, wants: (s: TimelineSource) => boolean, before: Date, take: number, onCap: () => void): Promise<TimelineEvent[]> {
   if (deals.length === 0) return [];
   const ids = deals.map((d) => d.id);
   const refs = new Map(deals.map((d) => [d.id, dealRef(d)]));
   const ref = (id: string) => refs.get(id) as DealRef;
-  const read = <T extends { id: string }>(timeKey: string, query: (range: TimeRange, take: number) => Promise<T[]>) => readWithTies(before, take, timeKey, query);
+  const read = <T extends { id: string }>(timeKey: string, query: (range: TimeRange, take: number) => Promise<T[]>) => readWithTies(before, take, timeKey, query, onCap);
   const tasks: Promise<TimelineEvent[]>[] = [];
 
   if (wants("deal_created")) {
@@ -242,12 +243,14 @@ async function loadEvents(scope: TimelineScope, access: TimelineAccess, filter: 
   const wants = (s: TimelineSource) => wanted.has(s);
   const deals = access.deal ? scope.deals : [];
   const take = limit + 1;
+  let capped = false;
+  const onCap = () => { capped = true; };
   const [propertyEvents, dealEvents, changes] = await Promise.all([
-    access.property && scope.propertyId ? loadPropertyEvents(scope.propertyId, access, wants, before, take) : Promise.resolve([]),
-    loadDealEvents(deals, access, wants, before, take),
+    access.property && scope.propertyId ? loadPropertyEvents(scope.propertyId, access, wants, before, take, onCap) : Promise.resolve([]),
+    loadDealEvents(deals, access, wants, before, take, onCap),
     loadChangeEvents(scope, deals, access, wants, before),
   ]);
-  return mergeTimeline([...propertyEvents, ...dealEvents, ...changes.events], limit, changes.floor);
+  return mergeTimeline([...propertyEvents, ...dealEvents, ...changes.events], limit, { floor: changes.floor, more: capped });
 }
 
 const isOpenDeal = (status: string) => status !== "cancelled" && status !== "settled";

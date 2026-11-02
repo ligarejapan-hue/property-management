@@ -162,7 +162,8 @@ describe("読む上限の境目", () => {
       (args.where.completedAt.equals ? items(60) : items(60).slice(0, args.take))) as never);
     const body = await (await dealGET(req(`/api/deals/${DID}/timeline?category=schedule`), dealCtx)).json();
     expect(body.events.filter((e: { source: string }) => e.source === "schedule")).toHaveLength(60);
-    expect(body.nextBefore).toBeNull();
+    // もっと古い行があるかもしれない=続きを読める。
+    expect(body.nextBefore).toBe(T.toISOString());
   });
 
   it("上限に届かなければ境目を読み直さない", async () => {
