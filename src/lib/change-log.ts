@@ -1,3 +1,7 @@
+import { savedTextValue } from "@/lib/notation";
+
+const MODEL_OF_TABLE: Record<string, string> = { properties: "property", owners: "owner", buildings: "building" };
+
 import prisma from "@/lib/prisma";
 
 // Tracked-fields 定数は Prisma-free な src/lib/property-field-constants.ts に置き、
@@ -38,7 +42,8 @@ export function buildChangeLogEntries(input: RecordChangesInput): ChangeLogEntry
     if (!(field in input.newValues)) continue;
 
     const oldVal = input.oldValues[field];
-    const newVal = input.newValues[field];
+    const rawNew = input.newValues[field];
+    const newVal = typeof rawNew === "string" ? savedTextValue(MODEL_OF_TABLE[input.targetTable] ?? "", field, rawNew) : rawNew;
     const oldStr = oldVal != null ? String(oldVal) : null;
     const newStr = newVal != null ? String(newVal) : null;
 

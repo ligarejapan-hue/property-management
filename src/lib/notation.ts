@@ -65,6 +65,14 @@ const HALF_WIDTH_FIELDS: Record<string, readonly string[]> = {
 };
 const WRITE_OPERATIONS = new Set(["create", "createMany", "createManyAndReturn", "update", "updateMany", "updateManyAndReturn", "upsert"]);
 
+/**
+ * 実際に保存される値。⚠変更履歴の比較はこの形で行う(「１丁目」のまま保存すると「1丁目」に変わるので記録する。
+ * 半角で入っている行へ全角で打っても変わらないので記録しない・@codex)。
+ */
+export function savedTextValue(model: string, field: string, value: string): string {
+  return HALF_WIDTH_FIELDS[model]?.includes(field) ? toHalfWidthDigits(value) : value;
+}
+
 type Row = Record<string, unknown>;
 
 function convertRow(row: Row, fields: readonly string[]): Row {

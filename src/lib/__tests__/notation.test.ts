@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { containsVariants, halfWidthDigitsInWrite, searchVariants } from "../notation";
+import { buildChangeLogEntries } from "../change-log";
 
 describe("検索の書き方の違い", () => {
   it("★ケ・ヶ・がを同じ地名として探す(井土ヶ谷で井土ケ谷が見つかる)", () => {
@@ -48,6 +49,15 @@ describe("検索の書き方の違い", () => {
   it("条件にして返す", () => {
     expect(containsVariants("address", "渋谷", "insensitive")).toEqual([{ address: { contains: "渋谷", mode: "insensitive" } }]);
     expect(containsVariants("address", "渋谷")).toEqual([{ address: { contains: "渋谷" } }]);
+  });
+});
+
+describe("変更履歴は保存される形で比べる", () => {
+  it("★全角のまま保存すると半角に変わるので記録し、半角の行へ全角で打っても記録しない", () => {
+    const entries = (oldVal: string, newVal: string) =>
+      buildChangeLogEntries({ targetTable: "owners", targetId: "o", changedBy: "u", oldValues: { address: oldVal, note: oldVal }, newValues: { address: newVal, note: newVal }, trackedFields: ["address", "note"] });
+    expect(entries("１丁目", "１丁目").map((e) => [e.fieldName, e.oldValue, e.newValue])).toEqual([["address", "１丁目", "1丁目"]]);
+    expect(entries("1丁目", "１丁目").map((e) => e.fieldName)).toEqual(["note"]);
   });
 });
 

@@ -1,3 +1,4 @@
+import { savedTextValue } from "@/lib/notation";
 import { NextRequest } from "next/server";
 import prisma from "@/lib/prisma";
 import {
@@ -478,7 +479,7 @@ export async function PATCH(
         : oldVal != null ? String(oldVal) : null;
       const newStr = isDateOnly
         ? dateOnlyString(newVal as Date | null)
-        : newVal != null ? String(newVal) : null;
+        : newVal != null ? savedTextValue("property", key, String(newVal)) : null;
       if (oldStr !== newStr) {
         changeLogs.push({
           targetTable: "properties",

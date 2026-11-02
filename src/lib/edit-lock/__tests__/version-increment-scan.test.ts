@@ -86,11 +86,11 @@ const VERSIONED: Record<string, string> = {
   "src/app/api/properties/[id]/dm-logs/[logId]/reaction/route.ts:276":
     "property.dmStatus(undeliverable連動のno_send昇格)+version increment" +
     "(Task 9で修正: 元は進めていなかった)",
-  "src/app/api/properties/[id]/route.ts:533":
+  "src/app/api/properties/[id]/route.ts:534":
     "property の編集画面フィールド一式(編集画面の本体保存窓口)+version increment",
   "src/app/api/properties/bulk-update/route.ts:90":
     "property.caseStatus/registryStatus/dmStatus/assignedTo(一括更新)+version increment",
-  "src/lib/building-link/rename.ts:121":
+  "src/lib/building-link/rename.ts:126":
     "property.buildingName(棟の名前を直したとき、つながっている全部屋へ反映)+version increment" +
     "(段3 Task 14。部屋の行(id順 FOR UPDATE)→棟の行(FOR NO KEY UPDATE)の後・編集中の鍵が0件のときだけ同じトランザクションで書く。" +
     "反映の直前に新しく鍵を取った人の保存は、この version の増分で 409 になる)",
