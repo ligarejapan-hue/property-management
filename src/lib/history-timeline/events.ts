@@ -138,16 +138,19 @@ export function nextActionCompletedEvent(r: { id: string; content: string; compl
   });
 }
 
-/** 操作の監査は保存のすぐあとに書かれる。この幅に入る最初の記録をその操作とみなす。 */
-const AUDIT_BEFORE_MS = 5_000;
+/** 操作の監査は保存のあとに書かれる。この幅に入る最初の記録をその操作とみなす。 */
 const AUDIT_AFTER_MS = 60_000;
 
 export interface AuditActor { createdAt: Date; user: Named | null }
 
-/** その時刻の操作をした人。⚠同じ項目をもう一度押した記録を拾わないよう、最初の1件だけ。見つからなければ null。 */
+/**
+ * その時刻の操作をした人。見つからなければ null。
+ * ⚠完了の時刻より前の記録は見ない(完了→取り消し→別の人が完了、で前の人を出さない・@codex P2)。
+ * ⚠同じ項目をもう一度押した記録を拾わないよう、最初の1件だけ。
+ */
 export function actorOfAudit(at: Date, audits: readonly AuditActor[]): string | null {
-  const from = at.getTime() - AUDIT_BEFORE_MS;
-  const to = at.getTime() + AUDIT_AFTER_MS;
+  const from = at.getTime();
+  const to = from + AUDIT_AFTER_MS;
   const inRange = audits.filter((a) => a.createdAt.getTime() >= from && a.createdAt.getTime() <= to);
   inRange.sort((a, b) => a.createdAt.getTime() - b.createdAt.getTime());
   return inRange[0]?.user?.name ?? null;
