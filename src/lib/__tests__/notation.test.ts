@@ -13,6 +13,13 @@ describe("検索の書き方の違い", () => {
     expect(searchVariants("1-2")).toEqual(expect.arrayContaining(["1-2", "１－２"]));
   });
 
+  it("★保存した形でも見つかる(「１－２」は数字だけ半角の「1－2」で入る)", () => {
+    const saved = halfWidthDigitsInWrite("property", "create", { data: { address: "東京都１－２" } }).data.address;
+    expect(saved).toBe("東京都1－2");
+    expect(searchVariants("東京都１－２")).toContain(saved);
+    expect(searchVariants("東京都1-2")).toContain("東京都１－２");
+  });
+
   it("★地名と数字の両方を組み合わせる", () => {
     expect(searchVariants("千駄ヶ谷1丁目")).toEqual(expect.arrayContaining(["千駄ケ谷１丁目", "千駄ヶ谷1丁目", "千駄ケ谷1丁目"]));
   });
@@ -31,6 +38,7 @@ describe("検索の書き方の違い", () => {
   it("★数が増えすぎない(3つ目からのケは変えない)", () => {
     expect(searchVariants("井ヶ谷千ヶ谷富ヶ谷").length).toBeLessThanOrEqual(9);
     expect(searchVariants("井ヶ谷千ヶ谷富ヶ谷１").length).toBeLessThanOrEqual(18);
+    expect(searchVariants("井ヶ谷千ヶ谷富ヶ谷１－２").length).toBeLessThanOrEqual(36);
   });
 
   it("条件にして返す", () => {

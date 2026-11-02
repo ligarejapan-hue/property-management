@@ -16,9 +16,18 @@ const KE_IN_PLACE_NAME = /(?<=[一-龥々])[ケヶヵが]/g;
 /** 候補が増えすぎないよう、3つ目からは変えない。 */
 const MAX_KE = 2;
 
-const toFullWidth = (s: string) =>
-  s.replace(/[0-9]/g, (d) => String.fromCharCode(d.charCodeAt(0) + 0xfee0)).replace(/-/g, "－");
-const toHalfWidth = (s: string) => toHalfWidthDigits(s).replace(/－/g, "-");
+const toFullWidthDigits = (s: string) => s.replace(/[0-9]/g, (d) => String.fromCharCode(d.charCodeAt(0) + 0xfee0));
+
+/**
+ * 数字の幅の候補。⚠数字だけ変えた形も探す: 保存は数字だけ半角にするので「１－２」は「1－2」で入る(@codex)。
+ * 区切りごと変えた形は、もとから半角や全角でそろって入っている行のため。
+ */
+function widthVariants(q: string): string[] {
+  if (!/[0-9０-９]/.test(q)) return [q];
+  const half = toHalfWidthDigits(q);
+  const full = toFullWidthDigits(half);
+  return [q, half, full, half.replace(/－/g, "-"), full.replace(/-/g, "－")];
+}
 
 function keVariants(q: string): string[] {
   const positions = [...q.matchAll(KE_IN_PLACE_NAME)].map((m) => m.index).slice(0, MAX_KE);
@@ -31,8 +40,7 @@ function keVariants(q: string): string[] {
 
 /** 検索語の書き方の候補(元の語を含む・重複なし)。 */
 export function searchVariants(q: string): string[] {
-  const widths = /[0-9０-９]/.test(q) ? [q, toHalfWidth(q), toFullWidth(toHalfWidth(q))] : [q];
-  return [...new Set(widths.flatMap(keVariants))];
+  return [...new Set(widthVariants(q).flatMap(keVariants))];
 }
 
 /** Prisma の OR に並べる条件。 */
