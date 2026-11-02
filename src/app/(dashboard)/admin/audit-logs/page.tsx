@@ -283,6 +283,7 @@ const ACTION_LABELS: Record<string, string> = {
   deal_schedule_registry_read: "段取りの判定のために謄本を読み取り",
   deal_schedule_update: "決済までの段取りを更新",
   deal_request_draft_copy: "外部への依頼文をコピー",
+  history_timeline_view: "所有者の情報を含む経緯を表示",
   deal_doc_link_issue: "お客様の提出用リンクを発行",
   deal_doc_link_revoke: "お客様の提出用リンクを無効化",
   deal_doc_submit: "お客様が書類を提出",

@@ -28,7 +28,7 @@ describe("保存の入力の決まり(updatePropertySchema)", () => {
     expect(updatePropertySchema.parse({ version: 1, roomNo: "　 " }).roomNo).toBeNull();
   });
   it("変更履歴で日本語の名前が出る", () => {
-    const hist = read("src/components/properties/history-tab.tsx");
+    const hist = read("src/lib/property-change-labels.ts");
     expect(hist).toContain('roomNo: "部屋番号",');
     expect(hist).toContain('occupancyStatus: "現況",');
   });

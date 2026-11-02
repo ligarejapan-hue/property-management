@@ -35,6 +35,7 @@ import NextActionTab from "@/components/properties/next-action-tab";
 import AgentInquiryTab from "@/components/properties/agent-inquiry-tab";
 import AttachmentTab from "@/components/properties/attachment-tab";
 import HistoryTab from "@/components/properties/history-tab";
+import HistoryTimeline from "@/components/history-timeline/history-timeline";
 import PhotoTab from "@/components/properties/photo-tab";
 import CandidateList from "@/components/properties/candidate-list";
 import ActionBar, { usePropertyAction } from "@/components/properties/action-bar";
@@ -166,6 +167,7 @@ const tabs = [
   { key: "inquiries", label: "反響" },
   { key: "comments", label: "コメント" },
   { key: "attachments", label: "添付ファイル" },
+  { key: "timeline", label: "経緯" },
   { key: "history", label: "変更履歴" },
 ] as const;
 
@@ -1130,6 +1132,10 @@ export default function PropertyDetailPage({
             canApplyRegistry={canWriteProperty}
           />
         )}
+        {activeTab === "timeline" && (
+          <HistoryTimeline url={`/api/properties/${property.id}/timeline`} />
+        )}
+
         {activeTab === "history" && (
           <HistoryTab propertyId={property.id} />
         )}

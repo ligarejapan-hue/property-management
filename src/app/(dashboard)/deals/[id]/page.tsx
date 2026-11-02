@@ -14,6 +14,7 @@ import DealSettlementPanel from "@/components/deals/deal-settlement-panel";
 import DealOcPanel from "@/components/deals/deal-oc-panel";
 import DealDocumentsPanel from "@/components/deals/deal-documents-panel";
 import DealPropertySide from "@/components/deals/deal-property-side";
+import HistoryTimeline from "@/components/history-timeline/history-timeline";
 import { DealRegistryRights } from "@/components/deals/deal-registry-rights";
 import { DealCrosscheck } from "@/components/deals/deal-crosscheck";
 import { DealSchedule } from "@/components/deals/deal-schedule";
@@ -37,6 +38,7 @@ const DEAL_TABS = [
   { key: "settlement", label: "精算" },
   { key: "oc", label: "OC" },
   { key: "documents", label: "書類" },
+  { key: "timeline", label: "経緯" },
 ] as const;
 const HEADER_LINK_CLS =
   "inline-flex items-center gap-1.5 rounded-md border border-gray-300 bg-white px-3 py-1.5 text-sm font-medium text-gray-700 hover:bg-gray-50 dark:border-gray-700 dark:bg-gray-900 dark:text-gray-200 dark:hover:bg-gray-800";
@@ -182,6 +184,7 @@ export default function DealDetailPage({ params }: { params: Promise<{ id: strin
         <div hidden={tab !== "documents"}>
           <DealDocumentsPanel dealId={deal.id} active={tab === "documents"} resale={deal.businessType === "resale"} onIssued={() => setIssuedTick((t) => t + 1)} />
         </div>
+        {tab === "timeline" && <HistoryTimeline url={`/api/deals/${deal.id}/timeline`} />}
       </div>
       </div>
       {sideOpen && propertyId && (
