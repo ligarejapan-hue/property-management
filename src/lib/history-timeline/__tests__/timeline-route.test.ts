@@ -152,6 +152,43 @@ describe("物件の経緯", () => {
   });
 });
 
+describe("読む上限の境目", () => {
+  const T = new Date("2026-10-20T00:00:00Z");
+  const items = (n: number) => Array.from({ length: n }, (_, i) => ({ id: `s${i}`, dealId: DID, label: `項目${i}`, completedAt: T, autoCompleted: false }));
+
+  it("同じ時刻に上限を超える行があっても、読み落とさない", async () => {
+    // 導入前の項目をまとめて完了にすると、同じ時刻の行が並ぶ。
+    pm.dealScheduleItem.findMany.mockImplementation((async (args: { where: { completedAt: { equals?: Date } }; take: number }) =>
+      (args.where.completedAt.equals ? items(60) : items(60).slice(0, args.take))) as never);
+    const body = await (await dealGET(req(`/api/deals/${DID}/timeline?category=schedule`), dealCtx)).json();
+    expect(body.events.filter((e: { source: string }) => e.source === "schedule")).toHaveLength(60);
+    expect(body.nextBefore).toBeNull();
+  });
+
+  it("上限に届かなければ境目を読み直さない", async () => {
+    pm.dealScheduleItem.findMany.mockResolvedValue(items(1));
+    await dealGET(req(`/api/deals/${DID}/timeline?category=schedule`), dealCtx);
+    expect(pm.dealScheduleItem.findMany).toHaveBeenCalledTimes(1);
+  });
+
+  it("提出用リンクの無効化は、発行の順に関係なく無効にした時刻で読む", async () => {
+    const link = { id: "l1", dealId: DID, partyRole: "seller", createdAt: new Date("2026-01-01T00:00:00Z"), revokedAt: new Date("2026-10-21T00:00:00Z"), createdBy: { name: "担当A" } };
+    pm.dealDocLink.findMany.mockImplementation((async (args: { where: Record<string, unknown> }) => (args.where.revokedAt ? [link] : [])) as never);
+    const body = await (await dealGET(req(`/api/deals/${DID}/timeline?category=document`), dealCtx)).json();
+    expect(body.events.map((e: { title: string }) => e.title)).toContain("売主の提出用リンクを無効化");
+  });
+
+  it("内見は予定日のある分と無い分を別々に日時順で読む", async () => {
+    pm.agentViewing.findMany.mockImplementation((async (args: { where: { scheduledAt?: unknown } }) => (args.where.scheduledAt === null ? [] : [{
+      id: "v1", scheduledAt: new Date("2026-10-22T00:00:00Z"), createdAt: new Date("2026-01-01T00:00:00Z"), canceledAt: null, resultNote: null, attendant: null,
+      inquiry: { agent: { companyName: "ABC" } },
+    }])) as never);
+    const body = await (await propertyGET(req(`/api/properties/${PID}/timeline?category=contact`), propCtx)).json();
+    expect(body.events.map((e: { id: string }) => e.id)).toContain("viewing:v1");
+    expect(pm.agentViewing.findMany.mock.calls.length).toBeGreaterThanOrEqual(2);
+  });
+});
+
 describe("取引の経緯", () => {
   it("物件の経緯も含み、同じ物件の別の取引は読まない", async () => {
     const res = await dealGET(req(`/api/deals/${DID}/timeline`), dealCtx);

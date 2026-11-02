@@ -187,11 +187,14 @@ export function docReviewEvent(r: { id: string; label: string; status: string; r
   });
 }
 
-export function docLinkEvents(r: { id: string; partyRole: string; createdAt: Date; revokedAt: Date | null; createdBy: Named }, deal: DealRef) {
-  const role = roleLabel(r.partyRole);
-  const issued = event("doc_link", `${r.id}:issued`, r.createdAt, { title: `${role}の提出用リンクを発行`, actor: r.createdBy.name, ...dealFields(deal) });
-  if (!r.revokedAt) return [issued];
-  return [issued, event("doc_link", `${r.id}:revoked`, r.revokedAt, { title: `${role}の提出用リンクを無効化`, ...dealFields(deal) })];
+type DocLinkRow = { id: string; partyRole: string; createdAt: Date; revokedAt: Date | null; createdBy: Named };
+
+export function docLinkIssuedEvent(r: DocLinkRow, deal: DealRef) {
+  return event("doc_link", `${r.id}:issued`, r.createdAt, { title: `${roleLabel(r.partyRole)}の提出用リンクを発行`, actor: r.createdBy.name, ...dealFields(deal) });
+}
+
+export function docLinkRevokedEvent(r: DocLinkRow, deal: DealRef) {
+  return event("doc_link", `${r.id}:revoked`, r.revokedAt as Date, { title: `${roleLabel(r.partyRole)}の提出用リンクを無効化`, ...dealFields(deal) });
 }
 
 export function dealCreatedEvent(r: { createdAt: Date; createdBy: Named }, deal: DealRef) {
@@ -269,10 +272,9 @@ function visibleRow(row: ChangeRow, ctx: ChangeContext): { row: ChangeRow; hideV
 
 /**
  * 同じ時刻・同じ人・同じ行の変更を1行にまとめる(取込で数十項目が一度に変わるため)。
- * reachedTake=読む上限まで読んだ=最後のまとまりは途中で切れているかもしれないので捨てる(次の読み込みで全部入る)。
- * ⚠rows は changedAt の新しい順。
+ * ⚠rows は changedAt の新しい順。同じ時刻の行は全部読んである前提(load.ts の readWithTies)。
  */
-export function changeEvents(rows: readonly ChangeRow[], ctx: ChangeContext, opts: { reachedTake?: boolean } = {}): { events: TimelineEvent[]; dropped: boolean } {
+export function changeEvents(rows: readonly ChangeRow[], ctx: ChangeContext): { events: TimelineEvent[] } {
   const groups = new Map<string, ChangeRow[]>();
   for (const row of rows) {
     const key = [row.targetTable, row.targetId, row.changer.name, row.source, row.changedAt.getTime()].join("|");
@@ -280,11 +282,8 @@ export function changeEvents(rows: readonly ChangeRow[], ctx: ChangeContext, opt
     if (group) group.push(row);
     else groups.set(key, [row]);
   }
-  let list = [...groups.values()];
-  const dropped = !!opts.reachedTake && list.length > 1;
-  if (dropped) list = list.slice(0, -1);
   const events: TimelineEvent[] = [];
-  for (const group of list) {
+  for (const group of groups.values()) {
     const visible = group.flatMap((r) => visibleRow(r, ctx) ?? []);
     if (visible.length === 0) continue;
     const first = visible[0].row;
@@ -304,7 +303,7 @@ export function changeEvents(rows: readonly ChangeRow[], ctx: ChangeContext, opt
       ...(deal ? dealFields(deal) : { href: ctx.propertyId ? propertyDetailHref(ctx.propertyId, "history") : null }),
     }));
   }
-  return { events, dropped };
+  return { events };
 }
 
 // ---------- 並べる ----------

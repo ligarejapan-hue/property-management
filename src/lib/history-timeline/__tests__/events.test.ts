@@ -2,7 +2,7 @@ import { describe, expect, it } from "vitest";
 import { timelineAccess } from "../access";
 import {
   buildTimelineSummary, categoryOf, changeEvents, commentEvent, dealCreatedEvent, dmReactionEvent, dmSentEvent, docFileEvent,
-  docLinkEvents, docReviewEvent, documentEvent, inquiryEvent, investigationEvent, materialSendEvent, mergeTimeline,
+  docLinkIssuedEvent, docLinkRevokedEvent, docReviewEvent, documentEvent, inquiryEvent, investigationEvent, materialSendEvent, mergeTimeline,
   nextActionCompletedEvent, nextActionCreatedEvent, ownerMemoEvent, requestCopyEvent, scheduleEvent, sourcesForCategory,
   viewingEvent, type ChangeContext, type TimelineEvent,
 } from "../events";
@@ -113,9 +113,11 @@ describe("出どころごとの変換", () => {
 
   it("提出用リンクは発行と無効化を別の行にする", () => {
     const row = { id: "1", partyRole: "buyer", createdAt: at("2026-10-15T00:00:00Z"), revokedAt: at("2026-10-16T00:00:00Z"), createdBy: author };
-    const events = docLinkEvents(row, DEAL);
-    expect(events.map((e) => e.title)).toEqual(["買主の提出用リンクを発行", "買主の提出用リンクを無効化"]);
-    expect(docLinkEvents({ ...row, revokedAt: null }, DEAL)).toHaveLength(1);
+    const issued = docLinkIssuedEvent(row, DEAL);
+    const revoked = docLinkRevokedEvent(row, DEAL);
+    expect([issued.title, revoked.title]).toEqual(["買主の提出用リンクを発行", "買主の提出用リンクを無効化"]);
+    expect(issued.id).not.toBe(revoked.id);
+    expect(revoked.at).toBe("2026-10-16T00:00:00.000Z");
   });
 
   it("取引の作成を行にする", () => {
@@ -192,14 +194,6 @@ describe("変更履歴の変換", () => {
     expect(changeEvents([row], ctx()).events[0]).toMatchObject({ title: "取引の状態を変更", detail: "契約予定 → 契約済", dealLabel: DEAL.label, href: `/deals/${DEAL.id}` });
   });
 
-  it("上限まで読んだときは途中で切れたかもしれない最後のまとまりを捨てる", () => {
-    const rows = [changeRow({ id: "a" }), changeRow({ id: "b", changedAt: at("2026-10-01T00:00:00Z") })];
-    const r = changeEvents(rows, ctx(), { reachedTake: true });
-    expect(r.events).toHaveLength(1);
-    expect(r.dropped).toBe(true);
-    // まとまりが1つだけなら捨てない(先へ進めなくなる)。
-    expect(changeEvents([changeRow()], ctx(), { reachedTake: true }).events).toHaveLength(1);
-  });
 });
 
 describe("並び順と上限", () => {

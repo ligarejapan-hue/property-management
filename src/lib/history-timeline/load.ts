@@ -7,7 +7,7 @@ import { CASE_STATUS_LABELS } from "@/lib/property-types";
 import type { TimelineAccess } from "./access";
 import {
   INVESTIGATION_ACTIONS, OWNER_INFO_SOURCES, TIMELINE_CATEGORIES, buildTimelineSummary, changeEvents, commentEvent, dealCreatedEvent,
-  dmReactionEvent, dmSentEvent, docFileEvent, docLinkEvents, docReviewEvent, documentEvent, inquiryEvent, investigationEvent,
+  dmReactionEvent, dmSentEvent, docFileEvent, docLinkIssuedEvent, docLinkRevokedEvent, docReviewEvent, documentEvent, inquiryEvent, investigationEvent,
   materialSendEvent, mergeTimeline, nextActionCompletedEvent, nextActionCreatedEvent, ownerMemoEvent, requestCopyEvent, scheduleEvent,
   sourcesForCategory, userIdsInChanges, viewingEvent,
   type ChangeRow, type DealRef, type NextCandidate, type TimelineEvent, type TimelineFilter, type TimelineSource, type TimelineSummary,
@@ -16,8 +16,8 @@ import {
 export const TIMELINE_PAGE_SIZE = 50;
 /** 変更履歴はまとめる前の行数で読む(取込で1回に数十行あるため)。 */
 const CHANGE_TAKE = 300;
-/** 内見は日時が2列に分かれていて DB で並べられない=物件あたり少数なので読んでから並べる。 */
-const VIEWING_TAKE = 200;
+/** 同じ時刻の行を読み足すときの上限(念のため)。 */
+const TIE_TAKE = 1000;
 
 const querySchema = z.object({
   category: z.enum(["all", ...TIMELINE_CATEGORIES]).default("all"),
@@ -45,16 +45,33 @@ export interface TimelineScope {
 
 const dealRef = (d: { id: string; dealNo: string }): DealRef => ({ id: d.id, label: `取引 ${d.dealNo}` });
 
+type TimeRange = { lt: Date } | { equals: Date };
+
+/**
+ * 時刻の新しい順に take 件読む。上限に届いたら、最後の行と同じ時刻の行を読み足す。
+ * ⚠続きは「その時刻より前」で読むので、同じ時刻の行が上限で切れると二度と出ない(まとめて完了にした段取りなど・@codex P2)。
+ */
+async function readWithTies<T extends { id: string }>(
+  before: Date, take: number, timeKey: string, query: (range: TimeRange, take: number) => Promise<T[]>,
+): Promise<T[]> {
+  const rows = await query({ lt: before }, take);
+  const last = rows.length >= take ? (rows[rows.length - 1] as unknown as Record<string, Date | null>)[timeKey] : null;
+  if (!last) return rows;
+  const seen = new Set(rows.map((r) => r.id));
+  const ties = await query({ equals: last }, TIE_TAKE);
+  return [...rows, ...ties.filter((r) => !seen.has(r.id))];
+}
+
 /** 物件の出どころ。⚠ access で閉じた出どころはクエリを流さない。 */
 async function loadPropertyEvents(propertyId: string, access: TimelineAccess, wants: (s: TimelineSource) => boolean, before: Date, take: number): Promise<TimelineEvent[]> {
   const tasks: Promise<TimelineEvent[]>[] = [];
-  const lt = { lt: before };
+  const read = <T extends { id: string }>(timeKey: string, query: (range: TimeRange, take: number) => Promise<T[]>) => readWithTies(before, take, timeKey, query);
 
   if (wants("comment")) {
-    tasks.push(prisma.comment.findMany({
-      where: { propertyId, createdAt: lt }, orderBy: { createdAt: "desc" }, take,
+    tasks.push(read("createdAt", (createdAt, n) => prisma.comment.findMany({
+      where: { propertyId, createdAt }, orderBy: { createdAt: "desc" }, take: n,
       select: { id: true, body: true, createdAt: true, parentId: true, author: { select: { name: true } } },
-    }).then((rows) => rows.map((r) => commentEvent(r, propertyId))));
+    })).then((rows) => rows.map((r) => commentEvent(r, propertyId))));
   }
   if (wants("owner_memo") && access.memo !== "hidden") {
     tasks.push((async () => {
@@ -62,61 +79,65 @@ async function loadPropertyEvents(propertyId: string, access: TimelineAccess, wa
       const links = await prisma.propertyOwner.findMany({ where: { propertyId }, select: { id: true, ownerId: true } });
       const ownerIds = links.map((l) => l.ownerId);
       const scope = [{ propertyId }, ...(ownerIds.length > 0 ? [{ ownerId: { in: ownerIds }, propertyId: null }] : [])];
-      const rows = await prisma.ownerMemo.findMany({
-        where: { OR: scope, createdAt: lt }, orderBy: { createdAt: "desc" }, take,
+      const rows = await read("createdAt", (createdAt, n) => prisma.ownerMemo.findMany({
+        where: { OR: scope, createdAt }, orderBy: { createdAt: "desc" }, take: n,
         select: { id: true, body: true, createdAt: true, creator: { select: { name: true } } },
-      });
+      }));
       return rows.map((r) => ownerMemoEvent(r, access.memo, propertyId));
     })());
   }
   if (access.dm && wants("dm")) {
-    tasks.push(prisma.propertyDmLog.findMany({
-      where: { propertyId, sentAt: lt }, orderBy: [{ sentAt: "desc" }, { createdAt: "desc" }], take,
+    tasks.push(read("sentAt", (sentAt, n) => prisma.propertyDmLog.findMany({
+      where: { propertyId, sentAt }, orderBy: [{ sentAt: "desc" }, { createdAt: "desc" }], take: n,
       select: { id: true, sentAt: true, method: true, note: true, sender: { select: { name: true } } },
-    }).then((rows) => rows.map((r) => dmSentEvent(r, access.noteLevel, propertyId))));
+    })).then((rows) => rows.map((r) => dmSentEvent(r, access.noteLevel, propertyId))));
   }
   if (access.dm && wants("dm_reaction")) {
-    tasks.push(prisma.propertyDmLog.findMany({
-      where: { propertyId, reactedAt: lt, reactionStatus: { not: "no_response" } }, orderBy: { reactedAt: "desc" }, take,
+    tasks.push(read("reactedAt", (reactedAt, n) => prisma.propertyDmLog.findMany({
+      where: { propertyId, reactedAt, reactionStatus: { not: "no_response" } }, orderBy: { reactedAt: "desc" }, take: n,
       select: { id: true, reactedAt: true, reactionStatus: true, reactionNote: true },
-    }).then((rows) => rows.flatMap((r) => (r.reactedAt ? [dmReactionEvent({ ...r, reactedAt: r.reactedAt }, access.noteLevel, propertyId)] : []))));
+    })).then((rows) => rows.flatMap((r) => (r.reactedAt ? [dmReactionEvent({ ...r, reactedAt: r.reactedAt }, access.noteLevel, propertyId)] : []))));
   }
   if (wants("inquiry")) {
-    tasks.push(prisma.agentInquiry.findMany({
-      where: { propertyId, receivedAt: lt }, orderBy: { receivedAt: "desc" }, take,
+    tasks.push(read("receivedAt", (receivedAt, n) => prisma.agentInquiry.findMany({
+      where: { propertyId, receivedAt }, orderBy: { receivedAt: "desc" }, take: n,
       select: { id: true, kind: true, receivedAt: true, contactName: true, agent: { select: { companyName: true } }, createdBy: { select: { name: true } } },
-    }).then((rows) => rows.map((r) => inquiryEvent(r, propertyId))));
+    })).then((rows) => rows.map((r) => inquiryEvent(r, propertyId))));
   }
   if (wants("viewing")) {
-    tasks.push(prisma.agentViewing.findMany({
-      where: { inquiry: { propertyId }, OR: [{ scheduledAt: lt }, { scheduledAt: null, createdAt: lt }] }, orderBy: { createdAt: "desc" }, take: VIEWING_TAKE,
-      select: {
-        id: true, scheduledAt: true, createdAt: true, canceledAt: true, resultNote: true, attendant: { select: { name: true } },
-        inquiry: { select: { agent: { select: { companyName: true } } } },
-      },
-    }).then((rows) => rows.map((r) => viewingEvent(r, propertyId))));
+    const viewingSelect = {
+      id: true, scheduledAt: true, createdAt: true, canceledAt: true, resultNote: true, attendant: { select: { name: true } },
+      inquiry: { select: { agent: { select: { companyName: true } } } },
+    } as const;
+    // 経緯の時刻は予定日、無ければ登録日。列ごとに読むと、それぞれ時刻の順に切れる。
+    tasks.push(read("scheduledAt", (scheduledAt, n) => prisma.agentViewing.findMany({
+      where: { inquiry: { propertyId }, scheduledAt }, orderBy: { scheduledAt: "desc" }, take: n, select: viewingSelect,
+    })).then((rows) => rows.map((r) => viewingEvent(r, propertyId))));
+    tasks.push(read("createdAt", (createdAt, n) => prisma.agentViewing.findMany({
+      where: { inquiry: { propertyId }, scheduledAt: null, createdAt }, orderBy: { createdAt: "desc" }, take: n, select: viewingSelect,
+    })).then((rows) => rows.map((r) => viewingEvent(r, propertyId))));
   }
   if (access.material && wants("material_send")) {
-    tasks.push(prisma.agentInquiryMaterialSend.findMany({
-      where: { inquiry: { propertyId }, createdAt: lt, result: { in: ["sent", "failed"] } }, orderBy: { createdAt: "desc" }, take,
+    tasks.push(read("createdAt", (createdAt, n) => prisma.agentInquiryMaterialSend.findMany({
+      where: { inquiry: { propertyId }, createdAt, result: { in: ["sent", "failed"] } }, orderBy: { createdAt: "desc" }, take: n,
       select: { id: true, createdAt: true, result: true, sentBy: { select: { name: true } }, inquiry: { select: { agent: { select: { companyName: true } } } } },
-    }).then((rows) => rows.map((r) => materialSendEvent(r, propertyId))));
+    })).then((rows) => rows.map((r) => materialSendEvent(r, propertyId))));
   }
   if (wants("next_action")) {
-    tasks.push(prisma.nextAction.findMany({
-      where: { propertyId, createdAt: lt }, orderBy: { createdAt: "desc" }, take,
+    tasks.push(read("createdAt", (createdAt, n) => prisma.nextAction.findMany({
+      where: { propertyId, createdAt }, orderBy: { createdAt: "desc" }, take: n,
       select: { id: true, content: true, createdAt: true, scheduledAt: true, creator: { select: { name: true } } },
-    }).then((rows) => rows.map((r) => nextActionCreatedEvent(r, propertyId))));
-    tasks.push(prisma.nextAction.findMany({
-      where: { propertyId, completedAt: lt }, orderBy: { completedAt: "desc" }, take,
+    })).then((rows) => rows.map((r) => nextActionCreatedEvent(r, propertyId))));
+    tasks.push(read("completedAt", (completedAt, n) => prisma.nextAction.findMany({
+      where: { propertyId, completedAt }, orderBy: { completedAt: "desc" }, take: n,
       select: { id: true, content: true, completedAt: true },
-    }).then((rows) => rows.map((r) => nextActionCompletedEvent(r, propertyId))));
+    })).then((rows) => rows.map((r) => nextActionCompletedEvent(r, propertyId))));
   }
   if (wants("investigation")) {
-    tasks.push(prisma.propertyInvestigationAuditLog.findMany({
-      where: { propertyId, createdAt: lt, action: { in: INVESTIGATION_ACTIONS } }, orderBy: { createdAt: "desc" }, take,
+    tasks.push(read("createdAt", (createdAt, n) => prisma.propertyInvestigationAuditLog.findMany({
+      where: { propertyId, createdAt, action: { in: INVESTIGATION_ACTIONS } }, orderBy: { createdAt: "desc" }, take: n,
       select: { id: true, action: true, note: true, createdAt: true, creator: { select: { name: true } } },
-    }).then((rows) => rows.map((r) => investigationEvent(r, propertyId))));
+    })).then((rows) => rows.map((r) => investigationEvent(r, propertyId))));
   }
   return (await Promise.all(tasks)).flat();
 }
@@ -127,53 +148,57 @@ async function loadDealEvents(deals: TimelineDeal[], access: TimelineAccess, wan
   const ids = deals.map((d) => d.id);
   const refs = new Map(deals.map((d) => [d.id, dealRef(d)]));
   const ref = (id: string) => refs.get(id) as DealRef;
-  const lt = { lt: before };
+  const read = <T extends { id: string }>(timeKey: string, query: (range: TimeRange, take: number) => Promise<T[]>) => readWithTies(before, take, timeKey, query);
   const tasks: Promise<TimelineEvent[]>[] = [];
 
   if (wants("deal_created")) {
     tasks.push(Promise.resolve(deals.filter((d) => d.createdAt < before).map((d) => dealCreatedEvent(d, ref(d.id)))));
   }
   if (wants("schedule")) {
-    tasks.push(prisma.dealScheduleItem.findMany({
-      where: { dealId: { in: ids }, completedAt: lt, excludedAt: null }, orderBy: { completedAt: "desc" }, take,
+    tasks.push(read("completedAt", (completedAt, n) => prisma.dealScheduleItem.findMany({
+      where: { dealId: { in: ids }, completedAt, excludedAt: null }, orderBy: { completedAt: "desc" }, take: n,
       select: { id: true, dealId: true, label: true, completedAt: true, autoCompleted: true },
-    }).then((rows) => rows.map((r) => scheduleEvent(r, ref(r.dealId)))));
+    })).then((rows) => rows.map((r) => scheduleEvent(r, ref(r.dealId)))));
   }
   if (wants("document")) {
-    tasks.push(prisma.dealDocument.findMany({
-      where: { dealId: { in: ids }, issuedAt: lt }, orderBy: { issuedAt: "desc" }, take,
+    tasks.push(read("issuedAt", (issuedAt, n) => prisma.dealDocument.findMany({
+      where: { dealId: { in: ids }, issuedAt }, orderBy: { issuedAt: "desc" }, take: n,
       select: { id: true, dealId: true, docType: true, variant: true, version: true, issuedAt: true, issuedBy: { select: { name: true } } },
-    }).then((rows) => rows.map((r) => documentEvent(r, ref(r.dealId)))));
+    })).then((rows) => rows.map((r) => documentEvent(r, ref(r.dealId)))));
   }
   if (wants("request_copy")) {
     tasks.push((async () => {
       const [rows, settings] = await Promise.all([
-        prisma.auditLog.findMany({
-          where: { action: "deal_request_draft_copy", targetTable: "deals", targetId: { in: ids }, createdAt: lt }, orderBy: { createdAt: "desc" }, take,
+        read("createdAt", (createdAt, n) => prisma.auditLog.findMany({
+          where: { action: "deal_request_draft_copy", targetTable: "deals", targetId: { in: ids }, createdAt }, orderBy: { createdAt: "desc" }, take: n,
           select: { id: true, targetId: true, createdAt: true, detail: true, user: { select: { name: true } } },
-        }),
+        })),
         loadDealSettings(),
       ]);
       return rows.flatMap((r) => (r.targetId && refs.has(r.targetId) ? [requestCopyEvent(r, ref(r.targetId), settings.requestTemplates)] : []));
     })());
   }
   if (wants("doc_file")) {
-    tasks.push(prisma.dealDocFile.findMany({
-      where: { request: { link: { dealId: { in: ids } } }, createdAt: lt }, orderBy: { createdAt: "desc" }, take,
+    tasks.push(read("createdAt", (createdAt, n) => prisma.dealDocFile.findMany({
+      where: { request: { link: { dealId: { in: ids } } }, createdAt }, orderBy: { createdAt: "desc" }, take: n,
       select: { id: true, createdAt: true, request: { select: { label: true, link: { select: { dealId: true, partyRole: true } } } } },
-    }).then((rows) => rows.map((r) => docFileEvent(r, ref(r.request.link.dealId)))));
+    })).then((rows) => rows.map((r) => docFileEvent(r, ref(r.request.link.dealId)))));
   }
   if (wants("doc_review")) {
-    tasks.push(prisma.dealDocRequest.findMany({
-      where: { link: { dealId: { in: ids } }, reviewedAt: lt, status: { in: ["received", "rejected"] } }, orderBy: { reviewedAt: "desc" }, take,
+    tasks.push(read("reviewedAt", (reviewedAt, n) => prisma.dealDocRequest.findMany({
+      where: { link: { dealId: { in: ids } }, reviewedAt, status: { in: ["received", "rejected"] } }, orderBy: { reviewedAt: "desc" }, take: n,
       select: { id: true, label: true, status: true, rejectReason: true, reviewedAt: true, reviewedBy: { select: { name: true } }, link: { select: { dealId: true } } },
-    }).then((rows) => rows.map((r) => docReviewEvent(r, ref(r.link.dealId), access.dealManage))));
+    })).then((rows) => rows.map((r) => docReviewEvent(r, ref(r.link.dealId), access.dealManage))));
   }
   if (wants("doc_link")) {
-    tasks.push(prisma.dealDocLink.findMany({
-      where: { dealId: { in: ids }, OR: [{ createdAt: lt }, { revokedAt: lt }] }, orderBy: { createdAt: "desc" }, take,
-      select: { id: true, dealId: true, partyRole: true, createdAt: true, revokedAt: true, createdBy: { select: { name: true } } },
-    }).then((rows) => rows.flatMap((r) => docLinkEvents(r, ref(r.dealId))).filter((e) => new Date(e.at) < before)));
+    const linkSelect = { id: true, dealId: true, partyRole: true, createdAt: true, revokedAt: true, createdBy: { select: { name: true } } } as const;
+    // 発行と無効化は時刻が別=別々に読む(古いリンクを最近無効にした行を落とさない・@codex P2)。
+    tasks.push(read("createdAt", (createdAt, n) => prisma.dealDocLink.findMany({
+      where: { dealId: { in: ids }, createdAt }, orderBy: { createdAt: "desc" }, take: n, select: linkSelect,
+    })).then((rows) => rows.map((r) => docLinkIssuedEvent(r, ref(r.dealId)))));
+    tasks.push(read("revokedAt", (revokedAt, n) => prisma.dealDocLink.findMany({
+      where: { dealId: { in: ids }, revokedAt }, orderBy: { revokedAt: "desc" }, take: n, select: linkSelect,
+    })).then((rows) => rows.map((r) => docLinkRevokedEvent(r, ref(r.dealId)))));
   }
   return (await Promise.all(tasks)).flat();
 }
@@ -192,24 +217,23 @@ async function loadChangeEvents(scope: TimelineScope, deals: TimelineDeal[], acc
   if (deals.length > 0 && wants("change")) targets.push({ targetTable: "deals", targetId: { in: deals.map((d) => d.id) } });
   if (targets.length === 0) return { events: [], truncated: false };
 
-  const rows: ChangeRow[] = await prisma.changeLog.findMany({
-    where: { OR: targets, changedAt: { lt: before } }, orderBy: { changedAt: "desc" }, take: CHANGE_TAKE,
+  const rows: ChangeRow[] = await readWithTies(before, CHANGE_TAKE, "changedAt", (changedAt, n) => prisma.changeLog.findMany({
+    where: { OR: targets, changedAt }, orderBy: { changedAt: "desc" }, take: n,
     select: {
       id: true, targetTable: true, targetId: true, fieldName: true, oldValue: true, newValue: true, source: true, changedAt: true,
       changer: { select: { name: true } },
     },
-  });
+  }));
   const userIds = userIdsInChanges(rows);
   const users = userIds.length > 0 ? await prisma.user.findMany({ where: { id: { in: userIds } }, select: { id: true, name: true } }) : [];
-  const reachedTake = rows.length >= CHANGE_TAKE;
   const { events } = changeEvents(rows, {
     propertyId: scope.propertyId,
     dealsById: new Map(deals.map((d) => [d.id, dealRef(d)])),
     userNames: new Map(users.map((u) => [u.id, u.name])),
     inquirerLevel: access.inquirerLevel,
     ownerNote: access.ownerNote,
-  }, { reachedTake });
-  return { events, truncated: reachedTake };
+  });
+  return { events, truncated: rows.length >= CHANGE_TAKE };
 }
 
 async function loadEvents(scope: TimelineScope, access: TimelineAccess, filter: TimelineFilter, before: Date, limit: number) {
