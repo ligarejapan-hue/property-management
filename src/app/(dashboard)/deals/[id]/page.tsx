@@ -27,6 +27,7 @@ import { DEAL_BUSINESS_TYPE_LABELS, DEAL_STATUS_LABELS } from "@/lib/deals/const
 import { dealTitle } from "@/lib/deals/deal-title";
 // 横の物件の編集が鍵のヘッダを送るので、合言葉の一生をこの画面でも持つ。
 import { useEditScreenToken } from "@/hooks/use-edit-screen-token";
+import { useWideScreen } from "@/hooks/use-wide-screen";
 
 // 「書類」=発行した書類の履歴(設計 §5・段3で追加)。
 const DEAL_TABS = [
@@ -59,6 +60,7 @@ export default function DealDetailPage({ params }: { params: Promise<{ id: strin
   // 当事者タブでは所有者を自動で横に出す。閉じたら、押して開くまで出さない。
   const [partiesSideClosed, setPartiesSideClosed] = useState(false);
   const [sideEditing, setSideEditing] = useState(false);
+  const wideScreen = useWideScreen();
   const [error, setError] = useState<string | null>(null);
   const [calcError, setCalcError] = useState<string | null>(null);
   // 書類を発行したら照合を読み直す。
@@ -107,7 +109,8 @@ export default function DealDetailPage({ params }: { params: Promise<{ id: strin
   const tab: DealTabKey = tabs.some((t) => t.key === selected) ? selected : "basic";
   const k = (v: unknown) => JSON.stringify(v);
   const propertyId = data.canOpenProperty && deal.propertyId ? deal.propertyId : null;
-  const sideOpen = propertyId !== null && (sideRequested || (tab === "parties" && !partiesSideClosed));
+  // 狭い画面の横の欄は全画面に重なるので、当事者タブでも自動では開かない。
+  const sideOpen = propertyId !== null && (sideRequested || (wideScreen && tab === "parties" && !partiesSideClosed));
   const closeSide = () => { setSideRequested(false); setSideEditing(false); if (tab === "parties") setPartiesSideClosed(true); };
   const openSide = () => { setSideRequested(true); setPartiesSideClosed(false); };
   const sideView = tab === "parties" ? "owners" : "property";

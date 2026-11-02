@@ -50,6 +50,9 @@ describe("取引の詳しい画面", () => {
   it("当事者タブでは所有者を自動で横に出す・閉じたら開き直さない", () => {
     expect(src).toMatch(/tab === "parties" && !partiesSideClosed/);
   });
+  it("★狭い画面では当事者タブでも自動で開かない(全画面に重なるので)", () => {
+    expect(src).toMatch(/wideScreen && tab === "parties"/);
+  });
   it("編集中は開閉のボタンを止める", () => {
     expect(src).toMatch(/disabled=\{sideEditing\}/);
   });
@@ -91,6 +94,16 @@ describe("横の編集", () => {
   });
   it("当事者タブでは所有者を出す", () => {
     expect(page).toMatch(/tab === "parties" \? "owners" : "property"/);
+  });
+  it("★編集中は読み直さない=渡す物件が変わると入力が開いた時点の値へ戻る", () => {
+    expect(side).toMatch(/useEffect\(\(\) => \{\s+if \(editing\) return;/);
+    expect(side).toMatch(/\[load, revision, editing\]/);
+    // 編集の部品は物件を受け取り直すと入力を入れ直す(この前提が変わったら上の守りも見直す)。
+    expect(form).toMatch(/\[property, restored, draftDiscarded\]/);
+  });
+  it("★編集中は横の欄の×を出さない=編集の部品の×・キャンセルで閉じる", () => {
+    expect(side).toMatch(/\{!editing && \(\s+<Button variant="ghost" size="sm" onClick=\{onClose\}/);
+    expect(form).toMatch(/handleCloseKeepDraft/);
   });
 });
 
