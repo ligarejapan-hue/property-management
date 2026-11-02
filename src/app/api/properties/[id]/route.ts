@@ -360,7 +360,7 @@ export async function PATCH(
     const touchesRegistryKey = REGISTRY_KEY_FIELDS.some((f) => {
       if (!(f in updateFields)) return false;
       const next = (updateFields as Record<string, unknown>)[f];
-      return String(next ?? "").trim() !== String(current[f] ?? "").trim();
+      return savedTextValue("property", f, String(next ?? "")).trim() !== String(current[f] ?? "").trim();
     });
     if (touchesRegistryKey && current.registryStatus === "scheduled") {
       throw new ApiError(
