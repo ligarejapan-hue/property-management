@@ -128,7 +128,7 @@ export default function HistoryTimeline({ url }: { url: string }) {
       {summary && <TimelineSummaryCard summary={summary} />}
       <div className="flex flex-wrap gap-2" role="group" aria-label="種類で絞り込む">
         {FILTERS.map((f) => (
-          <Button key={f} size="sm" variant={f === filter ? "primary" : "secondary"} aria-pressed={f === filter} onClick={() => choose(f)}>
+          <Button key={f} size="sm" variant={f === filter ? "primary" : "secondary"} aria-pressed={f === filter} disabled={loading} onClick={() => choose(f)}>
             {TIMELINE_FILTER_LABELS[f]}
           </Button>
         ))}
