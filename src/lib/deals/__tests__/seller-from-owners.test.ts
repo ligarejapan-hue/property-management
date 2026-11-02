@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { sellerAccessOf, sellerPartiesFromOwners } from "../seller-from-owners";
+import { ownersExceptCompany, sellerAccessOf, sellerPartiesFromOwners } from "../seller-from-owners";
 
 const owner = (over: Record<string, unknown> = {}) => ({
   name: "試験 太郎", phone: "03-0000-0000", address: "東京都試験区1-2-3", currentAddress: null,
@@ -52,5 +52,13 @@ describe("物件の所有者を売主にする", () => {
 describe("売主に入れてよい範囲(依頼文の差し込みと同じ決まり)", () => {
   it("所有者を読めない人は何も入れない", () => {
     expect(sellerAccessOf([])).toEqual({ name: false, address: false, phone: false });
+  });
+});
+
+describe("自社の名前の所有者", () => {
+  it("空白や(株)の書き方が違っても除く", () => {
+    const owners = [owner({ name: "リガーレ 株式会社" }), owner({ name: "(株)リガーレ" }), owner()];
+    expect(ownersExceptCompany(owners, "株式会社リガーレ").map((o) => o.name)).toEqual(["リガーレ 株式会社", "試験 太郎"]);
+    expect(ownersExceptCompany(owners, "リガーレ株式会社").map((o) => o.name)).toEqual(["(株)リガーレ", "試験 太郎"]);
   });
 });

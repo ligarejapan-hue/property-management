@@ -9,6 +9,7 @@ vi.mock("@/lib/prisma", () => {
     property: { findUnique: vi.fn() },
     propertyOwner: { findMany: vi.fn(async () => []) },
     dealParty: { findMany: vi.fn(async () => []), createMany: vi.fn(async () => ({ count: 0 })) },
+    companyProfile: { findUnique: vi.fn(async () => null) },
     $queryRaw: vi.fn(async () => []),
   };
   db.$transaction = vi.fn(async (fn: (tx: unknown) => unknown) => fn(db));
@@ -26,6 +27,7 @@ const pm = prismaMock as never as {
   property: { findUnique: Fn };
   propertyOwner: { findMany: Fn };
   dealParty: { findMany: Fn; createMany: Fn };
+  companyProfile: { findUnique: Fn };
   $queryRaw: Fn;
 };
 const ctx = { params: Promise.resolve({ id: DEAL_ID }) };
@@ -105,5 +107,34 @@ describe("物件の所有者を売主に入れる", () => {
     (getApiSession as Fn).mockResolvedValue({ id: "u-field", role: "field_staff" });
     pm.property.findUnique.mockResolvedValue({ createdBy: "other", assignedTo: null });
     expect((await post()).status).toBe(404);
+  });
+});
+
+describe("自社が売主の取引", () => {
+  const OWNER_PERMS = [
+    ...DEAL_PERMS,
+    { resource: "owner", action: "read", granted: true },
+    { resource: "owner_name", action: "full", granted: true },
+  ];
+  const ctx2 = { params: Promise.resolve({ id: DEAL_ID }) };
+  const link = (name: string) => ({ owner: { name, phone: null, address: null, currentAddress: null, corporateNumber: null, companyRegistryNumber: null } });
+  beforeEach(() => {
+    (getUserPermissions as Fn).mockResolvedValue(OWNER_PERMS);
+    pm.deal.findUnique.mockResolvedValue({ propertyId: PROP_ID });
+    pm.property.findUnique.mockResolvedValue({ createdBy: "x", assignedTo: null });
+    pm.companyProfile.findUnique.mockResolvedValue({ nameJa: "株式会社試験社" });
+  });
+  it("売主に自社がいれば、所有者を足さない", async () => {
+    pm.dealParty.findMany.mockResolvedValue([{ name: "株式会社試験社", isSelf: true }]);
+    (pm as never as { propertyOwner: { findMany: Fn } }).propertyOwner.findMany.mockResolvedValue([link("試験 花子")]);
+    const res = await POST(new Request("http://x", { method: "POST" }), ctx2);
+    expect(await res.json()).toEqual({ added: 0 });
+    expect(pm.dealParty.createMany).not.toHaveBeenCalled();
+  });
+  it("自社の名前の所有者は足さない", async () => {
+    pm.dealParty.findMany.mockResolvedValue([]);
+    (pm as never as { propertyOwner: { findMany: Fn } }).propertyOwner.findMany.mockResolvedValue([link("株式会社 試験社"), link("試験 花子")]);
+    await POST(new Request("http://x", { method: "POST" }), ctx2);
+    expect(pm.dealParty.createMany.mock.calls[0][0].data.map((r: { name: string }) => r.name)).toEqual(["試験 花子"]);
   });
 });

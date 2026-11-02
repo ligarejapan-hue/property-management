@@ -58,12 +58,14 @@ export function DealOwnerSideBody({ state }: { state: LoadState }) {
 /**
  * 取引の画面の横に並べる物件の情報。広い画面は右に並び、狭い画面は上に重なる。
  * 当事者タブでは所有者を出す。編集できる人には基本情報の編集を出す(鍵・下書きは物件の画面と同じ部品)。
- * key に取引の状態を入れて開き直す=連動で変わった案件ステータスを読み直す。
+ * revision(取引の状態)が変わったら読み直す=連動で変わった案件ステータスを出す。
+ * ⚠編集中は読み直さない(渡す物件が変わると編集の部品が入力を開いた時点の値へ戻す)。編集が終わったら読み直す。
  */
 export default function DealPropertySide({
-  propertyId, view = "property", canEdit = false, onEditingChange, onClose,
+  propertyId, revision, view = "property", canEdit = false, onEditingChange, onClose,
 }: {
   propertyId: string;
+  revision?: string;
   view?: "property" | "owners";
   canEdit?: boolean;
   onEditingChange?: (editing: boolean) => void;
@@ -80,12 +82,14 @@ export default function DealPropertySide({
   }, [propertyId]);
 
   useEffect(() => {
+    if (editing) return;
     let alive = true;
     load()
       .then((property) => { if (alive) setState({ kind: "ok", property }); })
-      .catch(() => { if (alive) setState({ kind: "error" }); });
+      // 読み直しの失敗で、見えている値を消さない。
+      .catch(() => { if (alive) setState((s) => (s.kind === "ok" ? s : { kind: "error" })); });
     return () => { alive = false; };
-  }, [load]);
+  }, [load, revision, editing]);
 
   const changeEditing = (next: boolean) => {
     setEditing(next);
@@ -100,9 +104,12 @@ export default function DealPropertySide({
     >
       <div className="flex items-center justify-between gap-2">
         <h2 className="text-sm font-semibold text-gray-900 dark:text-gray-100">{title}</h2>
-        <Button variant="ghost" size="sm" onClick={onClose} aria-label={`${title}を閉じる`}>
-          <X className="h-4 w-4" />
-        </Button>
+        {/* 編集中は編集の部品の×・キャンセルで閉じる(控えと鍵の扱いはそちらが持つ)。 */}
+        {!editing && (
+          <Button variant="ghost" size="sm" onClick={onClose} aria-label={`${title}を閉じる`}>
+            <X className="h-4 w-4" />
+          </Button>
+        )}
       </div>
       <div className="flex flex-wrap items-center gap-3">
         <a
@@ -135,10 +142,8 @@ export default function DealPropertySide({
           onSaved={() => {
             changeEditing(false);
             setSaved(true);
+            // 読み直しは編集が終わったときの effect が行う。
             setState({ kind: "loading" });
-            void load()
-              .then((property) => setState({ kind: "ok", property }))
-              .catch(() => setState({ kind: "error" }));
           }}
         />
       ) : view === "owners" ? (

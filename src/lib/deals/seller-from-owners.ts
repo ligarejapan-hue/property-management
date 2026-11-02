@@ -9,6 +9,7 @@
 import type { PermissionEntry } from "@/lib/api-helpers";
 import { hasPermission, isMaskFreeLevel, resolveOwnerDisplayConfig } from "@/lib/permissions";
 import { foldNameVariants } from "./crosscheck";
+import { resolveCompanyProfile } from "@/lib/sales-sheet/company-profile-store";
 import type { Prisma } from "@/generated/prisma";
 
 export interface SellerAccess { name: boolean; address: boolean; phone: boolean }
@@ -48,6 +49,16 @@ const fit = (v: string | null | undefined, max: number): string | null => {
   return t && t.length <= max ? t : null;
 };
 
+const sameCompany = (a: string, b: string) => {
+  const key = (v: string) => foldNameVariants(v).replace(/\s/g, "");
+  return key(a) === key(b);
+};
+
+/** 自社の名前の所有者を除く(自社の持ち物を売る取引に、自社を個人の売主として入れない)。純関数。 */
+export function ownersExceptCompany<T extends { name: string }>(owners: T[], companyName: string): T[] {
+  return owners.filter((o) => !sameCompany(o.name, companyName));
+}
+
 /** 足す売主を決める。純関数。`existingNames` はすでに入っている売主の氏名。 */
 export function sellerPartiesFromOwners(owners: OwnerForSeller[], existingNames: string[], access: SellerAccess): SellerParty[] {
   if (!access.name) return [];
@@ -83,8 +94,12 @@ export async function addSellersFromOwners(
     orderBy: [{ isPrimary: "desc" }, { createdAt: "asc" }],
     select: { owner: { select: SELLER_OWNER_SELECT } },
   });
-  const existing = await tx.dealParty.findMany({ where: { dealId: o.dealId, role: "seller" }, select: { name: true } });
-  const parties = sellerPartiesFromOwners(links.map((l) => l.owner), existing.map((p) => p.name), o.access);
+  const existing = await tx.dealParty.findMany({ where: { dealId: o.dealId, role: "seller" }, select: { name: true, isSelf: true } });
+  // 自社が売主の取引には、物件の所有者を足さない。
+  if (existing.some((p) => p.isSelf)) return 0;
+  const company = resolveCompanyProfile(await tx.companyProfile.findUnique({ where: { id: "singleton" } }));
+  const owners = ownersExceptCompany(links.map((l) => l.owner), company.nameJa);
+  const parties = sellerPartiesFromOwners(owners, existing.map((p) => p.name), o.access);
   if (parties.length > 0) {
     await tx.dealParty.createMany({
       data: parties.map((p, i) => ({ ...p, dealId: o.dealId, sortOrder: existing.length + i })),

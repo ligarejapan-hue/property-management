@@ -28,6 +28,7 @@ import { DEAL_BUSINESS_TYPE_LABELS, DEAL_STATUS_LABELS } from "@/lib/deals/const
 import { dealTitle } from "@/lib/deals/deal-title";
 // 横の物件の編集が鍵のヘッダを送るので、合言葉の一生をこの画面でも持つ。
 import { useEditScreenToken } from "@/hooks/use-edit-screen-token";
+import { useWideScreen } from "@/hooks/use-wide-screen";
 
 // 「書類」=発行した書類の履歴(設計 §5・段3で追加)。
 const DEAL_TABS = [
@@ -58,7 +59,10 @@ export default function DealDetailPage({ params }: { params: Promise<{ id: strin
   const [users, setUsers] = useState<UserOption[]>([]);
   const [selected, setSelected] = useState<DealTabKey>("basic");
   const [sideRequested, setSideRequested] = useState(false);
+  // 当事者タブでは所有者を自動で横に出す。閉じたら、押して開くまで出さない。
+  const [partiesSideClosed, setPartiesSideClosed] = useState(false);
   const [sideEditing, setSideEditing] = useState(false);
+  const wideScreen = useWideScreen();
   const [error, setError] = useState<string | null>(null);
   const [calcError, setCalcError] = useState<string | null>(null);
   // 書類を発行したら照合を読み直す。
@@ -107,7 +111,10 @@ export default function DealDetailPage({ params }: { params: Promise<{ id: strin
   const tab: DealTabKey = tabs.some((t) => t.key === selected) ? selected : "basic";
   const k = (v: unknown) => JSON.stringify(v);
   const propertyId = data.canOpenProperty && deal.propertyId ? deal.propertyId : null;
-  const sideOpen = sideRequested && propertyId !== null;
+  // 狭い画面の横の欄は全画面に重なるので、当事者タブでも自動では開かない。
+  const sideOpen = propertyId !== null && (sideRequested || (wideScreen && tab === "parties" && !partiesSideClosed));
+  const closeSide = () => { setSideRequested(false); setSideEditing(false); if (tab === "parties") setPartiesSideClosed(true); };
+  const openSide = () => { setSideRequested(true); setPartiesSideClosed(false); };
   const sideView = tab === "parties" ? "owners" : "property";
   // 編集の入力欄は狭いと使いにくいので、編集中だけ左右を半分ずつにする。
   const sideGrid = sideEditing ? "lg:grid-cols-2" : "lg:grid-cols-[minmax(0,1fr)_22rem]";
@@ -121,7 +128,7 @@ export default function DealDetailPage({ params }: { params: Promise<{ id: strin
           <div className="flex flex-wrap gap-2">
             {/* 開く権限がある人にだけ出す。 */}
             {data.canOpenProperty && deal.propertyId && (
-              <Button variant="secondary" size="sm" onClick={() => setSideRequested((v) => !v)} aria-pressed={sideOpen}>
+              <Button variant="secondary" size="sm" disabled={sideEditing} onClick={sideOpen ? closeSide : openSide} aria-pressed={sideOpen}>
                 <PanelRight className="h-4 w-4" />
                 {sideView === "owners" ? "所有者情報を見る" : "物件情報を見る"}
               </Button>
@@ -189,12 +196,13 @@ export default function DealDetailPage({ params }: { params: Promise<{ id: strin
       </div>
       {sideOpen && propertyId && (
         <DealPropertySide
-          key={`${propertyId}:${deal.status}`}
+          key={propertyId}
+          revision={deal.status}
           propertyId={propertyId}
           view={sideView}
           canEdit={data.canMoveCaseStatus}
           onEditingChange={setSideEditing}
-          onClose={() => { setSideRequested(false); setSideEditing(false); }}
+          onClose={closeSide}
         />
       )}
       </div>
