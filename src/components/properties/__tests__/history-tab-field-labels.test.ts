@@ -8,7 +8,7 @@ import { describe, it, expect } from "vitest";
 import { readFileSync } from "fs";
 import { resolve } from "path";
 
-const src = readFileSync(resolve(process.cwd(), "src/components/properties/history-tab.tsx"), "utf8");
+const src = readFileSync(resolve(process.cwd(), "src/lib/property-change-labels.ts"), "utf8");
 
 const COLUMNS = [
   // 販売図面 → 物件
@@ -41,7 +41,6 @@ const COLUMNS = [
 
 describe("変更履歴タブの項目名", () => {
   it.each(COLUMNS)("%s に日本語の項目名がある", (col) => {
-    const block = src.slice(src.indexOf("const FIELD_LABELS"), src.indexOf("const SOURCE_LABELS"));
-    expect(block).toMatch(new RegExp(`\\n\\s*${col}:\\s*"[^"]+"`));
+    expect(src).toMatch(new RegExp(`\\n\\s*${col}:\\s*"[^"]+"`));
   });
 });

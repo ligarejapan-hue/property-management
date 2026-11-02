@@ -4,6 +4,7 @@ import { useState, useEffect, useCallback } from "react";
 import { Loader2, History, ChevronLeft, ChevronRight, Search } from "lucide-react";
 import { fetchChangeLogs as apiFetchChangeLogs, fetchSaleDmScenarioOptionsAll, type SaleDmScenarioOptionAll } from "@/lib/api-client";
 import { formatJaDateTime } from "@/lib/format-datetime";
+import { CHANGE_FIELD_LABELS } from "@/lib/property-change-labels";
 import { dmScenarioHistoryLabel } from "./dm-scenario-field-model";
 import { caseStatusHistoryLabel, historyChangerLabel } from "./history-tab-model";
 import { Button } from "@/components/ui/button";
@@ -27,75 +28,7 @@ interface Pagination {
   totalPages: number;
 }
 
-const FIELD_LABELS: Record<string, string> = {
-  realEstateNumber: "不動産番号",
-  address: "住所",
-  lotNumber: "地番",
-  buildingNumber: "家屋番号",
-  buildingName: "物件名",
-  buildingId: "棟",
-  registryStatus: "登記状況",
-  dmStatus: "DM判断",
-  caseStatus: "案件ステータス",
-  // 案件ステータス 8〜10 の日付の欄(値は YYYY-MM-DD で残る)。
-  contractPlannedOn: "契約予定日",
-  settlementPlannedOn: "決済予定日",
-  // 問い合わせ者(値は所有者の氏名と同じ扱いで API が伏せて返す)・除外申請(2026-10-24)。
-  inquirerName: "問い合わせ者",
-  leadExclusionStatus: "除外申請",
-  leadExclusionRequestedAt: "除外申請日",
-  leadExclusionDecidedAt: "除外申請の結果の日",
-  propertyType: "種別",
-  assignedTo: "担当者",
-  zoningDistrict: "用途地域",
-  rosenkaValue: "路線価",
-  rebuildPermission: "再建築許可",
-  roadType: "道路種別",
-  setbackRequired: "セットバック",
-  name: "氏名",
-  nameKana: "氏名カナ",
-  phone: "電話番号",
-  zip: "郵便番号",
-  note: "備考",
-  propertyId: "物件ID",
-  ownerId: "所有者ID",
-  relationship: "関係",
-  isPrimary: "主所有者",
-  gpsLat: "緯度",
-  gpsLng: "経度",
-  totalFloors: "階数",
-  totalUnits: "総戸数",
-  builtYear: "築年",
-  structureType: "構造",
-  managementCompany: "管理会社",
-  dmScenarioId: "DMの種類",
-  // 販売図面から物件・棟へ保存する列(apply-writeback が変更履歴を直接書く)。
-  salePrice: "価格",
-  saleTaxType: "消費税",
-  saleTaxAmount: "うち消費税",
-  access: "交通",
-  landArea: "土地面積",
-  landAreaMethod: "面積計測方式",
-  totalFloorArea: "建物面積・延床面積",
-  builtMonth: "築月",
-  aboveFloors: "地上階",
-  basementFloors: "地下階",
-  parking: "駐車場",
-  grossYield: "想定利回り",
-  expectedIncome: "満室想定収入",
-  // 区分マンション(販売図面・CSV の「既存物件の更新」)。
-  floorNo: "所在階",
-  exclusiveArea: "専有面積（壁芯）",
-  exclusiveAreaRegistry: "専有面積（登記簿）",
-  balconyArea: "バルコニー面積",
-  layoutType: "間取り",
-  orientation: "バルコニー向き",
-  managementFee: "管理費",
-  repairReserveFee: "修繕積立金",
-  ownershipShareNote: "持分メモ",
-  roomNo: "部屋番号",
-  occupancyStatus: "現況",
-};
+const FIELD_LABELS = CHANGE_FIELD_LABELS;
 
 const SOURCE_LABELS: Record<string, string> = {
   manual: "手動",
