@@ -89,6 +89,7 @@ export const dealsApi = {
   completePreScheduleItems: (id: string) => call<{ count: number }>(`/api/deals/${id}/schedule/complete-pre`, { method: "POST" }),
   refreshProperty: (id: string, version: number) =>
     call<{ version: number }>(`/api/deals/${id}/refresh-property`, { method: "POST", body: { version } }),
+  addSellersFromOwners: (id: string) => call<{ added: number }>(`/api/deals/${id}/parties/from-owners`, { method: "POST" }),
   addParty: (id: string, body: Record<string, unknown>) =>
     call<{ party: DealPartyView }>(`/api/deals/${id}/parties`, { method: "POST", body }),
   updateParty: (id: string, partyId: string, body: Record<string, unknown>) =>

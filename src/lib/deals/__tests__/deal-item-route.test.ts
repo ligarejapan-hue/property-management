@@ -372,6 +372,25 @@ describe("POST /api/deals/[id]/refresh-property", () => {
     });
     expect(writeAuditLog).toHaveBeenCalledWith(expect.objectContaining({ action: "deal_property_refresh" }));
   });
+  it("★区分: 管理費・修繕積立金を精算へ入れる(ほかの精算の条件は残す)", async () => {
+    pm.deal.findUnique.mockResolvedValue({ propertyId: PROP_ID, settlementTerms: { fixedAssetTax: 1000, managementFee: 1, repairReserve: 2 } });
+    pm.property.findUnique.mockResolvedValue({ ...propRow, propertyType: "apartment_unit", managementFee: 12000, repairReserveFee: 8000 });
+    expect((await REFRESH(json("POST", { version: 3 }), ctx)).status).toBe(200);
+    expect(pm.deal.updateMany.mock.calls[0][0].data.settlementTerms).toMatchObject({ fixedAssetTax: 1000, managementFee: 12000, repairReserve: 8000 });
+    expect(writeAuditLog).toHaveBeenCalledWith(expect.objectContaining({ detail: { fields: ["propertySnapshot", "settlementTerms"] } }));
+  });
+  it("★物件が空の項目は、取引の額を消さない", async () => {
+    pm.deal.findUnique.mockResolvedValue({ propertyId: PROP_ID, settlementTerms: { managementFee: 1, repairReserve: 2 } });
+    pm.property.findUnique.mockResolvedValue({ ...propRow, propertyType: "apartment_unit", managementFee: 12000, repairReserveFee: null });
+    await REFRESH(json("POST", { version: 3 }), ctx);
+    expect(pm.deal.updateMany.mock.calls[0][0].data.settlementTerms).toMatchObject({ managementFee: 12000, repairReserve: 2 });
+  });
+  it("★区分でなければ精算に触らない", async () => {
+    pm.deal.findUnique.mockResolvedValue({ propertyId: PROP_ID, settlementTerms: {} });
+    pm.property.findUnique.mockResolvedValue({ ...propRow, managementFee: 12000, repairReserveFee: 8000 });
+    await REFRESH(json("POST", { version: 3 }), ctx);
+    expect(pm.deal.updateMany.mock.calls[0][0].data).not.toHaveProperty("settlementTerms");
+  });
   it("手入力の物件の取引では 422", async () => {
     pm.deal.findUnique.mockResolvedValue({ propertyId: null });
     expect((await REFRESH(json("POST", { version: 3 }), ctx)).status).toBe(422);
