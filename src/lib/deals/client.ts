@@ -89,7 +89,11 @@ export const dealsApi = {
   completePreScheduleItems: (id: string) => call<{ count: number }>(`/api/deals/${id}/schedule/complete-pre`, { method: "POST" }),
   refreshProperty: (id: string, version: number) =>
     call<{ version: number }>(`/api/deals/${id}/refresh-property`, { method: "POST", body: { version } }),
-  addSellersFromOwners: (id: string) => call<{ added: number }>(`/api/deals/${id}/parties/from-owners`, { method: "POST" }),
+  /** ownerIds なし=売主がいない取引の全員。あり=選んだ人だけ。 */
+  addSellersFromOwners: (id: string, ownerIds?: string[]) =>
+    call<{ added: number }>(`/api/deals/${id}/parties/from-owners`, { method: "POST", body: ownerIds ? { ownerIds } : {} }),
+  sellerCandidates: (id: string) =>
+    call<{ hasSellers: boolean; candidates: { ownerId: string; name: string }[] }>(`/api/deals/${id}/parties/from-owners`),
   addParty: (id: string, body: Record<string, unknown>) =>
     call<{ party: DealPartyView }>(`/api/deals/${id}/parties`, { method: "POST", body }),
   updateParty: (id: string, partyId: string, body: Record<string, unknown>) =>

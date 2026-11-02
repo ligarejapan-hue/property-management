@@ -98,8 +98,9 @@ export function CrosscheckPanel({ result: r, dealId, propertyId, canOpenProperty
 }
 
 /** revision が変わったら読み直す(取引の保存・当事者の変更・書類の発行)。 */
-export function DealCrosscheck({ dealId, propertyId, canOpenProperty, revision, onOpenTab }: {
+export function DealCrosscheck({ dealId, propertyId, canOpenProperty, revision, onOpenTab, onResult }: {
   dealId: string; propertyId: string | null; canOpenProperty: boolean; revision: string; onOpenTab: (tab: TabKey) => void;
+  onResult?: (result: CrosscheckResult | null) => void;
 }) {
   const [result, setResult] = useState<CrosscheckResult | null>(null);
   const [error, setError] = useState<string | null>(null);
@@ -107,11 +108,11 @@ export function DealCrosscheck({ dealId, propertyId, canOpenProperty, revision, 
   useEffect(() => {
     let alive = true;
     dealsApi.crosscheck(dealId)
-      .then((r) => { if (alive) { setResult(r.crosscheck); setError(null); } })
+      .then((r) => { if (alive) { setResult(r.crosscheck); setError(null); onResult?.(r.crosscheck); } })
       // 古い結果を今の結果として出さない。
-      .catch((e) => { if (alive) { setResult(null); setError(`照合の結果を読み込めませんでした: ${errorText(e)}`); } });
+      .catch((e) => { if (alive) { setResult(null); onResult?.(null); setError(`照合の結果を読み込めませんでした: ${errorText(e)}`); } });
     return () => { alive = false; };
-  }, [dealId, revision]);
+  }, [dealId, revision, onResult]);
 
   if (error) return <p className="text-sm text-red-600 dark:text-red-400" role="alert">{error}</p>;
   if (!result) return null;

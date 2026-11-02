@@ -226,6 +226,11 @@ export function normalizeName(v: string): string {
     .replace(/\(株\)/g, "株式会社").replace(/\(有\)/g, "有限会社").replace(/\(同\)/g, "合同会社");
 }
 
+/** 照合で登記名義人と売主の名前が一致しなかったか(持分の不一致は含まない)。 */
+export function sellerNameMismatch(result: Pick<CrosscheckResult, "items"> | null): boolean {
+  return result?.items.some((i) => i.key === "seller" && i.message === SELLER_MISMATCH_MESSAGE) ?? false;
+}
+
 /** 異体字をそろえた名前。そろえて初めて同じなら「表記の違い」。 */
 export function foldNameVariants(v: string): string {
   return [...normalizeName(v)].map((c) => NAME_VARIANTS[c] ?? c).join("");
