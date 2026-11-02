@@ -19,7 +19,7 @@ vi.mock("@/lib/prisma", () => {
 import prismaMock from "@/lib/prisma";
 import { getApiSession, getUserPermissions } from "@/lib/api-helpers";
 import { jsonRequest as json, DEAL_ID, PROP_ID, DEAL_PERMS } from "./route-mocks";
-import { POST } from "../../../app/api/deals/[id]/parties/from-owners/route";
+import { GET, POST } from "../../../app/api/deals/[id]/parties/from-owners/route";
 
 type Fn = ReturnType<typeof vi.fn>;
 const pm = prismaMock as never as {
@@ -38,8 +38,11 @@ const OWNER_PERMS = [
   { resource: "owner_address", action: "full", granted: true },
   { resource: "owner_phone", action: "full", granted: true },
 ];
-const taro = { owner: { name: "試験 太郎", phone: "03-0", address: "東京都試験区1", currentAddress: "東京都新区2", corporateNumber: null, companyRegistryNumber: null } };
-const post = () => POST(json("POST", {}), ctx);
+const OWNER_A = "11111111-1111-4111-8111-111111111111";
+const OWNER_B = "22222222-2222-4222-8222-222222222222";
+const taro = { owner: { id: OWNER_A, name: "試験 太郎", phone: "03-0", address: "東京都試験区1", currentAddress: "東京都新区2", corporateNumber: null, companyRegistryNumber: null } };
+const post = (body: Record<string, unknown> = {}) => POST(json("POST", body), ctx);
+const hanako = { owner: { ...taro.owner, id: OWNER_B, name: "試験 花子" } };
 
 beforeEach(() => {
   vi.clearAllMocks();
@@ -70,11 +73,41 @@ describe("物件の所有者を売主に入れる", () => {
 
   it("★すでに売主にいれば足さない・並びは今の売主の後ろ", async () => {
     pm.dealParty.findMany.mockResolvedValue([{ name: "試験 太郎" }]);
-    expect(await (await post()).json()).toEqual({ added: 0 });
+    expect(await (await post({ ownerIds: [OWNER_A] })).json()).toEqual({ added: 0 });
     expect(pm.dealParty.createMany).not.toHaveBeenCalled();
     pm.dealParty.findMany.mockResolvedValue([{ name: "別の人" }]);
-    await post();
+    await post({ ownerIds: [OWNER_A] });
     expect(pm.dealParty.createMany.mock.calls[0][0].data[0].sortOrder).toBe(1);
+  });
+
+  it("★売主がすでにいる取引は、選ばなければ足さない(相続人が売主の取引に亡くなった名義人を足さない)", async () => {
+    pm.dealParty.findMany.mockResolvedValue([{ name: "相続 一郎" }]);
+    expect(await (await post()).json()).toEqual({ added: 0 });
+    expect(pm.dealParty.createMany).not.toHaveBeenCalled();
+  });
+
+  it("★選んだ人だけ足す・今の所有者でない ID は足さない", async () => {
+    pm.propertyOwner.findMany.mockResolvedValue([taro, hanako]);
+    pm.dealParty.findMany.mockResolvedValue([{ name: "相続 一郎" }]);
+    await post({ ownerIds: [OWNER_B, "33333333-3333-4333-8333-333333333333"] });
+    expect(pm.dealParty.createMany.mock.calls[0][0].data.map((r: { name: string }) => r.name)).toEqual(["試験 花子"]);
+  });
+
+  it("★売主がいない取引は、選ばなくても全員足す", async () => {
+    pm.propertyOwner.findMany.mockResolvedValue([taro, hanako]);
+    expect(await (await post()).json()).toEqual({ added: 2 });
+  });
+
+  it("★(株)と株式会社・異体字の同じ人を二重に足さない", async () => {
+    const corp = { owner: { ...taro.owner, id: OWNER_B, name: "(株)試験髙橋" } };
+    pm.propertyOwner.findMany.mockResolvedValue([corp]);
+    pm.dealParty.findMany.mockResolvedValue([{ name: "株式会社 試験高橋" }]);
+    expect(await (await post({ ownerIds: [OWNER_B] })).json()).toEqual({ added: 0 });
+  });
+
+  it("選ぶ ID が UUID でない・空なら 422", async () => {
+    expect((await post({ ownerIds: ["x"] })).status).toBe(422);
+    expect((await post({ ownerIds: [] })).status).toBe(422);
   });
 
   it("★所有者を読めない人は 403・何も入れない", async () => {
@@ -127,14 +160,53 @@ describe("自社が売主の取引", () => {
   it("売主に自社がいれば、所有者を足さない", async () => {
     pm.dealParty.findMany.mockResolvedValue([{ name: "株式会社試験社", isSelf: true }]);
     (pm as never as { propertyOwner: { findMany: Fn } }).propertyOwner.findMany.mockResolvedValue([link("試験 花子")]);
-    const res = await POST(new Request("http://x", { method: "POST" }), ctx2);
+    const res = await POST(json("POST", {}), ctx2);
     expect(await res.json()).toEqual({ added: 0 });
     expect(pm.dealParty.createMany).not.toHaveBeenCalled();
   });
   it("自社の名前の所有者は足さない", async () => {
     pm.dealParty.findMany.mockResolvedValue([]);
     (pm as never as { propertyOwner: { findMany: Fn } }).propertyOwner.findMany.mockResolvedValue([link("株式会社 試験社"), link("試験 花子")]);
-    await POST(new Request("http://x", { method: "POST" }), ctx2);
+    await POST(json("POST", {}), ctx2);
     expect(pm.dealParty.createMany.mock.calls[0][0].data.map((r: { name: string }) => r.name)).toEqual(["試験 花子"]);
+  });
+});
+
+describe("売主にいない所有者の候補", () => {
+  const get = () => GET(new Request("http://x"), ctx);
+  beforeEach(() => {
+    pm.propertyOwner.findMany.mockResolvedValue([taro, hanako]);
+    pm.dealParty.findMany.mockResolvedValue([{ name: "試験　太郎", isSelf: false }]);
+    pm.companyProfile.findUnique.mockResolvedValue(null);
+  });
+
+  it("★売主にいない人だけ、ID と氏名だけ返す(住所・電話は返さない)", async () => {
+    const res = await get();
+    expect(res.status).toBe(200);
+    expect(await res.json()).toEqual({ hasSellers: true, candidates: [{ ownerId: OWNER_B, name: "試験 花子" }] });
+  });
+  it("★売主がいない取引は候補を出さない(全員を足すボタンの方)", async () => {
+    pm.dealParty.findMany.mockResolvedValue([]);
+    expect(await (await get()).json()).toEqual({ hasSellers: false, candidates: [] });
+  });
+  it("★自社が売主の取引は候補を出さない・自社の名前の人も出さない", async () => {
+    pm.dealParty.findMany.mockResolvedValue([{ name: "株式会社試験社", isSelf: true }]);
+    expect((await (await get()).json()).candidates).toEqual([]);
+    pm.dealParty.findMany.mockResolvedValue([{ name: "試験 太郎", isSelf: false }]);
+    pm.companyProfile.findUnique.mockResolvedValue({ nameJa: "試験 花子" });
+    expect((await (await get()).json()).candidates).toEqual([]);
+  });
+  it("★氏名をそのまま見られない人・編集できない人・物件を見られない人には返さない(人数も)", async () => {
+    (getUserPermissions as Fn).mockResolvedValue(OWNER_PERMS.filter((p) => p.resource !== "owner_name"));
+    expect((await get()).status).toBe(403);
+    (getUserPermissions as Fn).mockResolvedValue(OWNER_PERMS.filter((p) => !(p.resource === "deal" && p.action === "write")));
+    expect((await get()).status).toBe(403);
+    (getUserPermissions as Fn).mockResolvedValue(OWNER_PERMS.filter((p) => p.resource !== "property"));
+    expect((await get()).status).toBe(403);
+  });
+  it("★読むだけ(足さない・ロックしない)", async () => {
+    await get();
+    expect(pm.dealParty.createMany).not.toHaveBeenCalled();
+    expect(pm.$queryRaw).not.toHaveBeenCalled();
   });
 });

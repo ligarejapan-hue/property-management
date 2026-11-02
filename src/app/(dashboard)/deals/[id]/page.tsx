@@ -26,6 +26,7 @@ import { basicFormFromDeal } from "@/lib/deals/forms";
 import { MONEY_OVERRIDE_KEYS, SETTLEMENT_OVERRIDE_KEYS, pickOverrides } from "@/lib/deals/money-forms";
 import { DEAL_BUSINESS_TYPE_LABELS, DEAL_STATUS_LABELS } from "@/lib/deals/constants";
 import { dealTitle } from "@/lib/deals/deal-title";
+import { sellerNameMismatch, type CrosscheckResult } from "@/lib/deals/crosscheck";
 // 横の物件の編集が鍵のヘッダを送るので、合言葉の一生をこの画面でも持つ。
 import { useEditScreenToken } from "@/hooks/use-edit-screen-token";
 import { useWideScreen } from "@/hooks/use-wide-screen";
@@ -62,6 +63,7 @@ export default function DealDetailPage({ params }: { params: Promise<{ id: strin
   // 当事者タブでは所有者を自動で横に出す。閉じたら、押して開くまで出さない。
   const [partiesSideClosed, setPartiesSideClosed] = useState(false);
   const [sideEditing, setSideEditing] = useState(false);
+  const [crosscheckResult, setCrosscheckResult] = useState<CrosscheckResult | null>(null);
   const wideScreen = useWideScreen();
   const [error, setError] = useState<string | null>(null);
   const [calcError, setCalcError] = useState<string | null>(null);
@@ -154,7 +156,7 @@ export default function DealDetailPage({ params }: { params: Promise<{ id: strin
       {error && <p className="text-sm text-red-600 dark:text-red-400" role="alert">{error}</p>}
       {calcError && <p className="text-sm text-red-600 dark:text-red-400" role="alert">{calcError}</p>}
       {/* 数値照合。取引の保存・当事者の変更・書類の発行で読み直す。 */}
-      <DealCrosscheck dealId={deal.id} propertyId={deal.propertyId} canOpenProperty={data.canOpenProperty} revision={k([deal.version, deal.parties, issuedTick])} onOpenTab={setSelected} />
+      <DealCrosscheck onResult={setCrosscheckResult} dealId={deal.id} propertyId={deal.propertyId} canOpenProperty={data.canOpenProperty} revision={k([deal.version, deal.parties, issuedTick])} onOpenTab={setSelected} />
       {/* 決済までの段取り。取引の保存・書類の発行で読み直す。 */}
       <DealSchedule dealId={deal.id} users={users} defaultAssignee={deal.assigneeId} revision={k([deal.version, issuedTick, docLinkTick])} />
       {/* お客様の書類提出。当事者の変更で読み直す。操作したら段取りも読み直す(完了候補・受領の進み具合)。 */}
@@ -175,7 +177,7 @@ export default function DealDetailPage({ params }: { params: Promise<{ id: strin
           <DealPropertyPanel key={k([deal.propertySnapshot, deal.assessments])} deal={deal} canOpenProperty={data.canOpenProperty} onSaved={reload} />
         </div>
         <div hidden={tab !== "parties"}>
-          <DealPartiesPanel deal={deal} selfParty={options?.selfParty ?? null} canOpenProperty={data.canOpenProperty} onSaved={reload} />
+          <DealPartiesPanel deal={deal} selfParty={options?.selfParty ?? null} canOpenProperty={data.canOpenProperty} sellerMismatch={sellerNameMismatch(crosscheckResult)} onSaved={reload} />
         </div>
         <div hidden={tab !== "money"}>
           <DealMoneyPanel key={k([deal.price, deal.deposit, deal.taxRateBp, deal.costs, pickOverrides(deal.overrides, MONEY_OVERRIDE_KEYS)])} deal={deal} calc={calc} onSaved={reload} />

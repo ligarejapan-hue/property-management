@@ -1,4 +1,5 @@
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
+vi.mock("@/lib/prisma", () => ({ default: {} }));
 import { ownersExceptCompany, sellerAccessOf, sellerPartiesFromOwners } from "../seller-from-owners";
 
 const owner = (over: Record<string, unknown> = {}) => ({

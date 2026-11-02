@@ -5,6 +5,7 @@ import { Building2, Plus, Save, Trash2, UserPlus } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { ConfirmDialog } from "@/components/ui/confirm-dialog";
 import { Field, SelectBox, inputCls, optionsOf } from "./form-parts";
+import { DealSellerCandidates } from "./deal-seller-candidates";
 import { dealsApi, DealApiError, errorText, type DealOptions } from "@/lib/deals/client";
 import { EMPTY_PARTY_FORM, partyBodyFromForm, partyFormFromView, type PartyForm } from "@/lib/deals/forms";
 import type { DealPartyView, DealView } from "@/lib/deals/view";
@@ -17,8 +18,8 @@ const conflictText = (e: unknown) =>
 
 /** 当事者(売主・買主・代理人・賃借人)。1件ずつ開いて直す。 */
 export default function DealPartiesPanel({
-  deal, selfParty, canOpenProperty, onSaved,
-}: { deal: DealView; selfParty: DealOptions["selfParty"] | null; canOpenProperty: boolean; onSaved: () => Promise<void> }) {
+  deal, selfParty, canOpenProperty, sellerMismatch = false, onSaved,
+}: { deal: DealView; selfParty: DealOptions["selfParty"] | null; canOpenProperty: boolean; sellerMismatch?: boolean; onSaved: () => Promise<void> }) {
   /** null=閉じている / "new"=新しく足す / それ以外=直している当事者の id */
   const [editing, setEditing] = useState<string | null>(null);
   const [form, setForm] = useState<PartyForm>(EMPTY_PARTY_FORM);
@@ -62,6 +63,8 @@ export default function DealPartiesPanel({
       ? dealsApi.updateParty(deal.id, current.id, { version: current.version, ...body })
       : dealsApi.addParty(deal.id, body)));
   };
+  const sellers = deal.parties.filter((p) => p.role === "seller");
+  const hasSellers = sellers.length > 0;
   const addSellers = () => run(async () => {
     const { added } = await dealsApi.addSellersFromOwners(deal.id);
     setNotice(added > 0 ? `物件の所有者 ${added}人を売主に入れました。違う場合は「直す」で直してください。` : "新しく入れる所有者はいません(すでに売主に入っているか、物件に所有者がいません)。");
@@ -90,14 +93,24 @@ export default function DealPartiesPanel({
         </ul>
       )}
 
+      {hasSellers && canOpenProperty && deal.propertyId && (
+        <DealSellerCandidates
+          dealId={deal.id} revision={sellers.map((p) => `${p.id}:${p.version}`).join(",")} mismatch={sellerMismatch}
+          onAdded={async (added) => {
+            setNotice(`物件の所有者 ${added}人を売主に加えました。違う場合は「直す」で直してください。`);
+            await onSaved();
+          }}
+        />
+      )}
+
       {editing === null ? (
         <div className="flex flex-wrap gap-2">
           <Button variant="secondary" onClick={() => open(null)}>
             <Plus className="h-4 w-4" />
             当事者を足す
           </Button>
-          {/* 物件を開ける人だけ(API も同じ範囲)。足すだけで、入っている売主は変えない。 */}
-          {canOpenProperty && deal.propertyId && (
+          {/* 売主がいない取引で、物件を開ける人だけ(API も同じ範囲)。売主がいれば上の候補から選ぶ。 */}
+          {!hasSellers && canOpenProperty && deal.propertyId && (
             <Button variant="secondary" onClick={() => void addSellers()} disabled={busy}>
               <UserPlus className="h-4 w-4" />
               物件の所有者を売主に入れる
