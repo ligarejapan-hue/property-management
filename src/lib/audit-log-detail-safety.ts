@@ -326,7 +326,7 @@ const ACTION_EXTRA_KEYS: Readonly<Record<string, ReadonlySet<string>>> = {
   // 段取りの判定のために謄本を読んだ。result=yes|no|unknown だけ(件数・抵当権者は載せない)。
   deal_schedule_registry_read: new Set(["result"]),
   // 段取りの項目の操作。op=add|update|complete_pre・fields=変えた列の名前・count=件数。作業名は自由記述なので載せない。
-  deal_schedule_update: new Set(["op", "fields", "count"]),
+  deal_schedule_update: new Set(["op", "fields", "count", "itemId", "completed"]),
   // 依頼文をコピーした。templateKey/itemKey=ひな形と段取りの項目の鍵だけ。文面・宛先・氏名・リンクは載せない。
   deal_request_draft_copy: new Set(["templateKey", "itemKey"]),
   // 所有者の情報を含む経緯を開いた。count=所有者の情報を含む行の数だけ。本文・氏名は載せない。

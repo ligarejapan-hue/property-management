@@ -5,6 +5,7 @@ import {
   docLinkIssuedEvent, docLinkRevokedEvent, docReviewEvent, documentEvent, inquiryEvent, investigationEvent, materialSendEvent, mergeTimeline,
   nextActionCompletedEvent, nextActionCreatedEvent, ownerMemoEvent, requestCopyEvent, scheduleEvent, sourcesForCategory,
   viewingEvent, type ChangeContext, type TimelineEvent,
+  actorOfAudit, scheduleUndoEvent,
 } from "../events";
 
 const PID = "22222222-2222-4222-8222-222222222222";
@@ -13,7 +14,8 @@ const at = (s: string) => new Date(s);
 const author = { name: "担当A" };
 
 const ctx = (over: Partial<ChangeContext> = {}): ChangeContext => ({
-  propertyId: PID, dealsById: new Map([[DEAL.id, DEAL]]), userNames: new Map(), inquirerLevel: "full", ownerNote: "visible", ...over,
+  propertyId: PID, dealsById: new Map([[DEAL.id, DEAL]]), userNames: new Map(), inquirerLevel: "full", ownerNote: "visible",
+  ownerLevels: { name: "full", nameKana: "full", phone: "full", zip: "full", address: "full", note: "full", email: "full", corporateNumber: "full" }, ...over,
 });
 const changeRow = (over: Record<string, unknown> = {}) => ({
   id: "c1", targetTable: "properties", targetId: PID, fieldName: "caseStatus", oldValue: "new_case", newValue: "on_sale",
@@ -105,10 +107,10 @@ describe("出どころごとの変換", () => {
   });
 
   it("差し戻しの理由は取引を編集できる人にだけ出す", () => {
-    const row = { id: "1", label: "本人確認書類", status: "rejected", rejectReason: "ぼやけています", reviewedAt: at("2026-10-14T00:00:00Z"), reviewedBy: author };
+    const row = { id: "1", action: "rejected", reason: "ぼやけています", createdAt: at("2026-10-14T00:00:00Z"), reviewedBy: author, request: { label: "本人確認書類" } };
     expect(docReviewEvent(row, DEAL, true)).toMatchObject({ source: "doc_review", title: "差し戻し:本人確認書類", detail: "ぼやけています" });
     expect(docReviewEvent(row, DEAL, false).detail).toBeNull();
-    expect(docReviewEvent({ ...row, status: "received", rejectReason: null }, DEAL, true).title).toBe("受領:本人確認書類");
+    expect(docReviewEvent({ ...row, action: "received", reason: null }, DEAL, true).title).toBe("受領:本人確認書類");
   });
 
   it("提出用リンクは発行と無効化を別の行にする", () => {
@@ -310,5 +312,71 @@ describe("権限の判定", () => {
   it("差し戻しの理由は deal:write の人だけ", () => {
     expect(timelineAccess(session, [perm("deal", "read")], null)).toMatchObject({ deal: true, dealManage: false, property: false });
     expect(timelineAccess(session, [perm("deal", "read"), perm("deal", "write")], null).dealManage).toBe(true);
+  });
+});
+
+describe("足した記録", () => {
+  const audit = (s: string, name = "担当B") => ({ createdAt: at(s), user: { name } });
+
+  it("★操作の人は、その時刻の直後の最初の監査ログ(後でもう一度押した記録を拾わない)", () => {
+    const done = at("2026-10-14T00:00:00Z");
+    expect(actorOfAudit(done, [audit("2026-10-14T00:00:30Z", "二度目"), audit("2026-10-14T00:00:01Z", "本人")])).toBe("本人");
+    expect(actorOfAudit(done, [audit("2026-10-14T00:05:00Z")])).toBeNull();
+    expect(actorOfAudit(done, [audit("2026-10-13T23:50:00Z")])).toBeNull();
+    expect(actorOfAudit(done, [])).toBeNull();
+  });
+
+  it("★段取りの完了に人を出す・自動の完了には出さない・取り消しの行", () => {
+    const row = { id: "s1", label: "鍵の受領", completedAt: at("2026-10-14T00:00:00Z"), autoCompleted: false };
+    expect(scheduleEvent(row, DEAL, "担当B").actor).toBe("担当B");
+    expect(scheduleEvent({ ...row, autoCompleted: true }, DEAL, "担当B")).toMatchObject({ actor: null, title: "段取りを完了:鍵の受領(自動)" });
+    expect(scheduleUndoEvent({ id: "a1", createdAt: at("2026-10-15T00:00:00Z"), user: author }, "鍵の受領", DEAL)).toMatchObject({
+      source: "schedule", title: "段取りの完了を取り消し:鍵の受領", actor: "担当A",
+    });
+  });
+
+  it("次にやることの完了に人を出す", () => {
+    const row = { id: "n1", content: "電話", completedAt: at("2026-10-14T00:00:00Z") };
+    expect(nextActionCompletedEvent(row, PID, "担当B").actor).toBe("担当B");
+    expect(nextActionCompletedEvent(row, PID).actor).toBeNull();
+  });
+
+  const ownerRow = (over: Record<string, unknown> = {}) => changeRow({ targetTable: "owners", targetId: "o1", fieldName: "address", oldValue: "東京都旧住所", newValue: "東京都新住所", ...over });
+
+  it("★所有者本体の変更: そのまま見られる人にだけ値を出す", () => {
+    const { events } = changeEvents([ownerRow()], ctx());
+    expect(events[0]).toMatchObject({ source: "owner_change", title: "所有者の登記上の住所を変更", detail: "東京都旧住所 → 東京都新住所" });
+  });
+
+  it("★所有者本体の変更: 一部表示は項目名だけ・値を一切出さない", () => {
+    const levels = { ...ctx().ownerLevels, address: "partial" };
+    const { events } = changeEvents([ownerRow()], ctx({ ownerLevels: levels }));
+    expect(events[0].title).toBe("所有者の登記上の住所を変更");
+    expect(JSON.stringify(events)).not.toContain("東京都");
+  });
+
+  it("★所有者本体の変更: 非表示なら行を出さない・まとめた行でも値や項目が混ざらない", () => {
+    const levels = { ...ctx().ownerLevels, address: "hidden" };
+    expect(changeEvents([ownerRow()], ctx({ ownerLevels: levels })).events).toEqual([]);
+    const { events } = changeEvents([ownerRow(), ownerRow({ id: "x2", fieldName: "phone", oldValue: "03-1", newValue: "03-2" })], ctx({ ownerLevels: levels }));
+    expect(events).toHaveLength(1);
+    expect(events[0].title).toBe("所有者の電話番号を変更");
+    expect(JSON.stringify(events)).not.toContain("東京都");
+  });
+
+  it("★所有者本体の変更: 一覧に無い項目(統合の印など)は出さない", () => {
+    expect(changeEvents([ownerRow({ fieldName: "_merged_from", newValue: "11111111-1111-4111-8111-111111111111" })], ctx()).events).toEqual([]);
+    expect(changeEvents([ownerRow({ fieldName: "isArchived" })], ctx()).events).toEqual([]);
+  });
+
+  it.each(["_unlinked_from_property", "_deleted_via_mislink_correction", "_deleted_via_merge"])("★%s は「紐づけを解除」の1行・所有者の ID を出さない", (fieldName) => {
+    const owner = "99999999-9999-4999-8999-999999999999";
+    const { events } = changeEvents([
+      changeRow({ targetTable: "property_owners", targetId: "l1", fieldName, oldValue: owner, newValue: null }),
+      changeRow({ id: "x2", targetTable: "property_owners", targetId: "l1", fieldName: "isPrimary", oldValue: "true", newValue: null }),
+    ], ctx());
+    expect(events).toHaveLength(1);
+    expect(events[0]).toMatchObject({ source: "owner_change", title: "所有者の紐づけを解除" });
+    expect(JSON.stringify(events)).not.toContain(owner);
   });
 });

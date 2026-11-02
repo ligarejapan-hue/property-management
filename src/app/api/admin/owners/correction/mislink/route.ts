@@ -564,6 +564,7 @@ export async function POST(request: NextRequest) {
           newValue: string | null;
           source: "manual";
           changedBy: string;
+          propertyId?: string;
         }> = [];
 
         if (op === "remove") {
@@ -575,6 +576,7 @@ export async function POST(request: NextRequest) {
             newValue: null,
             source: "manual",
             changedBy: session.id,
+            propertyId,
           });
         } else if (targetOwnerId) {
           changeLogs.push({

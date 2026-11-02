@@ -1,3 +1,4 @@
+import { readFileSync } from "node:fs";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
 const writeAuditLog = vi.hoisted(() => vi.fn(async () => undefined));
@@ -7,7 +8,7 @@ const pm = vi.hoisted(() => {
   return {
     property: model(), deal: model(), comment: model(), ownerMemo: model(), propertyOwner: model(), propertyDmLog: model(), agentInquiry: model(),
     agentViewing: model(), agentInquiryMaterialSend: model(), nextAction: model(), propertyInvestigationAuditLog: model(), changeLog: model(),
-    dealScheduleItem: model(), dealDocument: model(), auditLog: model(), dealDocFile: model(), dealDocRequest: model(), dealDocLink: model(), user: model(),
+    dealScheduleItem: model(), dealDocument: model(), auditLog: model(), dealDocFile: model(), dealDocRequest: model(), dealDocReviewEvent: model(), dealDocLink: model(), user: model(),
   };
 });
 
@@ -258,5 +259,119 @@ describe("取引の経緯", () => {
     expect(pm.dealDocRequest.count).not.toHaveBeenCalled();
     expect(pm.dealScheduleItem.findFirst).not.toHaveBeenCalled();
     expect(body.summary.next).toBeNull();
+  });
+});
+
+describe("足した記録を読む", () => {
+  const firstChangeWhere = () => (pm.changeLog.findMany.mock.calls[0][0] as { where: { OR: Record<string, unknown>[] } }).where.OR;
+
+  it("★所有者本体と解除の行は owner:read の人だけ読む", async () => {
+    pm.propertyOwner.findMany.mockResolvedValue([{ id: "l1", ownerId: "o1" }]);
+    await propertyGET(req(`/api/properties/${PID}/timeline`), propCtx);
+    expect(firstChangeWhere()).toEqual(expect.arrayContaining([
+      { targetTable: "owners", targetId: { in: ["o1"] } },
+      { targetTable: "property_owners", propertyId: PID },
+    ]));
+
+    vi.clearAllMocks();
+    pm.changeLog.findMany.mockResolvedValue([]);
+    setPerms(OFFICE, [perm("property", "read")]);
+    await propertyGET(req(`/api/properties/${PID}/timeline`), propCtx);
+    const tables = JSON.stringify(pm.changeLog.findMany.mock.calls);
+    expect(tables).not.toContain("owners");
+    expect(tables).not.toContain("property_owners");
+  });
+
+  it("★物件を見られない人には、取引の経緯でも所有者の変更を読まない", async () => {
+    setPerms({ id: "u2", role: "field_staff" }, [perm("property", "read"), perm("owner", "read"), perm("deal", "read")]);
+    await dealGET(req(`/api/deals/${DID}/timeline`), dealCtx);
+    expect(JSON.stringify(pm.changeLog.findMany.mock.calls)).not.toContain("owners");
+  });
+
+  it("★差し戻しは履歴の表から読み、再提出のあとも出る・理由は編集できる人だけ", async () => {
+    pm.dealDocReviewEvent.findMany.mockResolvedValue([{
+      id: "r1", action: "rejected", reason: "ぼやけています", createdAt: new Date("2026-10-20T00:00:00Z"), reviewedBy: { name: "担当C" },
+      request: { label: "本人確認書類", link: { dealId: DID } },
+    }]);
+    setPerms(OFFICE, [perm("deal", "read")]);
+    const read = await (await dealGET(req(`/api/deals/${DID}/timeline`), dealCtx)).json();
+    const row = read.events.find((e: { source: string }) => e.source === "doc_review");
+    expect(row).toMatchObject({ title: "差し戻し:本人確認書類", actor: "担当C", detail: null });
+    expect(JSON.stringify(read)).not.toContain("ぼやけています");
+
+    setPerms(OFFICE, [perm("deal", "read"), perm("deal", "write")]);
+    const write = await (await dealGET(req(`/api/deals/${DID}/timeline`), dealCtx)).json();
+    expect(write.events.find((e: { source: string }) => e.source === "doc_review").detail).toBe("ぼやけています");
+  });
+
+  it("★段取りの完了に監査ログの人を結ぶ・別の項目の記録は結ばない", async () => {
+    const done = new Date("2026-10-20T00:00:00Z");
+    pm.dealScheduleItem.findMany.mockResolvedValue([{ id: "s1", dealId: DID, label: "鍵", completedAt: done, autoCompleted: false, preIntroduction: false }]);
+    pm.auditLog.findMany.mockImplementation((async (args: { where: { detail?: unknown; action: string } }) => (args.where.detail || args.where.action !== "deal_schedule_update" ? [] : [
+      { targetId: DID, createdAt: new Date("2026-10-20T00:00:01Z"), detail: { op: "update", itemId: "other", completed: true }, user: { name: "別の人" } },
+      { targetId: DID, createdAt: new Date("2026-10-20T00:00:02Z"), detail: { op: "update", itemId: "s1", completed: true }, user: { name: "本人" } },
+    ])) as never);
+    setPerms(OFFICE, [perm("deal", "read")]);
+    const body = await (await dealGET(req(`/api/deals/${DID}/timeline`), dealCtx)).json();
+    expect(body.events.find((e: { source: string }) => e.source === "schedule").actor).toBe("本人");
+  });
+
+  it("★完了の取り消しの行は、監査の項目 ID からこの取引の項目名を引く", async () => {
+    pm.dealScheduleItem.findMany.mockImplementation((async (args: { where: { id?: unknown } }) => (args.where.id ? [{ id: "s1", label: "鍵" }] : [])) as never);
+    pm.auditLog.findMany.mockImplementation((async (args: { where: { detail?: unknown } }) => (args.where.detail ? [
+      { id: "a1", targetId: DID, createdAt: new Date("2026-10-21T00:00:00Z"), detail: { itemId: "s1", completed: false }, user: { name: "担当D" } },
+    ] : [])) as never);
+    setPerms(OFFICE, [perm("deal", "read")]);
+    const body = await (await dealGET(req(`/api/deals/${DID}/timeline`), dealCtx)).json();
+    expect(body.events.find((e: { source: string }) => e.source === "schedule")).toMatchObject({ title: "段取りの完了を取り消し:鍵", actor: "担当D" });
+  });
+
+  it("★次にやることの完了は既にある監査ログから人を出す", async () => {
+    const done = new Date("2026-10-20T00:00:00Z");
+    pm.nextAction.findMany.mockImplementation((async (args: { where: { completedAt?: unknown } }) => (args.where.completedAt ? [{ id: "n1", content: "電話", completedAt: done }] : [])) as never);
+    pm.auditLog.findMany.mockImplementation((async (args: { where: { action: string } }) => (args.where.action === "complete" ? [
+      { targetId: "n1", createdAt: new Date("2026-10-20T00:00:01Z"), user: { name: "担当E" } },
+    ] : [])) as never);
+    const body = await (await propertyGET(req(`/api/properties/${PID}/timeline`), propCtx)).json();
+    expect(body.events.find((e: { id: string }) => e.id === "next_action:n1:completed").actor).toBe("担当E");
+  });
+});
+
+describe("記録の追加の migration", () => {
+  const sql = readFileSync("prisma/migrations/20261103000000_add_history_records/migration.sql", "utf8");
+  const statements = sql.split("\n").filter((l) => !l.startsWith("--")).join("\n");
+
+  it("★足すだけ(消す・型を変える文がない)", () => {
+    expect(statements).not.toMatch(/\bDROP\b|ALTER COLUMN|\bUPDATE\s+"|\bDELETE\s+FROM\b|TRUNCATE/);
+  });
+  it("★今の確認を写す・再提出の分は写せない", () => {
+    expect(statements).toContain(`INSERT INTO "deal_doc_review_events"`);
+    expect(statements).toContain(`"status" IN ('received', 'rejected')`);
+  });
+});
+
+describe("記録を書く所", () => {
+  const src = (p: string) => readFileSync(p, "utf8").replace(/\r\n/g, "\n");
+
+  it.each([
+    ["src/app/api/properties/[id]/owners/[ownerId]/route.ts", "_unlinked_from_property", "propertyId,"],
+    ["src/app/api/admin/owners/correction/mislink/route.ts", "_deleted_via_mislink_correction", "propertyId,"],
+    ["src/app/api/admin/owners/correction/merge/route.ts", "_deleted_via_merge", "propertyId: t.propertyId,"],
+  ])("★%s の解除の印に物件の ID を入れる", (path, field, value) => {
+    const text = src(path);
+    const at = text.indexOf(`fieldName: "${field}"`);
+    expect(at).toBeGreaterThan(-1);
+    expect(text.slice(at, text.indexOf("}", at))).toContain(value);
+  });
+
+  it("★段取りの監査に項目の ID と完了の向きを残す・許可リストにも足す", () => {
+    expect(src("src/app/api/deals/[id]/schedule/[itemId]/route.ts")).toMatch(/itemId, \.\.\.\(body\.completed !== undefined \? \{ completed: body\.completed \}/);
+    expect(src("src/lib/audit-log-detail-safety.ts")).toContain(`deal_schedule_update: new Set(["op", "fields", "count", "itemId", "completed"])`);
+  });
+
+  it("★差し戻しの理由を監査に入れない(履歴の表にだけ)", () => {
+    const text = src("src/app/api/deals/[id]/doc-links/requests/[requestId]/route.ts");
+    expect(text).toContain("tx.dealDocReviewEvent.create");
+    expect(text).toMatch(/targetId: id, detail: \{ count \}/);
   });
 });

@@ -196,6 +196,7 @@ export async function DELETE(
             newValue: null,
             source: "manual",
             changedBy: session.id,
+            propertyId,
           },
           {
             targetTable: "property_owners",
@@ -205,6 +206,7 @@ export async function DELETE(
             newValue: null,
             source: "manual",
             changedBy: session.id,
+            propertyId,
           },
         ],
       });

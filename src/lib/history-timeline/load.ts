@@ -6,9 +6,9 @@ import prisma from "@/lib/prisma";
 import { CASE_STATUS_LABELS } from "@/lib/property-types";
 import type { TimelineAccess } from "./access";
 import {
-  INVESTIGATION_ACTIONS, OWNER_INFO_SOURCES, TIMELINE_CATEGORIES, buildTimelineSummary, changeEvents, commentEvent, dealCreatedEvent,
+  INVESTIGATION_ACTIONS, OWNER_INFO_SOURCES, TIMELINE_CATEGORIES, actorOfAudit, buildTimelineSummary, changeEvents, commentEvent, dealCreatedEvent,
   dmReactionEvent, dmSentEvent, docFileEvent, docLinkIssuedEvent, docLinkRevokedEvent, docReviewEvent, documentEvent, inquiryEvent, investigationEvent,
-  materialSendEvent, mergeTimeline, nextActionCompletedEvent, nextActionCreatedEvent, ownerMemoEvent, requestCopyEvent, scheduleEvent,
+  materialSendEvent, mergeTimeline, nextActionCompletedEvent, nextActionCreatedEvent, ownerMemoEvent, requestCopyEvent, scheduleEvent, scheduleUndoEvent,
   sourcesForCategory, userIdsInChanges, viewingEvent,
   type ChangeRow, type DealRef, type NextCandidate, type TimelineEvent, type TimelineFilter, type TimelineSource, type TimelineSummary,
 } from "./events";
@@ -129,10 +129,19 @@ async function loadPropertyEvents(propertyId: string, access: TimelineAccess, wa
       where: { propertyId, createdAt }, orderBy: { createdAt: "desc" }, take: n,
       select: { id: true, content: true, createdAt: true, scheduledAt: true, creator: { select: { name: true } } },
     })).then((rows) => rows.map((r) => nextActionCreatedEvent(r, propertyId))));
-    tasks.push(read("completedAt", (completedAt, n) => prisma.nextAction.findMany({
-      where: { propertyId, completedAt }, orderBy: { completedAt: "desc" }, take: n,
-      select: { id: true, content: true, completedAt: true },
-    })).then((rows) => rows.map((r) => nextActionCompletedEvent(r, propertyId))));
+    tasks.push((async () => {
+      const rows = await read("completedAt", (completedAt, n) => prisma.nextAction.findMany({
+        where: { propertyId, completedAt }, orderBy: { completedAt: "desc" }, take: n,
+        select: { id: true, content: true, completedAt: true },
+      }));
+      if (rows.length === 0) return [];
+      // 完了にした人は監査ログにある(過去の分も出る)。
+      const audits = await prisma.auditLog.findMany({
+        where: { action: "complete", targetTable: "next_actions", targetId: { in: rows.map((r) => r.id) } },
+        select: { targetId: true, createdAt: true, user: { select: { name: true } } },
+      });
+      return rows.map((r) => nextActionCompletedEvent(r, propertyId, actorOfAudit(r.completedAt as Date, audits.filter((a) => a.targetId === r.id))));
+    })());
   }
   if (wants("investigation")) {
     tasks.push(read("createdAt", (createdAt, n) => prisma.propertyInvestigationAuditLog.findMany({
@@ -156,10 +165,37 @@ async function loadDealEvents(deals: TimelineDeal[], access: TimelineAccess, wan
     tasks.push(Promise.resolve(deals.filter((d) => d.createdAt < before).map((d) => dealCreatedEvent(d, ref(d.id)))));
   }
   if (wants("schedule")) {
-    tasks.push(read("completedAt", (completedAt, n) => prisma.dealScheduleItem.findMany({
-      where: { dealId: { in: ids }, completedAt, excludedAt: null }, orderBy: { completedAt: "desc" }, take: n,
-      select: { id: true, dealId: true, label: true, completedAt: true, autoCompleted: true },
-    })).then((rows) => rows.map((r) => scheduleEvent(r, ref(r.dealId)))));
+    tasks.push((async () => {
+      const rows = await read("completedAt", (completedAt, n) => prisma.dealScheduleItem.findMany({
+        where: { dealId: { in: ids }, completedAt, excludedAt: null }, orderBy: { completedAt: "desc" }, take: n,
+        select: { id: true, dealId: true, label: true, completedAt: true, autoCompleted: true, preIntroduction: true },
+      }));
+      if (rows.length === 0) return [];
+      const audits = await prisma.auditLog.findMany({
+        where: { action: "deal_schedule_update", targetTable: "deals", targetId: { in: ids } },
+        select: { targetId: true, createdAt: true, detail: true, user: { select: { name: true } } },
+      });
+      return rows.map((r) => {
+        const mine = audits.filter((a) => {
+          const d = a.detail as { op?: unknown; itemId?: unknown; completed?: unknown } | null;
+          // まとめて完了は項目の ID を持たないので、導入前の項目だけを同じ取引の記録と結ぶ。
+          return d?.itemId === r.id ? d.completed === true : d?.op === "complete_pre" && r.preIntroduction && a.targetId === r.dealId;
+        });
+        return scheduleEvent(r, ref(r.dealId), actorOfAudit(r.completedAt as Date, mine));
+      });
+    })());
+    tasks.push((async () => {
+      const rows = await read("createdAt", (createdAt, n) => prisma.auditLog.findMany({
+        where: { action: "deal_schedule_update", targetTable: "deals", targetId: { in: ids }, createdAt, detail: { path: ["completed"], equals: false } }, orderBy: { createdAt: "desc" }, take: n,
+        select: { id: true, targetId: true, createdAt: true, detail: true, user: { select: { name: true } } },
+      }));
+      if (rows.length === 0) return [];
+      const itemId = (r: (typeof rows)[number]) => (r.detail as { itemId?: string } | null)?.itemId ?? null;
+      const itemIds = rows.flatMap((r) => itemId(r) ?? []);
+      const items = await prisma.dealScheduleItem.findMany({ where: { id: { in: itemIds }, dealId: { in: ids } }, select: { id: true, label: true } });
+      const labels = new Map(items.map((i) => [i.id, i.label]));
+      return rows.flatMap((r) => (r.targetId && refs.has(r.targetId) ? [scheduleUndoEvent(r, labels.get(itemId(r) ?? "") ?? null, ref(r.targetId))] : []));
+    })());
   }
   if (wants("document")) {
     tasks.push(read("issuedAt", (issuedAt, n) => prisma.dealDocument.findMany({
@@ -186,10 +222,10 @@ async function loadDealEvents(deals: TimelineDeal[], access: TimelineAccess, wan
     })).then((rows) => rows.map((r) => docFileEvent(r, ref(r.request.link.dealId)))));
   }
   if (wants("doc_review")) {
-    tasks.push(read("reviewedAt", (reviewedAt, n) => prisma.dealDocRequest.findMany({
-      where: { link: { dealId: { in: ids } }, reviewedAt, status: { in: ["received", "rejected"] } }, orderBy: { reviewedAt: "desc" }, take: n,
-      select: { id: true, label: true, status: true, rejectReason: true, reviewedAt: true, reviewedBy: { select: { name: true } }, link: { select: { dealId: true } } },
-    })).then((rows) => rows.map((r) => docReviewEvent(r, ref(r.link.dealId), access.dealManage))));
+    tasks.push(read("createdAt", (createdAt, n) => prisma.dealDocReviewEvent.findMany({
+      where: { request: { link: { dealId: { in: ids } } }, createdAt }, orderBy: { createdAt: "desc" }, take: n,
+      select: { id: true, action: true, reason: true, createdAt: true, reviewedBy: { select: { name: true } }, request: { select: { label: true, link: { select: { dealId: true } } } } },
+    })).then((rows) => rows.map((r) => docReviewEvent(r, ref(r.request.link.dealId), access.dealManage))));
   }
   if (wants("doc_link")) {
     const linkSelect = { id: true, dealId: true, partyRole: true, createdAt: true, revokedAt: true, createdBy: { select: { name: true } } } as const;
@@ -212,8 +248,14 @@ async function loadChangeEvents(scope: TimelineScope, deals: TimelineDeal[], acc
     if (scope.buildingId) targets.push({ targetTable: "buildings", targetId: scope.buildingId });
   }
   if (access.ownerLinks && scope.propertyId && wants("owner_change")) {
-    const links = await prisma.propertyOwner.findMany({ where: { propertyId: scope.propertyId }, select: { id: true } });
-    if (links.length > 0) targets.push({ targetTable: "property_owners", targetId: { in: links.map((l) => l.id) } });
+    const links = await prisma.propertyOwner.findMany({ where: { propertyId: scope.propertyId }, select: { id: true, ownerId: true } });
+    if (links.length > 0) {
+      targets.push({ targetTable: "property_owners", targetId: { in: links.map((l) => l.id) } });
+      // 所有者本体の変更(今つながっている人)。⚠項目ごとの表示レベルは changeEvents で当てる。
+      targets.push({ targetTable: "owners", targetId: { in: links.map((l) => l.ownerId) } });
+    }
+    // 解除したつながりは行が消えているので、物件の列で引く。
+    targets.push({ targetTable: "property_owners", propertyId: scope.propertyId });
   }
   if (deals.length > 0 && wants("change")) targets.push({ targetTable: "deals", targetId: { in: deals.map((d) => d.id) } });
   if (targets.length === 0) return { events: [], floor: null };
@@ -233,6 +275,7 @@ async function loadChangeEvents(scope: TimelineScope, deals: TimelineDeal[], acc
     userNames: new Map(users.map((u) => [u.id, u.name])),
     inquirerLevel: access.inquirerLevel,
     ownerNote: access.ownerNote,
+    ownerLevels: access.ownerLevels,
   });
   // 上限まで読んだ=ここより古い変更はまだ読んでいない(まとめると行が減るので、ほかの出どころに追い越されうる)。
   return { events, floor: rows.length >= CHANGE_TAKE ? rows[rows.length - 1].changedAt.toISOString() : null };

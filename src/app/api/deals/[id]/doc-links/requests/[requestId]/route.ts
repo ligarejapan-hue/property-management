@@ -43,6 +43,10 @@ export async function POST(request: Request, ctx: Ctx) {
         where: { id: requestId },
         data: { status: received ? "received" : "rejected", rejectReason: received ? null : body.reason, reviewedById: session.id, reviewedAt: now },
       });
+      // 再提出で上の行は書き換わるので、履歴は別に残す。
+      await tx.dealDocReviewEvent.create({
+        data: { requestId, action: received ? "received" : "rejected", reason: received ? null : body.reason, reviewedById: session.id, createdAt: now },
+      });
       const res = await tx.dealDocFile.updateMany({
         where: { requestId, reviewState: { in: UNREVIEWED } },
         data: { reviewState: received ? "received" : "rejected", reviewStateAt: now },

@@ -22,7 +22,8 @@ export async function PATCH(request: Request, ctx: Ctx) {
     if (res.count === 0) throw new ApiError(404, "項目が見つかりません", "NOT_FOUND");
     await writeAuditLog({
       userId: session.id, action: "deal_schedule_update", targetTable: "deals", targetId: id,
-      detail: { op: "update", fields: Object.keys(body).sort(), count: 1 },
+      // itemId と completed は経緯の「誰が完了にしたか・取り消したか」に使う。
+      detail: { op: "update", fields: Object.keys(body).sort(), count: 1, itemId, ...(body.completed !== undefined ? { completed: body.completed } : {}) },
     });
     return NextResponse.json({ ok: true }, { headers: { "Cache-Control": "no-store" } });
   } catch (error) {

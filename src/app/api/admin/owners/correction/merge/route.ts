@@ -554,7 +554,7 @@ export async function POST(request: NextRequest) {
             ownerId: sourceFresh.id,
             propertyId: { in: Array.from(freshMasterPropertyIds) },
           },
-          select: { id: true },
+          select: { id: true, propertyId: true },
         });
         if (dedupeTargets.length > 0) {
           await tx.propertyOwner.deleteMany({
@@ -683,6 +683,7 @@ export async function POST(request: NextRequest) {
           newValue: string | null;
           source: "manual";
           changedBy: string;
+          propertyId?: string;
         }> = [];
 
         // source の isArchived 変化（archive route と同じ shape）
@@ -742,6 +743,7 @@ export async function POST(request: NextRequest) {
             newValue: null,
             source: "manual",
             changedBy: session.id,
+            propertyId: t.propertyId,
           });
         }
         for (const t of moveTargets) {

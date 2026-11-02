@@ -239,6 +239,7 @@ model User {
   dealDocumentsIssued     DealDocument[]          @relation("DealDocumentIssuedBy")
   dealDocLinksCreated     DealDocLink[]           @relation("DealDocLinkCreatedBy")
   dealDocRequestsReviewed DealDocRequest[]        @relation("DealDocRequestReviewedBy")
+  dealDocReviewEvents     DealDocReviewEvent[]    @relation("DealDocReviewEventReviewedBy")
 
   @@map("users")
 }
@@ -1020,11 +1021,14 @@ model ChangeLog {
   source      ChangeSource @default(manual)
   changedBy   String       @map("changed_by") @db.Uuid
   changedAt   DateTime     @default(now()) @map("changed_at")
+  /// 所有者の紐づけ解除の物件(つながりの行は消えるので id では引けない)。解除の行だけに入る。過去の解除は null。
+  propertyId  String?      @map("property_id") @db.Uuid
 
   changer User @relation(fields: [changedBy], references: [id])
 
   @@index([targetTable, targetId])
   @@index([changedAt])
+  @@index([propertyId, changedAt])
   @@map("change_logs")
 }
 
@@ -2406,9 +2410,27 @@ model DealDocRequest {
   link       DealDocLink    @relation(fields: [linkId], references: [id], onDelete: Cascade)
   reviewedBy User?          @relation("DealDocRequestReviewedBy", fields: [reviewedById], references: [id], onDelete: SetNull)
   files      DealDocFile[]
+  reviewEvents DealDocReviewEvent[]
 
   @@unique([linkId, checklistItemId])
   @@map("deal_doc_requests")
+}
+
+/// 受領・差し戻しの履歴(DealDocRequest は最新だけを持つ)。reason は差し戻しの理由=自由記述。監査ログには入れない。
+model DealDocReviewEvent {
+  id           String   @id @default(uuid()) @db.Uuid
+  requestId    String   @map("request_id") @db.Uuid
+  /// received | rejected
+  action       String
+  reason       String?
+  reviewedById String?  @map("reviewed_by_id") @db.Uuid
+  createdAt    DateTime @default(now()) @map("created_at")
+
+  request    DealDocRequest @relation(fields: [requestId], references: [id], onDelete: Cascade)
+  reviewedBy User?          @relation("DealDocReviewEventReviewedBy", fields: [reviewedById], references: [id], onDelete: SetNull)
+
+  @@index([requestId, createdAt])
+  @@map("deal_doc_review_events")
 }
 
 /// 届いたファイル。元のファイル名は保存しない。保存キーは deals/ の下=/uploads からは開けない。

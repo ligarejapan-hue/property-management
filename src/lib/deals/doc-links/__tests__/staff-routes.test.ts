@@ -19,6 +19,7 @@ vi.mock("@/lib/prisma", () => {
     dealDocLink: { findMany: vi.fn(async () => []), findFirst: vi.fn(async () => null), create: vi.fn(async () => ({ id: "l1" })), update: vi.fn(async () => ({ id: "l1" })), updateMany: vi.fn(async () => ({ count: 1 })) },
     dealDocRequest: { deleteMany: vi.fn(async () => ({ count: 0 })), createMany: vi.fn(async () => ({ count: 1 })), findFirst: vi.fn(), update: vi.fn(async () => ({})), findMany: vi.fn(async () => []) },
     dealDocFile: { updateMany: vi.fn(async () => ({ count: 2 })), findFirst: vi.fn(), findMany: vi.fn(async () => []) },
+    dealDocReviewEvent: { create: vi.fn(async () => ({})) },
     dealSettings: { findUnique: vi.fn(async () => null) },
     companyProfile: { findUnique: vi.fn(async () => null) },
     $queryRaw: vi.fn(async () => []),
@@ -44,6 +45,7 @@ const pm = prismaMock as never as {
   dealDocLink: { findMany: Fn; findFirst: Fn; create: Fn; update: Fn; updateMany: Fn };
   dealDocRequest: { deleteMany: Fn; createMany: Fn; findFirst: Fn; update: Fn; findMany: Fn };
   dealDocFile: { updateMany: Fn; findFirst: Fn; findMany: Fn };
+  dealDocReviewEvent: { create: Fn };
   $queryRaw: Fn;
 };
 const SECRET = "s".repeat(40);
@@ -238,6 +240,7 @@ describe("受領・差し戻し", () => {
       where: { requestId: REQUEST_ID, reviewState: { in: ["unreviewed", "deal_cancelled_unreviewed"] } },
       data: { reviewState: "received" },
     });
+    expect(pm.dealDocReviewEvent.create.mock.calls[0][0].data).toMatchObject({ requestId: REQUEST_ID, action: "received", reason: null, reviewedById: "u-office" });
     expect(writeAuditLog).toHaveBeenCalledWith({ userId: "u-office", action: "deal_doc_receive", targetTable: "deals", targetId: DEAL_ID, detail: { count: 2 } });
   });
   it("差し戻しは理由が要る。理由は監査に入れない", async () => {
@@ -247,6 +250,8 @@ describe("受領・差し戻し", () => {
     expect(res.status).toBe(200);
     expect(pm.dealDocRequest.update.mock.calls[0][0].data).toMatchObject({ status: "rejected", rejectReason: "試験 太郎さんの文字が読めません" });
     expect(pm.dealDocFile.updateMany.mock.calls[0][0].data).toMatchObject({ reviewState: "rejected" });
+    // ★再提出で上の行が書き換わっても、差し戻しの理由と担当者が残る。
+    expect(pm.dealDocReviewEvent.create.mock.calls.at(-1)?.[0].data).toMatchObject({ requestId: REQUEST_ID, action: "rejected", reason: "試験 太郎さんの文字が読めません", reviewedById: "u-office" });
     expect(writeAuditLog).toHaveBeenCalledWith({ userId: "u-office", action: "deal_doc_reject", targetTable: "deals", targetId: DEAL_ID, detail: { count: 2 } });
     expect(JSON.stringify(writeAuditLog.mock.calls)).not.toContain("試験 太郎");
   });
