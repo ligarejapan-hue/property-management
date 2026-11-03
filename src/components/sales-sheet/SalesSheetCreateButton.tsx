@@ -457,6 +457,17 @@ interface FieldModelAutoValues {
   preview: Record<string, string>;
   occupancySeed?: string;
   hints: Record<string, string>;
+  /**
+   * showWhen の制御フィールドが空のときに代わりに使う、物件に保存済みの値（キー=制御フィールドの key）。
+   * 表示専用＝values には書き込まない（occupancySeed と同じ理由）。図面は保存済みの値で作られるので、
+   * 「消費税=課税」が保存してあれば、選択が空でも「うち消費税」の欄を出す（2026-11-04 発注者指示）。
+   */
+  controlSeeds?: Record<string, string>;
+}
+
+/** 物件に保存した消費税(課税・不課税)を、うち消費税の欄の出し方に使う。 */
+function saleTaxControlSeeds(saleTaxType: string | null | undefined): Record<string, string> {
+  return saleTaxType ? { tax: saleTaxType } : {};
 }
 
 function toPreviewString(v: string | number | null | undefined): string {
@@ -518,6 +529,7 @@ export function computeMansionAutoValues(data: MansionAutoSource): FieldModelAut
     },
     occupancySeed: mapOccupancyStatusToMansionOccupancy(data.occupancyStatus),
     hints,
+    controlSeeds: saleTaxControlSeeds(data.saleTaxType),
   };
 }
 
@@ -565,7 +577,7 @@ function computeLandAutoValues(data: LandAutoSource): FieldModelAutoValues {
  * mapOccupancyStatusToMansionOccupancy を再利用する（build-document.ts の buildHouseValues
  * と同じ関数＝作成ダイアログと図面ビルダーで写像がずれない）。
  */
-function computeHouseAutoValues(data: HouseAutoSource): FieldModelAutoValues {
+export function computeHouseAutoValues(data: HouseAutoSource): FieldModelAutoValues {
   const hints: Record<string, string> = {};
   if (data.zoningDistrict) {
     hints.useDistrict = `${data.zoningDistrict}（追加の用途地域があれば選択してください）`;
@@ -605,6 +617,7 @@ function computeHouseAutoValues(data: HouseAutoSource): FieldModelAutoValues {
     },
     occupancySeed: mapOccupancyStatusToMansionOccupancy(data.occupancyStatus),
     hints,
+    controlSeeds: saleTaxControlSeeds(data.saleTaxType),
   };
 }
 
@@ -614,7 +627,7 @@ function computeHouseAutoValues(data: HouseAutoSource): FieldModelAutoValues {
  * 現況語彙がマンション/戸建と同一のため mapOccupancyStatusToMansionOccupancy を再利用する
  * （build-document.ts の buildBuildingValues と同じ関数＝ダイアログと図面ビルダーで写像がずれない）。
  */
-function computeBuildingAutoValues(data: BuildingAutoSource): FieldModelAutoValues {
+export function computeBuildingAutoValues(data: BuildingAutoSource): FieldModelAutoValues {
   const hints: Record<string, string> = {};
   if (data.zoningDistrict) {
     hints.useDistrict = `${data.zoningDistrict}（追加の用途地域があれば選択してください）`;
@@ -658,6 +671,7 @@ function computeBuildingAutoValues(data: BuildingAutoSource): FieldModelAutoValu
     },
     occupancySeed: mapOccupancyStatusToMansionOccupancy(data.occupancyStatus),
     hints,
+    controlSeeds: saleTaxControlSeeds(data.saleTaxType),
   };
 }
 
@@ -1132,6 +1146,7 @@ export function FieldModelForm({
   autoPreview,
   occupancySeed,
   hints,
+  controlSeeds,
 }: {
   kind: SalesSheetTemplateKind;
   /** SECTIONS_BY_KIND[kind]（groupBySection(FIELDS_BY_KIND[kind]) 済み）。 */
@@ -1146,6 +1161,8 @@ export function FieldModelForm({
   occupancySeed?: string;
   /** useDistrict/builtYearMonth/roadWidth 等の自動反映ヒント（詳細は FieldModelAutoValues.hints 参照）。 */
   hints: Record<string, string>;
+  /** showWhen の制御フィールドが空のときに使う保存済みの値（詳細は FieldModelAutoValues.controlSeeds 参照）。 */
+  controlSeeds?: Record<string, string>;
 }) {
   return (
     <>
@@ -1160,9 +1177,10 @@ export function FieldModelForm({
           {fields.map((f) => {
             // showWhen: 制御フィールドの現在値が一致しない限り描画しない
             // （sheet-rows.ts の buildSheetRows と同じ判定＝非string値は""扱い）。
+            // 選択が空なら物件に保存済みの値で決める（図面もその値で作られる）。手で選んだ値があればそちら。
             if (f.showWhen) {
               const ctrl = values[f.showWhen.field];
-              const ctrlStr = typeof ctrl === "string" ? ctrl : "";
+              const ctrlStr = (typeof ctrl === "string" && ctrl !== "" ? ctrl : controlSeeds?.[f.showWhen.field]) ?? "";
               if (ctrlStr !== f.showWhen.equals) return null;
             }
             if (autoOnlyKeys.has(f.key)) {
@@ -1313,6 +1331,7 @@ export function SalesSheetCreateDialog({
   const [autoPreview, setAutoPreview] = useState<Record<string, string>>({});
   const [occupancySeed, setOccupancySeed] = useState<string | undefined>(undefined);
   const [hints, setHints] = useState<Record<string, string>>({});
+  const [controlSeeds, setControlSeeds] = useState<Record<string, string>>({});
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
   // saveToProperty: 既定ON（[F3 Task5]・外すと saveToProperty:false を送る＝物件へは保存しない）。
@@ -1362,6 +1381,7 @@ export function SalesSheetCreateDialog({
         setAutoPreview(auto.preview);
         setOccupancySeed(auto.occupancySeed);
         setHints(auto.hints);
+        setControlSeeds(auto.controlSeeds ?? {});
         // [F3 Task5] property prop 省略時のみ: 同じフェッチ結果から version/棟情報も拾う
         // （呼び出し元が別途 GET しない経路＝/sales-sheets/new のピッカー用のフォールバック）。
         if (!hasPropertyMeta) {
@@ -1480,6 +1500,7 @@ export function SalesSheetCreateDialog({
               autoPreview={autoPreview}
               occupancySeed={occupancySeed}
               hints={hints}
+              controlSeeds={controlSeeds}
             />
             <CatchCopyFields
               kind={kind}
