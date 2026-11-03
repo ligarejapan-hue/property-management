@@ -394,6 +394,8 @@ export interface TimelineSummary {
   lastContactAt: string | null;
   /** 未受領の書類の件数。null=取引を見られない(出さない)。 */
   pendingDocs: number | null;
+  /** 次の段取りが無いときに残っている導入前の未完了の件数(次の段取りに数えない分)。次の段取りがあれば 0。 */
+  preIntroPending: number;
 }
 
 export function buildTimelineSummary(input: {
@@ -401,7 +403,11 @@ export function buildTimelineSummary(input: {
   nextCandidates: NextCandidate[];
   lastContactAt: string | null;
   pendingDocs: number | null;
+  preIntroPending?: number;
 }): TimelineSummary {
   const [next] = [...input.nextCandidates].sort((a, b) => a.due.localeCompare(b.due));
-  return { statuses: input.statuses, next: next ?? null, lastContactAt: input.lastContactAt, pendingDocs: input.pendingDocs };
+  return {
+    statuses: input.statuses, next: next ?? null, lastContactAt: input.lastContactAt, pendingDocs: input.pendingDocs,
+    preIntroPending: next ? 0 : (input.preIntroPending ?? 0),
+  };
 }

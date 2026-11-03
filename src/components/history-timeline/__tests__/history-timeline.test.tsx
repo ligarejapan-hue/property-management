@@ -11,7 +11,7 @@ const ev = (over: Partial<TimelineEvent> = {}): TimelineEvent => ({
   detail: null, href: "/properties/p?tab=comments", dealLabel: null, ...over,
 });
 const summary = (over: Partial<TimelineSummary> = {}): TimelineSummary => ({
-  statuses: [{ label: "案件ステータス", value: "販売中" }], next: { label: "決済日の確定", due: "2026-11-05" }, lastContactAt: "2026-11-01T01:00:00.000Z", pendingDocs: 2, ...over,
+  statuses: [{ label: "案件ステータス", value: "販売中" }], next: { label: "決済日の確定", due: "2026-11-05" }, lastContactAt: "2026-11-01T01:00:00.000Z", pendingDocs: 2, preIntroPending: 0, ...over,
 });
 
 describe("経緯の行", () => {
@@ -56,5 +56,11 @@ describe("直近の状況", () => {
   it("次の段取りとやり取りが無ければなしと出す", () => {
     const html = renderToStaticMarkup(<TimelineSummaryCard summary={summary({ next: null, lastContactAt: null })} />);
     expect(html.match(/なし/g)).toHaveLength(2);
+    expect(html).not.toContain("導入前");
+  });
+
+  it("次の段取りが無く導入前の未完了が残っていれば、なしに件数を添える", () => {
+    const html = renderToStaticMarkup(<TimelineSummaryCard summary={summary({ next: null, preIntroPending: 2 })} />);
+    expect(html).toContain("なし(導入前の未完了 2件)");
   });
 });

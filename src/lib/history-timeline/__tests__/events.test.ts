@@ -274,7 +274,13 @@ describe("直近の状況", () => {
   });
 
   it("何も無ければ空で返す", () => {
-    expect(buildTimelineSummary({ statuses: [], nextCandidates: [], lastContactAt: null, pendingDocs: null })).toEqual({ statuses: [], next: null, lastContactAt: null, pendingDocs: null });
+    expect(buildTimelineSummary({ statuses: [], nextCandidates: [], lastContactAt: null, pendingDocs: null })).toEqual({ statuses: [], next: null, lastContactAt: null, pendingDocs: null, preIntroPending: 0 });
+  });
+
+  it("導入前の未完了の件数は、次の段取りが無いときだけ返す", () => {
+    const base = { statuses: [], lastContactAt: null, pendingDocs: null, preIntroPending: 2 };
+    expect(buildTimelineSummary({ ...base, nextCandidates: [] }).preIntroPending).toBe(2);
+    expect(buildTimelineSummary({ ...base, nextCandidates: [{ label: "鍵", due: "2026-11-10" }] }).preIntroPending).toBe(0);
   });
 });
 

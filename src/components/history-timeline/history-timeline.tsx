@@ -17,7 +17,7 @@ const dayOf = (iso: string) => formatJaDateTime(iso).slice(0, 10);
 export function TimelineSummaryCard({ summary }: { summary: TimelineSummary }) {
   const rows: [string, string][] = [
     ...summary.statuses.map((s): [string, string] => [s.label, s.value]),
-    ["次の段取り", summary.next ? `${summary.next.due} ${summary.next.label}` : "なし"],
+    ["次の段取り", summary.next ? `${summary.next.due} ${summary.next.label}` : summary.preIntroPending > 0 ? `なし(導入前の未完了 ${summary.preIntroPending}件)` : "なし"],
     ["最後のやり取り", summary.lastContactAt ? dayOf(summary.lastContactAt) : "なし"],
     ...(summary.pendingDocs === null ? [] : [["未受領の書類", `${summary.pendingDocs}件`] as [string, string]]),
   ];
