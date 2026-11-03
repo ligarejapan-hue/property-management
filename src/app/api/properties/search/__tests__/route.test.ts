@@ -86,6 +86,14 @@ describe("GET /api/properties/search", () => {
     expect((findMany.mock.calls[0][0] as { take: number }).take).toBe(10);
   });
 
+  it("取扱区分も返す(取引の作成画面で物件を選んだときの事業区分の初期値・2026-11-04)", async () => {
+    findMany.mockResolvedValue([{ id: "p1", address: "架空区1-1", businessType: "resale" }]);
+    const res = await GET(req("caseStatus=contract_planned"));
+    const select = (findMany.mock.calls[0][0] as { select: Record<string, unknown> }).select;
+    expect(select.businessType).toBe(true);
+    expect(((await res.json()) as { data: Array<{ businessType: string }> }).data[0].businessType).toBe("resale");
+  });
+
   it("caseStatus だけ(q 空)なら、その案件状況のアーカイブされていない物件を出す", async () => {
     await GET(req("caseStatus=contract_planned"));
     const w = whereOf();
