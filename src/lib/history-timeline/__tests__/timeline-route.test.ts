@@ -105,6 +105,7 @@ describe("物件の経緯", () => {
     expect(pm.deal.findMany).not.toHaveBeenCalled();
     expect(pm.dealDocument.findMany).not.toHaveBeenCalled();
     expect(pm.dealDocRequest.count).not.toHaveBeenCalled();
+    expect(pm.dealScheduleItem.count).not.toHaveBeenCalled();
   });
 
   it("要約の最後のやり取りは見える行だけから作る", async () => {
@@ -250,6 +251,33 @@ describe("取引の経緯", () => {
     const where = (pm.dealDocRequest.count.mock.calls[0][0] as { where: Record<string, unknown> }).where;
     expect(JSON.stringify(where)).toContain('"revokedAt":null');
     expect(JSON.stringify(where)).toContain('"not":"received"');
+  });
+
+  it("次の段取りは導入前の項目を除いて探し、残っている導入前の未完了は数えて添える", async () => {
+    pm.dealScheduleItem.count.mockResolvedValue(2);
+    const body = await (await dealGET(req(`/api/deals/${DID}/timeline`), dealCtx)).json();
+    const nextWhere = (pm.dealScheduleItem.findFirst.mock.calls[0][0] as { where: Record<string, unknown> }).where;
+    expect(nextWhere).toMatchObject({ completedAt: null, excludedAt: null, preIntroduction: false });
+    const countWhere = (pm.dealScheduleItem.count.mock.calls[0][0] as { where: Record<string, unknown> }).where;
+    expect(countWhere).toMatchObject({ dealId: { in: [DID] }, completedAt: null, excludedAt: null, preIntroduction: true });
+    expect(body.summary.next).toBeNull();
+    expect(body.summary.preIntroPending).toBe(2);
+  });
+
+  it("次の段取りがあれば導入前の件数は添えない", async () => {
+    pm.dealScheduleItem.findFirst.mockResolvedValue({ label: "鍵の受け渡し", dueDate: new Date("2026-11-10T00:00:00Z") });
+    pm.dealScheduleItem.count.mockResolvedValue(2);
+    const body = await (await dealGET(req(`/api/deals/${DID}/timeline`), dealCtx)).json();
+    expect(body.summary.next).toEqual({ label: "鍵の受け渡し", due: "2026-11-10" });
+    expect(body.summary.preIntroPending).toBe(0);
+  });
+
+  it("中止の取引は導入前の件数も数えない", async () => {
+    pm.deal.findUnique.mockResolvedValue({ ...dealRow, status: "cancelled", propertyId: null });
+    pm.dealScheduleItem.count.mockResolvedValue(2);
+    const body = await (await dealGET(req(`/api/deals/${DID}/timeline`), dealCtx)).json();
+    expect(pm.dealScheduleItem.count).not.toHaveBeenCalled();
+    expect(body.summary.preIntroPending).toBe(0);
   });
 
   it("中止の取引の書類は未受領に数えず、次の段取りも出さない", async () => {

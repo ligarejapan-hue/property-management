@@ -312,13 +312,17 @@ async function loadSummary(scope: TimelineScope, access: TimelineAccess, now: Da
     statuses.push({ label: "案件ステータス", value: CASE_STATUS_LABELS[scope.caseStatus] ?? scope.caseStatus });
   }
 
-  const [nextItem, nextAction, contact, pendingDocs] = await Promise.all([
+  // 次の段取りに導入前の項目は数えない(通知と同じ)。残っている分は件数だけ添える(次の段取りと同じく取引を見られる人だけ)。
+  const [nextItem, preIntroPending, nextAction, contact, pendingDocs] = await Promise.all([
     openIds.length > 0
       ? prisma.dealScheduleItem.findFirst({
           where: { dealId: { in: openIds }, completedAt: null, excludedAt: null, preIntroduction: false }, orderBy: { dueDate: "asc" },
           select: { label: true, dueDate: true },
         })
       : null,
+    openIds.length > 0
+      ? prisma.dealScheduleItem.count({ where: { dealId: { in: openIds }, completedAt: null, excludedAt: null, preIntroduction: true } })
+      : 0,
     access.property && scope.propertyId
       ? prisma.nextAction.findFirst({
           where: { propertyId: scope.propertyId, isCompleted: false }, orderBy: { scheduledAt: "asc" },
@@ -336,7 +340,7 @@ async function loadSummary(scope: TimelineScope, access: TimelineAccess, now: Da
     ...(nextItem ? [{ label: nextItem.label, due: nextItem.dueDate.toISOString().slice(0, 10) }] : []),
     ...(nextAction ? [{ label: nextAction.content.slice(0, 60), due: nextAction.scheduledAt.toISOString().slice(0, 10) }] : []),
   ];
-  return buildTimelineSummary({ statuses, nextCandidates, lastContactAt: contact.events[0]?.at ?? null, pendingDocs });
+  return buildTimelineSummary({ statuses, nextCandidates, lastContactAt: contact.events[0]?.at ?? null, pendingDocs, preIntroPending });
 }
 
 /**
