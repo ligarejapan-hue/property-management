@@ -43,7 +43,7 @@ describe("buildSaleLandDocument（自社マイソク様式・[F2-A Task3]）", (
     const doc = buildSaleLandDocument({
       ...base,
       overrides: {
-        price: "3480",
+        price: "34800000",
         landCategory: ["宅地"],
         roadDirections: ["南"],
         catchCopy: "南西角地",
@@ -75,7 +75,7 @@ describe("buildSaleLandDocument（自社マイソク様式・[F2-A Task3]）", (
   });
 
   it("消費税/うち消費税の行は存在しない(土地は非課税)", () => {
-    const doc = buildSaleLandDocument({ ...base, overrides: { price: "3480" } });
+    const doc = buildSaleLandDocument({ ...base, overrides: { price: "34800000" } });
     const labels = tableLabels(doc);
     expect(labels).not.toContain("消費税");
     expect(labels).not.toContain("うち消費税");
@@ -197,22 +197,32 @@ describe("buildSaleLandDocument（自社マイソク様式・[F2-A Task3]）", (
   it("坪単価: 未指定なら価格と土地面積から自動計算し、行に「万円」付きで表示される([Task1])", () => {
     const doc = buildSaleLandDocument({
       ...base,
-      overrides: { price: "3000", landArea: "150" },
+      overrides: { price: "30000000", landArea: "150" },
     });
     // 3000万 / (150㎡ / 3.305785=45.375坪) = 66.11.. → "66.1万円"（tsubo.test.ts と同じ計算）
     expect(tableRow(doc, "坪単価")).toBe("66.1万円");
   });
 
+  it("坪単価の自動計算は円の価格を万円に直してから割る(千円の端数・応談)", () => {
+    const frac = buildSaleLandDocument({ ...base, overrides: { price: "30001500", landArea: "150" } });
+    expect(findEl(frac, "price")).toMatchObject({ content: "3,000万1,500円" });
+    // 3000.15万 / 45.375坪 = 66.12.. → "66.1万円"
+    expect(tableRow(frac, "坪単価")).toBe("66.1万円");
+    const ask = buildSaleLandDocument({ ...base, overrides: { price: "応談", landArea: "150" } });
+    expect(findEl(ask, "price")).toMatchObject({ content: "応談" });
+    expect(tableRow(ask, "坪単価")).toBe("");
+  });
+
   it("坪単価: 指定時はその値を優先する(自動計算値ではなく手動上書き値)([Task1])", () => {
     const doc = buildSaleLandDocument({
       ...base,
-      overrides: { price: "3000", landArea: "150", unitPrice: "80" },
+      overrides: { price: "30000000", landArea: "150", unitPrice: "80" },
     });
     expect(tableRow(doc, "坪単価")).toBe("80万円");
   });
 
   it("坪単価: 土地面積が空だと自動計算できず行は空文字([Task1])", () => {
-    const doc = buildSaleLandDocument({ ...base, overrides: { price: "3000" } });
+    const doc = buildSaleLandDocument({ ...base, overrides: { price: "30000000" } });
     expect(tableRow(doc, "坪単価")).toBe("");
   });
 
@@ -222,8 +232,8 @@ describe("buildSaleLandDocument（自社マイソク様式・[F2-A Task3]）", (
     expect(tableLabels(doc)).not.toContain("坪/㎡単価");
   });
 
-  it("表題は「売土地」固定、価格はoverride×万円", () => {
-    const doc = buildSaleLandDocument({ ...base, overrides: { price: "3480" } });
+  it("表題は「売土地」固定、価格はoverride(円で入力)を万円表記で出す", () => {
+    const doc = buildSaleLandDocument({ ...base, overrides: { price: "34800000" } });
     expect(findEl(doc, "heading")).toMatchObject({ content: "売土地" });
     expect(findEl(doc, "price")).toMatchObject({ content: "3,480万円" });
   });
@@ -255,7 +265,7 @@ describe("buildSaleLandDocument（自社マイソク様式・[F2-A Task3]）", (
   it("raw入力(単位なし)は従来どおり単位が1つ付く(回帰防止)", () => {
     const doc = buildSaleLandDocument({
       ...base,
-      overrides: { price: "3480", landArea: "150.5", areaMethod: "実測" },
+      overrides: { price: "34800000", landArea: "150.5", areaMethod: "実測" },
     });
     expect(findEl(doc, "price")).toMatchObject({ content: "3,480万円" });
     expect(tableRow(doc, "土地面積")).toBe("150.5㎡（実測）");
@@ -319,7 +329,7 @@ describe("buildSaleLandDocument（自社マイソク様式・[F2-A Task3]）", (
           landArea: "150.5",
           landAreaMethod: "実測",
         },
-        overrides: { price: "3980", access: "△△線 徒歩3分", landArea: "180", areaMethod: "公簿" },
+        overrides: { price: "39800000", access: "△△線 徒歩3分", landArea: "180", areaMethod: "公簿" },
       });
       expect(findEl(doc, "price")).toMatchObject({ content: "3,980万円" });
       expect(tableRow(doc, "交通")).toBe("△△線 徒歩3分");
@@ -338,7 +348,7 @@ describe("buildSaleLandDocument（自社マイソク様式・[F2-A Task3]）", (
     const doc = buildSaleLandDocument({
       ...base,
       overrides: {
-        price: "3480",
+        price: "34800000",
         catchCopy: "南西角地",
         salesPoints: ["整形地", "即引渡可"],
         landCategory: ["宅地"],

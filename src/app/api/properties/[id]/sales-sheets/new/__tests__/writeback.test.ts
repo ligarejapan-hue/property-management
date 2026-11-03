@@ -193,6 +193,7 @@ vi.mock("@/lib/audit", () => ({ writeAuditLog: vi.fn() }));
 
 import { getApiSession, getUserPermissions } from "@/lib/api-helpers";
 import prisma from "@/lib/prisma";
+import { Prisma } from "@/generated/prisma";
 import { createDesign } from "@/lib/sales-sheet/design-service";
 import { POST } from "../route";
 
@@ -266,7 +267,7 @@ beforeEach(() => {
 
 describe("POST /sales-sheets/new — 物件への保存", () => {
   it("既定(チェックON)で変わった欄だけ物件を更新し、変更履歴を1欄1行残す", async () => {
-    const res = await POST(req({ price: "3480", access: "○○線 徒歩8分", propertyVersion: 1 }), ctx);
+    const res = await POST(req({ price: "34800000", access: "○○線 徒歩8分", propertyVersion: 1 }), ctx);
     expect(res.status).toBe(201);
     const json = await res.json();
     expect(json.propertyWriteback).toEqual({ saved: ["価格", "交通"], unreadable: [], noTarget: [], tooLong: [], conflict: false });
@@ -299,8 +300,19 @@ describe("POST /sales-sheets/new — 物件への保存", () => {
     });
   });
 
+  it("価格は円で入れ、物件へは万円(1円まで)で保存する=千円の端数も残る(2026-11-03)", async () => {
+    const res = await POST(req({ price: "32801500", propertyVersion: 1 }), ctx);
+    expect(res.status).toBe(201);
+    expect((await res.json()).propertyWriteback.saved).toEqual(["価格"]);
+    expect(updateManyMock.mock.calls[0][0]).toMatchObject({
+      data: { salePrice: 3280.15, version: { increment: 1 } },
+    });
+    const logs = changeLogCreateManyMock.mock.calls[0][0].data;
+    expect(logs).toContainEqual(expect.objectContaining({ fieldName: "salePrice", newValue: "3280.15" }));
+  });
+
   it("チェックOFFなら物件を更新しない", async () => {
-    const res = await POST(req({ price: "3480", saveToProperty: false }), ctx);
+    const res = await POST(req({ price: "34800000", saveToProperty: false }), ctx);
     expect(res.status).toBe(201);
     expect(updateManyMock).not.toHaveBeenCalled();
     expect((await res.json()).propertyWriteback).toEqual({ saved: [], unreadable: [], noTarget: [], tooLong: [], conflict: false });
@@ -333,7 +345,7 @@ describe("POST /sales-sheets/new — 物件への保存", () => {
   });
 
   it("交通が物件の上限(200字)を超えると、その欄だけ保存せず「長すぎる」で知らせる", async () => {
-    const res = await POST(req({ access: "あ".repeat(201), price: "3480", propertyVersion: 1 }), ctx);
+    const res = await POST(req({ access: "あ".repeat(201), price: "34800000", propertyVersion: 1 }), ctx);
     expect(res.status).toBe(201);
     const json = await res.json();
     expect(json.propertyWriteback).toEqual({
@@ -356,7 +368,7 @@ describe("POST /sales-sheets/new — 物件への保存", () => {
   // C2/I6: 現行クライアントは version を送らない(Task 5 で送るようになる)。無条件で
   // 上書きせず、conflict 扱いにして物件へは書かない(図面自体は作る)。
   it("propertyVersion を送らないと conflict 扱いで書き込まない(C2)", async () => {
-    const res = await POST(req({ price: "3480" }), ctx);
+    const res = await POST(req({ price: "34800000" }), ctx);
     expect(res.status).toBe(201);
     expect(updateManyMock).not.toHaveBeenCalled();
     expect((await res.json()).propertyWriteback).toEqual({ saved: [], unreadable: [], noTarget: [], tooLong: [], conflict: true, conflictReason: "missing_version" });
@@ -364,7 +376,7 @@ describe("POST /sales-sheets/new — 物件への保存", () => {
   });
 
   it("propertyVersion が数値でないと conflict 扱いで書き込まない(C2)", async () => {
-    const res = await POST(req({ price: "3480", propertyVersion: "4" }), ctx);
+    const res = await POST(req({ price: "34800000", propertyVersion: "4" }), ctx);
     expect(res.status).toBe(201);
     expect(updateManyMock).not.toHaveBeenCalled();
     expect((await res.json()).propertyWriteback).toMatchObject({ conflict: true, conflictReason: "missing_version" });
@@ -400,7 +412,7 @@ describe("POST /sales-sheets/new — 物件への保存", () => {
       propertyType: "apartment_building",
       building: { ...testBuilding, version: 9 },
     });
-    const res = await POST(req({ price: "3480", propertyVersion: 1 }), ctx); // buildingVersion 省略
+    const res = await POST(req({ price: "34800000", propertyVersion: 1 }), ctx); // buildingVersion 省略
     expect(res.status).toBe(201);
     expect(updateManyMock).toHaveBeenCalledTimes(1);
     expect(buildingUpdateManyMock).not.toHaveBeenCalled();
@@ -412,7 +424,7 @@ describe("POST /sales-sheets/new — 物件への保存", () => {
   it("区分でも棟の項目を触っていなければ棟の版は問わない(@codex P2)", async () => {
     propertyFindMock.mockResolvedValue({ ...baseMansion, building: { ...testBuilding, version: 9 } });
     const res = await POST(
-      req({ price: "3480", propertyVersion: 1, buildingVersion: 1, buildingId: "b1" }), // 棟の版は食い違っている
+      req({ price: "34800000", propertyVersion: 1, buildingVersion: 1, buildingId: "b1" }), // 棟の版は食い違っている
       ctx,
     );
     expect(res.status).toBe(201);
@@ -427,7 +439,7 @@ describe("POST /sales-sheets/new — 物件への保存", () => {
   it("ロックの時点で担当から外れていたら 403 で図面も作らない(@codex P1)", async () => {
     (getApiSession as Mock).mockResolvedValue({ ...ADMIN_SESSION, role: "field_staff" });
     queryRawMock.mockResolvedValue([]); // スコープ付きロックが0行＝もう担当ではない
-    const res = await POST(req({ price: "3480", propertyVersion: 1 }), ctx);
+    const res = await POST(req({ price: "34800000", propertyVersion: 1 }), ctx);
     expect(res.status).toBe(403);
     expect(designCreateMock).not.toHaveBeenCalled();
     expect(updateManyMock).not.toHaveBeenCalled();
@@ -440,7 +452,7 @@ describe("POST /sales-sheets/new — 物件への保存", () => {
     propertyFindMock
       .mockResolvedValueOnce({ ...baseProperty, version: 4 }) // 最初の読み取り(ロック前)
       .mockResolvedValueOnce({ ...baseProperty, version: 5 }); // ロック後の読み直し(他の人が先に更新済み)
-    const res = await POST(req({ price: "3480", propertyVersion: 4 }), ctx);
+    const res = await POST(req({ price: "34800000", propertyVersion: 4 }), ctx);
     expect(res.status).toBe(201);
     expect(updateManyMock).not.toHaveBeenCalled();
     expect((await res.json()).propertyWriteback).toMatchObject({ conflict: true, conflictReason: "stale" });
@@ -511,7 +523,7 @@ describe("POST /sales-sheets/new — 物件への保存", () => {
 
   it("保存の途中で失敗したら図面も作らない", async () => {
     updateManyMock.mockRejectedValueOnce(new Error("db down"));
-    const res = await POST(req({ price: "3480", propertyVersion: 1 }), ctx);
+    const res = await POST(req({ price: "34800000", propertyVersion: 1 }), ctx);
     // 単体テストの prisma mock は実トランザクションを張らないため巻き戻りそのものは
     // 検証できない(原子性は「1つの $transaction にまとめてある」ことで担保し、レビューで
     // 確認する)。ここでは応答が 500 であることだけを確かめる。
@@ -522,7 +534,7 @@ describe("POST /sales-sheets/new — 物件への保存", () => {
   // 緑のままにならないよう、$transaction 自体が使われていること・createDesign に渡された tx
   // が物件更新にも使われている(同じ prisma mock)ことを固定する。
   it("図面作成と物件更新は同じトランザクション(tx)の中で行われる", async () => {
-    const res = await POST(req({ price: "3480", propertyVersion: 1 }), ctx);
+    const res = await POST(req({ price: "34800000", propertyVersion: 1 }), ctx);
     expect(res.status).toBe(201);
     expect(pm.$transaction).toHaveBeenCalledTimes(1);
     const txPassedToCreateDesign = (createDesign as Mock).mock.calls[0][1];
@@ -535,7 +547,7 @@ describe("POST /sales-sheets/new — 物件への保存", () => {
   it("FOR UPDATE で物件(区分は棟も)をロックしてから更新する", async () => {
     propertyFindMock.mockResolvedValue({ ...baseMansion, building: testBuilding });
     const res = await POST(
-      req({ price: "3480", basementFloors: "2", propertyVersion: 1, buildingVersion: 1, buildingId: "b1" }),
+      req({ price: "34800000", basementFloors: "2", propertyVersion: 1, buildingVersion: 1, buildingId: "b1" }),
       ctx,
     );
     expect(res.status).toBe(201);
@@ -571,7 +583,7 @@ describe("POST /sales-sheets/new — 物件への保存", () => {
   // ロックが要る。棟ロックの SQL は紐付きの有無で分岐させず必ず流す(無ければ0行)。
   it("ロック前の読み取りで棟が無くても、棟ロックのSQLは流す(@codex P1)", async () => {
     propertyFindMock.mockResolvedValue({ ...baseProperty, building: null });
-    const res = await POST(req({ price: "3480", propertyVersion: 1 }), ctx);
+    const res = await POST(req({ price: "34800000", propertyVersion: 1 }), ctx);
     expect(res.status).toBe(201);
     expect(queryRawMock).toHaveBeenCalledTimes(2);
     expect(sqlOf(queryRawMock.mock.calls[1])).toMatch(/FROM buildings/);
@@ -666,7 +678,7 @@ describe("POST /sales-sheets/new — 物件への保存", () => {
   it("区分の間取り・向きが物件の上限(50字)を超えても図面は作り、物件へは保存せず「長すぎる」で知らせる", async () => {
     propertyFindMock.mockResolvedValue(baseMansion);
     const res = await POST(
-      req({ layout: "あ".repeat(51), balconyDir: "南".repeat(51), price: "3480", propertyVersion: 1 }),
+      req({ layout: "あ".repeat(51), balconyDir: "南".repeat(51), price: "34800000", propertyVersion: 1 }),
       ctx,
     );
     expect(res.status).toBe(201);
@@ -706,6 +718,19 @@ describe("POST /sales-sheets/new — 図面への読み戻し(C-1)", () => {
     expect(doc.elements.find((e) => e.id === "price")).toMatchObject({ content: "3,480万円" });
     expect(documentTableRow("交通")).toBe("○○線 徒歩8分");
     expect(documentTableRow("土地面積")).toBe("150.5㎡（実測）");
+  });
+
+  it("土地: 物件の価格(万円の Decimal)に千円の端数があれば「万◯円」で図面に出る(2026-11-03)", async () => {
+    propertyFindMock.mockResolvedValue({
+      ...baseProperty,
+      salePrice: new Prisma.Decimal("3280.1500"),
+    });
+    const res = await POST(req({ propertyVersion: 1 }), ctx);
+    expect(res.status).toBe(201);
+    const doc = (createDesign as Mock).mock.calls[0][0].document as {
+      elements: { id: string; content?: string }[];
+    };
+    expect(doc.elements.find((e) => e.id === "price")).toMatchObject({ content: "3,280万1,500円" });
   });
 
   it("戸建: 物件に保存済みの構造・地上階・築年月が図面に出る", async () => {
@@ -850,7 +875,7 @@ describe("POST /sales-sheets/new — 棟の取り違え防止(@codex P1)", () =>
   it("棟へ書かないなら棟の id が食い違っていても物件へは保存する", async () => {
     propertyFindMock.mockResolvedValue({ ...baseMansion, building: { ...testBuilding, id: "b2" } });
     const res = await POST(
-      req({ price: "3480", propertyVersion: 1, buildingVersion: 1, buildingId: "b1" }),
+      req({ price: "34800000", propertyVersion: 1, buildingVersion: 1, buildingId: "b1" }),
       ctx,
     );
     expect(res.status).toBe(201);
@@ -865,7 +890,7 @@ describe("POST /sales-sheets/new — 棟が無い区分の棟の項目", () => {
   it("棟に紐づいていない区分の築年月・地下階は物件の欄へ保存する(棟の版は問わない)", async () => {
     propertyFindMock.mockResolvedValue({ ...baseMansion, building: null });
     const res = await POST(
-      req({ basementFloors: "2", builtYearMonth: "2015年3月", price: "3480", propertyVersion: 1 }),
+      req({ basementFloors: "2", builtYearMonth: "2015年3月", price: "34800000", propertyVersion: 1 }),
       ctx,
     );
     expect(res.status).toBe(201);

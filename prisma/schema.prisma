@@ -408,9 +408,9 @@ model Property {
   ownershipShareNote       String?           @map("ownership_share_note")
 
   // --- 販売図面 F3: 販売条件(図面の作成画面から保存する・仕様書 §4.1) ---
-  salePrice                Decimal?          @map("sale_price") @db.Decimal(12, 1)
+  salePrice                Decimal?          @map("sale_price") @db.Decimal(15, 4)
   saleTaxType              String?           @map("sale_tax_type")
-  saleTaxAmount            Decimal?          @map("sale_tax_amount") @db.Decimal(12, 1)
+  saleTaxAmount            Decimal?          @map("sale_tax_amount") @db.Decimal(15, 4)
   access                   String?           @map("access")
   landArea                 Decimal?          @map("land_area") @db.Decimal(10, 2)
   landAreaMethod           String?           @map("land_area_method")

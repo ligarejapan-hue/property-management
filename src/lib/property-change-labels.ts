@@ -1,3 +1,5 @@
+import { formatYenText, manToYen } from "@/lib/yen-man";
+
 /** 変更履歴に出す項目の画面の名前(変更履歴タブと経緯タブで共通)。 */
 export const CHANGE_FIELD_LABELS: Record<string, string> = {
   realEstateNumber: "不動産番号",
@@ -68,3 +70,13 @@ export const CHANGE_FIELD_LABELS: Record<string, string> = {
   roomNo: "部屋番号",
   occupancyStatus: "現況",
 };
+
+/** 価格・うち消費税の履歴の値(万円で残る)を円で出す(「3,280万1,500円」・2026-11-03)。それ以外の欄は null。 */
+export function saleYenHistoryValue(fieldName: string, value: string | null): string | null {
+  if (fieldName !== "salePrice" && fieldName !== "saleTaxAmount") return null;
+  if (value === null || value === "") return null;
+  // 数字として読めない値(古い手入力など)はそのまま出す。
+  if (!/^\d+(\.\d+)?$/.test(value)) return null;
+  const yen = manToYen(value);
+  return /^\d+$/.test(yen) ? formatYenText(yen) : null;
+}

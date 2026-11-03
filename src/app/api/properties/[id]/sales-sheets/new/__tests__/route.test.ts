@@ -320,7 +320,7 @@ describe("POST /api/properties/[id]/sales-sheets/new", () => {
   });
 
   it("201 — 土地: 消費税の行は生成されない（土地は非課税・LAND_FIELDS に tax 系キーが無い）", async () => {
-    const res = await POST(makeLandRequest({ price: "3480" }), {
+    const res = await POST(makeLandRequest({ price: "34800000" }), {
       params: Promise.resolve({ id: "p1" }),
     });
     expect(res.status).toBe(201);
@@ -432,7 +432,7 @@ describe("POST /api/properties/[id]/sales-sheets/new", () => {
 
   it("201 — 戸建: 課税指定で「うち消費税」行が入る（マンションと同じ tax/taxAmount 欄）", async () => {
     pm.property.findUnique.mockResolvedValue({ ...LAND_PROPERTY, propertyType: "house" });
-    const res = await POST(makeHouseRequest({ tax: "課税", taxAmount: "180" }), {
+    const res = await POST(makeHouseRequest({ tax: "課税", taxAmount: "1800000" }), {
       params: Promise.resolve({ id: "p1" }),
     });
     expect(res.status).toBe(201);
@@ -517,7 +517,7 @@ describe("POST /api/properties/[id]/sales-sheets/new", () => {
 
   it("201 — 一棟: 課税指定で「うち消費税」行が入る（house/mansion と同じ tax/taxAmount 欄）", async () => {
     pm.property.findUnique.mockResolvedValue({ ...LAND_PROPERTY, propertyType: "apartment_building" });
-    const res = await POST(makeBuildingRequest({ tax: "課税", taxAmount: "1200" }), {
+    const res = await POST(makeBuildingRequest({ tax: "課税", taxAmount: "12000000" }), {
       params: Promise.resolve({ id: "p1" }),
     });
     expect(res.status).toBe(201);

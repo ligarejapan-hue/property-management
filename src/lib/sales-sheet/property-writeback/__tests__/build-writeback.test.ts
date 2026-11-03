@@ -8,7 +8,7 @@ describe("buildWriteback — 土地", () => {
   it("価格・交通・土地面積・計測方式を物件へ", () => {
     const r = buildWriteback({
       kind: "land",
-      values: { price: "3480", access: "○○線 徒歩8分", landArea: "125.30", areaMethod: "実測" },
+      values: { price: "34800000", access: "○○線 徒歩8分", landArea: "125.30", areaMethod: "実測" },
       current: emptyCurrent,
     });
     expect(r.property).toEqual({
@@ -24,7 +24,7 @@ describe("buildWriteback — 土地", () => {
   it("今の値と同じ欄は入れない", () => {
     const r = buildWriteback({
       kind: "land",
-      values: { price: "3480", access: "○○線 徒歩8分" },
+      values: { price: "34800000", access: "○○線 徒歩8分" },
       current: { property: { salePrice: 3480, access: "○○線 徒歩8分" }, building: null },
     });
     expect(r.property).toEqual({});
@@ -249,7 +249,7 @@ describe("buildWriteback — 区分マンション", () => {
     const r = buildWriteback({
       kind: "mansion",
       values: {
-        price: "6590",
+        price: "65900000",
         exclusiveArea: "67.21",
         managementFee: "12800",
         structure: "RC",
@@ -268,7 +268,7 @@ describe("buildWriteback — 区分マンション", () => {
   it("棟が無い区分では棟の欄を捨てる", () => {
     const r = buildWriteback({
       kind: "mansion",
-      values: { price: "6590", structure: "RC" },
+      values: { price: "65900000", structure: "RC" },
       current: { property: {}, building: null },
     });
     expect(r.property).toEqual({ salePrice: 6590 });
@@ -341,22 +341,65 @@ describe("buildWriteback — 文字数の上限(@codex P2)", () => {
 // [@codex P2] DECIMAL(p,s) の桁あふれは DB が黙って丸める＝図面・変更履歴・物件の値が
 // 食い違ったまま残る。範囲外の値と同じく、その欄だけ保存しない。
 describe("buildWriteback — 小数の桁(@codex P2)", () => {
-  it("価格(DECIMAL(12,1))は小数1桁まで", () => {
+  // 2026-11-03: 価格は図面で円で入れ、物件へは万円(DECIMAL(15,4)=1円まで)で入れる。
+  it("価格(円→万円・DECIMAL(15,4))は1円単位まで受ける", () => {
     const ok = buildWriteback({
       kind: "land",
-      values: { price: "3480.5" },
+      values: { price: "32801501" },
       current: emptyCurrent,
     });
-    expect(ok.property).toEqual({ salePrice: 3480.5 });
+    expect(ok.property).toEqual({ salePrice: 3280.1501 });
     expect(ok.unreadable).toEqual([]);
 
+    const frac = buildWriteback({
+      kind: "land",
+      values: { price: "32801500" },
+      current: emptyCurrent,
+    });
+    expect(frac.property).toEqual({ salePrice: 3280.15 });
+
+    // 円の小数(1円未満)は列に入らない=丸めずに読めなかった欄にする。
     const over = buildWriteback({
       kind: "land",
-      values: { price: "3480.55" },
+      values: { price: "32801500.5" },
       current: emptyCurrent,
     });
     expect(over.property).toEqual({});
     expect(over.unreadable).toEqual(["価格"]);
+  });
+
+  it("価格・うち消費税は「万」入りの円の書き方も読む", () => {
+    const r = buildWriteback({
+      kind: "house",
+      values: { price: "3,280万1,500円", tax: "課税", taxAmount: "300万円" },
+      current: emptyCurrent,
+    });
+    expect(r.property).toEqual({ salePrice: 3280.15, saleTaxType: "課税", saleTaxAmount: 300 });
+    expect(r.unreadable).toEqual([]);
+  });
+
+  it("うち消費税も円で読み、1円単位まで入れる", () => {
+    const r = buildWriteback({
+      kind: "building",
+      values: { tax: "課税", taxAmount: "3000001" },
+      current: emptyCurrent,
+    });
+    expect(r.property).toEqual({ saleTaxType: "課税", saleTaxAmount: 300.0001 });
+  });
+
+  it("物件の今の値(万円の Decimal)と同じ円なら入れない", () => {
+    const r = buildWriteback({
+      kind: "land",
+      values: { price: "32801500" },
+      current: { property: { salePrice: new Prisma.Decimal("3280.1500") }, building: null },
+    });
+    expect(r.property).toEqual({});
+    const changed = buildWriteback({
+      kind: "land",
+      values: { price: "32801501" },
+      current: { property: { salePrice: new Prisma.Decimal("3280.1500") }, building: null },
+    });
+    expect(changed.property).toEqual({ salePrice: 3280.1501 });
   });
 
   it("土地面積(DECIMAL(10,2))は小数2桁まで", () => {
@@ -394,7 +437,7 @@ describe("buildWriteback — 棟が無い区分の棟の項目", () => {
   it("棟が無い区分の地下階・築年月は物件の欄へ保存する", () => {
     const r = buildWriteback({
       kind: "mansion",
-      values: { basementFloors: "2", builtYearMonth: "2015年3月", price: "3480" },
+      values: { basementFloors: "2", builtYearMonth: "2015年3月", price: "34800000" },
       current: { property: {}, building: null },
     });
     expect(r.building).toEqual({});
@@ -438,7 +481,7 @@ describe("buildWriteback — 棟が無い区分の棟の項目", () => {
   it("入れていない項目は noTarget に出さない(空欄は「変更なし」のまま)", () => {
     const r = buildWriteback({
       kind: "mansion",
-      values: { price: "3480" },
+      values: { price: "34800000" },
       current: { property: {}, building: null },
     });
     expect(r.noTarget).toEqual([]);
@@ -448,7 +491,7 @@ describe("buildWriteback — 棟が無い区分の棟の項目", () => {
     for (const kind of ["land", "house"] as const) {
       const r = buildWriteback({
         kind,
-        values: { price: "3480", basementFloors: "2", builtYearMonth: "2015年3月" },
+        values: { price: "34800000", basementFloors: "2", builtYearMonth: "2015年3月" },
         current: emptyCurrent,
       });
       expect({ kind, noTarget: r.noTarget }).toEqual({ kind, noTarget: [] });
@@ -507,13 +550,13 @@ describe("buildWriteback — 年だけ入れ直したときの月(@codex P2)", (
 
 // [@codex P2] 上限は列が実際に入れられる最大値(整数部 p-s 桁 + 小数 s 桁)に合わせる。
 describe("buildWriteback — 列の上限いっぱいの値(@codex P2)", () => {
-  it("DECIMAL(12,1) の最大値を受ける", () => {
+  it("価格 DECIMAL(15,4) の最大値(99999999999.9999万円=999999999999999円)を受ける", () => {
     const r = buildWriteback({
       kind: "land",
-      values: { price: "99999999999.9" },
+      values: { price: "999999999999999" },
       current: emptyCurrent,
     });
-    expect(r.property).toEqual({ salePrice: 99999999999.9 });
+    expect(r.property).toEqual({ salePrice: 99999999999.9999 });
     expect(r.unreadable).toEqual([]);
   });
 
@@ -529,10 +572,20 @@ describe("buildWriteback — 列の上限いっぱいの値(@codex P2)", () => {
   it("上限を超えたものは従来どおり読めなかった欄にする", () => {
     const r = buildWriteback({
       kind: "land",
-      values: { price: "100000000000" },
+      values: { price: "1000000000000000" }, // 100000000000万円=上限+1円
       current: emptyCurrent,
     });
     expect(r.property).toEqual({});
     expect(r.unreadable).toEqual(["価格"]);
+  });
+
+  it("うち消費税も上限+1円は読めなかった欄にする", () => {
+    const r = buildWriteback({
+      kind: "house",
+      values: { taxAmount: "1000000000000000" },
+      current: emptyCurrent,
+    });
+    expect(r.property).toEqual({});
+    expect(r.unreadable).toEqual(["うち消費税"]);
   });
 });

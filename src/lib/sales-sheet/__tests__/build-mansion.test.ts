@@ -40,7 +40,7 @@ describe("buildSaleMansionDocument（自社マイソク様式）", () => {
   it("スペック表に主要行が入り、キャッチ帯要素を含む", () => {
     const doc = buildSaleMansionDocument({
       ...base,
-      overrides: { price: "6590", tax: "不課税", catchCopy: "北東角部屋" },
+      overrides: { price: "65900000", tax: "不課税", catchCopy: "北東角部屋" },
     });
     const labels = tableLabels(doc);
     expect(labels).toContain("用途地域");
@@ -54,7 +54,7 @@ describe("buildSaleMansionDocument（自社マイソク様式）", () => {
   it("課税ならうち消費税行が出る", () => {
     const doc = buildSaleMansionDocument({
       ...base,
-      overrides: { price: "6590", tax: "課税", taxAmount: "300" },
+      overrides: { price: "65900000", tax: "課税", taxAmount: "3000000" },
     });
     const labels = tableLabels(doc);
     expect(labels).toContain("うち消費税");
@@ -384,7 +384,7 @@ describe("buildSaleMansionDocument（自社マイソク様式）", () => {
   it("新しい紙面で組まれる(物件名・価格・物件種目・主要表)", () => {
     const doc = buildSaleMansionDocument({
       ...base,
-      overrides: { price: "6590", propertyType: "中古マンション", catchCopy: "北東角部屋", salesPoints: ["リノベ済"], transactionType: "専任媒介" },
+      overrides: { price: "65900000", propertyType: "中古マンション", catchCopy: "北東角部屋", salesPoints: ["リノベ済"], transactionType: "専任媒介" },
     });
     expect(doc.theme.template).toBe("consumer-2026-09");
     expect(findEl(doc, "heading")).toMatchObject({ content: "西荻リリエンハイム" });
@@ -400,9 +400,9 @@ describe("buildSaleMansionDocument（自社マイソク様式）", () => {
     const doc = buildSaleMansionDocument({
       ...base,
       overrides: {
-        price: "6590",
+        price: "65900000",
         tax: "課税",
-        taxAmount: "300",
+        taxAmount: "3000000",
         catchCopy: "駅近角部屋",
         salesPoints: ["リノベ済", "南向き", "即入居可"],
       },
@@ -443,7 +443,7 @@ describe("buildSaleMansionDocument（自社マイソク様式）", () => {
         ...base,
         property: propertyWithSaleFields,
         overrides: {
-          price: "6980",
+          price: "69800000",
           tax: "不課税",
           access: "△△線 徒歩3分",
           parking: "無",
@@ -462,6 +462,16 @@ describe("buildSaleMansionDocument（自社マイソク様式）", () => {
       expect(tableRow(doc, "交通")).toBe("");
       // 駐車場(parking)は詳細表(main-detail-rows: 空行は出さない)なので行自体が無い。
       expect(tableLabels(doc)).not.toContain("駐車場");
+    });
+
+    it("物件の価格(万円で保存)に千円の端数があれば「万◯円」で出す(2026-11-03)", () => {
+      const doc = buildSaleMansionDocument({
+        ...base,
+        property: { ...propertyWithSaleFields, salePrice: "3280.15", saleTaxAmount: "300.05" },
+        overrides: {},
+      });
+      expect(findEl(doc, "price")).toMatchObject({ content: "3,280万1,500円" });
+      expect(tableRow(doc, "うち消費税")).toBe("300万500円");
     });
   });
 

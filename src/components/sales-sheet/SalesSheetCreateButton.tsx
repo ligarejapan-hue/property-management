@@ -13,6 +13,7 @@ import {
   mapOccupancyStatusToLandOccupancy,
 } from "@/lib/sales-sheet/occupancy";
 import { computeTsuboUnitPrice } from "@/lib/sales-sheet/tsubo";
+import { formatYenText, manToYen, parseYenText, yenToMan } from "@/lib/yen-man";
 import { formatBuiltYearMonth } from "@/lib/built-year-month";
 import {
   OTHER_OPTION,
@@ -489,10 +490,10 @@ export function computeMansionAutoValues(data: MansionAutoSource): FieldModelAut
   }
   // [Task10 C-1] F3で物件へ保存した販売条件(build-document.ts の buildMansionValues と
   // 同じ既定値・house/land/building と同じ5項目)。
-  if (data.salePrice != null && data.salePrice !== "") hints.price = savedValueHint(`${data.salePrice}万円`);
+  if (data.salePrice != null && data.salePrice !== "") hints.price = savedValueHint(formatYenText(manToYen(data.salePrice)));
   if (data.saleTaxType) hints.tax = savedValueHint(data.saleTaxType);
   if (data.saleTaxAmount != null && data.saleTaxAmount !== "") {
-    hints.taxAmount = savedValueHint(`${data.saleTaxAmount}万円`);
+    hints.taxAmount = savedValueHint(formatYenText(manToYen(data.saleTaxAmount)));
   }
   if (data.access) hints.access = savedValueHint(data.access);
   if (data.parking) hints.parking = savedValueHint(data.parking);
@@ -534,7 +535,7 @@ function computeLandAutoValues(data: LandAutoSource): FieldModelAutoValues {
   }
   // [Task10 C-1] F3で物件へ保存した販売条件(build-document.ts の既定値と同じ3項目)。
   if (data.salePrice != null && data.salePrice !== "") {
-    hints.price = savedValueHint(`${data.salePrice}万円`);
+    hints.price = savedValueHint(formatYenText(manToYen(data.salePrice)));
   }
   if (data.access) {
     hints.access = savedValueHint(data.access);
@@ -574,10 +575,10 @@ function computeHouseAutoValues(data: HouseAutoSource): FieldModelAutoValues {
   }
   // [Task10 C-1] F3で物件へ保存した販売条件(house は building relation を配線しないため
   // 全て property のスカラ列＝build-document.ts の buildHouseValues と同じ既定値)。
-  if (data.salePrice != null && data.salePrice !== "") hints.price = savedValueHint(`${data.salePrice}万円`);
+  if (data.salePrice != null && data.salePrice !== "") hints.price = savedValueHint(formatYenText(manToYen(data.salePrice)));
   if (data.saleTaxType) hints.tax = savedValueHint(data.saleTaxType);
   if (data.saleTaxAmount != null && data.saleTaxAmount !== "") {
-    hints.taxAmount = savedValueHint(`${data.saleTaxAmount}万円`);
+    hints.taxAmount = savedValueHint(formatYenText(manToYen(data.saleTaxAmount)));
   }
   if (data.access) hints.access = savedValueHint(data.access);
   if (data.landArea != null && data.landArea !== "") {
@@ -623,10 +624,10 @@ function computeBuildingAutoValues(data: BuildingAutoSource): FieldModelAutoValu
   }
   // [Task10 C-1] F3で物件へ保存した販売条件・収益系(一棟も house と同じく building
   // relation を配線しないため全て property のスカラ列＝buildBuildingValues と同じ既定値)。
-  if (data.salePrice != null && data.salePrice !== "") hints.price = savedValueHint(`${data.salePrice}万円`);
+  if (data.salePrice != null && data.salePrice !== "") hints.price = savedValueHint(formatYenText(manToYen(data.salePrice)));
   if (data.saleTaxType) hints.tax = savedValueHint(data.saleTaxType);
   if (data.saleTaxAmount != null && data.saleTaxAmount !== "") {
-    hints.taxAmount = savedValueHint(`${data.saleTaxAmount}万円`);
+    hints.taxAmount = savedValueHint(formatYenText(manToYen(data.saleTaxAmount)));
   }
   if (data.access) hints.access = savedValueHint(data.access);
   if (data.landArea != null && data.landArea !== "") {
@@ -997,8 +998,10 @@ function FieldModelWidget({
 
   if (field.widget === "number") {
     const v = typeof value === "string" ? value : "";
+    // 価格・うち消費税は円で入れる(2026-11-03)。万円のつもりで打っていないか、読み方を横に出す。
+    const yen = field.unit === "円" ? parseYenText(v) : null;
     return (
-      <div className="flex items-center gap-2">
+      <div className="flex flex-wrap items-center gap-2">
         <label htmlFor={id} className="w-28 shrink-0 text-sm text-gray-700 dark:text-gray-300">
           {field.label}
         </label>
@@ -1009,9 +1012,10 @@ function FieldModelWidget({
           value={v}
           onChange={(e) => onChange(e.target.value)}
           placeholder={placeholder}
-          className="w-28 rounded border border-neutral-300 px-2 py-1 text-sm dark:border-neutral-600 dark:bg-neutral-700 dark:text-neutral-100"
+          className={`${field.unit === "円" ? "w-36" : "w-28"} rounded border border-neutral-300 px-2 py-1 text-sm dark:border-neutral-600 dark:bg-neutral-700 dark:text-neutral-100`}
         />
         {field.unit && <span className="text-xs text-neutral-500 dark:text-neutral-400">{field.unit}</span>}
+        {yen !== null && <span className="text-xs text-neutral-500 dark:text-neutral-400" data-testid={`yen-reading-${field.key}`}>＝{formatYenText(v)}</span>}
       </div>
     );
   }
@@ -1105,7 +1109,8 @@ function tsuboUnitPricePlaceholder(
   price: FieldModelValue | undefined,
   landArea: FieldModelValue | undefined,
 ): string | undefined {
-  const p = typeof price === "string" ? price : "";
+  // 価格は円で入れる=坪単価(万円/坪)は万円に直してから割る。
+  const p = typeof price === "string" ? yenToMan(price) ?? "" : "";
   const a = typeof landArea === "string" ? landArea : "";
   const auto = computeTsuboUnitPrice(p, a);
   return auto === "" ? undefined : `自動: ${auto}万円`;

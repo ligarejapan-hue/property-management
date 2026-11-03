@@ -328,9 +328,9 @@ export const updatePropertySchema = z.object({
   // ── 「販売」区分(F3 Task7・物件編集画面から編集できる列) ──────────────────
   // ⚠区分マンションの構造・地上階・総戸数・地下階・築年月は棟の値が正のため、
   //   ここには含めない(引き続き棟の画面でのみ編集する・R12/R13 と同じ扱い)。
-  salePrice: decimalColumn(99999999999.9, 1).optional().nullable(), // DECIMAL(12,1) 万円
+  salePrice: decimalColumn(99999999999.9999, 4).optional().nullable(), // DECIMAL(15,4) 万円(画面は円・1円=0.0001)
   saleTaxType: z.string().max(50).optional().nullable(),
-  saleTaxAmount: decimalColumn(99999999999.9, 1).optional().nullable(), // DECIMAL(12,1) 万円
+  saleTaxAmount: decimalColumn(99999999999.9999, 4).optional().nullable(), // DECIMAL(15,4) 万円(画面は円)
   access: z.string().max(200).optional().nullable(), // 交通・自由記述
   landArea: decimalColumn(99999999.99, 2).optional().nullable(), // DECIMAL(10,2) ㎡
   landAreaMethod: z.string().max(50).optional().nullable(),

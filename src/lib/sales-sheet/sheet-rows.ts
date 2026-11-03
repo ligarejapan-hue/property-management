@@ -1,4 +1,5 @@
 import type { SheetField } from "./field-model";
+import { formatYenText } from "@/lib/yen-man";
 
 export type SheetValue = string | string[] | undefined;
 export type SheetValues = Record<string, SheetValue>;
@@ -44,6 +45,9 @@ export function formatValue(field: SheetField, v: SheetValue): string {
   }
   const s = typeof v === "string" ? v.trim() : "";
   if (!s) return "";
+  // 価格・うち消費税(単位がちょうど「円」の欄)は「300万円」「300万1,500円」(2026-11-03)。
+  // ⚠「円/月」(管理費など)は今までどおり「18,800円/月」。
+  if (field.widget === "number" && field.unit === "円") return formatYenText(s);
   // 桁区切りは数量の欄だけ（発注者指示 2026-09-16: 価格以外の数量にも入れる）。
   const num = field.widget === "number" ? groupDigits : (x: string) => x;
   if (!field.unit) return num(s);

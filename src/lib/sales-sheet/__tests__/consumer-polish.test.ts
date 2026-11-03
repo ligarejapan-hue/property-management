@@ -34,40 +34,57 @@ describe("① 詳細表の項目名「建蔽率・容積率」", () => {
   });
 });
 
+// 2026-11-03 から価格は円で入れる(発注者「万円表示にしない・千円の端数が出る」)。
 describe("⑤ 価格の桁区切り", () => {
-  it("4桁以上は3桁ごとにカンマを入れる", () => {
-    const doc = buildSaleHouseDocument({ ...base, overrides: { price: "18800" } } as never);
-    expect(priceText(doc)).toBe("18,800万円");
+  it("万の位は3桁ごとにカンマを入れる(円で入れる)", () => {
+    const doc = buildSaleHouseDocument({ ...base, overrides: { price: "187990000" } } as never);
+    expect(priceText(doc)).toBe("18,799万円");
   });
 
   it("「億」表記にはしない(発注者判断)", () => {
-    const doc = buildSaleHouseDocument({ ...base, overrides: { price: "10000" } } as never);
+    const doc = buildSaleHouseDocument({ ...base, overrides: { price: "100000000" } } as never);
     expect(priceText(doc)).toBe("10,000万円");
+    const doc2 = buildSaleHouseDocument({ ...base, overrides: { price: "188000000" } } as never);
+    expect(priceText(doc2)).toBe("18,800万円");
   });
 
-  it("3桁以下はそのまま", () => {
-    const doc = buildSaleHouseDocument({ ...base, overrides: { price: "980" } } as never);
+  it("万の位が3桁以下はそのまま", () => {
+    const doc = buildSaleHouseDocument({ ...base, overrides: { price: "9800000" } } as never);
     expect(priceText(doc)).toBe("980万円");
   });
 
+  it("1万円未満は円だけで出す", () => {
+    const doc = buildSaleHouseDocument({ ...base, overrides: { price: "980" } } as never);
+    expect(priceText(doc)).toBe("980円");
+  });
+
+  it("千円の端数があれば「万◯円」で出す", () => {
+    const doc = buildSaleHouseDocument({ ...base, overrides: { price: "32801500" } } as never);
+    expect(priceText(doc)).toBe("3,280万1,500円");
+  });
+
   it("既にカンマ入りで入力されても二重に付けない", () => {
-    const doc = buildSaleHouseDocument({ ...base, overrides: { price: "3,480" } } as never);
-    expect(priceText(doc)).toBe("3,480万円");
+    const doc = buildSaleHouseDocument({ ...base, overrides: { price: "18,800,000" } } as never);
+    expect(priceText(doc)).toBe("1,880万円");
   });
 
   it("単位まで入力されていても二重に付けない(従来の契約を維持)", () => {
     const doc = buildSaleHouseDocument({ ...base, overrides: { price: "18800万円" } } as never);
     expect(priceText(doc)).toBe("18,800万円");
+    const doc2 = buildSaleHouseDocument({ ...base, overrides: { price: "3,280万1,500円" } } as never);
+    expect(priceText(doc2)).toBe("3,280万1,500円");
+    const doc3 = buildSaleHouseDocument({ ...base, overrides: { price: "34800000円" } } as never);
+    expect(priceText(doc3)).toBe("3,480万円");
   });
 
-  it("小数は整数部だけ区切る", () => {
+  it("円に小数は無い=読めない入力として手を加えずに出す(勝手に丸めない)", () => {
     const doc = buildSaleHouseDocument({ ...base, overrides: { price: "18800.5" } } as never);
-    expect(priceText(doc)).toBe("18,800.5万円");
+    expect(priceText(doc)).toBe("18800.5");
   });
 
-  it("数字以外(「応談」等)はそのまま通す", () => {
+  it("数字以外(「応談」等)はそのまま通す(単位も付けない)", () => {
     const doc = buildSaleHouseDocument({ ...base, overrides: { price: "応談" } } as never);
-    expect(priceText(doc)).toBe("応談万円");
+    expect(priceText(doc)).toBe("応談");
   });
 
   it("空なら空のまま", () => {
@@ -135,6 +152,14 @@ describe("⑤-2 価格以外の数量にも桁区切りを入れる", () => {
 
   it("円/月の欄(管理費・修繕積立金・駐車場月額)", () => {
     expect(formatValue(numField("円/月"), "15000")).toBe("15,000円/月");
+    // 「円/月」は万の位に直さない(ちょうど「円」の欄だけが万表記)。
+    expect(formatValue(numField("円/月"), "150000")).toBe("150,000円/月");
+  });
+
+  it("円の欄(価格・うち消費税・2026-11-03)は「万円」「万◯円」で出す", () => {
+    expect(formatValue(numField("円"), "3000000")).toBe("300万円");
+    expect(formatValue(numField("円"), "3001500")).toBe("300万1,500円");
+    expect(formatValue(numField("円"), "1500")).toBe("1,500円");
   });
 
   it("面積(㎡)", () => {
@@ -185,8 +210,15 @@ describe("⑤-3 全角で入力された数字", () => {
     ({ key: "x", label: "x", widget: "number", section: "価格", unit }) as SheetField;
 
   it("価格(ビルダー側)", () => {
-    const doc = buildSaleHouseDocument({ ...base, overrides: { price: "１８８００" } } as never);
+    const doc = buildSaleHouseDocument({ ...base, overrides: { price: "１８８００００００" } } as never);
     expect(priceText(doc)).toBe("18,800万円");
+    const doc2 = buildSaleHouseDocument({ ...base, overrides: { price: "３２８０１５００" } } as never);
+    expect(priceText(doc2)).toBe("3,280万1,500円");
+  });
+
+  it("円の欄(うち消費税)の表の行も全角を読む", () => {
+    expect(formatValue(numField("円"), "３００００００")).toBe("300万円");
+    expect(formatValue(numField("円"), "応談")).toBe("応談");
   });
 
   it("数量の欄(表の行)", () => {

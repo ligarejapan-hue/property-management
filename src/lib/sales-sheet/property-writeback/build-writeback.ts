@@ -2,6 +2,7 @@ import type { SalesSheetTemplateKind } from "../template-kind";
 import * as M from "../option-master";
 import { parseNumeric, parseBuiltYearMonth, pickOption } from "./parse-values";
 import { fitsDecimalScale } from "@/lib/decimal-scale";
+import { yenToMan } from "@/lib/yen-man";
 
 export type WritebackCurrent = {
   property: Record<string, unknown>;
@@ -48,8 +49,8 @@ const INT_RANGES = {
 // [@codex P2] 上限は列が実際に入れられる最大値に合わせる(DECIMAL(p,s) は整数部 p-s 桁 +
 // 小数 s 桁)。整数部だけで切ると、DB は受け付ける値を画面が「範囲外」と言うことになる。
 const DECIMAL_RANGES = {
-  salePrice: { min: 0, max: 99999999999.9, scale: 1 }, // DECIMAL(12,1)
-  saleTaxAmount: { min: 0, max: 99999999999.9, scale: 1 }, // DECIMAL(12,1)
+  salePrice: { min: 0, max: 99999999999.9999, scale: 4 }, // DECIMAL(15,4) 万円(図面の入力は円)
+  saleTaxAmount: { min: 0, max: 99999999999.9999, scale: 4 }, // DECIMAL(15,4) 万円(図面の入力は円)
   expectedIncome: { min: 0, max: 99999999999.9, scale: 1 }, // DECIMAL(12,1)
   landArea: { min: 0, max: 99999999.99, scale: 2 }, // DECIMAL(10,2)
   totalFloorArea: { min: 0, max: 99999999.99, scale: 2 }, // DECIMAL(10,2)
@@ -84,9 +85,11 @@ type Rule = {
    * 持たせる(unit-building-facts.ts と同じ判断)。無ければ従来どおり noTarget。
    */
   propertyColumnWhenNoBuilding?: string;
-  /** 読み取り方 */
-  as: "number" | "text" | { option: readonly string[] };
-  /** as:"number" のときの範囲/整数制約(無ければ制約なし)。 */
+  /**
+   * 読み取り方。"yen"=図面では円で入れ、物件の列(万円)へ直して入れる(価格・うち消費税・2026-11-03)。
+   */
+  as: "number" | "yen" | "text" | { option: readonly string[] };
+  /** as:"number"/"yen" のときの範囲/整数制約(無ければ制約なし)。yen は万円に直した値で見る。 */
   range?: NumberRange;
   /**
    * as:"text" のときの文字数上限(無ければ制限なし)。
@@ -109,9 +112,9 @@ const TEXT_MAX_LENGTHS = {
 } as const;
 
 const PRICE = (opts: readonly string[]): Rule[] => [
-  { key: "price", label: "価格", to: "property", column: "salePrice", as: "number", range: DECIMAL_RANGES.salePrice },
+  { key: "price", label: "価格", to: "property", column: "salePrice", as: "yen", range: DECIMAL_RANGES.salePrice },
   { key: "tax", label: "消費税", to: "property", column: "saleTaxType", as: { option: opts } },
-  { key: "taxAmount", label: "うち消費税", to: "property", column: "saleTaxAmount", as: "number", range: DECIMAL_RANGES.saleTaxAmount },
+  { key: "taxAmount", label: "うち消費税", to: "property", column: "saleTaxAmount", as: "yen", range: DECIMAL_RANGES.saleTaxAmount },
 ];
 const ACCESS: Rule = { key: "access", label: "交通", to: "property", column: "access", as: "text", maxLength: TEXT_MAX_LENGTHS.access };
 const LAND: Rule[] = [
@@ -124,7 +127,7 @@ const BUILT_LABEL = "築年月";
 
 const RULES: Record<SalesSheetTemplateKind, Rule[]> = {
   land: [
-    { key: "price", label: "価格", to: "property", column: "salePrice", as: "number", range: DECIMAL_RANGES.salePrice },
+    { key: "price", label: "価格", to: "property", column: "salePrice", as: "yen", range: DECIMAL_RANGES.salePrice },
     ACCESS,
     ...LAND,
   ],
@@ -224,6 +227,10 @@ export function buildWriteback(input: {
     let next: string | number | null;
     if (rule.as === "number") {
       const n = parseNumeric(raw);
+      next = n !== null && inRange(n, rule.range) ? n : null;
+    } else if (rule.as === "yen") {
+      const man = yenToMan(raw);
+      const n = man === null ? null : Number(man);
       next = n !== null && inRange(n, rule.range) ? n : null;
     } else if (rule.as === "text") {
       const t = raw.trim();
