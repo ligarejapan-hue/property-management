@@ -18,14 +18,18 @@ import { areaChanged } from "@/lib/building-link/combobox-model";
 import type { BuildingLinkOutcome } from "@/lib/building-link/apply";
 import { formatBuiltYearMonth } from "@/lib/built-year-month";
 import { draftKey } from "@/lib/drafts/draft-store";
+import { TAX as SALE_TAX_TYPES } from "@/lib/sales-sheet/option-master";
 import {
   changedValues,
+  editFieldValue,
+  YEN_EDIT_KEYS,
   isPropertyEditDraftEmpty,
   mergeDraftIntoInitial,
   parsePropertyEditDraft,
   type PropertyEditDraft,
 } from "@/lib/drafts/screens/property-edit";
 import { useDraftAutosave, useRestoredDraft } from "@/hooks/use-draft";
+import { formatYenText, parseYenText, yenToMan } from "@/lib/yen-man";
 import { DraftRestoredNotice, DraftTooLargeNotice } from "@/components/drafts/draft-notices";
 // 編集中の鍵(仕様 6.1・6.2)。この画面が最初に配線する画面(Task 5)。
 import { useEditLock } from "@/hooks/use-edit-lock";
@@ -141,6 +145,18 @@ interface FormField {
    * 超過は注意書きで伝え、保存を止めるために使う。
    */
   maxLength?: number;
+}
+
+/**
+ * 選択肢に無い今の値(選択式にする前に手で入れた「税込」など)を消さないよう、末尾に足して出す。
+ * 足さないと select が先頭(未設定)を表示し、保存していないのに値が無いように見える。
+ */
+export function selectOptionsWithCurrent(
+  options: Array<{ value: string; label: string }>,
+  current: string | undefined,
+): Array<{ value: string; label: string }> {
+  if (!current || options.some((o) => o.value === current)) return options;
+  return [...options, { value: current, label: `${current}(今の値)` }];
 }
 
 /** その項目が上限を超えているか。⚠**数える前に整える**。 */
@@ -268,17 +284,24 @@ export async function runEditLockInit(
  *   物件そのものの欄として出す(unit-building-facts.ts・本番の区分は全件が棟なし)。
  * `hasBuilding` を省くと従来どおり(棟あり)として扱う。
  */
+/** 消費税の2択(販売図面の作成画面の選択肢と同じ)。 */
+const SALE_TAX_TYPE_OPTIONS = [
+  { value: "", label: "(未設定)" },
+  ...SALE_TAX_TYPES.map((v) => ({ value: v, label: v })),
+];
+
 export function salesFieldsFor(
   propertyType: string,
   opts: { hasBuilding?: boolean } = {},
 ): FormField[] {
   const hasBuilding = opts.hasBuilding ?? true;
   const price: FormField[] = [
-    { key: "salePrice", label: "価格(万円)", type: "number", section: "販売" },
+    { key: "salePrice", label: "価格(円)", type: "number", section: "販売" },
   ];
   const tax: FormField[] = [
-    { key: "saleTaxType", label: "消費税", type: "text", section: "販売" },
-    { key: "saleTaxAmount", label: "うち消費税(万円)", type: "number", section: "販売" },
+    // 消費税は2択(販売図面の作成画面と同じ・2026-11-03)。前からある別の書き方は select の描画で残す。
+    { key: "saleTaxType", label: "消費税", type: "select", section: "販売", options: SALE_TAX_TYPE_OPTIONS },
+    { key: "saleTaxAmount", label: "うち消費税(円)", type: "number", section: "販売" },
   ];
   const access: FormField[] = [{ key: "access", label: "交通", type: "text", section: "販売" }];
   const land: FormField[] = [
@@ -441,8 +464,7 @@ export default function PropertyEditForm({
   const [values, setValues] = useState<Record<string, string>>({});
   // 通知 段階1(N2): 開いた時点の値から変わった欄があるか(外れた知らせの一言だけに使う)。
   const hasUnsavedInput = Object.entries(values).some(([key, v]) => {
-    const raw = (property as unknown as Record<string, unknown>)[key];
-    return v !== (raw != null ? String(raw) : "");
+    return v !== editFieldValue(key, (property as unknown as Record<string, unknown>)[key]);
   });
   // 住所補完の user-edit signal（Codex P2-G）。住所 input 直接編集時だけ true。
   const [addressEdited, setAddressEdited] = useState(false);
@@ -505,7 +527,7 @@ export default function PropertyEditForm({
     const initial: Record<string, string> = {};
     for (const f of fieldsToLoad) {
       const val = (property as unknown as Record<string, unknown>)[f.key];
-      initial[f.key] = val != null ? String(val) : "";
+      initial[f.key] = editFieldValue(f.key, val);
     }
     // 控えがあれば、開いた時点の値の上に重ねる(版が同じときだけ)。
     // ⚠消すだけの欄(下の clearableKeys)は initial のまま=開いた時点の値で決める約束を守る。
@@ -547,6 +569,7 @@ export default function PropertyEditForm({
       baseVersion: property.version,
       changed: changedValues(values, property as unknown as Record<string, unknown>),
       buildingChoice,
+      yen: true,
     }),
     [property, values, buildingChoice],
   );
@@ -622,6 +645,18 @@ export default function PropertyEditForm({
       );
       return;
     }
+    // 円の欄は1円単位の整数だけ(保存は万円の小数4桁)。
+    const badYen = allFields.find(
+      (f) =>
+        YEN_EDIT_KEYS.has(f.key) &&
+        isFieldVisible(f, values, clearableKeys) &&
+        (values[f.key] ?? "").trim() !== "" &&
+        parseYenText(values[f.key]) === null,
+    );
+    if (badYen) {
+      setError(`${badYen.label.replace(/\(円\)$/, "")}は1円単位の数字で入力してください`);
+      return;
+    }
     // 棟につながっている区分で物件名を変えた/棟を選び直したら、付け替え(外す)を確かめる(D4)。
     const isUnit = (values.propertyType ?? property.propertyType) === "apartment_unit";
     if (isUnit) {
@@ -651,9 +686,13 @@ export default function PropertyEditForm({
       for (const f of allFields) {
         const raw = values[f.key] ?? "";
         const initialRaw = propRecord[f.key];
-        const initialStr = initialRaw != null ? String(initialRaw) : "";
+        const initialStr = editFieldValue(f.key, initialRaw);
         if (raw === initialStr) continue; // 未変更 → 送らない
-        if (f.type === "number") {
+        if (YEN_EDIT_KEYS.has(f.key)) {
+          // 画面は円・API と列は万円。
+          const man = raw.trim() ? yenToMan(raw) : null;
+          payload[f.key] = man === null ? null : Number(man);
+        } else if (f.type === "number") {
           payload[f.key] = raw ? Number(raw) : null;
         } else {
           payload[f.key] = raw || null;
@@ -836,7 +875,7 @@ export default function PropertyEditForm({
                               ))}
                             </>
                           ) : (
-                            field.options?.map((opt) => (
+                            selectOptionsWithCurrent(field.options ?? [], values[field.key]).map((opt) => (
                               <option key={opt.value} value={opt.value}>
                                 {opt.label}
                               </option>
@@ -914,6 +953,12 @@ export default function PropertyEditForm({
                       )}
                       {/* 上限のある項目の超過を、打ち終える前に伝える。
                           ⚠数える前に trim する (前後の空白で弾かない)。 */}
+                      {/* 円の欄は、どう読んだかを下に出す(万円のつもりで打っていないか)。 */}
+                      {YEN_EDIT_KEYS.has(field.key) && parseYenText(values[field.key]) !== null && (
+                        <p className="mt-1 text-xs text-gray-500 dark:text-gray-400" data-testid={`edit-yen-reading-${field.key}`}>
+                          ＝{formatYenText(values[field.key])}
+                        </p>
+                      )}
                       {isOverMaxLength(field, values[field.key]) && (
                         <p
                           role="status"

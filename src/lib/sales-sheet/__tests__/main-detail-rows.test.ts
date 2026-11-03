@@ -56,8 +56,12 @@ describe("splitMainDetailRows", () => {
     ]);
   });
   it("詳細: うち消費税は課税のときだけ", () => {
-    expect(splitMainDetailRows("house", HOUSE_FIELDS, { tax: "課税", taxAmount: "180" }).detail).toContainEqual({ label: "うち消費税", value: "180万円" });
-    expect(splitMainDetailRows("house", HOUSE_FIELDS, { tax: "非課税", taxAmount: "180" }).detail).toEqual([]);
+    // うち消費税は円で入れる(2026-11-03)。
+    expect(splitMainDetailRows("house", HOUSE_FIELDS, { tax: "課税", taxAmount: "1800000" }).detail).toContainEqual({ label: "うち消費税", value: "180万円" });
+    expect(splitMainDetailRows("house", HOUSE_FIELDS, { tax: "非課税", taxAmount: "1800000" }).detail).toEqual([]);
+  });
+  it("詳細: うち消費税に千円の端数があれば「万◯円」で出す", () => {
+    expect(splitMainDetailRows("house", HOUSE_FIELDS, { tax: "課税", taxAmount: "1801500" }).detail).toContainEqual({ label: "うち消費税", value: "180万1,500円" });
   });
   it("土地: 接道・建蔽率は主要に入り、詳細に重ねて出さない", () => {
     const { main, detail } = splitMainDetailRows("land", LAND_FIELDS, { roadKind: "公道", roadWidth: "4", coverageRatio: "60", floorRatio: "200" });

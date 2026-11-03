@@ -1,6 +1,7 @@
 import {
   CASE_STATUS_LABELS, INTRODUCTION_ROUTE_LABELS, OCCUPANCY_STATUS_LABELS, PROPERTY_TYPE_LABELS,
 } from "@/lib/property-types";
+import { formatYenText, manToYen } from "@/lib/yen-man";
 
 /** 取引の画面の横に出す物件の基本情報。GET /api/properties/[id] の項目のうち、ここで使うものだけ。 */
 export type PropertySideSource = {
@@ -92,8 +93,8 @@ export function propertySideRows(p: PropertySideSource): { label: string; value:
     ["所在・地番", p.lotNumber || null],
     ["家屋番号", p.buildingNumber || null],
     ["不動産番号", p.realEstateNumber || null],
-    // salePrice は万円で保存している(物件の編集画面の「価格(万円)」)。
-    ["価格", p.salePrice == null ? null : `${Number(p.salePrice).toLocaleString("ja-JP")}万円`],
+    // salePrice は万円で保存している。画面は円で出す(端数があれば「3,280万1,500円」・2026-11-03)。
+    ["価格", p.salePrice == null ? null : formatYenText(manToYen(p.salePrice))],
     ["専有面積(壁芯)", area(p.exclusiveArea)],
     ["専有面積(登記簿)", area(p.exclusiveAreaRegistry)],
     ["バルコニー面積", area(p.balconyArea)],

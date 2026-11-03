@@ -32,6 +32,7 @@ import type { CompanyProfile } from "./company-profile-store";
 import { formatBuiltYearMonth } from "@/lib/built-year-month";
 import { unitBuildingFacts } from "./unit-building-facts";
 import { roomLabel } from "@/lib/room-label";
+import { formatYenText, manToYen, yenToMan } from "@/lib/yen-man";
 
 /**
  * 保存する画像 src を正規化する。`PropertyPhoto.fileUrl` は storage backend に
@@ -132,21 +133,11 @@ function fmtValueWithUnit(value?: string | null, unit?: string | null): string {
   return `${groupDigits(s)}${u}`;
 }
 
-/**
- * 価格文字列 → "3,480万円"（すでに末尾が「万円」ならそのまま／付け直さない、空なら ""）。
- * 数字だけの入力には3桁区切りを入れる（発注者判断 2026-09-16: 消費者向けひな型の価格は
- * "18,800万円" 表記。「1億8,800万円」の億表記は採らない）。"3,480" のように既に区切られた
- * 入力や "応談" のような自由入力はそのまま通す。売マンション/売土地/売戸建/一棟の
- * priceText で共通利用し、挙動を一致させる（@codex Important fix: 現行の売土地ダイアログは
- * プレーン自由入力のため "3,480万円" と単位まで入力されると "3,480万円万円" に
- * 二重化していた）。
+/*
+ * 価格・うち消費税は円で入れ、図面では「3,280万円」(ちょうど万のとき)/「3,280万1,500円」(端数があるとき)と出す
+ * (2026-11-03 発注者決定・formatYenText)。億表記は採らない(2026-09-16 の判断のまま「18,800万円」)。
+ * 読めない自由入力(「価格応談」など)はそのまま出す。物件の値(万円で保存)は manToYen で円に直してから使う。
  */
-function fmtManYen(price?: string): string {
-  const s = typeof price === "string" ? price.trim() : "";
-  if (!s) return "";
-  const stripped = s.endsWith("万円") ? s.slice(0, -"万円".length) : s;
-  return `${groupDigits(stripped.trim())}万円`;
-}
 
 /**
  * 想定利回り → "7.8％"（末尾の %/％ を一度剥がして二重付与を防ぐ・空なら ""）。一棟の
@@ -347,10 +338,10 @@ function buildMansionValues(input: SaleMansionInput): SheetValues {
     buildingName: b.name ?? p.buildingName ?? undefined,
     // [Task10 C-1] price/tax/taxAmount/access/parking は override優先、無ければ物件の
     // 既定値(手入力 > 物件の値 > 空・house/land/building と同じ形)。
-    price: pick(o.price, p.salePrice),
+    price: pick(o.price, manToYen(p.salePrice) || null),
     unitPrice: o.unitPrice,
     tax: pick(o.tax, p.saleTaxType),
-    taxAmount: pick(o.taxAmount, p.saleTaxAmount),
+    taxAmount: pick(o.taxAmount, manToYen(p.saleTaxAmount) || null),
     // ⚠R16: 管理費/修繕積立金は override 優先(空/未指定なら property の自動反映値)。
     // 図面(この document)と物件(buildWriteback)を同じ入力から作るため
     // (土地・戸建・一棟の他項目と同じ「o.x が非空なら o.x、そうでなければ auto」の書き方)。
@@ -548,7 +539,7 @@ export function buildSaleMansionDocument(input: SaleMansionInput): SalesSheetDoc
   const heading = [b.name ?? p.buildingName, roomLabel(p.roomNo)]
     .filter(Boolean)
     .join("　");
-  const priceText = fmtManYen(asStr(values.price));
+  const priceText = formatYenText(asStr(values.price));
 
   return buildSpecSheetDocument({
     heading,
@@ -682,7 +673,7 @@ function buildLandValues(input: SaleLandInput): SheetValues {
       : undefined;
 
   // [Task10 C-1] override優先、無ければ物件の既定値(手入力 > 物件の値 > 空)。
-  const priceVal = pick(o.price, p.salePrice);
+  const priceVal = pick(o.price, manToYen(p.salePrice) || null);
   const accessVal = pick(o.access, p.access);
   const landAreaVal = pick(o.landArea, p.landArea);
   const areaMethodVal = pick(o.areaMethod, p.landAreaMethod);
@@ -698,7 +689,7 @@ function buildLandValues(input: SaleLandInput): SheetValues {
     unitPrice:
       o.unitPrice && o.unitPrice.trim() !== ""
         ? o.unitPrice
-        : computeTsuboUnitPrice(priceVal, landAreaVal),
+        : computeTsuboUnitPrice(yenToMan(priceVal) ?? "", landAreaVal),
     // 所在・交通
     address: p.address,
     access: accessVal,
@@ -740,7 +731,7 @@ export function buildSaleLandDocument(input: SaleLandInput): SalesSheetDocument 
   const values = buildLandValues(input);
   const { main, detail } = splitMainDetailRows("land", LAND_SPEC_FIELDS, values);
 
-  const priceText = fmtManYen(asStr(values.price));
+  const priceText = formatYenText(asStr(values.price));
   // photos(複数)優先・無ければ legacy な photo(単数)を1枚配列として扱う。
   const photos = input.photos ?? (input.photo ? [input.photo] : undefined);
 
@@ -902,9 +893,9 @@ function buildHouseValues(input: SaleHouseInput): SheetValues {
   return {
     // 価格。[Task10 C-1] override優先、無ければ物件の既定値(手入力 > 物件の値 > 空)。
     propertyType: o.propertyType,
-    price: pick(o.price, p.salePrice),
+    price: pick(o.price, manToYen(p.salePrice) || null),
     tax: pick(o.tax, p.saleTaxType),
-    taxAmount: pick(o.taxAmount, p.saleTaxAmount),
+    taxAmount: pick(o.taxAmount, manToYen(p.saleTaxAmount) || null),
     // 所在・交通
     address: p.address,
     access: pick(o.access, p.access),
@@ -969,7 +960,7 @@ export function buildSaleHouseDocument(input: SaleHouseInput): SalesSheetDocumen
   const values = buildHouseValues(input);
   const { main, detail } = splitMainDetailRows("house", HOUSE_SPEC_FIELDS, values);
 
-  const priceText = fmtManYen(asStr(values.price));
+  const priceText = formatYenText(asStr(values.price));
 
   return buildSpecSheetDocument({
     heading: "売戸建",
@@ -1123,9 +1114,9 @@ function buildBuildingValues(input: SaleBuildingInput): SheetValues {
   return {
     // 価格。[Task10 C-1] override優先、無ければ物件の既定値(手入力 > 物件の値 > 空)。
     propertyType: o.propertyType,
-    price: pick(o.price, p.salePrice),
+    price: pick(o.price, manToYen(p.salePrice) || null),
     tax: pick(o.tax, p.saleTaxType),
-    taxAmount: pick(o.taxAmount, p.saleTaxAmount),
+    taxAmount: pick(o.taxAmount, manToYen(p.saleTaxAmount) || null),
     // 所在・交通
     address: p.address,
     access: pick(o.access, p.access),
@@ -1194,7 +1185,7 @@ export function buildSaleBuildingDocument(input: SaleBuildingInput): SalesSheetD
 
   // 見出し: kind により二分岐（apartment=一棟アパート・それ以外/未指定=一棟マンション）。
   const heading = input.kind === "apartment" ? "一棟アパート" : "一棟マンション";
-  const priceText = fmtManYen(asStr(values.price));
+  const priceText = formatYenText(asStr(values.price));
 
   return buildSpecSheetDocument({
     heading,

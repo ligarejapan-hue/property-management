@@ -45,7 +45,7 @@ describe("buildSaleHouseDocument（自社マイソク様式・[F2-B Task2]）", 
     const doc = buildSaleHouseDocument({
       ...base,
       overrides: {
-        price: "5280",
+        price: "52800000",
         landCategory: ["宅地"],
         buildingArea: "95.60",
         catchCopy: "南向き陽当り良好",
@@ -81,14 +81,14 @@ describe("buildSaleHouseDocument（自社マイソク様式・[F2-B Task2]）", 
   it("課税ならうち消費税行が出て、不課税なら出ない", () => {
     const taxed = buildSaleHouseDocument({
       ...base,
-      overrides: { price: "5280", tax: "課税", taxAmount: "480" },
+      overrides: { price: "52800000", tax: "課税", taxAmount: "4800000" },
     });
     expect(tableLabels(taxed)).toContain("うち消費税");
     expect(tableRow(taxed, "うち消費税")).toBe("480万円");
 
     const untaxed = buildSaleHouseDocument({
       ...base,
-      overrides: { price: "5280", tax: "不課税" },
+      overrides: { price: "52800000", tax: "不課税" },
     });
     expect(tableLabels(untaxed)).not.toContain("うち消費税");
   });
@@ -250,8 +250,8 @@ describe("buildSaleHouseDocument（自社マイソク様式・[F2-B Task2]）", 
     expect(tableRow(doc, "各階面積")).toBe("1階 55.30㎡ / 2階 40.30㎡ / 3階 0㎡");
   });
 
-  it("表題は「売戸建」固定、価格はoverride×万円", () => {
-    const doc = buildSaleHouseDocument({ ...base, overrides: { price: "5280" } });
+  it("表題は「売戸建」固定、価格はoverride(円で入力)を万円表記で出す", () => {
+    const doc = buildSaleHouseDocument({ ...base, overrides: { price: "52800000" } });
     expect(findEl(doc, "heading")).toMatchObject({ content: "売戸建" });
     expect(findEl(doc, "price")).toMatchObject({ content: "5,280万円" });
   });
@@ -302,9 +302,9 @@ describe("buildSaleHouseDocument（自社マイソク様式・[F2-B Task2]）", 
       ...base,
       overrides: {
         propertyType: "中古戸建",
-        price: "5280",
+        price: "52800000",
         tax: "課税",
-        taxAmount: "480",
+        taxAmount: "4800000",
         access: "東急東横線 日吉駅 徒歩10分",
         landArea: "120.5",
         areaMethod: "実測",
@@ -358,9 +358,9 @@ describe("buildSaleHouseDocument（自社マイソク様式・[F2-B Task2]）", 
     const doc = buildSaleHouseDocument({
       ...base,
       overrides: {
-        price: "5280",
+        price: "52800000",
         tax: "課税",
-        taxAmount: "480",
+        taxAmount: "4800000",
         catchCopy: "南向き陽当り良好",
         salesPoints: ["リフォーム済", "車庫2台"],
         landCategory: ["宅地"],
@@ -413,7 +413,7 @@ describe("buildSaleHouseDocument（自社マイソク様式・[F2-B Task2]）", 
         ...base,
         property: propertyWithSaleFields,
         overrides: {
-          price: "5980",
+          price: "59800000",
           tax: "不課税",
           access: "△△線 徒歩3分",
           landArea: "150",

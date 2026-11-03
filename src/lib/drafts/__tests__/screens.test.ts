@@ -39,9 +39,43 @@ describe("物件の編集の控え", () => {
   });
   it("parse: 往復・形違い", () => {
     const d = { propertyId: "p1", baseVersion: 3, changed: { note: "x" }, buildingChoice: { kind: "auto" as const } };
-    expect(parsePropertyEditDraft(JSON.parse(JSON.stringify(d)))).toEqual(d);
+    // 読んだ控えは円の欄を円で持つ印(yen: true)が付く(2026-11-03)。他は往復で変わらない。
+    expect(parsePropertyEditDraft(JSON.parse(JSON.stringify(d)))).toEqual({ ...d, yen: true });
+    const dy = { ...d, yen: true as const };
+    expect(parsePropertyEditDraft(JSON.parse(JSON.stringify(dy)))).toEqual(dy);
     expect(parsePropertyEditDraft({ ...d, baseVersion: "3" })).toBeNull();
     expect(parsePropertyEditDraft({ ...d, changed: { note: 1 } })).toBeNull();
+    expect(parsePropertyEditDraft({ ...d, yen: false })).toBeNull();
+  });
+  it("parse: 円にする前の控え(yen なし)の価格・うち消費税は万円→円に直す", () => {
+    const legacy = {
+      propertyId: "p1",
+      baseVersion: 3,
+      changed: { salePrice: "3280.15", saleTaxAmount: "300", note: "3280.15", landArea: "12.5" },
+      buildingChoice: { kind: "auto" as const },
+    };
+    expect(parsePropertyEditDraft(legacy)).toEqual({
+      ...legacy,
+      changed: { salePrice: "32801500", saleTaxAmount: "3000000", note: "3280.15", landArea: "12.5" },
+      yen: true,
+    });
+    // 空にした欄は空のまま
+    expect(parsePropertyEditDraft({ ...legacy, changed: { salePrice: "" } })?.changed).toEqual({ salePrice: "" });
+  });
+  it("parse: 円の控え(yen: true)は直さない(二重に掛けない)", () => {
+    const d = {
+      propertyId: "p1",
+      baseVersion: 3,
+      changed: { salePrice: "32801500", saleTaxAmount: "3000000" },
+      buildingChoice: { kind: "auto" as const },
+      yen: true as const,
+    };
+    expect(parsePropertyEditDraft(d)).toEqual(d);
+  });
+  it("changedValues: 価格・うち消費税は物件の万円を円に直して比べる(開いただけで変えた扱いにしない)", () => {
+    const p = { ...property, salePrice: "3280.15", saleTaxAmount: null };
+    expect(changedValues({ salePrice: "32801500", saleTaxAmount: "" }, p)).toEqual({});
+    expect(changedValues({ salePrice: "32801501", saleTaxAmount: "3000000" }, p)).toEqual({ salePrice: "32801501", saleTaxAmount: "3000000" });
   });
   it("mergeDraftIntoInitial: 物件と版が同じなら重ねる・違えば重ねない", () => {
     const initial = { address: "東京都A", note: "" };

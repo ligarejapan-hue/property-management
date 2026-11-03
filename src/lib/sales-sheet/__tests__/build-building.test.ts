@@ -45,7 +45,7 @@ describe("buildSaleBuildingDocument（自社マイソク様式・[F2-C Task2]）
     const doc = buildSaleBuildingDocument({
       ...base,
       overrides: {
-        price: "39800",
+        price: "398000000",
         landRight: "所有権",
         totalFloorArea: "560.50",
         catchCopy: "駅徒歩3分・満室稼働中",
@@ -62,11 +62,11 @@ describe("buildSaleBuildingDocument（自社マイソク様式・[F2-C Task2]）
   });
 
   it("表題はkindで二分岐(一棟マンション/一棟アパート)、kind未指定は一棟マンション", () => {
-    const mansion = buildSaleBuildingDocument({ ...base, kind: "mansion", overrides: { price: "39800" } });
+    const mansion = buildSaleBuildingDocument({ ...base, kind: "mansion", overrides: { price: "398000000" } });
     expect(findEl(mansion, "heading")).toMatchObject({ content: "一棟マンション" });
     expect(findEl(mansion, "price")).toMatchObject({ content: "39,800万円" });
 
-    const apartment = buildSaleBuildingDocument({ ...base, kind: "apartment", overrides: { price: "18000" } });
+    const apartment = buildSaleBuildingDocument({ ...base, kind: "apartment", overrides: { price: "180000000" } });
     expect(findEl(apartment, "heading")).toMatchObject({ content: "一棟アパート" });
 
     const defaultKind = buildSaleBuildingDocument({ ...base, overrides: {} });
@@ -124,12 +124,12 @@ describe("buildSaleBuildingDocument（自社マイソク様式・[F2-C Task2]）
   it("課税ならうち消費税行が出て、不課税なら出ない", () => {
     const taxed = buildSaleBuildingDocument({
       ...base,
-      overrides: { price: "39800", tax: "課税", taxAmount: "1200" },
+      overrides: { price: "398000000", tax: "課税", taxAmount: "12000000" },
     });
     expect(tableLabels(taxed)).toContain("うち消費税");
     expect(tableRow(taxed, "うち消費税")).toBe("1,200万円");
 
-    const untaxed = buildSaleBuildingDocument({ ...base, overrides: { price: "39800", tax: "不課税" } });
+    const untaxed = buildSaleBuildingDocument({ ...base, overrides: { price: "398000000", tax: "不課税" } });
     expect(tableLabels(untaxed)).not.toContain("うち消費税");
   });
 
@@ -324,7 +324,7 @@ describe("buildSaleBuildingDocument（自社マイソク様式・[F2-C Task2]）
         ...base,
         property: propertyWithSaleFields,
         overrides: {
-          price: "42000",
+          price: "420000000",
           tax: "不課税",
           access: "△△線 徒歩3分",
           landArea: "300",
@@ -368,9 +368,9 @@ describe("buildSaleBuildingDocument（自社マイソク様式・[F2-C Task2]）
       ...base,
       kind: "apartment",
       overrides: {
-        price: "18000",
+        price: "180000000",
         tax: "課税",
-        taxAmount: "600",
+        taxAmount: "6000000",
         totalUnits: "8",
         grossYield: "8.2",
         expectedIncome: "1476",

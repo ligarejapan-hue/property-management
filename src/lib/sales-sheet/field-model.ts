@@ -24,10 +24,10 @@ export const MANSION_FIELDS: readonly SheetField[] = [
   // 価格・費用
   { key: "propertyType", label: "物件種目", widget: "select", section: "価格", options: M.PROPERTY_TYPE_MANSION, autoFrom: "propertyType" },
   { key: "buildingName", label: "建物名称", widget: "text", section: "価格", autoFrom: "buildingName" },
-  { key: "price", label: "価格", widget: "number", section: "価格", unit: "万円" },
+  { key: "price", label: "価格", widget: "number", section: "価格", unit: "円" },
   { key: "unitPrice", label: "㎡単価", widget: "number", section: "価格", unit: "万円" },
   { key: "tax", label: "消費税", widget: "select", section: "価格", options: M.TAX, controlOnly: true },
-  { key: "taxAmount", label: "うち消費税", widget: "number", section: "価格", unit: "万円", showWhen: { field: "tax", equals: "課税" } },
+  { key: "taxAmount", label: "うち消費税", widget: "number", section: "価格", unit: "円", showWhen: { field: "tax", equals: "課税" } },
   { key: "managementFee", label: "管理費", widget: "number", section: "価格", unit: "円/月", autoFrom: "managementFee" },
   { key: "repairFee", label: "修繕積立金", widget: "number", section: "価格", unit: "円/月", autoFrom: "repairReserveFee" },
   // 所在・交通
@@ -85,7 +85,7 @@ export const LAND_FIELDS: readonly SheetField[] = [
   // 価格
   { key: "propertyType", label: "物件種目", widget: "select", section: "価格", options: M.PROPERTY_TYPE_LAND },
   { key: "bestUse", label: "最適用途", widget: "select", section: "価格", options: M.BEST_USE_LAND },
-  { key: "price", label: "価格", widget: "number", section: "価格", unit: "万円" },
+  { key: "price", label: "価格", widget: "number", section: "価格", unit: "円" },
   { key: "unitPrice", label: "坪単価", widget: "number", section: "価格", unit: "万円" },
   // 所在・交通
   { key: "address", label: "所在地", widget: "text", section: "所在", autoFrom: "address" },
@@ -140,9 +140,9 @@ export const LAND_FIELDS: readonly SheetField[] = [
 export const HOUSE_FIELDS: readonly SheetField[] = [
   // 価格
   { key: "propertyType", label: "物件種目", widget: "select", section: "価格", options: M.PROPERTY_TYPE_HOUSE },
-  { key: "price", label: "価格", widget: "number", section: "価格", unit: "万円" },
+  { key: "price", label: "価格", widget: "number", section: "価格", unit: "円" },
   { key: "tax", label: "消費税", widget: "select", section: "価格", options: M.TAX, controlOnly: true },
-  { key: "taxAmount", label: "うち消費税", widget: "number", section: "価格", unit: "万円", showWhen: { field: "tax", equals: "課税" } },
+  { key: "taxAmount", label: "うち消費税", widget: "number", section: "価格", unit: "円", showWhen: { field: "tax", equals: "課税" } },
   // 所在・交通
   { key: "address", label: "所在地", widget: "text", section: "所在", autoFrom: "address" },
   { key: "access", label: "交通", widget: "text", section: "所在" },
@@ -213,9 +213,9 @@ export const HOUSE_FIELDS: readonly SheetField[] = [
 export const BUILDING_FIELDS: readonly SheetField[] = [
   // 価格
   { key: "propertyType", label: "物件種目", widget: "select", section: "価格", options: M.PROPERTY_TYPE_BUILDING },
-  { key: "price", label: "価格", widget: "number", section: "価格", unit: "万円" },
+  { key: "price", label: "価格", widget: "number", section: "価格", unit: "円" },
   { key: "tax", label: "消費税", widget: "select", section: "価格", options: M.TAX, controlOnly: true },
-  { key: "taxAmount", label: "うち消費税", widget: "number", section: "価格", unit: "万円", showWhen: { field: "tax", equals: "課税" } },
+  { key: "taxAmount", label: "うち消費税", widget: "number", section: "価格", unit: "円", showWhen: { field: "tax", equals: "課税" } },
   // 所在・交通
   { key: "address", label: "所在地", widget: "text", section: "所在", autoFrom: "address" },
   { key: "access", label: "交通", widget: "text", section: "所在" },

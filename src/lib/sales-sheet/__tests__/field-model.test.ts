@@ -21,10 +21,10 @@ const byHouseKey = (k: string): SheetField | undefined => HOUSE_FIELDS.find((f) 
 const byBuildingKey = (k: string): SheetField | undefined => BUILDING_FIELDS.find((f) => f.key === k);
 
 describe("MANSION_FIELDS", () => {
-  it("価格は number・万円固定", () => {
+  it("価格は number・円固定(2026-11-03 万円から変更)", () => {
     const price = byKey("price");
     expect(price?.widget).toBe("number");
-    expect(price?.unit).toBe("万円");
+    expect(price?.unit).toBe("円");
   });
   it("用途地域は multiselect・選択肢マスタ・自動反映元zoningDistrict", () => {
     const y = byKey("useDistrict");
@@ -41,7 +41,7 @@ describe("MANSION_FIELDS", () => {
   it("うち消費税は税=課税のときだけ表示", () => {
     const s = byKey("taxAmount");
     expect(s?.showWhen).toEqual({ field: "tax", equals: "課税" });
-    expect(s?.unit).toBe("万円");
+    expect(s?.unit).toBe("円");
   });
   it("複数選択はマンションでは用途地域のみ(地目/接道/地域地区/都市計画はF2で追加)", () => {
     for (const k of ["useDistrict"]) {
@@ -80,10 +80,10 @@ describe("LAND_FIELDS（[F2-A Task3]）", () => {
     expect(t?.options).toEqual(PROPERTY_TYPE_LAND);
     expect(t?.section).toBe("価格");
   });
-  it("価格は number・万円固定", () => {
+  it("価格は number・円固定(2026-11-03 万円から変更)", () => {
     const price = byLandKey("price");
     expect(price?.widget).toBe("number");
-    expect(price?.unit).toBe("万円");
+    expect(price?.unit).toBe("円");
   });
   it("用途地域は multiselect・選択肢マスタ・自動反映元zoningDistrict(マンションと同じ語彙)", () => {
     const y = byLandKey("useDistrict");
@@ -150,10 +150,10 @@ describe("HOUSE_FIELDS（[F2-B Task2]）", () => {
     expect(t?.options).toEqual(PROPERTY_TYPE_HOUSE);
     expect(t?.section).toBe("価格");
   });
-  it("価格は number・万円固定", () => {
+  it("価格は number・円固定(2026-11-03 万円から変更)", () => {
     const price = byHouseKey("price");
     expect(price?.widget).toBe("number");
-    expect(price?.unit).toBe("万円");
+    expect(price?.unit).toBe("円");
   });
   it("消費税はselect(課税/不課税)・controlOnly(表の行にしない)", () => {
     const t = byHouseKey("tax");
@@ -164,7 +164,7 @@ describe("HOUSE_FIELDS（[F2-B Task2]）", () => {
   it("うち消費税は税=課税のときだけ表示", () => {
     const s = byHouseKey("taxAmount");
     expect(s?.showWhen).toEqual({ field: "tax", equals: "課税" });
-    expect(s?.unit).toBe("万円");
+    expect(s?.unit).toBe("円");
   });
   it("用途地域は multiselect・選択肢マスタ・自動反映元zoningDistrict(マンション/土地と同じ語彙)", () => {
     const y = byHouseKey("useDistrict");
@@ -241,8 +241,9 @@ describe("BUILDING_FIELDS（[F2-C Task2]）", () => {
     expect(t?.options).toEqual(PROPERTY_TYPE_BUILDING);
     expect(t?.section).toBe("価格");
   });
-  it("価格は number・万円固定、消費税(課税/不課税)欄を持つ(house/mansionと同じ)", () => {
-    expect(byBuildingKey("price")?.unit).toBe("万円");
+  it("価格は number・円固定、消費税(課税/不課税)欄を持つ(house/mansionと同じ)", () => {
+    expect(byBuildingKey("price")?.unit).toBe("円");
+    expect(byBuildingKey("taxAmount")?.unit).toBe("円");
     const tax = byBuildingKey("tax");
     expect(tax?.options).toEqual(TAX);
     expect(tax?.controlOnly).toBe(true);

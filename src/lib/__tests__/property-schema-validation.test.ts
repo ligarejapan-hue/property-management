@@ -64,11 +64,12 @@ describe("updatePropertySchema: 同じ入力バリデーション(A2)", () => {
 describe("updatePropertySchema: DECIMAL 列の小数桁(@codex P2)", () => {
   const v = { version: 1 };
 
-  it("DECIMAL(12,1) の金額は小数1桁まで", () => {
+  it("価格・うち消費税は DECIMAL(15,4)=万円の小数4桁(1円)まで。満室想定収入は DECIMAL(12,1) のまま", () => {
     expect(() => updatePropertySchema.parse({ ...v, salePrice: 18800 })).not.toThrow();
-    expect(() => updatePropertySchema.parse({ ...v, salePrice: 18800.5 })).not.toThrow();
-    expect(() => updatePropertySchema.parse({ ...v, salePrice: 1.25 })).toThrow();
-    expect(() => updatePropertySchema.parse({ ...v, saleTaxAmount: 1.25 })).toThrow();
+    expect(() => updatePropertySchema.parse({ ...v, salePrice: 3280.1501 })).not.toThrow();
+    expect(() => updatePropertySchema.parse({ ...v, salePrice: 3280.15015 })).toThrow();
+    expect(() => updatePropertySchema.parse({ ...v, saleTaxAmount: 300.0001 })).not.toThrow();
+    expect(() => updatePropertySchema.parse({ ...v, saleTaxAmount: 300.00001 })).toThrow();
     expect(() => updatePropertySchema.parse({ ...v, expectedIncome: 1.25 })).toThrow();
   });
 
@@ -93,8 +94,8 @@ describe("updatePropertySchema: DECIMAL 列の小数桁(@codex P2)", () => {
 // 整数部だけで切ると、DB は受け付ける値を画面が「範囲外」と言うことになる。
 describe("updatePropertySchema: DECIMAL 列の上限いっぱい(@codex P2)", () => {
   const v = { version: 1 };
-  it("DECIMAL(12,1) は 99999999999.9 まで", () => {
-    expect(() => updatePropertySchema.parse({ ...v, salePrice: 99999999999.9 })).not.toThrow();
+  it("DECIMAL(15,4) は 99999999999.9999 まで", () => {
+    expect(() => updatePropertySchema.parse({ ...v, salePrice: 99999999999.9999 })).not.toThrow();
     expect(() => updatePropertySchema.parse({ ...v, salePrice: 100000000000 })).toThrow();
   });
   it("DECIMAL(10,2) は 99999999.99 まで", () => {
