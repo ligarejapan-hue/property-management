@@ -118,6 +118,13 @@ export default function DealMoneyPanel({ deal, calc, onSaved }: { deal: DealView
       </section>
 
       <section className="space-y-3">
+        <h3 className="text-sm font-semibold text-gray-700 dark:text-gray-300">建物価格と建物消費税(業者売主の場合)</h3>
+        <p className="text-xs text-gray-500">評価額は「物件」タブで入れます。契約書で建物価格を決めているときは、手で直してください。</p>
+        <OverrideField label="建物価格(税込)" onValidity={validity("建物価格(税込)")} computed={calc?.building.computedPrice ?? null} override={overrides.buildingPrice} onChange={(v) => setOverride("buildingPrice", v)} />
+        <OverrideField label="建物消費税" onValidity={validity("建物消費税")} computed={calc?.building.computedTax ?? null} override={overrides.buildingTax} onChange={(v) => setOverride("buildingTax", v)} />
+      </section>
+
+      <section className="space-y-3">
         <h3 className="text-sm font-semibold text-gray-700 dark:text-gray-300">仲介手数料(上限・税抜)</h3>
         <label className="flex items-center gap-2 text-sm">
           <input type="checkbox" checked={costs.lowCostSpecial} onChange={(e) => setCosts((c) => ({ ...c, lowCostSpecial: e.target.checked }))} />
@@ -134,12 +141,6 @@ export default function DealMoneyPanel({ deal, calc, onSaved }: { deal: DealView
         <p className="text-sm">税込: <b className="tabular-nums">{calc?.brokerage ? `${yenText(calc.brokerage.incl)}円` : "—"}</b></p>
       </section>
 
-      <section className="space-y-3">
-        <h3 className="text-sm font-semibold text-gray-700 dark:text-gray-300">建物価格と建物消費税(自社が売主のとき)</h3>
-        <p className="text-xs text-gray-500">評価額は「物件」タブで入れます。契約書で建物価格を決めているときは、手で直してください。</p>
-        <OverrideField label="建物価格(税込)" onValidity={validity("建物価格(税込)")} computed={calc?.building.computedPrice ?? null} override={overrides.buildingPrice} onChange={(v) => setOverride("buildingPrice", v)} />
-        <OverrideField label="建物消費税" onValidity={validity("建物消費税")} computed={calc?.building.computedTax ?? null} override={overrides.buildingTax} onChange={(v) => setOverride("buildingTax", v)} />
-      </section>
 
       <p className="text-sm">売買契約書の印紙税(1通): <b className="tabular-nums">{stamp === null ? "—" : `${yenText(stamp)}円`}</b></p>
 
