@@ -614,7 +614,7 @@ migration `20261102100000_add_deal_doc_links`（表を 3 つ足すだけ）が�
 
 ### 6.1 GitHub Actions からの反映（`.github/workflows/deploy.yml`）
 
-§6 の手順を 1 本のスクリプト（`deploy/vps/pm-deploy.sh`）にまとめ、GitHub Actions の手動起動から実行できるようにしたもの。**本番反映はこの経路に一本化している（2026-11-03〜・下の「反映のしかた」）。** §6 は手順の中身の説明と、この経路が使えないときにユーザーが手で行うためのもの。
+§6 の手順を 1 本のスクリプト（`deploy/vps/pm-deploy.sh`）にまとめ、GitHub Actions の手動起動から実行できるようにしたもの。**Claude Code の本番反映は §6.1a の手元の反映スクリプトで行う（2026-11-03 のユーザー指示）。** この経路はユーザーが画面から起動するためのもの。2 つの経路は VPS の同じ鍵 `/run/pm-deploy.lock` で排他し、どちらの経路でも同時に 1 本だけ動く。§6 は手順の中身の説明。
 
 **しくみ**
 
@@ -632,7 +632,8 @@ migration `20261102100000_add_deal_doc_links`（表を 3 つ足すだけ）が�
 - deploy ユーザーは `pm-deploy` 以外を実行できない（authorized_keys の `command=` と sudoers で二重に制限）。
 - migration は既定で流さない。未適用の migration があると、build と再起動の前に止まる（`migrate` を有効にして起動し直す）。
 - **`pm-deploy` は DB のバックアップを取らない。** `migrate` を有効にして起動する前に、§6 の手順 3.5 のバックアップを VPS で取る（足すだけの migration でも取る）。
-- **⚠ リポジトリを非公開にした 2026-10-31 以降、この経路はまだ動かしていない。** GitHub のプランによっては非公開リポジトリで Environment の secrets を使えないので、使う前に確かめる。使えないと分かったときは、Claude Code は手元から代わりに反映せず、ユーザーに報告する。
+- リポジトリを非公開にした 2026-10-31 以降も、2026-11-03 の反映（`ce46459d`→`b3e4abe5`）で動いた（Environment の secrets も使えた）。
+- 鍵 `/run/pm-deploy.lock` が取れないとき（手元の反映スクリプトが動いているとき）は、何も変えずに「別の反映が実行中です」で止まる。相手が終わってから起動し直す。
 - Actions のログは外に出してよい形に保つ（公開だった時期の決まりを続ける）。ログには工程名と結果だけを出し、各コマンドの出力は VPS の `/var/log/pm-deploy/<日時>.log`（root のみ）に残す。失敗時はそのファイルを見る。
 - 失敗時はサービスを再起動しない。ただし build 後（再起動・応答確認）で失敗した場合は、§6・§8 を見て手で確認する。
 
@@ -700,8 +701,6 @@ sudo rm /home/deploy/deploy_key /home/deploy/deploy_key.pub
 
 #### 反映のしかた
 
-**本番反映の経路はこの Deploy (production) の 1 本だけにする（ユーザー指示 2026-11-03）。** Claude Code は手元から VPS へ直接反映するスクリプト（root で SSH して依存の入れ直し・build・restart を流すもの）を使わない（CLAUDE.md §13）。この経路の鍵は `/run/pm-deploy.lock`、手元のスクリプトの鍵は `/root/pm-deploy.lock` で別なので、2 つの経路が同時に走ると互いを止められない（2026-11-02 に 2 つのセッションが同じ版の反映に向かって重なった）。
-
 **起動する前に、実行中・待機中の Deploy (production) がないか確かめる。** `concurrency`（`production-deploy`）は同時に 1 本しか走らせないが、待機できるのも 1 本だけで、待機中のものがあるときに次を起動すると、待機中だった方は取り消される。重ねて起動しない。
 
 ```bash
@@ -730,16 +729,39 @@ gh run watch "$ID" -R $R --exit-status
 - 3 の起動が成功したら（`gh api` がエラーを返さなければ）、**起動し直さない**。新しい回が一覧に出るまで数秒〜数十秒かかることがあるので、4 の繰り返しで待つ（1 や 3 に戻ると、同じ反映をもう一度起動してしまう）。3 が失敗したときだけ、原因を見てから 1 からやり直す。
 
 - 画面から: Actions → **Deploy (production)** → Run workflow（branch は `main`）→ confirm に `deploy`、migration があるときだけ `migrate` にチェック（先に §6 の手順 3.5 でバックアップを取る）→ Run。
-- Claude Code から（ユーザーの明示指示があるときだけ）:
-  ```bash
-  gh api repos/ligarejapan-hue/property-management/actions/workflows/deploy.yml/dispatches \
-    -X POST -f ref=main -f 'inputs[confirm]=deploy' -F 'inputs[migrate]=false'
-  ```
-  起動後は実行結果（各工程の OK/NG・反映前後の版・HTTP 応答）を確認して報告する。
+- 起動後は実行結果（各工程の OK/NG・反映前後の版・HTTP 応答）を確かめる。
+- Claude Code はこの経路を起動しない（反映は §6.1a）。
 
 #### スクリプトを変えたとき
 
-`deploy/vps/` を変えた PR を反映したら、B の `install` 2 行を流し直して `/usr/local/sbin/` を置き直す（置き直すまでは古いスクリプトで動く）。
+`deploy/vps/pm-deploy.sh`・`deploy/vps/pm-deploy-ssh.sh` を変えた PR を反映したら、B の `install` 2 行を流し直して `/usr/local/sbin/` を置き直す（置き直すまでは古いスクリプトで動く）。`deploy/vps/pm-deploy-local.sh`（§6.1a）は反映のたびに手元から送るので、置き直しは要らない。
+
+### 6.1a 手元の反映スクリプト（`deploy/vps/pm-deploy-local.sh`）
+
+Claude Code が本番反映に使う経路（2026-11-03 のユーザー指示・CLAUDE.md §13）。中身は §6 の手順と同じ（取得 → 依存の入れ直し → prisma generate →（migration があればバックアップ → migrate deploy）→ build → prune → 再起動 → smoke 8 本。DB まで届くかを見る `/api/health` が 200 であることも確かめる）。
+
+**決まり**
+
+- ユーザーが「反映して」と指示したときだけ使う。反映するのは、その指示を受けた 1 つのセッションだけ（ほかのセッションは反映しない）。
+- 反映前に、PR が merge 済みで main の CI が green であることを確かめる。範囲（`git log <本番の版>..origin/main`）に、ほかのセッションの変更が入っていれば報告に書く。
+- 反映（反映前の点検・反映・反映後の確認）以外の目的で VPS に SSH しない。app.env・timer・nginx などの変更はユーザー作業。
+- **鍵は §6.1 と同じ `/run/pm-deploy.lock`。** 鍵を取るまでは本番を何も変えない。もう一方（Actions の反映・別の手元の反映）が動いていれば、最大 `LOCK_WAIT` 秒（既定 1800）待ち（ログに `WAITING_LOCK` → `LOCK_ACQUIRED`）、待ちきれなければ何も変えずに `LOCKED` で終わる。待っている間に相手が同じ版まで進めていても、念のため作り直す（`SAME_VERSION_AFTER_WAIT`。相手が build や再起動の途中で失敗していても直るように）。移行の間は、古い写しが使っていた `/root/pm-deploy.lock` も続けて取る。
+- **migration があるときは、`prisma migrate deploy` の前にスクリプトが DB のバックアップを取る**（§6 の手順 3.5 と同じ。「この回の差分に migration がある」か「DB に未適用の migration がある（`prisma migrate status` が 0 以外。状態を確かめられないときも含む）」のどちらかで取るので、版だけ先に進んで途中で落ちたあとの再実行でも抜けない。`/var/backups/property-management/pre-migration/db-<旧版>-<日時>.dump`・読めるかを `pg_restore --list` で確かめる）。取れない・読めないときはそこで止まり、migrate・build・再起動へ進まない。控えは smoke まで通ったあとで 3 世代だけ残す。
+
+**使い方（手元の Git Bash から・main を最新にした本体の checkout で）**
+
+```bash
+cd /c/Users/issin/Desktop/Claude/property-management && git pull --ff-only -q origin main
+SHA=$(git rev-parse --short=8 origin/main)
+scp deploy/vps/pm-deploy-local.sh root@133.117.72.225:/root/pm-deploy.sh
+ssh root@133.117.72.225 "chmod 700 /root/pm-deploy.sh; nohup /root/pm-deploy.sh $SHA > /root/pm-deploy.log 2>&1 & echo started"
+# 終わるまで待つ（ログの最後の行で判断する）
+until ssh -o BatchMode=yes root@133.117.72.225 'grep -qE "DEPLOY_DONE|SMOKE_NG|FAILED_AT|LOCKED|UNEXPECTED_SHA|WORKTREE_DIRTY|BUILD_OK_NO_RESTART" /root/pm-deploy.log'; do sleep 30; done
+ssh root@133.117.72.225 'tail -25 /root/pm-deploy.log'
+```
+
+- サーバー側で nohup で走らせる（build は数分かかり、手元の接続が切れても反映は続く）。
+- 結果の行: `DEPLOY_DONE`=完了 / `FAILED_AT`・`UNEXPECTED_SHA`・`LOCKED`・`WORKTREE_DIRTY`=再起動の前に止まった（本番は旧版のまま）/ `SMOKE_NG`=再起動後の応答が期待と違う（§8 のロールバックを検討）。build の途中で落ちたときは `.next` を退避から戻す（ログに `RESTORED_NEXT`）。
 
 ### 6.2 Node.js 本体のセキュリティ更新（VPS）
 

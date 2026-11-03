@@ -217,8 +217,11 @@ Codex 指摘への対応後の再レビュー依頼（ユーザー指示 2026-10
 - VPS反映時は HOME=/var/www と npm_config_cache=/var/www/.npm を使う
 - migration がある場合のみ prisma migrate deploy / prisma generate を行う
 - ドキュメント更新のみの PR は VPS反映不要
-- ユーザーが本番反映を明示指示した場合、Claude Code は GitHub Actions の `Deploy (production)`（`.github/workflows/deploy.yml`）を REST API の workflow_dispatch で起動してよい（手順は `docs/deploy.md` §6.1）。起動前に PR が merge 済みで main の CI が green であることを確認し、migration がある場合は `migrate` を有効にする。起動後は実行結果を確認して報告する
-- Claude Code は VPS へ直接 SSH しない。deploy ユーザーの鍵・GitHub の Environment secrets・Tailscale の設定を作成・変更しない（いずれもユーザー作業）
+- 本番反映は、ユーザーが「反映して」と明示指示したときだけ、手元の反映スクリプト `deploy/vps/pm-deploy-local.sh` で行ってよい（手順は `docs/deploy.md` §6.1a）。反映前に PR が merge 済みで main の CI が green であることを確認し、反映後は実行結果を確認して報告する
+- 反映するのは、その指示を受けた 1 つのセッションだけ。ほかのセッションは反映しない（ほかのセッションの変更が範囲に入るときは報告に書く）
+- 本番反映の 2 つの経路（手元の反映スクリプト・GitHub Actions の `Deploy (production)`）は、VPS の同じ鍵 `/run/pm-deploy.lock` で排他する。手元の反映スクリプトは、もう一方が動いていれば待ち、待ちきれなければ何も変えずに止まる。Actions 側は鍵が取れなければすぐに止まる
+- migration があるときは、手元の反映スクリプトが `prisma migrate deploy` の前に DB のバックアップを取る（取れなければ migrate へ進まない）
+- Claude Code は、反映（反映前の点検・反映・反映後の確認）以外の目的（調査・設定変更など）で VPS に SSH しない。app.env・systemd の timer・nginx・deploy ユーザーの鍵・GitHub の Environment secrets・Tailscale の設定の作成・変更はユーザー作業
 
 ## 14. 実装後の報告フォーマット
 

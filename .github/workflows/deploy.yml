@@ -2,7 +2,8 @@
 #
 # - 手動起動専用（workflow_dispatch）。push や PR では動かない。
 # - 起動してよいのは、ユーザーが本番反映を明示指示したときだけ（CLAUDE.md §13）。
-#   Claude Code は、ユーザーの明示指示があれば REST API でこのワークフローを起動してよい。
+#   ユーザーが画面から起動する経路。Claude Code の反映は手元の反映スクリプト（docs/deploy.md §6.1a）で行う。
+#   2 つの経路は VPS の同じ鍵 /run/pm-deploy.lock で排他する（取れなければ pm-deploy は「別の反映が実行中です」で止まる）。
 # - main の最新 commit で、CI（ci / db-integration）が成功しているときだけ反映する。
 # - GitHub の実行環境を一時的に Tailscale に参加させ、tailnet 経由で VPS に SSH する
 #   （SSH をインターネットに開けない）。VPS 側は反映専用ユーザー deploy の強制コマンドで、
