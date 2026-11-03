@@ -40,6 +40,7 @@ import {
   DM_STATUS_LABELS,
 } from "@/lib/property-types";
 import { caseDatesSummary } from "@/lib/case-dates";
+import { PROPERTY_BUSINESS_TYPE_FILTER_OPTIONS } from "@/lib/property-business-type";
 import { InquirerOrOwnerNames, LeadExclusionListBadge } from "@/components/properties/property-list-cells";
 import { ownerColumnDisplay } from "@/lib/inquirer-name";
 import { LEAD_EXCLUSION_FILTER_OPTIONS, jstTodayDateOnly } from "@/lib/lead-exclusion";
@@ -179,6 +180,8 @@ function PropertiesPageInner() {
   const [dmFilter, setDmFilter] = useState(() => sp.get("dmStatus") ?? "");
   const [caseFilter, setCaseFilter] = useState(() => sp.get("caseStatus") ?? "");
   const [introductionRouteFilter, setIntroductionRouteFilter] = useState(() => sp.get("introductionRoute") ?? "");
+  // 取扱区分(仲介 / 買取再販 / 未定・2026-11-04)。空=すべて。
+  const [businessTypeFilter, setBusinessTypeFilter] = useState(() => sp.get("businessType") ?? "");
   // 除外申請(申請中 / 申請中で7日以上 / 除外された / 認められなかった)。空=すべて。
   const [leadExclusionFilter, setLeadExclusionFilter] = useState(() => sp.get("leadExclusion") ?? "");
   const [assigneeFilter, setAssigneeFilter] = useState(() => sp.get("assignedTo") ?? "");
@@ -209,6 +212,7 @@ function PropertiesPageInner() {
         sp.get("dmSentMax") ||
         sp.get("caseStatus") ||
         sp.get("introductionRoute") ||
+        sp.get("businessType") ||
         sp.get("leadExclusion") ||
         sp.get("updatedFrom") ||
         sp.get("updatedTo") ||
@@ -412,6 +416,7 @@ function PropertiesPageInner() {
     if (dmFilter) params.dmStatus = dmFilter;
     if (caseFilter) params.caseStatus = caseFilter;
     if (introductionRouteFilter) params.introductionRoute = introductionRouteFilter;
+    if (businessTypeFilter) params.businessType = businessTypeFilter;
     if (leadExclusionFilter) params.leadExclusion = leadExclusionFilter;
     if (assigneeFilter) params.assignedTo = assigneeFilter;
     if (ownerFilter) params.ownerId = ownerFilter;
@@ -425,7 +430,7 @@ function PropertiesPageInner() {
     if (sortBy) params.sortBy = sortBy;
     if (sortOrder) params.sortOrder = sortOrder;
     return params;
-  }, [searchText, mgmtIdText, typeFilter, registryFilter, dmFilter, caseFilter, introductionRouteFilter, leadExclusionFilter, assigneeFilter, ownerFilter, updatedFromFilter, updatedToFilter, warningOnly, undeliverableOnly, resendOnly, sendCountMaxFilter, sort]);
+  }, [searchText, mgmtIdText, typeFilter, registryFilter, dmFilter, caseFilter, introductionRouteFilter, businessTypeFilter, leadExclusionFilter, assigneeFilter, ownerFilter, updatedFromFilter, updatedToFilter, warningOnly, undeliverableOnly, resendOnly, sendCountMaxFilter, sort]);
 
   // 売却促進DM: 現在の検索条件で「送付可」物件から下書きを作成し、作業画面へ遷移する。
   // 差出人は env 既定を route が補完(初版・調整は作業画面)。集計・型は variant 基準。
@@ -664,6 +669,7 @@ function PropertiesPageInner() {
     if (dmFilter) params.set("dmStatus", dmFilter);
     if (caseFilter) params.set("caseStatus", caseFilter);
     if (introductionRouteFilter) params.set("introductionRoute", introductionRouteFilter);
+    if (businessTypeFilter) params.set("businessType", businessTypeFilter);
     if (leadExclusionFilter) params.set("leadExclusion", leadExclusionFilter);
     if (assigneeFilter) params.set("assignedTo", assigneeFilter);
     if (ownerFilter) params.set("ownerId", ownerFilter);
@@ -677,7 +683,7 @@ function PropertiesPageInner() {
     if (page > 1) params.set("page", String(page));
     const qs = params.toString();
     router.replace(qs ? `${pathname}?${qs}` : pathname, { scroll: false });
-  }, [searchText, mgmtIdText, typeFilter, registryFilter, dmFilter, caseFilter, introductionRouteFilter, leadExclusionFilter, assigneeFilter, ownerFilter, updatedFromFilter, updatedToFilter, warningOnly, undeliverableOnly, resendOnly, sendCountMaxFilter, sort, page, pathname, router]);
+  }, [searchText, mgmtIdText, typeFilter, registryFilter, dmFilter, caseFilter, introductionRouteFilter, businessTypeFilter, leadExclusionFilter, assigneeFilter, ownerFilter, updatedFromFilter, updatedToFilter, warningOnly, undeliverableOnly, resendOnly, sendCountMaxFilter, sort, page, pathname, router]);
 
   // 警告バッジは「現在ページに表示中の物件」だけに scope して取得する（17-C F2）。
   // properties が変わるたび（page/filter/sort 変更・mutation 後の再取得）に追従するため、
@@ -884,6 +890,7 @@ function PropertiesPageInner() {
     setDmFilter("");
     setCaseFilter("");
     setIntroductionRouteFilter("");
+    setBusinessTypeFilter("");
     setLeadExclusionFilter("");
     setAssigneeFilter("");
     setOwnerFilter("");
@@ -900,7 +907,7 @@ function PropertiesPageInner() {
   // 何らかのフィルタが効いているか（リセットボタン活性化用）
   const hasActiveFilter =
     !!searchInput || !!searchText || !!searchAllDraft || !!mgmtIdText || !!typeFilter || !!registryFilter || !!dmFilter ||
-    !!caseFilter || !!introductionRouteFilter || !!leadExclusionFilter || !!assigneeFilter || !!ownerFilter || !!updatedFromFilter || !!updatedToFilter ||
+    !!caseFilter || !!introductionRouteFilter || !!businessTypeFilter || !!leadExclusionFilter || !!assigneeFilter || !!ownerFilter || !!updatedFromFilter || !!updatedToFilter ||
     warningOnly || undeliverableOnly || resendOnly || !!sendCountMaxFilter || sort !== DEFAULT_SORT;
 
   // 更新日の開始>終了(逆転)は結果が必ず0件になるので警告する(UI総点検 B-9)。YYYY-MM-DD は文字列比較で日付順になる。
@@ -909,7 +916,7 @@ function PropertiesPageInner() {
   // アクティブなフィルタ条件数（モバイルトグルバッジ用）
   const activeFilterCount = [
     searchText, mgmtIdText, typeFilter, registryFilter, dmFilter, caseFilter,
-    introductionRouteFilter, leadExclusionFilter, assigneeFilter, ownerFilter, updatedFromFilter, updatedToFilter, sendCountMaxFilter,
+    introductionRouteFilter, businessTypeFilter, leadExclusionFilter, assigneeFilter, ownerFilter, updatedFromFilter, updatedToFilter, sendCountMaxFilter,
   ].filter(Boolean).length + (warningOnly ? 1 : 0) + (sort !== DEFAULT_SORT ? 1 : 0);
 
   // 折りたたみ内(詳細条件)に適用されている件数。畳んでいても見落とさないよう
@@ -919,7 +926,7 @@ function PropertiesPageInner() {
       // 画面すっきり化 第3回(2026-10-16): DM判断・担当者も詳細条件の中へ移した。
       dmFilter, assigneeFilter,
       typeFilter, registryFilter, sendCountMaxFilter, caseFilter,
-      introductionRouteFilter, leadExclusionFilter, updatedFromFilter, updatedToFilter,
+      introductionRouteFilter, businessTypeFilter, leadExclusionFilter, updatedFromFilter, updatedToFilter,
     ].filter(Boolean).length +
     (warningOnly ? 1 : 0) +
     (undeliverableOnly ? 1 : 0) +
@@ -1532,6 +1539,21 @@ function PropertiesPageInner() {
         >
           <option value="">導入ルート: すべて</option>
           {INTRODUCTION_ROUTE_OPTIONS.map((o) => (
+            <option key={o.value} value={o.value}>
+              {o.label}
+            </option>
+          ))}
+        </select>
+
+        {/* 取扱区分(仲介 / 買取再販 / 未定・2026-11-04)。 */}
+        <select
+          value={businessTypeFilter}
+          onChange={handleFilterChange(setBusinessTypeFilter)}
+          aria-label="取扱区分"
+          className="rounded-md border border-gray-300 px-3 py-2 text-sm focus:border-indigo-500 focus:ring-1 focus:ring-indigo-500 focus:outline-none dark:border-gray-700 dark:bg-gray-900 dark:text-gray-100"
+        >
+          <option value="">取扱区分: すべて</option>
+          {PROPERTY_BUSINESS_TYPE_FILTER_OPTIONS.map((o) => (
             <option key={o.value} value={o.value}>
               {o.label}
             </option>

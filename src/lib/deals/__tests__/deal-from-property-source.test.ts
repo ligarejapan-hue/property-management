@@ -19,7 +19,8 @@ describe("物件の基本情報 → 取引の作成", () => {
     expect(i).toBeGreaterThan(0);
     const before = src.slice(Math.max(0, i - 800), i);
     expect(before).toMatch(/canCreateDeal && property\.caseStatus === "contract_planned"/);
-    expect(before).toContain("/deals/new?propertyId=${property.id}");
+    // 道は newDealHref(物件の取扱区分も渡す・2026-11-04)。中身は property-business-type.test.ts。
+    expect(before).toContain("newDealHref(property.id, property.businessType)");
   });
 });
 

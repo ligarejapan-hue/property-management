@@ -24,7 +24,7 @@ describe("取引の画面", () => {
   it("物件の画面の「その他」に入口がある(取引を書ける人だけ)", () => {
     const src = read("src/app/(dashboard)/properties/[id]/page.tsx");
     expect(src).toContain('label: "この物件で取引を作成"');
-    expect(src).toContain("/deals/new?propertyId=");
+    expect(src).toContain('label: "この物件で取引を作成", icon: Handshake, href: newDealHref(property.id, property.businessType)');
     expect(src).toMatch(/p\.resource === "deal" && p\.action === "write"/);
   });
   it("取引の画面は素の button を使わない", () => {

@@ -70,6 +70,8 @@ const AUDIT_FILTER_KEYS = [
   "registryStatus",
   "caseStatus",
   "introductionRoute",
+  // 取扱区分の絞り込み(非PIIの固定値・2026-11-04)。
+  "businessType",
   "assignedTo",
   "updatedFrom",
   "updatedTo",

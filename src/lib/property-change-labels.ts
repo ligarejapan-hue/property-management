@@ -1,4 +1,5 @@
 import { formatYenText, manToYen } from "@/lib/yen-man";
+import { businessTypeLabel } from "@/lib/property-business-type";
 
 /** 変更履歴に出す項目の画面の名前(変更履歴タブと経緯タブで共通)。 */
 export const CHANGE_FIELD_LABELS: Record<string, string> = {
@@ -20,6 +21,7 @@ export const CHANGE_FIELD_LABELS: Record<string, string> = {
   leadExclusionRequestedAt: "除外申請日",
   leadExclusionDecidedAt: "除外申請の結果の日",
   propertyType: "種別",
+  businessType: "取扱区分",
   assignedTo: "担当者",
   zoningDistrict: "用途地域",
   rosenkaValue: "路線価",
@@ -79,4 +81,10 @@ export function saleYenHistoryValue(fieldName: string, value: string | null): st
   if (!/^\d+(\.\d+)?$/.test(value)) return null;
   const yen = manToYen(value);
   return /^\d+$/.test(yen) ? formatYenText(yen) : null;
+}
+
+/** 物件の変更履歴の値を画面の書き方に(価格は円・取扱区分は「仲介」など)。当てはまらない欄は null。 */
+export function propertyHistoryValue(fieldName: string, value: string | null): string | null {
+  if (fieldName === "businessType") return value ? businessTypeLabel(value) : null;
+  return saleYenHistoryValue(fieldName, value);
 }

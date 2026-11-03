@@ -19,6 +19,8 @@ import { fitsDecimalScale } from "@/lib/decimal-scale";
 import { parseDateOnly } from "@/lib/case-dates";
 import { LEAD_EXCLUSION_FILTER_VALUES, LEAD_EXCLUSION_STATUS_VALUES } from "@/lib/lead-exclusion";
 import { INQUIRER_NAME_MAX_LENGTH, INQUIRER_NAME_TOO_LONG_MESSAGE } from "@/lib/inquirer-name";
+import { DEAL_BUSINESS_TYPES } from "@/lib/deals/constants";
+import { PROPERTY_BUSINESS_TYPE_FILTER_VALUES } from "@/lib/property-business-type";
 
 /**
  * 日付だけの列(DATE)。画面は "YYYY-MM-DD" か空(未定)を送る。暦にある日だけ受け付け、
@@ -143,6 +145,11 @@ export const propertyListQuerySchema = z.object({
   ),
   caseStatus: z.enum(CASE_STATUS_VALUES).optional(),
   introductionRoute: z.enum(INTRODUCTION_ROUTE_VALUES).optional(),
+  // 取扱区分で絞り込む(仲介 / 買取再販 / none=未定・2026-11-04)。空=すべて。
+  businessType: z.preprocess(
+    (v) => (v === "" ? undefined : v),
+    z.enum(PROPERTY_BUSINESS_TYPE_FILTER_VALUES).optional(),
+  ),
   // 除外申請で絞り込む(申請中 / 申請中で7日以上 / 除外された / 認められなかった)。空=すべて。
   leadExclusion: z.preprocess(
     (v) => (v === "" ? undefined : v),
@@ -301,6 +308,8 @@ export const updatePropertySchema = z.object({
   leadExclusionRequestedAt: dateOnlyColumn,
   leadExclusionDecidedAt: dateOnlyColumn,
   introductionRoute: z.enum(INTRODUCTION_ROUTE_VALUES).optional().nullable(),
+  // 取扱区分(仲介/買取再販・2026-11-04)。null=未定。値は取引の事業区分と同じ。
+  businessType: z.enum(DEAL_BUSINESS_TYPES).optional().nullable(),
   // DMの種類(台帳を指す・設計 2026-09-27 §3.6)。null=自動判定に戻す。
   // ⚠作成時(createPropertySchema)には足さない=作成時は自動で決める。
   // ⚠大文字混じりの UUID をそのまま保存すると、生SQL(::uuid 比較)や他経路が保存済みの
