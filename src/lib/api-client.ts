@@ -3799,7 +3799,11 @@ export async function uploadFile(
   propertyId: string,
   file: File,
   type: "photo" | "attachment",
-  options?: { attachmentType?: "general" | "registry" },
+  options?: {
+    attachmentType?: "general" | "registry";
+    /** どの取引の書類か("common"=共通・取引の id)。省略=未区分(2026-11-04)。 */
+    dealScope?: string | null;
+  },
 ) {
   if (USE_MOCK) {
     await mockDelay();
@@ -3819,11 +3823,31 @@ export async function uploadFile(
   if (type === "attachment" && options?.attachmentType) {
     formData.append("type", options.attachmentType);
   }
+  if (type === "attachment" && options?.dealScope) {
+    formData.append("dealScope", options.dealScope);
+  }
   const endpoint =
     type === "photo"
       ? `/api/properties/${propertyId}/photos`
       : `/api/properties/${propertyId}/attachments`;
   const res = await fetch(endpoint, { method: "POST", body: formData });
+  if (!res.ok) throw await toApiError(res);
+  return res.json();
+}
+
+/**
+ * 添付がどの取引の書類かを決める(買取再販の仕入/売却・2026-11-04)。
+ * scope: "common"=共通・取引の id・null=未区分に戻す。1件の選び直しも、推定どおりのまとめての確定もこれ。
+ */
+export async function updateAttachmentDealScope(
+  propertyId: string,
+  items: Array<{ attachmentId: string; scope: string | null }>,
+): Promise<{ updated: number }> {
+  const res = await fetch(`/api/properties/${propertyId}/attachments/deal-scope`, {
+    method: "PUT",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ items }),
+  });
   if (!res.ok) throw await toApiError(res);
   return res.json();
 }
@@ -3882,11 +3906,13 @@ export async function saveSplitPdf(
   propertyId: string,
   file: File,
   segments: readonly BundleSegment[],
-  opts: { containsRegistry?: boolean } = {},
+  opts: { containsRegistry?: boolean; dealScope?: string | null } = {},
 ): Promise<{ originalId: string; parts: number; registryParts: number; registryNotice?: string | null }> {
   const formData = new FormData();
   formData.append("file", file);
   formData.append("segments", JSON.stringify(segments));
+  // どの取引の書類か(謄本の部分には付かない・2026-11-04)。
+  if (opts.dealScope) formData.append("dealScope", opts.dealScope);
   // 謄本のページが入っている(人が分け目を消してつなげた場合も)=サーバーは元の名前を使わない。
   if (opts.containsRegistry) formData.append("containsRegistry", "1");
   const res = await fetch(`/api/properties/${propertyId}/attachments/split`, { method: "POST", body: formData });

@@ -1129,6 +1129,8 @@ export default function PropertyDetailPage({
           <AttachmentTab
             propertyId={property.id}
             refreshToken={attachmentsRefreshToken}
+            // 取引で分ける(買取再販の仕入/売却・2026-11-04)。取引を見る権限が無い人は null。
+            deals={property.deals}
             caseStatus={property.caseStatus}
             occupancyStatus={property.occupancyStatus}
             // 謄本の増減後は「静かな再取得」で件数だけ更新する。fetchProperty は

@@ -50,20 +50,21 @@ describe("買取再販の取引が仕入か売却か", () => {
 });
 
 describe("物件の取引の一覧", () => {
+  const created = new Date("2026-03-01T00:00:00.000Z");
   const deals = [
-    { id: "d2", dealNo: "2026-0031", businessType: "resale", status: "considering", parties: [self("seller")] },
-    { id: "d1", dealNo: "2026-0012", businessType: "resale", status: "settled", parties: [self("buyer")] },
+    { id: "d2", dealNo: "2026-0031", businessType: "resale", status: "considering", settlementAt: null, createdAt: created, parties: [self("seller")] },
+    { id: "d1", dealNo: "2026-0012", businessType: "resale", status: "settled", settlementAt: new Date("2026-05-30T01:00:00.000Z"), createdAt: created, parties: [self("buyer")] },
   ];
-  it("取引番号・区分・仕入/売却の名前を出す", () => {
+  it("取引番号・区分・仕入/売却の名前を出す(決済日・作った日も・添付の推定に使う)", () => {
     expect(summarizePropertyDeals(deals)).toEqual([
-      { id: "d2", dealNo: "2026-0031", businessType: "resale", status: "considering", side: "sale", label: "買取再販(売却)" },
-      { id: "d1", dealNo: "2026-0012", businessType: "resale", status: "settled", side: "purchase", label: "買取再販(仕入)" },
+      { id: "d2", dealNo: "2026-0031", businessType: "resale", status: "considering", side: "sale", label: "買取再販(売却)", settlementAt: null, createdAt: "2026-03-01T00:00:00.000Z" },
+      { id: "d1", dealNo: "2026-0012", businessType: "resale", status: "settled", side: "purchase", label: "買取再販(仕入)", settlementAt: "2026-05-30T01:00:00.000Z", createdAt: "2026-03-01T00:00:00.000Z" },
     ]);
   });
   it("仕入か売却か分からない買取再販・仲介は区分の名前だけ", () => {
     const [a, b] = summarizePropertyDeals([
-      { id: "x", dealNo: "2026-0001", businessType: "resale", status: "considering", parties: [] },
-      { id: "y", dealNo: "2026-0002", businessType: "brokerage", status: "considering", parties: [self("buyer")] },
+      { id: "x", dealNo: "2026-0001", businessType: "resale", status: "considering", settlementAt: null, createdAt: created, parties: [] },
+      { id: "y", dealNo: "2026-0002", businessType: "brokerage", status: "considering", settlementAt: null, createdAt: created, parties: [self("buyer")] },
     ]);
     expect(a.label).toBe("買取再販");
     expect(b.label).toBe("仲介");

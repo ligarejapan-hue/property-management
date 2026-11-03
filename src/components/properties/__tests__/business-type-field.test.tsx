@@ -4,7 +4,8 @@ import BusinessTypeField from "../business-type-field";
 import type { PropertyDealSummary } from "@/lib/property-business-type";
 
 const deal = (o: Partial<PropertyDealSummary>): PropertyDealSummary => ({
-  id: "d1", dealNo: "2026-0012", businessType: "resale", status: "considering", side: "purchase", label: "買取再販(仕入)", ...o,
+  id: "d1", dealNo: "2026-0012", businessType: "resale", status: "considering", side: "purchase", label: "買取再販(仕入)",
+  settlementAt: null, createdAt: "2026-03-01T00:00:00.000Z", ...o,
 });
 const draw = (businessType: string | null, deals: PropertyDealSummary[] | null) =>
   renderToStaticMarkup(<BusinessTypeField businessType={businessType} deals={deals} />);

@@ -71,6 +71,8 @@ vi.mock("@/lib/prisma", () => {
       findMany: vi.fn(async () => []),
       create: vi.fn(async ({ data }: { data: Record<string, unknown> }) => ({ id: `a-${++n}`, type: data.type })),
     },
+    // 入れるときに選んだ取引(2026-11-04)。この物件の取引かをロックの中で確かめる。
+    deal: { findFirst: vi.fn(async () => ({ id: "33333333-3333-4333-8333-333333333333" })) },
   };
   db.$transaction = vi.fn(async (fn: (tx: unknown) => unknown) => fn(db));
   db.$queryRaw = vi.fn(async () => [{ id: "p-1" }]);
@@ -237,5 +239,28 @@ describe("split(分けて保存)", () => {
   it("分け方が JSON でなければ 422", async () => {
     const res = await SPLIT(await req("split", { segments: "{" }), params);
     expect(res.status).toBe(422);
+  });
+});
+
+describe("split — 入れるときに選んだ取引(2026-11-04)", () => {
+  const D1 = "33333333-3333-4333-8333-333333333333";
+  const withDeal = () => {
+    perms.value = [...perms.value, { resource: "deal", action: "read", granted: true }];
+  };
+  it("通常の添付(元の1冊・分けた書類)にだけ付け、謄本には付けない", async () => {
+    withDeal();
+    const res = await SPLIT(await req("split", { segments: JSON.stringify(SEGMENTS), dealScope: D1 }), params);
+    expect(res.status).toBe(201);
+    const [orig, summary, drawings, registry] = rows();
+    for (const r of [orig, summary, drawings]) expect(r).toMatchObject({ dealId: D1, dealCommon: false });
+    expect("dealId" in registry).toBe(false);
+  });
+  it("取引を見る権限が無ければ 403・ほかの物件の取引は 422(作らない)", async () => {
+    expect((await SPLIT(await req("split", { segments: JSON.stringify(SEGMENTS), dealScope: D1 }), params)).status).toBe(403);
+    withDeal();
+    const tx = prisma as unknown as { deal: { findFirst: ReturnType<typeof vi.fn> } };
+    tx.deal.findFirst.mockResolvedValueOnce(null);
+    expect((await SPLIT(await req("split", { segments: JSON.stringify(SEGMENTS), dealScope: D1 }), params)).status).toBe(422);
+    expect(db.attachment.create).not.toHaveBeenCalled();
   });
 });

@@ -75,11 +75,18 @@ export interface PropertyDealSummary {
   side: DealSide | null;
   /** 「買取再販(仕入)」「仲介」など。 */
   label: string;
+  /** 決済日・作った日(ISO)。添付の仕入/売却の推定の境に使う(2026-11-04)。 */
+  settlementAt: string | null;
+  createdAt: string;
 }
 
 /** 物件の基本情報に並べる取引(並びは渡された順)。 */
 export function summarizePropertyDeals(
-  deals: Array<{ id: string; dealNo: string; businessType: string; status: string; parties: Array<{ role: string; isSelf: boolean }> }>,
+  deals: Array<{
+    id: string; dealNo: string; businessType: string; status: string;
+    settlementAt: Date | null; createdAt: Date;
+    parties: Array<{ role: string; isSelf: boolean }>;
+  }>,
 ): PropertyDealSummary[] {
   return deals.map((d) => {
     const side = dealSideOf(d.businessType, d.parties);
@@ -87,6 +94,8 @@ export function summarizePropertyDeals(
     return {
       id: d.id, dealNo: d.dealNo, businessType: d.businessType, status: d.status, side,
       label: side ? `${name}(${SIDE_LABELS[side]})` : name,
+      settlementAt: d.settlementAt ? d.settlementAt.toISOString() : null,
+      createdAt: d.createdAt.toISOString(),
     };
   });
 }
