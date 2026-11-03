@@ -614,7 +614,7 @@ migration `20261102100000_add_deal_doc_links`（表を 3 つ足すだけ）が�
 
 ### 6.1 GitHub Actions からの反映（`.github/workflows/deploy.yml`）
 
-§6 の手順を 1 本のスクリプト（`deploy/vps/pm-deploy.sh`）にまとめ、GitHub Actions の手動起動から実行できるようにしたもの。§6 を手で流す方法もそのまま使える。
+§6 の手順を 1 本のスクリプト（`deploy/vps/pm-deploy.sh`）にまとめ、GitHub Actions の手動起動から実行できるようにしたもの。**本番反映はこの経路に一本化している（2026-11-03〜・下の「反映のしかた」）。** §6 は手順の中身の説明と、この経路が使えないときにユーザーが手で行うためのもの。
 
 **しくみ**
 
@@ -632,7 +632,7 @@ migration `20261102100000_add_deal_doc_links`（表を 3 つ足すだけ）が�
 - deploy ユーザーは `pm-deploy` 以外を実行できない（authorized_keys の `command=` と sudoers で二重に制限）。
 - migration は既定で流さない。未適用の migration があると、build と再起動の前に止まる（`migrate` を有効にして起動し直す）。
 - **`pm-deploy` は DB のバックアップを取らない。** `migrate` を有効にして起動する前に、§6 の手順 3.5 のバックアップを VPS で取る（足すだけの migration でも取る）。
-- **⚠ リポジトリを非公開にした 2026-10-31 以降、この経路はまだ動かしていない。** GitHub のプランによっては非公開リポジトリで Environment の secrets を使えないので、使う前に確かめる。§6 を手で流す方法は使える。
+- **⚠ リポジトリを非公開にした 2026-10-31 以降、この経路はまだ動かしていない。** GitHub のプランによっては非公開リポジトリで Environment の secrets を使えないので、使う前に確かめる。使えないと分かったときは、Claude Code は手元から代わりに反映せず、ユーザーに報告する。
 - Actions のログは外に出してよい形に保つ（公開だった時期の決まりを続ける）。ログには工程名と結果だけを出し、各コマンドの出力は VPS の `/var/log/pm-deploy/<日時>.log`（root のみ）に残す。失敗時はそのファイルを見る。
 - 失敗時はサービスを再起動しない。ただし build 後（再起動・応答確認）で失敗した場合は、§6・§8 を見て手で確認する。
 
@@ -699,6 +699,35 @@ sudo rm /home/deploy/deploy_key /home/deploy/deploy_key.pub
 | `DEPLOY_KNOWN_HOSTS` | B の `ssh-keyscan` の出力 1 行（先頭が `DEPLOY_HOST` と同じ IP であること） |
 
 #### 反映のしかた
+
+**本番反映の経路はこの Deploy (production) の 1 本だけにする（ユーザー指示 2026-11-03）。** Claude Code は手元から VPS へ直接反映するスクリプト（root で SSH して依存の入れ直し・build・restart を流すもの）を使わない（CLAUDE.md §13）。この経路の鍵は `/run/pm-deploy.lock`、手元のスクリプトの鍵は `/root/pm-deploy.lock` で別なので、2 つの経路が同時に走ると互いを止められない（2026-11-02 に 2 つのセッションが同じ版の反映に向かって重なった）。
+
+**起動する前に、実行中・待機中の Deploy (production) がないか確かめる。** `concurrency`（`production-deploy`）は同時に 1 本しか走らせないが、待機できるのも 1 本だけで、待機中のものがあるときに次を起動すると、待機中だった方は取り消される。重ねて起動しない。
+
+```bash
+R=ligarejapan-hue/property-management
+# 1. 終わっていない Deploy (production) を探す（何も出なければ 3 へ）
+gh run list -R $R --workflow deploy.yml --limit 20 \
+  --json databaseId,status,headSha,createdAt \
+  --jq '.[] | select(.status != "completed") | "\(.databaseId) \(.status) \(.headSha[0:8]) \(.createdAt)"'
+# 2. 出たら、1 本ずつ完了まで待つ（終了コードが 0 以外なら失敗。ログを見てから先へ進む）
+gh run watch <databaseId> -R $R --exit-status
+#    待ち終わったら 1 をもう一度流し、何も出なくなるまで繰り返す。
+#    完了した回が反映した版（headSha）が、今回反映したい main の最新と同じなら、起動し直さなくてよい。
+# 3. 起動する（1 回だけ。migration があるときは先に §6 の手順 3.5 のバックアップを取り、inputs[migrate]=true）
+T=$(date -u +%Y-%m-%dT%H:%M:%SZ)   # 起動の直前の時刻を控える（4 で使う）
+gh api repos/$R/actions/workflows/deploy.yml/dispatches \
+  -X POST -f ref=main -f 'inputs[confirm]=deploy' -F 'inputs[migrate]=false'
+# 4. いま起動した回（T より後に作られた回）が一覧に出るまで、この手順だけを繰り返す。見つかったら完了まで見る
+until ID=$(gh run list -R $R --workflow deploy.yml --event workflow_dispatch --limit 5 \
+    --json databaseId,createdAt --jq "[.[] | select(.createdAt >= \"$T\")] | last | .databaseId // empty") && [ -n "$ID" ]; do
+  sleep 10
+done
+gh run watch "$ID" -R $R --exit-status
+```
+
+- 1 で別の人・別のセッションの実行が見つかったときは、取り消さずに完了を待つ（途中で止めると build や再起動の途中で終わることがある）。
+- 3 の起動が成功したら（`gh api` がエラーを返さなければ）、**起動し直さない**。新しい回が一覧に出るまで数秒〜数十秒かかることがあるので、4 の繰り返しで待つ（1 や 3 に戻ると、同じ反映をもう一度起動してしまう）。3 が失敗したときだけ、原因を見てから 1 からやり直す。
 
 - 画面から: Actions → **Deploy (production)** → Run workflow（branch は `main`）→ confirm に `deploy`、migration があるときだけ `migrate` にチェック（先に §6 の手順 3.5 でバックアップを取る）→ Run。
 - Claude Code から（ユーザーの明示指示があるときだけ）:
