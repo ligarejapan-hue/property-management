@@ -700,7 +700,7 @@ sudo rm /home/deploy/deploy_key /home/deploy/deploy_key.pub
 
 #### 反映のしかた
 
-**本番反映の経路はこの Deploy (production) の 1 本だけにする（ユーザー指示 2026-11-03）。** Claude Code は手元から VPS へ直接反映するスクリプト（root で SSH して `npm ci`・build・restart を流すもの）を使わない（CLAUDE.md §13）。この経路の鍵は `/run/pm-deploy.lock`、手元のスクリプトの鍵は `/root/pm-deploy.lock` で別なので、2 つの経路が同時に走ると互いを止められない（2026-11-02 に 2 つのセッションが同じ版の反映に向かって重なった）。
+**本番反映の経路はこの Deploy (production) の 1 本だけにする（ユーザー指示 2026-11-03）。** Claude Code は手元から VPS へ直接反映するスクリプト（root で SSH して依存の入れ直し・build・restart を流すもの）を使わない（CLAUDE.md §13）。この経路の鍵は `/run/pm-deploy.lock`、手元のスクリプトの鍵は `/root/pm-deploy.lock` で別なので、2 つの経路が同時に走ると互いを止められない（2026-11-02 に 2 つのセッションが同じ版の反映に向かって重なった）。
 
 **起動する前に、実行中・待機中の Deploy (production) がないか確かめる。** `concurrency`（`production-deploy`）は同時に 1 本しか走らせないが、待機できるのも 1 本だけで、待機中のものがあるときに次を起動すると、待機中だった方は取り消される。重ねて起動しない。
 
