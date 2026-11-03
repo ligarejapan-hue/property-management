@@ -103,6 +103,20 @@ describe("migration がある回のバックアップ", () => {
     expect(checkAt).toBeGreaterThan(dumpAt);
     expect(migrateAt).toBeGreaterThan(checkAt);
   });
+
+  it("控えを取るかは git の差分だけでなく、DB に未適用の migration があるか(prisma migrate status)でも決める(@codex #647 P1)", () => {
+    // 版だけ先に進んで途中で落ちたあとの再実行では、git の差分が空でも migration は未適用のまま
+    const statusAt = local.indexOf("prisma migrate status");
+    expect(statusAt).toBeGreaterThan(-1);
+    expect(statusAt).toBeLessThan(local.indexOf("pg_dump"));
+    expect(local).toMatch(/if \[ -n "\$\(\$G diff --name-only "\$OLD" HEAD -- prisma\/migrations\)" \] \|\| ! \$WE \.\/node_modules\/\.bin\/prisma migrate status/);
+  });
+});
+
+describe("再起動後の確認", () => {
+  it("DB まで届くかを見る /api/health が 200 であることも確かめる(Actions 側と同じ・@codex #647 P2)", () => {
+    expect(local).toContain('"/api/health:200"');
+  });
 });
 
 describe("決まりの文書", () => {

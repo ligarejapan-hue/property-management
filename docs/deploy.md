@@ -738,7 +738,7 @@ gh run watch "$ID" -R $R --exit-status
 
 ### 6.1a 手元の反映スクリプト（`deploy/vps/pm-deploy-local.sh`）
 
-Claude Code が本番反映に使う経路（2026-11-03 のユーザー指示・CLAUDE.md §13）。中身は §6 の手順と同じ（取得 → 依存の入れ直し → prisma generate →（migration があればバックアップ → migrate deploy）→ build → prune → 再起動 → smoke 7 本）。
+Claude Code が本番反映に使う経路（2026-11-03 のユーザー指示・CLAUDE.md §13）。中身は §6 の手順と同じ（取得 → 依存の入れ直し → prisma generate →（migration があればバックアップ → migrate deploy）→ build → prune → 再起動 → smoke 8 本。DB まで届くかを見る `/api/health` が 200 であることも確かめる）。
 
 **決まり**
 
@@ -746,7 +746,7 @@ Claude Code が本番反映に使う経路（2026-11-03 のユーザー指示・
 - 反映前に、PR が merge 済みで main の CI が green であることを確かめる。範囲（`git log <本番の版>..origin/main`）に、ほかのセッションの変更が入っていれば報告に書く。
 - 反映（反映前の点検・反映・反映後の確認）以外の目的で VPS に SSH しない。app.env・timer・nginx などの変更はユーザー作業。
 - **鍵は §6.1 と同じ `/run/pm-deploy.lock`。** 鍵を取るまでは本番を何も変えない。もう一方（Actions の反映・別の手元の反映）が動いていれば、最大 `LOCK_WAIT` 秒（既定 1800）待ち（ログに `WAITING_LOCK` → `LOCK_ACQUIRED`）、待ちきれなければ何も変えずに `LOCKED` で終わる。待っている間に相手が同じ版まで進めていても、念のため作り直す（`SAME_VERSION_AFTER_WAIT`。相手が build や再起動の途中で失敗していても直るように）。移行の間は、古い写しが使っていた `/root/pm-deploy.lock` も続けて取る。
-- **migration があるときは、`prisma migrate deploy` の前にスクリプトが DB のバックアップを取る**（§6 の手順 3.5 と同じ。`/var/backups/property-management/pre-migration/db-<旧版>-<日時>.dump`・読めるかを `pg_restore --list` で確かめる）。取れない・読めないときはそこで止まり、migrate・build・再起動へ進まない。控えは smoke まで通ったあとで 3 世代だけ残す。
+- **migration があるときは、`prisma migrate deploy` の前にスクリプトが DB のバックアップを取る**（§6 の手順 3.5 と同じ。「この回の差分に migration がある」か「DB に未適用の migration がある（`prisma migrate status` が 0 以外。状態を確かめられないときも含む）」のどちらかで取るので、版だけ先に進んで途中で落ちたあとの再実行でも抜けない。`/var/backups/property-management/pre-migration/db-<旧版>-<日時>.dump`・読めるかを `pg_restore --list` で確かめる）。取れない・読めないときはそこで止まり、migrate・build・再起動へ進まない。控えは smoke まで通ったあとで 3 世代だけ残す。
 
 **使い方（手元の Git Bash から・main を最新にした本体の checkout で）**
 

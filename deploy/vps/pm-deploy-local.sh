@@ -72,8 +72,11 @@ WE="sudo -E -n -u www-data env HOME=/var/www npm_config_cache=/var/www/.npm PLAY
 $WE ./node_modules/.bin/prisma generate
 # ★migration がある回は直前に DB のバックアップ(足すだけでも取る・ユーザー指示 2026-11-01・docs/deploy.md §6 の手順 3.5)。
 #   取れない・読めないときは ERR で止まり、migrate へ進まない(restart 前=本番は旧版のまま)。
+#   取るかどうかは「この回の git の差分に migration がある」か「DB に未適用の migration がある(migrate status が 0 以外)」で決める。
+#   版だけ先に進んで途中で落ちたあとの再実行・別の経路が版だけ進めた後でも、git の差分は空だが migration は未適用のまま(@codex #647 P1)。
+#   migrate status は状態を確かめられないときも 0 以外を返す=そのときも控えを取る(安全側)。
 PRE_DIR=/var/backups/property-management/pre-migration
-if [ -n "$($G diff --name-only "$OLD" HEAD -- prisma/migrations)" ]; then
+if [ -n "$($G diff --name-only "$OLD" HEAD -- prisma/migrations)" ] || ! $WE ./node_modules/.bin/prisma migrate status > /dev/null 2>&1; then
   install -d -m 700 -o root -g root "$PRE_DIR"
   PRE_DUMP="$PRE_DIR/db-$OLD-$(date +%Y%m%d-%H%M%S).dump"
   ( umask 077; pg_dump "${DATABASE_URL%%\?*}" -Fc --no-owner --no-privileges -f "$PRE_DUMP" )
@@ -102,9 +105,10 @@ echo "PID $PID_OLD -> $PID_NEW $(systemctl is-active property-management)"
 journalctl -u property-management --since "3 min ago" --no-pager | grep -E "Ready in" | tail -1 || true
 echo "--- err(3分):"; journalctl -u property-management -p err --since "3 min ago" --no-pager | tail -5 || true
 
-# smoke: 期待コードと違えば SMOKE_NG。/uploads/probe=401 が最重要(200 なら認可の回帰=即異常)
+# smoke: 期待コードと違えば SMOKE_NG。/uploads/probe=401 が最重要(200 なら認可の回帰=即異常)。
+# /api/health は DB まで届くかを見る(届かなければ 503)。Actions 側と同じ確認(@codex #647 P2)。
 NG=0
-for pair in "/:307" "/login:200" "/uploads/probe:401" "/t/probe:302" "/help:307" "/properties:307" "/admin/sale-dm-settings:307"; do
+for pair in "/api/health:200" "/:307" "/login:200" "/uploads/probe:401" "/t/probe:302" "/help:307" "/properties:307" "/admin/sale-dm-settings:307"; do
   p=${pair%%:*}; want=${pair##*:}
   got=$(curl -s -o /dev/null -w '%{http_code}' --max-time 10 "http://localhost:3000$p" || true)
   echo "$p -> $got (期待 $want)"; [ "$got" = "$want" ] || NG=1
