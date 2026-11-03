@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest";
-import { bpToPercentText, depositFromBrokerageCap, parseYen, percentTextToBp, yenText } from "../money-forms";
+import { bpToPercentText, parseYen, percentTextToBp, yenText } from "../money-forms";
 
 describe("金額・率の入力", () => {
   it("カンマ・円・空白を無視して整数に・読めなければ null", () => {
@@ -59,25 +59,5 @@ describe("@codex 2巡目: 手で直す欄の打ち間違いで上書きを消さ
     expect(overrideInput("")).toEqual({ kind: "clear" });
     expect(overrideInput("９０００００")).toEqual({ kind: "set", value: 900_000 });
     expect(overrideInput("90万")).toEqual({ kind: "invalid" });
-  });
-});
-
-describe("depositFromBrokerageCap", () => {
-  const tiers = {
-    tiers: [{ upTo: 2_000_000, rateBp: 500 }, { upTo: 4_000_000, rateBp: 400 }, { upTo: null, rateBp: 300 }],
-    lowCostSpecial: { priceLimit: 8_000_000, feeCap: 300_000 },
-  };
-  it("入力中の価格で税抜の上限を出す(3%+6万円)", () => {
-    expect(depositFromBrokerageCap("30,000,000", tiers, false)).toBe("960000");
-  });
-  it("低廉な空家等の特例の入力に従う", () => {
-    expect(depositFromBrokerageCap("5000000", tiers, true)).toBe("300000");
-    expect(depositFromBrokerageCap("5000000", tiers, false)).toBe("210000");
-  });
-  it("価格が空・読めない・0円、表がないときは押せない", () => {
-    expect(depositFromBrokerageCap("", tiers, false)).toBeNull();
-    expect(depositFromBrokerageCap("abc", tiers, false)).toBeNull();
-    expect(depositFromBrokerageCap("0", tiers, false)).toBeNull();
-    expect(depositFromBrokerageCap("1000000", null, false)).toBeNull();
   });
 });

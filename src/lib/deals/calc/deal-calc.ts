@@ -4,7 +4,7 @@ import { jstDateString } from "../datetime";
 import { pickRateTable, type RateTableRow } from "../rate-tables";
 import { RATE_CONTENT_SCHEMAS } from "../rate-content";
 import type { DealView } from "../view";
-import { brokerageFee, type BrokerageTiers } from "./brokerage";
+import { brokerageFee } from "./brokerage";
 import { buildingPriceApportion, buildingTaxOf } from "./building-tax";
 import { contractStamp } from "./stamp";
 import { settlementResult, type SettlementResult } from "./settlement";
@@ -14,8 +14,6 @@ export interface DealCalc {
   kindBase: BasePropertyKind | null;
   /** computedExcl は表が当たらないとき null(手で直した値だけで出す)。 */
   brokerage: { computedExcl: number | null; excl: number; incl: number; overridden: boolean; specialApplied: boolean } | null;
-  /** 基準日の仲介手数料の表。保存前の売買価格で上限を出すのに使う(手付金のボタン)。 */
-  brokerageTiers: BrokerageTiers | null;
   building: {
     computedPrice: number | null; price: number | null; priceOverridden: boolean;
     computedTax: number | null; tax: number | null; taxOverridden: boolean;
@@ -75,5 +73,5 @@ export function computeDealCalc(deal: DealView, rateRows: RateTableRow[], kinds:
     terms: deal.settlementTerms, leases: deal.leases, overrides: o,
   });
   for (const m of settlement.missing) if (!missing.includes(m)) missing.push(m);
-  return { baseDate, kindBase, brokerage, brokerageTiers: tiers, building, contractStamp: stamp, settlement, missing };
+  return { baseDate, kindBase, brokerage, building, contractStamp: stamp, settlement, missing };
 }
