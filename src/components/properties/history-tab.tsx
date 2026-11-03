@@ -4,7 +4,7 @@ import { useState, useEffect, useCallback } from "react";
 import { Loader2, History, ChevronLeft, ChevronRight, Search } from "lucide-react";
 import { fetchChangeLogs as apiFetchChangeLogs, fetchSaleDmScenarioOptionsAll, type SaleDmScenarioOptionAll } from "@/lib/api-client";
 import { formatJaDateTime } from "@/lib/format-datetime";
-import { CHANGE_FIELD_LABELS, saleYenHistoryValue } from "@/lib/property-change-labels";
+import { CHANGE_FIELD_LABELS, propertyHistoryValue } from "@/lib/property-change-labels";
 import { dmScenarioHistoryLabel } from "./dm-scenario-field-model";
 import { caseStatusHistoryLabel, historyChangerLabel } from "./history-tab-model";
 import { Button } from "@/components/ui/button";
@@ -104,8 +104,8 @@ export default function HistoryTab({
 
   const displayValue = (fieldName: string, value: string | null): string | null => {
     if (fieldName === "caseStatus") return caseStatusHistoryLabel(value);
-    const yen = saleYenHistoryValue(fieldName, value);
-    if (yen !== null) return yen;
+    const shown = propertyHistoryValue(fieldName, value);
+    if (shown !== null) return shown;
     if (fieldName !== "dmScenarioId") return value;
     if (scenarioAll === "failed") return value ? "(名前を読み込めませんでした)" : "自動";
     return dmScenarioHistoryLabel(value, scenarioAll);

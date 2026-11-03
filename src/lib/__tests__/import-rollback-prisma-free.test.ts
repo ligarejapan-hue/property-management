@@ -68,7 +68,7 @@ describe("property-field-constants.ts は Prisma-free (Codex P1)", () => {
     expect(constantsSrc).not.toMatch(/from\s+("|')next\//);
   });
 
-  it("PROPERTY_TRACKED_FIELDS の中身 (46 項目・21-C PR-3c で postalCode・2026-09 で区分マンションの8列・2026-10-23 で契約予定日/決済予定日・2026-10-24 で問い合わせ者/除外申請3列・2026-10-25 で土地面積/計測方式/延床面積を追加)", () => {
+  it("PROPERTY_TRACKED_FIELDS の中身 (47 項目・21-C PR-3c で postalCode・2026-09 で区分マンションの8列・2026-10-23 で契約予定日/決済予定日・2026-10-24 で問い合わせ者/除外申請3列・2026-10-25 で土地面積/計測方式/延床面積・2026-11-04 で取扱区分を追加)", () => {
     expect(PROPERTY_TRACKED_FIELDS).toEqual([
       "propertyType",
       "address",
@@ -82,6 +82,7 @@ describe("property-field-constants.ts は Prisma-free (Codex P1)", () => {
       "contractPlannedOn",
       "settlementPlannedOn",
       "introductionRoute",
+      "businessType",
       "inquirerName",
       "leadExclusionStatus",
       "leadExclusionRequestedAt",

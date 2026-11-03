@@ -3448,6 +3448,8 @@ export async function searchProperties(query: string, opts: { caseStatus?: strin
       buildingName?: string | null;
       roomNo?: string | null;
       caseStatus?: string;
+      /** 取扱区分(brokerage/resale・null=未定)。 */
+      businessType?: string | null;
     }>;
   }>(
     `/api/properties/search?q=${encodeURIComponent(query)}` +

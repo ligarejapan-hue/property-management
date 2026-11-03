@@ -433,6 +433,9 @@ model Property {
   contractPlannedOn        DateTime?         @map("contract_planned_on") @db.Date
   settlementPlannedOn      DateTime?         @map("settlement_planned_on") @db.Date
   introductionRoute        String?           @map("introduction_route")
+  /// 取扱区分(2026-11-04 発注者)。brokerage=仲介 / resale=買取再販 / NULL=未定。値は取引の businessType と同じ
+  /// (src/lib/deals/constants.ts の DEAL_BUSINESS_TYPES・検査は zod)。取引を作るときの初期値に使う。
+  businessType             String?           @map("business_type")
   // 問い合わせ者(反響で申し込んできた人の氏名・2026-10-24)。貼り付け/Excel の反響取込が入れる。
   // ⚠個人情報=所有者の氏名と同じ扱い(owner:read がある人にだけ・同じ表示レベルで返す)。
   inquirerName             String?           @map("inquirer_name")

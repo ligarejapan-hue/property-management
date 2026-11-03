@@ -144,10 +144,20 @@ describe("画面の配線(ソース)", () => {
     expect(list).toContain('setLeadExclusionFilter("")');
     expect(list).toContain("!!leadExclusionFilter");
     // activeFilterCount・advancedFilterCount・buildFilterParams と URL 同期の依存配列の4つ
-    expect(list.match(/introductionRouteFilter, leadExclusionFilter,/g)?.length).toBe(4);
+    // (間に取扱区分の絞り込みが入った・2026-11-04)
+    expect(list.match(/introductionRouteFilter, businessTypeFilter, leadExclusionFilter,/g)?.length).toBe(4);
     // buildFilterParams と URL 同期の依存配列
-    expect(list.match(/caseFilter, introductionRouteFilter, leadExclusionFilter, assigneeFilter/g)?.length).toBe(2);
+    expect(list.match(/caseFilter, introductionRouteFilter, businessTypeFilter, leadExclusionFilter, assigneeFilter/g)?.length).toBe(2);
     expect(list).toContain("LEAD_EXCLUSION_FILTER_OPTIONS");
+  });
+
+  it("一覧: 取扱区分の絞り込みも並行する一覧(状態・URL・API・リセット・件数・初期の開閉)すべてに入っている", () => {
+    expect(list.match(/sp\.get\("businessType"\)/g)?.length).toBe(2); // 初期値+詳細条件を開くか
+    expect(list).toContain("params.businessType = businessTypeFilter");
+    expect(list).toContain('params.set("businessType", businessTypeFilter)');
+    expect(list).toContain('setBusinessTypeFilter("")');
+    expect(list).toContain("!!businessTypeFilter");
+    expect(list).toContain("PROPERTY_BUSINESS_TYPE_FILTER_OPTIONS");
   });
 
   it("取込: 貼り付け画面は申込者の氏名を問い合わせ者として送る", () => {

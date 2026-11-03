@@ -46,6 +46,8 @@ vi.mock("@/lib/prisma", () => ({
     property: { findUnique: vi.fn() },
     importJobRow: { findFirst: vi.fn() },
     attachment: { groupBy: vi.fn() },
+    // 取扱区分の横に並べる取引(2026-11-04)。中身は property-deals-summary.test.ts。
+    deal: { findMany: vi.fn(async () => []) },
   },
 }));
 

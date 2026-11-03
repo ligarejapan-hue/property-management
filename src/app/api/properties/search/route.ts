@@ -80,6 +80,8 @@ export async function GET(request: NextRequest) {
         buildingName: true,
         roomNo: true,
         caseStatus: true,
+        // 取扱区分(取引の作成画面で物件を選んだときの事業区分の初期値・2026-11-04)。
+        businessType: true,
       },
       take: caseStatus ? 30 : 10,
       orderBy: { updatedAt: "desc" },

@@ -109,6 +109,7 @@ const ALWAYS_SAFE_KEYS: ReadonlySet<string> = new Set([
   "resendOnly", // 再送候補フィルタ("1" のみ・非PIIのフラグ)。⚠route の AUDIT_FILTER_KEYS に足すだけでは表示で [REDACTED] になる(PR-C)。
   "caseStatus",
   "introductionRoute",
+  "businessType", // 取扱区分の絞り込み(仲介/買取再販/未定の固定値・非PII・2026-11-04)。
   "leadExclusion", // 除外申請の絞り込み(固定の4値・非PII)。
   "assignedTo",
   "updatedFrom",

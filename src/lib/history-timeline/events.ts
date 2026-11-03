@@ -7,7 +7,8 @@ import { REACTION_LABELS } from "@/lib/dm-reaction/core";
 import { redactPropertyChangeValue } from "@/lib/inquirer-name";
 import type { OwnerMemoBodyVisibility } from "@/lib/owner-memo";
 import { isMaskFreeLevel, maskValue, type OwnerDisplayConfigShape } from "@/lib/permissions";
-import { CHANGE_FIELD_LABELS, saleYenHistoryValue } from "@/lib/property-change-labels";
+import { CHANGE_FIELD_LABELS, propertyHistoryValue } from "@/lib/property-change-labels";
+import { businessTypeLabel } from "@/lib/property-business-type";
 import { propertyDetailHref } from "@/lib/property-detail-tab";
 import { CASE_STATUS_LABELS } from "@/lib/property-types";
 
@@ -281,10 +282,11 @@ function displayValue(row: ChangeRow, value: string | null, ctx: ChangeContext):
   if (UUID.test(value)) return (USER_VALUE_FIELDS.has(row.fieldName) && ctx.userNames.get(value)) || "(表示なし)";
   if (row.targetTable === "properties" && row.fieldName === "caseStatus") return CASE_STATUS_LABELS[value] ?? value;
   if (row.targetTable === "properties") {
-    const yen = saleYenHistoryValue(row.fieldName, value);
-    if (yen !== null) return yen;
+    const shown = propertyHistoryValue(row.fieldName, value);
+    if (shown !== null) return shown;
   }
   if (row.targetTable === "deals" && row.fieldName === "status") return (DEAL_STATUS_LABELS as Record<string, string>)[value] ?? value;
+  if (row.targetTable === "deals" && row.fieldName === "businessType") return businessTypeLabel(value);
   if (value === "true") return "はい";
   if (value === "false") return "いいえ";
   return ISO_DATE_TIME.test(value) && !Number.isNaN(Date.parse(value)) ? JST_DAY.format(new Date(value)) : value;

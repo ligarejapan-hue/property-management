@@ -284,6 +284,8 @@ export async function GET(request: NextRequest) {
       "dmStatus",
       "caseStatus",
       "introductionRoute",
+      // 取扱区分の絞り込み(非PIIの固定値・2026-11-04)。
+      "businessType",
       // 除外申請の絞り込み(非PIIの固定値)。
       "leadExclusion",
       "assignedTo",

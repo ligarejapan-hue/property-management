@@ -10,6 +10,7 @@ import { dealsApi, errorText, type DealOptions } from "@/lib/deals/client";
 import { DEAL_BUSINESS_TYPE_LABELS, DEAL_TRADE_SIDE_LABELS } from "@/lib/deals/constants";
 import { searchProperties } from "@/lib/api-client";
 import { CASE_STATUS_LABELS, PROPERTY_TYPE_LABELS } from "@/lib/property-types";
+import { businessTypeLabel, initialDealBusinessType, parseBusinessType } from "@/lib/property-business-type";
 
 /**
  * 新しい取引(設計 §5)。物件は「物件の一覧から選ぶ」か「手で入力する」を選ぶ。
@@ -27,14 +28,25 @@ export default function NewDealPage() {
 
 function NewDealForm() {
   const router = useRouter();
-  const initialPropertyId = useSearchParams().get("propertyId");
+  const searchParams = useSearchParams();
+  const initialPropertyId = searchParams.get("propertyId");
+  // 物件の画面から来たときは、物件の取扱区分(?businessType=)を事業区分の初期値にする(2026-11-04)。
+  const initialBusinessType = initialPropertyId ? parseBusinessType(searchParams.get("businessType")) : null;
   const [source, setSource] = useState<"list" | "manual">("list");
   const [picked, setPicked] = useState<PickedProperty | null>(
-    initialPropertyId ? { id: initialPropertyId, label: "物件の画面から選んだ物件" } : null,
+    initialPropertyId
+      ? { id: initialPropertyId, label: "物件の画面から選んだ物件", businessType: initialBusinessType }
+      : null,
   );
   const propertyId = source === "list" ? picked?.id ?? null : null;
   const [options, setOptions] = useState<DealOptions | null>(null);
-  const [businessType, setBusinessType] = useState("brokerage");
+  const [businessType, setBusinessType] = useState<string>(() => initialDealBusinessType(initialBusinessType));
+  // 一覧から物件を選んだら、その物件の取扱区分を事業区分に入れる(未定なら今の選択のまま)。
+  const pick = (p: PickedProperty) => {
+    setPicked(p);
+    if (p.businessType) setBusinessType(initialDealBusinessType(p.businessType));
+  };
+  const pickedType = source === "list" ? picked?.businessType ?? null : null;
   const [tradeSide, setTradeSide] = useState("");
   const [propertyKind, setPropertyKind] = useState("");
   const [hasOc, setHasOc] = useState(false);
@@ -98,12 +110,17 @@ function NewDealForm() {
                 </Button>
               </div>
             ) : (
-              <PropertyPicker onPick={setPicked} />
+              <PropertyPicker onPick={pick} />
             ))}
         </fieldset>
         <Field label="事業区分">
           <SelectBox label="事業区分" value={businessType} onChange={setBusinessType} options={optionsOf(DEAL_BUSINESS_TYPE_LABELS)} />
         </Field>
+        {pickedType && pickedType !== businessType && (
+          <p role="status" className="text-xs text-amber-700 dark:text-amber-400">
+            物件の取扱区分は「{businessTypeLabel(pickedType)}」です。違う区分で作ると、物件の画面にお知らせが出ます。
+          </p>
+        )}
         {businessType === "brokerage" && (
           <Field label="取引態様">
             <SelectBox label="取引態様" value={tradeSide} onChange={setTradeSide} options={optionsOf(DEAL_TRADE_SIDE_LABELS)} allowEmpty />
@@ -133,12 +150,13 @@ function NewDealForm() {
   );
 }
 
-type PickedProperty = { id: string; label: string };
+type PickedProperty = { id: string; label: string; businessType?: string | null };
 type PropertyHit = {
   id: string;
   address: string;
   lotNumber: string | null;
   propertyType: string;
+  businessType?: string | null;
   buildingName?: string | null;
   roomNo?: string | null;
   caseStatus?: string;
@@ -207,7 +225,7 @@ function PropertyPicker({ onPick }: { onPick: (p: PickedProperty) => void }) {
             <li key={p.id}>
               <Button
                 variant="ghost"
-                onClick={() => onPick({ id: p.id, label: propertyLabel(p) })}
+                onClick={() => onPick({ id: p.id, label: propertyLabel(p), businessType: parseBusinessType(p.businessType) })}
                 className="w-full justify-between text-left"
               >
                 <span className="text-gray-900 dark:text-gray-100">{propertyLabel(p)}</span>

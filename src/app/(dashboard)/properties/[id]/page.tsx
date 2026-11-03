@@ -106,6 +106,8 @@ import { SalesSheetCreateButton } from "@/components/sales-sheet/SalesSheetCreat
 import CaseDatesField from "@/components/properties/case-dates-field";
 import InquirerNameField from "@/components/properties/inquirer-name-field";
 import LeadExclusionField from "@/components/properties/lead-exclusion-field";
+import BusinessTypeField from "@/components/properties/business-type-field";
+import { newDealHref, type PropertyDealSummary } from "@/lib/property-business-type";
 import { SalesSheetList } from "@/components/sales-sheet/SalesSheetList";
 import { salesSheetTemplateKindFor } from "@/lib/sales-sheet/template-kind";
 import { landBuildingAreaRows } from "@/lib/property-area-display";
@@ -246,6 +248,10 @@ interface ApiProperty {
    * null = registry_pdf:preview を持たない閲覧者(=行自体を出さない)。
    */
   registryAttachmentCounts: { owner: number; all: number; other: number } | null;
+  /** 取扱区分(brokerage/resale・null=未定・2026-11-04)。 */
+  businessType?: string | null;
+  /** この物件の取引。null=取引を見る権限が無い(取引の行を出さない)。 */
+  deals?: PropertyDealSummary[] | null;
   dmStatus: string;
   caseStatus: string;
   /** 契約予定日・決済予定日("YYYY-MM-DD"・未定は null)。案件ステータス 8〜10 のときだけ欄が出る。 */
@@ -849,7 +855,7 @@ export default function PropertyDetailPage({
   // 「その他 ▾」の中身(画面すっきり化 第3回)。出す条件は表に置いていたときと同じ。
   const moreMenuItems: MenuItem[] = [
     ...(canCreateDeal
-      ? [{ key: "new-deal", label: "この物件で取引を作成", icon: Handshake, href: `/deals/new?propertyId=${property.id}` }]
+      ? [{ key: "new-deal", label: "この物件で取引を作成", icon: Handshake, href: newDealHref(property.id, property.businessType) }]
       : []),
     // DM 送付履歴ページは property:read + owner:read + record-scope を要するため canReadOwner で出し分ける(403 の行き止まりを避ける)。
     ...(canReadOwner
@@ -1224,6 +1230,7 @@ function BasicTab({
         label="種別"
         value={PROPERTY_TYPE_LABELS[property.propertyType] ?? property.propertyType}
       />
+      <BusinessTypeField businessType={property.businessType} deals={property.deals} />
 
       {/* Building link for units(物件名が空の旧データだけ。物件名があれば物件名がリンクになる) */}
       {isUnit && property.building && !property.buildingName && (
@@ -1408,7 +1415,7 @@ function BasicTab({
       {canCreateDeal && property.caseStatus === "contract_planned" && (
         <div className="md:col-span-2">
           <Link
-            href={`/deals/new?propertyId=${property.id}`}
+            href={newDealHref(property.id, property.businessType)}
             className="inline-flex items-center gap-1.5 rounded-md bg-indigo-600 px-3 py-1.5 text-sm font-medium text-white hover:bg-indigo-700 focus:outline-none focus:ring-2 focus:ring-indigo-500 focus:ring-offset-2 dark:focus:ring-offset-gray-900"
           >
             <Handshake className="h-4 w-4" />

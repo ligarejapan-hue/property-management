@@ -43,6 +43,7 @@ import {
 } from "@/lib/lead-exclusion";
 import { syncDealFromCaseStatus } from "@/lib/deals/status-link";
 import { syncDealScheduleAfterCaseStatus } from "@/lib/deals/schedule-sync";
+import { summarizePropertyDeals } from "@/lib/property-business-type";
 
 // ---------- GET /api/properties/[id] ----------
 
@@ -203,6 +204,22 @@ export async function GET(
       registryAttachmentCounts = counts;
     }
 
+    // この物件の取引(取扱区分の横に並べる・2026-11-04)。⚠取引を見る権限(deal:read)が無い人には
+    // null を返す(問い合わせも投げない)=画面は取引の行を出さない。返すのは番号・区分・状態・仕入/売却だけ。
+    const deals = hasPermission(permissions, "deal", "read")
+      ? summarizePropertyDeals(
+          await prisma.deal.findMany({
+            where: { propertyId: id },
+            orderBy: { createdAt: "desc" },
+            take: 20,
+            select: {
+              id: true, dealNo: true, businessType: true, status: true,
+              parties: { where: { isSelf: true }, select: { role: true, isSelf: true } },
+            },
+          }),
+        )
+      : null;
+
     return apiResponse({
       // 問い合わせ者(個人情報)は owner:read がある人にだけ・所有者の氏名と同じ表示レベルで返す。
       ...applyInquirerNameVisibility(property, ownerDisplayConfig?.name ?? null),
@@ -214,6 +231,7 @@ export async function GET(
       propertyOwners: maskedPropertyOwners,
       importSource,
       registryAttachmentCounts,
+      deals,
     });
   } catch (error) {
     return handleApiError(error);
@@ -275,6 +293,8 @@ export async function PATCH(
         contractPlannedOn: true,
         settlementPlannedOn: true,
         introductionRoute: true,
+        // 取扱区分(変更履歴の「変更前」に使う)。
+        businessType: true,
         // 問い合わせ者・除外申請(変更履歴の「変更前」・除外申請の日付の補いに使う)。
         inquirerName: true,
         leadExclusionStatus: true,

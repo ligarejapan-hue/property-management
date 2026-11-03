@@ -41,6 +41,8 @@ vi.mock("@/lib/prisma", () => ({
     importJobRow: { findFirst: vi.fn() },
     // GET は謄本添付の件数を groupBy で集計する(基本情報の「謄本 ○件」行)。
     attachment: { groupBy: vi.fn() },
+    // 取扱区分の横に並べる取引(2026-11-04)。中身は property-deals-summary.test.ts。
+    deal: { findMany: vi.fn(async () => []) },
   },
 }));
 

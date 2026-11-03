@@ -5,6 +5,7 @@ import { X, Save, AlertTriangle } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { USE_MOCK, fetchUsers, apiErrorCode, codeFromErrorBody } from "@/lib/api-client";
 import { OCCUPANCY_STATUS_OPTIONS, PROPERTY_TYPE_OPTIONS } from "@/lib/property-types";
+import { PROPERTY_BUSINESS_TYPE_OPTIONS } from "@/lib/property-business-type";
 import {
   BUILDING_NAME_MAX_LENGTH,
   supportsBuildingName,
@@ -60,6 +61,8 @@ interface PropertyData {
   realEstateNumber: string | null;
   registryStatus: string;
   dmStatus: string;
+  /** 取扱区分(brokerage/resale・null=未定・2026-11-04)。 */
+  businessType?: string | null;
   gpsLat: number | null;
   gpsLng: number | null;
   zoningDistrict: string | null;
@@ -415,6 +418,8 @@ const FORM_FIELDS: FormField[] = [
   //   **空にする手段が画面に無ければ本当の行き止まりになる**(@codex #420 P1)。
   //   よって「元から値がある物件でだけ出る、消すだけの欄」を残す。
   { key: "realEstateNumber", label: "不動産番号", type: "clearOnly", section: "基本" },
+  // 取扱区分(仲介/買取再販・2026-11-04 発注者)。取引を作るときの初期値になる。
+  { key: "businessType", label: "取扱区分", type: "select", section: "基本", options: PROPERTY_BUSINESS_TYPE_OPTIONS },
   { key: "registryStatus", label: "登記状況", type: "select", section: "基本", options: [
     { value: "unconfirmed", label: "未取得" },
     { value: "scheduled", label: "取得中" },

@@ -17,6 +17,7 @@ import {
 import prisma from "@/lib/prisma";
 import { resolveMgmtIdMatches } from "@/lib/property-mgmt-id-search";
 import { buildLeadExclusionWhere, jstTodayDateOnly } from "@/lib/lead-exclusion";
+import { businessTypeWhere } from "@/lib/property-business-type";
 import { propertyListQuerySchema } from "@/lib/validators";
 import type { z } from "zod";
 
@@ -81,6 +82,7 @@ export async function buildPropertyListWhere(
     dmSentMax,
     caseStatus,
     introductionRoute,
+    businessType,
     leadExclusion,
     assignedTo,
     ownerId,
@@ -108,6 +110,8 @@ export async function buildPropertyListWhere(
   if (undeliverable === "1") where.dmUndeliverableAt = { not: null };
   if (caseStatus) where.caseStatus = caseStatus;
   if (introductionRoute) where.introductionRoute = introductionRoute;
+  // 取扱区分(仲介 / 買取再販 / 未定=空)。
+  if (businessType) where.businessType = businessTypeWhere(businessType);
   // 除外申請(申請中 / 申請中で7日以上 / 除外された / 認められなかった)。
   // ⚠「7日以上」の今日(JST)はここで1回だけ決める(1つの判定で時計を2回読まない)。
   // ⚠AND に足す(keyword の OR と混ぜない)。

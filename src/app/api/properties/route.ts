@@ -80,6 +80,8 @@ export async function GET(request: NextRequest) {
             contractPlannedOn: true,
             settlementPlannedOn: true,
             introductionRoute: true,
+            // 取扱区分(取引の作成画面で物件を選んだときの事業区分の初期値・2026-11-04)。
+            businessType: true,
             // 一覧の「問い合わせ者／所有者」の列(個人情報=下で owner:read と表示レベルを通す)。
             inquirerName: true,
             // 一覧の案件ステータスの横の「除外申請中 N日」の札。
