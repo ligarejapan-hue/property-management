@@ -118,6 +118,11 @@ export async function POST(request: NextRequest, { params }: { params: Promise<{
         throw new ApiError(403, "取引を見る権限がないため、取引を選んで入れられません", "FORBIDDEN");
       }
       dealScope = parsed;
+      // ⚠保存する前にも確かめる(断ったときに保存先へファイルを残さない・@codex P2)。確定はロックの中でもう一度。
+      if (parsed.dealId) {
+        const deal = await prisma.deal.findFirst({ where: { id: parsed.dealId, propertyId }, select: { id: true } });
+        if (!deal) throw new ApiError(422, "この物件の取引ではありません", "VALIDATION_ERROR");
+      }
     }
 
     const original = Buffer.from(await file.arrayBuffer());

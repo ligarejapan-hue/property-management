@@ -262,5 +262,7 @@ describe("split — 入れるときに選んだ取引(2026-11-04)", () => {
     tx.deal.findFirst.mockResolvedValueOnce(null);
     expect((await SPLIT(await req("split", { segments: JSON.stringify(SEGMENTS), dealScope: D1 }), params)).status).toBe(422);
     expect(db.attachment.create).not.toHaveBeenCalled();
+    // 断ったときは保存先にも置かない(分ける前に確かめる・@codex P2)。
+    expect(storageStub.upload).not.toHaveBeenCalled();
   });
 });

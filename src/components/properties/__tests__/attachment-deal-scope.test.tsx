@@ -56,6 +56,10 @@ describe("添付タブの配線(ソース)", () => {
   it("入れるときの取引は通常の添付にだけ付ける(謄本には付けない)", () => {
     expect(tab).toContain('scopeEnabled && type === "general" && uploadScope !== "" ? uploadScope : null');
   });
+  it("分けて保存・書類を撮ったときも選んだ取引を付ける(@codex P2)", () => {
+    expect(tab).toContain('dealScope: scopeEnabled && uploadScope !== "" ? uploadScope : null,');
+    expect(tab).toMatch(/handleScanSaved[\s\S]{0,600}saveScopes\(\[\{ attachmentId: result\.id, scope: uploadScope \}\]\)/);
+  });
   it("通常の添付と謄本の両方の行に取引の欄", () => {
     expect(tab.match(/scopeControl=\{scopeControl\(att\)\}/g)?.length).toBe(2);
   });

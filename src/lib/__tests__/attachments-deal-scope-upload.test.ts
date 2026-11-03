@@ -115,11 +115,12 @@ describe("入れるときの取引(POST)", () => {
     expect("dealId" in created()).toBe(false);
     expect("dealCommon" in created()).toBe(false);
   });
-  it("ほかの物件の取引は 422・読めない指定も 422(作らない)", async () => {
+  it("ほかの物件の取引は 422・読めない指定も 422(作らない・保存先にも置かない)", async () => {
     db.deal.findFirst.mockResolvedValue(null);
     expect((await POST(await req(D1), params)).status).toBe(422);
     expect((await POST(await req("xyz"), params)).status).toBe(422);
     expect(db.attachment.create).not.toHaveBeenCalled();
+    expect(storageStub.upload).not.toHaveBeenCalled();
   });
   it("取引を見る権限が無い人が取引を選ぶと 403(作らない)", async () => {
     permsState.dealRead = false;

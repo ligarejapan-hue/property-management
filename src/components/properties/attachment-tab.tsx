@@ -549,6 +549,10 @@ export default function AttachmentTab({
     const kind = docKindByCode(result.docKind);
     const stage = kind ? DOC_STAGES.find((s) => s.code === kind.stage) : undefined;
     scanMoveRef.current = { attachmentId: result.id, originals, uploaded: 0 };
+    // 「入れる書類の取引」を選んでいたら、撮った書類にも付ける(@codex P2)。一覧の読み直しは saveScopes が行う。
+    if (scopeEnabled && uploadScope !== "") {
+      void saveScopes([{ attachmentId: result.id, scope: uploadScope }]);
+    }
     setScanNotice({
       kind: "saved",
       pages: result.scan.pages,
