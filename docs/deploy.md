@@ -714,16 +714,20 @@ gh run list -R $R --workflow deploy.yml --limit 20 \
 gh run watch <databaseId> -R $R --exit-status
 #    待ち終わったら 1 をもう一度流し、何も出なくなるまで繰り返す。
 #    完了した回が反映した版（headSha）が、今回反映したい main の最新と同じなら、起動し直さなくてよい。
-# 3. 起動する（migration があるときは先に §6 の手順 3.5 のバックアップを取り、inputs[migrate]=true）
+# 3. 起動する（1 回だけ。migration があるときは先に §6 の手順 3.5 のバックアップを取り、inputs[migrate]=true）
+T=$(date -u +%Y-%m-%dT%H:%M:%SZ)   # 起動の直前の時刻を控える（4 で使う）
 gh api repos/$R/actions/workflows/deploy.yml/dispatches \
   -X POST -f ref=main -f 'inputs[confirm]=deploy' -F 'inputs[migrate]=false'
-# 4. いま起動した回を見つけて、完了まで見る
-gh run list -R $R --workflow deploy.yml --limit 1 --json databaseId,status,headSha,createdAt
-gh run watch <databaseId> -R $R --exit-status
+# 4. いま起動した回（T より後に作られた回）が一覧に出るまで、この手順だけを繰り返す。見つかったら完了まで見る
+until ID=$(gh run list -R $R --workflow deploy.yml --event workflow_dispatch --limit 5 \
+    --json databaseId,createdAt --jq "[.[] | select(.createdAt >= \"$T\")] | last | .databaseId // empty") && [ -n "$ID" ]; do
+  sleep 10
+done
+gh run watch "$ID" -R $R --exit-status
 ```
 
 - 1 で別の人・別のセッションの実行が見つかったときは、取り消さずに完了を待つ（途中で止めると build や再起動の途中で終わることがある）。
-- 4 で見つけた回の `createdAt` が 3 の直前より古いときは、まだ新しい回が一覧に出ていない。数秒おいて 1 から見直す。
+- 3 の起動が成功したら（`gh api` がエラーを返さなければ）、**起動し直さない**。新しい回が一覧に出るまで数秒〜数十秒かかることがあるので、4 の繰り返しで待つ（1 や 3 に戻ると、同じ反映をもう一度起動してしまう）。3 が失敗したときだけ、原因を見てから 1 からやり直す。
 
 - 画面から: Actions → **Deploy (production)** → Run workflow（branch は `main`）→ confirm に `deploy`、migration があるときだけ `migrate` にチェック（先に §6 の手順 3.5 でバックアップを取る）→ Run。
 - Claude Code から（ユーザーの明示指示があるときだけ）:
