@@ -56,8 +56,17 @@ describe("本番反映の鍵(2つの経路で共通)", () => {
 const hasFlock = spawnSync("bash", ["-c", "command -v flock"], { encoding: "utf8" }).status === 0;
 describe.skipIf(!hasFlock)("鍵の動き(実際に flock する)", () => {
   const start = local.indexOf(`LOCK=${LOCK}`);
-  const end = local.indexOf("cd /opt/property-management");
+  // on_err の中にも同じ文字列があるので、鍵の宣言より後ろから探す(@codex #647 P1)
+  const end = local.indexOf("\ncd /opt/property-management", start);
   const block = local.slice(start, end);
+
+  it("抜き出した部分が鍵の処理そのもの(空振りしない)", () => {
+    expect(start).toBeGreaterThan(-1);
+    expect(end).toBeGreaterThan(start);
+    expect(block).toContain('exec 9>"$LOCK"');
+    expect(block).toContain('flock -w "$LOCK_WAIT" 9');
+    expect(block).toContain("/root/pm-deploy.lock");
+  });
 
   function run(holdSeconds: number, lockWait: number) {
     const dir = fs.mkdtempSync(path.join(os.tmpdir(), "pm-lock-"));
@@ -110,6 +119,16 @@ describe("migration がある回のバックアップ", () => {
     expect(statusAt).toBeGreaterThan(-1);
     expect(statusAt).toBeLessThan(local.indexOf("pg_dump"));
     expect(local).toMatch(/if \[ -n "\$\(\$G diff --name-only "\$OLD" HEAD -- prisma\/migrations\)" \] \|\| ! \$WE \.\/node_modules\/\.bin\/prisma migrate status/);
+  });
+});
+
+describe(".next の退避", () => {
+  it("退避は cp が成功してから BAK に入れる(半端な退避で本番の .next を上書きしない・@codex #647 P2)", () => {
+    const cpAt = local.indexOf('cp -a .next "$BAK_TRY"');
+    const setAt = local.indexOf('BAK="$BAK_TRY"');
+    expect(cpAt).toBeGreaterThan(-1);
+    expect(setAt).toBeGreaterThan(cpAt);
+    expect(local).not.toMatch(/^BAK="\.next\.bak/m);
   });
 });
 

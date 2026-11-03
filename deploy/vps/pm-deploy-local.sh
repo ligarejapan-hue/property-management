@@ -60,8 +60,10 @@ if [ "$WAITED" = 1 ] && [ "$OLD" = "$NEW" ]; then
   echo "SAME_VERSION_AFTER_WAIT $NEW(待っている間に別の反映がこの版まで進めた・念のため作り直す)"
 fi
 $G merge-base --is-ancestor HEAD origin/main
-BAK=".next.bak-$OLD-$(date +%Y%m%d-%H%M%S)"
-sudo -n -u www-data cp -a .next "$BAK"
+# 退避はコピーが成功してから BAK に入れる。途中で失敗した半端な退避で、失敗時の処理が本番の .next を上書きしないように(@codex #647 P2)
+BAK_TRY=".next.bak-$OLD-$(date +%Y%m%d-%H%M%S)"
+sudo -n -u www-data cp -a .next "$BAK_TRY"
+BAK="$BAK_TRY"
 echo "BAK=$BAK"
 $G merge --ff-only origin/main           # 対象は必ず origin/main(full SHA の手打ちは捏造事故の実績あり)
 
