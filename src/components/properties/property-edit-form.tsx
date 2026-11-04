@@ -133,6 +133,8 @@ interface PropertyEditFormProps {
   onSaved: (result?: { buildingLink?: BuildingLinkOutcome | null }) => void;
   /** 小窓にせず、置かれた場所に並べる(取引の画面の横)。 */
   embedded?: boolean;
+  /** 開いたときにその欄まで送る(項目の key・例 saleTaxType)。 */
+  focusField?: string;
 }
 
 interface FormField {
@@ -460,7 +462,14 @@ export default function PropertyEditForm({
   onClose,
   onSaved,
   embedded = false,
+  focusField,
 }: PropertyEditFormProps) {
+  // 開いたときに見せる欄(取引の金額・費用タブから「消費税」を直しに来たとき)。
+  useEffect(() => {
+    if (!focusField) return;
+    const el = document.querySelector(`[data-field-key="${focusField}"]`);
+    el?.scrollIntoView({ block: "center" });
+  }, [focusField]);
   // 作業中の入力の控え(設計書 2026-10-13 §2 S5)。変えた欄だけ+基にした版番号。
   // ⚠版が違えば重ねない(mergeDraftIntoInitial)=ほかの人の保存を古い入力で上書きしない。
   const editDraftKey = draftKey("property-edit", property.id);
@@ -852,6 +861,7 @@ export default function PropertyEditForm({
                   (field) => (
                     <div
                       key={field.key}
+                      data-field-key={field.key}
                       className={
                         field.type === "textarea" ? "md:col-span-2" : ""
                       }

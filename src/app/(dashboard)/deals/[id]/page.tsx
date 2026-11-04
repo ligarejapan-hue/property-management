@@ -63,6 +63,8 @@ export default function DealDetailPage({ params }: { params: Promise<{ id: strin
   // 当事者タブでは所有者を自動で横に出す。閉じたら、押して開くまで出さない。
   const [partiesSideClosed, setPartiesSideClosed] = useState(false);
   const [sideEditing, setSideEditing] = useState(false);
+  // 外から横の編集を開く合図(0=頼んでいない)。
+  const [sideEditRequest, setSideEditRequest] = useState(0);
   const [crosscheckResult, setCrosscheckResult] = useState<CrosscheckResult | null>(null);
   const wideScreen = useWideScreen();
   const [error, setError] = useState<string | null>(null);
@@ -115,8 +117,11 @@ export default function DealDetailPage({ params }: { params: Promise<{ id: strin
   const propertyId = data.canOpenProperty && deal.propertyId ? deal.propertyId : null;
   // 狭い画面の横の欄は全画面に重なるので、当事者タブでも自動では開かない。
   const sideOpen = propertyId !== null && (sideRequested || (wideScreen && tab === "parties" && !partiesSideClosed));
-  const closeSide = () => { setSideRequested(false); setSideEditing(false); if (tab === "parties") setPartiesSideClosed(true); };
+  // 閉じたら編集の合図も戻す(次に開いたときに勝手に編集を開かない)。
+  const closeSide = () => { setSideRequested(false); setSideEditing(false); setSideEditRequest(0); if (tab === "parties") setPartiesSideClosed(true); };
   const openSide = () => { setSideRequested(true); setPartiesSideClosed(false); };
+  // 金額・費用タブの「物件の販売価格と消費税」の編集=横に物件の編集を開いて消費税の欄へ(2026-11-04 発注者)。
+  const editSaleTax = () => { openSide(); setSideEditing(true); setSideEditRequest((n) => n + 1); };
   const sideView = tab === "parties" ? "owners" : "property";
   // 編集の入力欄は狭いと使いにくいので、編集中だけ左右を半分ずつにする。
   const sideGrid = sideEditing ? "lg:grid-cols-2" : "lg:grid-cols-[minmax(0,1fr)_22rem]";
@@ -180,7 +185,9 @@ export default function DealDetailPage({ params }: { params: Promise<{ id: strin
           <DealPartiesPanel deal={deal} selfParty={options?.selfParty ?? null} canOpenProperty={data.canOpenProperty} sellerMismatch={sellerNameMismatch(crosscheckResult)} onSaved={reload} />
         </div>
         <div hidden={tab !== "money"}>
-          <DealMoneyPanel key={k([deal.price, deal.deposit, deal.taxRateBp, deal.costs, pickOverrides(deal.overrides, MONEY_OVERRIDE_KEYS)])} deal={deal} calc={calc} onSaved={reload} />
+          <DealMoneyPanel key={k([deal.price, deal.deposit, deal.taxRateBp, deal.costs, pickOverrides(deal.overrides, MONEY_OVERRIDE_KEYS)])} deal={deal} calc={calc} onSaved={reload}
+            // 横の編集を閉じたら読み直す(sideEditing が変わる)。
+            property={propertyId ? { id: propertyId, revision: String(sideEditing), canEdit: data.canMoveCaseStatus, onEdit: editSaleTax } : null} />
         </div>
         <div hidden={tab !== "settlement"}>
           <DealSettlementPanel key={k([{ ...deal.settlementTerms, depositMode: null }, pickOverrides(deal.overrides, SETTLEMENT_OVERRIDE_KEYS)])} deal={deal} calc={calc} onSaved={reload} />
@@ -204,6 +211,8 @@ export default function DealDetailPage({ params }: { params: Promise<{ id: strin
           view={sideView}
           canEdit={data.canMoveCaseStatus}
           onEditingChange={setSideEditing}
+          editRequest={sideEditRequest}
+          focusField="saleTaxType"
           onClose={closeSide}
         />
       )}
