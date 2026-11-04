@@ -603,8 +603,10 @@ export function buildCrosscheck(input: CrosscheckInput): CrosscheckResult {
       || (i.key === "mortgage" && i.sources.some((s) => s.key === "registry" && s.state === "unverifiable"))
     ))
   );
+  // 片方が未入力の項目が残っていれば、種類を問わず照合OKと出さない(2026-11-04 発注者指示)。
+  const hasMissing = items.some((i) => i.status === "missing");
   return {
-    summary: mismatchCount > 0 ? "mismatch" : comparedCount === 0 ? "none" : unconfirmed ? "incomplete" : "ok",
+    summary: mismatchCount > 0 ? "mismatch" : comparedCount === 0 ? "none" : unconfirmed || hasMissing ? "incomplete" : "ok",
     mismatchCount, comparedCount, items, notices, registries,
   };
 }

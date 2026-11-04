@@ -17,11 +17,12 @@ const render = (i: CrosscheckInput, canOpenProperty = true) => renderToStaticMar
 const read = (p: string) => readFileSync(join(process.cwd(), p), "utf8").replace(/\r\n/g, "\n");
 
 describe("照合の表示", () => {
-  it("一致だけ=照合OK(閉じて出す)・未確認の件数を添える", () => {
+  it("一致があっても片方が未入力が残れば照合OKと出さず、確認できていない項目がありますと未確認の件数を出す(開いて出す・2026-11-04)", () => {
     const html = render(input());
-    expect(html).toContain("照合OK");
+    expect(html).not.toContain("照合OK");
+    expect(html).toContain("確認できていない項目があります");
     expect(html).toContain("未確認");
-    expect(html).not.toContain("<details open");
+    expect(html).toContain("<details open");
   });
   it("不一致=N件の食い違い(開いて出す)・出どころと値", () => {
     const html = render(input({ snapshot: { floorArea: 70, landArea: null } }));

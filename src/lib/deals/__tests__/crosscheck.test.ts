@@ -302,11 +302,16 @@ describe("土地のある物件の謄本(土地と建物の両方が要る)", ()
   });
   const check = (activeRights: number) => doc({ docType: "checklist_settlement", title: "書類確認書(決済時)", activeRights });
 
-  it("両方そろえば担保も売主も比べて照合OK", () => {
-    const input = house({ registry: both(), documents: [check(0)] });
+  it("両方そろえば担保も売主も比べて照合OK(片方が未入力の項目も無いとき)", () => {
+    const input = house({
+      registry: both(),
+      documents: [check(0), doc({ documentId: "doc-2", price: 30_000_000, settlementDate: "2026-11-30", floorArea: 91.05, landArea: 120.5 })],
+    });
     expect(item(input, "mortgage").status).toBe("match");
     expect(item(input, "seller").status).toBe("match");
-    expect(buildCrosscheck(input).summary).toBe("ok");
+    const r = buildCrosscheck(input);
+    expect(r.items.filter((i) => i.status === "missing").map((i) => i.key)).toEqual([]);
+    expect(r.summary).toBe("ok");
   });
   it("建物の謄本が無い: 担保と所有者は確認できない・照合OKにしない", () => {
     const input = house({ registry: both({ missing: ["建物"] }), documents: [check(0)] });
@@ -513,8 +518,14 @@ describe("全体の結果", () => {
     expect(r.summary).toBe("none");
     expect(r.comparedCount).toBe(0);
   });
-  it("一致があり不一致が無い=ok・不一致があれば mismatch と件数", () => {
-    expect(buildCrosscheck(base()).summary).toBe("ok");
+  it("片方が未入力の項目が残っていれば、区分でも照合OKにしない(2026-11-04 発注者指示)", () => {
+    const r = buildCrosscheck(base());
+    expect(r.items.some((i) => i.status === "match")).toBe(true);
+    expect(r.items.some((i) => i.status === "missing")).toBe(true);
+    expect(r.mismatchCount).toBe(0);
+    expect(r.summary).toBe("incomplete");
+  });
+  it("不一致があれば mismatch と件数", () => {
     const r = buildCrosscheck(base({ snapshot: { floorArea: 1, landArea: null }, documents: [doc({ price: 1 })] }));
     expect(r.summary).toBe("mismatch");
     expect(r.mismatchCount).toBe(2);
