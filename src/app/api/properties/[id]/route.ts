@@ -213,7 +213,7 @@ export async function GET(
             orderBy: { createdAt: "desc" },
             take: 20,
             select: {
-              id: true, dealNo: true, businessType: true, status: true,
+              id: true, dealNo: true, businessType: true, status: true, settlementAt: true, createdAt: true,
               parties: { where: { isSelf: true }, select: { role: true, isSelf: true } },
             },
           }),

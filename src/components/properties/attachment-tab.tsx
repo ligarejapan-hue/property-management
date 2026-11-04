@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useEffect, useCallback, useRef } from "react";
+import { useState, useEffect, useCallback, useRef, type ReactNode } from "react";
 import { ConfirmDialog } from "@/components/ui/confirm-dialog";
 import FileDropZone from "@/components/ui/file-drop-zone";
 import { Button } from "@/components/ui/button";
@@ -27,6 +27,7 @@ import {
   fetchAttachments as apiFetchAttachments,
   deleteAttachment,
   saveSplitPdf,
+  updateAttachmentDealScope,
   updateAttachmentKind,
   uploadFile,
   applyRegistryBasicInfo,
@@ -34,6 +35,8 @@ import {
   type ScanUploadResult,
 } from "@/lib/api-client";
 import SplitPdfDialog from "@/components/properties/split-pdf-dialog";
+import { DealScopeBar, DealScopeSelect, UploadScopeSelect } from "@/components/properties/attachment-deal-scope";
+import { estimatedAssignments, filterByScope, splitDealsOf, type ScopeDeal } from "@/lib/attachments/deal-scope";
 import {
   bundleHasRegistry,
   dropKindOf,
@@ -89,6 +92,9 @@ interface AttachmentData {
   docKind?: string | null;
   docTitle?: string | null;
   docConfidence?: string | null;
+  /** どの取引の書類か(2026-11-04)。dealCommon=true は共通・両方空は未区分。 */
+  dealId?: string | null;
+  dealCommon?: boolean;
 }
 
 /** 保存してよい上限(20MB・2026-10-19 発注者決定・謄本も同じ)。値はサーバーと同じ定数から。 */
@@ -154,7 +160,13 @@ export default function AttachmentTab({
   caseStatus = null,
   occupancyStatus = null,
   canApplyRegistry = false,
+  deals = null,
 }: {
+  /**
+   * この物件の取引(物件の画面が受け取ったもの)。null=取引を見る権限が無い。
+   * 仕入か売却の分かる取引があるときだけ、添付を取引で分ける(買取再販・2026-11-04 発注者 案A)。
+   */
+  deals?: readonly ScopeDeal[] | null;
   /** 現況。賃貸中(rented)のときだけ「⑤ 賃貸関係」のフォルダを空でも出す。 */
   occupancyStatus?: string | null;
   propertyId: string;
@@ -214,6 +226,13 @@ export default function AttachmentTab({
   // （@codex #395 R7 P2）。独自の世代ガードだと、**新しい取り直しが失敗しただけ**で
   // 先に届いていた使える一覧を捨て、タブが空/古いままエラーになる。
   const refreshStateRef = useRef(createRefreshState());
+  // 取引で分ける(買取再販の仕入/売却)。分けられる取引が無い物件では何も出さない。
+  const scopeDeals = deals ? splitDealsOf(deals) : [];
+  const scopeEnabled = scopeDeals.length > 0;
+  const [scopeFilter, setScopeFilter] = useState("all");
+  // 入れるときの取引(空=あとで決める)。
+  const [uploadScope, setUploadScope] = useState("");
+  const [scopeSaving, setScopeSaving] = useState(false);
 
   const fetchAttachmentsData = useCallback(async (options?: { silent?: boolean }) => {
     const ticket = beginRefresh(
@@ -276,7 +295,9 @@ export default function AttachmentTab({
     }
     setCompressing(compressible && file.size > MAX_FILE_SIZE);
     try {
-      const saved = await uploadFile(propertyId, file, "attachment", { attachmentType: type });
+      // 選んだ取引は通常の添付にだけ付ける(謄本は共通として扱う)。
+      const dealScope = scopeEnabled && type === "general" && uploadScope !== "" ? uploadScope : null;
+      const saved = await uploadFile(propertyId, file, "attachment", { attachmentType: type, dealScope });
       if (saved.registryNotice) onRegistryNotice?.(saved.registryNotice);
       return null;
     } catch (err) {
@@ -506,11 +527,32 @@ export default function AttachmentTab({
     }
   };
 
+  /** どの取引の書類かを決める(1件・まとめて)。一覧を静かに読み直す。 */
+  const saveScopes = async (items: Array<{ attachmentId: string; scope: string | null }>) => {
+    if (scopeSaving || items.length === 0) return;
+    setScopeSaving(true);
+    try {
+      // 窓口は1回 500 件まで。
+      for (let i = 0; i < items.length; i += 500) {
+        await updateAttachmentDealScope(propertyId, items.slice(i, i + 500));
+      }
+      await fetchAttachmentsData({ silent: true });
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "取引の変更に失敗しました");
+    } finally {
+      setScopeSaving(false);
+    }
+  };
+
   /** 書類を撮って PDF にした。種類の判別の結果を知らせ、一覧を静かに読み直す。 */
   const handleScanSaved = async (result: ScanUploadResult, originals: readonly Blob[]) => {
     const kind = docKindByCode(result.docKind);
     const stage = kind ? DOC_STAGES.find((s) => s.code === kind.stage) : undefined;
     scanMoveRef.current = { attachmentId: result.id, originals, uploaded: 0 };
+    // 「入れる書類の取引」を選んでいたら、撮った書類にも付ける(@codex P2)。一覧の読み直しは saveScopes が行う。
+    if (scopeEnabled && uploadScope !== "") {
+      void saveScopes([{ attachmentId: result.id, scope: uploadScope }]);
+    }
     setScanNotice({
       kind: "saved",
       pages: result.scan.pages,
@@ -552,8 +594,19 @@ export default function AttachmentTab({
     );
   }
 
-  const registryAttachments = attachments.filter((a) => a.type === "registry");
-  const generalAttachments = attachments.filter((a) => a.type !== "registry");
+  // 取引で絞り込んだ一覧(分けない物件は全部)。
+  const shown = scopeEnabled ? filterByScope(attachments, scopeDeals, scopeFilter) : attachments;
+  const registryAttachments = shown.filter((a) => a.type === "registry");
+  const generalAttachments = shown.filter((a) => a.type !== "registry");
+  const scopeControl = (att: AttachmentData) =>
+    scopeEnabled ? (
+      <DealScopeSelect
+        att={att}
+        deals={scopeDeals}
+        saving={scopeSaving}
+        onChange={(scope) => void saveScopes([{ attachmentId: att.id, scope }])}
+      />
+    ) : undefined;
   // 最初に開いておく段階。その段階が空のときは「その他」に中身があればそちらも開く(古い添付が隠れないように)。
   const openStage = defaultOpenStage(caseStatus);
   const openStageEmpty = !generalAttachments.some((a) => a.docStage === openStage);
@@ -582,6 +635,20 @@ export default function AttachmentTab({
               setScanNotice(null);
             }}
           />
+        )}
+
+        {scopeEnabled && (
+          <>
+            <DealScopeBar
+              deals={scopeDeals}
+              items={attachments}
+              filter={scopeFilter}
+              onFilter={setScopeFilter}
+              saving={scopeSaving}
+              onConfirmEstimates={() => void saveScopes(estimatedAssignments(attachments, scopeDeals))}
+            />
+            <UploadScopeSelect deals={scopeDeals} value={uploadScope} onChange={setUploadScope} />
+          </>
         )}
 
         {/* ファイルを入れる枠は1つ(2026-10-28 発注者決定)。謄本・まとめてある PDF・画像もここから。
@@ -693,7 +760,7 @@ export default function AttachmentTab({
         {generalAttachments.length === 0 ? (
           <div className="flex flex-col items-center py-6 text-gray-400 dark:text-gray-500">
             <Paperclip className="mb-2 h-8 w-8" />
-            <p className="text-sm">添付ファイルはまだありません</p>
+            <p className="text-sm">{scopeEnabled && scopeFilter !== "all" ? "この取引の添付はありません" : "添付ファイルはまだありません"}</p>
           </div>
         ) : (
           // 段階ごとのフォルダ(①調査資料等 ②管理関係 ③契約関係 ④決済関係 ⑤賃貸関係[賃貸中のときだけ] 本人確認 その他)。
@@ -728,6 +795,7 @@ export default function AttachmentTab({
                         onDeleteClick={() => setDeleteTargetId(att.id)}
                         onKindChange={(kind) => void handleKindChange(att.id, kind)}
                         kindSaving={kindSavingId === att.id}
+                        scopeControl={scopeControl(att)}
                       />
                     ))}
                   </div>
@@ -761,6 +829,7 @@ export default function AttachmentTab({
                 onDeleteClick={() => setDeleteTargetId(att.id)}
                 onApplyRegistry={canApplyRegistry ? () => void handleApplyRegistry(att.id) : undefined}
                 applyingRegistry={applyingRegistryId === att.id}
+                scopeControl={scopeControl(att)}
               />
             ))}
           </div>
@@ -789,6 +858,7 @@ export default function AttachmentTab({
           onSave={async (segments) => {
             const r = await saveSplitPdf(propertyId, splitTarget.file, segments, {
               containsRegistry: bundleHasRegistry(splitTarget.analysis.pageKinds, segments),
+              dealScope: scopeEnabled && uploadScope !== "" ? uploadScope : null,
             });
             finishSplit({ kind: "split", parts: r.parts, registryParts: r.registryParts, registryNotice: r.registryNotice });
           }}
@@ -821,7 +891,10 @@ function AttachmentRow({
   kindSaving = false,
   onApplyRegistry,
   applyingRegistry = false,
+  scopeControl,
 }: {
+  /** どの取引の書類かの欄(取引で分ける物件だけ)。 */
+  scopeControl?: ReactNode;
   att: AttachmentData;
   onPreviewClick: () => void;
   onDeleteClick: () => void;
@@ -935,6 +1008,7 @@ function AttachmentRow({
             )}
           </label>
         )}
+        {scopeControl}
       </div>
       <div data-testid="attachment-row-actions" className="ml-auto flex shrink-0 items-center gap-3">
       {previewable && (

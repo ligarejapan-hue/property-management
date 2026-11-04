@@ -990,9 +990,15 @@ model Attachment {
   propertyId String?   @map("property_id") @db.Uuid
   owner      Owner?    @relation(fields: [ownerId], references: [id])
   ownerId    String?   @map("owner_id") @db.Uuid
+  /// どの取引の書類か(買取再販の仕入/売却を分ける・2026-11-04 発注者 案A)。dealCommon=true は「共通」(謄本・調査資料など)。
+  /// 両方とも空=未区分(画面は仕入の決済日から推定して出し、人が確定する)。取引は消さない運用だが、消えたら未区分に戻る。
+  dealId     String?   @map("deal_id") @db.Uuid
+  deal       Deal?     @relation(fields: [dealId], references: [id], onDelete: SetNull)
+  dealCommon Boolean   @default(false) @map("deal_common")
 
   @@index([targetType, targetId])
   @@index([isDeleted, type, deletedAt])
+  @@index([dealId])
   @@map("attachments")
 }
 
@@ -2336,6 +2342,7 @@ model Deal {
   documents     DealDocument[]
   scheduleItems DealScheduleItem[]
   docLinks      DealDocLink[]
+  attachments   Attachment[]
 
   @@index([status, settlementAt])
   @@index([businessType])

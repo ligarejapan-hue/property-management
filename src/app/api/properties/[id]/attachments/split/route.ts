@@ -26,6 +26,7 @@ import { fitPdfToLimit } from "@/lib/pdf-compress/fit";
 import { isPdfBuffer } from "@/lib/pdf-extract";
 import { docColumnsForKnownKind, type DocColumns } from "@/lib/doc-classify/assign";
 import { splitPdfByRanges } from "@/lib/pdf-split/run";
+import { parseScopeInput } from "@/lib/attachments/deal-scope";
 import {
   BUNDLE_ORIGINAL_KIND,
   MAX_SPLIT_PAGES,
@@ -107,6 +108,22 @@ export async function POST(request: NextRequest, { params }: { params: Promise<{
     //   読んだページの種類から付ける印(containsRegistry)でも見る(@codex #604 P1)。
     const hasRegistry = segments.some((s) => s.kind === REGISTRY_KIND) || formData.get("containsRegistry") === "1";
     const baseName = hasRegistry ? GENERIC_BUNDLE_NAME : originalName;
+    // どの取引の書類か(添付の POST と同じ・2026-11-04)。謄本の部分には付けない(共通として扱う)。
+    let dealScope: { dealId: string | null; dealCommon: boolean } | null = null;
+    const rawScope = formData.get("dealScope");
+    if (typeof rawScope === "string" && rawScope !== "") {
+      const parsed = parseScopeInput(rawScope);
+      if (!parsed) throw new ApiError(422, "取引の指定が読めません", "VALIDATION_ERROR");
+      if (!hasPermission(perms, "deal", "read")) {
+        throw new ApiError(403, "取引を見る権限がないため、取引を選んで入れられません", "FORBIDDEN");
+      }
+      dealScope = parsed;
+      // ⚠保存する前にも確かめる(断ったときに保存先へファイルを残さない・@codex P2)。確定はロックの中でもう一度。
+      if (parsed.dealId) {
+        const deal = await prisma.deal.findFirst({ where: { id: parsed.dealId, propertyId }, select: { id: true } });
+        if (!deal) throw new ApiError(422, "この物件の取引ではありません", "VALIDATION_ERROR");
+      }
+    }
 
     const original = Buffer.from(await file.arrayBuffer());
     if (!isPdfBuffer(original)) throw new ApiError(422, "PDFファイルではありません", "VALIDATION_ERROR");
@@ -169,6 +186,10 @@ export async function POST(request: NextRequest, { params }: { params: Promise<{
     //   ⚠ロックの中で既存の名前を読む=同時に入れても同じ名前にならない。
     const created = await prisma.$transaction(async (tx) => {
       await lockPropertyRow(tx, propertyId);
+      if (dealScope?.dealId) {
+        const deal = await tx.deal.findFirst({ where: { id: dealScope.dealId, propertyId }, select: { id: true } });
+        if (!deal) throw new ApiError(422, "この物件の取引ではありません", "VALIDATION_ERROR");
+      }
       const existing = await tx.attachment.findMany({
         where: { targetType: "property", targetId: propertyId, isDeleted: false, docTitle: { not: null } },
         select: { docTitle: true },
@@ -201,6 +222,7 @@ export async function POST(request: NextRequest, { params }: { params: Promise<{
               mimeType: PDF_MIME,
               uploadedBy: session.id,
               ...docColumns,
+              ...(p.type === "general" && dealScope ? dealScope : {}),
             },
             select: { id: true, type: true },
           }),

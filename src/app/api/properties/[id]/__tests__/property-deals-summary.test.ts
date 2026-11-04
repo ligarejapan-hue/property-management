@@ -73,16 +73,17 @@ beforeEach(() => {
 
 describe("GET /api/properties/[id] — 物件の取引", () => {
   it("取引を番号・区分・状態・仕入/売却で返す(この物件の分だけ・自社の当事者だけ読む)", async () => {
+    const created = new Date("2026-03-01T00:00:00.000Z");
     pm.deal.findMany.mockResolvedValue([
-      { id: "d2", dealNo: "2026-0031", businessType: "resale", status: "considering", parties: [{ role: "seller", isSelf: true }] },
-      { id: "d1", dealNo: "2026-0012", businessType: "resale", status: "settled", parties: [{ role: "buyer", isSelf: true }] },
+      { id: "d2", dealNo: "2026-0031", businessType: "resale", status: "considering", settlementAt: null, createdAt: created, parties: [{ role: "seller", isSelf: true }] },
+      { id: "d1", dealNo: "2026-0012", businessType: "resale", status: "settled", settlementAt: new Date("2026-05-30T01:00:00.000Z"), createdAt: created, parties: [{ role: "buyer", isSelf: true }] },
     ]);
     const { status, body } = await callGet();
     expect(status).toBe(200);
     expect(body.businessType).toBe("resale");
     expect(body.deals).toEqual([
-      { id: "d2", dealNo: "2026-0031", businessType: "resale", status: "considering", side: "sale", label: "買取再販(売却)" },
-      { id: "d1", dealNo: "2026-0012", businessType: "resale", status: "settled", side: "purchase", label: "買取再販(仕入)" },
+      { id: "d2", dealNo: "2026-0031", businessType: "resale", status: "considering", side: "sale", label: "買取再販(売却)", settlementAt: null, createdAt: "2026-03-01T00:00:00.000Z" },
+      { id: "d1", dealNo: "2026-0012", businessType: "resale", status: "settled", side: "purchase", label: "買取再販(仕入)", settlementAt: "2026-05-30T01:00:00.000Z", createdAt: "2026-03-01T00:00:00.000Z" },
     ]);
     const arg = pm.deal.findMany.mock.calls[0][0] as { where: unknown; select: { parties: { where: unknown; select: unknown } } };
     expect(arg.where).toEqual({ propertyId: "p1" });

@@ -31,6 +31,7 @@ import {
 import { fitPdfToLimit, reserveLargePdfSlot } from "@/lib/pdf-compress/fit";
 import { extractHeadTextFromPdf, isPdfBuffer } from "@/lib/pdf-extract";
 import { docColumnsForNewAttachment } from "@/lib/doc-classify/assign";
+import { parseScopeInput } from "@/lib/attachments/deal-scope";
 
 const ATTACHMENT_TYPES = ["general", "registry"] as const;
 type AttachmentType = (typeof ATTACHMENT_TYPES)[number];
@@ -151,6 +152,8 @@ export async function POST(
     let classificationText: string | null = null;
     // 謄本PDFの中身(面積を読む・2026-10-25)。ファイルを受け取った謄本のときだけ。
     let registryBuffer: Buffer | null = null;
+    // どの取引の書類か(未指定=未区分)。取引はこの物件のものかをロックの中で確かめる。
+    let dealScope: { dealId: string | null; dealCommon: boolean } | null = null;
 
     if (contentType.includes("multipart/form-data")) {
       // ⚠formData() はボディ全体をメモリに読む。大きいPDF(自動圧縮の対象)を受けるので、
@@ -165,6 +168,21 @@ export async function POST(
       }
 
       attachmentType = normalizeAttachmentType(formData.get("type"));
+      // どの取引の書類か(共通/取引の id・2026-11-04)。空=未区分(あとで決める)。
+      const rawScope = formData.get("dealScope");
+      if (typeof rawScope === "string" && rawScope !== "") {
+        const parsed = parseScopeInput(rawScope);
+        if (!parsed) throw new ApiError(422, "取引の指定が読めません", "VALIDATION_ERROR");
+        if (!hasPermission(perms, "deal", "read")) {
+          throw new ApiError(403, "取引を見る権限がないため、取引を選んで入れられません", "FORBIDDEN");
+        }
+        dealScope = parsed;
+        // ⚠保存する前にも確かめる(断ったときに保存先へファイルを残さない・@codex P2)。確定はロックの中でもう一度。
+        if (parsed.dealId) {
+          const deal = await prisma.deal.findFirst({ where: { id: parsed.dealId, propertyId }, select: { id: true } });
+          if (!deal) throw new ApiError(422, "この物件の取引ではありません", "VALIDATION_ERROR");
+        }
+      }
 
       fileName = (file as File).name ?? "file";
       fileSize = file.size;
@@ -280,6 +298,11 @@ export async function POST(
     //   ロック」の書き込み規約(#364)に全 type で揃える。ロックは作成の一瞬だけ。
     const attachment = await prisma.$transaction(async (tx) => {
       await lockPropertyRow(tx, propertyId);
+      // 選んだ取引は、この物件の取引だけ(別の物件の取引に付けさせない)。
+      if (dealScope?.dealId) {
+        const deal = await tx.deal.findFirst({ where: { id: dealScope.dealId, propertyId }, select: { id: true } });
+        if (!deal) throw new ApiError(422, "この物件の取引ではありません", "VALIDATION_ERROR");
+      }
       // 書類の自動整理(2026-10-23): 謄本以外は名前と本文から段階・種類を当て、名前をそろえる。
       //   当たらなければ4列とも null(=その他・元の名前のまま)。同じ名前には連番。
       //   ⚠ロックの中で既存の名前を読む=同時に2件入れても同じ名前にならない。
@@ -310,6 +333,7 @@ export async function POST(
           mimeType,
           uploadedBy: session.id,
           ...docColumns,
+          ...(dealScope ?? {}),
         },
         include: {
           uploader: { select: { id: true, name: true } },
@@ -326,6 +350,7 @@ export async function POST(
         propertyId,
         fileName,
         ...(originalSize !== null ? { compressedFrom: originalSize, compressedTo: fileSize } : {}),
+        ...(dealScope ? { dealId: dealScope.dealId, dealCommon: dealScope.dealCommon } : {}),
       },
     });
 

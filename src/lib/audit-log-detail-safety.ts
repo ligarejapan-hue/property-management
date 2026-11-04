@@ -35,6 +35,9 @@ const ALWAYS_SAFE_KEYS: ReadonlySet<string> = new Set([
   "propertyId",
   "ownerId",
   "buildingId",
+  // 添付を入れたときに選んだ取引(id と「共通」の印・非PII・2026-11-04)。
+  "dealId",
+  "dealCommon",
   // 売却促進DM の監査(create/export/print/update/variant)は campaignId/variantId で対象を辿る。
   // UUID 識別子(名称・住所ではない)なので他の *Id と同様に安全キーとして残す(管理画面で追跡可能に)。
   "campaignId",
@@ -65,6 +68,10 @@ const ALWAYS_SAFE_KEYS: ReadonlySet<string> = new Set([
   // CSV import summary counters（実在キー: csv/route.ts の writeAuditLog detail）。
   // 非PIIの件数のみ。*Count を無条件許可せず実在キーに限定する。
   "updateCount",
+  // 添付の取引の振り分けの件数(attachments/deal-scope・非PII・2026-11-04)。
+  "toDeal",
+  "toCommon",
+  "toUnset",
   "needsReviewCount",
   "matched",
   "matchedCount",
