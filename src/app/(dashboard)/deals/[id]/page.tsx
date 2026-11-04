@@ -198,8 +198,8 @@ export default function DealDetailPage({ params }: { params: Promise<{ id: strin
         </div>
         {propertyId && (
           <div hidden={tab !== "attachments"}>
-            {/* 物件を差し替えたら作り直す。 */}
-            <DealAttachmentsPanel key={propertyId} dealId={deal.id} propertyId={propertyId} active={tab === "attachments"} />
+            {/* 物件を差し替えたら作り直す。取引の保存・当事者の変更で読み直す(仕入/売却・決済日が変わる)。 */}
+            <DealAttachmentsPanel key={propertyId} dealId={deal.id} propertyId={propertyId} active={tab === "attachments"} revision={k([deal.version, deal.parties])} />
           </div>
         )}
         {tab === "timeline" &&<HistoryTimeline url={`/api/deals/${deal.id}/timeline`} />}

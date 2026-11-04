@@ -57,7 +57,7 @@ describe("取引の画面の添付タブ(ソース)", () => {
     expect(page).toContain('{ key: "attachments", label: "添付" }');
     expect(page).toContain('(propertyId !== null || t.key !== "attachments")');
     expect(page).toContain("const propertyId = data.canOpenProperty && deal.propertyId ? deal.propertyId : null;");
-    expect(page).toMatch(/<DealAttachmentsPanel key=\{propertyId\} dealId=\{deal\.id\} propertyId=\{propertyId\} active=\{tab === "attachments"\} \/>/);
+    expect(page).toMatch(/<DealAttachmentsPanel key=\{propertyId\} dealId=\{deal\.id\} propertyId=\{propertyId\} active=\{tab === "attachments"\} revision=\{k\(\[deal\.version, deal\.parties\]\)\} \/>/);
   });
   it("物件の添付の部品にこの取引を渡す・開くまで読まない", () => {
     expect(panel).toContain("fixedDealId={dealId}");
@@ -65,7 +65,10 @@ describe("取引の画面の添付タブ(ソース)", () => {
     expect(panel).toContain("const requested = active || state !== null;");
     expect(panel).toContain("if (!requested) return;");
     // 読めなかったら押して読み直せる(見直しの指摘)。
-    expect(panel).toContain("}, [requested, propertyId, attempt]);");
+    // 取引の保存・当事者の変更で読み直し、分けられるようになったら作り直す(@codex P2)。
+    expect(panel).toContain("}, [requested, propertyId, attempt, revision]);");
+    expect(panel).toContain('key={splittable ? "split" : "plain"}');
+    expect(panel).toContain('setState((s) => (s?.kind === "ok" ? s : { kind: "error" }))');
     expect(panel).toContain("もう一度読む");
   });
 });
