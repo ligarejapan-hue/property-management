@@ -117,7 +117,9 @@ describe("金額・費用", () => {
     expect(src).toContain("BROKERAGE_QUICK_OPTIONS.map");
   });
   it("★仲介手数料は自由に入れる欄(計算に戻すの欄ではない)", () => {
-    expect(src).toMatch(/<FreeYenField\s+label="仲介手数料"/);
+    // 計算のボタンで欄を作り直す=額が同じでも読めない文字を残さない(@codex P2)。
+    expect(src).toMatch(/<FreeYenField\s+key=\{brokerageReset\}\s+label="仲介手数料"/);
+    expect(src).toMatch(/setBrokerageReset\(\(t\) => t \+ 1\);\s+void save\(nextOverrides, bads\);/);
     expect(src).not.toMatch(/<OverrideField[^>]*label="仲介手数料"/);
   });
   it("★入れた手数料はその場で税込に出し、未保存なら知らせる(2026-11-04 発注者「反映されない」)", () => {

@@ -86,7 +86,8 @@ export default function DealPropertySide({
   const [pendingEdit, setPendingEdit] = useState(editRequest > 0 && canEdit);
   if (editRequest !== seenRequest) {
     setSeenRequest(editRequest);
-    if (canEdit) setPendingEdit(true);
+    // 編集中に頼まれても溜めない(取り消し・保存のあとに勝手に開き直さない・@codex P2)。
+    if (canEdit && !editing) setPendingEdit(true);
   }
   if (pendingEdit && !editing && state.kind === "ok") {
     setPendingEdit(false);

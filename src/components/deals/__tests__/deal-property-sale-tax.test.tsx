@@ -36,6 +36,8 @@ describe("物件の販売価格と消費税(金額・費用タブ)", () => {
   it("横の欄: 合図が増えたら(読み込み後に)編集を開く・編集の部品は欄まで送る", () => {
     const side = read("src/components/deals/deal-property-side.tsx");
     expect(side).toContain("if (editRequest !== seenRequest) {");
+    // 編集中に頼まれても溜めない(@codex P2)。
+    expect(side).toContain("if (canEdit && !editing) setPendingEdit(true);");
     expect(side).toContain('if (pendingEdit && !editing && state.kind === "ok") {');
     expect(side).toContain("focusField={focusField}");
     const form = read("src/components/properties/property-edit-form.tsx");

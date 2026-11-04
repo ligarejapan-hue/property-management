@@ -43,6 +43,8 @@ export default function DealMoneyPanel({
   const [error, setError] = useState<string | null>(null);
   // 「正規の手数料率で計算する」の計算のしかた(既定=3%＋6万円＋消費税)。
   const [quickMode, setQuickMode] = useState<BrokerageQuickMode>("3pct_60k");
+  // 計算のボタンで欄の文字ごと入れ直すために、欄を作り直す(額が前と同じでも読めない文字を残さない・@codex P2)。
+  const [brokerageReset, setBrokerageReset] = useState(0);
   const setOverride =(key: keyof Overrides, v: number | undefined) =>
     setOverrides((o) => {
       const next = { ...o };
@@ -102,6 +104,7 @@ export default function DealMoneyPanel({
     const bads = badOverrides.filter((x) => x !== "仲介手数料");
     setOverrides(nextOverrides);
     setBadOverrides(bads);
+    setBrokerageReset((t) => t + 1);
     void save(nextOverrides, bads);
   };
 
@@ -139,6 +142,7 @@ export default function DealMoneyPanel({
         <h3 className="text-sm font-semibold text-gray-700 dark:text-gray-300">仲介手数料(税抜)</h3>
         {/* 自由に入れる(2026-11-04 発注者)。空欄のときは上限額で計算する(資金計画表などがこの額を使う)。 */}
         <FreeYenField
+          key={brokerageReset}
           label="仲介手数料"
           onValidity={validity("仲介手数料")}
           value={overrides.brokerageFee}
