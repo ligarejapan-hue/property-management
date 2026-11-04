@@ -59,6 +59,50 @@ export function YenInput({ label, value, onChange }: { label: string; value: str
 }
 
 /**
+ * 自由に入れる金額の欄(仲介手数料・2026-11-04 発注者「自由入力でいい」)。空欄=未入力(undefined)。
+ * 打った文字はそのまま持ち、外から値が変わった(計算のボタン・読み込み直し)ときだけ表示を合わせる。
+ * 読めない文字のときは onValidity(false) で親に保存を止めさせる。
+ */
+export function FreeYenField({
+  label, value, onChange, onValidity, placeholder,
+}: {
+  label: string;
+  value: number | undefined;
+  onChange: (v: number | undefined) => void;
+  onValidity?: (ok: boolean) => void;
+  placeholder?: string;
+}) {
+  const [text, setText] = useState(value === undefined ? "" : String(value));
+  const [seen, setSeen] = useState(value);
+  if (value !== seen) {
+    setSeen(value);
+    setText(value === undefined ? "" : String(value));
+  }
+  const r = overrideInput(text);
+  return (
+    <span className="flex items-center gap-2">
+      <input
+        inputMode="numeric"
+        value={text}
+        placeholder={placeholder}
+        onChange={(e) => {
+          const next = overrideInput(e.target.value);
+          setText(e.target.value);
+          onValidity?.(next.kind !== "invalid");
+          if (next.kind === "clear") onChange(undefined);
+          else if (next.kind === "set") onChange(next.value);
+        }}
+        aria-label={label}
+        className={inputCls}
+      />
+      <span className="shrink-0 text-xs tabular-nums text-gray-500">
+        {r.kind === "invalid" ? <span className="text-red-600 dark:text-red-400">数字で入れてください</span> : r.kind === "set" ? `= ${yenText(r.value)}円` : ""}
+      </span>
+    </span>
+  );
+}
+
+/**
  * 自動計算だが手で直せる欄(設計 §3)。表示 = 上書き ?? 計算。上書きしたら印を付け、「計算に戻す」で消せる。
  * 打った文字はそのまま持つ。読めない文字のときは上書きを消さず、onValidity(false) で親に保存を止めさせる(@codex 2巡目)。
  */

@@ -62,7 +62,7 @@ export function DealOwnerSideBody({ state }: { state: LoadState }) {
  * ⚠編集中は読み直さない(渡す物件が変わると編集の部品が入力を開いた時点の値へ戻す)。編集が終わったら読み直す。
  */
 export default function DealPropertySide({
-  propertyId, revision, view = "property", canEdit = false, onEditingChange, onClose,
+  propertyId, revision, view = "property", canEdit = false, onEditingChange, onClose, editRequest = 0, focusField,
 }: {
   propertyId: string;
   revision?: string;
@@ -70,10 +70,31 @@ export default function DealPropertySide({
   canEdit?: boolean;
   onEditingChange?: (editing: boolean) => void;
   onClose: () => void;
+  /**
+   * 外から「編集を開いて」と頼む合図(金額・費用タブの販売価格の消費税・2026-11-04 発注者)。値が増えたら編集を開く。
+   * ⚠親は合図を増やすときに自分の「編集中」も立てる(この部品は描画の途中で親へ知らせない)。
+   */
+  editRequest?: number;
+  /** 編集を開いたときに見せる欄(物件の編集の項目名)。 */
+  focusField?: string;
 }) {
   const [state, setState] = useState<LoadState>({ kind: "loading" });
   const [editing, setEditing] = useState(false);
   const [saved, setSaved] = useState(false);
+  // 頼まれた編集(読み込みが終わってから開く)。
+  const [seenRequest, setSeenRequest] = useState(editRequest);
+  const [pendingEdit, setPendingEdit] = useState(editRequest > 0 && canEdit);
+  if (editRequest !== seenRequest) {
+    setSeenRequest(editRequest);
+    // 編集中に頼まれても溜めない(取り消し・保存のあとに勝手に開き直さない・@codex P2)。
+    if (canEdit && !editing) setPendingEdit(true);
+  }
+  if (pendingEdit && !editing && state.kind === "ok") {
+    setPendingEdit(false);
+    setSaved(false);
+    setEditing(true);
+  }
+  if (pendingEdit && state.kind === "error") setPendingEdit(false);
 
   const load = useCallback(async () => {
     const res = await fetch(`/api/properties/${propertyId}`);
@@ -87,9 +108,14 @@ export default function DealPropertySide({
     load()
       .then((property) => { if (alive) setState({ kind: "ok", property }); })
       // 読み直しの失敗で、見えている値を消さない。
-      .catch(() => { if (alive) setState((s) => (s.kind === "ok" ? s : { kind: "error" })); });
+      .catch(() => {
+        if (!alive) return;
+        setState((s) => (s.kind === "ok" ? s : { kind: "error" }));
+        // 頼まれた編集を開けなかったときに親の「編集中」を下ろす(編集中はここへ来ない=害は無い)。
+        onEditingChange?.(false);
+      });
     return () => { alive = false; };
-  }, [load, revision, editing]);
+  }, [load, revision, editing, onEditingChange]);
 
   const changeEditing = (next: boolean) => {
     setEditing(next);
@@ -136,6 +162,7 @@ export default function DealPropertySide({
       {editing && state.kind === "ok" ? (
         <PropertyEditForm
           embedded
+          focusField={focusField}
           // 物件の画面と同じ API の返事。編集の部品は必要な項目をこの中から読む。
           property={state.property as unknown as ComponentProps<typeof PropertyEditForm>["property"]}
           onClose={() => changeEditing(false)}

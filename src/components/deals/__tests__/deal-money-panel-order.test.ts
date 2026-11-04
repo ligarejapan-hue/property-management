@@ -12,7 +12,7 @@ describe("金額・費用タブの並び", () => {
   });
   it("仲介手数料は建物消費税の下", () => {
     const building = src.indexOf("建物価格と建物消費税(業者売主の場合)");
-    const brokerage = src.indexOf("仲介手数料(上限・税抜)");
+    const brokerage = src.indexOf("仲介手数料(税抜)");
     expect(building).toBeGreaterThan(-1);
     expect(brokerage).toBeGreaterThan(building);
     expect(brokerage).toBeGreaterThan(src.indexOf('label="建物消費税"'));

@@ -97,7 +97,7 @@ describe("横の編集", () => {
   });
   it("★編集中は読み直さない=渡す物件が変わると入力が開いた時点の値へ戻る", () => {
     expect(side).toMatch(/useEffect\(\(\) => \{\s+if \(editing\) return;/);
-    expect(side).toMatch(/\[load, revision, editing\]/);
+    expect(side).toMatch(/\[load, revision, editing, onEditingChange\]/);
     // 編集の部品は物件を受け取り直すと入力を入れ直す(この前提が変わったら上の守りも見直す)。
     expect(form).toMatch(/\[property, restored, draftDiscarded\]/);
   });
@@ -109,9 +109,26 @@ describe("横の編集", () => {
 
 describe("金額・費用", () => {
   const src = readFileSync("src/components/deals/deal-money-panel.tsx", "utf8").replace(/\r\n/g, "\n");
-  it("★正規の料率のボタンは手で直した手数料を消して保存する", () => {
-    expect(src).toContain("正規の料率で計算する");
-    expect(src).toMatch(/delete nextOverrides\.brokerageFee/);
+  it("★正規の手数料率のボタンは選んだ速算で欄に入れて保存する(2026-11-04 発注者)", () => {
+    expect(src).toContain("正規の手数料率で計算する");
+    expect(src).toContain("brokerageFee: brokerageQuick(p, quickMode)");
     expect(src).toMatch(/void save\(nextOverrides, bads\)/);
+    expect(src).toContain('aria-label="手数料の計算のしかた"');
+    expect(src).toContain("BROKERAGE_QUICK_OPTIONS.map");
+  });
+  it("★仲介手数料は自由に入れる欄(計算に戻すの欄ではない)", () => {
+    // 計算のボタンで欄を作り直す=額が同じでも読めない文字を残さない(@codex P2)。
+    expect(src).toMatch(/<FreeYenField\s+key=\{brokerageReset\}\s+label="仲介手数料"/);
+    expect(src).toMatch(/setBrokerageReset\(\(t\) => t \+ 1\);\s+void save\(nextOverrides, bads\);/);
+    expect(src).not.toMatch(/<OverrideField[^>]*label="仲介手数料"/);
+  });
+  it("★入れた手数料はその場で税込に出し、未保存なら知らせる(2026-11-04 発注者「反映されない」)", () => {
+    expect(src).toContain("brokerageInclOf(overrides.brokerageFee ?? calc?.brokerage?.computedExcl ?? null, deal.taxRateBp)");
+    expect(src).toContain("const brokerageUnsaved = overrides.brokerageFee !== deal.overrides.brokerageFee;");
+    expect(src).toContain("まだ保存していません");
+  });
+  it("★消費税率の欄は出さない・保存は今の率のまま(2026-11-04 発注者)", () => {
+    expect(src).not.toContain('aria-label="消費税率"');
+    expect(src).toContain("const taxRateBp = deal.taxRateBp;");
   });
 });
