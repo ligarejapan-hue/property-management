@@ -2,7 +2,7 @@ import { describe, expect, it } from "vitest";
 import { readFileSync } from "node:fs";
 import { join } from "node:path";
 import { renderToStaticMarkup } from "react-dom/server";
-import { DealScopeBar, DealScopeSelect, UploadScopeSelect } from "../attachment-deal-scope";
+import { DealScopeBar, DealScopeSelect, FixedUploadScopeNote, UploadScopeSelect } from "../attachment-deal-scope";
 import type { ScopeDeal } from "@/lib/attachments/deal-scope";
 
 const purchase: ScopeDeal = { id: "dp", dealNo: "2026-0012", status: "settled", side: "purchase", settlementAt: "2026-05-30T01:00:00.000Z", createdAt: "2026-03-01T00:00:00.000Z" };
@@ -43,6 +43,31 @@ describe("取引で分ける部品", () => {
     expect(html).toMatch(/<option value="" selected="">あとで決める<\/option>/);
     expect(html).toContain("仕入 2026-0012");
   });
+  it("取引の画面から入れるときは選ばせず、その取引を知らせる", () => {
+    const html = renderToStaticMarkup(<FixedUploadScopeNote deals={deals} dealId="ds" />);
+    expect(html).toContain("ここで入れた書類は「売却 2026-0031」の書類になります");
+    expect(html).not.toContain("<select");
+  });
+});
+
+describe("取引の画面の添付タブ(ソース)", () => {
+  const page = readFileSync(join(process.cwd(), "src/app/(dashboard)/deals/[id]/page.tsx"), "utf8").replace(/\r\n/g, "\n");
+  const panel = readFileSync(join(process.cwd(), "src/components/deals/deal-attachments-panel.tsx"), "utf8").replace(/\r\n/g, "\n");
+  it("物件を開ける人だけにタブを出す", () => {
+    expect(page).toContain('{ key: "attachments", label: "添付" }');
+    expect(page).toContain('(propertyId !== null || t.key !== "attachments")');
+    expect(page).toContain("const propertyId = data.canOpenProperty && deal.propertyId ? deal.propertyId : null;");
+    expect(page).toMatch(/<DealAttachmentsPanel key=\{propertyId\} dealId=\{deal\.id\} propertyId=\{propertyId\} active=\{tab === "attachments"\} \/>/);
+  });
+  it("物件の添付の部品にこの取引を渡す・開くまで読まない", () => {
+    expect(panel).toContain("fixedDealId={dealId}");
+    expect(panel).toContain("deals={property.deals ?? null}");
+    expect(panel).toContain("const requested = active || state !== null;");
+    expect(panel).toContain("if (!requested) return;");
+    // 読めなかったら押して読み直せる(見直しの指摘)。
+    expect(panel).toContain("}, [requested, propertyId, attempt]);");
+    expect(panel).toContain("もう一度読む");
+  });
 });
 
 describe("添付タブの配線(ソース)", () => {
@@ -54,11 +79,20 @@ describe("添付タブの配線(ソース)", () => {
     expect(tab).toContain("{scopeEnabled && (");
   });
   it("入れるときの取引は通常の添付にだけ付ける(謄本には付けない)", () => {
-    expect(tab).toContain('scopeEnabled && type === "general" && uploadScope !== "" ? uploadScope : null');
+    expect(tab).toContain('scopeEnabled && type === "general" && activeUploadScope !== "" ? activeUploadScope : null');
   });
   it("分けて保存・書類を撮ったときも選んだ取引を付ける(@codex P2)", () => {
-    expect(tab).toContain('dealScope: scopeEnabled && uploadScope !== "" ? uploadScope : null,');
-    expect(tab).toMatch(/handleScanSaved[\s\S]{0,600}saveScopes\(\[\{ attachmentId: result\.id, scope: uploadScope \}\]\)/);
+    expect(tab).toContain('dealScope: scopeEnabled && activeUploadScope !== "" ? activeUploadScope : null,');
+    // 撮った書類は saveScopes の「変更中なら何もしない」を通さずに直接送る(見直しの指摘)。
+    expect(tab).toMatch(/handleScanSaved[\s\S]{0,800}updateAttachmentDealScope\(propertyId, \[\{ attachmentId: result\.id, scope: activeUploadScope \}\]\)/);
+  });
+  it("取引の画面から: 最初はその取引だけ・入れた書類はその取引(選ばせない)", () => {
+    expect(tab).toContain('const fixedDeal = fixedDealId ? (scopeDeals.find((d) => d.id === fixedDealId) ?? null) : null;');
+    expect(tab).toContain('useState(() => fixedDeal?.id ?? "all")');
+    expect(tab).toContain("const activeUploadScope = fixedDeal ? fixedDeal.id : uploadScope;");
+    expect(tab).toMatch(/fixedDeal \? \(\s*<FixedUploadScopeNote/);
+    // 送るときは必ず activeUploadScope を通す(取引の画面で選択の値を使わない)。
+    expect(tab.match(/uploadScope !== ""/g)).toBeNull();
   });
   it("通常の添付と謄本の両方の行に取引の欄", () => {
     expect(tab.match(/scopeControl=\{scopeControl\(att\)\}/g)?.length).toBe(2);

@@ -14,6 +14,7 @@ import DealSettlementPanel from "@/components/deals/deal-settlement-panel";
 import DealOcPanel from "@/components/deals/deal-oc-panel";
 import DealDocumentsPanel from "@/components/deals/deal-documents-panel";
 import DealPropertySide from "@/components/deals/deal-property-side";
+import DealAttachmentsPanel from "@/components/deals/deal-attachments-panel";
 import HistoryTimeline from "@/components/history-timeline/history-timeline";
 import { DealRegistryRights } from "@/components/deals/deal-registry-rights";
 import { DealCrosscheck } from "@/components/deals/deal-crosscheck";
@@ -40,6 +41,8 @@ const DEAL_TABS = [
   { key: "settlement", label: "精算" },
   { key: "oc", label: "OC" },
   { key: "documents", label: "書類" },
+  // 物件の添付ファイル(この取引の分から出す・2026-11-04 案A)。物件を開ける人だけ。
+  { key: "attachments", label: "添付" },
   { key: "timeline", label: "経緯" },
 ] as const;
 const HEADER_LINK_CLS =
@@ -108,11 +111,11 @@ export default function DealDetailPage({ params }: { params: Promise<{ id: strin
     );
   }
   const { deal } = data;
-  const tabs = DEAL_TABS.filter((t) => deal.hasOc || t.key !== "oc");
+  const propertyId = data.canOpenProperty && deal.propertyId ? deal.propertyId : null;
+  const tabs = DEAL_TABS.filter((t) => (deal.hasOc || t.key !== "oc") && (propertyId !== null || t.key !== "attachments"));
   // OC を外したあとに OC タブを選んでいたら、基本タブを出す。
   const tab: DealTabKey = tabs.some((t) => t.key === selected) ? selected : "basic";
   const k = (v: unknown) => JSON.stringify(v);
-  const propertyId = data.canOpenProperty && deal.propertyId ? deal.propertyId : null;
   // 狭い画面の横の欄は全画面に重なるので、当事者タブでも自動では開かない。
   const sideOpen = propertyId !== null && (sideRequested || (wideScreen && tab === "parties" && !partiesSideClosed));
   const closeSide = () => { setSideRequested(false); setSideEditing(false); if (tab === "parties") setPartiesSideClosed(true); };
@@ -193,7 +196,13 @@ export default function DealDetailPage({ params }: { params: Promise<{ id: strin
         <div hidden={tab !== "documents"}>
           <DealDocumentsPanel dealId={deal.id} active={tab === "documents"} resale={deal.businessType === "resale"} onIssued={() => setIssuedTick((t) => t + 1)} />
         </div>
-        {tab === "timeline" && <HistoryTimeline url={`/api/deals/${deal.id}/timeline`} />}
+        {propertyId && (
+          <div hidden={tab !== "attachments"}>
+            {/* 物件を差し替えたら作り直す。 */}
+            <DealAttachmentsPanel key={propertyId} dealId={deal.id} propertyId={propertyId} active={tab === "attachments"} />
+          </div>
+        )}
+        {tab === "timeline" &&<HistoryTimeline url={`/api/deals/${deal.id}/timeline`} />}
       </div>
       </div>
       {sideOpen && propertyId && (

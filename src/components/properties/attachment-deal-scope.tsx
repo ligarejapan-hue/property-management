@@ -156,3 +156,13 @@ export function UploadScopeSelect({
     </label>
   );
 }
+
+/** 取引の画面から入れるとき(選ばせずに、その取引の書類にする)。 */
+export function FixedUploadScopeNote({ deals, dealId }: { deals: readonly ScopeDeal[]; dealId: string }) {
+  const label = dealScopeOptions(deals).find((o) => o.value === dealId)?.label ?? "この取引";
+  return (
+    <p className="mb-2 text-xs text-gray-600 dark:text-gray-300">
+      ここで入れた書類は「{label}」の書類になります。<span className="text-gray-400 dark:text-gray-500">謄本は共通として扱います</span>
+    </p>
+  );
+}
