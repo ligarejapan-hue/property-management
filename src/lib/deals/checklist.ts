@@ -29,8 +29,12 @@ export const CHECKLIST_AMOUNTS = {
 } as const;
 export type ChecklistAmount = keyof typeof CHECKLIST_AMOUNTS;
 export const CHECKLIST_AMOUNT_KEYS = Object.keys(CHECKLIST_AMOUNTS) as ChecklistAmount[];
-/** 持参する金額の払い方(発行のときに選ぶ)。 */
-export const CHECKLIST_PAY_METHODS = { cash: "現金", from_deposit: "手付金から", from_balance: "残金から" } as const;
+/**
+ * 持参する金額の払い方(発行のときに選ぶ・いくつでも)。2つ以上選んだら、それぞれに金額を入れる。
+ * 「その他」だけ手入力の言葉を付ける(2026-11-05 発注者)。
+ */
+export const CHECKLIST_PAY_METHODS = { cash: "現金", transfer: "振込", check: "小切手", other: "その他" } as const;
+export const CHECKLIST_PAY_OTHER_MAX = 30;
 export type ChecklistPayMethod = keyof typeof CHECKLIST_PAY_METHODS;
 
 export const CHECKLIST_ITEM_ID = /^[a-z0-9_]{1,40}$/;

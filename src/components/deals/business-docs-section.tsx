@@ -14,11 +14,12 @@ import { dealDocumentDraftKey, parseDealDocumentDraft, sameAsInitial, type DealD
 import { CHECKLIST_TEXT_MAX } from "@/lib/deals/checklist";
 import { dealsApi, dealDocumentFileUrl, DealApiError, errorText, type AvailableDocument } from "@/lib/deals/client";
 import { useIssueCrosscheck } from "./use-issue-crosscheck";
+import { PayMethodsField, payEntriesOf, payEntriesToSend } from "./checklist-pay-field";
 
 const RECEIPTS = new Set(["deposit_receipt", "balance_receipt", "settlement_receipt"]);
 const str = (v: unknown) => (typeof v === "string" ? v : "");
 const CHECKLISTS = new Set(["checklist_contract", "checklist_settlement"]);
-const payOf = (v: unknown): Record<string, string> => (v && typeof v === "object" ? (v as Record<string, string>) : {});
+const payOf = (v: unknown): Record<string, unknown> => (v && typeof v === "object" && !Array.isArray(v) ? (v as Record<string, unknown>) : {});
 /** 書類タブのまとまり(一覧表の group と同じ順)。 */
 const GROUPS = [
   { key: "contract", label: "契約・媒介の書類" },
@@ -212,7 +213,9 @@ function IssueDialog({ dealId, doc, version, onCancel, onDone }: {
               ? { ...values, changeOn: str(values.changeOn) || null }
               : doc.docType === "settlement_guide_seller"
                 ? { ...values, costs: costRows.map((r) => ({ label: r.label.trim(), amount: Number(r.amount.replace(/,/g, "")) })) }
-                : values;
+                : CHECKLISTS.has(doc.docType)
+                  ? { ...values, pay: Object.fromEntries(Object.entries(pay).map(([k, v]) => [k, payEntriesToSend(payEntriesOf(v))])) }
+                  : values;
       const r = await dealsApi.issueDocument(dealId, doc.docType, version, options);
       draft.close();
       onDone({ id: r.id, title: r.title, version: r.version });
@@ -444,13 +447,15 @@ function IssueDialog({ dealId, doc, version, onCancel, onDone }: {
         )}
         {CHECKLISTS.has(doc.docType) && (
           <>
-            {(choices.payItems ?? []).map((it) => (
-              <Field key={it.value} label={`${it.label}の払い方`}>
-                <select aria-label={`${it.label}の払い方`} value={pay[it.value] ?? "cash"} onChange={(e) => set("pay", { ...pay, [it.value]: e.target.value })} className={inputCls}>
-                  {(choices.payMethods ?? []).map((m) => <option key={m.value} value={m.value}>{m.label}</option>)}
-                </select>
-              </Field>
-            ))}
+            {(choices.payItems ?? []).map((it) => {
+              const total = (choices.payTotals ?? []).find((t) => t.value === it.value)?.label;
+              return (
+                <PayMethodsField
+                  key={it.value} label={it.label} total={total ? Number(total) : null}
+                  value={payEntriesOf(pay[it.value])} onChange={(v) => set("pay", { ...pay, [it.value]: v })}
+                />
+              );
+            })}
             <p className="text-xs text-gray-500">チェック欄は空けて出します(紙に手で付けてください)。持参する金額は決済の計算と取引の値を使います。</p>
           </>
         )}

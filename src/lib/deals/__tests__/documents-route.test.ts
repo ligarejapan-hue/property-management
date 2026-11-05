@@ -389,14 +389,14 @@ describe("書類確認書の発行(段5c-1)", () => {
   it("担当者の名前を引いて頭に出す・払い方は写しに残す", async () => {
     pm.deal.findUnique.mockResolvedValue({ ...row, salesStaffId: SALES, opsStaffId: OPS, settlementAt: new Date("2026-06-30T01:00:00Z") });
     pm.user.findMany.mockResolvedValue([{ id: SALES, name: "架空 営業" }, { id: OPS, name: "架空 業務" }]);
-    const options = { pay: { s_bring_payment: "from_balance" } };
+    const options = { pay: { s_bring_payment: [{ method: "transfer", amount: 2_000_000, other: null }, { method: "cash", amount: 100_000, other: null }] } };
     const res = await POST(json("POST", { docType: "checklist_settlement", version: 3, options }), ctx);
     expect(res.status).toBe(201);
     expect((await res.json()).title).toBe("書類確認書(決済時)");
     const h = (renderHtmlToPdfDocument as Fn).mock.calls[0][0];
     expect(h).toContain("架空 営業");
     expect(h).toContain("架空 業務");
-    expect(h).toContain("残金から");
+    expect(h).toContain("振込 2,000,000円／現金 100,000円");
     expect(pm.user.findMany.mock.calls[0][0].where.id.in.sort()).toEqual([SALES, OPS]);
     expect(pm.dealDocument.create.mock.calls[0][0].data.inputSnapshot).toEqual({ options });
   });
@@ -421,8 +421,8 @@ describe("書類確認書の発行(段5c-1)", () => {
     const body = await (await AVAILABLE(new Request("http://x"), ctx)).json();
     const cl = body.documents.find((d: { docType: string }) => d.docType === "checklist_contract");
     expect(cl.group).toBe("checklist");
-    expect(cl.choices.payMethods.map((x: { value: string }) => x.value)).toEqual(["cash", "from_deposit", "from_balance"]);
-    expect(cl.defaults).toEqual({ pay: { c_bring_deposit: "cash" } });
+    expect(cl.choices.payItems.map((x: { value: string }) => x.value)).toEqual(["c_bring_deposit"]);
+    expect(cl.defaults).toEqual({ pay: { c_bring_deposit: [] } });
   });
 });
 
