@@ -276,6 +276,15 @@ describe("業務書類の発行(段5a)", () => {
     expect(files.size).toBe(0);
     expect(pm.dealDocument.create).not.toHaveBeenCalled();
   });
+  it("手付金・残金の領収書を自社として出そうとしたら 422 で、何も作らない(2026-11-06 発注者)", async () => {
+    for (const docType of ["deposit_receipt", "balance_receipt"]) {
+      const res = await POST(json("POST", { docType, version: 3, options: { issuer: "self", exempt: null, receivedOn: null } }), ctx);
+      expect(res.status).toBe(422);
+      expect((await res.json()).error.code).toBe("DOC_OPTION_INVALID");
+    }
+    expect(files.size).toBe(0);
+    expect(pm.dealDocument.create).not.toHaveBeenCalled();
+  });
   it("この取引で出せない書類(差引 0 の精算金領収書)は 422", async () => {
     pm.deal.findUnique.mockResolvedValue({ ...settled, settlementTerms: {} });
     const res = await POST(json("POST", { docType: "settlement_receipt", version: 3, options: { issuer: "self", exempt: null, receivedOn: null } }), ctx);
@@ -329,7 +338,9 @@ describe("業務書類の発行(段5a)", () => {
     expect(guide.missing).toEqual(["決済場所"]);
     const receipt = body.documents.find((d: { docType: string }) => d.docType === "deposit_receipt");
     expect(receipt.defaults).toEqual({ issuer: SELLER.id, exempt: null, receivedOn: null });
-    expect(receipt.issuers.map((i: { value: string }) => i.value)).toEqual(["self", SELLER.id]);
+    // 手付金・残金は自社では出さない(別の会計システム・2026-11-06 発注者)=売主の当事者だけ
+    expect(receipt.issuers.map((i: { value: string }) => i.value)).toEqual([SELLER.id]);
+    expect(receipt.blocking).toEqual([]);
     (getUserPermissions as Fn).mockResolvedValue([]);
     expect((await AVAILABLE(new Request("http://x"), ctx)).status).toBe(403);
   });

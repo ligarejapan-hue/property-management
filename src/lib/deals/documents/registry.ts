@@ -7,7 +7,7 @@ import {
   sellerGuideOptionsSchema, settlementGuideOptionsSchema,
 } from "./business/settlement-guide";
 import {
-  RECEIPT_KINDS, buildReceipt, issuerChoices, partyReceiptNotes, receiptAmount, receiptOptionsSchema, receiptSides,
+  RECEIPT_KINDS, buildReceipt, issuerChoices, partyReceiptNotes, receiptAmount, receiptIssuerBlocking, receiptOptionsSchema, receiptSides,
   type IssuerChoice, type ReceiptKind,
 } from "./business/receipts";
 import { POA_MATTERS, buildPowerOfAttorney, poaChoices, poaOptionsSchema } from "./business/power-of-attorney";
@@ -115,7 +115,8 @@ function receiptDef(kind: ReceiptKind): BusinessDocDef {
     missing: (c) => need([
       [`${RECEIPT_KINDS[kind].purpose}の金額`, receiptAmount(kind, c)], ["売主", hasParty(c, "seller")], ["買主", hasParty(c, "buyer")],
     ]),
-    blocking: (c) => need([[`${RECEIPT_KINDS[kind].purpose}の金額`, receiptAmount(kind, c)]]),
+    // 手付金・残金は売主の当事者がいなければ出せない(自社では出さない・2026-11-06 発注者)。
+    blocking: (c) => [...need([[`${RECEIPT_KINDS[kind].purpose}の金額`, receiptAmount(kind, c)]]), ...receiptIssuerBlocking(kind, c)],
     options: receiptOptionsSchema as z.ZodType<Record<string, unknown>>,
     defaults: (c) => {
       const { choices, initial } = issuerChoices(kind, c);

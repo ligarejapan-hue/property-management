@@ -8,6 +8,7 @@ import { Field, inputCls } from "./form-parts";
 import { DocFormFields } from "./doc-form-fields";
 import { clearFormValues, fitFormValues } from "@/lib/deals/documents/forms/values";
 import type { FormValues } from "@/lib/deals/documents/forms/types";
+import { NEEDS_SELLER_PARTY, NEEDS_SELLER_PARTY_MESSAGE } from "@/lib/deals/documents/business/receipt-issuer";
 import { useDraftAutosave, useDraftExists, useRestoredDraft } from "@/hooks/use-draft";
 import { DraftRestoredNotice, DraftTooLargeNotice } from "@/components/drafts/draft-notices";
 import { dealDocumentDraftKey, parseDealDocumentDraft, sameAsInitial, type DealDocumentDraft } from "@/lib/drafts/screens/deal-document";
@@ -44,6 +45,18 @@ export function PartyReceiptNotes({ notes }: { notes: string[] }) {
     <div className="rounded-md border border-amber-200 bg-amber-50 px-3 py-2 text-sm text-amber-900 dark:border-amber-900 dark:bg-amber-950 dark:text-amber-200" role="status">
       <p>この領収書は、次の部分を空欄で出します(手で書き入れられます)。</p>
       <ul className="mt-1 list-disc pl-5">{notes.map((n) => <li key={n}>{n}</li>)}</ul>
+    </div>
+  );
+}
+
+/** 発行できない理由。売主の当事者がいない手付金・残金の領収書は登録を促す文(2026-11-06 発注者)・ほかは「〜が無いと出せません」。 */
+export function BlockingNotice({ blocking }: { blocking: string[] }) {
+  if (!blocking.length) return null;
+  const others = blocking.filter((b) => b !== NEEDS_SELLER_PARTY);
+  return (
+    <div className="space-y-1 text-sm text-red-600 dark:text-red-400" role="alert">
+      {others.length > 0 && <p>{others.join("・")}が無いと出せません。取引の画面で入れてください。</p>}
+      {blocking.includes(NEEDS_SELLER_PARTY) && <p>{NEEDS_SELLER_PARTY_MESSAGE}</p>}
     </div>
   );
 }
@@ -126,10 +139,12 @@ function initialValuesOf(doc: AvailableDocument): Record<string, unknown> {
  * 控えから続けるときの初めの値。項目の表のある書類は、書式が変わる前の控えの合わない項目だけ初めの値に戻す
  * (そのまま送ると発行で 422 になる・2026-10-30)。dropped = 戻した項目があった(小窓で知らせる)。
  */
-function restoredValuesOf(
-  doc: AvailableDocument, saved: Record<string, unknown> | undefined, initial: Record<string, unknown>,
+export function restoredValuesOf(
+  doc: Pick<AvailableDocument, "form" | "issuers">, saved: Record<string, unknown> | undefined, initial: Record<string, unknown>,
 ): { values: Record<string, unknown>; dropped: boolean } {
   if (!saved) return { values: initial, dropped: false };
+  // 領収書: 控えの発行者が今は選べない(手付金・残金の「自社」を外した・2026-11-06 / 当事者を消した)なら初めの値に戻す。
+  if (doc.issuers && !doc.issuers.some((i) => i.value === saved.issuer)) return { values: { ...saved, issuer: initial.issuer }, dropped: true };
   if (!doc.form) return { values: saved, dropped: false };
   return fitFormValues(doc.form, saved, initial as FormValues);
 }
@@ -261,9 +276,7 @@ function IssueDialog({ dealId, doc, version, onCancel, onDone }: {
             書式が新しくなったため、前回の入力の一部を読み込めませんでした。その項目は初めの値に戻しています。確かめてから発行してください。
           </p>
         )}
-        {doc.blocking.length > 0 && (
-          <p className="text-sm text-red-600 dark:text-red-400" role="alert">{doc.blocking.join("・")}が無いと出せません。取引の画面で入れてください。</p>
-        )}
+        <BlockingNotice blocking={doc.blocking} />
         {missing.length > 0 ? (
           <div className="rounded-md border border-amber-200 bg-amber-50 px-3 py-2 text-sm text-amber-900 dark:border-amber-900 dark:bg-amber-950 dark:text-amber-200" role="alert">
             <p>次の項目が空欄です。取引の画面で入れるか、空欄のまま出してください。</p>
@@ -274,12 +287,14 @@ function IssueDialog({ dealId, doc, version, onCancel, onDone }: {
         )}
         {receipt && doc.issuers && (
           <>
-            {values.issuer !== "self" && <PartyReceiptNotes notes={(choices.partyNotes ?? []).map((n) => n.label)} />}
-            <Field label="発行者(受け取る人)">
-              <select aria-label="発行者" value={str(values.issuer)} onChange={(e) => set("issuer", e.target.value)} className={inputCls}>
-                {doc.issuers.map((i) => <option key={i.value} value={i.value}>{i.label}</option>)}
-              </select>
-            </Field>
+            {issuer && values.issuer !== "self" && <PartyReceiptNotes notes={(choices.partyNotes ?? []).map((n) => n.label)} />}
+            {doc.issuers.length > 0 && (
+              <Field label="発行者(受け取る人)">
+                <select aria-label="発行者" value={str(values.issuer)} onChange={(e) => set("issuer", e.target.value)} className={inputCls}>
+                  {doc.issuers.map((i) => <option key={i.value} value={i.value}>{i.label}</option>)}
+                </select>
+              </Field>
+            )}
             {issuer?.individual && (
               <fieldset className="space-y-1 text-sm">
                 <legend className="text-xs font-medium text-gray-600 dark:text-gray-400">印紙(個人の方が発行するとき・必ず選ぶ)</legend>

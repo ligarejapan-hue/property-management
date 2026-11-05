@@ -10,6 +10,7 @@ import type { DealPartyView, DealView } from "../../view";
 import type { CompanyProfile } from "@/lib/sales-sheet/company-profile-store";
 import type { BusinessDocContext } from "../business/common";
 import { businessDocOf } from "../registry";
+import { DocOptionError } from "../business/receipts";
 
 const rateRows: RateTableRow[] = INITIAL_RATE_TABLES.map((t) => ({
   kind: t.kind, validFrom: new Date(`${t.validFrom}T00:00:00Z`), validTo: t.validTo ? new Date(`${t.validTo}T00:00:00Z`) : null, content: t.content,
@@ -136,18 +137,25 @@ describe("売主の当事者が発行する手付金・残金の領収書(2026-1
   });
 });
 
-describe("変えないもの(精算金領収書・自社発行の領収書)", () => {
+describe("変えないもの(精算金領収書)", () => {
   // 控えは直す前の出力(2026-11-05)。
   it("精算金領収書(当事者が発行)", async () => {
     const out = doc("settlement_receipt").build(ctx(), opts(SELLER.id));
     await expect(out.html).toMatchFileSnapshot("./__snapshots__/receipt-settlement.html");
     await expect(JSON.stringify(out.rows, null, 1)).toMatchFileSnapshot("./__snapshots__/receipt-settlement.rows.json");
   });
-  for (const kind of ["deposit_receipt", "balance_receipt", "settlement_receipt"]) {
-    it(`自社が発行する ${kind}`, async () => {
-      const out = doc(kind).build(ctx({ ...deal, parties: [SELF_SELLER, BUYER] }), opts("self", null));
-      await expect(out.html).toMatchFileSnapshot(`./__snapshots__/receipt-self-${kind}.html`);
-      await expect(JSON.stringify(out.rows, null, 1)).toMatchFileSnapshot(`./__snapshots__/receipt-self-${kind}.rows.json`);
+  it("自社が発行する精算金領収書", async () => {
+    const out = doc("settlement_receipt").build(ctx({ ...deal, parties: [SELF_SELLER, BUYER] }), opts("self", null));
+    await expect(out.html).toMatchFileSnapshot("./__snapshots__/receipt-self-settlement_receipt.html");
+    await expect(JSON.stringify(out.rows, null, 1)).toMatchFileSnapshot("./__snapshots__/receipt-self-settlement_receipt.rows.json");
+  });
+});
+
+describe("手付金・残金の領収書は自社では出さない(2026-11-06 発注者)", () => {
+  for (const kind of ["deposit_receipt", "balance_receipt"]) {
+    it(`${kind}: 自社を渡すと組み立てない`, () => {
+      expect(() => doc(kind).build(ctx({ ...deal, parties: [SELF_SELLER, BUYER] }), opts("self", null))).toThrow(DocOptionError);
+      expect(() => doc(kind).build(ctx(), opts("self", null))).toThrow(DocOptionError);
     });
   }
 });
