@@ -44,6 +44,7 @@ import {
 import { syncDealFromCaseStatus } from "@/lib/deals/status-link";
 import { syncDealScheduleAfterCaseStatus } from "@/lib/deals/schedule-sync";
 import { summarizePropertyDeals } from "@/lib/property-business-type";
+import { extraParcelsText } from "@/lib/property-parcels";
 
 // ---------- GET /api/properties/[id] ----------
 
@@ -280,6 +281,8 @@ export async function PATCH(
         postalCode: true,
         lotNumber: true,
         buildingNumber: true,
+        // 2筆目以降の土地・2棟目以降の建物(変更履歴の「変更前」に使う・2026-11-05)。
+        extraParcels: true,
         // ⚠変更履歴の「変更前」に使う。選ばないと、物件名を書き換えても
         // 履歴が「空 → 〇〇」になり、元の名前が残らない (@codex #354 P2)。
         buildingName: true,
@@ -491,6 +494,15 @@ export async function PATCH(
       if (newVal === undefined) continue;
       const oldVal = (current as Record<string, unknown>)[key];
       // 日付だけの列は "YYYY-MM-DD" で履歴に残す(Date の String() は曜日入りの英語になる)。
+      // ほかの土地・建物は一覧なので、読める文字(1行に1件)で残す。
+      if (key === "extraParcels") {
+        const oldText = extraParcelsText(oldVal);
+        const newText = extraParcelsText(newVal);
+        if (oldText !== newText) {
+          changeLogs.push({ targetTable: "properties", targetId: id, fieldName: key, oldValue: oldText, newValue: newText, source: "manual", changedBy: session.id });
+        }
+        continue;
+      }
       const isDateOnly =
         (CASE_DATE_FIELDS as readonly string[]).includes(key) ||
         (LEAD_EXCLUSION_DATE_FIELDS as readonly string[]).includes(key);

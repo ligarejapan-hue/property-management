@@ -1,4 +1,5 @@
 import { z } from "zod";
+import { extraParcelsSchema } from "@/lib/property-parcels";
 import {
   PROPERTY_TYPE_VALUES,
   CASE_STATUS_VALUES,
@@ -275,6 +276,8 @@ export const updatePropertySchema = z.object({
   postalCode: optionalPostalCode,
   lotNumber: z.string().optional().nullable(),
   buildingNumber: z.string().optional().nullable(),
+  // 2筆目以降の土地・2棟目以降の建物(全部を送り直す・2026-11-05 案A)。
+  extraParcels: extraParcelsSchema.optional(),
   // 物件名(任意)。種別を変えた保存でも normalizeBuildingName を通すので、
   // 対象外の種別に変えたら自動で null になる (画面から消えた値が残らない)。
   buildingName: z

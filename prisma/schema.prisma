@@ -415,6 +415,8 @@ model Property {
   landArea                 Decimal?          @map("land_area") @db.Decimal(10, 2)
   landAreaMethod           String?           @map("land_area_method")
   totalFloorArea           Decimal?          @map("total_floor_area") @db.Decimal(10, 2)
+  /// 2筆目以降の土地・2棟目以降の建物(1筆目・1棟目は lotNumber/buildingNumber のまま・2026-11-05 発注者 案A)。src/lib/property-parcels.ts の形。
+  extraParcels             Json              @default("[]") @map("extra_parcels")
   builtYear                Int?              @map("built_year")
   builtMonth               Int?              @map("built_month")
   structureType            String?           @map("structure_type")
