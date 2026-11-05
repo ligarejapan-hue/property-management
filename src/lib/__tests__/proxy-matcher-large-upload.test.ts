@@ -162,8 +162,8 @@ describe("お客様の書類提出の受け口も proxy を通さない(大き�
     expect(post.indexOf("content-length")).toBeLessThan(read);
     expect(post.indexOf("verifyDocLinkToken(")).toBeGreaterThan(-1);
     expect(post.indexOf("verifyDocLinkToken(")).toBeLessThan(read);
-    expect(post.indexOf("tryReserveCompressionSlot(")).toBeGreaterThan(post.indexOf("verifyDocLinkToken("));
-    expect(post.indexOf("tryReserveCompressionSlot(")).toBeLessThan(read);
+    expect(post.indexOf("reservePublicSlot(")).toBeGreaterThan(post.indexOf("verifyDocLinkToken("));
+    expect(post.indexOf("reservePublicSlot(")).toBeLessThan(read);
   });
 
   it("nginx の見本の /submit/ の location は上限 32MB・待ち 300 秒", () => {

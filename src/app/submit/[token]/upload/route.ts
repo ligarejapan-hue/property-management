@@ -29,9 +29,29 @@ const ipLimiter = createRateLimiter({ limit: 10, windowMs: 60_000 }, { onOverflo
 const ipHourLimiter = createRateLimiter({ limit: 60, windowMs: 3_600_000 }, { onOverflow: "deny" });
 const linkLimiter = createRateLimiter({ limit: 60, windowMs: 3_600_000 }, { onOverflow: "deny" });
 const globalLimiter = createRateLimiter({ limit: 600, windowMs: 3_600_000 }, { onOverflow: "deny" });
+/** 1つのリンクで大きい PDF を縮めるのは1時間に10回まで(縮められなかった回も数える)。 */
+const compressLinkLimiter = createRateLimiter({ limit: 10, windowMs: 3_600_000 }, { onOverflow: "deny" });
 const MULTIPART_OVERHEAD_BYTES = 1024 * 1024;
 const MAX_IN_FLIGHT = 4;
 let inFlight = 0;
+/**
+ * 圧縮の席(社内の添付と共通で2つ)のうち、この口が同時に使うのは1つまで。
+ * ⚠ログインなしの口から2つとも埋められると、社内の大きい PDF の添付がずっと「混み合っています」になる。
+ */
+let publicSlotInUse = false;
+function reservePublicSlot(): (() => void) | null {
+  if (publicSlotInUse) return null;
+  const release = tryReserveCompressionSlot();
+  if (release === null) return null;
+  publicSlotInUse = true;
+  let released = false;
+  return () => {
+    if (released) return;
+    released = true;
+    publicSlotInUse = false;
+    release();
+  };
+}
 
 const reply = (status: number, body: Record<string, unknown>) =>
   new Response(JSON.stringify(body), { status, headers: submitHeaders("application/json; charset=utf-8") });
@@ -42,6 +62,7 @@ const BUSY = "いま混み合っています。1分ほど待ってから、も�
 const TOO_LARGE = "ファイルが大きすぎます。写真は8MBまで、PDFは30MBまでです。";
 const PDF_TOO_LARGE = "PDFを小さくできませんでした。ページを分けるか、写真で撮って送ってください。";
 const PDF_ENCRYPTED = "パスワード付きのPDFは小さくできません。パスワードを外すか、写真で撮って送ってください。";
+const PDF_UNREADABLE = "このPDFは読み取れませんでした。写真で撮って送ってください。";
 const UNSUPPORTED = "写真(JPEG・PNG・WebP)かPDFを送ってください。";
 
 export async function POST(req: Request, { params }: Ctx) {
@@ -75,9 +96,12 @@ export async function POST(req: Request, { params }: Ctx) {
     if (!ipHourLimiter.wouldAllow(ipKey, at) || !linkLimiter.wouldAllow(linkKey, at) || !globalLimiter.wouldAllow("global", at)) return fail(429, THROTTLED);
     // ⚠基準は送信全体(ファイルが 8MB を超えるなら送信全体も必ず超える)。本文を読む前に席を取る。
     //   混んでいて断るときは枠を消費しない(やり直しで1時間の枠を食わない)。
+    const compressKey = `submit-cmp:${publicId}`;
     if (length > DOC_FILE_MAX_BYTES) {
-      releaseSlot = tryReserveCompressionSlot();
+      if (!compressLinkLimiter.wouldAllow(compressKey, at)) return fail(429, THROTTLED);
+      releaseSlot = reservePublicSlot();
       if (releaseSlot === null) return fail(429, BUSY);
+      compressLinkLimiter.hit(compressKey, at);
     }
     ipHourLimiter.hit(ipKey, at);
     linkLimiter.hit(linkKey, at);
@@ -99,7 +123,11 @@ export async function POST(req: Request, { params }: Ctx) {
     let buffer = inspected.buffer;
     if (inspected.mimeType === "application/pdf") {
       const fitted = await fitSubmittedPdf(buffer);
-      if (!fitted.ok) return fitted.reason === "encrypted" ? fail(422, PDF_ENCRYPTED) : fail(413, PDF_TOO_LARGE);
+      if (!fitted.ok) {
+        if (fitted.reason === "encrypted") return fail(422, PDF_ENCRYPTED);
+        if (fitted.reason === "unreadable") return fail(422, PDF_UNREADABLE);
+        return fail(413, PDF_TOO_LARGE);
+      }
       buffer = fitted.buffer;
     }
 

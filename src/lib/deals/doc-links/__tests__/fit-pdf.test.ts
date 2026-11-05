@@ -43,6 +43,14 @@ describe("お客様の PDF を縮める(2026-11-06 発注者「8MBを超えた�
     const compress = vi.fn(async () => ({ ok: true as const, buffer: pdf(9 * MB), level: "lossless" as const, inBytes: 9 * MB, outBytes: 9 * MB }));
     expectKept(await fitSubmittedPdf(input, compress), input, false);
   });
+  it("8MB を超えたものを元のまま残すのは、PDF として読めて縮みきらなかったときだけ", async () => {
+    const input = pdf(9 * MB);
+    const fail = (reason: "invalid_pdf" | "encrypted" | "error" | "unavailable") => vi.fn(async () => ({ ok: false as const, reason, inBytes: 9 * MB, bestBytes: null }));
+    expect(await fitSubmittedPdf(input, fail("invalid_pdf"))).toEqual({ ok: false, reason: "unreadable" });
+    expect(await fitSubmittedPdf(input, fail("encrypted"))).toEqual({ ok: false, reason: "encrypted" });
+    expect(await fitSubmittedPdf(input, fail("error"))).toEqual({ ok: false, reason: "too_large" });
+    expect(await fitSubmittedPdf(input, fail("unavailable"))).toEqual({ ok: false, reason: "too_large" });
+  });
   it("20MB を超えたまま縮められなければ断る(パスワード付きはその理由で)", async () => {
     const input = pdf(25 * MB);
     expect(await fitSubmittedPdf(input, vi.fn(async () => ({ ok: false as const, reason: "too_large" as const, inBytes: 25 * MB, bestBytes: 21 * MB })))).toEqual({ ok: false, reason: "too_large" });

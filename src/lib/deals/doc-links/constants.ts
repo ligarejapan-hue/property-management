@@ -25,6 +25,11 @@ export const DOC_FILE_ACCEPT_BYTES = 20 * 1024 * 1024;
 export const DOC_FILES_PER_REQUEST = 5;
 /** 差し戻したものも含めて、1リンクあたりのファイル数(ディスクを使い切られない上限)。 */
 export const DOC_FILES_PER_LINK = 50;
+/**
+ * 差し戻したものも含めて、1リンクあたりの合計の大きさ。1ファイル 20MB まで保存できるようにした(2026-11-06)ので、
+ * ディスクの使い方の最悪が前(50 ファイル × 8MB)より増えないよう合計でも見る。
+ */
+export const DOC_BYTES_PER_LINK = DOC_FILES_PER_LINK * DOC_FILE_MAX_BYTES;
 
 export const DOC_REQUEST_STATUSES = ["pending", "submitted", "received", "rejected"] as const;
 export type DocRequestStatus = (typeof DOC_REQUEST_STATUSES)[number];
