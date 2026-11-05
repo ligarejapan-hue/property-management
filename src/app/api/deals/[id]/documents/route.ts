@@ -82,6 +82,10 @@ export async function POST(request: Request, ctx: Ctx) {
     const { session, perms } = await requireDeal("write");
     const id = z.string().uuid().parse((await ctx.params).id);
     const { docType, version, options } = bodySchema.parse(await parseJsonBody(request));
+    // 一覧から外した書類(物件状況確認書・付帯設備表など)は、資金計画表の作り方に落ちる前に断る(履歴の題名は残す・@codex P2)。
+    if (!businessDocOf(docType) && docType !== "funding_plan" && docType !== "business_plan") {
+      throw new ApiError(422, `${dealDocumentTitle(docType, "default")}は取引の書類から外したため、出せません`, "DOC_NOT_APPLICABLE");
+    }
     const row = await prisma.deal.findUnique({ where: { id }, select: DEAL_DETAIL_SELECT });
     if (!row) throw new ApiError(404, "取引が見つかりません", "NOT_FOUND");
     // 保存してから発行するまでの間に、ほかの人が別の入力を保存していたら、その入力を自分の名前で発行しない(最終レビュー)。

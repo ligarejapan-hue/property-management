@@ -189,32 +189,6 @@ export const BUSINESS_DOCS: BusinessDocDef[] = [
     build: (c) => buildSaleGuide(c),
   },
   {
-    key: "disclosure",
-    label: "物件状況確認書(告知書)",
-    group: "contract",
-    remember: true,
-    form: DISCLOSURE_FORM,
-    applies: () => true,
-    missing: (c) => disclosureMissing(c),
-    blocking: () => [],
-    options: disclosureOptionsSchema as z.ZodType<Record<string, unknown>>,
-    defaults: (c) => ({ values: disclosureDefaults(c) }),
-    build: (c, o) => buildDisclosure(c, disclosureOptionsSchema.parse(o)),
-  },
-  {
-    key: "equipment",
-    label: "付帯設備表",
-    group: "contract",
-    remember: true,
-    form: EQUIPMENT_FORM,
-    applies: (c) => equipmentApplies(c),
-    missing: (c) => equipmentMissing(c),
-    blocking: () => [],
-    options: equipmentOptionsSchema as z.ZodType<Record<string, unknown>>,
-    defaults: (c) => ({ values: equipmentDefaults(c) }),
-    build: (c, o) => buildEquipment(c, equipmentOptionsSchema.parse(o)),
-  },
-  {
     key: "settlement_statement",
     label: "精算書",
     group: "settlement",
@@ -336,3 +310,35 @@ export const BUSINESS_DOCS: BusinessDocDef[] = [
 
 export const BUSINESS_DOC_KEYS = BUSINESS_DOCS.map((d) => d.key);
 export const businessDocOf = (key: string) => BUSINESS_DOCS.find((d) => d.key === key) ?? null;
+
+/**
+ * 物件状況確認書(告知書)・付帯設備表。2026-11-05 発注者「取引の書類に不要」で書類タブ(BUSINESS_DOCS)から外した。
+ * 文面と入力欄は残してある。戻すときは BUSINESS_DOCS の媒介契約の前の説明書の次に足す。
+ */
+export const DISCLOSURE_DOC: BusinessDocDef = {
+  key: "disclosure",
+  label: "物件状況確認書(告知書)",
+  group: "contract",
+  remember: true,
+  form: DISCLOSURE_FORM,
+  applies: () => true,
+  missing: (c) => disclosureMissing(c),
+  blocking: () => [],
+  options: disclosureOptionsSchema as z.ZodType<Record<string, unknown>>,
+  defaults: (c) => ({ values: disclosureDefaults(c) }),
+  build: (c, o) => buildDisclosure(c, disclosureOptionsSchema.parse(o)),
+};
+
+export const EQUIPMENT_DOC: BusinessDocDef = {
+  key: "equipment",
+  label: "付帯設備表",
+  group: "contract",
+  remember: true,
+  form: EQUIPMENT_FORM,
+  applies: (c) => equipmentApplies(c),
+  missing: (c) => equipmentMissing(c),
+  blocking: () => [],
+  options: equipmentOptionsSchema as z.ZodType<Record<string, unknown>>,
+  defaults: (c) => ({ values: equipmentDefaults(c) }),
+  build: (c, o) => buildEquipment(c, equipmentOptionsSchema.parse(o)),
+};

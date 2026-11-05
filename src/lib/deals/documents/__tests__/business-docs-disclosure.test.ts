@@ -9,7 +9,7 @@ import { resolveDealSettings } from "../../settings";
 import type { DealPartyView, DealView } from "../../view";
 import type { CompanyProfile } from "@/lib/sales-sheet/company-profile-store";
 import type { BusinessDocContext } from "../business/common";
-import { BUSINESS_DOCS, businessDocOf } from "../registry";
+import { BUSINESS_DOCS, DISCLOSURE_DOC, businessDocOf } from "../registry";
 import { dealDocumentTitle } from "../issue";
 import { emptyFormValues, formItems } from "../forms/values";
 import { DISCLOSURE_FORM } from "../forms/disclosure";
@@ -41,14 +41,14 @@ const ctx = (d: DealView = deal): BusinessDocContext => ({
   staff: { sales: "架空 営業", ops: null },
 });
 const K = "disclosure";
-const doc = () => businessDocOf(K)!;
+const doc = () => DISCLOSURE_DOC;
 const blank = (kind: string, withGuide = "付けない") => ({ ...emptyFormValues(DISCLOSURE_FORM), kind, withGuide });
 const squeeze = (s: string) => s.replace(/[\s\u3000]/g, "");
 
 describe("物件状況確認書(告知書・第2段階 §4.7)", () => {
-  it("「契約・媒介の書類」の説明書の次・どの取引でも出せる・前回の入力を引き継ぐ・種類はタブ", () => {
-    const keys = BUSINESS_DOCS.map((d) => d.key);
-    expect(keys.indexOf(K)).toBe(keys.indexOf("sale_guide") + 1);
+  it("取引の書類タブには出さない(2026-11-05 発注者「不要」)・中身は残す・前回の入力を引き継ぐ・種類はタブ", () => {
+    expect(BUSINESS_DOCS.map((d) => d.key)).not.toContain(K);
+    expect(businessDocOf(K)).toBeNull();
     expect(doc().label).toBe("物件状況確認書(告知書)");
     expect(doc().group).toBe("contract");
     expect(doc().remember).toBe(true);

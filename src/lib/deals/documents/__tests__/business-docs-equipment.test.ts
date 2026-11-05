@@ -9,7 +9,7 @@ import { resolveDealSettings } from "../../settings";
 import type { DealPartyView, DealView } from "../../view";
 import type { CompanyProfile } from "@/lib/sales-sheet/company-profile-store";
 import type { BusinessDocContext } from "../business/common";
-import { BUSINESS_DOCS, businessDocOf } from "../registry";
+import { BUSINESS_DOCS, EQUIPMENT_DOC, businessDocOf } from "../registry";
 import { dealDocumentTitle } from "../issue";
 import { emptyFormValues } from "../forms/values";
 import { EQUIPMENT_FORM } from "../forms/equipment";
@@ -41,14 +41,14 @@ const ctx = (d: DealView = deal): BusinessDocContext => ({
   staff: { sales: "架空 営業", ops: null },
 });
 const K = "equipment";
-const doc = () => businessDocOf(K)!;
+const doc = () => EQUIPMENT_DOC;
 const blank = (kind: string, withGuide = "付けない") => ({ ...emptyFormValues(EQUIPMENT_FORM), kind, withGuide });
 const count = (h: string) => (h.match(/class="circle"/g) ?? []).length;
 
 describe("付帯設備表(第2段階 §4.8)", () => {
-  it("「契約・媒介の書類」の告知書の次・土地だけの物件には出さない・前回の入力を引き継ぐ・種類はタブ", () => {
-    const keys = BUSINESS_DOCS.map((d) => d.key);
-    expect(keys.indexOf(K)).toBe(keys.indexOf("disclosure") + 1);
+  it("取引の書類タブには出さない(2026-11-05 発注者「不要」)・中身は残す・土地だけの物件には出さない・種類はタブ", () => {
+    expect(BUSINESS_DOCS.map((d) => d.key)).not.toContain(K);
+    expect(businessDocOf(K)).toBeNull();
     expect(doc().label).toBe("付帯設備表");
     expect(doc().group).toBe("contract");
     expect(doc().remember).toBe(true);

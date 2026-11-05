@@ -281,6 +281,15 @@ describe("業務書類の発行(段5a)", () => {
     const res = await POST(json("POST", { docType: "settlement_receipt", version: 3, options: { issuer: "self", exempt: null, receivedOn: null } }), ctx);
     expect((await res.json()).error.code).toBe("DOC_NOT_APPLICABLE");
   });
+  it("一覧から外した書類(物件状況確認書・付帯設備表)は 422 で、資金計画表として作らない(@codex P2)", async () => {
+    for (const docType of ["disclosure", "equipment"]) {
+      const res = await POST(json("POST", { docType, version: 3, options: {} }), ctx);
+      expect(res.status).toBe(422);
+      expect((await res.json()).error.code).toBe("DOC_NOT_APPLICABLE");
+    }
+    expect(files.size).toBe(0);
+    expect(pm.dealDocument.create).not.toHaveBeenCalled();
+  });
   it("精算書: 1枚に収まれば1回で作る・2ページ以上なら計算明細を2枚目に回して作り直す", async () => {
     expect((await POST(json("POST", { docType: "settlement_statement", version: 3 }), ctx)).status).toBe(201);
     expect(renderHtmlToPdfDocument).toHaveBeenCalledTimes(1);
@@ -315,7 +324,7 @@ describe("業務書類の発行(段5a)", () => {
     expect(body.version).toBe(3);
     const keys = body.documents.map((d: { docType: string }) => d.docType);
     // OC なしの取引には OC の4種を出さない(段5b)
-    expect(keys).toEqual(["contract_guide", "seller_survey", "mediation", "sale_guide", "disclosure", "equipment", "settlement_statement", "settlement_guide", "settlement_guide_seller", "deposit_receipt", "balance_receipt", "settlement_receipt", "completion_confirmation", "power_of_attorney", "key_receipt", "checklist_contract", "checklist_settlement", "prep_checklist"]);
+    expect(keys).toEqual(["contract_guide", "seller_survey", "mediation", "sale_guide", "settlement_statement", "settlement_guide", "settlement_guide_seller", "deposit_receipt", "balance_receipt", "settlement_receipt", "completion_confirmation", "power_of_attorney", "key_receipt", "checklist_contract", "checklist_settlement", "prep_checklist"]);
     const guide = body.documents.find((d: { docType: string }) => d.docType === "settlement_guide");
     expect(guide.missing).toEqual(["決済場所"]);
     const receipt = body.documents.find((d: { docType: string }) => d.docType === "deposit_receipt");
@@ -621,7 +630,7 @@ describe("前回の入力を初めの値にする(第2段階 §3.2)", () => {
     expect((docOf(body, "contract_guide") as unknown as { missing: string[] }).missing).not.toContain("買主");
     expect(docOf(body, "completion_confirmation").defaults).toEqual({ handover: "前回の鍵" });
     const q = pm.dealDocument.findMany.mock.calls[0][0];
-    expect(q.where).toEqual({ dealId: DEAL_ID, docType: { in: ["contract_guide", "seller_survey", "mediation", "disclosure", "equipment", "completion_confirmation"] } });
+    expect(q.where).toEqual({ dealId: DEAL_ID, docType: { in: ["contract_guide", "seller_survey", "mediation", "completion_confirmation"] } });
     // 版の番号は書き分け(売却・購入など)ごとに数え直すので、発行した日時の新しい順で探す(提出前レビュー)
     expect(q.orderBy).toEqual([{ issuedAt: "desc" }, { version: "desc" }]);
     expect(q.select).toEqual({ docType: true, inputSnapshot: true });
