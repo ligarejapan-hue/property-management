@@ -37,6 +37,17 @@ const costRowsOf = (v: unknown): CostRow[] => (Array.isArray(v) ? (v as CostRow[
 /** 諸費用の行が出せる形か(項目名があり、金額が 0 以上の整数)。 */
 const costRowOk = (r: CostRow) => r.label.trim() !== "" && /^\d{1,13}$/.test(r.amount.replace(/,/g, ""));
 
+/** 売主の当事者が出す手付金・残金の領収書で、空欄で出る部分の知らせ(発行は止めない・2026-11-05 発注者)。 */
+export function PartyReceiptNotes({ notes }: { notes: string[] }) {
+  if (!notes.length) return null;
+  return (
+    <div className="rounded-md border border-amber-200 bg-amber-50 px-3 py-2 text-sm text-amber-900 dark:border-amber-900 dark:bg-amber-950 dark:text-amber-200" role="status">
+      <p>この領収書は、次の部分を空欄で出します(手で書き入れられます)。</p>
+      <ul className="mt-1 list-disc pl-5">{notes.map((n) => <li key={n}>{n}</li>)}</ul>
+    </div>
+  );
+}
+
 /**
  * 業務書類(段5)。その取引で出せる書類を並べ、「発行」→ 出す前の確認(空欄の項目・発行のときに選ぶもの)→ 発行。
  * 空欄があっても発行できる(「空欄のまま出す」)。判定はサーバーの一覧表の結果をそのまま出す(設計 §4.3)。
@@ -263,6 +274,7 @@ function IssueDialog({ dealId, doc, version, onCancel, onDone }: {
         )}
         {receipt && doc.issuers && (
           <>
+            {values.issuer !== "self" && <PartyReceiptNotes notes={(choices.partyNotes ?? []).map((n) => n.label)} />}
             <Field label="発行者(受け取る人)">
               <select aria-label="発行者" value={str(values.issuer)} onChange={(e) => set("issuer", e.target.value)} className={inputCls}>
                 {doc.issuers.map((i) => <option key={i.value} value={i.value}>{i.label}</option>)}

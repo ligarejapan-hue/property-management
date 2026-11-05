@@ -47,9 +47,9 @@ ${tel ? html`<div>${tel}</div>` : null}
 }
 
 /** A4 縦の書類1つ分の完全な HTML。外の URL は読まない(PDF を作るブラウザも外を読まない設定)。 */
-export function documentHtml(opts: { title: string; font?: "gothic" | "mincho"; body: HtmlValue }): string {
+export function documentHtml(opts: { title: string; font?: "gothic" | "mincho"; body: HtmlValue; /** この書類だけの CSS(固定の文字だけを渡す)。 */ css?: string }): string {
   const font = opts.font === "mincho" ? MINCHO : GOTHIC;
   return `<!DOCTYPE html>${html`<html lang="ja"><head><meta charset="utf-8"><title>${opts.title}</title>
-<style>${raw(BASE_CSS)} body { font-family: ${raw(font)}; }</style></head>
+<style>${raw(BASE_CSS)} body { font-family: ${raw(font)}; }${opts.css ? raw(opts.css) : null}</style></head>
 <body><div class="doc">${opts.body}</div></body></html>`.__html}`;
 }

@@ -6,6 +6,7 @@ import { receiptStamp } from "../../calc/stamp";
 import type { DealPartyView } from "../../view";
 import { html, type SafeHtml } from "../html";
 import { documentHtml } from "../layout";
+import { jstDateString } from "../../datetime";
 import { dateJa, namesOf, partiesOf, propertyLabel, type BusinessDocContext, type ValueRow } from "./common";
 
 export const RECEIPT_KINDS = {
@@ -100,6 +101,102 @@ ${p.partyType === "corporation" && p.representative ? html`<div>${p.representati
 </div>`;
 }
 
+/** 西暦の YYYY-MM-DD → 和暦(令和・平成・昭和。1年は「元年」)。 */
+export function warekiJa(ymd: string): string {
+  const y = Number(ymd.slice(0, 4));
+  const [era, n] = ymd >= "2019-05-01" ? ["令和", y - 2018] : ymd >= "1989-01-08" ? ["平成", y - 1988] : ["昭和", y - 1925];
+  return `${era}${n === 1 ? "元" : n}年${Number(ymd.slice(5, 7))}月${Number(ymd.slice(8, 10))}日`;
+}
+
+const BLANK_DATE = "　　年　　月　　日";
+/** 手で書き入れる空欄(全角の空白5つ)。 */
+const BLANK = "　　　　　";
+
+/** 新しいひな形の物件の表示。区分=マンション名と部屋番号・それ以外(種類が未選択も)=所在地と地番。 */
+function partyReceiptProperty(c: BusinessDocContext) {
+  const s = c.deal.propertySnapshot;
+  if (c.calc.kindBase === "unit") {
+    return { label: "物件", sep: "　", parts: [["マンション名", s.buildingName], ["部屋番号", s.roomNo]] as const };
+  }
+  return { label: "所在地", sep: " ", parts: [["所在地", s.address], ["地番", s.lotNumber]] as const };
+}
+
+/**
+ * 当事者が発行する手付金・残金の領収書で、空欄で出る部分の知らせ(発行は止めない)。
+ * 精算金領収書は今の書式のままなので出さない。自社発行のときは画面が出さない。
+ */
+export function partyReceiptNotes(kind: ReceiptKind, c: BusinessDocContext): string[] {
+  if (kind === "settlement_receipt") return [];
+  const out = c.deal.contractAt ? [] : ["契約日が未入力のため、日付は空欄で出ます"];
+  for (const [name, v] of partyReceiptProperty(c).parts) if (!v) out.push(`${name}が未入力のため、空欄で出ます`);
+  return out;
+}
+
+const PARTY_CSS = `
+@page { size: A4 portrait; margin: 0; }
+.doc { position: relative; width: 210mm; height: 296mm; margin: 0 auto; padding: 0; overflow: hidden; }
+@media screen { .doc { padding: 0; min-height: 0; } }
+.rc-outer { position: absolute; inset: 12mm; border: 1mm double #000; }
+.rc-inner { position: absolute; inset: 15mm; border: 0.3mm solid #000; }
+.rc-body { position: absolute; inset: 25mm; font-size: 11pt; color: #000; }
+.rc-top { text-align: right; font-size: 10.5pt; }
+.rc-title { font-size: 26pt; letter-spacing: .6em; text-indent: .6em; margin: 12mm 0 10mm; }
+.rc-to { display: flex; justify-content: space-between; width: 110mm; border-bottom: 0.4mm solid #000; font-size: 16pt; padding: 0 2mm 1mm; }
+.rc-amount { display: flex; align-items: center; justify-content: center; height: 22mm; border-top: 1.2mm solid #000; border-bottom: 1.2mm solid #000; font-size: 24pt; font-weight: bold; margin: 10mm 0 8mm; }
+.rc-body p { margin: 0 0 3mm; }
+.rc-ki { text-align: center; font-size: 12pt; margin: 8mm 0 4mm; }
+.rc-k { display: inline-block; width: 18mm; }
+.rc-bottom { position: absolute; left: 0; right: 0; bottom: 0; display: flex; justify-content: space-between; align-items: flex-end; }
+.rc-stamp { width: 30mm; height: 36mm; border: 0.3mm solid #000; display: flex; align-items: center; justify-content: center; text-align: center; font-size: 9pt; padding: 2mm; }
+.rc-issuer { width: 95mm; }
+.rc-issuer .name { font-size: 13pt; }
+.rc-sign { border: 0.3mm solid #000; padding: 2mm 3mm; margin-top: 3mm; height: 22mm; font-size: 9pt; }
+`;
+
+/** 手付金・残金の領収書(売主の当事者が発行・A4縦・黒一色・2026-11-05 発注者の見本)。 */
+function buildPartyReceipt(
+  kind: ReceiptKind, c: BusinessDocContext, o: ReceiptOptions, a: { amount: number; payer: string | null; stamp: number | null; exempt: boolean; party: DealPartyView },
+): { html: string; rows: ValueRow[]; issuerLabel: string } {
+  const def = RECEIPT_KINDS[kind];
+  const contractOn = c.deal.contractAt ? warekiJa(jstDateString(new Date(c.deal.contractAt))) : null;
+  const tadashi = `但し　${contractOn ?? BLANK_DATE}付下記記載の不動産売買契約に基づく売買代金（${def.purpose}）として`;
+  const prop = partyReceiptProperty(c);
+  const shown = prop.parts.map(([, v]) => v || BLANK).join(prop.sep);
+  const propValue = prop.parts.map(([, v]) => v).filter(Boolean).join(prop.sep) || null;
+  const stampNone = a.exempt ? "非課税（営業に関しない受取書）" : "印紙 不要";
+  const p = a.party;
+  const body = html`<div class="rc-outer"></div><div class="rc-inner"></div>
+<div class="rc-body">
+<div class="rc-top">${o.receivedOn ? dateJa(o.receivedOn) : BLANK_DATE}</div>
+<h1 class="rc-title">領 収 書</h1>
+<div class="rc-to"><span>${a.payer ?? ""}</span><span>様</span></div>
+<div class="rc-amount">金 ${yen(a.amount)} 円也</div>
+<p>${tadashi}</p>
+<p>上記の金額を正に領収いたしました。</p>
+<div class="rc-ki">記</div>
+<p><span class="rc-k">${prop.label}</span>${shown}</p>
+<div class="rc-bottom">
+<div class="rc-stamp">${a.stamp === null ? "収入印紙" : a.stamp === 0 ? stampNone : html`収入印紙<br>${yen(a.stamp)}円`}</div>
+<div class="rc-issuer">
+<div>${p.address ?? ""}</div>
+<div class="name">${p.name}</div>
+${p.partyType === "corporation" && p.representative ? html`<div>${p.representative}</div>` : null}
+<div class="rc-sign">署名・押印</div>
+</div>
+</div>
+</div>`;
+  return {
+    html: documentHtml({ title: def.label, font: "mincho", body, css: PARTY_CSS }),
+    issuerLabel: p.name,
+    rows: [
+      { label: "書類", value: def.label }, { label: "宛先", value: a.payer }, { label: "金額", value: a.amount },
+      { label: "但し書き", value: tadashi }, { label: "契約日", value: contractOn }, { label: prop.label, value: propValue },
+      { label: "受領日", value: o.receivedOn }, { label: "収入印紙", value: a.stamp === 0 ? stampNone : a.stamp },
+      { label: "発行者", value: p.name },
+    ],
+  };
+}
+
 /** 手付金・残金・精算金の領収書(依頼書 4.3・設計 §4.4)。 */
 export function buildReceipt(kind: ReceiptKind, c: BusinessDocContext, o: ReceiptOptions): { html: string; rows: ValueRow[]; issuerLabel: string } {
   const def = RECEIPT_KINDS[kind];
@@ -114,6 +211,8 @@ export function buildReceipt(kind: ReceiptKind, c: BusinessDocContext, o: Receip
   const stamp = exempt ? 0 : table ? receiptStamp(amount, table, "no").tax : null;
   const sides = receiptSides(kind, c)!;
   const payer = namesOf(partiesOf(c.deal, sides.payer));
+  // 売主の当事者が出す手付金・残金は新しいひな形(2026-11-05 発注者)。精算金と自社発行は下の今の書式のまま。
+  if (kind !== "settlement_receipt" && issuer.kind === "party") return buildPartyReceipt(kind, c, o, { amount, payer, stamp, exempt, party: issuer.party });
   const breakdown = kind === "settlement_receipt" ? c.calc.settlement.rows.map((r) => r.label).join("・") : null;
   const issuerLabel = issuer.kind === "self" ? c.company.nameJa : issuer.party.name;
   // 0円は「非課税」(個人の事業用でない売買を選んだとき)か「不要」(5万円未満など)。

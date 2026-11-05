@@ -113,7 +113,8 @@ describe("領収書", () => {
     const c = ctx();
     const { html } = doc("deposit_receipt").build(c, { issuer: SELLER.id, exempt: "no", receivedOn: "2026-05-01" });
     expect(html).toContain("金 1,500,000 円也");
-    expect(html).toContain("架空 花子 様");
+    // 売主の当事者が出す手付金は新しいひな形(「様」は下線の右端・2026-11-05 発注者)。
+    expect(html).toContain("<span>架空 花子</span><span>様</span>");
     expect(html).toContain("架空 一郎");
     expect(html).toContain("架空県架空市1-1");
     expect(html).toContain("署名・押印");
@@ -199,6 +200,7 @@ describe("@codex の直し", () => {
   it("非課税を選んだら、印紙の表が無くても「非課税」と出す", () => {
     const { html, rows } = doc("deposit_receipt").build(ctx(deal, { rateRows: [] }), { issuer: SELLER.id, exempt: "yes", receivedOn: null });
     expect(html).toContain("非課税");
-    expect(rows.find((r) => r.label === "収入印紙")?.value).toBe("非課税");
+    // 売主の当事者が出す手付金は新しいひな形の書き方(2026-11-05 発注者)。
+    expect(rows.find((r) => r.label === "収入印紙")?.value).toBe("非課税（営業に関しない受取書）");
   });
 });
