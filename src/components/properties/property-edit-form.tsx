@@ -718,6 +718,8 @@ export default function PropertyEditForm({
           const man = raw.trim() ? yenToMan(raw) : null;
           payload[f.key] = man === null ? null : Number(man);
         } else if (f.type === "parcels") {
+          // 隠れているとき(区分マンションへ変えた)は送らない=画面に無い行で保存を止めない(@codex P2)。
+          if (!isFieldVisible(f, values, clearableKeys)) continue;
           // 行の JSON をそのまま送る(空の欄はサーバーが null にする)。行が無ければ空の一覧。
           payload[f.key] = parcelRowsOf(raw);
         } else if (f.type === "number") {

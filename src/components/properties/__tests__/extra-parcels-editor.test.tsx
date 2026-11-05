@@ -44,6 +44,9 @@ describe("編集画面のほかの土地・建物(2026-11-05 案A 1回目)", () 
     expect(src).toContain('{ key: "extraParcels", label: "ほかの土地・建物", type: "parcels", section: "基本" }');
     expect(src).toContain('if (field.type === "parcels") return !isMansionUnit(values.propertyType);');
     expect(src).toContain("payload[f.key] = parcelRowsOf(raw);");
+    // 区分マンションへ変えて隠れた行は送らない(@codex P2)
+    const branch = src.slice(src.indexOf('} else if (f.type === "parcels") {'), src.indexOf("payload[f.key] = parcelRowsOf(raw);"));
+    expect(branch).toContain("if (!isFieldVisible(f, values, clearableKeys)) continue;");
     expect(src).toContain("ほかの土地・建物の地番・家屋番号を入れてください");
   });
 });
