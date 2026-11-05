@@ -41,8 +41,9 @@ describe("書類タブの業務書類(段5a・5b・5c)", () => {
     const src = read(SECTION);
     expect(src).toContain('{ key: "checklist", label: "書類確認書" }');
     expect(src).toMatch(/\(choices\.payItems \?\? \[\]\)\.map/);
-    expect(src).toMatch(/\(choices\.payMethods \?\? \[\]\)\.map/);
-    expect(src).toMatch(/set\("pay", \{ \.\.\.pay, \[it\.value\]: e\.target\.value \}\)/);
+    // 払い方はいくつでも選べる部品で(2026-11-05)。送るときは金額・その他を整える。
+    expect(src).toContain('value={payEntriesOf(pay[it.value])} onChange={(v) => set("pay", { ...pay, [it.value]: v })}');
+    expect(src).toContain("pay: Object.fromEntries(Object.entries(pay).map(([k, v]) => [k, payEntriesToSend(payEntriesOf(v))]))");
   });
   it("委任状は委任する事項・鍵受領書は鍵の行がそろうまで発行ボタンを押せない(段5b)", () => {
     const src = read(SECTION);

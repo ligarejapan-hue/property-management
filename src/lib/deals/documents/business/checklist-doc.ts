@@ -1,6 +1,6 @@
 import { z } from "zod";
 import {
-  CHECKLIST_AMOUNTS, CHECKLIST_GROUPS, CHECKLIST_ITEM_ID, CHECKLIST_PAY_METHODS, CHECKLIST_PHASES, itemsFor,
+  CHECKLIST_AMOUNTS, CHECKLIST_GROUPS, CHECKLIST_ITEM_ID, CHECKLIST_PAY_METHODS, CHECKLIST_PAY_OTHER_MAX, CHECKLIST_PHASES, itemsFor,
   type ChecklistAmount, type ChecklistDoc, type ChecklistGroup, type ChecklistItem, type ChecklistPayMethod, type ChecklistPhase,
 } from "../../checklist";
 import type { BASE_PROPERTY_KINDS } from "../../constants";
@@ -8,11 +8,37 @@ import { html } from "../html";
 import { documentHtml } from "../layout";
 import { DASH, dateJa, dateTimeJa, headTable, money, namesOf, partiesOf, propertyLabel, type BusinessDocContext, type Choice, type ValueRow } from "./common";
 
-/** 発行のときに選ぶもの: 持参する金額の払い方(項目の鍵ごと・計画 段5c-1 の読み替え 4)。 */
+const payEntrySchema = z.object({
+  method: z.enum(Object.keys(CHECKLIST_PAY_METHODS) as [ChecklistPayMethod, ...ChecklistPayMethod[]]),
+  /** 2つ以上の払い方を選んだときの、その払い方の金額(円)。1つだけなら null(金額の欄の額)。 */
+  amount: z.number().int().min(0).max(9_999_999_999_999).nullable(),
+  /** 「その他」のときだけの手入力。 */
+  other: z.string().trim().max(CHECKLIST_PAY_OTHER_MAX, `その他の払い方は${CHECKLIST_PAY_OTHER_MAX}文字までです`).nullable(),
+}).strict();
+export type ChecklistPayEntry = z.output<typeof payEntrySchema>;
+
+/** 前の形(払い方を1つの文字で送っていた)。現金だけ引き継ぎ、手付金から・残金からは選んでいないことにする。 */
+const LEGACY_PAY: Record<string, ChecklistPayEntry[]> = { cash: [{ method: "cash", amount: null, other: null }], from_deposit: [], from_balance: [] };
+const legacyPay = (v: unknown) => (typeof v === "string" && v in LEGACY_PAY ? LEGACY_PAY[v] : v);
+
+/**
+ * 発行のときに選ぶもの: 持参する金額の払い方(項目の鍵ごと・いくつでも・計画 段5c-1 の読み替え 4)。
+ * 同じ払い方は1回だけ。何も選ばなければ払い方の欄は空(紙に手で書く)。
+ */
 export const checklistOptionsSchema = z.object({
-  pay: z.record(z.string().regex(CHECKLIST_ITEM_ID), z.enum(Object.keys(CHECKLIST_PAY_METHODS) as [ChecklistPayMethod, ...ChecklistPayMethod[]])),
+  pay: z.record(z.string().regex(CHECKLIST_ITEM_ID), z.preprocess(legacyPay, z.array(payEntrySchema).max(Object.keys(CHECKLIST_PAY_METHODS).length)
+    .refine((es) => new Set(es.map((e) => e.method)).size === es.length, "同じ払い方が重なっています"))),
 }).strict();
 export type ChecklistOptions = z.output<typeof checklistOptionsSchema>;
+
+/** 払い方の欄の文字。2つ以上なら「振込 300,000円／現金 50,000円」。その他は手入力を括弧で添える。 */
+export function payText(entries: ChecklistPayEntry[] | undefined): string {
+  const es = entries ?? [];
+  return es.map((e) => {
+    const name = e.method === "other" && e.other ? `${CHECKLIST_PAY_METHODS.other}(${e.other})` : CHECKLIST_PAY_METHODS[e.method];
+    return es.length > 1 && e.amount !== null ? `${name} ${money(e.amount)}` : name;
+  }).join("／");
+}
 
 /** 持参する金額(決済の計算と取引の値をそのまま使う・設計 §4.6)。 */
 export function checklistAmount(a: ChecklistAmount, c: BusinessDocContext): number | null {
@@ -70,10 +96,11 @@ export function checklistMissing(phase: ChecklistPhase, c: BusinessDocContext): 
 export function checklistDefaults(phase: ChecklistPhase, c: BusinessDocContext): { values: ChecklistOptions; choices: Record<string, Choice[]> } {
   const items = amountItems(phase, c);
   return {
-    values: { pay: Object.fromEntries(items.map((i) => [i.id, "cash" as const])) },
+    values: { pay: Object.fromEntries(items.map((i) => [i.id, [] as ChecklistPayEntry[]])) },
     choices: {
       payItems: items.map((i) => ({ value: i.id, label: `${i.label}(${money(checklistAmount(i.amount, c))})` })),
-      payMethods: Object.entries(CHECKLIST_PAY_METHODS).map(([value, label]) => ({ value, label })),
+      // 内訳の合計を画面で確かめるための金額(円・無ければ空)。
+      payTotals: items.map((i) => ({ value: i.id, label: String(checklistAmount(i.amount, c) ?? "") })),
     },
   };
 }
@@ -102,7 +129,7 @@ export function buildChecklistDoc(phase: ChecklistPhase, c: BusinessDocContext, 
   ];
   const items = checklistItemsOf(phase, c);
   const of = (g: ChecklistGroup) => items.filter((i) => i.group === g);
-  const payOf = (i: ChecklistItem) => CHECKLIST_PAY_METHODS[o.pay[i.id] ?? "cash"];
+  const payOf = (i: ChecklistItem) => payText(o.pay[i.id]);
   const received = (i: ChecklistItem) => phase === "settlement" && (c.receivedItemIds?.has(i.id) ?? false);
   const confirmBox = (i: ChecklistItem) => (received(i) ? checkedBox : box);
 
@@ -117,7 +144,7 @@ ${prepare.length ? html`<h2>${CHECKLIST_GROUPS.prepare}</h2>
 <table><tr><th>項目</th><th style="width:12mm">営業</th><th style="width:12mm">業務</th><th style="width:34%">注意事項</th></tr>
 ${prepare.map((i) => html`<tr><td>${i.label}</td>${box}${box}<td>${i.note ?? ""}</td></tr>`)}</table>` : null}
 ${bring.length ? html`<h2>${CHECKLIST_GROUPS.bring}</h2>
-<table><tr><th>項目</th><th style="width:24%">金額</th><th style="width:14%">払い方</th><th style="width:12mm">確認</th><th style="width:26%">注意事項</th></tr>
+<table><tr><th>項目</th><th style="width:20%">金額</th><th style="width:26%">払い方</th><th style="width:12mm">確認</th><th style="width:18%">注意事項</th></tr>
 ${bring.map((i) => html`<tr><td>${i.label}</td><td class="num">${i.amount ? money(checklistAmount(i.amount, c)) : ""}</td><td>${i.amount ? payOf(i) : ""}</td>${confirmBox(i)}<td>${i.note ?? ""}</td></tr>`)}</table>` : null}
 ${receive.length ? html`<h2>${CHECKLIST_GROUPS.receive}</h2>
 <table><tr><th>項目</th><th style="width:12mm">確認</th><th style="width:28%">注意事項</th><th style="width:24%">メモ</th></tr>

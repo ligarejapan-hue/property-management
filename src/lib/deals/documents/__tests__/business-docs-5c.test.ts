@@ -87,19 +87,23 @@ describe("書類確認書(段5c-1)", () => {
     expect(unit + bldg).not.toMatch(/リースバック/);
   });
 
-  it("持参する金額は決済の計算と取引の値・払い方は選んだもの(初めは現金)", () => {
+  it("持参する金額は決済の計算と取引の値・払い方は選んだもの(初めは何も選ばない)", () => {
     const c = ctx(unitDeal);
     const def = doc("checklist_settlement").defaults(c);
-    expect(def.values).toEqual({ pay: { s_bring_payment: "cash", s_bring_registration: "cash" } });
-    expect(def.choices!.payMethods.map((x) => x.value)).toEqual(["cash", "from_deposit", "from_balance"]);
+    expect(def.values).toEqual({ pay: { s_bring_payment: [], s_bring_registration: [] } });
     expect(def.choices!.payItems.map((x) => x.value)).toEqual(["s_bring_payment", "s_bring_registration"]);
-    const out = doc("checklist_settlement").build(c, { pay: { s_bring_payment: "from_balance" } });
+    expect(def.choices!.payTotals).toEqual([
+      { value: "s_bring_payment", label: String(c.calc.settlement.paymentAtSettlement) }, { value: "s_bring_registration", label: "300000" },
+    ]);
+    const out = doc("checklist_settlement").build(c, { pay: { s_bring_payment: [{ method: "transfer", amount: null, other: null }] } });
     const pay = c.calc.settlement.paymentAtSettlement!;
     expect(pay).toBeGreaterThan(0);
     expect(out.html).toContain(`${pay.toLocaleString("ja-JP")}円`);
     expect(out.html).toContain("300,000円");
-    expect(out.html).toContain("残金から");
+    expect(out.html).toContain("振込");
     expect(out.rows).toContainEqual({ label: "持参: 残代金・精算金", value: pay });
+    expect(out.rows).toContainEqual({ label: "払い方: 残代金・精算金", value: "振込" });
+    expect(out.rows).toContainEqual({ label: "払い方: 登記費用", value: "" });
     expect(doc("checklist_contract").build(c, { pay: {} }).html).toContain("2,000,000円");
   });
 
@@ -110,10 +114,34 @@ describe("書類確認書(段5c-1)", () => {
     expect(doc("checklist_settlement").missing(ctx())).toEqual(["登記費用"]);
   });
 
-  it("払い方の形: 知らない払い方は通さない", () => {
-    expect(() => doc("checklist_settlement").options.parse({ pay: { s_bring_payment: "card" } })).toThrow();
-    expect(() => doc("checklist_settlement").options.parse({ pay: { "Bad Id": "cash" } })).toThrow();
-    expect(doc("checklist_settlement").options.parse({ pay: {} })).toEqual({ pay: {} });
+  it("払い方の形: 知らない払い方・重なり・長すぎるその他は通さない・前の形は読み替える", () => {
+    const parse = (pay: unknown) => doc("checklist_settlement").options.parse({ pay });
+    const e = (method: string, amount: number | null = null, other: string | null = null) => ({ method, amount, other });
+    expect(() => parse({ s_bring_payment: "card" })).toThrow();
+    expect(() => parse({ s_bring_payment: [e("card")] })).toThrow();
+    expect(() => parse({ s_bring_payment: [e("cash"), e("cash")] })).toThrow();
+    expect(() => parse({ s_bring_payment: [e("other", null, "x".repeat(31))] })).toThrow();
+    expect(() => parse({ s_bring_payment: [e("cash", -1)] })).toThrow();
+    expect(() => parse({ "Bad Id": [] })).toThrow();
+    expect(parse({})).toEqual({ pay: {} });
+    // 前の形(1つの文字): 現金は引き継ぎ、手付金から・残金からは選んでいないことにする
+    expect(parse({ s_bring_payment: "cash", s_bring_registration: "from_deposit" })).toEqual({ pay: { s_bring_payment: [e("cash")], s_bring_registration: [] } });
+  });
+
+  it("払い方の欄: 1つなら名前・2つ以上なら名前と金額・その他は手入力を添える", () => {
+    const c = ctx(unitDeal);
+    const e = (method: string, amount: number | null = null, other: string | null = null) => ({ method, amount, other });
+    const out = doc("checklist_settlement").build(c, { pay: {
+      s_bring_payment: [e("transfer", 3_000_000), e("cash", 50_000)],
+      s_bring_registration: [e("other", null, "預り金から")],
+    } });
+    expect(out.rows).toContainEqual({ label: "払い方: 残代金・精算金", value: "振込 3,000,000円／現金 50,000円" });
+    expect(out.rows).toContainEqual({ label: "払い方: 登記費用", value: "その他(預り金から)" });
+    expect(out.html).toContain("振込 3,000,000円／現金 50,000円");
+    // 1つだけなら金額は付けない(金額の欄の額)・その他の手入力が空なら「その他」だけ
+    const one = doc("checklist_settlement").build(c, { pay: { s_bring_payment: [e("check", 99)], s_bring_registration: [e("other")] } });
+    expect(one.rows).toContainEqual({ label: "払い方: 残代金・精算金", value: "小切手" });
+    expect(one.rows).toContainEqual({ label: "払い方: 登記費用", value: "その他" });
   });
 
   it("担当者の名前が無いときは「—」", () => {
@@ -133,8 +161,8 @@ describe("書類確認書と謄本の登記の現況(段5c-2)", () => {
     expect(out.html).toContain("抵当権抹消書類(金融機関)");
     expect(out.html).toContain("40,000円");
     expect(out.rows).toContainEqual({ label: "持参: 抹消費用", value: 40_000 });
-    // 払い方を選べる・初期値は現金
-    expect(doc("checklist_settlement").defaults(c).values).toEqual({ pay: { s_bring_payment: "cash", s_bring_registration: "cash", auto_cancel_fee: "cash" } });
+    // 払い方を選べる・初めは何も選ばない
+    expect(doc("checklist_settlement").defaults(c).values).toEqual({ pay: { s_bring_payment: [], s_bring_registration: [], auto_cancel_fee: [] } });
     // 抹消費用が空なら出す前の確認に出す
     expect(doc("checklist_settlement").missing(withRights(unitDeal, 1))).toEqual(["抹消費用"]);
   });
