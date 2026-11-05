@@ -6,6 +6,7 @@ import { z } from "zod/v4";
 import type { BuildingChoice } from "@/lib/building-link/resolve";
 import { buildingChoiceSchema } from "./building-choice";
 import { manToYen } from "@/lib/yen-man";
+import { extraParcelsEditValue } from "@/lib/property-parcels";
 
 /**
  * 画面では円で入れる欄(保存は万円・2026-11-03 発注者「万円表示にしない」)。
@@ -16,6 +17,8 @@ export const YEN_EDIT_KEYS: ReadonlySet<string> = new Set(["salePrice", "saleTax
 /** 物件の値を編集画面の欄の文字に。円の欄は万円→円。 */
 export function editFieldValue(key: string, raw: unknown): string {
   if (YEN_EDIT_KEYS.has(key)) return manToYen(raw);
+  // ほかの土地・建物は行の JSON(足していなければ空)。
+  if (key === "extraParcels") return extraParcelsEditValue(raw);
   return raw != null ? String(raw) : "";
 }
 

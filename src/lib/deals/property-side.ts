@@ -1,3 +1,4 @@
+import { joinedParcelNumbers } from "@/lib/property-parcels";
 import {
   CASE_STATUS_LABELS, INTRODUCTION_ROUTE_LABELS, OCCUPANCY_STATUS_LABELS, PROPERTY_TYPE_LABELS,
 } from "@/lib/property-types";
@@ -14,6 +15,8 @@ export type PropertySideSource = {
   address?: string | null;
   lotNumber?: string | null;
   buildingNumber?: string | null;
+  /** 2筆目以降の土地・2棟目以降の建物(2026-11-05)。 */
+  extraParcels?: unknown;
   realEstateNumber?: string | null;
   salePrice?: number | null;
   exclusiveArea?: number | null;
@@ -90,8 +93,9 @@ export function propertySideRows(p: PropertySideSource): { label: string; value:
     ["物件名", p.buildingName || null],
     ["号室", p.roomNo || null],
     ["住居表示", p.address || null],
-    ["所在・地番", p.lotNumber || null],
-    ["家屋番号", p.buildingNumber || null],
+    // 2筆目・2棟目があれば「、」でつなぐ(2026-11-05)。
+    ["所在・地番", joinedParcelNumbers(p.lotNumber, p.extraParcels, "land")],
+    ["家屋番号", joinedParcelNumbers(p.buildingNumber, p.extraParcels, "building")],
     ["不動産番号", p.realEstateNumber || null],
     // salePrice は万円で保存している。画面は円で出す(端数があれば「3,280万1,500円」・2026-11-03)。
     ["価格", p.salePrice == null ? null : formatYenText(manToYen(p.salePrice))],

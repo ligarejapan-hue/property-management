@@ -45,6 +45,7 @@ import { canSubmitSave, shouldShowLockUnavailableNotice } from "@/lib/edit-lock/
 // 1回だけ問い合わせて差し替える。
 import { showComposedEditLockedMessage } from "@/lib/edit-lock/locked-message";
 import { INQUIRER_NAME_MAX_LENGTH } from "@/lib/inquirer-name";
+import { ExtraParcelsEditor, parcelRowsOf } from "./extra-parcels-editor";
 
 interface AssigneeOption {
   id: string;
@@ -140,7 +141,7 @@ interface PropertyEditFormProps {
 interface FormField {
   key: string;
   label: string;
-  type: "text" | "number" | "select" | "textarea" | "clearOnly";
+  type: "text" | "number" | "select" | "textarea" | "clearOnly" | "parcels";
   options?: Array<{ value: string; label: string }>;
   section: string;
   /**
@@ -193,6 +194,8 @@ function isFieldVisible(
   if (field.key === "roomNo") {
     return isMansionUnit(values.propertyType);
   }
+  // 区分マンションは棟のしくみで扱う(対象外)。
+  if (field.type === "parcels") return !isMansionUnit(values.propertyType);
   // ⚠clearOnly は「新しく入れる」ためではなく「消す」ための欄。
   //   元から値がある物件でだけ出す(空の物件に欄が生えると、入れられてしまう)。
   //   判定は**開いた時点の値**で固定する。編集中に消した瞬間に欄が消えると、
@@ -401,6 +404,8 @@ const FORM_FIELDS: FormField[] = [
   { key: "address", label: "住所", type: "text", section: "基本" },
   { key: "lotNumber", label: "地番", type: "text", section: "基本" },
   { key: "buildingNumber", label: "家屋番号", type: "text", section: "基本" },
+  // 2筆目以降の土地・2棟目以降の建物(足していない物件はリンクだけ・区分マンションには出さない・2026-11-05)。
+  { key: "extraParcels", label: "ほかの土地・建物", type: "parcels", section: "基本" },
   // 物件名(任意)。⚠**集合住宅の種別を選んでいるときだけ表示する**(描画側で判定)。
   // 土地や戸建には無い項目なので、常時出すと入力欄が無駄に増える。
   {
@@ -671,6 +676,12 @@ export default function PropertyEditForm({
       setError(`${badYen.label.replace(/\(円\)$/, "")}は1円単位の数字で入力してください`);
       return;
     }
+    // ほかの土地・建物は、地番・家屋番号が空の行を残したまま保存しない(どの筆か分からない)。
+    const parcelsField = allFields.find((f) => f.type === "parcels");
+    if (parcelsField && isFieldVisible(parcelsField, values, clearableKeys) && parcelRowsOf(values.extraParcels).some((r) => !r.number.trim())) {
+      setError("ほかの土地・建物の地番・家屋番号を入れてください(要らない行は消してください)");
+      return;
+    }
     // 棟につながっている区分で物件名を変えた/棟を選び直したら、付け替え(外す)を確かめる(D4)。
     const isUnit = (values.propertyType ?? property.propertyType) === "apartment_unit";
     if (isUnit) {
@@ -706,6 +717,9 @@ export default function PropertyEditForm({
           // 画面は円・API と列は万円。
           const man = raw.trim() ? yenToMan(raw) : null;
           payload[f.key] = man === null ? null : Number(man);
+        } else if (f.type === "parcels") {
+          // 行の JSON をそのまま送る(空の欄はサーバーが null にする)。行が無ければ空の一覧。
+          payload[f.key] = parcelRowsOf(raw);
         } else if (f.type === "number") {
           payload[f.key] = raw ? Number(raw) : null;
         } else {
@@ -858,7 +872,13 @@ export default function PropertyEditForm({
                   // ⚠判定は保存前の検証と共有する (isFieldVisible)。
                   .filter((f) => isFieldVisible(f, values, clearableKeys))
                   .map(
-                  (field) => (
+                  (field) => field.type === "parcels" ? (
+                    <div key={field.key} data-field-key={field.key} className="md:col-span-2">
+                      <ExtraParcelsEditor
+                        value={values[field.key]} onChange={(v) => handleChange(field.key, v)}
+                      />
+                    </div>
+                  ) : (
                     <div
                       key={field.key}
                       data-field-key={field.key}

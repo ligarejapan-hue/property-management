@@ -1,5 +1,6 @@
 "use client";
 
+import { extraParcelsText, parcelNumberLabel, readExtraParcels } from "@/lib/property-parcels";
 import { useState, useEffect, useCallback, useMemo, useRef, use, type Dispatch, type SetStateAction } from "react";
 import { clearDraft, draftKey, readDraft } from "@/lib/drafts/draft-store";
 import { decideEditDraftOnLoad, parsePropertyEditDraft } from "@/lib/drafts/screens/property-edit";
@@ -239,6 +240,8 @@ interface ApiProperty {
   address: string;
   lotNumber: string | null;
   buildingNumber: string | null;
+  /** 2筆目以降の土地・2棟目以降の建物(2026-11-05)。 */
+  extraParcels?: unknown;
   /** 物件名(任意)。集合住宅の種別のときだけ値が入る。 */
   buildingName: string | null;
   realEstateNumber: string | null;
@@ -1314,8 +1317,12 @@ function BasicTab({
           }}
         />
       )}
-      <Field label="地番" value={property.lotNumber} />
-      <Field label="家屋番号" value={property.buildingNumber} />
+      {/* 2筆目・2棟目があれば「ほか◯筆」と出し、下に1行ずつ並べる(無ければ今のまま・2026-11-05)。 */}
+      <Field label="地番" value={parcelNumberLabel(property.lotNumber, property.extraParcels, "land")} />
+      <Field label="家屋番号" value={parcelNumberLabel(property.buildingNumber, property.extraParcels, "building")} />
+      {readExtraParcels(property.extraParcels).length > 0 && (
+        <Field label="ほかの土地・建物" value={extraParcelsText(property.extraParcels)} multiline />
+      )}
       {/* 不動産番号は「今後も作らない」運用(本番は0件)。空なら行ごと出さない(実機確認 2026-10-22)。 */}
       {property.realEstateNumber && (
         <Field label="不動産番号" value={property.realEstateNumber} mono />

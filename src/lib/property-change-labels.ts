@@ -7,6 +7,7 @@ export const CHANGE_FIELD_LABELS: Record<string, string> = {
   address: "住所",
   lotNumber: "地番",
   buildingNumber: "家屋番号",
+  extraParcels: "ほかの土地・建物",
   buildingName: "物件名",
   buildingId: "棟",
   registryStatus: "登記状況",

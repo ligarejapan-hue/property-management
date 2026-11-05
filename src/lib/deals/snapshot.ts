@@ -1,4 +1,11 @@
 import { toHalfWidthDigits } from "@/lib/registry-fetch/chiban-input";
+import { joinedParcelNumbers, parcelNumberLabel, type ParcelKind } from "@/lib/property-parcels";
+
+/** 写しの地番・家屋番号。並べると欄の長さを超えるときは「1番1 ほか◯筆」(読めない値にして消さない)。 */
+const parcelNumbersFor = (main: string | null, extra: unknown, kind: ParcelKind, max: number): string | null => {
+  const joined = joinedParcelNumbers(main, extra, kind);
+  return joined && joined.length > max ? parcelNumberLabel(main, extra, kind) : joined;
+};
 import { PROPERTY_TYPE_LABELS } from "@/lib/property-types";
 import {
   EMPTY_BROKER, EMPTY_SNAPSHOT, counterpartyBrokerSchema, propertySnapshotSchema,
@@ -7,7 +14,7 @@ import {
 
 /** 写しに使う物件の列(+現地担当の範囲判定に使う createdBy/assignedTo)。 */
 export const SNAPSHOT_PROPERTY_SELECT = {
-  propertyType: true, address: true, lotNumber: true, buildingNumber: true, buildingName: true, roomNo: true,
+  propertyType: true, address: true, lotNumber: true, buildingNumber: true, extraParcels: true, buildingName: true, roomNo: true,
   exclusiveArea: true, totalFloorArea: true, landArea: true, structureType: true, builtYear: true, builtMonth: true,
   access: true, layoutType: true, createdBy: true, assignedTo: true, managementFee: true, repairReserveFee: true,
 } as const;
@@ -30,6 +37,8 @@ export function settlementFeesFromProperty(p: {
 type Num = { toString(): string } | number | string | null;
 interface SnapshotSource {
   propertyType: string; address: string; lotNumber: string | null; buildingNumber: string | null;
+  /** 2筆目以降の土地・2棟目以降の建物。写しの地番・家屋番号に「、」でつないで入れる(書類にそのまま出る・2026-11-05)。 */
+  extraParcels?: unknown;
   buildingName: string | null; roomNo: string | null; exclusiveArea: Num; totalFloorArea: Num; landArea: Num;
   structureType: string | null; builtYear: number | null; builtMonth: number | null; access: string | null; layoutType: string | null;
 }
@@ -49,8 +58,8 @@ export function buildSnapshotFromProperty(p: SnapshotSource): PropertySnapshot {
   // 写しの範囲を外れた値(和暦の年・長すぎる交通 など)は、ここで空にする。保存したあとに
   // readSnapshot で読めず、画面で空に見えて次の保存で消える、を防ぐ(保存したものは必ず読める)。
   return readSnapshot({
-    buildingName: strHalf(p.buildingName), roomNo: strHalf(p.roomNo), address: strHalf(p.address), lotNumber: strHalf(p.lotNumber),
-    buildingNumber: strHalf(p.buildingNumber), propertyTypeLabel: PROPERTY_TYPE_LABELS[p.propertyType] ?? null,
+    buildingName: strHalf(p.buildingName), roomNo: strHalf(p.roomNo), address: strHalf(p.address), lotNumber: strHalf(parcelNumbersFor(p.lotNumber, p.extraParcels, "land", 300)),
+    buildingNumber: strHalf(parcelNumbersFor(p.buildingNumber, p.extraParcels, "building", 100)), propertyTypeLabel: PROPERTY_TYPE_LABELS[p.propertyType] ?? null,
     structure: str(p.structureType), builtYear: p.builtYear, builtMonth: p.builtMonth,
     floorArea: num(isUnit ? p.exclusiveArea : p.totalFloorArea), landArea: num(p.landArea), landRight: null,
     access: str(p.access), layout: str(p.layoutType),
