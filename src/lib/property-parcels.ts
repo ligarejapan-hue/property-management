@@ -1,6 +1,6 @@
 import { z } from "zod";
 import { normalizeAddress, normalizeLotNumber } from "@/lib/address-normalizer";
-import { toHalfWidthDigits } from "@/lib/registry-fetch/chiban-input";
+import { toHalfWidthDigits, unifyChibanSeparators } from "@/lib/registry-fetch/chiban-input";
 
 /**
  * 物件の2筆目以降の土地・2棟目以降の建物(2026-11-05 発注者 案A「物件の中に土地・建物の内訳」1回目)。
@@ -87,11 +87,12 @@ export function joinedParcelNumbers(main: string | null | undefined, raw: unknow
   return all.length ? all.join("、") : null;
 }
 
-/** 地番・家屋番号を比べる形。「1番1」「1番地1」「1-1」「１番１」を同じにする。 */
+/** 地番・家屋番号を比べる形。「1番1の2」「1番地1の2」「1-1-2」「１番１ノ２」を同じにする(@codex P2)。 */
 export function parcelNumberKey(v: string | null | undefined): string | null {
   const s = v?.normalize("NFKC").replace(/番地/g, "番").trim();
   if (!s) return null;
-  return normalizeLotNumber(s) || null;
+  // 漢数字と「番」は normalizeLotNumber、「の」「ノ」・ダッシュの類は謄本の取得と同じ unifyChibanSeparators でそろえる。
+  return unifyChibanSeparators(normalizeLotNumber(s)).replace(/-+/g, "-").replace(/^-|-$/g, "") || null;
 }
 
 /**

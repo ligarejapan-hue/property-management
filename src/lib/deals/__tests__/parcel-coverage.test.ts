@@ -9,6 +9,7 @@ const BOTH = ["土地", "建物"] as const;
 describe("地番・家屋番号の比べる形", () => {
   it("書き方の違いをそろえる", () => {
     for (const v of ["1番1", "1番地1", "1-1", "１番１", " 1番1 "]) expect(parcelNumberKey(v)).toBe("1-1");
+    for (const v of ["1番1の2", "1番地1の2", "1-1-2", "１番１ノ２", "1−1−2", "一番一の二"]) expect(parcelNumberKey(v)).toBe("1-1-2");
     expect(parcelNumberKey("12番")).toBe("12");
     expect(parcelNumberKey("")).toBeNull();
     expect(parcelNumberKey(null)).toBeNull();
