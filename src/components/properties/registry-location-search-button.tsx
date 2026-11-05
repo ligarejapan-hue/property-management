@@ -705,6 +705,18 @@ export default function RegistryLocationSearchButton({
         </div>
       )}
 
+      {/* 取る土地・建物(2026-11-06)。⚠地番を尋ねる小窓・確認パネルのどちらが出ていても選べるように、
+          その外に置く(1筆目の地番が空でも、足した行を選べば小窓を経ずに検索できる・@codex P2)。 */}
+      {state === "confirmSearch" && (
+        <RegistryParcelTargetPicker
+          rows={extraRows}
+          mainLotNumber={propertyLotNumber}
+          mainBuildingNumber={propertyBuildingNumber}
+          value={targetParcelId}
+          onChange={setTargetParcelId}
+        />
+      )}
+
       {/* ⚠番号が無い物件では、確認パネルの**前に**地番を入れてもらう（設計 §3.1）。
           保存したら物件を取り直し、分類が変わって通常の確認パネルになる。 */}
       {state === "confirmSearch" && target?.kind === "none" && (
@@ -735,13 +747,6 @@ export default function RegistryLocationSearchButton({
           <p className="text-indigo-700 dark:text-indigo-300">
             登記情報の検索は有料処理になり得ます。実行には明示的な確認が必要です。
           </p>
-          <RegistryParcelTargetPicker
-            rows={extraRows}
-            mainLotNumber={propertyLotNumber}
-            mainBuildingNumber={propertyBuildingNumber}
-            value={targetParcelId}
-            onChange={setTargetParcelId}
-          />
           <RegistryTargetNote state={preflight} propertyId={propertyId} />
           {/* ⚠**取得の前に警告を出す**（@codex #399 R1 P1）。候補1件はそのまま課金まで
               進むため、確認画面だけに警告があると「既に取得済み・PDF添付済み・所有者あり」に

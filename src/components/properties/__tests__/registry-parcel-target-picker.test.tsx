@@ -47,4 +47,10 @@ describe("取得の画面への配線(ソース)", () => {
     expect((src.match(/<RegistryParcelTargetPicker/g) ?? []).length).toBe(2);
     expect(src).toContain("取得する土地・建物：{parcelTargetLabel(targetRow)}");
   });
+  it("★1筆目の地番が空(地番を尋ねる小窓が出る)ときも選べる=小窓・確認パネルの外に置く(@codex P2)", () => {
+    const picker = src.indexOf('{state === "confirmSearch" && (\n        <RegistryParcelTargetPicker');
+    const popup = src.indexOf('{state === "confirmSearch" && target?.kind === "none" && (');
+    expect(picker).toBeGreaterThan(-1);
+    expect(popup).toBeGreaterThan(picker);
+  });
 });

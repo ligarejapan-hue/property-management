@@ -55,8 +55,15 @@ describe("取得する土地・建物の指定(2026-11-06 2回目後半)", () =>
 
   it("★二重課金の鍵: 1筆目は今までどおり・行は種類つき(土地 1番1 と建物 1番1 を同じにしない)", () => {
     expect(purchaseIdentifierFor(registryTargetView(P, null)!, "1番1")).toBe("1番1");
-    expect(purchaseIdentifierFor(registryTargetView(P, "a")!, "1番2")).toBe("land:1番2");
-    expect(purchaseIdentifierFor(registryTargetView(P, "b")!, "1番1の2")).toBe("building:1番1の2");
+    expect(purchaseIdentifierFor(registryTargetView(P, "a")!, "1番2")).toBe("land:a:1番2");
+    expect(purchaseIdentifierFor(registryTargetView(P, "b")!, "1番1の2")).toBe("building:b:1番1の2");
+  });
+  it("★所在が違う同じ番号の行は別の鍵・同じ行は所在の書き方を直しても同じ鍵(@codex P2)", () => {
+    const twins = { ...P, extraParcels: [row("x", "land", "2番", { location: "架空町二丁目" }), row("y", "land", "2番", { location: "架空町三丁目" })] };
+    const kx = purchaseIdentifierFor(registryTargetView(twins, "x")!, "2番");
+    expect(kx).not.toBe(purchaseIdentifierFor(registryTargetView(twins, "y")!, "2番"));
+    const renamed = { ...twins, extraParcels: [row("x", "land", "2番", { location: "架空町2丁目" }), twins.extraParcels[1]] };
+    expect(purchaseIdentifierFor(registryTargetView(renamed, "x")!, "2番")).toBe(kx);
   });
 
   it("受け取る値: 省略=指定なし・文字(64字まで)=行・それ以外は不正", () => {

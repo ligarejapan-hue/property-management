@@ -63,8 +63,12 @@ export function fingerprintRegistryTarget(p: RegistryTargetSource, targetParcelI
 
 /**
  * 二重課金の鍵に入れる番号。1筆目は今までどおり(30日の台帳と同じ鍵のまま=前に買った分で止まる)。
- * 足した行は種類をつける(家屋番号が地番と同じ「1番1」でも、土地と建物を同じ買い物にしない)。
+ * 足した行は種類と行の id をつける。
+ * - 種類: 家屋番号が地番と同じ「1番1」でも、土地と建物を同じ買い物にしない。
+ * - 行の id: 所在が違う同じ番号の行(二丁目の2番と三丁目の2番)を、別の買い物にする(@codex P2)。
+ *   ⚠所在そのものは入れない(表記を直すだけで鍵が変わり、二重課金の守りをすり抜けるため=1筆目と同じ考え)。
+ *   行の id は行を直しても変わらないので、同じ行をもう一度買おうとすれば止まる。
  */
 export function purchaseIdentifierFor(view: RegistryTargetView, lotOrBuilding: string): string {
-  return view.parcel ? `${view.parcel.kind}:${lotOrBuilding}` : lotOrBuilding;
+  return view.parcel ? `${view.parcel.kind}:${view.parcel.id}:${lotOrBuilding}` : lotOrBuilding;
 }

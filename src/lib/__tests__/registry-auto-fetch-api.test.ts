@@ -2000,12 +2000,12 @@ describe("取る土地・建物を選んだ有料取得(2026-11-06 2筆以上の
     const { promise } = run("row-a");
     await promise;
     const where = pm.auditLog.findFirst.mock.calls[0][0].where;
-    expect(where.detail).toEqual({ path: ["purchaseKeyHash"], equals: hashOf("land:1-2") });
-    expect(hashOf("land:1-2")).not.toBe(hashOf("1-2"));
+    expect(where.detail).toEqual({ path: ["purchaseKeyHash"], equals: hashOf("land:row-a:1-2") });
+    expect(hashOf("land:row-a:1-2")).not.toBe(hashOf("1-2"));
     const ledger = pm.auditLog.create.mock.calls
       .map((c) => (c[0] as { data: { action: string; detail: { purchaseKeyHash: string } } }).data)
       .filter((d) => d.action === "registry_location_purchase");
-    expect(ledger[0].detail.purchaseKeyHash).toBe(hashOf("land:1-2"));
+    expect(ledger[0].detail.purchaseKeyHash).toBe(hashOf("land:row-a:1-2"));
   });
   it("★行が台帳にあれば 409 で止まる(課金しない)", async () => {
     pm.auditLog.findFirst.mockResolvedValue({ id: "prior" });
