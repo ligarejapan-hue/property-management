@@ -1,5 +1,6 @@
 import { z } from "zod";
-import { toHalfWidthDigits } from "@/lib/registry-fetch/chiban-input";
+import { normalizeAddress, normalizeLotNumber } from "@/lib/address-normalizer";
+import { toHalfWidthDigits, unifyChibanSeparators } from "@/lib/registry-fetch/chiban-input";
 
 /**
  * 物件の2筆目以降の土地・2棟目以降の建物(2026-11-05 発注者 案A「物件の中に土地・建物の内訳」1回目)。
@@ -84,6 +85,100 @@ export function joinedParcelNumbers(main: string | null | undefined, raw: unknow
   const all = [main?.trim() || null, ...ofKind(readExtraParcels(raw), kind).map((p) => (p.location ? `${p.location} ${p.number}` : p.number))]
     .filter((v): v is string => !!v);
   return all.length ? all.join("、") : null;
+}
+
+/** 地番・家屋番号を比べる形。「1番1の2」「1番地1の2」「1-1-2」「１番１ノ２」を同じにする(@codex P2)。 */
+export function parcelNumberKey(v: string | null | undefined): string | null {
+  const s = v?.normalize("NFKC").replace(/番地/g, "番").trim();
+  if (!s) return null;
+  // 漢数字と「番」は normalizeLotNumber、「の」「ノ」・ダッシュの類は謄本の取得と同じ unifyChibanSeparators でそろえる。
+  return unifyChibanSeparators(normalizeLotNumber(s)).replace(/-+/g, "-").replace(/^-|-$/g, "") || null;
+}
+
+/**
+ * 謄本がこの物件のどの土地・建物のものか(謄本から読めた地番・家屋番号で決める)。
+ * - main: 1筆目・1棟目(今までどおり物件の欄を埋める)。足した行に無い番号で、その種類の物件の欄が空のときも main。
+ *   足した行が無い物件で番号を読めないときも main(今までどおり)。
+ * - extra: 足した行のどれか(物件の欄は埋めない)。
+ * - 同じ番号が2つ以上あるときは謄本の所在で決める(pickParcelByLocation)。決められなければ unknown(ambiguous)=何も入れない。
+ * - unknown: 1筆目とも足した行とも違う番号(hasExtras=足した行がある物件か)。足した行がある物件で番号を読めないときも
+ *   unknown(kind=null)=どの筆か分からないので物件全体の面積などに入れない(内部レビュー P2)。
+ * 建物の謄本は家屋番号で決める(建物の謄本の地番の欄は所在の地番のことがある)。
+ * ⚠pdf の番号は registryIdentityOf(表の欄だけを読む)で読んだものを渡す。全文から拾うと、土地の謄本の
+ *   共同担保目録にある建物の家屋番号で建物と取り違える(内部レビュー P2)。
+ */
+export type RegistryParcelTarget =
+  | { target: "main" }
+  | { target: "extra"; id: string; kind: ParcelKind }
+  /** ambiguous=同じ番号の土地・建物が2つ以上あり、所在でも決められない(@codex P1)。 */
+  | { target: "unknown"; kind: ParcelKind | null; number: string; hasExtras: boolean; ambiguous?: boolean };
+
+/** 所在を比べる形。全角・空白・「二丁目/2丁目」などの書き方をそろえる(@codex P1)。 */
+const locationKey = (v: string | null | undefined) => (v ? normalizeAddress(v.normalize("NFKC")) || null : null);
+
+/**
+ * 片方がもう片方を含むか。ただし数字で終わる側(「架空町2」=2丁目)の続きが数字なら別の場所(「架空町21」)。
+ * 数字で終わらない側(「架空町」)は、続きが番地の数字でも同じ場所(「架空町12-3」)。
+ */
+function locationContains(longer: string, shorter: string): boolean {
+  if (!/\d$/.test(shorter)) return longer.includes(shorter);
+  for (let i = longer.indexOf(shorter); i >= 0; i = longer.indexOf(shorter, i + 1)) {
+    if (!/\d/.test(longer[i + shorter.length] ?? "")) return true;
+  }
+  return false;
+}
+const sameLocation = (a: string, b: string) => locationContains(a, b) || locationContains(b, a);
+
+/**
+ * 同じ番号の候補から、謄本の所在で1つに決める。決められなければ null。
+ * 候補の所在が空なら fallbackLocation(=物件の住所)とみなして比べる。謄本の所在と合う候補がちょうど1つのときだけそれ。
+ * ⚠合わない所在を「だから1筆目」とはしない(書き方が違うだけで別の筆に入れてしまう・@codex P1)。
+ * ⚠謄本の所在を読めなければ、候補が2つ以上なら決めない。
+ */
+export function pickParcelByLocation<T extends { location: string | null }>(
+  candidates: T[], registryAddress: string | null, fallbackLocation: string | null = null,
+): T | null {
+  if (candidates.length <= 1) return candidates[0] ?? null;
+  const addr = locationKey(registryAddress);
+  if (!addr) return null;
+  const matched = candidates.filter((c) => {
+    const l = locationKey(c.location) ?? locationKey(fallbackLocation);
+    return !!l && sameLocation(addr, l);
+  });
+  return matched.length === 1 ? matched[0] : null;
+}
+
+export function registryParcelTarget(
+  pdf: { lotNumber: string | null; buildingNumber: string | null; address?: string | null },
+  property: { lotNumber: string | null; buildingNumber: string | null; extraParcels: unknown; address?: string | null },
+): RegistryParcelTarget {
+  const extras = readExtraParcels(property.extraParcels);
+  const kind: ParcelKind | null = pdf.buildingNumber ? "building" : pdf.lotNumber ? "land" : null;
+  const number = kind === "building" ? pdf.buildingNumber : kind === "land" ? pdf.lotNumber : null;
+  const key = parcelNumberKey(number);
+  if (!kind || !key) return extras.length ? { target: "unknown", kind: null, number: "", hasExtras: true } : { target: "main" };
+  const mainKey = parcelNumberKey(kind === "building" ? property.buildingNumber : property.lotNumber);
+  // 1筆目と足した行に同じ番号があれば(所在が違う筆など)、所在で決める(@codex P1)。1筆目の所在は物件の住所。
+  const candidates: { location: string | null; id: string | null }[] = [
+    ...(mainKey === key ? [{ location: null, id: null }] : []),
+    ...extras.filter((p) => p.kind === kind && parcelNumberKey(p.number) === key).map((p) => ({ location: p.location, id: p.id as string | null })),
+  ];
+  if (!candidates.length) {
+    if (!mainKey) return { target: "main" };
+    return { target: "unknown", kind, number: number as string, hasExtras: extras.length > 0 };
+  }
+  const hit = pickParcelByLocation(candidates, pdf.address ?? null, property.address ?? null);
+  if (!hit) return { target: "unknown", kind, number: number as string, hasExtras: true, ambiguous: true };
+  return hit.id === null ? { target: "main" } : { target: "extra", id: hit.id, kind };
+}
+
+/** 足した行の空いている面積だけを入れた行の一覧。入れるものが無ければ null(書かない)。 */
+export function fillExtraParcelArea(raw: unknown, id: string, area: number | null): ExtraParcel[] | null {
+  if (area === null || !Number.isFinite(area) || area < 0) return null;
+  const ps = readExtraParcels(raw);
+  const row = ps.find((p) => p.id === id);
+  if (!row || row.area !== null) return null;
+  return ps.map((p) => (p.id === id ? { ...p, area: Math.round(area * 100) / 100 } : p));
 }
 
 /** 変更履歴に残す文字(1行に1件)。空なら null。 */

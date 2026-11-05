@@ -426,3 +426,25 @@ describe("移記の行の外字の余白", () => {
     expect(f.structureType).toBeNull();
   });
 });
+
+describe("2筆以上・2棟以上の物件の案内", () => {
+  const base = { skippedByEditLock: false, unreadable: false };
+  it("足した行に入れた・入れるものが無い", () => {
+    const extra = { target: "extra" as const, kind: "land" as const, number: "1番2" };
+    expect(registryFillNotice({ ...base, filled: ["extraParcels"], parcel: extra })).toBe("ほかの土地・建物(土地 1番2)の空いていた面積に入れました");
+    expect(registryFillNotice({ ...base, filled: [], parcel: extra })).toBeNull();
+    expect(registryFillNotice({ ...base, filled: [], parcel: extra }, { manual: true })).toContain("ほかの土地・建物(土地 1番2)のものです");
+  });
+  it("どれでもない番号は注意の色で、足し方を添える(足した行が無い物件では入れた欄も出す)", () => {
+    const unknown = { target: "unknown" as const, kind: "building" as const, number: "1番3" };
+    const n = registryFillNotice({ ...base, filled: [], parcel: unknown });
+    expect(n).toBe("この謄本の家屋番号(1番3)は、物件の家屋番号にもほかの土地・建物にもありません。2棟目以降なら、物件の編集の「土地・建物を足す」で足してください");
+    expect(isRegistryWarningNotice(n)).toBe(true);
+    expect(registryFillNotice({ ...base, filled: ["landArea"], parcel: unknown })).toMatch(/^基本情報の空いていた欄に入れました: 土地面積。この謄本の家屋番号/);
+  });
+  it("番号を読めない謄本(足した行がある物件)は反映しないと知らせる", () => {
+    const n = registryFillNotice({ ...base, filled: [], parcel: { target: "unknown", kind: null, number: "" } });
+    expect(n).toContain("どの土地・建物のものか分からないため");
+    expect(isRegistryWarningNotice(n)).toBe(true);
+  });
+});

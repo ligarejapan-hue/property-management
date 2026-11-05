@@ -266,12 +266,22 @@ describe("土地のある物件の謄本(土地と建物の両方が要る)", ()
     expect(item(house({ kindBase: "land", registry: { status: "none" } }), "mortgage").message).toBe("確認できない(土地の謄本がありません)");
   });
   it("読めない・判定できない・多すぎる謄本があれば確認できない", () => {
-    for (const [uncertain, text] of [["unreadable", "読めない謄本"], ["unclassified", "判定できない謄本"], ["too_many", "すべてを確認できません"], ["no_full_certificate", "全部事項の謄本が無い"]] as const) {
+    for (const [uncertain, text] of [["unreadable", "読めない謄本"], ["unclassified", "判定できない謄本"], ["too_many", "すべてを確認できません"], ["no_full_certificate", "全部事項の謄本が無い"], ["unplaced_parcel", "どの土地・建物のものか分からない"]] as const) {
       const input = house({ registry: both({ uncertain }), documents: [doc({ price: 30_000_000 })] });
       expect(item(input, "mortgage").status).toBe("unverifiable");
       expect(item(input, "seller").message).toContain(text);
       expect(buildCrosscheck(input).summary).toBe("incomplete");
     }
+  });
+  it("2筆以上の物件で謄本が無い筆があれば、その筆を出して照合OKにしない", () => {
+    const input = house({ registry: both({ missingParcels: ["土地 1番2"] }), documents: [doc({ price: 30_000_000 })] });
+    expect(item(input, "mortgage").message).toBe("確認できない(土地 1番2の謄本がありません)");
+    expect(item(input, "seller").status).toBe("unverifiable");
+    expect(buildCrosscheck(input).summary).toBe("incomplete");
+    const many = house({ registry: both({ missingParcels: ["土地 1", "土地 2", "土地 3", "建物 4", "建物 5"] }) });
+    expect(item(many, "mortgage").message).toBe("確認できない(土地 1・土地 2・土地 3 ほか2件の謄本がありません)");
+    // 種類ごとに足りないときは、今までどおり種類で出す。
+    expect(item(house({ registry: both({ missing: ["建物"], missingParcels: ["土地 1番2"] }) }), "mortgage").message).toBe("確認できない(建物の謄本がありません)");
   });
   it("謄本を読む権限が無い人にも照合OKと出さない", () => {
     expect(buildCrosscheck(house({ registry: { status: "denied" }, sellerCompare: "denied", documents: [doc({ price: 30_000_000 })] })).summary).toBe("incomplete");

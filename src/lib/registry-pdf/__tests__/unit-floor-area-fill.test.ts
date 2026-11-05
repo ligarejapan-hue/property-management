@@ -293,6 +293,62 @@ describe("土地・戸建の面積を謄本から埋める(Mode A)", () => {
   });
 });
 
+// 2026-11-05 案A 2回目: 2筆目の謄本の不動産番号・地番・面積を1筆目の欄に入れない。
+describe("2筆以上の物件で1筆目ではない謄本(Mode A)", () => {
+  const ROW = { id: "r2", kind: "land", location: null, number: "2番", realEstateNumber: null, area: null };
+  const LAND = {
+    ...BASE_PROPERTY, propertyType: "land", lotNumber: "1番", registryStatus: "obtained",
+    exclusiveAreaRegistry: null, landArea: null, landAreaMethod: null, totalFloorArea: null,
+    structureType: null, builtYear: null, builtMonth: null, buildingId: null, extraParcels: [ROW],
+  };
+  const second = { ...FILLED_PARSED, owners: [], lotNumber: "2番", buildingNumber: null, landAreaRegistry: "61.95" };
+  /** 番号は表の欄から読む(registryIdentityOf)。共同担保目録に建物の家屋番号があっても土地の謄本のまま。 */
+  const landText = (lot: string) => [
+    "┃ 表 題 部 （土地の表示） │調製│余白 │不動産番号│０１００００００００００３┃",
+    "┃所 在│架空市架空町 │ ┃",
+    "┃① 地 番 │② 地 目 │③ 地 積 ㎡ │ 原因及びその日付〔登記の日付〕 ┃",
+    `┃${lot} │宅地 │６１：９５│ ┃`,
+    "┃ 権 利 部 （甲 区） （所 有 権 に 関 す る 事 項） ┃",
+    "共同担保目録 家屋番号 1番",
+  ].join("\n");
+  const runText = (text: string) => processRegistryPdf({
+    session, text, propertyId: PROP_ID, fileName: "謄本.pdf", edited: undefined, pdfBuffer: null, certificateType: "owner",
+  });
+
+  it("★足した行の謄本: 物件の不動産番号・土地面積には入れず、その行の面積に入れる", async () => {
+    // 全文から拾う読み取りが家屋番号を返しても、建物と取り違えない(内部レビュー P2)。
+    (parseRegistryText as Mock).mockReturnValue({ ...second, buildingNumber: "1番" });
+    pm.property.findUnique.mockResolvedValue({ ...LAND, buildingNumber: "1番" });
+    await runText(landText("２番"));
+    const data = pm.property.updateMany.mock.calls.map((c) => c[0].data);
+    for (const d of data) {
+      expect(d).not.toHaveProperty("realEstateNumber");
+      expect(d).not.toHaveProperty("landArea");
+    }
+    expect(data).toContainEqual({ extraParcels: [{ ...ROW, area: 61.95 }], version: { increment: 1 } });
+  });
+
+  it("★足した行がある物件で、どれでもない番号の謄本: 物件の欄に何も書かない", async () => {
+    (parseRegistryText as Mock).mockReturnValue({ ...second, lotNumber: "3番" });
+    pm.property.findUnique.mockResolvedValue({ ...LAND });
+    await runText(landText("３番"));
+    expect(pm.property.updateMany).not.toHaveBeenCalled();
+  });
+
+  it("★足した行がある物件で、番号を読めない謄本: 物件全体の面積に入れない", async () => {
+    pm.property.findUnique.mockResolvedValue({ ...LAND });
+    await run();
+    expect(pm.property.updateMany).not.toHaveBeenCalled();
+  });
+
+  it("1筆目の謄本は今までどおり埋める", async () => {
+    (parseRegistryText as Mock).mockReturnValue({ ...second, lotNumber: "1番", landAreaRegistry: "120.50" });
+    pm.property.findUnique.mockResolvedValue({ ...LAND });
+    await runText(landText("１番"));
+    expect(pm.property.updateMany.mock.calls[0][0].data).toMatchObject({ realEstateNumber: "0100012345678", landArea: "120.50" });
+  });
+});
+
 describe("物件を指定しない取込(Mode B)でも面積を埋める", () => {
   const runB = () =>
     processRegistryPdf({
@@ -321,6 +377,22 @@ describe("物件を指定しない取込(Mode B)でも面積を埋める", () =>
     expect(pmB.property.updateMany).toHaveBeenCalledTimes(1);
     expect(pmB.property.updateMany.mock.calls[0][0].data).toMatchObject({ landArea: "120.50", landAreaMethod: "公簿" });
     expect((recordChanges as Mock).mock.calls[0][0]).toMatchObject({ source: "pdf_import", targetId: PROP_ID });
+  });
+
+  it("★足した行がある物件でも、1筆目の謄本なら入れる(番号を表の欄から渡す・@codex P2)", async () => {
+    (parseRegistryText as Mock).mockReturnValue({ ...FILLED_PARSED, buildingNumber: null, owners: [], landAreaRegistry: "120.50" });
+    pmB.property.findFirst.mockResolvedValue({ id: PROP_ID, address: "東京都千代田区一番町1", realEstateNumber: "0100012345678" });
+    pmB.property.findUnique.mockResolvedValue({
+      ...BASE_PROPERTY, propertyType: "land", lotNumber: "1番", exclusiveAreaRegistry: null, landArea: null, landAreaMethod: null, totalFloorArea: null,
+      extraParcels: [{ id: "r2", kind: "land", location: null, number: "2番", realEstateNumber: null, area: null }],
+    });
+    const text = [
+      "┃ 表 題 部 （土地の表示） ┃", "┃① 地 番 │② 地 目 │③ 地 積 ㎡ │ 原因 ┃", "┃１番 │宅地 │１２０：５０│ ┃", "┃ 権 利 部 （甲 区） ┃",
+    ].join("\n");
+    await processRegistryPdf({
+      session, text, propertyId: undefined, fileName: "謄本.pdf", edited: undefined, pdfBuffer: null, certificateType: "owner",
+    } as unknown as Parameters<typeof processRegistryPdf>[0]);
+    expect(pmB.property.updateMany.mock.calls[0][0].data).toMatchObject({ landArea: "120.50", landAreaMethod: "公簿" });
   });
 
   it("★住所の部分一致(弱い一致)では入れない", async () => {
