@@ -1,6 +1,7 @@
 import prisma from "@/lib/prisma";
 import { parseRegistryText } from "@/lib/pdf-registry-parser";
 import { parseRegistryOwnerTable } from "@/lib/registry-owner-table";
+import { registryIdentityOf } from "@/lib/registry-basic-info";
 import { isFullCertificateText, summarizeRegistryRights, type RegistryRightsSummary } from "@/lib/registry-strike";
 import type { BasePropertyKind } from "./constants";
 import {
@@ -140,7 +141,13 @@ export async function loadLandedCertificates(
     }
     if (!required.includes(side) || seen.has(identity)) continue;
     seen.add(identity);
-    certParcels.push({ side, number: side === "建物" ? parsed.buildingNumber : parsed.lotNumber, realEstateNumber: parsed.realEstateNumber });
+    if (expected.length) {
+      // 番号は表の欄から(parseRegistryText は「1番1の2」を「1番1」に切る・@codex P2)。
+      const id = registryIdentityOf(pdf.text);
+      certParcels.push({
+        side, number: side === "建物" ? id.buildingNumber : id.lotNumber, realEstateNumber: parsed.realEstateNumber, address: parsed.address,
+      });
+    }
     certs.push({
       side, identity, createdAt: at,
       summary: await summarizeRegistryRights({ pdf: pdf.body, text: pdf.text }),

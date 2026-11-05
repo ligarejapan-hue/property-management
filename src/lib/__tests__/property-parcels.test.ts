@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import {
-  extraParcelsSchema, extraParcelsText, fillExtraParcelArea, joinedParcelNumbers, parcelNumberLabel, readExtraParcels, registryParcelTarget,
+  extraParcelsSchema, extraParcelsText, fillExtraParcelArea, joinedParcelNumbers, parcelNumberLabel, pickParcelByLocation, readExtraParcels, registryParcelTarget,
 } from "../property-parcels";
 
 const land = (id: string, number: string, area: number | string | null = null, o: Record<string, unknown> = {}) =>
@@ -57,6 +57,22 @@ describe("謄本がどの土地・建物のものか(2回目)", () => {
   it("物件の欄が空: 足した行の番号なら足した行・そうでなければ 1筆目", () => {
     expect(registryParcelTarget({ lotNumber: "1番2", buildingNumber: null }, { ...P, lotNumber: null })).toEqual({ target: "extra", id: "a", kind: "land" });
     expect(registryParcelTarget({ lotNumber: "1番5", buildingNumber: null }, { ...P, lotNumber: null })).toEqual({ target: "main" });
+  });
+  it("★同じ番号の土地・建物が2つ以上: 謄本の所在で決める・決められなければ ambiguous(@codex P1)", () => {
+    const T = { lotNumber: "1番", buildingNumber: null, extraParcels: [land("x", "1番", null, { location: "架空町二丁目" })] };
+    expect(registryParcelTarget({ lotNumber: "1番", buildingNumber: null, address: "架空市架空町二丁目" }, T)).toEqual({ target: "extra", id: "x", kind: "land" });
+    expect(registryParcelTarget({ lotNumber: "1番", buildingNumber: null, address: "架空市架空町一丁目" }, T)).toEqual({ target: "main" });
+    expect(registryParcelTarget({ lotNumber: "1番", buildingNumber: null, address: null }, T))
+      .toEqual({ target: "unknown", kind: "land", number: "1番", hasExtras: true, ambiguous: true });
+    // 足した行どうしで同じ番号・所在も同じ=決められない。
+    const twins = { ...T, extraParcels: [land("x", "1番", null, { location: "架空町二丁目" }), land("y", "1番", null, { location: "架空町二丁目" })] };
+    expect(registryParcelTarget({ lotNumber: "1番", buildingNumber: null, address: "架空町二丁目" }, twins)).toMatchObject({ target: "unknown", ambiguous: true });
+  });
+  it("所在で1つに決める部品", () => {
+    expect(pickParcelByLocation([], "x")).toBeNull();
+    expect(pickParcelByLocation([{ location: "A" }], null)).toEqual({ location: "A" });
+    expect(pickParcelByLocation([{ location: null }, { location: "架空 町" }], "架空市架空町")).toEqual({ location: "架空 町" });
+    expect(pickParcelByLocation([{ location: null }, { location: null }], "架空市")).toBeNull();
   });
   it("足した行の空いている面積だけ入れる", () => {
     expect(fillExtraParcelArea(P.extraParcels, "a", 61.954)).toEqual([{ ...land("a", "1番2"), area: 61.95 }, bldg("b", "1番1の2")]);

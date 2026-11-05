@@ -293,6 +293,8 @@ export interface RegistryFillParcel {
   /** null=地番・家屋番号を読めなかった(足した行がある物件)。 */
   kind: "land" | "building" | null;
   number: string;
+  /** 同じ番号の土地・建物が2つ以上あり、所在でも決められなかった。 */
+  ambiguous?: boolean;
 }
 
 const FIELD_LABELS: Record<string, string> = {
@@ -315,6 +317,9 @@ function parcelNotice(p: RegistryFillParcel, filled: string[], manual: boolean):
     return manual ? `この謄本はほかの土地・建物(${name})のものです。新しく入れる項目はありません` : null;
   }
   const field = p.kind === "land" ? "地番" : "家屋番号";
+  if (p.ambiguous) {
+    return `この謄本の${field}(${p.number})と同じ番号の土地・建物が物件に2つ以上あり、所在でもどれのものか決められないため、基本情報には反映されません。ほかの土地・建物の所在を確かめてください`;
+  }
   const add = `2${p.kind === "land" ? "筆" : "棟"}目以降なら、物件の編集の「土地・建物を足す」で足してください`;
   return `この謄本の${field}(${p.number})は、物件の${field}にもほかの土地・建物にもありません。${add}`;
 }

@@ -33,23 +33,30 @@ describe("謄本が無い筆(棟)", () => {
     lotNumber: "1番", buildingNumber: "1番1", extraParcels: [extra("land", "2番", { realEstateNumber: "1234-5678" })],
   }, BOTH);
   it("種類と番号で比べる(土地の1番と建物の1番は別)", () => {
-    expect(parcelCoverage(expected, [{ side: "建物", number: "1番", realEstateNumber: null }]).missing).toEqual(["土地 1番", "建物 1番1", "土地 2番"]);
+    expect(parcelCoverage(expected, [{ side: "建物", number: "1番", realEstateNumber: null, address: null }]).missing).toEqual(["土地 1番", "建物 1番1", "土地 2番"]);
   });
   it("不動産番号が両方にあれば不動産番号で比べる(番号が同じでも別の不動産番号なら違う筆)", () => {
     const c = parcelCoverage(expected, [
-      { side: "土地", number: "1番", realEstateNumber: null },
-      { side: "建物", number: "1番1", realEstateNumber: "9999" },
-      { side: "土地", number: "2番", realEstateNumber: "99999999" },
+      { side: "土地", number: "1番", realEstateNumber: null, address: null },
+      { side: "建物", number: "1番1", realEstateNumber: "9999", address: null },
+      { side: "土地", number: "2番", realEstateNumber: "99999999", address: null },
     ]);
     expect(c).toEqual({ missing: ["土地 2番"], unplaced: false });
     expect(parcelCoverage(expected, [
-      { side: "土地", number: "1番", realEstateNumber: null },
-      { side: "建物", number: "1番1", realEstateNumber: null },
-      { side: "土地", number: null, realEstateNumber: "12345678" },
+      { side: "土地", number: "1番", realEstateNumber: null, address: null },
+      { side: "建物", number: "1番1", realEstateNumber: null, address: null },
+      { side: "土地", number: null, realEstateNumber: "12345678", address: null },
     ])).toEqual({ missing: [], unplaced: false });
   });
+  it("★同じ番号の筆は所在で分ける・決められなければ unplaced(1通で2筆を満たさない・@codex P1)", () => {
+    const twins = expectedParcels({ lotNumber: "1番", buildingNumber: null, extraParcels: [extra("land", "1番", { location: "架空町二丁目" })] }, ["土地"]);
+    const cert = (address: string | null) => ({ side: "土地" as const, number: "1番", realEstateNumber: null, address });
+    expect(parcelCoverage(twins, [cert("架空市架空町二丁目")])).toEqual({ missing: ["土地 1番"], unplaced: false });
+    expect(parcelCoverage(twins, [cert("架空市架空町一丁目")])).toEqual({ missing: ["土地 架空町二丁目 1番"], unplaced: false });
+    expect(parcelCoverage(twins, [cert(null)])).toEqual({ missing: ["土地 1番", "土地 架空町二丁目 1番"], unplaced: true });
+  });
   it("番号を読めず不動産番号でも決まらない謄本は unplaced", () => {
-    expect(parcelCoverage(expected, [{ side: "土地", number: null, realEstateNumber: "0000" }]).unplaced).toBe(true);
-    expect(parcelCoverage([], [{ side: "土地", number: null, realEstateNumber: null }])).toEqual({ missing: [], unplaced: false });
+    expect(parcelCoverage(expected, [{ side: "土地", number: null, realEstateNumber: "0000", address: null }]).unplaced).toBe(true);
+    expect(parcelCoverage([], [{ side: "土地", number: null, realEstateNumber: null, address: null }])).toEqual({ missing: [], unplaced: false });
   });
 });

@@ -99,6 +99,7 @@ export function parcelNumberKey(v: string | null | undefined): string | null {
  * - main: 1筆目・1棟目(今までどおり物件の欄を埋める)。足した行に無い番号で、その種類の物件の欄が空のときも main。
  *   足した行が無い物件で番号を読めないときも main(今までどおり)。
  * - extra: 足した行のどれか(物件の欄は埋めない)。
+ * - 同じ番号が2つ以上あるときは謄本の所在で決める(pickParcelByLocation)。決められなければ unknown(ambiguous)=何も入れない。
  * - unknown: 1筆目とも足した行とも違う番号(hasExtras=足した行がある物件か)。足した行がある物件で番号を読めないときも
  *   unknown(kind=null)=どの筆か分からないので物件全体の面積などに入れない(内部レビュー P2)。
  * 建物の謄本は家屋番号で決める(建物の謄本の地番の欄は所在の地番のことがある)。
@@ -108,10 +109,32 @@ export function parcelNumberKey(v: string | null | undefined): string | null {
 export type RegistryParcelTarget =
   | { target: "main" }
   | { target: "extra"; id: string; kind: ParcelKind }
-  | { target: "unknown"; kind: ParcelKind | null; number: string; hasExtras: boolean };
+  /** ambiguous=同じ番号の土地・建物が2つ以上あり、所在でも決められない(@codex P1)。 */
+  | { target: "unknown"; kind: ParcelKind | null; number: string; hasExtras: boolean; ambiguous?: boolean };
+
+const locationKey = (v: string | null | undefined) => (v ? v.normalize("NFKC").replace(/\s+/g, "") || null : null);
+
+/**
+ * 同じ番号の候補から、謄本の所在で1つに決める。決められなければ null。
+ * - 所在を入れた候補は、謄本の所在と(どちらかがもう一方を含む形で)合うものだけ。
+ * - 合う候補が無ければ、所在が空の候補(=物件の住所と同じ)が1つだけのときそれ。
+ * ⚠謄本の所在を読めなければ、候補が2つ以上なら決めない。
+ */
+export function pickParcelByLocation<T extends { location: string | null }>(candidates: T[], registryAddress: string | null): T | null {
+  if (candidates.length <= 1) return candidates[0] ?? null;
+  const addr = locationKey(registryAddress);
+  if (!addr) return null;
+  const matched = candidates.filter((c) => {
+    const l = locationKey(c.location);
+    return !!l && (addr.includes(l) || l.includes(addr));
+  });
+  if (matched.length) return matched.length === 1 ? matched[0] : null;
+  const implicit = candidates.filter((c) => !locationKey(c.location));
+  return implicit.length === 1 ? implicit[0] : null;
+}
 
 export function registryParcelTarget(
-  pdf: { lotNumber: string | null; buildingNumber: string | null },
+  pdf: { lotNumber: string | null; buildingNumber: string | null; address?: string | null },
   property: { lotNumber: string | null; buildingNumber: string | null; extraParcels: unknown },
 ): RegistryParcelTarget {
   const extras = readExtraParcels(property.extraParcels);
@@ -120,11 +143,18 @@ export function registryParcelTarget(
   const key = parcelNumberKey(number);
   if (!kind || !key) return extras.length ? { target: "unknown", kind: null, number: "", hasExtras: true } : { target: "main" };
   const mainKey = parcelNumberKey(kind === "building" ? property.buildingNumber : property.lotNumber);
-  if (key === mainKey) return { target: "main" };
-  const hit = extras.find((p) => p.kind === kind && parcelNumberKey(p.number) === key);
-  if (hit) return { target: "extra", id: hit.id, kind };
-  if (!mainKey) return { target: "main" };
-  return { target: "unknown", kind, number: number as string, hasExtras: extras.length > 0 };
+  // 1筆目と足した行に同じ番号があれば(所在が違う筆など)、所在で決める(@codex P1)。1筆目の所在は物件の住所=空とみなす。
+  const candidates: { location: string | null; id: string | null }[] = [
+    ...(mainKey === key ? [{ location: null, id: null }] : []),
+    ...extras.filter((p) => p.kind === kind && parcelNumberKey(p.number) === key).map((p) => ({ location: p.location, id: p.id as string | null })),
+  ];
+  if (!candidates.length) {
+    if (!mainKey) return { target: "main" };
+    return { target: "unknown", kind, number: number as string, hasExtras: extras.length > 0 };
+  }
+  const hit = pickParcelByLocation(candidates, pdf.address ?? null);
+  if (!hit) return { target: "unknown", kind, number: number as string, hasExtras: true, ambiguous: true };
+  return hit.id === null ? { target: "main" } : { target: "extra", id: hit.id, kind };
 }
 
 /** 足した行の空いている面積だけを入れた行の一覧。入れるものが無ければ null(書かない)。 */

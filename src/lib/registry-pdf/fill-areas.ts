@@ -85,6 +85,8 @@ export async function fillPropertyFromRegistry(args: {
   propertyId: string;
   values: RegistryFillValues;
   changedBy: string;
+  /** 謄本の所在(同じ番号の土地・建物が2つ以上あるとき、どれのものかを決めるのに使う)。 */
+  registryAddress?: string | null;
 }): Promise<FillResult> {
   const { propertyId, values, changedBy } = args;
   if (!hasValue(values)) return NOTHING;
@@ -97,9 +99,12 @@ export async function fillPropertyFromRegistry(args: {
    */
   const planFor = (p: Current): { fill: Record<string, unknown>; buildingFacts: boolean; parcel: RegistryFillParcel | null } => {
     const main = () => ({ ...planRegistryAreaFill(areas, p), ...planPropertyBasicFill(basic, p) });
-    const t = supportsUnitFields(p.propertyType) ? { target: "main" as const } : registryParcelTarget(basic, p);
+    const t = supportsUnitFields(p.propertyType) ? { target: "main" as const } : registryParcelTarget({ ...basic, address: args.registryAddress }, p);
     if (t.target === "main") return { fill: main(), buildingFacts: true, parcel: null };
-    const parcel: RegistryFillParcel = { target: t.target, kind: t.kind, number: (t.kind === "building" ? basic.buildingNumber : basic.lotNumber) ?? "" };
+    const parcel: RegistryFillParcel = {
+      target: t.target, kind: t.kind, number: (t.kind === "building" ? basic.buildingNumber : basic.lotNumber) ?? "",
+      ...(t.target === "unknown" && t.ambiguous ? { ambiguous: true } : {}),
+    };
     if (t.target === "extra") {
       const raw = t.kind === "land" ? areas.landArea : areas.buildingFloorArea;
       const rows = fillExtraParcelArea(p.extraParcels, t.id, raw ? Number(raw) : null);
@@ -215,6 +220,7 @@ export async function fillBasicInfoFromRegistryPdfBestEffort(args: {
     const result = await fillPropertyFromRegistry({
       propertyId: args.propertyId,
       values: { ...registryAreasOf(parsed), ...registryIdentityOf(text), ...parseRegistryBuildingFacts(text) },
+      registryAddress: parsed.address,
       changedBy: args.changedBy,
     });
     return { ...result, unreadable: false };

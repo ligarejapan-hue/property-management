@@ -909,7 +909,7 @@ export async function processRegistryPdf(
       const hasExtraParcels = readExtraParcels(existing.extraParcels).length > 0;
       const notMainParcel = (p: { propertyType: string; lotNumber: string | null; buildingNumber: string | null; extraParcels: unknown }) => {
         if (supportsUnitFields(p.propertyType)) return false;
-        const t = registryParcelTarget(identity, p);
+        const t = registryParcelTarget({ ...identity, address: parsed.address }, p);
         return t.target === "extra" || (t.target === "unknown" && t.hasExtras);
       };
       const wouldFillProperty =
@@ -1059,6 +1059,7 @@ export async function processRegistryPdf(
             ? { ...parsedAreas, ...identity }
             : hasExtraParcels ? { ...parseRegistryBuildingFacts(text), ...identity } : parseRegistryBuildingFacts(text),
           changedBy: session.id,
+          registryAddress: parsed.address,
         });
         if (factsFill.filled.length > 0) resultAction = "updated";
         if (factsFill.skippedByEditLock) propertyFillSkippedByEditLock = true;
