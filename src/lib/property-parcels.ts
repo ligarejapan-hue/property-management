@@ -76,9 +76,13 @@ export function parcelNumberLabel(main: string | null | undefined, raw: unknown,
   return m ? `${m} ほか${extra}${unit}` : `ほか${extra}${unit}`;
 }
 
-/** 書類・依頼文に出す地番・家屋番号(1筆目から順に「、」でつなぐ)。 */
+/**
+ * 書類・依頼文に出す地番・家屋番号(1筆目から順に「、」でつなぐ)。
+ * 所在を入れた行は「所在 番号」にする(所在が違う筆を、物件の住所の地番と取り違えない・@codex P2)。
+ */
 export function joinedParcelNumbers(main: string | null | undefined, raw: unknown, kind: ParcelKind): string | null {
-  const all = [main?.trim() || null, ...ofKind(readExtraParcels(raw), kind).map((p) => p.number)].filter((v): v is string => !!v);
+  const all = [main?.trim() || null, ...ofKind(readExtraParcels(raw), kind).map((p) => (p.location ? `${p.location} ${p.number}` : p.number))]
+    .filter((v): v is string => !!v);
   return all.length ? all.join("、") : null;
 }
 

@@ -63,6 +63,20 @@ describe("取引の写し・横の物件情報", () => {
     const many = Array.from({ length: 30 }, (_, i) => ({ id: `x${i}`, kind: "land", location: null, number: `${100 + i}番${"1".repeat(10)}`, realEstateNumber: null, area: null }));
     expect(buildSnapshotFromProperty({ ...p, extraParcels: many }).lotNumber).toBe("1番1 ほか30筆");
   });
+  it("所在が違う筆は「所在 番号」で出す(物件の住所の地番と取り違えない・@codex P2)", () => {
+    const s = buildSnapshotFromProperty({ ...p, extraParcels: [{ id: "a", kind: "land", location: "架空市B町", number: "2番1", realEstateNumber: null, area: null }] });
+    expect(s.lotNumber).toBe("1番1、架空市B町 2番1");
+  });
+  it("欄の長さの境目: 「ほか◯筆」も収まらなければ1筆目だけ(空にしない・@codex P2)", () => {
+    const b100 = "1".repeat(100);
+    const one = [{ id: "b", kind: "building", location: null, number: "2", realEstateNumber: null, area: null }];
+    expect(buildSnapshotFromProperty({ ...p, buildingNumber: b100, extraParcels: one }).buildingNumber).toBe(b100);
+    const l300 = "2".repeat(300);
+    const land1 = [{ id: "a", kind: "land", location: null, number: "3", realEstateNumber: null, area: null }];
+    expect(buildSnapshotFromProperty({ ...p, lotNumber: l300, extraParcels: land1 }).lotNumber).toBe(l300);
+    const l290 = "2".repeat(290);
+    expect(buildSnapshotFromProperty({ ...p, lotNumber: l290, extraParcels: [{ ...land1[0], number: "3".repeat(20) }] }).lotNumber).toBe(`${l290} ほか1筆`);
+  });
   it("横の物件情報も「、」でつなぐ", () => {
     const rows = propertySideRows({ caseStatus: "new_case", lotNumber: "1番1", buildingNumber: "1番1", extraParcels: p.extraParcels });
     expect(rows).toContainEqual({ label: "所在・地番", value: "1番1、1番2" });

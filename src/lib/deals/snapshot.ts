@@ -1,10 +1,13 @@
 import { toHalfWidthDigits } from "@/lib/registry-fetch/chiban-input";
 import { joinedParcelNumbers, parcelNumberLabel, type ParcelKind } from "@/lib/property-parcels";
 
-/** 写しの地番・家屋番号。並べると欄の長さを超えるときは「1番1 ほか◯筆」(読めない値にして消さない)。 */
+/**
+ * 写しの地番・家屋番号。並べると欄の長さを超えるときは「1番1 ほか◯筆」、それも超えるなら1筆目だけ
+ * (欄に収まらない値は写しで空になるので、収まる形を選ぶ・@codex P2)。
+ */
 const parcelNumbersFor = (main: string | null, extra: unknown, kind: ParcelKind, max: number): string | null => {
-  const joined = joinedParcelNumbers(main, extra, kind);
-  return joined && joined.length > max ? parcelNumberLabel(main, extra, kind) : joined;
+  const fits = (v: string | null) => v === null || (strHalf(v) ?? "").length <= max;
+  return [joinedParcelNumbers(main, extra, kind), parcelNumberLabel(main, extra, kind), main].find(fits) ?? null;
 };
 import { PROPERTY_TYPE_LABELS } from "@/lib/property-types";
 import {
