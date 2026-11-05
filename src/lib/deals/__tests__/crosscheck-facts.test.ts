@@ -20,7 +20,7 @@ describe("発行の写しに残す値", () => {
   it("その書類が使う値だけを残す", () => {
     expect(buildCrosscheckFacts("key_receipt", deal)).toEqual({});
     expect(buildCrosscheckFacts("funding_plan", deal)).toEqual({ price: 30_000_000 });
-    expect(buildCrosscheckFacts("mediation", deal)).toEqual({ price: 30_000_000, floorArea: 65.5, landArea: 120 });
+    expect(buildCrosscheckFacts("mediation", deal)).toEqual({ price: 30_000_000 });
   });
   it("決済日は日本時間の日付で残す", () => {
     expect(buildCrosscheckFacts("contract_guide", deal)).toEqual({ settlementDate: "2026-12-01" });
@@ -44,12 +44,11 @@ describe("発行の写しを読む", () => {
   it("過去の資金計画表は計算の結果の価格を読む", () => {
     expect(readIssuedFacts(row({ calcSnapshot: { price: 5 } })).price).toBe(5);
   });
-  it("過去の事業計画書は仕入価格と面積を読む(販売価格は読まない)", () => {
+  it("過去の事業計画書は仕入価格を読む(販売価格・面積は読まない)", () => {
     const f = readIssuedFacts(row({ docType: "business_plan", variant: "internal", calcSnapshot: { kindBase: "unit", areaSqm: 60, purchase: { priceIncl: 7 }, sale: { priceIncl: 9 } } }));
-    expect(f).toMatchObject({ price: 7, floorArea: 60 });
-    const land = readIssuedFacts(row({ docType: "business_plan", variant: "internal", calcSnapshot: { kindBase: "land", areaSqm: 100 } }));
-    expect(land.landArea).toBe(100);
-    expect(land.floorArea).toBeUndefined();
+    expect(f).toMatchObject({ price: 7 });
+    expect(f).not.toHaveProperty("floorArea");
+    expect(f).not.toHaveProperty("landArea");
   });
   it("過去の業務書類には値が無い(undefined=確認できない)", () => {
     const f = readIssuedFacts(row({ docType: "settlement_statement", variant: "default", calcSnapshot: { settlement: { remaining: 1 } } }));

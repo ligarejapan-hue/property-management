@@ -4,7 +4,7 @@ import { parseRegistryOwnerTable } from "@/lib/registry-owner-table";
 import { isFullCertificateText, summarizeRegistryRights, type RegistryRightsSummary } from "@/lib/registry-strike";
 import type { BasePropertyKind } from "./constants";
 import {
-  LANDED_REQUIRED_SIDES, foldNameVariants, isLandedKind, normalizeArea, normalizeName, parseShare,
+  LANDED_REQUIRED_SIDES, foldNameVariants, isLandedKind, normalizeName, parseShare,
   type RegistryFacts, type RegistrySide, type RegistryUncertain,
 } from "./crosscheck";
 import { readRegistryPdf } from "./registry-rights-load";
@@ -21,8 +21,6 @@ export interface LandedCertificate {
   side: RegistrySide;
   identity: string;
   createdAt: string;
-  landArea: string | null;
-  buildingArea: string | null;
   summary: RegistryRightsSummary | null;
 }
 
@@ -135,7 +133,6 @@ export async function loadLandedCertificates(
     seen.add(identity);
     certs.push({
       side, identity, createdAt: at,
-      landArea: parsed.landAreaRegistry ?? null, buildingArea: parsed.buildingFloorArea ?? null,
       summary: await summarizeRegistryRights({ pdf: pdf.body, text: pdf.text }),
     });
   }
@@ -147,17 +144,6 @@ export async function loadLandedCertificates(
     hasRows: rows.length > 0, readAny, certs, ownerCerts,
     missing: required.filter((s) => !certs.some((c) => c.side === s)), uncertain,
   };
-}
-
-/** 筆(棟)ごとの面積の合計。読めない筆が1つでもあれば null。 */
-function sumAreas(values: (string | null)[]): string | null {
-  let total = 0;
-  for (const v of values) {
-    const n = normalizeArea(v);
-    if (n === null) return null;
-    total += n;
-  }
-  return values.length ? `${Math.floor(total / 100)}.${String(total % 100).padStart(2, "0")}` : null;
 }
 
 const ownerKey = (list: Owner[]) => list
@@ -213,13 +199,6 @@ async function loadLandedFacts(propertyId: string, o: { kindBase: BasePropertyKi
     missing: data.missing,
     uncertain: data.uncertain,
     certificates: certs.map((c) => ({ side: c.side, createdAt: c.createdAt })),
-    areas: oldest ? {
-      unit: null,
-      // 抜けた筆があるかもしれない合計は、正しい値と比べて不一致に見えるので出さない。
-      land: data.uncertain ? null : sumAreas(certs.filter((c) => c.side === "土地").map((c) => c.landArea)),
-      building: data.uncertain ? null : sumAreas(certs.filter((c) => c.side === "建物").map((c) => c.buildingArea)),
-      attachmentCreatedAt: oldest,
-    } : null,
     rights: oldest ? {
       activeRights: certs.reduce((n, c) => n + (c.summary?.activeRights.length ?? 0), 0),
       readable: certs.every((c) => !!c.summary?.hasKouku),
@@ -232,7 +211,7 @@ async function loadLandedFacts(propertyId: string, o: { kindBase: BasePropertyKi
 /**
  * 照合に使う謄本の値を集める(読み取りの部品は変えず、呼ぶだけ)。
  * - 土地のある物件(戸建・土地・一棟)は、土地と建物それぞれの全筆を読む(loadLandedCertificates)。
- * - それ以外の面積・担保は全部事項だけ(所有者事項には載らない)。担保は登記の現況と同じ「全部事項の最新の1件」。
+ * - それ以外の担保は全部事項だけ(所有者事項には載らない)。担保は登記の現況と同じ「全部事項の最新の1件」。
  * - 売主名と比べる所有者は、いちばん新しい謄本から。読み取りが怪しければ confirmed=false(比べない)。
  * ⚠結果には氏名が入る。ログ・監査に出さない(例外の中身も出さない)。includeOwners=false なら氏名を持たない。
  */
@@ -249,14 +228,11 @@ export async function loadCrosscheckRegistry(
   });
   if (!rows.length) return { status: "none" };
 
-  const needUnit = o.kindBase === "unit";
-  let unit: string | null = null;
-  let areaDate: string | null = null;
   let rights: Extract<RegistryFacts, { status: "ok" }>["rights"] = null;
   let owners: Extract<RegistryFacts, { status: "ok" }>["owners"] = null;
   let readAny = false;
 
-  const done = () => rights !== null && (!o.includeOwners || owners !== null) && (!needUnit || unit !== null);
+  const done = () => rights !== null && (!o.includeOwners || owners !== null);
 
   for (const a of rows) {
     const at = a.createdAt.toISOString();
@@ -277,9 +253,6 @@ export async function loadCrosscheckRegistry(
     }
     readAny = true;
     if (full) {
-      const parsed = parseRegistryText(pdf.text);
-      if (needUnit) unit ??= parsed.unitFloorArea ?? null;
-      areaDate ??= at;
       if (rights === null || (o.includeOwners && owners === null)) {
         const summary = await summarizeRegistryRights({ pdf: pdf.body, text: pdf.text });
         rights ??= summary
@@ -306,7 +279,6 @@ export async function loadCrosscheckRegistry(
   if (!readAny) return { status: "unreadable" };
   return {
     status: "ok",
-    areas: areaDate ? { unit, land: null, building: null, attachmentCreatedAt: areaDate } : null,
     rights,
     owners,
   };

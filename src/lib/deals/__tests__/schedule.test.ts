@@ -334,11 +334,11 @@ describe("ひな形の保存", () => {
 
 describe("担保の判定は照合の結果を読むだけ", () => {
   const cc = (registry: RegistryFacts, kindBase: "unit" | "house" | null = "unit") => buildCrosscheck({
-    kindBase, price: null, settlementDate: null, snapshot: { floorArea: null, landArea: null }, property: null, registry,
+    kindBase, price: null, settlementDate: null, registry,
     sellerCompare: "denied", sellers: [], documents: [],
   });
   const ok = (activeRights: number, readable = true, extra: object = {}): RegistryFacts => ({
-    status: "ok", areas: null, owners: null, rights: { activeRights, readable, attachmentCreatedAt: "2026-10-01T00:00:00.000Z" }, ...extra,
+    status: "ok", owners: null, rights: { activeRights, readable, attachmentCreatedAt: "2026-10-01T00:00:00.000Z" }, ...extra,
   });
   it("注意があれば担保あり", () => {
     const r = cc(ok(2));
