@@ -60,7 +60,8 @@ describe("売主の当事者が発行する手付金・残金の領収書(2026-1
       expect(html).toContain(">記<");
       expect(html).toContain("物件</span>試験マンション&lt;b&gt;　201");
       expect(html).not.toContain("所在地</span>");
-      expect(html).toContain("2026年5月1日");
+      expect(html).toContain('<div class="rc-top">令和8年5月1日</div>');
+      expect(html).not.toContain("2026年");
       expect(html).toContain("架空 花子");
       expect(html).toContain("架空県架空市1-1");
       expect(html).toContain("署名・押印");
@@ -95,6 +96,13 @@ describe("売主の当事者が発行する手付金・残金の領収書(2026-1
     expect(rowOf(rows, "契約日")).toBeNull();
     expect(notesOf("deposit_receipt", d)).toEqual(["契約日が未入力のため、日付は空欄で出ます"]);
     expect(doc("deposit_receipt").blocking(ctx(d))).toEqual([]);
+  });
+  it("受領日は和暦(但し書きの契約日とそろえる・2026-11-05 発注者)", () => {
+    for (const kind of ["deposit_receipt", "balance_receipt"]) {
+      const { html, rows } = doc(kind).build(ctx(), opts(SELLER.id, "no", "2026-11-20"));
+      expect(html).toContain('<div class="rc-top">令和8年11月20日</div>');
+      expect(rowOf(rows, "受領日")).toBe("令和8年11月20日");
+    }
   });
   it("受領日が無ければ空欄", () => {
     expect(doc("deposit_receipt").build(ctx(), opts(SELLER.id, "no", null)).html).toContain("　　年　　月　　日");
