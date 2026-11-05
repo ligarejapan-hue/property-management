@@ -159,6 +159,8 @@ function buildPartyReceipt(
 ): { html: string; rows: ValueRow[]; issuerLabel: string } {
   const def = RECEIPT_KINDS[kind];
   const contractOn = c.deal.contractAt ? warekiJa(jstDateString(new Date(c.deal.contractAt))) : null;
+  // 受領日も和暦(但し書きの契約日とそろえる・2026-11-05 発注者)。ほかの書類の日付は西暦のまま。
+  const receivedOn = o.receivedOn ? warekiJa(o.receivedOn) : null;
   const tadashi = `但し　${contractOn ?? BLANK_DATE}付下記記載の不動産売買契約に基づく売買代金（${def.purpose}）として`;
   const prop = partyReceiptProperty(c);
   const shown = prop.parts.map(([, v]) => v || BLANK).join(prop.sep);
@@ -167,7 +169,7 @@ function buildPartyReceipt(
   const p = a.party;
   const body = html`<div class="rc-outer"></div><div class="rc-inner"></div>
 <div class="rc-body">
-<div class="rc-top">${o.receivedOn ? dateJa(o.receivedOn) : BLANK_DATE}</div>
+<div class="rc-top">${receivedOn ?? BLANK_DATE}</div>
 <h1 class="rc-title">領 収 書</h1>
 <div class="rc-to"><span>${a.payer ?? ""}</span><span>様</span></div>
 <div class="rc-amount">金 ${yen(a.amount)} 円也</div>
@@ -191,7 +193,7 @@ ${p.partyType === "corporation" && p.representative ? html`<div>${p.representati
     rows: [
       { label: "書類", value: def.label }, { label: "宛先", value: a.payer }, { label: "金額", value: a.amount },
       { label: "但し書き", value: tadashi }, { label: "契約日", value: contractOn }, { label: prop.label, value: propValue },
-      { label: "受領日", value: o.receivedOn }, { label: "収入印紙", value: a.stamp === 0 ? stampNone : a.stamp },
+      { label: "受領日", value: receivedOn }, { label: "収入印紙", value: a.stamp === 0 ? stampNone : a.stamp },
       { label: "発行者", value: p.name },
     ],
   };
