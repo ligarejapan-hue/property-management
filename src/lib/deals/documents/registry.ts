@@ -58,6 +58,8 @@ export interface BusinessDocDef {
    * 無い書類は、いちばん新しい発行の入力を使う。合うものが無ければ初めの値のまま。
    */
   rememberBy?: { key: string; values: readonly string[] };
+  /** rememberBy の値ごとに変わる初めの値(小窓で宛先などを切り替えたときに使う)。 */
+  defaultsFor?(c: BusinessDocContext, value: string): Record<string, unknown>;
   /** 発行の出し分け(履歴の題名と版の数え方・issue.ts の variants の鍵)。無ければ default。 */
   variantOf?(options: Record<string, unknown>): string;
   /** 謄本の登記の状況を使う(発行のときにも謄本を読む・書類確認書と同じ読み方)。 */
@@ -142,6 +144,8 @@ export const BUSINESS_DOCS: BusinessDocDef[] = [
       values: { addressee: defaultAddressee(c), belongings: defaultContractBelongings(c), notes: null },
       choices: { addressee: addresseeChoices(c), addresseeMissing: addresseeMissingChoices(c) },
     }),
+    // お持ちいただくものは宛先の当事者(法人・代理人)で変わる。
+    defaultsFor: (c, v) => ({ belongings: defaultContractBelongings(c, v === "buyer" ? "buyer" : "seller") }),
     build: (c, o) => buildContractGuide(c, contractGuideOptionsSchema.parse(o)),
   },
   {

@@ -79,6 +79,41 @@ describe("契約のご案内", () => {
     expect(doc(G).defaults(ctx()).values.notes).toBeNull();
   });
 
+  describe("委任状と実印(2026-11-05 発注者: 代理人がいる個人の取引と法人取引)", () => {
+    const BASE = ["手付金", "収入印紙", "印鑑(認印または実印)", "本人確認書類"];
+    const WITH = [...BASE, "委任状", "実印"];
+    const AGENT = party({ id: "p-agent", role: "agent", name: "架空 代理" });
+    const CORP_SELLER = { ...SELLER, partyType: "corporation" as const };
+    const CORP_BUYER = { ...BUYER, partyType: "corporation" as const };
+    const belongings = (d: DealView, to?: "seller" | "buyer") => String(
+      to ? doc(G).defaultsFor!(ctx(d), to).belongings : doc(G).defaults(ctx(d)).values.belongings,
+    ).split("\n");
+
+    it("宛先が法人なら足す", () => {
+      expect(belongings({ ...deal, parties: [CORP_SELLER, BUYER] })).toEqual(WITH);
+      expect(belongings({ ...deal, parties: [SELLER, CORP_BUYER] }, "buyer")).toEqual(WITH);
+    });
+    it("個人でも、取引に代理人がいれば足す", () => {
+      expect(belongings({ ...deal, parties: [SELLER, BUYER, AGENT] })).toEqual(WITH);
+      expect(belongings({ ...deal, parties: [SELLER, BUYER, AGENT] }, "buyer")).toEqual(WITH);
+    });
+    it("個人で代理人がいなければ今のまま・相手方だけが法人でも足さない", () => {
+      expect(belongings(deal)).toEqual(BASE);
+      expect(belongings({ ...deal, parties: [SELLER, CORP_BUYER] }, "seller")).toEqual(BASE);
+      expect(belongings({ ...deal, parties: [CORP_SELLER, BUYER] }, "buyer")).toEqual(BASE);
+    });
+    it("宛先ごとの初めの値は宛先だけを変える(お持ちいただくもの)", () => {
+      expect(Object.keys(doc(G).defaultsFor!(ctx(), "buyer"))).toEqual(["belongings"]);
+    });
+    it("書類確認書の項目にすでにあれば重ねない", () => {
+      const c = ctx({ ...deal, parties: [CORP_SELLER, BUYER] });
+      const items = [...c.settings.checklistItems, { id: "c_bring_poa", phase: "contract" as const, group: "bring" as const, label: "委任状", note: null, scope: "all" as const, amount: null }];
+      const v = String(doc(G).defaults({ ...c, settings: { ...c.settings, checklistItems: items } }).values.belongings).split("\n");
+      expect(v.filter((x) => x === "委任状")).toHaveLength(1);
+      expect(v).toContain("実印");
+    });
+  });
+
   it("空欄の確認: 契約日時・契約場所・宛先の当事者", () => {
     expect(doc(G).missing(ctx())).toEqual(["契約場所"]);
     expect(doc(G).missing(ctx({ ...deal, contractAt: null, contractPlace: "架空会議室", parties: [BUYER] }))).toEqual(["契約日時", "売主"]);
