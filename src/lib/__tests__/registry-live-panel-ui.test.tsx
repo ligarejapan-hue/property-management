@@ -184,7 +184,7 @@ describe("registry-location-search-button — 実況パネル統合 (ソース�
     expect(BUTTON_SRC).toMatch(/safeRandomId\(\)/);
     // 実呼び出しの禁止 (コメントでの言及は許容)
     expect(BUTTON_SRC).not.toMatch(/crypto\.randomUUID\(\)/);
-    expect(BUTTON_SRC).toMatch(/searchRegistryCandidates\(propertyId, ref\)/);
+    expect(BUTTON_SRC).toMatch(/searchRegistryCandidates\(propertyId, ref, targetParcelId\)/);
   });
 
   it("パネルは検索完了後 (results/cancelled/error) も維持し、閉じるで消える (@codex P2)", () => {

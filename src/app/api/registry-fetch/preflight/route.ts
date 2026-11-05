@@ -12,6 +12,7 @@ import { hashPropertyFingerprint } from "@/lib/registry-fetch/candidate-cache";
 import { requireBulkSession } from "@/lib/registry-fetch/bulk/route-support";
 import { publicRegistryLoginUrl } from "@/lib/registry-fetch/auto-fetch";
 import { MAX_BULK_ITEMS, UUID_RE } from "@/lib/registry-fetch/bulk/types";
+import { parseTargetParcelId, registryTargetView } from "@/lib/registry-fetch/parcel-target";
 
 // ---------- POST /api/registry-fetch/preflight ----------
 //
@@ -36,7 +37,13 @@ export async function POST(request: NextRequest) {
 
     const body = (await parseJsonBody(request)) as {
       propertyIds?: unknown;
+      targetParcelId?: unknown;
     };
+    // 取る土地・建物(足した行の id・物件の画面から1件だけ・2026-11-06)。分類をその行の値で出す。
+    const targetParcel = parseTargetParcelId(body.targetParcelId);
+    if (!targetParcel.ok) {
+      throw new ApiError(400, "取る土地・建物の指定が正しくありません", "REGISTRY_TARGET_PARCEL_INVALID");
+    }
     const rawIds = Array.isArray(body.propertyIds) ? body.propertyIds : [];
     const ids = [
       ...new Set(
@@ -58,6 +65,10 @@ export async function POST(request: NextRequest) {
     if (!ids.every((id) => UUID_RE.test(id))) {
       throw new ApiError(400, "物件IDの形式が不正です", "REGISTRY_PREFLIGHT_INVALID_PROPERTY_ID");
     }
+    // ⚠行の指定は物件1件のときだけ(一括は1筆目だけ=発注者決定 2026-11-06)。
+    if (targetParcel.value && ids.length !== 1) {
+      throw new ApiError(400, "取る土地・建物の指定は物件1件のときだけです", "REGISTRY_TARGET_PARCEL_INVALID");
+    }
 
     const properties = await prisma.property.findMany({
       where: { id: { in: ids } },
@@ -74,6 +85,7 @@ export async function POST(request: NextRequest) {
         buildingNumber: true,
         // ⚠あれば所在検索の対象外＝地番を尋ねてはいけない（設計 §3.1）。
         realEstateNumber: true,
+        extraParcels: true,
         _count: { select: { propertyOwners: true } },
       },
     });
@@ -97,7 +109,17 @@ export async function POST(request: NextRequest) {
       : [];
     const attachedSet = new Set(registryAttachments.map((a) => a.targetId));
 
-    const data = visible.map((p) => ({
+    const data = visible.map((p) => {
+      // ⚠消された行は「分類できない」で止める(番号なしの扱いにすると、地番の入力が1筆目の欄へ入る)。
+      const view = registryTargetView(p, targetParcel.value);
+      if (!view) {
+        throw new ApiError(
+          409,
+          "選んだ土地・建物が物件にありません。画面を開き直してから選び直してください",
+          "REGISTRY_TARGET_PARCEL_NOT_FOUND",
+        );
+      }
+      return {
       propertyId: p.id,
       registryObtained: p.registryStatus === "obtained",
       hasRegistryAttachment: attachedSet.has(p.id),
@@ -112,13 +134,15 @@ export async function POST(request: NextRequest) {
       //   ⚠これは digest（sha256 の先頭32桁）で、地番そのものではない。
       fingerprintHash: hashPropertyFingerprint(p),
       target: classifyRegistryTarget({
-        propertyType: p.propertyType,
-        address: p.address,
-        lotNumber: p.lotNumber,
-        buildingNumber: p.buildingNumber,
-        realEstateNumber: p.realEstateNumber,
+        // 足した行は種類が決まっているので、物件の種別との食い違いの注意は出さない。
+        propertyType: view.parcel ? "unknown" : p.propertyType,
+        address: view.address,
+        lotNumber: view.lotNumber,
+        buildingNumber: view.buildingNumber,
+        realEstateNumber: view.realEstateNumber,
       }),
-    }));
+      };
+    });
 
     // A案(@codex #381 R1/R2 P2): 画面のログインリンクは**公開専用**の実効値に従わせる
     // (自動操作用 REGISTRY_FETCH_BASE_URL は内部を指し得るため配らない)。

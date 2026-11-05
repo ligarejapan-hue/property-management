@@ -105,7 +105,11 @@ import {
   createRegistryFetchThrottle,
   type RegistryFetchThrottle,
 } from "@/lib/registry-fetch/throttle";
-import { fingerprintProperty } from "./candidate-cache";
+import {
+  fingerprintRegistryTarget,
+  purchaseIdentifierFor,
+  registryTargetView,
+} from "./parcel-target";
 import { canDownloadRow, purchaseIdempotencyKey } from "./purchase-safety";
 import { createHash } from "crypto";
 
@@ -189,6 +193,12 @@ export interface RunRegistryAutoFetchArgs {
    * ⚠有料取得は中止を受け付けない=reporter に isCancelRequested は配線されない。
    */
   live?: RegistryLiveReporter;
+  /**
+   * 取る土地・建物(足した行の id・2026-11-06 2筆以上の2回目後半)。省略=1筆目・1棟目(今までどおり)。
+   * ⚠番号・所在は物件から読み直した行の値だけを使う(registryTargetView)。指紋にも入る=検索した
+   *   ときと違う行・直された行では取得しない。二重課金の鍵は種類つき(purchaseIdentifierFor)。
+   */
+  targetParcelId?: string | null;
 }
 
 /**
@@ -3988,6 +3998,8 @@ export async function runRegistryAutoFetch(
       address: true,
       lotNumber: true,
       buildingNumber: true,
+      // 足した行を取るとき(行の番号・所在・指紋)。
+      extraParcels: true,
     },
   });
   if (!property) {
@@ -3999,12 +4011,23 @@ export async function runRegistryAutoFetch(
     throw new ApiError(403, "この物件にアクセスする権限がありません", "FORBIDDEN");
   }
 
+  // 3.2 取る土地・建物。⚠以降、探す所在・番号・不動産番号は**この値**を使う(物件の欄を直接読まない)。
+  //   足した行を選んだのに、物件の不動産番号や1筆目の地番で取りに行くと別の謄本に課金する。
+  const target = registryTargetView(property, args.targetParcelId);
+  if (!target) {
+    throw new ApiError(
+      409,
+      "選んだ土地・建物が物件にありません。画面を開き直してから選び直してください",
+      "REGISTRY_TARGET_PARCEL_NOT_FOUND",
+    );
+  }
+
   // 3.5 @codex P2: 所在検索取得の override は「今 version-lock する行の指紋」が resolve 時と
   //     一致する場合だけ使う。resolve のスナップショットとこの read の間に物件が編集されていたら
   //     429/lock 前に 409 で弾く（この read〜fetch は下の楽観ロックで直列化される）。
   if (
     args.expectedFingerprint !== undefined &&
-    fingerprintProperty(property) !== args.expectedFingerprint
+    fingerprintRegistryTarget(property, args.targetParcelId) !== args.expectedFingerprint
   ) {
     throw new ApiError(
       409,
@@ -4037,7 +4060,7 @@ export async function runRegistryAutoFetch(
   const willPurchaseByLocation =
     !isRecover &&
     !!args.locationCandidate &&
-    !(args.realEstateNumber ?? property.realEstateNumber)?.trim();
+    !(args.realEstateNumber ?? target.realEstateNumber)?.trim();
   // ⚠中止の節目(abortIfCancelledPaid)を実装しているのは**所在購入の adapter だけ**
   //   (@codex #401 R4 P2)。番号での購入(provider.fetchRegistryPdf の番号分岐)は
   //   live の中止を見ない。ここで受付を閉じないと、中止が accepted:true になるのに
@@ -4089,12 +4112,12 @@ export async function runRegistryAutoFetch(
       // ⚠両方持つ物件は**指定された方だけ**を対象にする(@codex #394 R13 P1)。
       //   指定が無ければ従来どおり(家屋番号があれば建物)。
       (args.recoverKind === "land"
-        ? { lotNumber: property.lotNumber, buildingNumber: null }
+        ? { lotNumber: target.lotNumber, buildingNumber: null }
         : args.recoverKind === "building"
-          ? { lotNumber: null, buildingNumber: property.buildingNumber }
+          ? { lotNumber: null, buildingNumber: target.buildingNumber }
           : {
-              lotNumber: property.lotNumber,
-              buildingNumber: property.buildingNumber,
+              lotNumber: target.lotNumber,
+              buildingNumber: target.buildingNumber,
             }))
     : args.locationCandidate;
   if (isRecover) {
@@ -4113,8 +4136,8 @@ export async function runRegistryAutoFetch(
       //   所有者情報を取り込みかねない。選ばせてから実行する。
       if (
         args.recoverKind === undefined &&
-        (property.lotNumber ?? "").trim() &&
-        (property.buildingNumber ?? "").trim()
+        (target.lotNumber ?? "").trim() &&
+        (target.buildingNumber ?? "").trim()
       ) {
         throw new ApiError(
           409,
@@ -4136,7 +4159,7 @@ export async function runRegistryAutoFetch(
       if (
         expectedAddress &&
         normalizeKuikiForCompare(expectedAddress) !==
-          normalizeKuikiForCompare(property.address ?? "")
+          normalizeKuikiForCompare(target.address ?? "")
       ) {
         throw new ApiError(
           409,
@@ -4157,7 +4180,7 @@ export async function runRegistryAutoFetch(
         );
       }
     }
-    if (!lotOrBuilding || !(property.address ?? "").trim()) {
+    if (!lotOrBuilding || !(target.address ?? "").trim()) {
       throw new ApiError(
         409,
         "取り込む対象が特定できません。物件の所在・地番をご確認ください",
@@ -4187,7 +4210,7 @@ export async function runRegistryAutoFetch(
     const lotOrBuilding = effectiveLocationIdentifier(
       args.locationCandidate,
     ).value;
-    if (!lotOrBuilding || !(property.address ?? "").trim()) {
+    if (!lotOrBuilding || !(target.address ?? "").trim()) {
       // 買う対象(地番/家屋番号)か所在が無い候補は購入できない(課金前・fail-closed)。
       throw new ApiError(
         409,
@@ -4211,7 +4234,8 @@ export async function runRegistryAutoFetch(
       .update(
         purchaseIdempotencyKey({
           propertyId,
-          lotOrBuilding,
+          // ⚠1筆目は今までどおりの鍵(前に買った分の台帳で止まる)。足した行は種類つき。
+          lotOrBuilding: purchaseIdentifierFor(target, lotOrBuilding),
           certificateType,
         }),
       )
@@ -4275,6 +4299,7 @@ export async function runRegistryAutoFetch(
         lotNumber: true,
         buildingNumber: true,
         realEstateNumber: true,
+        extraParcels: true,
         _count: { select: { propertyOwners: true } },
       },
     });
@@ -4294,8 +4319,9 @@ export async function runRegistryAutoFetch(
       fingerprintMatches:
         fresh !== null &&
         (args.expectedFingerprint !== undefined
-          ? fingerprintProperty(fresh) === args.expectedFingerprint
-          : fingerprintProperty(fresh) === fingerprintProperty(property)),
+          ? fingerprintRegistryTarget(fresh, args.targetParcelId) === args.expectedFingerprint
+          : fingerprintRegistryTarget(fresh, args.targetParcelId) ===
+            fingerprintRegistryTarget(property, args.targetParcelId)),
       approved:
         willPurchaseByLocation && args.approvedPreflight
           ? args.approvedPreflight
@@ -4359,7 +4385,7 @@ export async function runRegistryAutoFetch(
     // 取得キーは非PIIのみ（realEstateNumber / 物件UUID）。所有者名は渡さない。
     // cond③: 所在検索の候補取得では server 再解決した override を優先（物件は番号未保持）。
     // 段階②: 地番候補の有料取得は location を渡す（番号があれば番号を優先）。
-    const effectiveNumber = args.realEstateNumber ?? property.realEstateNumber;
+    const effectiveNumber = args.realEstateNumber ?? target.realEstateNumber;
     if (isRecover) {
       // 回収は provider 側の専用メソッド(課金操作を含まない実装)でのみ行う。
       if (!provider.recoverRegistryPdf) {
@@ -4382,7 +4408,8 @@ export async function runRegistryAutoFetch(
         (isRecover ? recoverLocation : args.locationCandidate) &&
         (isRecover || !effectiveNumber?.trim())
           ? {
-              address: property.address ?? "",
+              // ⚠足した行は行の所在(空なら物件の住所)。
+              address: target.address ?? "",
               lotNumber: (isRecover ? recoverLocation : args.locationCandidate)!
                 .lotNumber,
               buildingNumber: (isRecover
@@ -4394,10 +4421,10 @@ export async function runRegistryAutoFetch(
               // 候補経由の建物取得は地番を持たないため、ここで補う(@codex R12 P2)。
               ...(isRecover
                 ? {
-                    addressIdentifiers: [
-                      property.lotNumber,
-                      property.buildingNumber,
-                    ],
+                    // 足した行の所在が空なら物件の住所で探すので、1筆目の番号も外せる候補に残す。
+                    addressIdentifiers: target.parcel
+                      ? [target.lotNumber, target.buildingNumber, property.lotNumber, property.buildingNumber]
+                      : [property.lotNumber, property.buildingNumber],
                   }
                 : {}),
             }
@@ -4466,6 +4493,7 @@ export async function runRegistryAutoFetch(
             lotNumber: true,
             buildingNumber: true,
             realEstateNumber: true,
+            extraParcels: true,
           },
         });
         if (
@@ -4473,7 +4501,10 @@ export async function runRegistryAutoFetch(
           fresh.address !== property.address ||
           fresh.lotNumber !== property.lotNumber ||
           fresh.buildingNumber !== property.buildingNumber ||
-          fresh.realEstateNumber !== property.realEstateNumber
+          fresh.realEstateNumber !== property.realEstateNumber ||
+          // 足した行を取り込むときは、その行が直された・消されたときも止める。
+          fingerprintRegistryTarget(fresh, args.targetParcelId) !==
+            fingerprintRegistryTarget(property, args.targetParcelId)
         ) {
           throw new ApiError(
             409,

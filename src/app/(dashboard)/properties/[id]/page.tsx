@@ -1,6 +1,7 @@
 "use client";
 
 import { extraParcelsText, parcelNumberLabel, readExtraParcels } from "@/lib/property-parcels";
+import { supportsUnitFields } from "@/lib/property-building-name";
 import { useState, useEffect, useCallback, useMemo, useRef, use, type Dispatch, type SetStateAction } from "react";
 import { clearDraft, draftKey, readDraft } from "@/lib/drafts/draft-store";
 import { decideEditDraftOnLoad, parsePropertyEditDraft } from "@/lib/drafts/screens/property-edit";
@@ -995,6 +996,8 @@ export default function PropertyDetailPage({
         // (両方登録されている物件は放っておくと家屋番号が優先される)。
         propertyLotNumber={property.lotNumber}
         propertyBuildingNumber={property.buildingNumber}
+        // ほかの土地・建物を選んで取れる(2026-11-06)。区分マンションは足した行を使わない。
+        propertyExtraParcels={supportsUnitFields(property.propertyType) ? undefined : property.extraParcels}
         // ⚠地番の保存に要る。保存後は fetchProperty で取り直す
         //   （同じ画面で2回保存すると2回目が必ず 409 になるため）。
         propertyVersion={property.version}

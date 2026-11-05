@@ -523,3 +523,49 @@ describe("実況の画面写真は『全物件を見られる役割』にだけ�
     expect(labels).toContain("テスト進行");
   });
 });
+
+describe("取る土地・建物の指定(2026-11-06 2筆以上の2回目後半)", () => {
+  it("行の id を候補の解決と取得の両方に渡す(検索したときと同じ行でないと候補は見つからない)", async () => {
+    (resolveRegistryCandidate as Mock).mockResolvedValue({
+      candidate: { kind: "location", lotNumber: "1-2", buildingNumber: null },
+      fingerprint: "FP-ROW",
+    });
+    const res = await callRoute({ confirmed: true, candidateRef: "c1", targetParcelId: "row-a" });
+    expect(res.status).toBe(200);
+    expect(resolveRegistryCandidate).toHaveBeenCalledWith(expect.objectContaining({ targetParcelId: "row-a" }));
+    expect((runRegistryAutoFetch as Mock).mock.calls[0][0]).toMatchObject({ targetParcelId: "row-a", expectedFingerprint: "FP-ROW" });
+  });
+  it("指定なしは今までどおり(行の id を渡さない)", async () => {
+    await callRoute({ confirmed: true, candidateRef: "c1" });
+    expect((resolveRegistryCandidate as Mock).mock.calls[0][0].targetParcelId).toBeUndefined();
+    expect((runRegistryAutoFetch as Mock).mock.calls[0][0].targetParcelId).toBeUndefined();
+  });
+  it("★壊れた指定(null・空・文字以外)は 400(黙って1筆目に倒して課金しない)", async () => {
+    for (const bad of [null, "", 5, { id: "x" }]) {
+      vi.clearAllMocks();
+      (getApiSession as Mock).mockResolvedValue({ id: "user-1", role: "admin", email: "u@t", name: "U" });
+      (getUserPermissions as Mock).mockResolvedValue(PERMS_FULL);
+      (getRegistryFetchProvider as Mock).mockReturnValue({ name: "mock", supportsLocationSearch: true, searchCandidates: vi.fn(), fetchRegistryPdf: vi.fn() });
+      const res = await callRoute({ confirmed: true, candidateRef: "c1", targetParcelId: bad });
+      expect(res.status).toBe(400);
+      expect(((await res.json()) as { error: { code: string } }).error.code).toBe("REGISTRY_TARGET_PARCEL_INVALID");
+      expect(runRegistryAutoFetch).not.toHaveBeenCalled();
+    }
+  });
+  it("★候補なしの経路(物件の不動産番号で取る)では行を取らない=400", async () => {
+    const res = await callRoute({ confirmed: true, targetParcelId: "row-a" });
+    expect(res.status).toBe(400);
+    expect(((await res.json()) as { error: { code: string } }).error.code).toBe("REGISTRY_TARGET_PARCEL_NEEDS_CANDIDATE");
+    expect(runRegistryAutoFetch).not.toHaveBeenCalled();
+  });
+  it("候補なしの取り込み(課金なし)は行を渡し、土地/建物の指定は捨てる(行は種類が1つ)", async () => {
+    const res = await callRoute({
+      confirmed: true, mode: "recover", recoverKind: "building", targetParcelId: "row-a",
+      expectedVersion: 3, expectedIdentifier: "1番2", expectedAddress: "架空市",
+    });
+    expect(res.status).toBe(200);
+    const arg = (runRegistryAutoFetch as Mock).mock.calls[0][0];
+    expect(arg).toMatchObject({ mode: "recover", targetParcelId: "row-a" });
+    expect(arg.recoverKind).toBeUndefined();
+  });
+});

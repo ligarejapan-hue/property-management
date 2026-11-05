@@ -25,6 +25,7 @@ import {
   isLiveViewCancelRequested,
   clearLiveViewCancel,
 } from "@/lib/registry-fetch/live-view-store";
+import { parseTargetParcelId } from "@/lib/registry-fetch/parcel-target";
 
 // ---------- POST /api/properties/[id]/registry/auto-fetch ----------
 // 謄本自動取得（PR4・mock provider のみ）。本番外部接続・Playwright・課金・env 追加・
@@ -68,6 +69,18 @@ export async function POST(
         "REGISTRY_AUTO_FETCH_CONFIRMATION_REQUIRED",
       );
     }
+    // 取る土地・建物(足した行の id・2026-11-06)。⚠壊れた指定を黙って1筆目に倒さない(別の謄本に課金しない)。
+    const targetParcel = parseTargetParcelId(
+      (body as { targetParcelId?: unknown } | null)?.targetParcelId,
+    );
+    if (!targetParcel.ok) {
+      throw new ApiError(
+        400,
+        "取る土地・建物の指定が正しくありません",
+        "REGISTRY_TARGET_PARCEL_INVALID",
+      );
+    }
+    const targetArgs = targetParcel.value ? { targetParcelId: targetParcel.value } : {};
 
     // CodexP1: 本番 provider は未実装。route は mock provider を直接 new せず、解決した
     // provider が無ければ 501 で安全停止する。これにより mock 固定PDFで本番 DB
@@ -319,7 +332,8 @@ export async function POST(
             confirmed,
             mode: "recover",
             certificateType,
-            ...(recoverKind ? { recoverKind } : {}),
+            ...(recoverKind && !targetParcel.value ? { recoverKind } : {}),
+            ...targetArgs,
             ...(recoverExpectedVersion !== undefined
               ? { recoverExpectedVersion }
               : {}),
@@ -356,6 +370,8 @@ export async function POST(
           propertyId: id,
           confirmed,
           candidateRef,
+          // ⚠検索したときと同じ行でないと候補は見つからない(指紋に行の id が入っている)。
+          ...targetArgs,
         });
         const obtained = await runRegistryAutoFetch(
           {
@@ -381,6 +397,7 @@ export async function POST(
             // 請求済み・期限内の行しか取り込まない)。
             ...(isRecover ? ({ mode: "recover" } as const) : {}),
             live,
+            ...targetArgs,
           },
           provider,
         );
@@ -401,6 +418,14 @@ export async function POST(
     // ⚠従来経路(番号取得)も**必ず実況を閉じる**(@codex #394 R13 P2)。実況は上で
     //   始まっているので、ここで閉じないとパネルが期限切れまで回り続ける。
     try {
+      // ⚠この経路は物件の不動産番号で取る=足した行は取れない。行の指定を黙って捨てない。
+      if (targetParcel.value) {
+        throw new ApiError(
+          400,
+          "ほかの土地・建物は、所在で検索してから取得してください",
+          "REGISTRY_TARGET_PARCEL_NEEDS_CANDIDATE",
+        );
+      }
       const result = await runRegistryAutoFetch(
         {
           session: { id: session.id, role: session.role },

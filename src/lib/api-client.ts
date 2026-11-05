@@ -2537,6 +2537,8 @@ export type RegistrySearchResult =
 export async function searchRegistryCandidates(
   propertyId: string,
   liveRef?: string,
+  /** 取る土地・建物(足した行の id)。省略=1筆目・1棟目。 */
+  targetParcelId?: string | null,
 ): Promise<RegistrySearchResult> {
   return apiFetch<RegistrySearchResult>(
     `/api/properties/${propertyId}/registry/search`,
@@ -2546,6 +2548,7 @@ export async function searchRegistryCandidates(
       body: JSON.stringify({
         confirmed: true,
         ...(liveRef ? { liveRef } : {}),
+        ...(targetParcelId ? { targetParcelId } : {}),
       }),
     },
   );
@@ -2638,6 +2641,8 @@ export async function obtainRegistryByCandidate(
     hasRegistryAttachment: boolean;
     hasOwners: boolean;
   },
+  /** 取る土地・建物(足した行の id)。省略=1筆目・1棟目。 */
+  targetParcelId?: string | null,
 ): Promise<unknown> {
   return apiFetch(`/api/properties/${propertyId}/registry/auto-fetch`, {
     method: "POST",
@@ -2648,6 +2653,7 @@ export async function obtainRegistryByCandidate(
       certificateType,
       ...(liveRef ? { liveRef } : {}),
       ...(approvedPreflight ? { approvedPreflight } : {}),
+      ...(targetParcelId ? { targetParcelId } : {}),
     }),
   });
 }
@@ -2662,6 +2668,8 @@ export async function recoverRegistryByCandidate(
   candidateRef: string,
   certificateType: "owner" | "all" = "owner",
   liveRef?: string,
+  /** 取る土地・建物(足した行の id)。省略=1筆目・1棟目。 */
+  targetParcelId?: string | null,
 ): Promise<unknown> {
   return apiFetch(`/api/properties/${propertyId}/registry/auto-fetch`, {
     method: "POST",
@@ -2672,6 +2680,7 @@ export async function recoverRegistryByCandidate(
       certificateType,
       mode: "recover",
       ...(liveRef ? { liveRef } : {}),
+      ...(targetParcelId ? { targetParcelId } : {}),
     }),
   });
 }
@@ -2696,6 +2705,8 @@ export async function recoverRegistryFromProperty(
     identifier?: string | null;
     address?: string | null;
   },
+  /** 取る土地・建物(足した行の id)。省略=1筆目・1棟目。 */
+  targetParcelId?: string | null,
 ): Promise<unknown> {
   return apiFetch(`/api/properties/${propertyId}/registry/auto-fetch`, {
     method: "POST",
@@ -2709,6 +2720,7 @@ export async function recoverRegistryFromProperty(
       ...(expected?.identifier ? { expectedIdentifier: expected.identifier } : {}),
       ...(expected?.address ? { expectedAddress: expected.address } : {}),
       ...(liveRef ? { liveRef } : {}),
+      ...(targetParcelId ? { targetParcelId } : {}),
     }),
   });
 }
@@ -4818,6 +4830,8 @@ export interface RegistryPreflightFlags {
  */
 export async function fetchRegistryPreflight(
   propertyIds: string[],
+  /** 取る土地・建物(足した行の id・物件1件のときだけ)。分類をその行で出す。 */
+  targetParcelId?: string | null,
 ): Promise<{
   data: RegistryPreflightFlags[];
   excluded: number;
@@ -4847,7 +4861,7 @@ export async function fetchRegistryPreflight(
     {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ propertyIds }),
+      body: JSON.stringify({ propertyIds, ...(targetParcelId ? { targetParcelId } : {}) }),
     },
   );
 }
