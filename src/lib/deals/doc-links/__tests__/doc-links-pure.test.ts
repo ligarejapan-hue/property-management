@@ -2,7 +2,7 @@ import { readFileSync } from "fs";
 import path from "path";
 import { describe, expect, it } from "vitest";
 import { isPublicPath } from "@/proxy";
-import { DOC_FILE_MAX_BYTES, docLinkExpiresAt, docLinkExpiresOn, docLinkStateOf, isDocLinkOpen, receivedChecklistItemIds } from "../constants";
+import { DOC_FILE_MAX_BYTES, DOC_PDF_UPLOAD_MAX_BYTES, docLinkExpiresAt, docLinkExpiresOn, docLinkStateOf, isDocLinkOpen, receivedChecklistItemIds } from "../constants";
 import { buildDocLinkGuidance, buildMissingDocsText } from "../guidance";
 import { inspectSubmittedFile } from "../inspect-file";
 import { renderSubmitMessage, renderSubmitPage, submitHeaders } from "../public-page";
@@ -118,8 +118,16 @@ describe("保存前の検査(サーバー側で必ず通す)", () => {
   ])("%s は断る", (_n, buf) => {
     expect(inspectSubmittedFile(buf)).toEqual({ ok: false, reason: "unsupported" });
   });
-  it("大きすぎれば断る", () => {
-    expect(inspectSubmittedFile(Buffer.concat([Buffer.from("%PDF-"), Buffer.alloc(DOC_FILE_MAX_BYTES)]))).toEqual({ ok: false, reason: "too_large" });
+  it("8MB を超える PDF は通す(このあと縮める)。30MB を超える PDF は断る", () => {
+    const big = Buffer.concat([Buffer.from("%PDF-"), Buffer.alloc(DOC_FILE_MAX_BYTES)]);
+    const r = inspectSubmittedFile(big);
+    if (!r.ok) throw new Error(r.reason);
+    expect(r.mimeType).toBe("application/pdf");
+    expect(r.buffer.equals(big)).toBe(true);
+    expect(inspectSubmittedFile(Buffer.concat([Buffer.from("%PDF-"), Buffer.alloc(DOC_PDF_UPLOAD_MAX_BYTES)]))).toEqual({ ok: false, reason: "too_large" });
+  });
+  it("PDF 以外は今までどおり 8MB を超えれば断る", () => {
+    expect(inspectSubmittedFile(Buffer.concat([Buffer.from([0xff, 0xd8, 0xff]), Buffer.alloc(DOC_FILE_MAX_BYTES)]))).toEqual({ ok: false, reason: "too_large" });
   });
   it("JPEG の頭だけで中身が壊れているものは保存しない", () => {
     expect(inspectSubmittedFile(Buffer.from([0xff, 0xd8, 0xff, 0x00, 0x01]))).toEqual({ ok: false, reason: "malformed" });
@@ -146,6 +154,13 @@ describe("お客様のページの HTML", () => {
     expect(html).toContain('capture="environment"');
     expect(html).toContain('accept="image/*,application/pdf"');
     expect(html.match(/capture="environment"/g)?.length).toBe(3);
+  });
+  it("大きい PDF は自動で縮めると案内し、画面の上限は写真 8MB・PDF 30MB(2026-11-06)", () => {
+    expect(html).toContain("写真とPDFを送れます(写真は自動で縮めます。PDFは30MBまでで、8MBを超えるものは自動で縮めます)。");
+    expect(html).toContain(`var MAX=${DOC_FILE_MAX_BYTES},PDF_MAX=${DOC_PDF_UPLOAD_MAX_BYTES},`);
+    expect(html).toContain("(isPdf(f)?PDF_MAX:MAX)");
+    expect(html).toContain("大きいPDFは縮めるので1〜2分かかることがあります");
+    expect(html).not.toContain("1ファイル8MBまで");
   });
   it("外部の読み込みがなく、ファイルへのリンクもない", () => {
     expect(html).not.toMatch(/https?:\/\//);
@@ -244,12 +259,12 @@ describe("nginx の見本", () => {
       `/submit/${token}/../../api/x`, `/submit/${token}/%2e%2e/upload`, `/submit/${token}%2Fupload`, `/submit/%2e%2e/${token}`, `/submit//${token}`,
     ]) expect(re.test(bad), bad).toBe(false);
   });
-  it("アプリへ渡すのは正規化した道だけ・ログに残さない・実 IP を渡す・本文は 10MB まで", () => {
+  it("アプリへ渡すのは正規化した道だけ・ログに残さない・実 IP を渡す・本文は 32MB まで(PDF 30MB+上乗せ・2026-11-06)", () => {
     expect(body).toContain("proxy_pass         http://127.0.0.1:3000$uri;");
     expect(body).toContain("access_log off;");
     expect(body).toContain("error_log /dev/null crit;");
     expect(body).toContain("proxy_set_header   X-Real-IP         $remote_addr;");
-    expect(body).toContain("client_max_body_size 10m;");
+    expect(body).toContain("client_max_body_size 32m;");
     expect(body).toContain("return 404;");
   });
   it("形に合わない /submit/ は 404(前方一致に ^~ を付けない=正規表現が先に効く)", () => {

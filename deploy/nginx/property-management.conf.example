@@ -203,8 +203,9 @@ server {
             return 404;
         }
 
-        # アプリの上限(8MB+multipart の上乗せ)と proxy の 10MB に合わせる。
-        client_max_body_size 10m;
+        # アプリの上限(PDF 30MB+multipart の上乗せ)に合わせる。8MB を超える PDF はアプリが縮める(2026-11-06)。
+        # 待ち時間は圧縮の順番待ち(前の1本 最大120秒+自分の分 最大120秒)より長く 300 秒。
+        client_max_body_size 32m;
 
         # server の add_header を引き継がない(引き継ぐと上流の値のあとに全体の値が足され、ブラウザは後ろの値を使う)。
         # ⚠location に add_header を1つでも書くと server の分は全部消えるので、防御ヘッダも並べる。
@@ -218,8 +219,8 @@ server {
         proxy_set_header   X-Real-IP         $remote_addr;
         proxy_set_header   X-Forwarded-For   $proxy_add_x_forwarded_for;
         proxy_set_header   X-Forwarded-Proto $scheme;
-        proxy_read_timeout  60s;
-        proxy_send_timeout  60s;
+        proxy_read_timeout  300s;
+        proxy_send_timeout  300s;
     }
     location /submit/ {
         access_log off;

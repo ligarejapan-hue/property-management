@@ -10,7 +10,7 @@ import { describe, it, expect } from "vitest";
 import { readFileSync } from "node:fs";
 import path from "node:path";
 import nextConfig from "../../../next.config";
-import { config, LARGE_UPLOAD_API_PATTERN } from "@/proxy";
+import { config, LARGE_UPLOAD_API_PATTERN, SUBMIT_UPLOAD_PATTERN } from "@/proxy";
 
 const matcher = config.matcher[0];
 // Next の matcher はパス全体に対する正規表現として評価される。
@@ -141,5 +141,37 @@ describe("proxy を通さない口は、本文を読む前に認証と大きさ�
         i = post.indexOf(s, i + 1);
       }
     }
+  });
+});
+
+describe("お客様の書類提出の受け口も proxy を通さない(大きい PDF を縮める・2026-11-06)", () => {
+  const TOKEN = `${"A".repeat(22)}.${"b".repeat(43)}`;
+  it("受け口(/submit/<トークン>/upload)は proxy を通さない。ページは今までどおり通る", () => {
+    expect(re.test(`/submit/${TOKEN}/upload`)).toBe(false);
+    expect(re.test(`/submit/${TOKEN}`)).toBe(true);
+    expect(re.test(`/submit/${TOKEN}/upload/x`)).toBe(true);
+    expect(matcher).toContain(SUBMIT_UPLOAD_PATTERN);
+  });
+
+  it("受け口は、署名の確認と大きさの事前確認のあとで本文を読む", () => {
+    const src = readFileSync(path.join(process.cwd(), "src/app/submit/[token]/upload/route.ts"), "utf8");
+    const post = src.slice(src.indexOf("export async function POST"));
+    const read = post.indexOf("req.formData()");
+    expect(read).toBeGreaterThan(-1);
+    expect(post.indexOf("content-length")).toBeGreaterThan(-1);
+    expect(post.indexOf("content-length")).toBeLessThan(read);
+    expect(post.indexOf("verifyDocLinkToken(")).toBeGreaterThan(-1);
+    expect(post.indexOf("verifyDocLinkToken(")).toBeLessThan(read);
+    expect(post.indexOf("tryReserveCompressionSlot(")).toBeGreaterThan(post.indexOf("verifyDocLinkToken("));
+    expect(post.indexOf("tryReserveCompressionSlot(")).toBeLessThan(read);
+  });
+
+  it("nginx の見本の /submit/ の location は上限 32MB・待ち 300 秒", () => {
+    const conf = readFileSync(path.join(process.cwd(), "deploy/nginx/property-management.conf.example"), "utf8");
+    const m = /location ~ "\^\/submit\/[^"]+" \{([\s\S]*?)\n    \}/.exec(conf);
+    expect(m).not.toBeNull();
+    expect(m![1]).toMatch(/client_max_body_size 32m;/);
+    expect(m![1]).toMatch(/proxy_read_timeout\s+300s;/);
+    expect(m![1]).toMatch(/proxy_send_timeout\s+300s;/);
   });
 });

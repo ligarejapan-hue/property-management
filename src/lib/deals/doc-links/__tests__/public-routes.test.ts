@@ -1,10 +1,12 @@
 import { afterAll, beforeEach, describe, expect, it, vi } from "vitest";
 
-const { storage, writeAuditLog } = vi.hoisted(() => ({
+const { storage, writeAuditLog, compress } = vi.hoisted(() => ({
   storage: { upload: vi.fn(async () => ({})), delete: vi.fn(async () => undefined), read: vi.fn(), getUrl: vi.fn(), keyFromUrl: vi.fn() },
   writeAuditLog: vi.fn(),
+  compress: { release: vi.fn(), reserve: vi.fn(), compressPdf: vi.fn() },
 }));
 vi.mock("@/lib/storage", () => ({ getStorage: () => storage }));
+vi.mock("@/lib/pdf-compress/run", () => ({ tryReserveCompressionSlot: compress.reserve, compressPdf: compress.compressPdf }));
 vi.mock("@/lib/audit", () => ({ writeAuditLog }));
 vi.mock("@/lib/prisma", () => {
   const db: Record<string, unknown> = {
@@ -21,7 +23,7 @@ vi.mock("@/lib/prisma", () => {
 import prismaMock from "@/lib/prisma";
 import { GET } from "@/app/submit/[token]/route";
 import { POST } from "@/app/submit/[token]/upload/route";
-import { DOC_FILE_MAX_BYTES } from "../constants";
+import { DOC_FILE_ACCEPT_BYTES, DOC_FILE_MAX_BYTES, DOC_PDF_UPLOAD_MAX_BYTES } from "../constants";
 import { buildDocLinkToken } from "../token";
 import { DIRTY_JPEG } from "./fixtures";
 
@@ -73,6 +75,7 @@ beforeEach(() => {
     { id: "r2", label: "住民票", status: "submitted", _count: { files: 2 } },
   ]);
   pm.dealDocFile.count.mockResolvedValue(0);
+  compress.reserve.mockReturnValue(compress.release);
 });
 
 describe("お客様のページ", () => {
@@ -240,15 +243,95 @@ describe("提出", () => {
   it("ファイルが無ければ断る", async () => {
     expect((await upload({ file: null })).status).toBe(422);
   });
-  it("大きさを本文を読む前に断る", async () => {
-    expect((await upload({ contentLength: String(DOC_FILE_MAX_BYTES + 2 * 1024 * 1024) })).status).toBe(413);
+  it("大きさを本文を読む前に断る(PDF の受け取りの上限 30MB+上乗せ分)", async () => {
+    expect((await upload({ contentLength: String(DOC_PDF_UPLOAD_MAX_BYTES + 2 * 1024 * 1024) })).status).toBe(413);
     expect((await upload({ contentLength: null })).status).toBe(411);
     expect(pm.dealDocLink.findUnique).not.toHaveBeenCalled();
   });
-  it("実際のファイルが上限を超えていれば断る", async () => {
+  it("実際のファイルが上限を超えていれば断る(PDF でないものは 8MB)", async () => {
     const res = await upload({ file: new Blob([new Uint8Array(DOC_FILE_MAX_BYTES + 1)], { type: "application/pdf" }) });
     expect(res.status).toBe(413);
     expect(storage.upload).not.toHaveBeenCalled();
+  });
+
+  describe("8MB を超える PDF は自動で縮める(2026-11-06 発注者)", () => {
+    const MB = 1024 * 1024;
+    const bigPdf = (bytes: number) => Buffer.concat([Buffer.from("%PDF-1.7\n"), Buffer.alloc(bytes - 9, 1)]);
+    const send = (buf: Buffer) => upload({ file: new Blob([new Uint8Array(buf)], { type: "application/pdf" }), contentLength: String(buf.length + 1000) });
+
+    it("縮めたものを保存する。席を取り、終わったら返す", async () => {
+      const small = Buffer.from("%PDF-1.7\nsmall");
+      compress.compressPdf.mockResolvedValueOnce({ ok: true, buffer: small, level: "jpeg85", inBytes: 12 * MB, outBytes: small.length });
+      const res = await send(bigPdf(12 * MB));
+      expect(res.status).toBe(200);
+      const [buffer, meta] = storage.upload.mock.calls[0] as unknown as [Buffer, { key: string; mimeType: string }];
+      expect(buffer.equals(small)).toBe(true);
+      expect(meta.mimeType).toBe("application/pdf");
+      expect(meta.key).toMatch(/\.pdf$/);
+      expect(compress.compressPdf).toHaveBeenCalledWith(expect.any(Buffer), DOC_FILE_MAX_BYTES, undefined, DOC_FILE_ACCEPT_BYTES);
+      expect(compress.reserve).toHaveBeenCalledTimes(1);
+      expect(compress.release).toHaveBeenCalledTimes(1);
+    });
+    it("8MB 以下の PDF は縮めず、席も取らない", async () => {
+      expect((await upload({ file: new Blob(["%PDF-1.7\nbody"], { type: "application/pdf" }) })).status).toBe(200);
+      expect(compress.compressPdf).not.toHaveBeenCalled();
+      expect(compress.reserve).not.toHaveBeenCalled();
+    });
+    it("縮められなくても 20MB 以下なら元のまま保存する", async () => {
+      compress.compressPdf.mockResolvedValueOnce({ ok: false, reason: "too_large", inBytes: 9 * MB, bestBytes: 9 * MB });
+      const input = bigPdf(9 * MB);
+      expect((await send(input)).status).toBe(200);
+      expect((storage.upload.mock.calls[0] as unknown as [Buffer])[0].length).toBe(input.length);
+    });
+    it("20MB を超えたまま縮められなければ、分けるか写真で送るよう案内して断る", async () => {
+      compress.compressPdf.mockResolvedValueOnce({ ok: false, reason: "too_large", inBytes: 25 * MB, bestBytes: 21 * MB });
+      const res = await send(bigPdf(25 * MB));
+      expect(res.status).toBe(413);
+      expect((await res.json()).error).toBe("PDFを小さくできませんでした。ページを分けるか、写真で撮って送ってください。");
+      expect(storage.upload).not.toHaveBeenCalled();
+      expect(compress.release).toHaveBeenCalledTimes(1);
+    });
+    it("パスワード付きで縮められなければ、その理由で断る", async () => {
+      compress.compressPdf.mockResolvedValueOnce({ ok: false, reason: "encrypted", inBytes: 25 * MB, bestBytes: null });
+      const res = await send(bigPdf(25 * MB));
+      expect(res.status).toBe(422);
+      expect((await res.json()).error).toBe("パスワード付きのPDFは小さくできません。パスワードを外すか、写真で撮って送ってください。");
+    });
+    it("圧縮の席が埋まっていれば、本文を読む前に 429", async () => {
+      compress.reserve.mockReturnValueOnce(null);
+      const res = await send(bigPdf(12 * MB));
+      expect(res.status).toBe(429);
+      expect((await res.json()).error).toBe("いま混み合っています。1分ほど待ってから、もう一度お試しください。");
+      expect(compress.compressPdf).not.toHaveBeenCalled();
+      expect(storage.upload).not.toHaveBeenCalled();
+    });
+    it("混んでいて断った分は、リンクの1時間の枠を消費しない", async () => {
+      const token = buildDocLinkToken("B".repeat(22), Buffer.from(SECRET));
+      compress.reserve.mockReturnValue(null);
+      for (let i = 0; i < 60; i++) expect((await upload({ token, contentLength: String(12 * MB) })).status).toBe(429);
+      compress.reserve.mockReturnValue(compress.release);
+      expect((await upload({ token })).status).toBe(200);
+    });
+    it("圧縮が途中で失敗しても席を返す", async () => {
+      compress.compressPdf.mockRejectedValueOnce(new Error("boom"));
+      expect((await send(bigPdf(12 * MB))).status).toBe(503);
+      expect(compress.release).toHaveBeenCalledTimes(1);
+      expect(storage.upload).not.toHaveBeenCalled();
+    });
+    it("申告が 8MB 以下なら席を取らない", async () => {
+      await upload({ contentLength: String(DOC_FILE_MAX_BYTES) });
+      expect(compress.reserve).not.toHaveBeenCalled();
+    });
+    it("署名が違えば席を取らない(圧縮の席を他人に使わせない)", async () => {
+      const res = await upload({ token: "wrong", contentLength: String(12 * MB) });
+      expect(res.status).toBe(404);
+      expect(compress.reserve).not.toHaveBeenCalled();
+    });
+    it("写真は今までどおり 8MB まで(縮めるのはスマホの中)", async () => {
+      const res = await upload({ file: new Blob([new Uint8Array(Buffer.concat([Buffer.from([0xff, 0xd8, 0xff]), Buffer.alloc(DOC_FILE_MAX_BYTES)]))], { type: "image/jpeg" }), contentLength: String(9 * MB) });
+      expect(res.status).toBe(413);
+      expect(compress.compressPdf).not.toHaveBeenCalled();
+    });
   });
   it("よそのサイトからの送信は断る", async () => {
     const res = await upload({ headers: { origin: "https://evil.example", host: "app.example" } });
