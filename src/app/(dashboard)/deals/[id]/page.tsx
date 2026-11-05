@@ -20,8 +20,8 @@ import { DealRegistryRights } from "@/components/deals/deal-registry-rights";
 import { DealCrosscheck } from "@/components/deals/deal-crosscheck";
 import { DealSchedule } from "@/components/deals/deal-schedule";
 import { DealDocLinks } from "@/components/deals/deal-doc-links";
-import { dealsApi, errorText, type DealOptions, type UserOption } from "@/lib/deals/client";
-import type { DealView } from "@/lib/deals/view";
+import { DealResaleSide } from "@/components/deals/deal-resale-side";
+import { dealsApi, errorText, type DealDetailResponse, type DealOptions, type UserOption } from "@/lib/deals/client";
 import type { DealCalc } from "@/lib/deals/calc/deal-calc";
 import { basicFormFromDeal } from "@/lib/deals/forms";
 import { MONEY_OVERRIDE_KEYS, SETTLEMENT_OVERRIDE_KEYS, pickOverrides } from "@/lib/deals/money-forms";
@@ -56,7 +56,7 @@ type DealTabKey = (typeof DEAL_TABS)[number]["key"];
 export default function DealDetailPage({ params }: { params: Promise<{ id: string }> }) {
   const { id } = use(params);
   useEditScreenToken();
-  const [data, setData] = useState<{ deal: DealView; canOpenProperty: boolean; canChangeStatus: boolean; canChangeAssignee: boolean; canMoveCaseStatus: boolean } | null>(null);
+  const [data, setData] = useState<DealDetailResponse | null>(null);
   const [caseStatusNotChanged, setCaseStatusNotChanged] = useState(false);
   const [calc, setCalc] = useState<DealCalc | null>(null);
   const [options, setOptions] = useState<DealOptions | null>(null);
@@ -158,6 +158,8 @@ export default function DealDetailPage({ params }: { params: Promise<{ id: strin
         }
         description={`${deal.dealNo} ・ ${DEAL_BUSINESS_TYPE_LABELS[deal.businessType as keyof typeof DEAL_BUSINESS_TYPE_LABELS] ?? deal.businessType} ・ ${DEAL_STATUS_LABELS[deal.status as keyof typeof DEAL_STATUS_LABELS] ?? deal.status}`}
       />
+      {/* 買取再販は仕入/売却と、同じ物件のもう一方の取引(2026-11-05)。 */}
+      <DealResaleSide deal={deal} relatedDeals={data.relatedDeals ?? []} canOpenProperty={data.canOpenProperty} />
       {/* 開閉しても同じ位置に描く=入力中のパネルを作り直さない。 */}
       <div className={sideOpen ? `grid items-start gap-5 ${sideGrid}` : ""}>
       <div className="min-w-0 space-y-5">
