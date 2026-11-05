@@ -8,6 +8,7 @@ import { html, type SafeHtml } from "../html";
 import { documentHtml } from "../layout";
 import { jstDateString } from "../../datetime";
 import { dateJa, namesOf, partiesOf, propertyLabel, type BusinessDocContext, type ValueRow } from "./common";
+import { NEEDS_SELLER_PARTY } from "./receipt-issuer";
 
 export const RECEIPT_KINDS = {
   deposit_receipt: { label: "手付金領収書", purpose: "手付金" },
@@ -50,21 +51,34 @@ export function receiptSides(kind: ReceiptKind, c: BusinessDocContext): { receiv
 
 export interface IssuerChoice { value: string; label: string; individual: boolean }
 
-/** 選べる発行者: 自社と、受け取る側の当事者(自社の当事者は「自社」にまとめる)。初期値は自社の当事者があれば自社。 */
+/** 自社を発行者に選べるか。手付金・残金は自社では出さない(別の会計システム・2026-11-06 発注者)。精算金は今のまま。 */
+const selfIssuerAllowed = (kind: ReceiptKind) => kind === "settlement_receipt";
+
+/**
+ * 選べる発行者: 受け取る側の当事者(自社の当事者は除く)。精算金だけ自社も選べる(自社の当事者は「自社」にまとめる)。
+ * 初期値: 精算金は自社の当事者があれば自社・それ以外は最初の当事者。手付金・残金で選べる人がいなければ ""(発行は止める)。
+ */
 export function issuerChoices(kind: ReceiptKind, c: BusinessDocContext): { choices: IssuerChoice[]; initial: string } {
   const sides = receiptSides(kind, c);
   const receivers = sides ? partiesOf(c.deal, sides.receiver) : [];
-  const choices: IssuerChoice[] = [
-    { value: "self", label: `${c.company.nameJa}(自社)`, individual: false },
-    ...receivers.filter((p) => !p.isSelf).map((p) => ({ value: p.id, label: p.name, individual: p.partyType === "individual" })),
-  ];
+  const parties = receivers.filter((p) => !p.isSelf).map((p) => ({ value: p.id, label: p.name, individual: p.partyType === "individual" }));
+  if (!selfIssuerAllowed(kind)) return { choices: parties, initial: parties[0]?.value ?? "" };
+  const choices: IssuerChoice[] = [{ value: "self", label: `${c.company.nameJa}(自社)`, individual: false }, ...parties];
   const initial = receivers.some((p) => p.isSelf) || !receivers.length ? "self" : receivers[0].id;
   return { choices, initial };
 }
 
+/** 発行を止める項目: 手付金・残金で売主の当事者(自社を除く)がいない。 */
+export function receiptIssuerBlocking(kind: ReceiptKind, c: BusinessDocContext): string[] {
+  return !selfIssuerAllowed(kind) && !issuerChoices(kind, c).choices.length ? [NEEDS_SELLER_PARTY] : [];
+}
+
 type Issuer = { kind: "self" } | { kind: "party"; party: DealPartyView };
 function resolveIssuer(kind: ReceiptKind, c: BusinessDocContext, o: ReceiptOptions): Issuer {
-  if (o.issuer === "self") return { kind: "self" };
+  if (o.issuer === "self") {
+    if (!selfIssuerAllowed(kind)) throw new DocOptionError(`${RECEIPT_KINDS[kind].label}は自社では発行できません。売主の当事者を選んでください`);
+    return { kind: "self" };
+  }
   const sides = receiptSides(kind, c);
   const party = sides ? partiesOf(c.deal, sides.receiver).find((p) => p.id === o.issuer && !p.isSelf) : undefined;
   if (!party) throw new DocOptionError("発行者を選び直してください");

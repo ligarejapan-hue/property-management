@@ -13,6 +13,7 @@ import type { CompanyProfile } from "@/lib/sales-sheet/company-profile-store";
 import type { BusinessDocContext } from "../business/common";
 import { BUSINESS_DOCS, businessDocOf } from "../registry";
 import { DocOptionError } from "../business/receipts";
+import { NEEDS_SELLER_PARTY } from "../business/receipt-issuer";
 
 const rateRows: RateTableRow[] = INITIAL_RATE_TABLES.map((t) => ({
   kind: t.kind, validFrom: new Date(`${t.validFrom}T00:00:00Z`), validTo: t.validTo ? new Date(`${t.validTo}T00:00:00Z`) : null, content: t.content,
@@ -126,19 +127,33 @@ describe("領収書", () => {
     expect(() => doc("deposit_receipt").build(ctx(), { issuer: SELLER.id, exempt: null, receivedOn: null })).toThrow(DocOptionError);
     expect(doc("deposit_receipt").build(ctx(), { issuer: SELLER.id, exempt: "yes", receivedOn: null }).html).toContain("非課税");
   });
-  it("自社が発行: 会社名・角印あり・判断は要らない", () => {
-    const { html } = doc("balance_receipt").build(ctx({ ...deal, parties: [SELF_SELLER, BUYER] }), { issuer: "self", exempt: null, receivedOn: null });
-    expect(html).toContain("金 28,500,000 円也");
+  it("手付金・残金は自社では出さない(別の会計システム・2026-11-06 発注者): 選べるのは売主の当事者だけ・自社を渡しても組み立てない", () => {
+    for (const kind of ["deposit_receipt", "balance_receipt"]) {
+      expect(doc(kind).defaults(ctx()).values.issuer).toBe(SELLER.id);
+      expect(doc(kind).defaults(ctx()).issuers!.map((i) => i.value)).toEqual([SELLER.id]);
+      expect(doc(kind).blocking(ctx())).toEqual([]);
+      expect(() => doc(kind).build(ctx(), { issuer: "self", exempt: null, receivedOn: null })).toThrow(DocOptionError);
+      // 受け取る側でない当事者は選べない
+      expect(() => doc(kind).build(ctx(), { issuer: BUYER.id, exempt: "no", receivedOn: null })).toThrow(DocOptionError);
+    }
+  });
+  it("売主の当事者がいない取引(売主が自社だけ・売主なし)では手付金・残金を出せない", () => {
+    for (const kind of ["deposit_receipt", "balance_receipt"]) {
+      for (const parties of [[SELF_SELLER, BUYER], [BUYER]]) {
+        const c = ctx({ ...deal, parties });
+        expect(doc(kind).blocking(c)).toContain(NEEDS_SELLER_PARTY);
+        expect(doc(kind).defaults(c).issuers).toEqual([]);
+        expect(doc(kind).defaults(c).values.issuer).toBe("");
+      }
+    }
+  });
+  it("精算金領収書の発行者は今のまま(自社も選べる・自社の当事者があれば自社が初期値)", () => {
+    expect(doc("settlement_receipt").defaults(ctx()).issuers!.map((i) => i.value)).toEqual(["self", SELLER.id]);
+    expect(doc("settlement_receipt").defaults(ctx({ ...deal, parties: [SELF_SELLER, BUYER] })).values.issuer).toBe("self");
+    expect(doc("settlement_receipt").blocking(ctx({ ...deal, parties: [SELF_SELLER, BUYER] }))).not.toContain(NEEDS_SELLER_PARTY);
+    const { html } = doc("settlement_receipt").build(ctx({ ...deal, parties: [SELF_SELLER, BUYER] }), { issuer: "self", exempt: null, receivedOn: null });
     expect(html).toContain("架空不動産株式会社");
     expect(html).toContain(SEAL);
-    expect(html).not.toContain("署名・押印");
-  });
-  it("発行者の初期値と選べる値: 自社の当事者があれば自社・なければ最初の売主", () => {
-    expect(doc("deposit_receipt").defaults(ctx()).values.issuer).toBe(SELLER.id);
-    expect(doc("deposit_receipt").defaults(ctx({ ...deal, parties: [SELF_SELLER, BUYER] })).values.issuer).toBe("self");
-    expect(doc("deposit_receipt").defaults(ctx()).issuers!.map((i) => i.value)).toEqual(["self", SELLER.id]);
-    // 受け取る側でない当事者は選べない
-    expect(() => doc("deposit_receipt").build(ctx(), { issuer: BUYER.id, exempt: "no", receivedOn: null })).toThrow(DocOptionError);
   });
   it("精算金領収書: 金額は精算書の差引・内訳は精算書の項目名・宛先は払う側", () => {
     const c = ctx();
