@@ -35,7 +35,7 @@ import {
   type ScanUploadResult,
 } from "@/lib/api-client";
 import SplitPdfDialog from "@/components/properties/split-pdf-dialog";
-import { DealScopeBar, DealScopeSelect, UploadScopeSelect } from "@/components/properties/attachment-deal-scope";
+import { DealScopeBar, DealScopeSelect, FixedUploadScopeNote, UploadScopeSelect } from "@/components/properties/attachment-deal-scope";
 import { estimatedAssignments, filterByScope, splitDealsOf, type ScopeDeal } from "@/lib/attachments/deal-scope";
 import {
   bundleHasRegistry,
@@ -161,7 +161,13 @@ export default function AttachmentTab({
   occupancyStatus = null,
   canApplyRegistry = false,
   deals = null,
+  fixedDealId = null,
 }: {
+  /**
+   * 取引の画面から開いたときのその取引の id。最初はその取引の書類だけを出し、入れた書類はその取引の書類にする。
+   * その取引が仕入/売却の分からない取引(仲介など)なら、物件の画面と同じ出し方。
+   */
+  fixedDealId?: string | null;
   /**
    * この物件の取引(物件の画面が受け取ったもの)。null=取引を見る権限が無い。
    * 仕入か売却の分かる取引があるときだけ、添付を取引で分ける(買取再販・2026-11-04 発注者 案A)。
@@ -229,9 +235,13 @@ export default function AttachmentTab({
   // 取引で分ける(買取再販の仕入/売却)。分けられる取引が無い物件では何も出さない。
   const scopeDeals = deals ? splitDealsOf(deals) : [];
   const scopeEnabled = scopeDeals.length > 0;
-  const [scopeFilter, setScopeFilter] = useState("all");
-  // 入れるときの取引(空=あとで決める)。
+  // 取引の画面から開いたときのその取引(仕入/売却の分かる取引のときだけ)。
+  const fixedDeal = fixedDealId ? (scopeDeals.find((d) => d.id === fixedDealId) ?? null) : null;
+  // 取引の画面では、最初はその取引の書類だけを出す。
+  const [scopeFilter, setScopeFilter] = useState(() => fixedDeal?.id ?? "all");
+  // 入れるときの取引(空=あとで決める)。取引の画面ではその取引に決まっている(選ばせない)。
   const [uploadScope, setUploadScope] = useState("");
+  const activeUploadScope = fixedDeal ? fixedDeal.id : uploadScope;
   const [scopeSaving, setScopeSaving] = useState(false);
 
   const fetchAttachmentsData = useCallback(async (options?: { silent?: boolean }) => {
@@ -296,7 +306,7 @@ export default function AttachmentTab({
     setCompressing(compressible && file.size > MAX_FILE_SIZE);
     try {
       // 選んだ取引は通常の添付にだけ付ける(謄本は共通として扱う)。
-      const dealScope = scopeEnabled && type === "general" && uploadScope !== "" ? uploadScope : null;
+      const dealScope = scopeEnabled && type === "general" && activeUploadScope !== "" ? activeUploadScope : null;
       const saved = await uploadFile(propertyId, file, "attachment", { attachmentType: type, dealScope });
       if (saved.registryNotice) onRegistryNotice?.(saved.registryNotice);
       return null;
@@ -549,9 +559,12 @@ export default function AttachmentTab({
     const kind = docKindByCode(result.docKind);
     const stage = kind ? DOC_STAGES.find((s) => s.code === kind.stage) : undefined;
     scanMoveRef.current = { attachmentId: result.id, originals, uploaded: 0 };
-    // 「入れる書類の取引」を選んでいたら、撮った書類にも付ける(@codex P2)。一覧の読み直しは saveScopes が行う。
-    if (scopeEnabled && uploadScope !== "") {
-      void saveScopes([{ attachmentId: result.id, scope: uploadScope }]);
+    // 「入れる書類の取引」を選んでいたら、撮った書類にも付ける(@codex P2)。
+    // ⚠saveScopes は別の取引の変更中だと黙って何もしない=撮った書類が未区分のまま残るので、ここは直接送る。
+    if (scopeEnabled && activeUploadScope !== "") {
+      void updateAttachmentDealScope(propertyId, [{ attachmentId: result.id, scope: activeUploadScope }])
+        .then(() => fetchAttachmentsData({ silent: true }))
+        .catch((err) => setError(err instanceof Error ? err.message : "取引の変更に失敗しました"));
     }
     setScanNotice({
       kind: "saved",
@@ -647,7 +660,11 @@ export default function AttachmentTab({
               saving={scopeSaving}
               onConfirmEstimates={() => void saveScopes(estimatedAssignments(attachments, scopeDeals))}
             />
-            <UploadScopeSelect deals={scopeDeals} value={uploadScope} onChange={setUploadScope} />
+            {fixedDeal ? (
+              <FixedUploadScopeNote deals={scopeDeals} dealId={fixedDeal.id} />
+            ) : (
+              <UploadScopeSelect deals={scopeDeals} value={uploadScope} onChange={setUploadScope} />
+            )}
           </>
         )}
 
@@ -858,7 +875,7 @@ export default function AttachmentTab({
           onSave={async (segments) => {
             const r = await saveSplitPdf(propertyId, splitTarget.file, segments, {
               containsRegistry: bundleHasRegistry(splitTarget.analysis.pageKinds, segments),
-              dealScope: scopeEnabled && uploadScope !== "" ? uploadScope : null,
+              dealScope: scopeEnabled && activeUploadScope !== "" ? activeUploadScope : null,
             });
             finishSplit({ kind: "split", parts: r.parts, registryParts: r.registryParts, registryNotice: r.registryNotice });
           }}
