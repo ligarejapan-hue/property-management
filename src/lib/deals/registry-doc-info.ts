@@ -22,7 +22,7 @@ export async function loadRegistryDocInfo(
       const infos = data.certs.map((c) => registryDocInfo(
         c.summary ? { status: "ok", attachmentCreatedAt: c.createdAt, summary: c.summary } : { status: "unreadable" },
       ));
-      const gap = registryGapText(data.missing, data.uncertain);
+      const gap = registryGapText(data.missing, data.uncertain, data.missingParcels);
       const cautions = [...new Set(infos.map((i) => i.caution).filter((c): c is string => !!c))];
       return {
         activeRights: infos.reduce((n, i) => n + i.activeRights, 0),

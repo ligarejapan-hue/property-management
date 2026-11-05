@@ -30,7 +30,9 @@ import { pickReusableAddresslessOwner } from "@/lib/registry-pdf/owner-reuse";
 import { parseRegistryText } from "@/lib/pdf-registry-parser";
 import { planRegistryAreaFill, registryAreasOf, type RegistryAreaCurrent } from "@/lib/registry-area";
 import { fillPropertyFromRegistry } from "@/lib/registry-pdf/fill-areas";
-import { parseRegistryBuildingFacts } from "@/lib/registry-basic-info";
+import { parseRegistryBuildingFacts, registryIdentityOf } from "@/lib/registry-basic-info";
+import { supportsUnitFields } from "@/lib/property-building-name";
+import { readExtraParcels, registryParcelTarget } from "@/lib/property-parcels";
 import {
   FULL_CERTIFICATE_OWNERS_UNDETERMINED_WARNING,
   hasDeterminedOwners,
@@ -899,8 +901,20 @@ export async function processRegistryPdf(
       const parsedAreas = registryAreasOf(parsed);
       const areaFillFor = (p: RegistryAreaCurrent) => planRegistryAreaFill(parsedAreas, p);
       const wouldFillArea = (p: RegistryAreaCurrent) => Object.keys(areaFillFor(p)).length > 0;
+      // 2筆以上・2棟以上の物件(2026-11-05 案A 2回目): 1筆目・1棟目ではない謄本なら、物件の番号・面積の欄を埋めない
+      // (2筆目の不動産番号・地番・面積を1筆目の欄に入れない)。決め方は fillPropertyFromRegistry と同じ。
+      // ⚠番号は表の欄だけを読む registryIdentityOf で(parsed は全文から拾うので、土地の謄本の共同担保目録にある
+      //   建物の家屋番号で建物と取り違える・内部レビュー P2)。
+      const identity = registryIdentityOf(text);
+      const hasExtraParcels = readExtraParcels(existing.extraParcels).length > 0;
+      const notMainParcel = (p: { propertyType: string; lotNumber: string | null; buildingNumber: string | null; extraParcels: unknown }) => {
+        if (supportsUnitFields(p.propertyType)) return false;
+        const t = registryParcelTarget(identity, p);
+        return t.target === "extra" || (t.target === "unknown" && t.hasExtras);
+      };
       const wouldFillProperty =
         !args.ownersOnly &&
+        !notMainParcel(existing) &&
         ((!existing.realEstateNumber && !!parsed.realEstateNumber) ||
           (!existing.lotNumber && !!parsed.lotNumber) ||
           (!existing.buildingNumber && !!parsed.buildingNumber) ||
@@ -953,6 +967,8 @@ export async function processRegistryPdf(
                   landAreaMethod: true,
                   totalFloorArea: true,
                   propertyType: true,
+                  // 1筆目の謄本かの判定に使う(merged には入らない)。
+                  extraParcels: true,
                 },
               });
               // ロック直後に取れない=行ロックとfindUniqueの間で削除された。
@@ -965,11 +981,12 @@ export async function processRegistryPdf(
               });
 
               // 以降の判定は全て fresh(読み直した現在値)基準にする。
-              const freshWouldFillProperty =
+              const freshNotMain = notMainParcel(fresh);
+              const freshWouldFillProperty = !freshNotMain && (
                 (!fresh.realEstateNumber && !!parsed.realEstateNumber) ||
                 (!fresh.lotNumber && !!parsed.lotNumber) ||
                 (!fresh.buildingNumber && !!parsed.buildingNumber) ||
-                wouldFillArea(fresh);
+                wouldFillArea(fresh));
               const freshWouldAdvanceStatus =
                 fresh.registryStatus === "unconfirmed" && !!parsed.realEstateNumber;
 
@@ -982,7 +999,7 @@ export async function processRegistryPdf(
 
               // (b) 3項目の補完。鍵が無いときだけ実行する。
               const fieldUpdates: Record<string, unknown> = {};
-              if (!propertyLocked) {
+              if (!propertyLocked && !freshNotMain) {
                 if (!fresh.realEstateNumber && parsed.realEstateNumber) {
                   fieldUpdates.realEstateNumber = parsed.realEstateNumber;
                 }
@@ -1034,9 +1051,13 @@ export async function processRegistryPdf(
 
       // 構造と築年月(2026-11-01): 上の更新のあとに同じ決まりで空の欄へ(棟に紐づく部屋は棟へ)。
       if (!args.ownersOnly) {
+        // 1筆目ではない謄本は、番号を渡して足した行の面積だけを埋める(構造・築年月は1棟目の欄なので入れない)。
+        // 足した行がある物件では、1筆目の謄本にも番号を渡す(番号が無いと、どの筆か分からない謄本として何も入れないため)。
         const factsFill = await fillPropertyFromRegistry({
           propertyId,
-          values: parseRegistryBuildingFacts(text),
+          values: notMainParcel(existing)
+            ? { ...parsedAreas, ...identity }
+            : hasExtraParcels ? { ...parseRegistryBuildingFacts(text), ...identity } : parseRegistryBuildingFacts(text),
           changedBy: session.id,
         });
         if (factsFill.filled.length > 0) resultAction = "updated";

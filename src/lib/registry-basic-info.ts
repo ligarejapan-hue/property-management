@@ -283,6 +283,16 @@ export interface RegistryFillOutcome {
   unreadable: boolean;
   /** 読めたが保存に失敗した(一時的なもの。押し直せば入る)。 */
   failed?: boolean;
+  /** 1筆目・1棟目ではない謄本(足した行のもの・どれでもないもの)。1筆目のものなら無い。 */
+  parcel?: RegistryFillParcel;
+}
+
+/** 1筆目・1棟目ではない謄本の、種類と番号(案内に出す)。 */
+export interface RegistryFillParcel {
+  target: "extra" | "unknown";
+  /** null=地番・家屋番号を読めなかった(足した行がある物件)。 */
+  kind: "land" | "building" | null;
+  number: string;
 }
 
 const FIELD_LABELS: Record<string, string> = {
@@ -296,17 +306,36 @@ const FIELD_LABELS: Record<string, string> = {
   totalFloorArea: "建物面積",
 };
 
+/** 1筆目・1棟目ではない謄本の案内(足した行のもの・どれでもないもの)。 */
+function parcelNotice(p: RegistryFillParcel, filled: string[], manual: boolean): string | null {
+  if (!p.kind) return "この謄本の地番・家屋番号を読めず、どの土地・建物のものか分からないため、基本情報には反映されません";
+  const name = `${p.kind === "land" ? "土地" : "建物"} ${p.number}`;
+  if (p.target === "extra") {
+    if (filled.includes("extraParcels")) return `ほかの土地・建物(${name})の空いていた面積に入れました`;
+    return manual ? `この謄本はほかの土地・建物(${name})のものです。新しく入れる項目はありません` : null;
+  }
+  const field = p.kind === "land" ? "地番" : "家屋番号";
+  const add = `2${p.kind === "land" ? "筆" : "棟"}目以降なら、物件の編集の「土地・建物を足す」で足してください`;
+  return `この謄本の${field}(${p.number})は、物件の${field}にもほかの土地・建物にもありません。${add}`;
+}
+
 /** 画面に出す案内。⚠添付では、入れたものも入れなかった理由も無いときは黙る(`manual`=ボタンのときは必ず答える)。 */
 export function registryFillNotice(outcome: RegistryFillOutcome, opts: { manual?: boolean } = {}): string | null {
   if (outcome.unreadable) return "謄本の文字を読めないため、基本情報には反映されません(画像の謄本は手で入力してください)";
   if (outcome.failed) return "基本情報への反映に失敗しました。謄本の「この謄本から基本情報に反映」を押し直してください";
   if (outcome.skippedByEditLock) return "物件を編集中の人がいるため、基本情報への反映を見送りました。編集が終わったら謄本の「この謄本から基本情報に反映」を押してください";
   const labels = [...new Set(outcome.filled.map((f) => FIELD_LABELS[f]).filter((l): l is string => l !== undefined))];
-  if (labels.length > 0) return `基本情報の空いていた欄に入れました: ${labels.join("・")}`;
+  const filledText = labels.length > 0 ? `基本情報の空いていた欄に入れました: ${labels.join("・")}` : null;
+  if (outcome.parcel) {
+    const p = parcelNotice(outcome.parcel, outcome.filled, !!opts.manual);
+    // 足した行が無い物件で番号が違う謄本: 今までどおり空の欄は埋め、2筆目かもしれないことを添える。
+    if (p) return filledText && outcome.parcel.target === "unknown" ? `${filledText}。${p}` : p;
+  }
+  if (filledText) return filledText;
   return opts.manual ? "新しく入れる項目はありません(欄がすでに入っているか、謄本から読めない項目です)" : null;
 }
 
 /** 案内が注意か(緑の「入れました」ではなく、注意の色で出す)。 */
 export function isRegistryWarningNotice(notice: string | null): boolean {
-  return notice !== null && /反映されません|反映に失敗|見送りました/.test(notice);
+  return notice !== null && /反映されません|反映に失敗|見送りました|ほかの土地・建物にもありません/.test(notice);
 }

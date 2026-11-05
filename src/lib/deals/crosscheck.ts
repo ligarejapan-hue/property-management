@@ -32,7 +32,7 @@ export const LANDLORD_DATE_MESSAGE = "変更日が決済日と違います(意�
 
 /** 謄本の種類。土地のある物件で、どちらが要るかを決める。 */
 export type RegistrySide = "土地" | "建物";
-export type RegistryUncertain = "unreadable" | "unclassified" | "too_many" | "no_full_certificate";
+export type RegistryUncertain = "unreadable" | "unclassified" | "too_many" | "no_full_certificate" | "unplaced_parcel";
 export const LANDED_REQUIRED_SIDES: Partial<Record<BasePropertyKind, readonly RegistrySide[]>> = {
   house: ["土地", "建物"], building: ["土地", "建物"], land: ["土地"],
 };
@@ -43,11 +43,25 @@ const UNCERTAIN_TEXT: Record<RegistryUncertain, string> = {
   unclassified: "土地か建物か判定できない謄本があります",
   too_many: "謄本が多く、すべてを確認できません",
   no_full_certificate: "全部事項の謄本が無い土地・建物があります",
+  unplaced_parcel: "地番・家屋番号を読めず、どの土地・建物のものか分からない謄本があります",
 };
 
-/** 足りない・確かめられない謄本の説明。問題が無ければ null。 */
-export function registryGapText(missing: readonly RegistrySide[], uncertain: RegistryUncertain | null): string | null {
+/** 謄本が無い筆(棟)を出す数。多いときは「ほか◯件」。 */
+const PARCELS_SHOWN = 3;
+
+/**
+ * 足りない・確かめられない謄本の説明。問題が無ければ null。
+ * missingParcels=2筆以上・2棟以上の物件で謄本が無い筆(棟)の文字(「土地 1番2」)。
+ */
+export function registryGapText(
+  missing: readonly RegistrySide[], uncertain: RegistryUncertain | null, missingParcels: readonly string[] = [],
+): string | null {
   if (missing.length) return `${missing.join("・")}の謄本がありません`;
+  if (missingParcels.length) {
+    const shown = missingParcels.slice(0, PARCELS_SHOWN).join("・");
+    const rest = missingParcels.length - PARCELS_SHOWN;
+    return `${shown}${rest > 0 ? ` ほか${rest}件` : ""}の謄本がありません`;
+  }
   return uncertain ? UNCERTAIN_TEXT[uncertain] : null;
 }
 
@@ -118,6 +132,8 @@ export type RegistryFacts =
     status: "ok";
     /** 土地のある物件で足りない謄本・確かめられない理由(それ以外の物件には無い)。 */
     missing?: RegistrySide[];
+    /** 2筆以上・2棟以上の物件で、謄本が無い筆(棟)(「土地 1番2」)。 */
+    missingParcels?: string[];
     uncertain?: RegistryUncertain | null;
     /** 土地のある物件で使った謄本(種類と取り込んだ日)。 */
     certificates?: { side: RegistrySide; createdAt: string }[];
@@ -377,7 +393,7 @@ function coverageGap(i: CrosscheckInput): string | null {
   if (r.status === "none") return registryGapText(required, null);
   if (r.status === "unreadable") return UNCERTAIN_TEXT.unreadable;
   if (r.status === "denied") return null;
-  return registryGapText(r.missing ?? [], r.uncertain ?? null);
+  return registryGapText(r.missing ?? [], r.uncertain ?? null, r.missingParcels ?? []);
 }
 
 function sellerItem(i: CrosscheckInput): CrosscheckItem {

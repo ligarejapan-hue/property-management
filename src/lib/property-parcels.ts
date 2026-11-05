@@ -1,4 +1,5 @@
 import { z } from "zod";
+import { normalizeLotNumber } from "@/lib/address-normalizer";
 import { toHalfWidthDigits } from "@/lib/registry-fetch/chiban-input";
 
 /**
@@ -84,6 +85,55 @@ export function joinedParcelNumbers(main: string | null | undefined, raw: unknow
   const all = [main?.trim() || null, ...ofKind(readExtraParcels(raw), kind).map((p) => (p.location ? `${p.location} ${p.number}` : p.number))]
     .filter((v): v is string => !!v);
   return all.length ? all.join("、") : null;
+}
+
+/** 地番・家屋番号を比べる形。「1番1」「1番地1」「1-1」「１番１」を同じにする。 */
+export function parcelNumberKey(v: string | null | undefined): string | null {
+  const s = v?.normalize("NFKC").replace(/番地/g, "番").trim();
+  if (!s) return null;
+  return normalizeLotNumber(s) || null;
+}
+
+/**
+ * 謄本がこの物件のどの土地・建物のものか(謄本から読めた地番・家屋番号で決める)。
+ * - main: 1筆目・1棟目(今までどおり物件の欄を埋める)。足した行に無い番号で、その種類の物件の欄が空のときも main。
+ *   足した行が無い物件で番号を読めないときも main(今までどおり)。
+ * - extra: 足した行のどれか(物件の欄は埋めない)。
+ * - unknown: 1筆目とも足した行とも違う番号(hasExtras=足した行がある物件か)。足した行がある物件で番号を読めないときも
+ *   unknown(kind=null)=どの筆か分からないので物件全体の面積などに入れない(内部レビュー P2)。
+ * 建物の謄本は家屋番号で決める(建物の謄本の地番の欄は所在の地番のことがある)。
+ * ⚠pdf の番号は registryIdentityOf(表の欄だけを読む)で読んだものを渡す。全文から拾うと、土地の謄本の
+ *   共同担保目録にある建物の家屋番号で建物と取り違える(内部レビュー P2)。
+ */
+export type RegistryParcelTarget =
+  | { target: "main" }
+  | { target: "extra"; id: string; kind: ParcelKind }
+  | { target: "unknown"; kind: ParcelKind | null; number: string; hasExtras: boolean };
+
+export function registryParcelTarget(
+  pdf: { lotNumber: string | null; buildingNumber: string | null },
+  property: { lotNumber: string | null; buildingNumber: string | null; extraParcels: unknown },
+): RegistryParcelTarget {
+  const extras = readExtraParcels(property.extraParcels);
+  const kind: ParcelKind | null = pdf.buildingNumber ? "building" : pdf.lotNumber ? "land" : null;
+  const number = kind === "building" ? pdf.buildingNumber : kind === "land" ? pdf.lotNumber : null;
+  const key = parcelNumberKey(number);
+  if (!kind || !key) return extras.length ? { target: "unknown", kind: null, number: "", hasExtras: true } : { target: "main" };
+  const mainKey = parcelNumberKey(kind === "building" ? property.buildingNumber : property.lotNumber);
+  if (key === mainKey) return { target: "main" };
+  const hit = extras.find((p) => p.kind === kind && parcelNumberKey(p.number) === key);
+  if (hit) return { target: "extra", id: hit.id, kind };
+  if (!mainKey) return { target: "main" };
+  return { target: "unknown", kind, number: number as string, hasExtras: extras.length > 0 };
+}
+
+/** 足した行の空いている面積だけを入れた行の一覧。入れるものが無ければ null(書かない)。 */
+export function fillExtraParcelArea(raw: unknown, id: string, area: number | null): ExtraParcel[] | null {
+  if (area === null || !Number.isFinite(area) || area < 0) return null;
+  const ps = readExtraParcels(raw);
+  const row = ps.find((p) => p.id === id);
+  if (!row || row.area !== null) return null;
+  return ps.map((p) => (p.id === id ? { ...p, area: Math.round(area * 100) / 100 } : p));
 }
 
 /** 変更履歴に残す文字(1行に1件)。空なら null。 */

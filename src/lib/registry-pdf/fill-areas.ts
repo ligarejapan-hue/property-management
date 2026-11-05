@@ -24,12 +24,15 @@ import {
   registryIdentityOf,
   type RegistryBasicValues,
   type RegistryFillOutcome,
+  type RegistryFillParcel,
 } from "@/lib/registry-basic-info";
+import { supportsUnitFields } from "@/lib/property-building-name";
+import { extraParcelsText, fillExtraParcelArea, registryParcelTarget } from "@/lib/property-parcels";
 import { extractHeadTextFromPdf } from "@/lib/pdf-extract";
 import { parseRegistryText } from "@/lib/pdf-registry-parser";
 import { safeErrorSummary } from "@/lib/safe-error-summary";
 
-export type FillResult = Pick<RegistryFillOutcome, "filled" | "skippedByEditLock">;
+export type FillResult = Pick<RegistryFillOutcome, "filled" | "skippedByEditLock" | "parcel">;
 
 /** 謄本から読めた値。読めないものは null・渡さないものは書かない。 */
 export type RegistryFillValues = Partial<RegistryAreas> & Partial<RegistryBasicValues>;
@@ -48,6 +51,7 @@ const PROPERTY_SELECT = {
   structureType: true,
   builtYear: true,
   builtMonth: true,
+  extraParcels: true,
 } as const;
 
 const BUILDING_SELECT = { version: true, structureType: true, builtYear: true, builtMonth: true } as const;
@@ -85,35 +89,52 @@ export async function fillPropertyFromRegistry(args: {
   const { propertyId, values, changedBy } = args;
   if (!hasValue(values)) return NOTHING;
   const { areas, basic } = normalize(values);
-  const propertyPlan = (p: Parameters<typeof planPropertyBasicFill>[1] & Parameters<typeof planRegistryAreaFill>[1]) => ({
-    ...planRegistryAreaFill(areas, p),
-    ...planPropertyBasicFill(basic, p),
-  });
+  type Current = Parameters<typeof planPropertyBasicFill>[1] & Parameters<typeof planRegistryAreaFill>[1] & { extraParcels: unknown };
+  /**
+   * 2筆以上・2棟以上の物件(2026-11-05 案A 2回目): 謄本の地番・家屋番号で、どの土地・建物のものかを決める。
+   * 足した行の謄本なら、その行の空いている面積だけ。1筆目とも足した行とも違う番号なら、足した行がある物件では何も書かない
+   * (2筆目の面積・番号を1筆目の欄に入れない)。足した行が無い物件は今までどおり(案内だけ足す)。区分は今までどおり。
+   */
+  const planFor = (p: Current): { fill: Record<string, unknown>; buildingFacts: boolean; parcel: RegistryFillParcel | null } => {
+    const main = () => ({ ...planRegistryAreaFill(areas, p), ...planPropertyBasicFill(basic, p) });
+    const t = supportsUnitFields(p.propertyType) ? { target: "main" as const } : registryParcelTarget(basic, p);
+    if (t.target === "main") return { fill: main(), buildingFacts: true, parcel: null };
+    const parcel: RegistryFillParcel = { target: t.target, kind: t.kind, number: (t.kind === "building" ? basic.buildingNumber : basic.lotNumber) ?? "" };
+    if (t.target === "extra") {
+      const raw = t.kind === "land" ? areas.landArea : areas.buildingFloorArea;
+      const rows = fillExtraParcelArea(p.extraParcels, t.id, raw ? Number(raw) : null);
+      return { fill: rows ? { extraParcels: rows } : {}, buildingFacts: false, parcel };
+    }
+    return t.hasExtras ? { fill: {}, buildingFacts: false, parcel } : { fill: main(), buildingFacts: true, parcel };
+  };
 
   const before = await prisma.property.findUnique({ where: { id: propertyId }, select: PROPERTY_SELECT });
   if (!before) return NOTHING;
-  const buildingBefore = before.buildingId
+  const planBefore = planFor(before);
+  const parcelOnly = planBefore.parcel ? { parcel: planBefore.parcel } : {};
+  const buildingBefore = before.buildingId && planBefore.buildingFacts
     ? await prisma.building.findUnique({ where: { id: before.buildingId }, select: BUILDING_SELECT })
     : null;
   if (
-    Object.keys(propertyPlan(before)).length === 0 &&
+    Object.keys(planBefore.fill).length === 0 &&
     (!buildingBefore || Object.keys(planBuildingFactsFill(basic, buildingBefore)).length === 0)
   ) {
-    return NOTHING;
+    return { ...NOTHING, ...parcelOnly };
   }
 
   const result = await prisma.$transaction(async (tx) => {
     await lockPropertyRow(tx, propertyId);
     // ⚠ロックの後に読み直す(変更履歴の「変更前」と、空かどうかの判定に使う)。
     const fresh = await tx.property.findUnique({ where: { id: propertyId }, select: PROPERTY_SELECT });
-    if (!fresh) return { fill: {}, fresh: null, buildingFill: {}, building: null, buildingId: null, skipped: false };
-    const fill = propertyPlan(fresh);
-    if (fresh.buildingId) await lockBuildingRowNoKeyUpdate(tx, fresh.buildingId);
-    const building = fresh.buildingId
+    if (!fresh) return { fill: {}, fresh: null, buildingFill: {}, building: null, buildingId: null, skipped: false, parcel: null };
+    const plan = planFor(fresh);
+    const fill = plan.fill;
+    if (fresh.buildingId && plan.buildingFacts) await lockBuildingRowNoKeyUpdate(tx, fresh.buildingId);
+    const building = fresh.buildingId && plan.buildingFacts
       ? await tx.building.findUnique({ where: { id: fresh.buildingId }, select: BUILDING_SELECT })
       : null;
     const buildingFill = building ? planBuildingFactsFill(basic, building) : {};
-    const base = { fresh, building, buildingId: fresh.buildingId };
+    const base = { fresh, building, buildingId: fresh.buildingId, parcel: plan.parcel };
     if (Object.keys(fill).length === 0 && Object.keys(buildingFill).length === 0) {
       return { ...base, fill: {}, buildingFill: {}, skipped: false };
     }
@@ -143,10 +164,13 @@ export async function fillPropertyFromRegistry(args: {
       targetTable: "properties",
       targetId: propertyId,
       changedBy,
-      oldValues: result.fresh as unknown as Record<string, unknown>,
-      newValues: result.fill as Record<string, unknown>,
+      // ほかの土地・建物は一覧なので、読める文字(1行に1件)で残す(物件の編集の保存と同じ)。
+      oldValues: { ...(result.fresh as unknown as Record<string, unknown>), extraParcels: extraParcelsText(result.fresh.extraParcels) },
+      newValues: "extraParcels" in result.fill
+        ? { ...(result.fill as Record<string, unknown>), extraParcels: extraParcelsText(result.fill.extraParcels) }
+        : result.fill as Record<string, unknown>,
       // 構造・築年月は編集画面の保存では追跡していないが、自動で入れた跡は残す。
-      trackedFields: [...PROPERTY_TRACKED_FIELDS, "structureType", "builtYear", "builtMonth"],
+      trackedFields: [...PROPERTY_TRACKED_FIELDS, "structureType", "builtYear", "builtMonth", "extraParcels"],
       source: "pdf_import",
     });
   }
@@ -162,7 +186,7 @@ export async function fillPropertyFromRegistry(args: {
     });
   }
   const filled = [...new Set([...Object.keys(result.fill), ...Object.keys(result.buildingFill)])];
-  return { filled, skippedByEditLock: result.skipped };
+  return { filled, skippedByEditLock: result.skipped, ...(result.parcel ? { parcel: result.parcel } : {}) };
 }
 
 /**

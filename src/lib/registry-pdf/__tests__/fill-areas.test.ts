@@ -217,3 +217,57 @@ describe("PDF を読んで入れる(失敗しても投げない)", () => {
     spy.mockRestore();
   });
 });
+
+describe("2筆以上・2棟以上の物件(どの土地・建物の謄本か)", () => {
+  const ROW = { id: "r2", kind: "land", location: null, number: "2番", realEstateNumber: null, area: null };
+  const MULTI = { ...HOUSE, lotNumber: "1番", landArea: null, extraParcels: [ROW] };
+  const land = (lot: string, area = "61.95") => ({ unitFloorArea: null, landArea: area, buildingFloorArea: null, lotNumber: lot, buildingNumber: null });
+
+  it("★足した行の謄本: その行の空いている面積だけ入れる(1筆目の土地面積には入れない)・変更履歴は読める文字", async () => {
+    pm.property.findUnique.mockResolvedValue({ ...MULTI });
+    const r = await fillPropertyFromRegistry({ propertyId: "p-1", values: land("2番地"), changedBy: "u-1" });
+    expect(r).toEqual({ filled: ["extraParcels"], skippedByEditLock: false, parcel: { target: "extra", kind: "land", number: "2番地" } });
+    expect(pm.property.updateMany.mock.calls[0][0].data).toEqual({ extraParcels: [{ ...ROW, area: 61.95 }], version: { increment: 1 } });
+    expect((recordChanges as Mock).mock.calls[0][0]).toMatchObject({
+      oldValues: { extraParcels: "土地 2番" }, newValues: { extraParcels: "土地 2番 61.95㎡" },
+    });
+    expect((recordChanges as Mock).mock.calls[0][0].trackedFields).toContain("extraParcels");
+  });
+
+  it("足した行の面積が入っていれば書かない(ロックも取らない)", async () => {
+    pm.property.findUnique.mockResolvedValue({ ...MULTI, extraParcels: [{ ...ROW, area: 60 }] });
+    const r = await fillPropertyFromRegistry({ propertyId: "p-1", values: land("2番"), changedBy: "u-1" });
+    expect(r).toEqual({ filled: [], skippedByEditLock: false, parcel: { target: "extra", kind: "land", number: "2番" } });
+    expect(pm.$transaction).not.toHaveBeenCalled();
+  });
+
+  it("★足した行がある物件で、どれでもない番号の謄本: 何も書かない", async () => {
+    pm.property.findUnique.mockResolvedValue({ ...MULTI });
+    const r = await fillPropertyFromRegistry({ propertyId: "p-1", values: land("3番"), changedBy: "u-1" });
+    expect(r).toEqual({ filled: [], skippedByEditLock: false, parcel: { target: "unknown", kind: "land", number: "3番" } });
+    expect(pm.property.updateMany).not.toHaveBeenCalled();
+  });
+
+  it("1筆目の謄本は今までどおり物件の欄に入れる", async () => {
+    pm.property.findUnique.mockResolvedValue({ ...MULTI });
+    const r = await fillPropertyFromRegistry({ propertyId: "p-1", values: land("1番", "120.50"), changedBy: "u-1" });
+    expect(r.filled.sort()).toEqual(["landArea", "landAreaMethod"]);
+    expect(r).not.toHaveProperty("parcel");
+  });
+
+  it("足した行が無い物件で番号が違う謄本: 今までどおり空の欄は埋め、知らせる", async () => {
+    pm.property.findUnique.mockResolvedValue({ ...HOUSE, lotNumber: "1番", extraParcels: [] });
+    const r = await fillPropertyFromRegistry({ propertyId: "p-1", values: land("3番", "120.50"), changedBy: "u-1" });
+    expect(r.filled.sort()).toEqual(["landArea", "landAreaMethod"]);
+    expect(r.parcel).toEqual({ target: "unknown", kind: "land", number: "3番" });
+  });
+
+  it("区分マンションは今までどおり(番号で分けない)", async () => {
+    pm.property.findUnique.mockResolvedValue({ ...HOUSE, propertyType: "apartment_unit", buildingNumber: "1番1の1", extraParcels: [ROW] });
+    const r = await fillPropertyFromRegistry({
+      propertyId: "p-1", values: { unitFloorArea: "60.25", landArea: null, buildingFloorArea: null, buildingNumber: "1番1の2" }, changedBy: "u-1",
+    });
+    expect(r.filled).toEqual(["exclusiveAreaRegistry"]);
+    expect(r).not.toHaveProperty("parcel");
+  });
+});

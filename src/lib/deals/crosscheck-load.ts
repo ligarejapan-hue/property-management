@@ -7,6 +7,7 @@ import {
   LANDED_REQUIRED_SIDES, foldNameVariants, isLandedKind, normalizeName, parseShare,
   type RegistryFacts, type RegistrySide, type RegistryUncertain,
 } from "./crosscheck";
+import { expectedParcels, parcelCoverage, type CertificateParcel } from "./parcel-coverage";
 import { readRegistryPdf } from "./registry-rights-load";
 
 /** 見る添付の数(新しい順)。全部事項と所有者事項が混ざるので、登記の現況より少し多めに見る。 */
@@ -33,6 +34,8 @@ export interface LandedCertificates {
   /** 所有者事項(新しい順)。identity が null=どの物件のものか読めない。⚠list に氏名が入る。 */
   ownerCerts: { identity: string | null; createdAt: string; list: Owner[]; confirmed: boolean }[];
   missing: RegistrySide[];
+  /** 2筆以上・2棟以上の物件で、謄本が無い筆(棟)(「土地 1番2」)。それ以外の物件は空。 */
+  missingParcels: string[];
   uncertain: RegistryUncertain | null;
 }
 
@@ -72,13 +75,19 @@ function hasSeveralProperties(text: string): boolean {
 export async function loadLandedCertificates(
   propertyId: string, o: { kindBase: BasePropertyKind; includeOwners: boolean },
 ): Promise<LandedCertificates> {
-  const rows = await prisma.attachment.findMany({
-    where: { propertyId, type: "registry", isDeleted: false },
-    orderBy: { createdAt: "desc" },
-    take: LANDED_CANDIDATES + 1,
-    select: { fileUrl: true, registryCertificateType: true, createdAt: true },
-  });
+  const [rows, property] = await Promise.all([
+    prisma.attachment.findMany({
+      where: { propertyId, type: "registry", isDeleted: false },
+      orderBy: { createdAt: "desc" },
+      take: LANDED_CANDIDATES + 1,
+      select: { fileUrl: true, registryCertificateType: true, createdAt: true },
+    }),
+    prisma.property.findUnique({ where: { id: propertyId }, select: { lotNumber: true, buildingNumber: true, extraParcels: true } }),
+  ]);
   const required = LANDED_REQUIRED_SIDES[o.kindBase] ?? [];
+  // 2筆以上・2棟以上の物件だけ、筆(棟)ごとに謄本があるかも見る。
+  const expected = property ? expectedParcels(property, required) : [];
+  const certParcels: CertificateParcel[] = [];
   const certs: LandedCertificate[] = [];
   const ownerCerts: LandedCertificates["ownerCerts"] = [];
   const seen = new Set<string>();
@@ -131,18 +140,21 @@ export async function loadLandedCertificates(
     }
     if (!required.includes(side) || seen.has(identity)) continue;
     seen.add(identity);
+    certParcels.push({ side, number: side === "建物" ? parsed.buildingNumber : parsed.lotNumber, realEstateNumber: parsed.realEstateNumber });
     certs.push({
       side, identity, createdAt: at,
       summary: await summarizeRegistryRights({ pdf: pdf.body, text: pdf.text }),
     });
   }
 
+  const coverage = parcelCoverage(expected, certParcels);
   const uncertain: RegistryUncertain | null = rows.length > LANDED_CANDIDATES ? "too_many"
     : unreadable ? "unreadable" : unclassified ? "unclassified"
-      : [...ownerOnly].some((id) => !seen.has(id)) ? "no_full_certificate" : null;
+      : [...ownerOnly].some((id) => !seen.has(id)) ? "no_full_certificate"
+        : coverage.unplaced ? "unplaced_parcel" : null;
   return {
     hasRows: rows.length > 0, readAny, certs, ownerCerts,
-    missing: required.filter((s) => !certs.some((c) => c.side === s)), uncertain,
+    missing: required.filter((s) => !certs.some((c) => c.side === s)), missingParcels: coverage.missing, uncertain,
   };
 }
 
@@ -197,6 +209,7 @@ async function loadLandedFacts(propertyId: string, o: { kindBase: BasePropertyKi
   return {
     status: "ok",
     missing: data.missing,
+    ...(data.missingParcels.length ? { missingParcels: data.missingParcels } : {}),
     uncertain: data.uncertain,
     certificates: certs.map((c) => ({ side: c.side, createdAt: c.createdAt })),
     rights: oldest ? {
