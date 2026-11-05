@@ -98,6 +98,12 @@ server {
         # 停止URLは再生可能な権限なので、この location のエラーは記録しない(@codex #416 R3 P2)。
         error_log /dev/null crit;
 
+        # server の add_header を引き継がない(引き継ぐと上流の値のあとに全体の値が足され、ブラウザは後ろの値を使う)。
+        # ⚠location に add_header を1つでも書くと server の分は全部消えるので、防御ヘッダも並べる。
+        add_header X-Frame-Options        "SAMEORIGIN"  always;
+        add_header X-Content-Type-Options "nosniff"     always;
+        add_header Referrer-Policy        "strict-origin" always;
+
         proxy_pass         http://127.0.0.1:3000;
         proxy_http_version 1.1;
         proxy_set_header   Host              $host;
@@ -116,6 +122,12 @@ server {
         access_log off;
         # /u/ と同じ理由でエラーログにもリクエスト行(=/t/<token>)を残さない。
         error_log /dev/null crit;
+
+        # server の add_header を引き継がない(引き継ぐと上流の値のあとに全体の値が足され、ブラウザは後ろの値を使う)。
+        # ⚠location に add_header を1つでも書くと server の分は全部消えるので、防御ヘッダも並べる。
+        add_header X-Frame-Options        "SAMEORIGIN"  always;
+        add_header X-Content-Type-Options "nosniff"     always;
+        add_header Referrer-Policy        "strict-origin" always;
 
         proxy_pass         http://127.0.0.1:3000;
         proxy_http_version 1.1;
@@ -136,6 +148,12 @@ server {
         access_log off;
         error_log /dev/null crit;
 
+        # server の add_header を引き継がない(引き継ぐと上流の値のあとに全体の値が足され、ブラウザは後ろの値を使う)。
+        # ⚠location に add_header を1つでも書くと server の分は全部消えるので、防御ヘッダも並べる。
+        add_header X-Frame-Options        "SAMEORIGIN"  always;
+        add_header X-Content-Type-Options "nosniff"     always;
+        add_header Referrer-Policy        "strict-origin" always;
+
         proxy_pass         http://127.0.0.1:3000;
         proxy_http_version 1.1;
         proxy_set_header   Host              $host;
@@ -154,6 +172,12 @@ server {
     location ^~ /lp/ {
         access_log off;
         error_log /dev/null crit;
+
+        # server の add_header を引き継がない(引き継ぐと上流の値のあとに全体の値が足され、ブラウザは後ろの値を使う)。
+        # ⚠location に add_header を1つでも書くと server の分は全部消えるので、防御ヘッダも並べる。
+        add_header X-Frame-Options        "SAMEORIGIN"  always;
+        add_header X-Content-Type-Options "nosniff"     always;
+        add_header Referrer-Policy        "strict-origin" always;
 
         proxy_pass         http://127.0.0.1:3000;
         proxy_http_version 1.1;
@@ -181,6 +205,12 @@ server {
 
         # アプリの上限(8MB+multipart の上乗せ)と proxy の 10MB に合わせる。
         client_max_body_size 10m;
+
+        # server の add_header を引き継がない(引き継ぐと上流の値のあとに全体の値が足され、ブラウザは後ろの値を使う)。
+        # ⚠location に add_header を1つでも書くと server の分は全部消えるので、防御ヘッダも並べる。
+        add_header X-Frame-Options        "SAMEORIGIN"  always;
+        add_header X-Content-Type-Options "nosniff"     always;
+        add_header Referrer-Policy        "no-referrer" always;
 
         proxy_pass         http://127.0.0.1:3000$uri;
         proxy_http_version 1.1;

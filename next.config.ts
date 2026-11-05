@@ -34,6 +34,12 @@ const nextConfig: NextConfig = {
           { key: "Strict-Transport-Security", value: "max-age=31536000" },
         ],
       },
+      // 公開ページ(QR・配信停止・広告用ページ・その写真)。route が付ける strict-origin(src/lib/sale-dm-letter/unsubscribe-page.ts の理由)を
+      // 全体の指定で上書きしないよう、ここでも同じ値にする。⚠ここの値は route の応答ヘッダより強い(後ろの指定が勝つ)。
+      ...["/t/:path*", "/u/:path*", "/lp/:path*", "/lp-assets/:path*"].map((source) => ({
+        source,
+        headers: [{ key: "Referrer-Policy", value: "strict-origin" }],
+      })),
       // お客様の書類提出。URL のトークンを外へ漏らさない。⚠ここの値は route の応答ヘッダより強いので、route だけでは足りない(後ろの指定が勝つ)。
       {
         source: "/submit/:path*",
