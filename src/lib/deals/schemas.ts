@@ -135,6 +135,8 @@ export const dealCreateSchema = z.object({
   propertyKind: z.string().min(1).max(30).nullable().optional(),
   hasOc: z.boolean().optional(),
   propertySnapshot: propertySnapshotSchema.optional(),
+  /** 買取再販の取引を仕入・売却のどちらで作るか(自社の当事者を入れる・2026-11-05)。仲介では使わない。 */
+  resaleSide: z.enum(["purchase", "sale"]).optional(),
 }).strict();
 export type DealCreateInput = z.output<typeof dealCreateSchema>;
 

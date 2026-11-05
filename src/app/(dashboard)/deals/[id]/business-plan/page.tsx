@@ -6,7 +6,7 @@ import { FileSpreadsheet, FileText, Loader2 } from "lucide-react";
 import { PageHeader } from "@/components/ui/page-header";
 import BusinessPlanForm from "@/components/deals/business-plan-form";
 import type { IssueNotice } from "@/components/deals/funding-plan-form";
-import { dealsApi, dealDocumentFileUrl, errorText } from "@/lib/deals/client";
+import { dealsApi, dealDocumentFileUrl, errorText, type DealDetailResponse } from "@/lib/deals/client";
 import type { DealView } from "@/lib/deals/view";
 import { dealTitle } from "@/lib/deals/deal-title";
 
@@ -14,21 +14,27 @@ import { dealTitle } from "@/lib/deals/deal-title";
 export default function BusinessPlanPage({ params }: { params: Promise<{ id: string }> }) {
   const { id } = use(params);
   const [deal, setDeal] = useState<DealView | null>(null);
+  // 同じ物件の売却の取引(売買価格を売却価格に入れられる・2026-11-05)。
+  const [saleDeal, setSaleDeal] = useState<{ dealNo: string; price: number | null } | null>(null);
+  const apply = useCallback((r: DealDetailResponse) => {
+    setDeal(r.deal);
+    setSaleDeal((r.relatedDeals ?? []).find((d) => d.side === "sale" && d.status !== "cancelled") ?? null);
+  }, []);
   const [error, setError] = useState<string | null>(null);
   const [notice, setNotice] = useState<IssueNotice | null>(null);
 
   const reload = useCallback(async () => {
     try {
-      setDeal((await dealsApi.get(id)).deal);
+      apply(await dealsApi.get(id));
       setError(null);
     } catch (e) {
       setError(errorText(e));
     }
-  }, [id]);
+  }, [id, apply]);
 
   useEffect(() => {
-    dealsApi.get(id).then((r) => setDeal(r.deal)).catch((e) => setError(errorText(e)));
-  }, [id]);
+    dealsApi.get(id).then(apply).catch((e) => setError(errorText(e)));
+  }, [id, apply]);
 
   if (!deal) {
     return error ? (
@@ -65,7 +71,7 @@ export default function BusinessPlanPage({ params }: { params: Promise<{ id: str
         </p>
       ) : (
         // 保存した入力が変わったときだけ作り直す(版の番号だけの変化では打ちかけを消さない)。
-        <BusinessPlanForm key={JSON.stringify(deal.businessPlan)} deal={deal} onSaved={reload} onIssue={setNotice} />
+        <BusinessPlanForm key={JSON.stringify(deal.businessPlan)} deal={deal} onSaved={reload} onIssue={setNotice} saleDeal={saleDeal} />
       )}
     </div>
   );

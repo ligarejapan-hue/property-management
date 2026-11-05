@@ -28,8 +28,10 @@ type YenKey = keyof typeof BUSINESS_YEN_LABELS;
  * 事業計画書(設計 §5・依頼書 4.2・買取再販だけ)。左で入力し、右に PDF と同じ HTML のプレビューを出す。
  * 社内用・銀行向けは同じ入力の中の切り替え(切り替えても入力は消えない)。出すセクションは取引の設定の表で決まる。
  */
-export default function BusinessPlanForm({ deal, onSaved, onIssue }: {
+export default function BusinessPlanForm({ deal, onSaved, onIssue, saleDeal = null }: {
   deal: DealView; onSaved: () => Promise<void>; onIssue: (n: IssueNotice | null) => void;
+  /** 同じ物件の売却の取引(仕入と売却は取引を分ける・2026-11-05)。売買価格を売却価格に入れられる。 */
+  saleDeal?: { dealNo: string; price: number | null } | null;
 }) {
   const [form, setForm] = useState<BusinessForm>(() => businessFormFromInputs(deal.businessPlan));
   const [preview, setPreview] = useState<{ html: string; calc: BusinessPlanCalc; sections: BusinessSectionKey[] } | null>(null);
@@ -188,7 +190,14 @@ export default function BusinessPlanForm({ deal, onSaved, onIssue }: {
         {(shown("sale") || shown("profit")) && (
         <Group title={shown("sale") ? "販売" : "売却価格"}>
           <div className="grid gap-4 sm:grid-cols-2">
-            {yen("salePrice", "税込")}
+            <div>
+              {yen("salePrice", "税込")}
+              {saleDeal?.price != null && form.salePrice !== String(saleDeal.price) && (
+                <Button variant="ghost" size="sm" onClick={() => set("salePrice", String(saleDeal.price))}>
+                  売却の取引({saleDeal.dealNo})の売買価格 {yenText(saleDeal.price)}円 を入れる
+                </Button>
+              )}
+            </div>
             {shown("sale") && (
               <>
                 {yen("saleBuildingTax", "空なら仕入と同じ割合で按分")}

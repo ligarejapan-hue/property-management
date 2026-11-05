@@ -1,3 +1,4 @@
+import type { PropertyDealSummary } from "@/lib/property-business-type";
 import type { DealListItem, DealPartyView, DealView } from "./view";
 import type { DealSettingsView } from "./settings";
 import type { PropertyKindDef } from "./constants";
@@ -61,11 +62,18 @@ export interface DealDocumentView {
   issuedAt: string; issuedByName: string; fileBaseName: string; hasPdf: boolean; hasXlsx: boolean;
 }
 
+/** 同じ物件のほかの取引(買取再販の仕入・売却を行き来する)。 */
+export type RelatedDeal = PropertyDealSummary & { price: number | null };
+export interface DealDetailResponse {
+  deal: DealView; canOpenProperty: boolean; canChangeStatus: boolean; canChangeAssignee: boolean; canMoveCaseStatus: boolean;
+  relatedDeals: RelatedDeal[];
+}
+
 export const dealsApi = {
   list: (params: Record<string, string>) =>
     call<{ deals: DealListItem[]; total: number; page: number; pageSize: number }>(`/api/deals?${new URLSearchParams(params)}`),
   create: (body: Record<string, unknown>) => call<{ id: string; dealNo: string }>("/api/deals", { method: "POST", body }),
-  get: (id: string) => call<{ deal: DealView; canOpenProperty: boolean; canChangeStatus: boolean; canChangeAssignee: boolean; canMoveCaseStatus: boolean }>(`/api/deals/${id}`),
+  get: (id: string) => call<DealDetailResponse>(`/api/deals/${id}`),
   /** 物件の謄本(全部事項)の登記の現況(確認用・段5c-2)。 */
   registryRights: (id: string) => call<{ rights: RegistryRightsView }>(`/api/deals/${id}/registry-rights`),
   /** 数値照合(確認用)。 */
