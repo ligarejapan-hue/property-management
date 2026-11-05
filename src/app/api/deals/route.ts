@@ -21,6 +21,8 @@ import { isKnownPropertyKind } from "@/lib/deals/settings";
 import { consumptionTaxRateBp } from "@/lib/deals/rate-tables";
 import { normalizeTradeSide } from "@/lib/deals/change-values";
 import { DEAL_LIST_SELECT, toDealListItem } from "@/lib/deals/view";
+import { selfPartyFor } from "@/lib/deals/self-party";
+import { resolveCompanyProfile } from "@/lib/sales-sheet/company-profile-store";
 
 const NO_STORE = { "Cache-Control": "no-store" };
 const PAGE_SIZE = 50;
@@ -144,6 +146,12 @@ export async function POST(request: Request) {
             },
             select: { id: true, dealNo: true },
           });
+          // 買取再販は仕入=買主・売却=売主に自社を入れる(売却なら物件の所有者は売主に足さない)。
+          const resaleSide = body.businessType === "resale" ? body.resaleSide : undefined;
+          if (resaleSide) {
+            const company = resolveCompanyProfile(await tx.companyProfile.findUnique({ where: { id: "singleton" } }));
+            await tx.dealParty.create({ data: { ...selfPartyFor(resaleSide, company), dealId: row.id, sortOrder: 0 } });
+          }
           // 売主は物件の今の所有者。違う場合は当事者タブで手で直す。
           if (propertyId) await addSellersFromOwners(tx, { dealId: row.id, propertyId, access: sellerAccessOf(perms) });
           if (propertyId && canMoveCase) await syncCaseStatusFromDeals(tx, { propertyId, changedBy: session.id });

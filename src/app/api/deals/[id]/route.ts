@@ -17,6 +17,7 @@ import { syncDealScheduleSafe, taxesEnteredOf } from "@/lib/deals/schedule-sync"
 import type { ScheduleEvent } from "@/lib/deals/schedule";
 import { canChangeDealAssignee, canChangeDealStatus, caseStatusWouldMove, syncCaseStatusFromDeals, syncDealDocRetention } from "@/lib/deals/status-link";
 import { lockPropertyRow } from "@/lib/property-record-guard";
+import { summarizePropertyDeals } from "@/lib/property-business-type";
 
 type Ctx = { params: Promise<{ id: string }> };
 const NO_STORE = { "Cache-Control": "no-store" };
@@ -24,7 +25,10 @@ const jsonObject = (v: unknown): Record<string, unknown> =>
   v && typeof v === "object" && !Array.isArray(v) ? (v as Record<string, unknown>) : {};
 const idOf = async (ctx: Ctx) => z.string().uuid().parse((await ctx.params).id);
 
-/** 取引の詳しい中身。物件を開くリンクは、その物件を見られる人にだけ出す。 */
+/**
+ * 取引の詳しい中身。物件を開くリンクは、その物件を見られる人にだけ出す。
+ * relatedDeals = 同じ物件のほかの取引(買取再販の仕入と売却を行き来する・2026-11-05)。取引を見られる人なら見られる。
+ */
 export async function GET(_req: Request, ctx: Ctx) {
   try {
     const { session, perms } = await requireDeal("read");
@@ -38,7 +42,12 @@ export async function GET(_req: Request, ctx: Ctx) {
     const canChangeStatus = canChangeDealStatus(session, row, p);
     const canChangeAssignee = canChangeDealAssignee(session, row, p);
     const canMoveCaseStatus = !!p && hasPermission(perms, "property", "write") && canAccessPropertyRecord(session, p);
-    return NextResponse.json({ deal: toDealView(row), canOpenProperty, canChangeStatus, canChangeAssignee, canMoveCaseStatus }, { headers: NO_STORE });
+    const related = row.propertyId ? await prisma.deal.findMany({
+      where: { propertyId: row.propertyId, id: { not: id } }, orderBy: [{ createdAt: "asc" }],
+      select: { id: true, dealNo: true, businessType: true, status: true, price: true, settlementAt: true, createdAt: true, parties: { select: { role: true, isSelf: true } } },
+    }) : [];
+    const relatedDeals = summarizePropertyDeals(related).map((d, i) => ({ ...d, price: related[i].price === null ? null : Number(related[i].price) }));
+    return NextResponse.json({ deal: toDealView(row), canOpenProperty, canChangeStatus, canChangeAssignee, canMoveCaseStatus, relatedDeals }, { headers: NO_STORE });
   } catch (error) {
     return handleApiError(error);
   }

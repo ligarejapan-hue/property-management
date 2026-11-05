@@ -53,6 +53,7 @@ beforeEach(() => {
   (getUserPermissions as Fn).mockResolvedValue(DEAL_PERMS);
   pm.deal.findUnique.mockResolvedValue(detailRow);
   pm.deal.updateMany.mockResolvedValue({ count: 1 });
+  pm.deal.findMany.mockResolvedValue([]);
   pm.user.findUnique.mockResolvedValue({ isActive: true });
 });
 
@@ -70,6 +71,22 @@ describe("GET /api/deals/[id]", () => {
     pm.property.findUnique.mockResolvedValue({ createdBy: "other", assignedTo: null });
     const body = await (await GET(new Request("http://x"), ctx)).json();
     expect(body.canOpenProperty).toBe(false);
+  });
+  it("同じ物件のほかの取引を、仕入・売却と売買価格つきで返す(2026-11-05)", async () => {
+    pm.property.findUnique.mockResolvedValue({ createdBy: "u-office", assignedTo: null });
+    pm.deal.findMany.mockResolvedValueOnce([{
+      id: "d-sale", dealNo: "2026-0031", businessType: "resale", status: "considering", price: BigInt(52_000_000),
+      settlementAt: null, createdAt: new Date("2026-11-05T00:00:00Z"), parties: [{ role: "seller", isSelf: true }],
+    }]);
+    const body = await (await GET(new Request("http://x"), ctx)).json();
+    expect(pm.deal.findMany.mock.calls[0][0].where).toEqual({ propertyId: PROP_ID, id: { not: DEAL_ID } });
+    expect(body.relatedDeals).toEqual([expect.objectContaining({ id: "d-sale", dealNo: "2026-0031", side: "sale", price: 52_000_000 })]);
+  });
+  it("物件の無い取引は、ほかの取引を探さない", async () => {
+    pm.deal.findUnique.mockResolvedValue({ ...detailRow, propertyId: null });
+    const body = await (await GET(new Request("http://x"), ctx)).json();
+    expect(body.relatedDeals).toEqual([]);
+    expect(pm.deal.findMany).not.toHaveBeenCalled();
   });
   it("無ければ 404", async () => {
     pm.deal.findUnique.mockResolvedValue(null);

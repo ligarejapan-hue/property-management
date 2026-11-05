@@ -48,6 +48,11 @@ function NewDealForm() {
   };
   const pickedType = source === "list" ? picked?.businessType ?? null : null;
   const [tradeSide, setTradeSide] = useState("");
+  // 買取再販は仕入と売却で取引を分ける(2026-11-05 発注者)。?side=sale で来たら売却(仕入の取引の「売却の取引を作る」)。
+  const [resaleSide, setResaleSide] = useState<"purchase" | "sale" | "">(() => {
+    const v = searchParams.get("side");
+    return v === "purchase" || v === "sale" ? v : "";
+  });
   const [propertyKind, setPropertyKind] = useState("");
   const [hasOc, setHasOc] = useState(false);
   const [saving, setSaving] = useState(false);
@@ -65,6 +70,7 @@ function NewDealForm() {
       const res = await dealsApi.create({
         businessType, hasOc,
         tradeSide: businessType === "brokerage" && tradeSide ? tradeSide : null,
+        ...(businessType === "resale" && resaleSide ? { resaleSide } : {}),
         propertyKind: propertyKind || null,
         ...(propertyId ? { propertyId } : {}),
       });
@@ -121,6 +127,20 @@ function NewDealForm() {
             物件の取扱区分は「{businessTypeLabel(pickedType)}」です。違う区分で作ると、物件の画面にお知らせが出ます。
           </p>
         )}
+        {businessType === "resale" && (
+          <fieldset>
+            <legend className="mb-1 block text-xs font-medium text-gray-600 dark:text-gray-400">仕入か売却か</legend>
+            <div className="flex flex-wrap gap-4 text-sm">
+              {RESALE_SIDES.map((o) => (
+                <label key={o.value} className="flex items-center gap-2">
+                  <input type="radio" name="resale-side" checked={resaleSide === o.value} onChange={() => setResaleSide(o.value)} />
+                  {o.label}
+                </label>
+              ))}
+            </div>
+            <p className="mt-1 text-xs text-gray-500 dark:text-gray-400">仕入と売却は別の取引にします。当事者に自社(仕入なら買主・売却なら売主)が入ります。</p>
+          </fieldset>
+        )}
         {businessType === "brokerage" && (
           <Field label="取引態様">
             <SelectBox label="取引態様" value={tradeSide} onChange={setTradeSide} options={optionsOf(DEAL_TRADE_SIDE_LABELS)} allowEmpty />
@@ -139,7 +159,7 @@ function NewDealForm() {
       </div>
       <Button
         onClick={save}
-        disabled={saving || (source === "list" && !picked)}
+        disabled={saving || (source === "list" && !picked) || (businessType === "resale" && !resaleSide)}
         loading={saving}
         loadingLabel="作成中"
       >
@@ -149,6 +169,11 @@ function NewDealForm() {
     </div>
   );
 }
+
+const RESALE_SIDES = [
+  { value: "purchase", label: "仕入(自社が買う)" },
+  { value: "sale", label: "売却(自社が売る)" },
+] as const;
 
 type PickedProperty = { id: string; label: string; businessType?: string | null };
 type PropertyHit = {

@@ -9,7 +9,7 @@ vi.mock("@/lib/prisma", () => {
     property: { findUnique: vi.fn(async () => null), updateMany: vi.fn(async () => ({ count: 1 })) },
     changeLog: { create: vi.fn(async () => ({})) },
     propertyOwner: { findMany: vi.fn(async () => []) },
-    dealParty: { findMany: vi.fn(async () => []), createMany: vi.fn(async () => ({ count: 0 })) },
+    dealParty: { findMany: vi.fn(async () => []), createMany: vi.fn(async () => ({ count: 0 })), create: vi.fn(async () => ({})) },
     dealSettings: { findUnique: vi.fn(async () => null) },
     dealRateTable: { findMany: vi.fn(async () => []) },
     companyProfile: { findUnique: vi.fn(async () => null) },
@@ -74,6 +74,41 @@ describe("GET /api/deals", () => {
   });
   it("知らない状態は 422", async () => {
     expect((await LIST(new Request("http://x/api/deals?status=lease"))).status).toBe(422);
+  });
+});
+
+describe("POST /api/deals 買取再販の仕入・売却(2026-11-05)", () => {
+  const db = pm as never as { propertyOwner: { findMany: Fn }; dealParty: { findMany: Fn; create: Fn; createMany: Fn } };
+  const ownerRow = { owner: { name: "試験 太郎", phone: "03-0", address: "東京都試験区1", currentAddress: null, corporateNumber: null, companyRegistryNumber: null } };
+  const allOwnerPerms = [...DEAL_PERMS, { resource: "owner", action: "read", granted: true }, { resource: "owner_name", action: "full", granted: true }, { resource: "owner_address", action: "full", granted: true }];
+  const company = { nameJa: "試験不動産株式会社", license: null, tel: "03-1111-1111", fax: null, email: null, hp: null, address: "東京都試験区9-9" };
+
+  it("仕入=買主に自社を入れ、売主は今までどおり物件の所有者", async () => {
+    (getUserPermissions as Fn).mockResolvedValue(allOwnerPerms);
+    pm.companyProfile.findUnique.mockResolvedValue(company);
+    pm.property.findUnique.mockResolvedValue(propRow);
+    db.propertyOwner.findMany.mockResolvedValue([ownerRow]);
+    expect((await POST(json("POST", { businessType: "resale", propertyId: PROP_ID, resaleSide: "purchase" }))).status).toBe(201);
+    expect(db.dealParty.create.mock.calls[0][0].data).toEqual({
+      role: "buyer", partyType: "corporation", name: "試験不動産株式会社", representative: null, address: "東京都試験区9-9", phone: "03-1111-1111",
+      shareNum: null, shareDen: null, isSelf: true, dealId: DEAL_ID, sortOrder: 0,
+    });
+    expect(db.dealParty.createMany.mock.calls[0][0].data).toEqual([expect.objectContaining({ role: "seller", name: "試験 太郎" })]);
+  });
+  it("売却=売主に自社を入れ、物件の所有者は売主に足さない", async () => {
+    (getUserPermissions as Fn).mockResolvedValue(allOwnerPerms);
+    pm.companyProfile.findUnique.mockResolvedValue(company);
+    pm.property.findUnique.mockResolvedValue(propRow);
+    db.propertyOwner.findMany.mockResolvedValue([ownerRow]);
+    db.dealParty.findMany.mockResolvedValueOnce([{ name: "試験不動産株式会社", isSelf: true }]);
+    expect((await POST(json("POST", { businessType: "resale", propertyId: PROP_ID, resaleSide: "sale" }))).status).toBe(201);
+    expect(db.dealParty.create.mock.calls[0][0].data).toMatchObject({ role: "seller", isSelf: true });
+    expect(db.dealParty.createMany).not.toHaveBeenCalled();
+  });
+  it("仲介では仕入・売却を使わない・知らない値は 422", async () => {
+    expect((await POST(json("POST", { businessType: "brokerage", resaleSide: "sale" }))).status).toBe(201);
+    expect(db.dealParty.create).not.toHaveBeenCalled();
+    expect((await POST(json("POST", { businessType: "resale", resaleSide: "both" }))).status).toBe(422);
   });
 });
 
