@@ -1282,6 +1282,8 @@ sudo ln -s /etc/nginx/sites-available/property-management \
 sudo nginx -t && sudo systemctl reload nginx
 ```
 
+**⚠公開の location の Referrer-Policy(2026-11-06)**: server ブロックの `add_header Referrer-Policy "strict-origin-when-cross-origin" always;` は、自分の `add_header` を持たない location へ引き継がれ、アプリが付けた値の**あとに**足される。ブラウザは後ろの値を使うので、公開ページの意図(`/t/` `/u/` `/lp/` `/lp-assets/`=`strict-origin`・`/submit/`=`no-referrer`)が負ける。設定例の443側の公開の location には、それぞれ `add_header` を3行(X-Frame-Options・X-Content-Type-Options・Referrer-Policy)入れてある(location に1つでも書くと server の分は全部消えるため、防御ヘッダも並べる)。本番の公開ホスト(app.ligarejapan.com)は 2026-11-06 に外から見て Referrer-Policy が1行だけ(=vhost は足していない)なので、今は直す要は無い。vhost の server に `add_header Referrer-Policy` を足すときは、公開の location にも同じ3行を足すこと。確かめ方(反映のあと): `curl -sI https://<公開ホスト>/u/x | grep -i referrer-policy` が `strict-origin` の1行だけになること(2行出るなら引き継ぎが残っている)。
+
 ### app.env
 
 ```bash
