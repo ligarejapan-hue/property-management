@@ -55,9 +55,12 @@ function sideOf(text: string, p: ReturnType<typeof parseRegistryText>): Registry
 }
 
 /** 同じ物件かを見分ける鍵。不動産番号が無ければ所在と、その種類の番号(地番か家屋番号)。 */
-function identityOf(p: ReturnType<typeof parseRegistryText>, side: RegistrySide | null): string | null {
+function identityOf(p: ReturnType<typeof parseRegistryText>, side: RegistrySide | null, text: string): string | null {
   if (p.realEstateNumber) return `no:${p.realEstateNumber}`;
-  const number = side === "建物" ? p.buildingNumber : side === "土地" ? p.lotNumber : null;
+  // 番号は表の欄全体から読めればそれ(parseRegistryText は「1番1の2」と「1番1の3」をどちらも「1番1」に切り、
+  // 別の筆の謄本を同じ筆として捨ててしまう・@codex P2)。読めなければ今までどおり。
+  const id = registryIdentityOf(text);
+  const number = side === "建物" ? (id.buildingNumber ?? p.buildingNumber) : side === "土地" ? (id.lotNumber ?? p.lotNumber) : null;
   // 土地の地番と建物の家屋番号は同じ「1番」になることがあるので、種類も鍵に入れる。
   return p.address && number ? `at:${side}:${p.address}|${number}` : null;
 }
@@ -118,7 +121,7 @@ export async function loadLandedCertificates(
       readAny = true;
       const parsedOwner = parseRegistryText(pdf.text);
       const ownerSide = sideOf(pdf.text, parsedOwner);
-      const ownerIdentity = identityOf(parsedOwner, ownerSide);
+      const ownerIdentity = identityOf(parsedOwner, ownerSide, pdf.text);
       if (hasSeveralProperties(pdf.text)) unclassified = true;
       // ⚠読めるのに物件を特定できない所有者事項では止めない(表だけの所有者事項で、いつまでも確認できなくなるため)。
       if (ownerIdentity && ownerSide && required.includes(ownerSide)) ownerOnly.add(ownerIdentity);
@@ -134,7 +137,7 @@ export async function loadLandedCertificates(
     readAny = true;
     const parsed = parseRegistryText(pdf.text);
     const side = sideOf(pdf.text, parsed);
-    const identity = identityOf(parsed, side);
+    const identity = identityOf(parsed, side, pdf.text);
     if (!side || !identity || hasSeveralProperties(pdf.text)) {
       unclassified = true;
       continue;

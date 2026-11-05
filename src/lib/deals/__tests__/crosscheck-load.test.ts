@@ -412,6 +412,16 @@ describe("土地のある物件の謄本", () => {
       setup([["l2", "all", "2026-10-02T00:00:00Z", LAND("1番1", "20.25", "L2"), summary(0), landTx("１番１の２")]]);
       expect(await loadCrosscheckRegistry("p", { kindBase: "land", includeOwners: true })).toMatchObject({ missingParcels: ["土地 1番1"] });
     });
+    it("★不動産番号の無い「1番1の2」「1番1の3」の謄本を同じ筆として捨てない(@codex P2)", async () => {
+      findProperty.mockResolvedValue({ lotNumber: "1番1の2", buildingNumber: null, extraParcels: [extra("x", "land", "1番1の3")] });
+      setup([
+        ["a", "all", "2026-10-02T00:00:00Z", { ...LAND("1番1", "20.25"), realEstateNumber: null }, summary(1), landTx("１番１の３")],
+        ["b", "all", "2026-10-01T00:00:00Z", { ...LAND("1番1", "30.25"), realEstateNumber: null }, summary(1), landTx("１番１の２")],
+      ]);
+      const r = await loadCrosscheckRegistry("p", { kindBase: "land", includeOwners: true });
+      expect(r).toMatchObject({ uncertain: null, rights: { activeRights: 2 } });
+      expect(r).not.toHaveProperty("missingParcels");
+    });
     it("全部そろえば missingParcels は出さない・不動産番号が両方にあれば不動産番号で比べる", async () => {
       findProperty.mockResolvedValue({ lotNumber: "1番", buildingNumber: "1番1", extraParcels: [extra("x", "land", "別の書き方", "L2"), extra("y", "building", "1番2", "B2")] });
       setup([
