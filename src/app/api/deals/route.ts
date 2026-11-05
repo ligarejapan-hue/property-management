@@ -120,6 +120,9 @@ export async function POST(request: Request) {
       const dealNo = nextDealNo(year, latest?.dealNo ?? null);
       try {
         const propertyId = body.propertyId ?? null;
+        // 買取再販の売却は仕入とは別の契約。仕入の進み(案件ステータス)を引き継がず、検討中から始める(@codex P2)。
+        const resaleSide = body.businessType === "resale" ? body.resaleSide : undefined;
+        const isSale = resaleSide === "sale";
         const created = await prisma.$transaction(async (tx) => {
           // 案件ステータスと連動する(lib/deals/status-link.ts)。ロックは物件の行が先。
           // ⚠案件ステータスを動かすのは、その物件を編集できる人が作ったときだけ。ロック後に担当範囲を見直す。
@@ -131,7 +134,7 @@ export async function POST(request: Request) {
               where: { id: propertyId }, select: { caseStatus: true, createdBy: true, assignedTo: true },
             });
             if (current) {
-              status = initialDealStatusForCase(current.caseStatus);
+              status = isSale ? "considering" : initialDealStatusForCase(current.caseStatus);
               canMoveCase = hasPermission(perms, "property", "write") && canAccessPropertyRecord(session, current);
             }
           }
@@ -147,14 +150,14 @@ export async function POST(request: Request) {
             select: { id: true, dealNo: true },
           });
           // 買取再販は仕入=買主・売却=売主に自社を入れる(売却なら物件の所有者は売主に足さない)。
-          const resaleSide = body.businessType === "resale" ? body.resaleSide : undefined;
           if (resaleSide) {
             const company = resolveCompanyProfile(await tx.companyProfile.findUnique({ where: { id: "singleton" } }));
             await tx.dealParty.create({ data: { ...selfPartyFor(resaleSide, company), dealId: row.id, sortOrder: 0 } });
           }
           // 売主は物件の今の所有者。違う場合は当事者タブで手で直す。
           if (propertyId) await addSellersFromOwners(tx, { dealId: row.id, propertyId, access: sellerAccessOf(perms) });
-          if (propertyId && canMoveCase) await syncCaseStatusFromDeals(tx, { propertyId, changedBy: session.id });
+          // 売却の取引を作っただけでは、仕入で進んだ案件ステータスを戻さない。
+          if (propertyId && canMoveCase && !isSale) await syncCaseStatusFromDeals(tx, { propertyId, changedBy: session.id });
           return row;
         });
         await writeAuditLog({

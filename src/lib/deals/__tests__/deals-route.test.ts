@@ -234,6 +234,22 @@ describe("POST /api/deals — 案件ステータスとの連動", () => {
     expect(pm.deal.create.mock.calls[0][0].data.status).toBe("settled");
     expect(pm.property.updateMany).not.toHaveBeenCalled();
   });
+  it("買取再販の売却は、仕入で進んだ案件ステータスを引き継がず検討中から始め、案件も戻さない(@codex P2)", async () => {
+    for (const cs of ["sold", "contracted"]) {
+      withCase(cs);
+      pm.deal.create.mockClear();
+      pm.property.updateMany.mockClear();
+      pm.deal.findMany.mockResolvedValue([{ id: DEAL_ID, status: "considering" }]);
+      expect((await POST(json("POST", { businessType: "resale", propertyId: PROP_ID, resaleSide: "sale" }))).status).toBe(201);
+      expect(pm.deal.create.mock.calls[0][0].data.status).toBe("considering");
+      expect(pm.property.updateMany).not.toHaveBeenCalled();
+    }
+    // 仕入は今までどおり案件ステータスから始める
+    withCase("sold");
+    pm.deal.create.mockClear();
+    await POST(json("POST", { businessType: "resale", propertyId: PROP_ID, resaleSide: "purchase" }));
+    expect(pm.deal.create.mock.calls[0][0].data.status).toBe("settled");
+  });
   it("物件を編集できない人が作っても案件ステータスは動かさない", async () => {
     withCase("on_sale");
     (getUserPermissions as Fn).mockResolvedValue(DEAL_PERMS);
