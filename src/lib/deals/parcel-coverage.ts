@@ -8,7 +8,7 @@ import type { RegistrySide } from "./crosscheck";
  * ⚠Prisma を読まない(純関数)。
  */
 
-/** 謄本が要る筆(棟)。label は画面に出す文字(「土地 1番2」)。location は空=物件の住所と同じ。 */
+/** 謄本が要る筆(棟)。label は画面に出す文字(「土地 1番2」)。location は見分けに使う所在(行の所在が空なら物件の住所)。 */
 export interface ExpectedParcel {
   side: RegistrySide;
   number: string;
@@ -38,7 +38,7 @@ const reKey = (v: string | null | undefined) => (v ? normalizeRealEstateNumber(v
  * 1筆目・1棟目は物件の地番・家屋番号。⚠物件の不動産番号はどの筆のものか分からないので使わない。
  */
 export function expectedParcels(
-  p: { lotNumber: string | null; buildingNumber: string | null; extraParcels: unknown },
+  p: { lotNumber: string | null; buildingNumber: string | null; extraParcels: unknown; address?: string | null },
   required: readonly RegistrySide[],
 ): ExpectedParcel[] {
   const extras = readExtraParcels(p.extraParcels);
@@ -47,7 +47,9 @@ export function expectedParcels(
   const add = (side: RegistrySide, number: string | null | undefined, realEstateNumber: string | null, location: string | null) => {
     const n = number?.trim();
     if (!n || !required.includes(side)) return;
-    out.push({ side, number: n, realEstateNumber, location: location?.trim() || null, label: `${side} ${location ? `${location} ` : ""}${n}` });
+    // 所在が空の筆は物件の住所で見分ける(見出しには出さない)。
+    const own = location?.trim() || null;
+    out.push({ side, number: n, realEstateNumber, location: own ?? (p.address?.trim() || null), label: `${side} ${own ? `${own} ` : ""}${n}` });
   };
   add("土地", p.lotNumber, null, null);
   add("建物", p.buildingNumber, null, null);

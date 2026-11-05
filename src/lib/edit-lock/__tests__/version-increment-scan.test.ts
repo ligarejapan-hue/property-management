@@ -118,7 +118,7 @@ const VERSIONED: Record<string, string> = {
     "(Task 7で修正済)",
   "src/lib/registry-pdf/process.ts:1023":
     "property.registryStatus/realEstateNumber/lotNumber/buildingNumber/exclusiveAreaRegistry/landArea/landAreaMethod/totalFloorArea(取得状況前進+空欄補完)+version increment",
-  "src/lib/registry-pdf/fill-areas.ts:150":
+  "src/lib/registry-pdf/fill-areas.ts:157":
     "property.exclusiveAreaRegistry/landArea/landAreaMethod/totalFloorArea/lotNumber/buildingNumber/structureType/builtYear/builtMonth(謄本から空欄補完・2026-10-25/11-01)+version increment" +
     "(行ロック後に読み直し・編集中の鍵の間は見送り・where に version)",
 };

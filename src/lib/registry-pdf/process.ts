@@ -32,7 +32,7 @@ import { planRegistryAreaFill, registryAreasOf, type RegistryAreaCurrent } from 
 import { fillPropertyFromRegistry } from "@/lib/registry-pdf/fill-areas";
 import { parseRegistryBuildingFacts, registryIdentityOf } from "@/lib/registry-basic-info";
 import { supportsUnitFields } from "@/lib/property-building-name";
-import { readExtraParcels, registryParcelTarget } from "@/lib/property-parcels";
+import { registryParcelTarget } from "@/lib/property-parcels";
 import {
   FULL_CERTIFICATE_OWNERS_UNDETERMINED_WARNING,
   hasDeterminedOwners,
@@ -906,8 +906,7 @@ export async function processRegistryPdf(
       // ⚠番号は表の欄だけを読む registryIdentityOf で(parsed は全文から拾うので、土地の謄本の共同担保目録にある
       //   建物の家屋番号で建物と取り違える・内部レビュー P2)。
       const identity = registryIdentityOf(text);
-      const hasExtraParcels = readExtraParcels(existing.extraParcels).length > 0;
-      const notMainParcel = (p: { propertyType: string; lotNumber: string | null; buildingNumber: string | null; extraParcels: unknown }) => {
+      const notMainParcel = (p: { propertyType: string; lotNumber: string | null; buildingNumber: string | null; extraParcels: unknown; address: string | null }) => {
         if (supportsUnitFields(p.propertyType)) return false;
         const t = registryParcelTarget({ ...identity, address: parsed.address }, p);
         return t.target === "extra" || (t.target === "unknown" && t.hasExtras);
@@ -969,6 +968,7 @@ export async function processRegistryPdf(
                   propertyType: true,
                   // 1筆目の謄本かの判定に使う(merged には入らない)。
                   extraParcels: true,
+                  address: true,
                 },
               });
               // ロック直後に取れない=行ロックとfindUniqueの間で削除された。
@@ -1051,15 +1051,14 @@ export async function processRegistryPdf(
 
       // 構造と築年月(2026-11-01): 上の更新のあとに同じ決まりで空の欄へ(棟に紐づく部屋は棟へ)。
       if (!args.ownersOnly) {
-        // 1筆目ではない謄本は、番号を渡して足した行の面積だけを埋める(構造・築年月は1棟目の欄なので入れない)。
-        // 足した行がある物件では、1筆目の謄本にも番号を渡す(番号が無いと、どの筆か分からない謄本として何も入れないため)。
+        // 1筆目ではない謄本は、面積を渡して足した行の面積だけを埋める(構造・築年月は1棟目の欄なので入れない)。
+        // どの筆かを決める番号と所在は、埋める値とは別に渡す(番号が無いと、足した行がある物件では何も入れないため)。
         const factsFill = await fillPropertyFromRegistry({
           propertyId,
-          values: notMainParcel(existing)
-            ? { ...parsedAreas, ...identity }
-            : hasExtraParcels ? { ...parseRegistryBuildingFacts(text), ...identity } : parseRegistryBuildingFacts(text),
+          values: notMainParcel(existing) ? { ...parsedAreas } : parseRegistryBuildingFacts(text),
           changedBy: session.id,
           registryAddress: parsed.address,
+          parcelIdentity: identity,
         });
         if (factsFill.filled.length > 0) resultAction = "updated";
         if (factsFill.skippedByEditLock) propertyFillSkippedByEditLock = true;
@@ -1202,6 +1201,9 @@ export async function processRegistryPdf(
               propertyId: targetPropertyId,
               values: { ...areas, ...facts },
               changedBy: session.id,
+              // 足した行がある物件で、どの土地・建物の謄本かを決める(無いと何も入れない・@codex P2)。
+              registryAddress: parsed.address,
+              parcelIdentity: registryIdentityOf(text),
             });
             if (areaFill.skippedByEditLock) propertyFillSkippedByEditLock = true;
           }

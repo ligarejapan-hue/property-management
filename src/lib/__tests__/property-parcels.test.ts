@@ -59,11 +59,19 @@ describe("謄本がどの土地・建物のものか(2回目)", () => {
     expect(registryParcelTarget({ lotNumber: "1番5", buildingNumber: null }, { ...P, lotNumber: null })).toEqual({ target: "main" });
   });
   it("★同じ番号の土地・建物が2つ以上: 謄本の所在で決める・決められなければ ambiguous(@codex P1)", () => {
-    const T = { lotNumber: "1番", buildingNumber: null, extraParcels: [land("x", "1番", null, { location: "架空町二丁目" })] };
+    const T = { lotNumber: "1番", buildingNumber: null, address: "架空県架空市架空町一丁目5-6", extraParcels: [land("x", "1番", null, { location: "架空町二丁目" })] };
     expect(registryParcelTarget({ lotNumber: "1番", buildingNumber: null, address: "架空市架空町二丁目" }, T)).toEqual({ target: "extra", id: "x", kind: "land" });
+    // 1筆目は物件の住所で見分ける。
     expect(registryParcelTarget({ lotNumber: "1番", buildingNumber: null, address: "架空市架空町一丁目" }, T)).toEqual({ target: "main" });
     expect(registryParcelTarget({ lotNumber: "1番", buildingNumber: null, address: null }, T))
       .toEqual({ target: "unknown", kind: "land", number: "1番", hasExtras: true, ambiguous: true });
+    // ★書き方の違い(「2丁目」と「二丁目」・全角)はそろえる。合わない所在を「だから1筆目」としない(@codex P1)。
+    const W = { ...T, extraParcels: [land("x", "1番", null, { location: "架空市架空町2丁目" })] };
+    expect(registryParcelTarget({ lotNumber: "1番", buildingNumber: null, address: "架空市架空町二丁目" }, W)).toEqual({ target: "extra", id: "x", kind: "land" });
+    expect(registryParcelTarget({ lotNumber: "1番", buildingNumber: null, address: "別市別町三丁目" }, W)).toMatchObject({ target: "unknown", ambiguous: true });
+    // 「架空町2」と「架空町21」は別の場所。
+    const N = { ...T, extraParcels: [land("x", "1番", null, { location: "架空町2丁目" })] };
+    expect(registryParcelTarget({ lotNumber: "1番", buildingNumber: null, address: "架空市架空町二十一丁目" }, N)).toMatchObject({ target: "unknown", ambiguous: true });
     // 足した行どうしで同じ番号・所在も同じ=決められない。
     const twins = { ...T, extraParcels: [land("x", "1番", null, { location: "架空町二丁目" }), land("y", "1番", null, { location: "架空町二丁目" })] };
     expect(registryParcelTarget({ lotNumber: "1番", buildingNumber: null, address: "架空町二丁目" }, twins)).toMatchObject({ target: "unknown", ambiguous: true });
@@ -73,6 +81,7 @@ describe("謄本がどの土地・建物のものか(2回目)", () => {
     expect(pickParcelByLocation([{ location: "A" }], null)).toEqual({ location: "A" });
     expect(pickParcelByLocation([{ location: null }, { location: "架空 町" }], "架空市架空町")).toEqual({ location: "架空 町" });
     expect(pickParcelByLocation([{ location: null }, { location: null }], "架空市")).toBeNull();
+    expect(pickParcelByLocation([{ location: null }, { location: "別町" }], "架空市架空町", "架空市架空町1-1")).toEqual({ location: null });
   });
   it("足した行の空いている面積だけ入れる", () => {
     expect(fillExtraParcelArea(P.extraParcels, "a", 61.954)).toEqual([{ ...land("a", "1番2"), area: 61.95 }, bldg("b", "1番1の2")]);

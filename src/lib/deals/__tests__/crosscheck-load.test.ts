@@ -435,7 +435,7 @@ describe("土地のある物件の謄本", () => {
       expect(r).not.toHaveProperty("missingParcels");
     });
     it("★所在が違う同じ番号の筆は、1通で両方を満たしたことにしない(@codex P1)", async () => {
-      findProperty.mockResolvedValue({ lotNumber: "1番", buildingNumber: null, extraParcels: [extra("x", "land", "1番", null, "架空町二丁目")] });
+      findProperty.mockResolvedValue({ address: "架空市架空町一丁目3", lotNumber: "1番", buildingNumber: null, extraParcels: [extra("x", "land", "1番", null, "架空町二丁目")] });
       setup([["l", "all", "2026-10-01T00:00:00Z", { ...LAND("1番", "120.50"), address: "架空市架空町一丁目" }, summary(0), landTx("１番")]]);
       expect(await loadCrosscheckRegistry("p", { kindBase: "land", includeOwners: true })).toMatchObject({ missingParcels: ["土地 架空町二丁目 1番"] });
     });

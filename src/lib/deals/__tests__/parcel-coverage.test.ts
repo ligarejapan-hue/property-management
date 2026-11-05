@@ -49,7 +49,7 @@ describe("謄本が無い筆(棟)", () => {
     ])).toEqual({ missing: [], unplaced: false });
   });
   it("★同じ番号の筆は所在で分ける・決められなければ unplaced(1通で2筆を満たさない・@codex P1)", () => {
-    const twins = expectedParcels({ lotNumber: "1番", buildingNumber: null, extraParcels: [extra("land", "1番", { location: "架空町二丁目" })] }, ["土地"]);
+    const twins = expectedParcels({ lotNumber: "1番", buildingNumber: null, address: "架空市架空町一丁目3", extraParcels: [extra("land", "1番", { location: "架空町二丁目" })] }, ["土地"]);
     const cert = (address: string | null) => ({ side: "土地" as const, number: "1番", realEstateNumber: null, address });
     expect(parcelCoverage(twins, [cert("架空市架空町二丁目")])).toEqual({ missing: ["土地 1番"], unplaced: false });
     expect(parcelCoverage(twins, [cert("架空市架空町一丁目")])).toEqual({ missing: ["土地 架空町二丁目 1番"], unplaced: false });

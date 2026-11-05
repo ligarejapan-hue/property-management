@@ -1,5 +1,5 @@
 import { z } from "zod";
-import { normalizeLotNumber } from "@/lib/address-normalizer";
+import { normalizeAddress, normalizeLotNumber } from "@/lib/address-normalizer";
 import { toHalfWidthDigits } from "@/lib/registry-fetch/chiban-input";
 
 /**
@@ -112,30 +112,44 @@ export type RegistryParcelTarget =
   /** ambiguous=同じ番号の土地・建物が2つ以上あり、所在でも決められない(@codex P1)。 */
   | { target: "unknown"; kind: ParcelKind | null; number: string; hasExtras: boolean; ambiguous?: boolean };
 
-const locationKey = (v: string | null | undefined) => (v ? v.normalize("NFKC").replace(/\s+/g, "") || null : null);
+/** 所在を比べる形。全角・空白・「二丁目/2丁目」などの書き方をそろえる(@codex P1)。 */
+const locationKey = (v: string | null | undefined) => (v ? normalizeAddress(v.normalize("NFKC")) || null : null);
+
+/**
+ * 片方がもう片方を含むか。ただし数字で終わる側(「架空町2」=2丁目)の続きが数字なら別の場所(「架空町21」)。
+ * 数字で終わらない側(「架空町」)は、続きが番地の数字でも同じ場所(「架空町12-3」)。
+ */
+function locationContains(longer: string, shorter: string): boolean {
+  if (!/\d$/.test(shorter)) return longer.includes(shorter);
+  for (let i = longer.indexOf(shorter); i >= 0; i = longer.indexOf(shorter, i + 1)) {
+    if (!/\d/.test(longer[i + shorter.length] ?? "")) return true;
+  }
+  return false;
+}
+const sameLocation = (a: string, b: string) => locationContains(a, b) || locationContains(b, a);
 
 /**
  * 同じ番号の候補から、謄本の所在で1つに決める。決められなければ null。
- * - 所在を入れた候補は、謄本の所在と(どちらかがもう一方を含む形で)合うものだけ。
- * - 合う候補が無ければ、所在が空の候補(=物件の住所と同じ)が1つだけのときそれ。
+ * 候補の所在が空なら fallbackLocation(=物件の住所)とみなして比べる。謄本の所在と合う候補がちょうど1つのときだけそれ。
+ * ⚠合わない所在を「だから1筆目」とはしない(書き方が違うだけで別の筆に入れてしまう・@codex P1)。
  * ⚠謄本の所在を読めなければ、候補が2つ以上なら決めない。
  */
-export function pickParcelByLocation<T extends { location: string | null }>(candidates: T[], registryAddress: string | null): T | null {
+export function pickParcelByLocation<T extends { location: string | null }>(
+  candidates: T[], registryAddress: string | null, fallbackLocation: string | null = null,
+): T | null {
   if (candidates.length <= 1) return candidates[0] ?? null;
   const addr = locationKey(registryAddress);
   if (!addr) return null;
   const matched = candidates.filter((c) => {
-    const l = locationKey(c.location);
-    return !!l && (addr.includes(l) || l.includes(addr));
+    const l = locationKey(c.location) ?? locationKey(fallbackLocation);
+    return !!l && sameLocation(addr, l);
   });
-  if (matched.length) return matched.length === 1 ? matched[0] : null;
-  const implicit = candidates.filter((c) => !locationKey(c.location));
-  return implicit.length === 1 ? implicit[0] : null;
+  return matched.length === 1 ? matched[0] : null;
 }
 
 export function registryParcelTarget(
   pdf: { lotNumber: string | null; buildingNumber: string | null; address?: string | null },
-  property: { lotNumber: string | null; buildingNumber: string | null; extraParcels: unknown },
+  property: { lotNumber: string | null; buildingNumber: string | null; extraParcels: unknown; address?: string | null },
 ): RegistryParcelTarget {
   const extras = readExtraParcels(property.extraParcels);
   const kind: ParcelKind | null = pdf.buildingNumber ? "building" : pdf.lotNumber ? "land" : null;
@@ -143,7 +157,7 @@ export function registryParcelTarget(
   const key = parcelNumberKey(number);
   if (!kind || !key) return extras.length ? { target: "unknown", kind: null, number: "", hasExtras: true } : { target: "main" };
   const mainKey = parcelNumberKey(kind === "building" ? property.buildingNumber : property.lotNumber);
-  // 1筆目と足した行に同じ番号があれば(所在が違う筆など)、所在で決める(@codex P1)。1筆目の所在は物件の住所=空とみなす。
+  // 1筆目と足した行に同じ番号があれば(所在が違う筆など)、所在で決める(@codex P1)。1筆目の所在は物件の住所。
   const candidates: { location: string | null; id: string | null }[] = [
     ...(mainKey === key ? [{ location: null, id: null }] : []),
     ...extras.filter((p) => p.kind === kind && parcelNumberKey(p.number) === key).map((p) => ({ location: p.location, id: p.id as string | null })),
@@ -152,7 +166,7 @@ export function registryParcelTarget(
     if (!mainKey) return { target: "main" };
     return { target: "unknown", kind, number: number as string, hasExtras: extras.length > 0 };
   }
-  const hit = pickParcelByLocation(candidates, pdf.address ?? null);
+  const hit = pickParcelByLocation(candidates, pdf.address ?? null, property.address ?? null);
   if (!hit) return { target: "unknown", kind, number: number as string, hasExtras: true, ambiguous: true };
   return hit.id === null ? { target: "main" } : { target: "extra", id: hit.id, kind };
 }

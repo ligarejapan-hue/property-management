@@ -86,7 +86,7 @@ export async function loadLandedCertificates(
       take: LANDED_CANDIDATES + 1,
       select: { fileUrl: true, registryCertificateType: true, createdAt: true },
     }),
-    prisma.property.findUnique({ where: { id: propertyId }, select: { lotNumber: true, buildingNumber: true, extraParcels: true } }),
+    prisma.property.findUnique({ where: { id: propertyId }, select: { address: true, lotNumber: true, buildingNumber: true, extraParcels: true } }),
   ]);
   const required = LANDED_REQUIRED_SIDES[o.kindBase] ?? [];
   // 2筆以上・2棟以上の物件だけ、筆(棟)ごとに謄本があるかも見る。

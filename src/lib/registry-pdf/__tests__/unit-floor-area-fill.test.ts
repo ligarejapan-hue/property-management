@@ -379,6 +379,22 @@ describe("物件を指定しない取込(Mode B)でも面積を埋める", () =>
     expect((recordChanges as Mock).mock.calls[0][0]).toMatchObject({ source: "pdf_import", targetId: PROP_ID });
   });
 
+  it("★足した行がある物件でも、1筆目の謄本なら入れる(番号を表の欄から渡す・@codex P2)", async () => {
+    (parseRegistryText as Mock).mockReturnValue({ ...FILLED_PARSED, buildingNumber: null, owners: [], landAreaRegistry: "120.50" });
+    pmB.property.findFirst.mockResolvedValue({ id: PROP_ID, address: "東京都千代田区一番町1", realEstateNumber: "0100012345678" });
+    pmB.property.findUnique.mockResolvedValue({
+      ...BASE_PROPERTY, propertyType: "land", lotNumber: "1番", exclusiveAreaRegistry: null, landArea: null, landAreaMethod: null, totalFloorArea: null,
+      extraParcels: [{ id: "r2", kind: "land", location: null, number: "2番", realEstateNumber: null, area: null }],
+    });
+    const text = [
+      "┃ 表 題 部 （土地の表示） ┃", "┃① 地 番 │② 地 目 │③ 地 積 ㎡ │ 原因 ┃", "┃１番 │宅地 │１２０：５０│ ┃", "┃ 権 利 部 （甲 区） ┃",
+    ].join("\n");
+    await processRegistryPdf({
+      session, text, propertyId: undefined, fileName: "謄本.pdf", edited: undefined, pdfBuffer: null, certificateType: "owner",
+    } as unknown as Parameters<typeof processRegistryPdf>[0]);
+    expect(pmB.property.updateMany.mock.calls[0][0].data).toMatchObject({ landArea: "120.50", landAreaMethod: "公簿" });
+  });
+
   it("★住所の部分一致(弱い一致)では入れない", async () => {
     (parseRegistryText as Mock).mockReturnValue({
       ...FILLED_PARSED,

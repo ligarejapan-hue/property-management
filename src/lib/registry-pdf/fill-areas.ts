@@ -52,6 +52,7 @@ const PROPERTY_SELECT = {
   builtYear: true,
   builtMonth: true,
   extraParcels: true,
+  address: true,
 } as const;
 
 const BUILDING_SELECT = { version: true, structureType: true, builtYear: true, builtMonth: true } as const;
@@ -87,11 +88,17 @@ export async function fillPropertyFromRegistry(args: {
   changedBy: string;
   /** 謄本の所在(同じ番号の土地・建物が2つ以上あるとき、どれのものかを決めるのに使う)。 */
   registryAddress?: string | null;
+  /**
+   * どの土地・建物の謄本かを決める番号(表の欄から読んだもの)。渡さなければ values の地番・家屋番号。
+   * values に番号を入れると空の地番・家屋番号の欄を埋めるので、埋めたくない呼び出し元(Mode A・Mode B)はこちらで渡す。
+   */
+  parcelIdentity?: { lotNumber: string | null; buildingNumber: string | null };
 }): Promise<FillResult> {
   const { propertyId, values, changedBy } = args;
   if (!hasValue(values)) return NOTHING;
   const { areas, basic } = normalize(values);
-  type Current = Parameters<typeof planPropertyBasicFill>[1] & Parameters<typeof planRegistryAreaFill>[1] & { extraParcels: unknown };
+  const ident = args.parcelIdentity ?? { lotNumber: basic.lotNumber, buildingNumber: basic.buildingNumber };
+  type Current = Parameters<typeof planPropertyBasicFill>[1] & Parameters<typeof planRegistryAreaFill>[1] & { extraParcels: unknown; address: string | null };
   /**
    * 2筆以上・2棟以上の物件(2026-11-05 案A 2回目): 謄本の地番・家屋番号で、どの土地・建物のものかを決める。
    * 足した行の謄本なら、その行の空いている面積だけ。1筆目とも足した行とも違う番号なら、足した行がある物件では何も書かない
@@ -99,10 +106,10 @@ export async function fillPropertyFromRegistry(args: {
    */
   const planFor = (p: Current): { fill: Record<string, unknown>; buildingFacts: boolean; parcel: RegistryFillParcel | null } => {
     const main = () => ({ ...planRegistryAreaFill(areas, p), ...planPropertyBasicFill(basic, p) });
-    const t = supportsUnitFields(p.propertyType) ? { target: "main" as const } : registryParcelTarget({ ...basic, address: args.registryAddress }, p);
+    const t = supportsUnitFields(p.propertyType) ? { target: "main" as const } : registryParcelTarget({ ...ident, address: args.registryAddress }, p);
     if (t.target === "main") return { fill: main(), buildingFacts: true, parcel: null };
     const parcel: RegistryFillParcel = {
-      target: t.target, kind: t.kind, number: (t.kind === "building" ? basic.buildingNumber : basic.lotNumber) ?? "",
+      target: t.target, kind: t.kind, number: (t.kind === "building" ? ident.buildingNumber : ident.lotNumber) ?? "",
       ...(t.target === "unknown" && t.ambiguous ? { ambiguous: true } : {}),
     };
     if (t.target === "extra") {
