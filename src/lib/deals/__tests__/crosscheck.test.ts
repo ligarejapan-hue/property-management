@@ -1,7 +1,7 @@
 import { describe, it, expect } from "vitest";
 import {
   ACTIVE_MORTGAGE_MESSAGE, CROSSCHECK_NOTICE_IDS, NAME_VARIANTS, NAME_VARIANT_MESSAGE, REGISTRY_STALE_MESSAGE, SELLER_MISMATCH_MESSAGE,
-  buildCrosscheck, foldNameVariants, issueWarnings, normalizeArea, normalizeDate, normalizeName, normalizeYen, parseShare,
+  buildCrosscheck, foldNameVariants, issueWarnings, normalizeDate, normalizeName, normalizeYen, parseShare,
   type CrosscheckInput, type CrosscheckItemKey, type IssuedDocFacts, type RegistryFacts,
 } from "../crosscheck";
 
@@ -9,15 +9,12 @@ const AT = "2026-10-01T03:00:00.000Z";
 const NO_REGISTRY: RegistryFacts = { status: "none" };
 const registry = (over: Partial<Extract<RegistryFacts, { status: "ok" }>> = {}): RegistryFacts => ({
   status: "ok",
-  areas: null,
   rights: null,
   owners: null,
   ...over,
 });
 const base = (over: Partial<CrosscheckInput> = {}): CrosscheckInput => ({
   kindBase: "unit", price: 30_000_000, settlementDate: "2026-11-30",
-  snapshot: { floorArea: 65.5, landArea: null },
-  property: { exclusiveArea: "65.50", exclusiveAreaRegistry: "60.25", landArea: null, landAreaMethod: null, totalFloorArea: null },
   registry: NO_REGISTRY, sellerCompare: "allowed", sellers: [], documents: [],
   ...over,
 });
@@ -31,15 +28,6 @@ const item = (input: CrosscheckInput, key: CrosscheckItemKey) => {
 };
 
 describe("表記ゆれをそろえる", () => {
-  it("面積: 全角・単位・小数の書き方がそろう", () => {
-    for (const v of ["６５．５０㎡", "65.5", "65.50m2", "65.5 平方メートル", "６５：５０", "65・50", "65.5m²", 65.5]) {
-      expect(normalizeArea(v)).toBe(6550);
-    }
-    expect(normalizeArea("1,234.5㎡")).toBe(123450);
-  });
-  it("面積: 読めないものと坪は null(推測で換算しない)", () => {
-    for (const v of ["", "約65", "20坪", "65.505", null, undefined, -1]) expect(normalizeArea(v)).toBeNull();
-  });
   it("金額: 全角・カンマ・円", () => {
     for (const v of ["３０，０００，０００円", "30,000,000", "¥30000000", 30_000_000]) expect(normalizeYen(v)).toBe(30_000_000);
     expect(normalizeYen("3000万円")).toBeNull();
@@ -66,74 +54,15 @@ describe("表記ゆれをそろえる", () => {
   });
 });
 
-describe("面積(区分)", () => {
-  it("同じ種類どうしの一致: 登記(謄本と物件)・壁芯(物件と写し)", () => {
-    const input = base({ registry: registry({ areas: { unit: "６０．２５", land: null, building: null, attachmentCreatedAt: AT } }) });
-    expect(item(input, "area_registered").status).toBe("match");
-    expect(item(input, "area_wall").status).toBe("match");
+describe("面積は比べない(2026-11-05 発注者指示)", () => {
+  it("どの種類の物件でも、項目は売買価格・決済日・売主名・有効な担保だけ", () => {
+    for (const kindBase of ["unit", "house", "building", "land", null] as const) {
+      expect(buildCrosscheck(base({ kindBase })).items.map((i) => i.key)).toEqual(["price", "settlement_date", "seller", "mortgage"]);
+    }
   });
-  it("内法と壁芯の差はエラーにしない(種類が違う・件数に数えない)", () => {
-    const input = base({ registry: registry({ areas: { unit: "60.25", land: null, building: null, attachmentCreatedAt: AT } }) });
-    expect(item(input, "area_kinds").status).toBe("kind_differs");
-    expect(buildCrosscheck(input).mismatchCount).toBe(0);
-  });
-  it("謄本が無く物件の2つの欄を並べるときも、出どころの鍵が重ならない", () => {
-    const keys = item(base(), "area_kinds").sources.map((s) => s.key);
-    expect(new Set(keys).size).toBe(2);
-  });
-  it("登記どうしの差は不一致", () => {
-    const input = base({ registry: registry({ areas: { unit: "60.26", land: null, building: null, attachmentCreatedAt: AT } }) });
-    expect(item(input, "area_registered").status).toBe("mismatch");
-    expect(buildCrosscheck(input).mismatchCount).toBe(1);
-  });
-  it("壁芯どうしの差は不一致", () => {
-    expect(item(base({ snapshot: { floorArea: 66, landArea: null } }), "area_wall").status).toBe("mismatch");
-  });
-  it("謄本が無い=片方が未入力。全部事項が読めても値が決まらない=確認できない", () => {
-    expect(item(base(), "area_registered").status).toBe("missing");
-    const input = base({
-      property: { exclusiveArea: "65.50", exclusiveAreaRegistry: null, landArea: null, landAreaMethod: null, totalFloorArea: null },
-      registry: registry({ areas: { unit: null, land: null, building: null, attachmentCreatedAt: AT } }),
-    });
-    expect(item(input, "area_registered").status).toBe("unverifiable");
-  });
-  it("物件の無い取引は、物件の欄を出どころにしない", () => {
-    const input = base({ property: null, documents: [doc({ docType: "mediation", floorArea: 65.5 })] });
-    expect(item(input, "area_wall").status).toBe("match");
-    expect(item(input, "area_wall").sources.map((s) => s.key)).not.toContain("property");
-  });
-});
-
-describe("面積(土地・建物)", () => {
-  const houseProp = { exclusiveArea: null, exclusiveAreaRegistry: null, landArea: "120.50", landAreaMethod: "公簿", totalFloorArea: "91.05" };
-  it("戸建: 謄本・物件・写しの土地と建物を比べる", () => {
-    const input = base({
-      kindBase: "house", property: houseProp, snapshot: { floorArea: 91.05, landArea: 120.5 },
-      registry: registry({ areas: { unit: null, land: "１２０．５０", building: "91.05", attachmentCreatedAt: AT } }),
-    });
-    expect(item(input, "area_land").status).toBe("match");
-    expect(item(input, "area_floor").status).toBe("match");
-    const input2 = { ...input, snapshot: { floorArea: 90, landArea: 120.5 } };
-    expect(item(input2, "area_floor").status).toBe("mismatch");
-  });
-  it("実測の土地は公簿の謄本と種類が違う(不一致にしない)", () => {
-    const input = base({
-      kindBase: "land", property: { ...houseProp, landArea: "125.00", landAreaMethod: "実測" }, snapshot: { floorArea: null, landArea: 125 },
-      registry: registry({ areas: { unit: null, land: "120.50", building: null, attachmentCreatedAt: AT } }),
-    });
-    expect(item(input, "area_land").status).toBe("match");
-    expect(item(input, "area_land_kinds").status).toBe("kind_differs");
-    expect(buildCrosscheck(input).mismatchCount).toBe(0);
-  });
-  it("土地の取引に建物の項目を出さない・区分に土地の項目を出さない", () => {
-    const land = buildCrosscheck(base({ kindBase: "land" })).items.map((i) => i.key);
-    expect(land).not.toContain("area_floor");
-    const unit = buildCrosscheck(base()).items.map((i) => i.key);
-    expect(unit).not.toContain("area_land");
-  });
-  it("種別が決まっていなければ面積の項目を出さない", () => {
-    const keys = buildCrosscheck(base({ kindBase: null })).items.map((i) => i.key);
-    expect(keys.filter((k) => k.startsWith("area_"))).toEqual([]);
+  it("面積を載せる書類があっても面積の項目は出さない", () => {
+    const keys = buildCrosscheck(base({ documents: [doc({ docType: "mediation", price: 30_000_000 })] })).items.map((i) => i.key as string);
+    expect(keys.some((k) => k.startsWith("area"))).toBe(false);
   });
 });
 
@@ -290,14 +219,12 @@ describe("土地のある物件の謄本(土地と建物の両方が要る)", ()
   const both = (over: Partial<Extract<RegistryFacts, { status: "ok" }>> = {}) => registry({
     missing: [], uncertain: null,
     certificates: [{ side: "土地", createdAt: AT }, { side: "建物", createdAt: OLD }],
-    areas: { unit: null, land: "120.50", building: "91.05", attachmentCreatedAt: OLD },
     rights: { activeRights: 0, readable: true, attachmentCreatedAt: OLD },
     owners: { list: [{ name: "架空太郎", share: null }], confirmed: true, attachmentCreatedAt: OLD },
     ...over,
   });
   const house = (over: Partial<CrosscheckInput> = {}) => base({
-    kindBase: "house", snapshot: { floorArea: 91.05, landArea: 120.5 }, sellers: [seller],
-    property: { exclusiveArea: null, exclusiveAreaRegistry: null, landArea: "120.50", landAreaMethod: "公簿", totalFloorArea: "91.05" },
+    kindBase: "house", sellers: [seller],
     ...over,
   });
   const check = (activeRights: number) => doc({ docType: "checklist_settlement", title: "書類確認書(決済時)", activeRights });
@@ -305,7 +232,7 @@ describe("土地のある物件の謄本(土地と建物の両方が要る)", ()
   it("両方そろえば担保も売主も比べて照合OK(片方が未入力の項目も無いとき)", () => {
     const input = house({
       registry: both(),
-      documents: [check(0), doc({ documentId: "doc-2", price: 30_000_000, settlementDate: "2026-11-30", floorArea: 91.05, landArea: 120.5 })],
+      documents: [check(0), doc({ documentId: "doc-2", price: 30_000_000, settlementDate: "2026-11-30" })],
     });
     expect(item(input, "mortgage").status).toBe("match");
     expect(item(input, "seller").status).toBe("match");
@@ -314,7 +241,7 @@ describe("土地のある物件の謄本(土地と建物の両方が要る)", ()
     expect(r.summary).toBe("ok");
   });
   it("建物の謄本が無い: 担保と所有者は確認できない・照合OKにしない", () => {
-    const input = house({ registry: both({ missing: ["建物"] }), documents: [check(0)] });
+    const input = house({ registry: both({ missing: ["建物"] }), documents: [check(0), doc({ documentId: "doc-2", price: 30_000_000 })] });
     for (const key of ["mortgage", "seller"] as const) {
       expect(item(input, key).status).toBe("unverifiable");
       expect(item(input, key).message).toBe("確認できない(建物の謄本がありません)");
@@ -338,17 +265,9 @@ describe("土地のある物件の謄本(土地と建物の両方が要る)", ()
     expect(item(input, "seller").status).toBe("match");
     expect(item(house({ kindBase: "land", registry: { status: "none" } }), "mortgage").message).toBe("確認できない(土地の謄本がありません)");
   });
-  it("面積の合計を出せないときは謄本を比べない(不一致にせず、照合OKにもしない)", () => {
-    const input = house({ registry: both({ uncertain: "unreadable", areas: { unit: null, land: null, building: null, attachmentCreatedAt: OLD } }), documents: [doc({ price: 30_000_000 })] });
-    expect(item(input, "area_land").sources.find((s) => s.key === "registry")?.state).toBe("unverifiable");
-    expect(item(input, "area_land").status).not.toBe("mismatch");
-    const r = buildCrosscheck(input);
-    expect(r.mismatchCount).toBe(0);
-    expect(r.summary).toBe("incomplete");
-  });
   it("読めない・判定できない・多すぎる謄本があれば確認できない", () => {
     for (const [uncertain, text] of [["unreadable", "読めない謄本"], ["unclassified", "判定できない謄本"], ["too_many", "すべてを確認できません"], ["no_full_certificate", "全部事項の謄本が無い"]] as const) {
-      const input = house({ registry: both({ uncertain }) });
+      const input = house({ registry: both({ uncertain }), documents: [doc({ price: 30_000_000 })] });
       expect(item(input, "mortgage").status).toBe("unverifiable");
       expect(item(input, "seller").message).toContain(text);
       expect(buildCrosscheck(input).summary).toBe("incomplete");
@@ -379,7 +298,7 @@ describe("土地のある物件の謄本(土地と建物の両方が要る)", ()
     expect(buildCrosscheck(house({ registry: both({ missing: ["土地"] }), price: 1, documents: [doc({ price: 2 })] })).summary).toBe("mismatch");
   });
   it("土地と建物で所有者や持分が違えば、持分は比べず確認できない", () => {
-    const input = house({ registry: both({ owners: { list: [{ name: "架空太郎", share: null }], confirmed: true, attachmentCreatedAt: OLD, differsAcross: true } }) });
+    const input = house({ registry: both({ owners: { list: [{ name: "架空太郎", share: null }], confirmed: true, attachmentCreatedAt: OLD, differsAcross: true } }), documents: [doc({ price: 30_000_000 })] });
     const i = item(input, "seller");
     expect(i.status).toBe("unverifiable");
     expect(i.message).toContain("土地と建物");
@@ -481,12 +400,11 @@ describe("照合に使った謄本の日付", () => {
 
   it("使った謄本の取り込んだ日と用途を返す", () => {
     const r = buildCrosscheck(base({ registry: registry({
-      areas: { unit: "60.25", land: null, building: null, attachmentCreatedAt: AT },
       rights: { activeRights: 0, attachmentCreatedAt: AT, readable: true },
       owners: { list: [{ name: "架空太郎", share: null }], confirmed: true, attachmentCreatedAt: "2026-10-05T03:00:00.000Z" },
     }) }));
     expect(r.registries).toEqual([
-      { date: "2026-10-01", usedFor: ["面積", "担保"] },
+      { date: "2026-10-01", usedFor: ["担保"] },
       { date: "2026-10-05", usedFor: ["売主名"] },
     ]);
   });
@@ -514,19 +432,19 @@ describe("照合に使った謄本の日付", () => {
 
 describe("全体の結果", () => {
   it("比べられた項目が無い=none(照合OKにしない)", () => {
-    const r = buildCrosscheck(base({ kindBase: null, property: null, snapshot: { floorArea: null, landArea: null } }));
+    const r = buildCrosscheck(base({ kindBase: null }));
     expect(r.summary).toBe("none");
     expect(r.comparedCount).toBe(0);
   });
   it("片方が未入力の項目が残っていれば、区分でも照合OKにしない(2026-11-04 発注者指示)", () => {
-    const r = buildCrosscheck(base());
+    const r = buildCrosscheck(base({ documents: [doc({ price: 30_000_000 })] }));
     expect(r.items.some((i) => i.status === "match")).toBe(true);
     expect(r.items.some((i) => i.status === "missing")).toBe(true);
     expect(r.mismatchCount).toBe(0);
     expect(r.summary).toBe("incomplete");
   });
   it("不一致があれば mismatch と件数", () => {
-    const r = buildCrosscheck(base({ snapshot: { floorArea: 1, landArea: null }, documents: [doc({ price: 1 })] }));
+    const r = buildCrosscheck(base({ documents: [doc({ price: 1, settlementDate: "2026-12-01" })] }));
     expect(r.summary).toBe("mismatch");
     expect(r.mismatchCount).toBe(2);
   });
@@ -537,10 +455,6 @@ describe("発行の前の確認", () => {
     const r = buildCrosscheck(base({ documents: [doc({ price: 1 })] }));
     expect(issueWarnings(r, "settlement_statement")).toEqual([]);
     expect(issueWarnings(r, "funding_plan").map((i) => i.key)).toEqual(["price"]);
-  });
-  it("元のデータどうしの食い違いは、どの書類でも確認に出す", () => {
-    const r = buildCrosscheck(base({ snapshot: { floorArea: 1, landArea: null } }));
-    expect(issueWarnings(r, "settlement_statement").map((i) => i.key)).toEqual(["area_wall"]);
   });
   it("売主名の不一致は確認に出す", () => {
     const r = buildCrosscheck(base({

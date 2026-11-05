@@ -54,25 +54,25 @@ describe("照合に使う謄本の値を集める", () => {
     findMany.mockResolvedValue([]);
     expect(await loadCrosscheckRegistry("p", opts)).toEqual({ status: "none" });
   });
-  it("全部事項から面積・担保・所有者を読む", async () => {
+  it("全部事項から担保・所有者を読む(面積は読まない)", async () => {
     files.set("a.pdf", Buffer.from(FULL));
     findMany.mockResolvedValue([att("a", "all", "2026-10-01T00:00:00Z")]);
     const r = await loadCrosscheckRegistry("p", opts);
     expect(r).toMatchObject({
       status: "ok",
-      areas: { unit: "60.25", attachmentCreatedAt: "2026-10-01T00:00:00.000Z" },
       rights: { activeRights: 2, readable: true },
       owners: { list: [{ name: "架空太郎", share: "2分の1" }], confirmed: true },
     });
+    expect(r).not.toHaveProperty("areas");
   });
-  it("所有者事項だけなら面積・担保は無く、所有者の表を読む", async () => {
+  it("所有者事項だけなら担保は無く、所有者の表を読む", async () => {
     files.set("b.pdf", Buffer.from(OWNER_TABLE));
     findMany.mockResolvedValue([att("b", "owner", "2026-10-02T00:00:00Z")]);
     const r = await loadCrosscheckRegistry("p", opts);
-    expect(r).toMatchObject({ status: "ok", areas: null, rights: null, owners: { confirmed: true, attachmentCreatedAt: "2026-10-02T00:00:00.000Z" } });
+    expect(r).toMatchObject({ status: "ok", rights: null, owners: { confirmed: true, attachmentCreatedAt: "2026-10-02T00:00:00.000Z" } });
     if (r.status === "ok") expect(r.owners?.list[0].name).toBe("架空太郎");
   });
-  it("所有者は新しい謄本から・担保と面積は全部事項から", async () => {
+  it("所有者は新しい謄本から・担保は全部事項から", async () => {
     files.set("b.pdf", Buffer.from(OWNER_TABLE));
     files.set("a.pdf", Buffer.from(FULL));
     findMany.mockResolvedValue([att("b", "owner", "2026-10-02T00:00:00Z"), att("a", "all", "2026-09-01T00:00:00Z")]);
@@ -127,7 +127,7 @@ describe("土地のある物件の謄本", () => {
   };
   const house = { kindBase: "house" as const, includeOwners: true };
 
-  it("土地と建物の両方を読み、担保を合計し、面積は種類ごと・日付は古いほう", async () => {
+  it("土地と建物の両方を読み、担保を合計し、日付は古いほう(面積は読まない)", async () => {
     setup([
       ["b", "all", "2026-10-02T00:00:00Z", BLDG(), summary(1)],
       ["l", "all", "2026-09-01T00:00:00Z", LAND("1番", "120.50"), summary(2)],
@@ -135,28 +135,20 @@ describe("土地のある物件の謄本", () => {
     const r = await loadCrosscheckRegistry("p", house);
     expect(r).toMatchObject({
       status: "ok", missing: [], uncertain: null,
-      areas: { land: "120.50", building: "91.05", attachmentCreatedAt: "2026-09-01T00:00:00.000Z" },
       rights: { activeRights: 3, readable: true, attachmentCreatedAt: "2026-09-01T00:00:00.000Z" },
       owners: { confirmed: true, attachmentCreatedAt: "2026-09-01T00:00:00.000Z", newestCreatedAt: "2026-10-02T00:00:00.000Z" },
       certificates: [{ side: "建物", createdAt: "2026-10-02T00:00:00.000Z" }, { side: "土地", createdAt: "2026-09-01T00:00:00.000Z" }],
     });
+    expect(r).not.toHaveProperty("areas");
   });
-  it("土地が複数筆なら全筆を読み、地積を合計する", async () => {
+  it("土地が複数筆なら全筆を読み、担保を合計する", async () => {
     setup([
       ["b", "all", "2026-10-03T00:00:00Z", BLDG(), summary(0)],
       ["l1", "all", "2026-10-02T00:00:00Z", LAND("1番", "100.25"), summary(1)],
       ["l2", "all", "2026-10-01T00:00:00Z", LAND("2番", "20.25"), summary(1)],
     ]);
     const r = await loadCrosscheckRegistry("p", house);
-    expect(r).toMatchObject({ areas: { land: "120.50" }, rights: { activeRights: 2 }, missing: [] });
-  });
-  it("筆の地積が1つでも読めなければ合計を出さない", async () => {
-    setup([
-      ["l1", "all", "2026-10-02T00:00:00Z", { ...LAND("1番", "100.25") }, summary(0)],
-      ["l2", "all", "2026-10-01T00:00:00Z", { ...LAND("2番", "1"), landAreaRegistry: null }, summary(0)],
-    ]);
-    const r = await loadCrosscheckRegistry("p", { kindBase: "land", includeOwners: false });
-    expect(r).toMatchObject({ areas: { land: null } });
+    expect(r).toMatchObject({ rights: { activeRights: 2 }, missing: [] });
   });
   it("同じ筆は最新の1通だけ(古い謄本の権利を足さない)", async () => {
     setup([
@@ -165,7 +157,7 @@ describe("土地のある物件の謄本", () => {
       ["old", "all", "2026-01-01T00:00:00Z", LAND("1番", "120.50"), summary(5)],
     ]);
     const r = await loadCrosscheckRegistry("p", house);
-    expect(r).toMatchObject({ rights: { activeRights: 0 }, areas: { land: "120.50" } });
+    expect(r).toMatchObject({ rights: { activeRights: 0 } });
   });
   it("片方だけなら足りない側を返す", async () => {
     setup([["l", "all", "2026-10-01T00:00:00Z", LAND("1番", "120.50"), summary(1)]]);
@@ -197,7 +189,7 @@ describe("土地のある物件の謄本", () => {
       ["b", "all", "2026-10-01T00:00:00Z", BLDG(), summary(1), buildingText],
     ]);
     expect(await loadCrosscheckRegistry("p", house)).toMatchObject({
-      missing: [], uncertain: null, rights: { activeRights: 2 }, areas: { land: "120.50", building: "91.05" },
+      missing: [], uncertain: null, rights: { activeRights: 2 },
     });
   });
   it("不動産番号が無くても、土地と建物を取り違えず別の物件として数える", async () => {
@@ -296,13 +288,6 @@ describe("土地のある物件の謄本", () => {
       ["l", "all", "2026-10-01T00:00:00Z", LAND("1番", "120.50"), summary(0)],
     ]);
     expect(await loadCrosscheckRegistry("p", { kindBase: "land", includeOwners: false })).toMatchObject({ uncertain: null });
-  });
-  it("抜けた筆があるかもしれないときは面積の合計を出さない", async () => {
-    setup([
-      ["l", "all", "2026-10-02T00:00:00Z", LAND("1番", "100.00"), summary(0)],
-      ["x", null, "2026-01-01T00:00:00Z", null],
-    ]);
-    expect(await loadCrosscheckRegistry("p", { kindBase: "land", includeOwners: false })).toMatchObject({ uncertain: "unreadable", areas: { land: null } });
   });
   it("土地か建物か判定できない全部事項があれば uncertain", async () => {
     setup([["u", "all", "2026-10-02T00:00:00Z", { realEstateNumber: null, address: null, lotNumber: null, buildingNumber: null, owners: [] }]]);

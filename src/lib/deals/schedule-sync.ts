@@ -57,7 +57,7 @@ export async function readMortgageState(propertyId: string, kindBase: BaseProper
     registry = { status: "unreadable" };
   }
   return mortgageStateOf(buildCrosscheck({
-    kindBase, price: null, settlementDate: null, snapshot: { floorArea: null, landArea: null }, property: null, registry,
+    kindBase, price: null, settlementDate: null, registry,
     sellerCompare: "denied", sellers: [], documents: [],
   }));
 }

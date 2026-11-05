@@ -7,10 +7,9 @@ import { CROSSCHECK_NOTICE_IDS, buildCrosscheck, type CrosscheckInput } from "@/
 
 const input = (over: Partial<CrosscheckInput> = {}): CrosscheckInput => ({
   kindBase: "unit", price: 30_000_000, settlementDate: "2026-11-30",
-  snapshot: { floorArea: 65.5, landArea: null },
-  property: { exclusiveArea: "65.50", exclusiveAreaRegistry: null, landArea: null, landAreaMethod: null, totalFloorArea: null },
   registry: { status: "none" }, sellerCompare: "allowed", sellers: [], documents: [], ...over,
 });
+const plan = (price: number) => ({ documentId: "doc-1", docType: "funding_plan", variant: "purchase", version: 1, title: "資金計画表(購入)", issuedAt: "2026-10-01T00:00:00.000Z", price });
 const render = (i: CrosscheckInput, canOpenProperty = true) => renderToStaticMarkup(
   <CrosscheckPanel result={buildCrosscheck(i)} dealId="d" propertyId="p" canOpenProperty={canOpenProperty} onOpenTab={() => {}} />,
 );
@@ -18,31 +17,31 @@ const read = (p: string) => readFileSync(join(process.cwd(), p), "utf8").replace
 
 describe("照合の表示", () => {
   it("一致があっても片方が未入力が残れば照合OKと出さず、確認できていない項目がありますと未確認の件数を出す(開いて出す・2026-11-04)", () => {
-    const html = render(input());
+    const html = render(input({ documents: [plan(30_000_000)] }));
     expect(html).not.toContain("照合OK");
     expect(html).toContain("確認できていない項目があります");
     expect(html).toContain("未確認");
     expect(html).toContain("<details open");
   });
   it("不一致=N件の食い違い(開いて出す)・出どころと値", () => {
-    const html = render(input({ snapshot: { floorArea: 70, landArea: null } }));
+    const html = render(input({ documents: [plan(29_000_000)] }));
     expect(html).toContain("1件の食い違い");
     expect(html).toContain("<details open");
-    expect(html).toContain("70.00㎡");
-    expect(html).toContain("65.50㎡");
+    expect(html).toContain("29,000,000円");
+    expect(html).toContain("30,000,000円");
+    // 面積は比べない(2026-11-05 発注者指示)。
+    expect(html).not.toContain("面積");
   });
   it("比べられた項目が無い=照合できる項目がありません", () => {
-    const html = render(input({ kindBase: null, property: null }));
+    const html = render(input({ kindBase: null }));
     expect(html).toContain("照合できる項目がありません");
     expect(html).not.toContain("照合OK");
   });
   it("土地か建物の謄本が足りない=照合OKと出さず、開いて出す", () => {
     const html = render(input({
-      kindBase: "house", snapshot: { floorArea: 91, landArea: 120 },
-      documents: [{ documentId: "doc-1", docType: "funding_plan", variant: "purchase", version: 1, title: "資金計画表(購入)", issuedAt: "2026-10-01T00:00:00.000Z", price: 30_000_000 }],
-      property: { exclusiveArea: null, exclusiveAreaRegistry: null, landArea: "120", landAreaMethod: null, totalFloorArea: "91" },
+      kindBase: "house", documents: [plan(30_000_000)],
       registry: {
-        status: "ok", missing: ["建物"], uncertain: null, areas: null, owners: null,
+        status: "ok", missing: ["建物"], uncertain: null, owners: null,
         rights: { activeRights: 1, readable: true, attachmentCreatedAt: "2026-10-05T03:00:00.000Z" },
         certificates: [{ side: "土地", createdAt: "2026-10-05T03:00:00.000Z" }],
       },
@@ -57,7 +56,7 @@ describe("照合の表示", () => {
   it("異体字=表記の違いの結果と注意を、開いて出す", () => {
     const html = render(input({
       sellers: [{ name: "高橋一郎", shareNum: null, shareDen: null }],
-      registry: { status: "ok", areas: null, rights: null, owners: { list: [{ name: "髙橋一郎", share: null }], confirmed: true, attachmentCreatedAt: "2026-10-05T03:00:00.000Z" } },
+      registry: { status: "ok", rights: null, owners: { list: [{ name: "髙橋一郎", share: null }], confirmed: true, attachmentCreatedAt: "2026-10-05T03:00:00.000Z" } },
     }));
     expect(html).toContain("表記の違い(異体字)");
     expect(html).toContain(`data-notice-id="${CROSSCHECK_NOTICE_IDS.nameVariant}"`);
@@ -68,12 +67,12 @@ describe("照合の表示", () => {
     const docs = [{ documentId: "doc-9", docType: "funding_plan", variant: "purchase", version: 1, title: "資金計画表(購入)", issuedAt: "2026-10-01T00:00:00.000Z", price: 30_000_000 }];
     const html = render(input({ documents: docs }));
     expect(html).toContain("/api/deals/d/documents/doc-9/file?format=pdf");
-    expect(html).toContain('href="/properties/p"');
-    expect(render(input(), false)).not.toContain('href="/properties/p"');
+    expect(html).toContain('href="/properties/p?tab=attachments"');
+    expect(render(input(), false)).not.toContain('href="/properties/p');
   });
   it("謄本の日付と注意(識別子つき)を出す", () => {
     const html = render(input({
-      registry: { status: "ok", areas: null, owners: null, rights: { activeRights: 1, readable: true, attachmentCreatedAt: "2026-01-05T03:00:00.000Z" } },
+      registry: { status: "ok", owners: null, rights: { activeRights: 1, readable: true, attachmentCreatedAt: "2026-01-05T03:00:00.000Z" } },
     }));
     expect(html).toContain("照合に使った謄本: 2026/01/05 取込(担保)");
     expect(html).toContain(`data-notice-id="${CROSSCHECK_NOTICE_IDS.activeMortgage}"`);

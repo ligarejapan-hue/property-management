@@ -4,15 +4,13 @@ import type { BasePropertyKind } from "./constants";
 /**
  * 取引の数値照合。同じ意味の値を出どころごとに集めて比べる。純関数(読み込みは crosscheck-load.ts)。
  * - 件数に数えるのは「不一致」だけ。種類が違う・表記の違い・確認できない・片方が未入力は数えない。
- * - 区分の床面積は登記(内法)と契約(壁芯)を分ける。実測の土地と公簿の謄本も同じ扱い。
+ * - 面積は比べない(2026-11-05 発注者指示)。
  * - 土地のある物件(戸建・土地・一棟)は土地と建物の全筆がそろって初めて担保と所有者を比べる。足りなければ照合OKと出さない。
  * ⚠謄本の所有者名は入力に入るが、結果には入れない(比べた結果だけを返す)。ログ・監査にも出さない。
  */
 
 export type CrosscheckStatus = "match" | "mismatch" | "missing" | "kind_differs" | "notation_differs" | "unverifiable";
-export type CrosscheckItemKey =
-  | "area_registered" | "area_wall" | "area_kinds" | "area_floor" | "area_land" | "area_land_kinds"
-  | "price" | "settlement_date" | "landlord_change_date" | "seller" | "mortgage";
+export type CrosscheckItemKey = "price" | "settlement_date" | "landlord_change_date" | "seller" | "mortgage";
 
 export const CROSSCHECK_STATUS_LABELS: Record<CrosscheckStatus, string> = {
   match: "一致", mismatch: "不一致", missing: "片方が未入力", kind_differs: "種類が違う", notation_differs: "表記の違い(異体字)", unverifiable: "確認できない",
@@ -123,7 +121,6 @@ export type RegistryFacts =
     uncertain?: RegistryUncertain | null;
     /** 土地のある物件で使った謄本(種類と取り込んだ日)。 */
     certificates?: { side: RegistrySide; createdAt: string }[];
-    areas: { unit: string | null; land: string | null; building: string | null; attachmentCreatedAt: string } | null;
     rights: { activeRights: number; readable: boolean; attachmentCreatedAt: string } | null;
     owners: {
       list: { name: string; share: string | null }[]; confirmed: boolean;
@@ -138,8 +135,6 @@ export type RegistryFacts =
 export interface CrosscheckDocument {
   price?: number | null;
   settlementDate?: string | null;
-  floorArea?: number | null;
-  landArea?: number | null;
   activeRights?: number | null;
 }
 
@@ -157,11 +152,6 @@ export interface CrosscheckInput {
   kindBase: BasePropertyKind | null;
   price: number | null;
   settlementDate: string | null;
-  snapshot: { floorArea: number | null; landArea: number | null };
-  /** 物件の無い取引・物件を見られない人は null。 */
-  property: {
-    exclusiveArea: unknown; exclusiveAreaRegistry: unknown; landArea: unknown; landAreaMethod: string | null; totalFloorArea: unknown;
-  } | null;
   registry: RegistryFacts;
   /** 売主名を比べてよいか。謄本と所有者の閲覧の権限が無い人は denied(結果から名義を当てられないように)。 */
   sellerCompare: "allowed" | "denied";
@@ -173,7 +163,7 @@ export interface CrosscheckInput {
  * 値の種類ごとに、値を使う書類(発行の写しに残す項目もこの表で決める)。
  * 鍵受領書のように価格を載せない書類は、あとで価格が変わっても食い違いにしない。
  */
-export const CROSSCHECK_DOC_FIELDS: Record<"price" | "settlementDate" | "area" | "activeRights", readonly string[]> = {
+export const CROSSCHECK_DOC_FIELDS: Record<"price" | "settlementDate" | "activeRights", readonly string[]> = {
   price: [
     "funding_plan", "business_plan", "mediation", "settlement_statement", "settlement_guide", "settlement_guide_seller",
     "balance_receipt", "oc_purchase_consult",
@@ -182,26 +172,12 @@ export const CROSSCHECK_DOC_FIELDS: Record<"price" | "settlementDate" | "area" |
     "settlement_statement", "settlement_guide", "settlement_guide_seller", "completion_confirmation", "contract_guide",
     "power_of_attorney", "prep_checklist", "checklist_settlement", "landlord_change_notice",
   ],
-  area: ["business_plan", "mediation"],
   activeRights: ["checklist_settlement"],
 };
 
 // ---------- 表記をそろえる ----------
 
 const nfkc = (v: string) => v.normalize("NFKC").replace(/\s+/g, "");
-
-/** 面積を 100分の1㎡ の整数に(浮動小数の誤差を避ける)。読めないもの・坪は null(推測で換算しない)。 */
-export function normalizeArea(v: unknown): number | null {
-  if (typeof v === "number") {
-    if (!Number.isFinite(v) || v < 0) return null;
-  } else if (typeof v !== "string" && !(v && typeof v === "object" && "toString" in v)) {
-    return null;
-  }
-  const s = nfkc(String(v)).replace(/平方メートル|m2|,/gi, "");
-  const m = /^(\d+)(?:[.:・](\d{1,2}))?$/.exec(s);
-  if (!m) return null;
-  return Number(m[1]) * 100 + Number((m[2] ?? "").padEnd(2, "0"));
-}
 
 export function normalizeYen(v: unknown): number | null {
   if (typeof v === "number") return Number.isFinite(v) ? v : null;
@@ -254,7 +230,6 @@ export function parseShare(v: string | null | undefined): { num: number; den: nu
 
 // ---------- 出どころ ----------
 
-const fmtArea = (h: number) => `${Math.floor(h / 100)}.${String(h % 100).padStart(2, "0")}㎡`;
 const fmtYen = (n: number) => `${n.toLocaleString("en-US")}円`;
 
 type Base = Pick<CrosscheckSource, "key" | "label" | "docType" | "link">;
@@ -269,34 +244,21 @@ function sourceOf<T extends string | number>(
   return { ...base, value: fmt(n), state: "value", compareKey: String(n) };
 }
 
-const areaSource = (base: Base, raw: unknown) => sourceOf(base, raw, normalizeArea, fmtArea);
 const unverifiableSource = (base: Base): CrosscheckSource => ({ ...base, value: null, state: "unverifiable", compareKey: null });
 const emptySource = (base: Base): CrosscheckSource => ({ ...base, value: null, state: "empty", compareKey: null });
 
-const SNAPSHOT_LINK: CrosscheckLink = { kind: "tab", tab: "property" };
-const PROPERTY_LINK: CrosscheckLink = { kind: "property" };
 const REGISTRY_LINK: CrosscheckLink = { kind: "property", tab: "attachments" };
 const DOCS_LINK: CrosscheckLink = { kind: "tab", tab: "documents" };
 
 const jstDay = (iso: string) => jstDateString(new Date(iso));
 const dayJa = (ymd: string) => ymd.replace(/-/g, "/");
 
-function registryAreaSource(r: RegistryFacts, pick: "unit" | "land" | "building", label: string): CrosscheckSource {
-  const base = { key: "registry", link: REGISTRY_LINK };
-  if (r.status === "none") return emptySource({ ...base, label: `${label}(謄本)` });
-  if (r.status !== "ok") return unverifiableSource({ ...base, label: `${label}(謄本)` });
-  if (!r.areas) return emptySource({ ...base, label: `${label}(謄本)` });
-  const named = `${label}(謄本・${dayJa(jstDay(r.areas.attachmentCreatedAt))} 取込)`;
-  const v = r.areas[pick];
-  return v === null ? unverifiableSource({ ...base, label: named }) : areaSource({ ...base, label: named }, v);
-}
-
 /** 書類の出どころ。その値を使う書類で値が残っていないものは legacy に数える(不一致にしない)。 */
 function documentSources(
-  docs: IssuedDocFacts[], field: "price" | "settlementDate" | "floorArea" | "landArea",
+  docs: IssuedDocFacts[], field: "price" | "settlementDate",
   make: (base: Base, raw: unknown) => CrosscheckSource,
 ): { sources: CrosscheckSource[]; legacy: number } {
-  const usedBy = CROSSCHECK_DOC_FIELDS[field === "floorArea" || field === "landArea" ? "area" : field];
+  const usedBy = CROSSCHECK_DOC_FIELDS[field];
   const sources: CrosscheckSource[] = [];
   let legacy = 0;
   for (const d of docs) {
@@ -351,53 +313,6 @@ function kindsItem(key: CrosscheckItemKey, label: string, message: string, a: Cr
   if (a.state !== "value" || b.state !== "value") return null;
   // どちらも物件の欄のことがあるので、この項目の中で出どころの鍵が重ならないようにする。
   return { key, label, status: "kind_differs", message, sources: [{ ...a, key: `a:${a.key}` }, { ...b, key: `b:${b.key}` }], legacyDocuments: 0 };
-}
-
-function areaItems(i: CrosscheckInput): CrosscheckItem[] {
-  if (!i.kindBase) return [];
-  const p = i.property;
-  const out: CrosscheckItem[] = [];
-  const snapshot = (raw: unknown, label: string) => areaSource({ key: "snapshot", label, link: SNAPSHOT_LINK }, raw);
-  if (i.kindBase === "unit") {
-    const reg = registryAreaSource(i.registry, "unit", "登記の専有面積");
-    const propReg = p ? [areaSource({ key: "property", label: "物件の専有面積(登記簿)", link: PROPERTY_LINK }, p.exclusiveAreaRegistry)] : [];
-    out.push(compareItem("area_registered", "専有面積(登記・内法)", [reg, ...propReg]));
-    const docs = documentSources(i.documents, "floorArea", areaSource);
-    const wall = [
-      ...(p ? [areaSource({ key: "property", label: "物件の専有面積(壁芯)", link: PROPERTY_LINK }, p.exclusiveArea)] : []),
-      snapshot(i.snapshot.floorArea, "取引の専有面積"),
-      ...docs.sources, ...legacySource(docs.legacy),
-    ];
-    out.push(compareItem("area_wall", "専有面積(契約・壁芯)", wall, docs.legacy));
-    const registered = [reg, ...propReg].find((s) => s.state === "value");
-    const contract = wall.find((s) => s.state === "value");
-    const kinds = registered && contract
-      ? kindsItem("area_kinds", "専有面積(内法と壁芯)", "登記は内法、契約は壁芯で測るので、差があっても間違いではありません。", registered, contract)
-      : null;
-    if (kinds) out.push(kinds);
-    return out;
-  }
-  if (i.kindBase === "house" || i.kindBase === "building") {
-    const docs = documentSources(i.documents, "floorArea", areaSource);
-    out.push(compareItem("area_floor", "建物の床面積", [
-      registryAreaSource(i.registry, "building", "登記の床面積"),
-      ...(p ? [areaSource({ key: "property", label: "物件の建物面積", link: PROPERTY_LINK }, p.totalFloorArea)] : []),
-      snapshot(i.snapshot.floorArea, "取引の延床面積"), ...docs.sources, ...legacySource(docs.legacy),
-    ], docs.legacy));
-  }
-  const docs = documentSources(i.documents, "landArea", areaSource);
-  const reg = registryAreaSource(i.registry, "land", "登記の地積");
-  // 実測の土地は公簿(謄本)と測り方が違う。実測の値どうしだけを比べる。
-  const surveyed = !!p?.landAreaMethod && /実測/.test(p.landAreaMethod);
-  const propLand = p ? [areaSource({ key: "property", label: "物件の土地面積", link: PROPERTY_LINK }, p.landArea)] : [];
-  out.push(compareItem("area_land", "土地の面積", [
-    ...(surveyed ? [] : [reg]), ...propLand, snapshot(i.snapshot.landArea, "取引の土地面積"), ...docs.sources, ...legacySource(docs.legacy),
-  ], docs.legacy));
-  if (surveyed && propLand[0]) {
-    const kinds = kindsItem("area_land_kinds", "土地の面積(公簿と実測)", "謄本は公簿、物件は実測の面積なので、差があっても間違いではありません。", reg, propLand[0]);
-    if (kinds) out.push(kinds);
-  }
-  return out;
 }
 
 function priceItem(i: CrosscheckInput): CrosscheckItem {
@@ -569,14 +484,13 @@ function registriesUsed(r: RegistryFacts): { date: string; usedFor: string[] }[]
     if (hit) hit.usedFor.push(use);
     else out.push({ date, usedFor: [use] });
   };
-  if (r.areas) add(r.areas.attachmentCreatedAt, "面積");
   if (r.rights) add(r.rights.attachmentCreatedAt, "担保");
   if (r.owners) add(r.owners.attachmentCreatedAt, "売主名");
   return out.sort((a, b) => a.date.localeCompare(b.date));
 }
 
 export function buildCrosscheck(input: CrosscheckInput): CrosscheckResult {
-  const items = [...areaItems(input), priceItem(input), ...dateItems(input), sellerItem(input), mortgageItem(input)];
+  const items = [priceItem(input), ...dateItems(input), sellerItem(input), mortgageItem(input)];
   const mismatchCount = items.filter((i) => i.status === "mismatch").length;
   const comparedCount = mismatchCount + items.filter((i) => i.status === "match" || i.status === "notation_differs").length;
   const registries = registriesUsed(input.registry);

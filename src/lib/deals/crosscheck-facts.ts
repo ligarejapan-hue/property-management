@@ -15,17 +15,13 @@ const numOrNull = (v: unknown): number | null | undefined => (typeof v === "numb
  * activeRights = 書類確認書が抹消の項目を足すのに使った件数(謄本を読めなかった人の発行は 0 のまま残る=あとで不一致に出る)。
  */
 export function buildCrosscheckFacts(
-  docType: string, deal: Pick<DealView, "price" | "settlementAt" | "propertySnapshot">, registry?: { activeRights: number },
+  docType: string, deal: Pick<DealView, "price" | "settlementAt">, registry?: { activeRights: number },
 ): CrosscheckDocument {
   const out: CrosscheckDocument = {};
   if (CROSSCHECK_DOC_FIELDS.price.includes(docType)) out.price = deal.price;
   // 賃貸人変更のお知らせの日付は発行のときに選ぶ変更日(inputSnapshot に残る)。
   if (CROSSCHECK_DOC_FIELDS.settlementDate.includes(docType) && docType !== "landlord_change_notice") {
     out.settlementDate = deal.settlementAt ? jstDateString(new Date(deal.settlementAt)) : null;
-  }
-  if (CROSSCHECK_DOC_FIELDS.area.includes(docType)) {
-    out.floorArea = deal.propertySnapshot.floorArea;
-    out.landArea = deal.propertySnapshot.landArea;
   }
   if (CROSSCHECK_DOC_FIELDS.activeRights.includes(docType) && registry) out.activeRights = registry.activeRights;
   return out;
@@ -41,11 +37,6 @@ function legacyFacts(docType: string, calc: Record<string, unknown>): Crosscheck
     const out: CrosscheckDocument = {};
     const price = numOrNull(obj(calc.purchase).priceIncl);
     if (price !== undefined) out.price = price;
-    const area = numOrNull(calc.areaSqm);
-    if (area !== undefined) {
-      if (calc.kindBase === "unit") out.floorArea = area;
-      else out.landArea = area;
-    }
     return out;
   }
   return {};
@@ -55,7 +46,7 @@ function legacyFacts(docType: string, calc: Record<string, unknown>): Crosscheck
 function readFacts(raw: unknown): CrosscheckDocument {
   const f = obj(raw);
   const out: CrosscheckDocument = {};
-  for (const k of ["price", "floorArea", "landArea", "activeRights"] as const) {
+  for (const k of ["price", "activeRights"] as const) {
     const v = numOrNull(f[k]);
     if (v !== undefined) out[k] = v;
   }
