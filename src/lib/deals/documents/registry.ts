@@ -7,7 +7,7 @@ import {
   sellerGuideOptionsSchema, settlementGuideOptionsSchema,
 } from "./business/settlement-guide";
 import {
-  RECEIPT_KINDS, buildReceipt, issuerChoices, receiptAmount, receiptOptionsSchema, receiptSides,
+  RECEIPT_KINDS, buildReceipt, issuerChoices, partyReceiptNotes, receiptAmount, receiptOptionsSchema, receiptSides,
   type IssuerChoice, type ReceiptKind,
 } from "./business/receipts";
 import { POA_MATTERS, buildPowerOfAttorney, poaChoices, poaOptionsSchema } from "./business/power-of-attorney";
@@ -119,7 +119,9 @@ function receiptDef(kind: ReceiptKind): BusinessDocDef {
     options: receiptOptionsSchema as z.ZodType<Record<string, unknown>>,
     defaults: (c) => {
       const { choices, initial } = issuerChoices(kind, c);
-      return { values: { issuer: initial, exempt: null, receivedOn: null }, issuers: choices };
+      // 売主の当事者が出すときだけ空欄で出る部分の知らせ(画面は自社を選んでいる間は出さない・止めない)。
+      const partyNotes = partyReceiptNotes(kind, c).map((n) => ({ value: n, label: n }));
+      return { values: { issuer: initial, exempt: null, receivedOn: null }, issuers: choices, ...(partyNotes.length ? { choices: { partyNotes } } : {}) };
     },
     build: (c, o) => {
       const r = buildReceipt(kind, c, receiptOptionsSchema.parse(o));

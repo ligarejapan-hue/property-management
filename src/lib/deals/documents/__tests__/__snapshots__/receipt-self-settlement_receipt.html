@@ -1,0 +1,39 @@
+<!DOCTYPE html><html lang="ja"><head><meta charset="utf-8"><title>精算金領収書</title>
+<style>
+@page { size: A4 portrait; margin: 14mm 14mm 16mm; }
+* { box-sizing: border-box; }
+html, body { margin: 0; padding: 0; background: #fff; color: #111; }
+body { font-size: 10pt; line-height: 1.5; -webkit-print-color-adjust: exact; print-color-adjust: exact; }
+.doc { width: 182mm; margin: 0 auto; }
+@media screen { body { background: #e5e7eb; padding: 8mm 0; } .doc { background: #fff; padding: 14mm; width: 210mm; min-height: 297mm; box-shadow: 0 1px 4px rgba(0,0,0,.15); } }
+h1 { font-size: 16pt; text-align: center; letter-spacing: .2em; margin: 0 0 4mm; }
+h2 { font-size: 11pt; margin: 5mm 0 1.5mm; padding-left: 2mm; border-left: 3px solid #333; }
+table { width: 100%; border-collapse: collapse; page-break-inside: auto; }
+tr { page-break-inside: avoid; }
+th, td { border: 1px solid #999; padding: 1.2mm 2mm; vertical-align: top; }
+th { background: #f3f4f6; font-weight: normal; text-align: left; }
+td.num, th.num { text-align: right; font-variant-numeric: tabular-nums; white-space: nowrap; }
+tr.total th, tr.total td { font-weight: bold; background: #f9fafb; }
+.meta { display: flex; justify-content: space-between; align-items: flex-end; margin-bottom: 3mm; }
+.customer { font-size: 13pt; border-bottom: 1px solid #333; padding: 0 2mm 1mm; min-width: 70mm; }
+.right { text-align: right; }
+.notes { margin: 2mm 0 0; padding-left: 5mm; font-size: 8.5pt; color: #333; }
+.company { margin-top: 8mm; text-align: right; font-size: 9pt; line-height: 1.6; }
+.company .name { font-size: 11pt; }
+.company .logo { display: block; margin: 0 0 1.5mm auto; max-height: 14mm; max-width: 50mm; height: auto; width: auto; }
+.greeting, .remarks { white-space: pre-wrap; margin: 3mm 0; }
+.remarks { font-size: 8.5pt; color: #333; }
+ body { font-family: "BIZ UDMincho","BIZ UD明朝","Yu Mincho",serif; }</style></head>
+<body><div class="doc">
+<h1>領収書</h1>
+<div class="meta"><div class="customer">架空 花子 様</div><div class="right">2026年5月1日</div></div>
+<p style="border:1px solid #333;padding:3mm;font-size:18pt;text-align:center;margin:6mm 0">金 61,487 円也</p>
+<p>但し、試験マンション&lt;b&gt; 201 / 架空県架空市2-2 の売買代金のうち精算金として(内訳: 固定資産税・都市計画税・管理費・修繕積立金等)</p>
+<p>上記の金額を正に領収いたしました。</p>
+<div style="border:1px solid #333;padding:3mm;width:30mm;text-align:center;font-size:9pt">収入印紙<br>200円</div>
+<div style="position:relative;margin:8mm 0 0 auto;width:95mm;min-height:28mm">
+<div style="font-size:12pt">架空不動産株式会社</div>
+<div>架空県架空市3-3</div>
+
+<img src="data:image/png;base64,c2VhbA==" alt="" style="position:absolute;right:0;top:0;max-height:24mm;max-width:24mm;height:auto;width:auto">
+</div></div></body></html>
