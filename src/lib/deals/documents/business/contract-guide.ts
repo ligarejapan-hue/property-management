@@ -31,9 +31,19 @@ export function addresseeChoices(c: BusinessDocContext): Choice[] {
   return (["seller", "buyer"] as const).map((r) => ({ value: r, label: `${ADDRESSEE_LABELS[r]}(${namesOf(partiesOf(c.deal, r)) ?? "未入力"})` }));
 }
 
-/** お持ちいただくものの初期値: 書類確認書(契約時)の「持参するもの」(この取引に当てはまる項目・1行に1つ)。 */
-export function defaultContractBelongings(c: BusinessDocContext): string | null {
+/** 宛先が法人、または個人で取引に代理人がいるときに足すもの(2026-11-05 発注者)。 */
+const PROXY_BELONGINGS = ["委任状", "実印"];
+
+/**
+ * お持ちいただくものの初期値: 書類確認書(契約時)の「持参するもの」(この取引に当てはまる項目・1行に1つ)。
+ * 宛先の当事者が法人、または個人で取引に代理人がいれば、委任状と実印も足す(すでにあれば重ねない)。
+ */
+export function defaultContractBelongings(c: BusinessDocContext, addressee: "seller" | "buyer" = defaultAddressee(c)): string | null {
   const labels = checklistItemsOf("contract", c).filter((i) => i.group === "bring").map((i) => i.label);
+  const hasAgent = c.deal.parties.some((p) => p.role === "agent");
+  if (partiesOf(c.deal, addressee).some((p) => p.partyType === "corporation" || hasAgent)) {
+    for (const x of PROXY_BELONGINGS) if (!labels.includes(x)) labels.push(x);
+  }
   return labels.length ? labels.join("\n") : null;
 }
 

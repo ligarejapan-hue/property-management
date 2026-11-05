@@ -615,6 +615,16 @@ describe("前回の入力を初めの値にする(第2段階 §3.2)", () => {
     expect(cg.starts.buyer.notes).toBeNull();
     expect(cg.starts.buyer.belongings).not.toBe("売主の持ち物");
   });
+  it("宛先を切り替えたときのお持ちいただくものは、その宛先の当事者で作る(法人なら委任状・実印・2026-11-05)", async () => {
+    const BUYER_CORP = { ...SELLER, id: "33333333-3333-4333-8333-000000000012", role: "buyer", partyType: "corporation", name: "架空商事" };
+    pm.deal.findUnique.mockResolvedValue({ ...row, parties: [SELLER, BUYER_CORP] });
+    pm.dealDocument.findMany.mockResolvedValue([]);
+    const body = await (await AVAILABLE(new Request("http://x"), ctx)).json();
+    const cg = docOf(body, "contract_guide") as unknown as { defaults: Record<string, unknown>; starts: Record<string, Record<string, unknown>> };
+    expect(String(cg.defaults.belongings)).not.toContain("委任状");
+    expect(String(cg.starts.seller.belongings)).not.toContain("委任状");
+    expect(String(cg.starts.buyer.belongings).split("\n").slice(-2)).toEqual(["委任状", "実印"]);
+  });
   it("前に発行した入力を初めの値にする・覚える書類だけを新しい版から読む・形の合わない写しは捨てる", async () => {
     pm.deal.findUnique.mockResolvedValue({ ...row, parties: [SELLER] });
     const prev = { addressee: "seller", belongings: "前回の持ち物", notes: "前回の連絡" };

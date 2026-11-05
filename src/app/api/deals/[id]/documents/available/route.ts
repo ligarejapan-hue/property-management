@@ -49,7 +49,7 @@ export async function GET(_request: Request, ctx: Ctx) {
       const startOf = (base: Record<string, unknown>) => rememberedStart(history, d.key, d.options, base, by?.key, d.form);
       const values = d.remember ? startOf(def.values) : def.values;
       // 小窓で依頼の内容・宛先を切り替えたときの初めの値(その値で出した前回の入力・無ければ初めの値。発注者決定 2026-10-29)
-      const starts = d.remember && by ? Object.fromEntries(by.values.map((v) => [v, startOf({ ...def.values, [by.key]: v })])) : null;
+      const starts = d.remember && by ? Object.fromEntries(by.values.map((v) => [v, startOf({ ...def.values, ...d.defaultsFor?.(bctx, v), [by.key]: v })])) : null;
       return {
         docType: d.key, label: d.label, group: d.group, missing: d.missing(bctx, values), blocking: d.blocking(bctx),
         defaults: values, issuers: def.issuers ?? null, choices: def.choices ?? null,
