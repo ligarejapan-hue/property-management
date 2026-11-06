@@ -1,5 +1,6 @@
 import { formatYenText, manToYen } from "@/lib/yen-man";
 import { businessTypeLabel } from "@/lib/property-business-type";
+import { REGISTRY_STATUS_LABELS } from "@/lib/property-types";
 
 /** 変更履歴に出す項目の画面の名前(変更履歴タブと経緯タブで共通)。 */
 export const CHANGE_FIELD_LABELS: Record<string, string> = {
@@ -84,8 +85,10 @@ export function saleYenHistoryValue(fieldName: string, value: string | null): st
   return /^\d+$/.test(yen) ? formatYenText(yen) : null;
 }
 
-/** 物件の変更履歴の値を画面の書き方に(価格は円・取扱区分は「仲介」など)。当てはまらない欄は null。 */
+/** 物件の変更履歴の値を画面の書き方に(価格は円・取扱区分は「仲介」・登記状況は「取得済」など)。当てはまらない欄は null。 */
 export function propertyHistoryValue(fieldName: string, value: string | null): string | null {
   if (fieldName === "businessType") return value ? businessTypeLabel(value) : null;
+  // 登記状況は画面と同じ言葉で(謄本の添付で自動で取得済になる行が増えたため・2026-11-06)。
+  if (fieldName === "registryStatus") return (value && Object.prototype.hasOwnProperty.call(REGISTRY_STATUS_LABELS, value) ? REGISTRY_STATUS_LABELS[value] : null);
   return saleYenHistoryValue(fieldName, value);
 }
