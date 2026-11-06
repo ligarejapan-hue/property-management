@@ -86,6 +86,9 @@ const VERSIONED: Record<string, string> = {
   "src/app/api/properties/[id]/dm-logs/[logId]/reaction/route.ts:276":
     "property.dmStatus(undeliverable連動のno_send昇格)+version increment" +
     "(Task 9で修正: 元は進めていなかった)",
+  "src/app/api/properties/[id]/parcel-change/route.ts:87":
+    "property.lotNumber/extraParcels(分筆・合筆の記録・2026-11-06)+version increment" +
+    "(物件の行ロック→編集中の鍵の確認→版の条件つき更新。取引の選びは物件の行のあとに直す)",
   "src/app/api/properties/[id]/route.ts:566":
     "property の編集画面フィールド一式(編集画面の本体保存窓口)+version increment",
   "src/app/api/properties/bulk-update/route.ts:90":
