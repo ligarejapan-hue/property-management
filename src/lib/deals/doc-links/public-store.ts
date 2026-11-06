@@ -2,7 +2,7 @@ import crypto from "crypto";
 import prisma from "@/lib/prisma";
 import { resolveCompanyProfile } from "@/lib/sales-sheet/company-profile-store";
 import { getStorage } from "@/lib/storage";
-import { DOC_FILES_PER_LINK, DOC_FILES_PER_REQUEST, DOC_REQUEST_STATUSES, isDocLinkOpen, type DocRequestStatus } from "./constants";
+import { DOC_BYTES_PER_LINK, DOC_FILES_PER_LINK, DOC_FILES_PER_REQUEST, DOC_REQUEST_STATUSES, isDocLinkOpen, type DocRequestStatus } from "./constants";
 import type { PublicRequestView } from "./public-page";
 
 /** ⚠お客様のページへ渡す値はこの select だけで決まる。取引から読むのは状態だけ(住所・氏名・金額を読まない)。 */
@@ -59,11 +59,13 @@ export async function recordSubmittedFile(
       const request = await tx.dealDocRequest.findFirst({ where: { id: args.requestId, linkId: link.id }, select: { id: true, status: true } });
       if (!request) return { kind: "not_found" };
       if (request.status === "received") return { kind: "received" };
-      const [inRequest, inLink] = await Promise.all([
+      const [inRequest, inLink, linkBytes] = await Promise.all([
         tx.dealDocFile.count({ where: { requestId: request.id, reviewState: { not: "rejected" } } }),
         tx.dealDocFile.count({ where: { request: { linkId: link.id } } }),
+        tx.dealDocFile.aggregate({ where: { request: { linkId: link.id } }, _sum: { fileSize: true } }),
       ]);
       if (inRequest >= DOC_FILES_PER_REQUEST || inLink >= DOC_FILES_PER_LINK) return { kind: "too_many" };
+      if ((linkBytes._sum.fileSize ?? 0) + args.buffer.length > DOC_BYTES_PER_LINK) return { kind: "too_many" };
       await tx.dealDocFile.create({
         data: { id: fileId, requestId: request.id, storageKey, mimeType: args.mimeType, fileSize: args.buffer.length, reviewStateAt: args.now },
       });

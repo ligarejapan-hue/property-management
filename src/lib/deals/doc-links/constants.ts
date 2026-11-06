@@ -12,12 +12,24 @@ export const DOC_LINK_ROLES = ["seller", "buyer"] as const;
 export type DocLinkRole = (typeof DOC_LINK_ROLES)[number];
 export const DOC_LINK_ROLE_LABELS: Record<DocLinkRole, string> = { seller: "売主", buyer: "買主" };
 
-/** 1ファイルの上限。proxy の上限(10MB)と nginx の見本(10m)に収める。 */
+/** 写真の上限で、PDF を縮めるときの目標(写真はスマホの中で縮めてから送る)。 */
 export const DOC_FILE_MAX_BYTES = 8 * 1024 * 1024;
+/**
+ * PDF として受け取ってよい大きさ(縮める前)。8MB を超えた PDF はサーバーで縮める(2026-11-06 発注者)。
+ * ⚠受け口は proxy を通さない(src/proxy.ts の SUBMIT_UPLOAD_PATTERN)。nginx の見本は 32m。
+ */
+export const DOC_PDF_UPLOAD_MAX_BYTES = 30 * 1024 * 1024;
+/** 縮めても 8MB に届かないとき、保存してよい大きさ(社内の添付と同じ 20MB・2026-10-19 発注者決定)。 */
+export const DOC_FILE_ACCEPT_BYTES = 20 * 1024 * 1024;
 /** 差し戻したものを除いて、1書類あたりのファイル数。 */
 export const DOC_FILES_PER_REQUEST = 5;
 /** 差し戻したものも含めて、1リンクあたりのファイル数(ディスクを使い切られない上限)。 */
 export const DOC_FILES_PER_LINK = 50;
+/**
+ * 差し戻したものも含めて、1リンクあたりの合計の大きさ。1ファイル 20MB まで保存できるようにした(2026-11-06)ので、
+ * ディスクの使い方の最悪が前(50 ファイル × 8MB)より増えないよう合計でも見る。
+ */
+export const DOC_BYTES_PER_LINK = DOC_FILES_PER_LINK * DOC_FILE_MAX_BYTES;
 
 export const DOC_REQUEST_STATUSES = ["pending", "submitted", "received", "rejected"] as const;
 export type DocRequestStatus = (typeof DOC_REQUEST_STATUSES)[number];

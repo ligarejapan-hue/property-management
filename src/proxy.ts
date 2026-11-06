@@ -91,9 +91,15 @@ export default async function proxy(request: NextRequest) {
 // ⚠まとめてある PDF の分け方の案(split-analyze)と、分けて保存(split)も同じ大きさの PDF を受け取る(2026-10-28)。
 export const LARGE_UPLOAD_API_PATTERN =
   "api/properties/[^/]+/attachments$|api/properties/[^/]+/attachments/scan$|api/properties/[^/]+/attachments/split$|api/properties/[^/]+/attachments/split-analyze$|api/import/paste$|api/import/paste/commit$|api/import/detect$|api/report-inbox$";
+/**
+ * お客様の書類提出の受け口(ログインなし)。8MB を超える PDF を 30MB まで受け取って縮める(2026-11-06 発注者)。
+ * proxy を通すと本文が 10MB で切られるので外す。route が本文を読む前に署名と Content-Length を確かめる
+ * (proxy-matcher-large-upload.test.ts)。proxy の役目は無い(/submit/ はもともと公開)。
+ */
+export const SUBMIT_UPLOAD_PATTERN = "submit/[^/]+/upload$";
 
 export const config = {
   matcher: [
-    "/((?!_next/static|_next/image|favicon.ico|uploads/|api/properties/[^/]+/attachments$|api/properties/[^/]+/attachments/scan$|api/properties/[^/]+/attachments/split$|api/properties/[^/]+/attachments/split-analyze$|api/import/paste$|api/import/paste/commit$|api/import/detect$|api/report-inbox$).*)",
+    "/((?!_next/static|_next/image|favicon.ico|uploads/|api/properties/[^/]+/attachments$|api/properties/[^/]+/attachments/scan$|api/properties/[^/]+/attachments/split$|api/properties/[^/]+/attachments/split-analyze$|api/import/paste$|api/import/paste/commit$|api/import/detect$|api/report-inbox$|submit/[^/]+/upload$).*)",
   ],
 };

@@ -1,5 +1,5 @@
 import crypto from "crypto";
-import { DOC_FILE_MAX_BYTES, DOC_REQUEST_PUBLIC_LABELS, type DocRequestStatus } from "./constants";
+import { DOC_FILE_MAX_BYTES, DOC_PDF_UPLOAD_MAX_BYTES, DOC_REQUEST_PUBLIC_LABELS, type DocRequestStatus } from "./constants";
 
 /**
  * お客様のページ(/submit/<トークン>)の HTML。
@@ -32,9 +32,12 @@ main{max-width:34rem;margin:0 auto;padding:1rem}h1{font-size:1.1rem;margin:.5rem
 label.btn.main{background:#1c1917;border-color:#1c1917;color:#fff}input[type=file]{position:absolute;width:1px;height:1px;opacity:0}
 .msg{font-size:.875rem;color:#b91c1c;min-height:1.2em;margin:.25rem 0 0}.note{font-size:.8rem;color:#57534e}`;
 
-/** スマホで画像を描き直してから送る。向きを画素に焼き込むので、サーバーでメタデータを全部落としても向きが保たれる。 */
+/**
+ * スマホで画像を描き直してから送る。向きを画素に焼き込むので、サーバーでメタデータを全部落としても向きが保たれる。
+ * PDF はそのまま送り、8MB を超えるものはサーバーが縮める(30MB まで・2026-11-06 発注者)。
+ */
 const SCRIPT = `(function(){
-var MAX=${DOC_FILE_MAX_BYTES},EDGE=2560,LABELS=${JSON.stringify(DOC_REQUEST_PUBLIC_LABELS).replace(/</g, "\\u003c")};
+var MAX=${DOC_FILE_MAX_BYTES},PDF_MAX=${DOC_PDF_UPLOAD_MAX_BYTES},EDGE=2560,LABELS=${JSON.stringify(DOC_REQUEST_PUBLIC_LABELS).replace(/</g, "\\u003c")};
 function isPdf(f){return f.type==="application/pdf"||/\\.pdf$/i.test(f.name||"")}
 function toJpeg(file){return new Promise(function(res,rej){
  var url=URL.createObjectURL(file),img=new Image();
@@ -53,10 +56,10 @@ function row(doc,status,count){var st=doc.querySelector(".st");st.dataset.status
  if(status==="received"){var b=doc.querySelector(".btns");if(b)b.remove()}}
 document.querySelectorAll(".doc input[type=file]").forEach(function(input){input.addEventListener("change",function(){
  var doc=input.closest(".doc"),msg=doc.querySelector(".msg"),files=[].slice.call(input.files||[]);input.value="";
- if(!files.length)return;msg.textContent="送信しています…";
+ if(!files.length)return;msg.textContent=files.some(function(f){return isPdf(f)&&f.size>MAX})?"送信しています…(大きいPDFは縮めるので1〜2分かかることがあります)":"送信しています…";
  files.reduce(function(p,f){return p.then(function(){
   var ready=isPdf(f)?Promise.resolve(f):toJpeg(f);
-  return ready.then(function(b){if(b.size>MAX)throw new Error("ファイルが大きすぎます。8MB以下にしてください。");return send(doc.dataset.id,b,isPdf(f)?"document.pdf":"photo.jpg")},function(){throw new Error("このファイルは読み込めませんでした。写真かPDFを選んでください。")})
+  return ready.then(function(b){if(b.size>(isPdf(f)?PDF_MAX:MAX))throw new Error("ファイルが大きすぎます。写真は8MBまで、PDFは30MBまでです。");return send(doc.dataset.id,b,isPdf(f)?"document.pdf":"photo.jpg")},function(){throw new Error("このファイルは読み込めませんでした。写真かPDFを選んでください。")})
   .then(function(r){if(!r.ok)throw new Error(r.error||"送信できませんでした。もう一度お試しください。");row(doc,r.status,r.count)});
  })},Promise.resolve()).then(function(){msg.textContent=""},function(e){msg.textContent=e.message||"送信できませんでした。もう一度お試しください。"});
 })});
@@ -77,7 +80,7 @@ export interface PublicRequestView { id: string; label: string; status: DocReque
 export function renderSubmitPage(input: { companyName: string; requests: PublicRequestView[]; nonce: string }): string {
   return `<!doctype html><html lang="ja"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><meta name="robots" content="noindex,nofollow,noarchive"><meta name="referrer" content="no-referrer"><title>書類のご提出</title><style nonce="${input.nonce}">${STYLE}</style></head><body><main>
 <h1>${esc(input.companyName)} 書類のご提出</h1>
-<p>書類ごとに、写真を撮るかファイルを選んでください。写真とPDFを送れます(1ファイル8MBまで)。</p>
+<p>書類ごとに、写真を撮るかファイルを選んでください。写真とPDFを送れます(写真は自動で縮めます。PDFは30MBまでで、8MBを超えるものは自動で縮めます)。</p>
 ${input.requests.map(docRow).join("\n")}
 <p class="note">送っていただいたファイルは、このページでは見られません。届いたことだけを表示します。</p>
 <noscript><p>このページを使うには JavaScript を有効にしてください。</p></noscript>

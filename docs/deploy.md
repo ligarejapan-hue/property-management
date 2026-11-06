@@ -612,6 +612,13 @@ migration `20261102100000_add_deal_doc_links`（表を 3 つ足すだけ）が�
 - 届いたファイルは保存先の `deals/<取引>/submissions/` に入り、`/uploads` からは開けない。保存ファイルの社外控えの対象に入る。
 - 届いたファイルは自動では消えない。`deal_doc_files.review_state` と `review_state_at` に状態が残る。
 
+### 6.0b お客様の書類提出で大きい PDF を縮める（2026-11-06）を反映するとき
+
+アプリは 8MB を超える PDF を 30MB まで受け取り、社内の添付と同じ部品（`scripts/pdf-compress.py`）で 8MB を目標に縮める。縮めても届かなければ 20MB までは元のまま保存する。migration・環境変数はない。**nginx はユーザーが実施する**（どちらを先にしても壊れない。nginx が 10m のままなら、8MB を超える PDF が今までどおり断られるだけ）。
+
+1. **nginx**: 公開ホストの vhost の `/submit/` の正規表現の location で、`client_max_body_size 10m;` を `32m;` に、`proxy_read_timeout`・`proxy_send_timeout` を `60s` から `300s` にする（`deploy/nginx/property-management.conf.example` と同じ）。`nginx -t` のあと `systemctl reload nginx`。
+2. **確かめる**: お客様のページから 8MB を超える PDF を1つ送り、社内の取引の画面で届いたファイルが 8MB 以下になっていること。圧縮が混んでいれば「いま混み合っています」と出る（社内の添付と席を分け合う）。
+
 ### 6.1 GitHub Actions からの反映（`.github/workflows/deploy.yml`）
 
 §6 の手順を 1 本のスクリプト（`deploy/vps/pm-deploy.sh`）にまとめ、GitHub Actions の手動起動から実行できるようにしたもの。**Claude Code の本番反映は §6.1a の手元の反映スクリプトで行う（2026-11-03 のユーザー指示）。** この経路はユーザーが画面から起動するためのもの。2 つの経路は VPS の同じ鍵 `/run/pm-deploy.lock` で排他し、どちらの経路でも同時に 1 本だけ動く。§6 は手順の中身の説明。
