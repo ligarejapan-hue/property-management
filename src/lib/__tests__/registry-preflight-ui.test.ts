@@ -89,7 +89,7 @@ describe("⚠APIへ送るIDに取り直しの合図を混ぜない（@codex #373
   it("送るのは idsKey（合図を含む cacheKey ではない）", () => {
     // 混ぜると `0|<uuid>` が送られて 400 になり、分類が読めず
     // 実行ボタンが永久に無効＝謄本の取得が全部できなくなる。
-    expect(SHARED).toContain("fetchRegistryPreflight(idsKey.split(\",\"))");
+    expect(SHARED).toContain("fetchRegistryPreflight(idsKey.split(\",\"), targetParcelId)");
     expect(SHARED).not.toMatch(/fetchRegistryPreflight\(cacheKey/);
   });
 

@@ -100,7 +100,7 @@ describe("検索の間に状況が変わっていたら自動で買わない(@co
     );
     // 検索前の値と、取り直した今の値を比べる。
     expect(block).toContain("preflight.flagsById.get(propertyId)");
-    expect(block).toContain("await fetchRegistryPreflight([propertyId])");
+    expect(block).toContain("await fetchRegistryPreflight([propertyId], targetParcelId)");
     expect(block).toContain("preflightWarningsIncreased(beforeFlags, afterFlags)");
     // 増えていたら取得へ進まず確認画面へ。
     const iGuard = block.indexOf("preflightWarningsIncreased(");

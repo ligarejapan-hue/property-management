@@ -285,3 +285,27 @@ describe("⚠住所が無い物件は地番ではなく住所を求める（@cod
     expect(await res.text()).not.toContain("秘密の住所");
   });
 });
+
+describe("取る土地・建物を選んだ事前確認(2026-11-06 2筆以上の2回目後半)", () => {
+  const ROW = { id: "row-b", kind: "building", location: null, number: "1番1の2", realEstateNumber: null, area: null };
+  it("★分類は選んだ行で出す(1筆目の不動産番号があっても行は建物として探せる・種別の食い違いの注意は出さない)", async () => {
+    pm.property.findMany.mockResolvedValue([
+      makeProp({ propertyType: "land", lotNumber: "1番1", buildingNumber: null, realEstateNumber: "1234567890123", extraParcels: [ROW] }),
+    ]);
+    const res = await POST(makeRequest({ propertyIds: [P1], targetParcelId: "row-b" }));
+    const body = (await res.json()) as { data: Array<Record<string, unknown>> };
+    expect(body.data[0].target).toEqual({ kind: "building", mismatchWarning: null });
+    // 指定なしは今までどおり(不動産番号がある=所在検索の対象外)。
+    const plain = (await (await POST(makeRequest({ propertyIds: [P1] }))).json()) as { data: Array<Record<string, unknown>> };
+    expect(plain.data[0].target).toEqual({ kind: "number", mismatchWarning: null });
+  });
+  it("★消された行は 409(番号なしの扱いにして地番の入力を1筆目へ入れさせない)", async () => {
+    pm.property.findMany.mockResolvedValue([makeProp({ lotNumber: "1番1", extraParcels: [] })]);
+    const res = await POST(makeRequest({ propertyIds: [P1], targetParcelId: "row-b" }));
+    expect(res.status).toBe(409);
+  });
+  it("行の指定は物件1件のときだけ・壊れた指定は 400", async () => {
+    expect((await POST(makeRequest({ propertyIds: [P1, P2], targetParcelId: "row-b" }))).status).toBe(400);
+    expect((await POST(makeRequest({ propertyIds: [P1], targetParcelId: "" }))).status).toBe(400);
+  });
+});

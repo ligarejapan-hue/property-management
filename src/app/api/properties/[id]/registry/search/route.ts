@@ -22,6 +22,7 @@ import {
   clearLiveViewCancel,
   closeLiveViewCancelWindow,
 } from "@/lib/registry-fetch/live-view-store";
+import { parseTargetParcelId } from "@/lib/registry-fetch/parcel-target";
 
 // ---------- POST /api/properties/[id]/registry/search ----------
 // 謄本 所在検索（PR-2b-2・add-only・検索ルートのみ）。番号無し物件を所在/地番/家屋番号で
@@ -68,6 +69,18 @@ export async function POST(
         "REGISTRY_SEARCH_CONFIRMATION_REQUIRED",
       );
     }
+    // 取る土地・建物(足した行の id・2026-11-06)。⚠壊れた指定を黙って1筆目に倒さない(別の謄本に課金しない)。
+    const targetParcel = parseTargetParcelId(
+      (body as { targetParcelId?: unknown } | null)?.targetParcelId,
+    );
+    if (!targetParcel.ok) {
+      throw new ApiError(
+        400,
+        "取る土地・建物の指定が正しくありません",
+        "REGISTRY_TARGET_PARCEL_INVALID",
+      );
+    }
+    const targetArgs = targetParcel.value ? { targetParcelId: targetParcel.value } : {};
 
     // 本番 provider は未実装。route は mock を直接 new せず、解決した provider が
     // 無ければ 501 で安全停止する（本番 DB・外部接続に一切触れない fail-closed）。
@@ -140,6 +153,7 @@ export async function POST(
           propertyId: id,
           confirmed,
           live,
+          ...targetArgs,
         },
         provider,
       );

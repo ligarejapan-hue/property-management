@@ -289,7 +289,7 @@ describe("⚠不動産番号を持つ物件では出さない（設計 §3.1）"
       join(process.cwd(), "src/app/api/registry-fetch/preflight/route.ts"),
       "utf8",
     );
-    expect(route).toContain("realEstateNumber: p.realEstateNumber");
+    expect(route).toContain("realEstateNumber: view.realEstateNumber");
   });
 
   it("番号ありのときは「どうすれば取得できるか」を案内する", () => {

@@ -150,6 +150,9 @@ import {
 } from "@/lib/registry-fetch/monthly-cap";
 import { RegistryFetchError } from "@/lib/registry-fetch/errors";
 import { fingerprintProperty } from "@/lib/registry-fetch/candidate-cache";
+import { fingerprintRegistryTarget } from "@/lib/registry-fetch/parcel-target";
+import { purchaseIdempotencyKey } from "@/lib/registry-fetch/purchase-safety";
+import { createHash } from "crypto";
 import * as routeModule from "@/app/api/properties/[id]/registry/auto-fetch/route";
 
 const { POST } = routeModule;
@@ -1944,5 +1947,102 @@ describe("【回収】購入済みの謄本を再課金なしで取り込む(mod
     // ⚠番号は**渡さない**。渡すと provider 側の「番号があれば番号を優先」に
     //   乗って課金フロー(確定→請求)へ落ちる余地が残る。
     expect(req.realEstateNumber).toBeFalsy();
+  });
+});
+
+describe("取る土地・建物を選んだ有料取得(2026-11-06 2筆以上の2回目後半)", () => {
+  const ROW = { id: "row-a", kind: "land", location: "テスト市テスト町二丁目", number: "1番2", realEstateNumber: null, area: null };
+  const BASE = {
+    address: "テスト市テスト町一丁目",
+    lotNumber: "1番1",
+    buildingNumber: null,
+    // ⚠1筆目の不動産番号。足した行の取得ではこれで取りに行かない。
+    realEstateNumber: "1234567890123" as string | null,
+    extraParcels: [ROW],
+  };
+  const PURCHASE_ENV = "REGISTRY_FETCH_PURCHASE_ENABLED";
+  let saved: string | undefined;
+  beforeEach(() => {
+    saved = process.env[PURCHASE_ENV];
+    process.env[PURCHASE_ENV] = "true";
+    setProperty(BASE);
+  });
+  afterEach(() => {
+    if (saved === undefined) delete process.env[PURCHASE_ENV];
+    else process.env[PURCHASE_ENV] = saved;
+  });
+  const hashOf = (lotOrBuilding: string) =>
+    createHash("sha256").update(purchaseIdempotencyKey({ propertyId: PROP_ID, lotOrBuilding, certificateType: "owner" })).digest("hex").slice(0, 32);
+  function run(targetParcelId: string | null, fingerprintFrom = BASE) {
+    const provider = successProvider();
+    const promise = runRegistryAutoFetch(
+      {
+        session: SESSION,
+        propertyId: PROP_ID,
+        confirmed: true,
+        locationCandidate: { lotNumber: "1-2", buildingNumber: null },
+        expectedFingerprint: fingerprintRegistryTarget(fingerprintFrom, targetParcelId),
+        ...(targetParcelId ? { targetParcelId } : {}),
+      },
+      provider,
+    );
+    return { provider, promise };
+  }
+
+  it("★行の所在で探し、1筆目の不動産番号では取りに行かない", async () => {
+    const { provider, promise } = run("row-a");
+    await promise;
+    const req = provider.fetchRegistryPdf.mock.calls[0][0];
+    expect(req.realEstateNumber).toBeNull();
+    expect(req.location).toEqual({ address: "テスト市テスト町二丁目", lotNumber: "1-2", buildingNumber: null, certificateType: "owner" });
+  });
+  it("★二重課金の鍵は種類つき(1筆目と同じ番号でも別の買い物)・台帳もその鍵で引く", async () => {
+    const { promise } = run("row-a");
+    await promise;
+    const where = pm.auditLog.findFirst.mock.calls[0][0].where;
+    expect(where.detail).toEqual({ path: ["purchaseKeyHash"], equals: hashOf("land:row-a:1-2") });
+    expect(hashOf("land:row-a:1-2")).not.toBe(hashOf("1-2"));
+    const ledger = pm.auditLog.create.mock.calls
+      .map((c) => (c[0] as { data: { action: string; detail: { purchaseKeyHash: string } } }).data)
+      .filter((d) => d.action === "registry_location_purchase");
+    expect(ledger[0].detail.purchaseKeyHash).toBe(hashOf("land:row-a:1-2"));
+  });
+  it("★行が台帳にあれば 409 で止まる(課金しない)", async () => {
+    pm.auditLog.findFirst.mockResolvedValue({ id: "prior" });
+    const { provider, promise } = run("row-a");
+    await expect(promise).rejects.toMatchObject({ status: 409, code: "REGISTRY_PURCHASE_ALREADY_DONE" });
+    expect(provider.fetchRegistryPdf).not.toHaveBeenCalled();
+  });
+  it("★消された行は課金前に 409・検索のあとで行を直したら 409(指紋が合わない)", async () => {
+    setProperty({ ...BASE, extraParcels: [] });
+    const gone = run("row-a");
+    await expect(gone.promise).rejects.toMatchObject({ status: 409, code: "REGISTRY_TARGET_PARCEL_NOT_FOUND" });
+    expect(gone.provider.fetchRegistryPdf).not.toHaveBeenCalled();
+
+    setProperty({ ...BASE, extraParcels: [{ ...ROW, number: "1番3" }] });
+    const edited = run("row-a");
+    await expect(edited.promise).rejects.toMatchObject({ status: 409 });
+    expect(edited.provider.fetchRegistryPdf).not.toHaveBeenCalled();
+  });
+  it("★1筆目で探した候補(指紋)は行の取得に使えない", async () => {
+    const provider = successProvider();
+    await expect(
+      runRegistryAutoFetch(
+        {
+          session: SESSION, propertyId: PROP_ID, confirmed: true,
+          locationCandidate: { lotNumber: "1-2", buildingNumber: null },
+          expectedFingerprint: fingerprintRegistryTarget(BASE, null),
+          targetParcelId: "row-a",
+        },
+        provider,
+      ),
+    ).rejects.toMatchObject({ status: 409 });
+    expect(provider.fetchRegistryPdf).not.toHaveBeenCalled();
+  });
+  it("指定なしは今までどおり(鍵は種類なし)", async () => {
+    setProperty({ ...BASE, realEstateNumber: null });
+    const { promise } = run(null, { ...BASE, realEstateNumber: null });
+    await promise;
+    expect(pm.auditLog.findFirst.mock.calls[0][0].where.detail.equals).toBe(hashOf("1-2"));
   });
 });

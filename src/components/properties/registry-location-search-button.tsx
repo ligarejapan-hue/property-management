@@ -32,6 +32,10 @@ import {
   monthlyCapBlockedReason,
 } from "@/lib/registry-fetch/monthly-cap";
 import { safeRandomId } from "@/lib/random-id";
+import { readExtraParcels } from "@/lib/property-parcels";
+import RegistryParcelTargetPicker, {
+  parcelTargetLabel,
+} from "@/components/properties/registry-parcel-target-picker";
 
 interface RegistryLocationSearchButtonProps {
   propertyId: string;
@@ -58,6 +62,11 @@ interface RegistryLocationSearchButtonProps {
   propertyLotNumber?: string | null;
   /** 物件に登録されている家屋番号(同上)。 */
   propertyBuildingNumber?: string | null;
+  /**
+   * 物件の「ほかの土地・建物」(extraParcels・保存されている形のまま)。行があれば「取得する土地・建物」を選べる
+   * (2026-11-06)。⚠区分マンションでは渡さない(足した行を使わない種別)。
+   */
+  propertyExtraParcels?: unknown;
   /**
    * 地番の保存に必要な現在の版番号。
    * ⚠保存後は**この画面が持ち帰った版番号**を使う（親の取り直しを待たない）。
@@ -125,6 +134,7 @@ export default function RegistryLocationSearchButton({
   propertyAddress,
   propertyLotNumber,
   propertyBuildingNumber,
+  propertyExtraParcels,
   propertyVersion,
   canWriteProperty,
   editLockHeld = false,
@@ -153,6 +163,11 @@ export default function RegistryLocationSearchButton({
   // 候補なしの回収で、物件が両方持つときにどちらを取り込むか(@codex #394 R13 P1)。
   // ⚠既定は土地(地番)。この運用では地番で買うのが基本のため。画面で変更できる。
   const [recoverKind, setRecoverKind] = useState<"land" | "building">("land");
+  // 取る土地・建物(足した行の id・null=1筆目・1棟目)。⚠検索の前に選ぶ。候補・指紋はこの行に結びつく
+  //   (サーバーが行の id を指紋に入れる)ので、検索した後で変えさせない(選べるのは検索の前と候補なしの取り込みだけ)。
+  const [targetParcelId, setTargetParcelId] = useState<string | null>(null);
+  const extraRows = readExtraParcels(propertyExtraParcels);
+  const targetRow = targetParcelId ? (extraRows.find((r) => r.id === targetParcelId) ?? null) : null;
   // 実況パネル用の参照 (client 発行・非PII)。検索のたびに発行し直す。
   // HTTP 本番でも動く safeRandomId を使う (crypto.randomUUID 禁止)。
   const [liveRef, setLiveRef] = useState<string | null>(null);
@@ -195,6 +210,7 @@ export default function RegistryLocationSearchButton({
     [propertyId],
     state === "confirmSearch" || state === "confirmObtain",
     preflightReload,
+    targetParcelId,
   );
   const target = preflight.targetsById.get(propertyId) ?? null;
   // 月の上限(2026-10-29 発注者決定=5万円/月)。確認の画面を開くたびに読み直す。
@@ -235,7 +251,9 @@ export default function RegistryLocationSearchButton({
       : undefined;
   };
 
+  // ⚠足した行を選んだときは行の種類が1つなので、土地/建物の選択は出さない。
   const hasBothIdentifiers =
+    !targetParcelId &&
     !!(propertyLotNumber ?? "").trim() && !!(propertyBuildingNumber ?? "").trim();
 
   /**
@@ -257,6 +275,7 @@ export default function RegistryLocationSearchButton({
 
   const reset = () => {
     clearFlow();
+    setTargetParcelId(null);
     // ⚠溜めておいた物件の取り直しをここで流す。流れは閉じたので、
     //   親が読み込み中の画面へ切り替わっても失うものが無い。
     if (propertyRefreshPendingRef.current) {
@@ -339,7 +358,7 @@ export default function RegistryLocationSearchButton({
     const ref = safeRandomId();
     setLiveRef(ref);
     try {
-      const res = await searchRegistryCandidates(propertyId, ref);
+      const res = await searchRegistryCandidates(propertyId, ref, targetParcelId);
       if (!res.searchable) {
         setCandidates([]);
         setNotSearchableReason(res.reason);
@@ -375,7 +394,7 @@ export default function RegistryLocationSearchButton({
         //   所有者を入れたりすると、検索前に見た警告のまま**重複して買ってしまう**。
         //   取り直せなかったときも止める側に倒す（お金は取り戻せない）。
         const beforeFlags = preflight.flagsById.get(propertyId) ?? null;
-        const afterFlags = await fetchRegistryPreflight([propertyId])
+        const afterFlags = await fetchRegistryPreflight([propertyId], targetParcelId)
           .then((r) => r.data[0] ?? null)
           .catch(() => null);
         // ⚠**待ちの直後に、真っ先に中止を読み直す**（@codex #399 R3/R4 P1・P2）。
@@ -466,6 +485,7 @@ export default function RegistryLocationSearchButton({
         certificateType,
         obtainLiveRef,
         approvedPreflight,
+        targetParcelId,
       );
       setState("done");
       // 画面を作り直さずに、添付ファイル一覧と謄本の状態だけを静かに最新化する
@@ -526,17 +546,25 @@ export default function RegistryLocationSearchButton({
           hasBothIdentifiers ? recoverKind : undefined,
           // ⚠**画面が見せていた内容**を一緒に送る(@codex #394 R20 P1)。確認の後に
           //   誰かが地番を編集していたら、server 側で 409 にして取り違えを防ぐ。
-          {
-            version: savedVersion ?? propertyVersion,
-            address: propertyAddress,
-            identifier: hasBothIdentifiers
-              ? recoverKind === "land"
-                ? propertyLotNumber
-                : propertyBuildingNumber
-              : ((propertyBuildingNumber ?? "").trim()
-                  ? propertyBuildingNumber
-                  : propertyLotNumber),
-          },
+          targetParcelId
+            ? {
+                // ⚠足した行は行の所在(空なら物件の住所)と行の番号(サーバーも同じ値で比べる)。
+                version: savedVersion ?? propertyVersion,
+                address: targetRow?.location?.trim() ? targetRow.location : propertyAddress,
+                identifier: targetRow?.number ?? null,
+              }
+            : {
+                version: savedVersion ?? propertyVersion,
+                address: propertyAddress,
+                identifier: hasBothIdentifiers
+                  ? recoverKind === "land"
+                    ? propertyLotNumber
+                    : propertyBuildingNumber
+                  : ((propertyBuildingNumber ?? "").trim()
+                      ? propertyBuildingNumber
+                      : propertyLotNumber),
+              },
+          targetParcelId,
         );
       } else {
         await recoverRegistryByCandidate(
@@ -544,6 +572,7 @@ export default function RegistryLocationSearchButton({
           selected!.candidateRef,
           certificateType,
           recoverLiveRef,
+          targetParcelId,
         );
       }
       setState("done");
@@ -674,6 +703,18 @@ export default function RegistryLocationSearchButton({
             閉じる
           </Button>
         </div>
+      )}
+
+      {/* 取る土地・建物(2026-11-06)。⚠地番を尋ねる小窓・確認パネルのどちらが出ていても選べるように、
+          その外に置く(1筆目の地番が空でも、足した行を選べば小窓を経ずに検索できる・@codex P2)。 */}
+      {state === "confirmSearch" && (
+        <RegistryParcelTargetPicker
+          rows={extraRows}
+          mainLotNumber={propertyLotNumber}
+          mainBuildingNumber={propertyBuildingNumber}
+          value={targetParcelId}
+          onChange={setTargetParcelId}
+        />
       )}
 
       {/* ⚠番号が無い物件では、確認パネルの**前に**地番を入れてもらう（設計 §3.1）。
@@ -933,6 +974,21 @@ export default function RegistryLocationSearchButton({
           </p>
           <RegistryPreflightWarningLines state={preflight} propertyId={propertyId} />
           {selected ? (
+            targetRow && (
+              <p className="text-indigo-700 dark:text-indigo-300">
+                取得する土地・建物：{parcelTargetLabel(targetRow)}
+              </p>
+            )
+          ) : (
+            <RegistryParcelTargetPicker
+              rows={extraRows}
+              mainLotNumber={propertyLotNumber}
+              mainBuildingNumber={propertyBuildingNumber}
+              value={targetParcelId}
+              onChange={setTargetParcelId}
+            />
+          )}
+          {selected ? (
             <>
               <p className="truncate text-indigo-700 dark:text-indigo-300">{selected.address ?? "（所在不明）"}</p>
               <p className="truncate text-indigo-700 dark:text-indigo-300">
@@ -947,7 +1003,9 @@ export default function RegistryLocationSearchButton({
           ) : (
             <>
               <p className="text-indigo-700 dark:text-indigo-300">
-                この物件に登録されている所在・地番で、購入済みの謄本を探します。
+                {targetRow
+                  ? "選んだ土地・建物の所在・番号で、購入済みの謄本を探します。"
+                  : "この物件に登録されている所在・地番で、購入済みの謄本を探します。"}
               </p>
             </>
           )}

@@ -28,10 +28,10 @@ import {
 import type { RegistryLiveReporter } from "@/lib/registry-fetch/types";
 import { buildRegistrySearchRequest } from "@/lib/registry-fetch/search-request";
 import { hashPropertyFingerprint } from "@/lib/registry-fetch/candidate-cache";
+import { fingerprintRegistryTarget, registryTargetView } from "./parcel-target";
 import {
   rememberSearchCandidates,
   resolveCachedCandidate,
-  fingerprintProperty,
   type ResolvedCandidate,
 } from "./candidate-cache";
 
@@ -57,6 +57,11 @@ export interface RunRegistrySearchArgs {
    * この関数が読む物件と同じ読み取りで照合して、隙を無くす。
    */
   expectedFingerprintHash?: string | null;
+  /**
+   * 取る土地・建物(足した行の id)。省略=1筆目・1棟目(今までどおり)。2026-11-06 2筆以上の2回目後半。
+   * ⚠番号・所在はここで物件から読み直した行の値だけを使う。
+   */
+  targetParcelId?: string | null;
 }
 
 // provider 失敗（RegistryFetchError）の分類コード → 安全な HTTP ステータス。
@@ -113,6 +118,7 @@ export async function runRegistrySearch(
       lotNumber: true,
       buildingNumber: true,
       realEstateNumber: true,
+      extraParcels: true,
     },
   });
   if (!property) {
@@ -141,12 +147,16 @@ export async function runRegistrySearch(
     );
   }
 
+  // 3.5 取る土地・建物(足した行を選んだときはその行の値で探す)。消された行は探さない。
+  const view = registryTargetView(property, args.targetParcelId);
+  if (!view) throw targetParcelNotFound();
+
   // 4. 検索入力の組み立て（純関数）。不動産番号があれば検索不要・所在が無ければ検索不能。
   const built = buildRegistrySearchRequest({
-    address: property.address,
-    lotNumber: property.lotNumber,
-    buildingNumber: property.buildingNumber,
-    realEstateNumber: property.realEstateNumber,
+    address: view.address,
+    lotNumber: view.lotNumber,
+    buildingNumber: view.buildingNumber,
+    realEstateNumber: view.realEstateNumber,
     ref: property.id,
   });
 
@@ -223,7 +233,8 @@ export async function runRegistrySearch(
     rememberSearchCandidates(
       session.id,
       propertyId,
-      fingerprintProperty(property),
+      // ⚠行を選んだときは行の id も指紋に入れる=1筆目で探した候補を行の取得に使えない(逆も)。
+      fingerprintRegistryTarget(property, args.targetParcelId),
       displayable,
     );
 
@@ -318,6 +329,8 @@ export interface ResolveRegistryCandidateArgs {
    * 隙を塞ぐ(@codex #372 Blocker)。
    */
   expectedFingerprintHash?: string | null;
+  /** 取る土地・建物(足した行の id)。検索したときと同じものでないと候補は見つからない(指紋に入っている)。 */
+  targetParcelId?: string | null;
 }
 
 /**
@@ -364,6 +377,7 @@ export async function resolveRegistryCandidate(
       lotNumber: true,
       buildingNumber: true,
       realEstateNumber: true,
+      extraParcels: true,
     },
   });
   if (!property) {
@@ -393,7 +407,8 @@ export async function resolveRegistryCandidate(
 
   // 認可済み検索が覚えた候補からのみ取得キーを解決する（client の値は一致判定にのみ使う）。
   // @codex P1: 検索時の物件指紋と現在が一致する場合だけ有効（編集後の古い候補は使わせない）。
-  const fingerprint = fingerprintProperty(property);
+  if (!registryTargetView(property, args.targetParcelId)) throw targetParcelNotFound();
+  const fingerprint = fingerprintRegistryTarget(property, args.targetParcelId);
   const candidate = resolveCachedCandidate(session.id, propertyId, ref, fingerprint);
   if (!candidate) {
     // 未検索 / 改ざん / TTL 超過 / 物件編集で指紋不一致 → 409。秘匿情報は載せない。
@@ -407,4 +422,13 @@ export async function resolveRegistryCandidate(
   // @codex P2: 取得側(runRegistryAutoFetch)が version-lock する行の指紋とこれが一致する時だけ
   // override を使うよう、解決に使った指紋も返す（resolve〜取得の間の編集による TOCTOU 防止）。
   return { candidate, fingerprint };
+}
+
+/** 選んだ足した行が物件に無い(検索のあとで消された・古い画面)。課金前なので 409 で止める。 */
+export function targetParcelNotFound(): ApiError {
+  return new ApiError(
+    409,
+    "選んだ土地・建物が物件にありません。画面を開き直してから選び直してください",
+    "REGISTRY_TARGET_PARCEL_NOT_FOUND",
+  );
 }

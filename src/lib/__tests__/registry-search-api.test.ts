@@ -86,7 +86,7 @@ import {
   MockRegistryFetchProvider,
   type RegistryFetchProvider,
 } from "@/lib/registry-fetch";
-import { runRegistrySearch } from "@/lib/registry-fetch/search";
+import { runRegistrySearch, resolveRegistryCandidate } from "@/lib/registry-fetch/search";
 import { sanitizeAuditDetail } from "@/lib/audit-log-detail-safety";
 import * as routeModule from "@/app/api/properties/[id]/registry/search/route";
 
@@ -487,5 +487,39 @@ describe("⚠申し込んだときの内容から変わっていたら検索し�
   it("指紋を渡さなければ今までどおり（単発の検索は無関係）", async () => {
     const body = await runSearch();
     expect(body.searchable).toBe(true);
+  });
+});
+
+describe("取る土地・建物を選んだ所在検索(2026-11-06 2筆以上の2回目後半)", () => {
+  const ROW = { id: "row-a", kind: "land", location: "東京都秘匿区別町2", number: "1番2", realEstateNumber: null, area: null };
+  it("★行の所在と番号で探す・1筆目の不動産番号があっても行は探せる", async () => {
+    setProperty({ realEstateNumber: "1234567890123", extraParcels: [ROW] });
+    const provider = new MockRegistryFetchProvider();
+    const spy = vi.spyOn(provider, "searchCandidates");
+    const body = await runSearch({ provider, extraArgs: { targetParcelId: "row-a" } });
+    expect(body.searchable).toBe(true);
+    expect(spy.mock.calls[0][0]).toMatchObject({ address: "東京都秘匿区別町2", lotNumber: "1番2", buildingNumber: null });
+  });
+  it("★候補は行に結びつく: 同じ行なら解決でき、1筆目として取ろうとすると 409", async () => {
+    setProperty({ extraParcels: [ROW] });
+    const body = await runSearch({ extraArgs: { targetParcelId: "row-a" } });
+    const ref = (body.candidates as Array<{ candidateRef: string }>)[0].candidateRef;
+    const ok = await resolveRegistryCandidate({ session: SESSION, propertyId: PROP_ID, confirmed: true, candidateRef: ref, targetParcelId: "row-a" });
+    expect(ok.candidate).toMatchObject({ kind: "number" });
+    await runSearch({ extraArgs: { targetParcelId: "row-a" } });
+    await expect(
+      resolveRegistryCandidate({ session: SESSION, propertyId: PROP_ID, confirmed: true, candidateRef: ref }),
+    ).rejects.toMatchObject({ status: 409, code: "REGISTRY_OBTAIN_CANDIDATE_NOT_FOUND" });
+  });
+  it("★消された行は探さない(409・provider に触れない)", async () => {
+    setProperty({ extraParcels: [] });
+    const provider = new MockRegistryFetchProvider();
+    const spy = vi.spyOn(provider, "searchCandidates");
+    await expect(runSearch({ provider, extraArgs: { targetParcelId: "row-a" } })).rejects.toMatchObject({ status: 409, code: "REGISTRY_TARGET_PARCEL_NOT_FOUND" });
+    expect(spy).not.toHaveBeenCalled();
+  });
+  it("route: 壊れた指定は 400・正しい指定は検索へ渡す", async () => {
+    const bad = await callRoute({ confirmed: true, targetParcelId: null });
+    expect(bad.status).toBe(400);
   });
 });

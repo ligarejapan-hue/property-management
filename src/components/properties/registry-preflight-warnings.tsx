@@ -68,6 +68,11 @@ export function useRegistryPreflight(
    * この値を変えて取り直す(対象も active も変わらないため、これが無いと古い分類のまま)。
    */
   reloadToken: number = 0,
+  /**
+   * 取る土地・建物(足した行の id・物件の画面の1件だけ)。変えたら取り直す(分類がその行のものになる)。
+   * 省略=1筆目・1棟目(今までどおり)。
+   */
+  targetParcelId: string | null = null,
 ): RegistryPreflightState {
   const [flagsById, setFlagsById] = useState<
     Map<string, RegistryPreflightFlags>
@@ -83,7 +88,10 @@ export function useRegistryPreflight(
   // 完了済みの対象集合キー。pending はここから導出する(effect 内の同期 setState を
   // 使わずに「確認が済むまで実行を止める」を実現する=#365 R1)。
   const [settledKey, setSettledKey] = useState<string | null>(null);
-  const { idsKey, cacheKey } = buildPreflightKeys(propertyIds, reloadToken);
+  const keys = buildPreflightKeys(propertyIds, reloadToken);
+  const idsKey = keys.idsKey;
+  // ⚠行を変えたら「確定」を無効にする(前の行の分類のまま実行させない)。
+  const cacheKey = targetParcelId ? `${keys.cacheKey}|${targetParcelId}` : keys.cacheKey;
 
   // ⚠effect 内の同期 setState は lint 規約(react-hooks/set-state-in-effect)で禁止。
   // 状態更新はすべて fetch の then/catch(非同期)内で行う。
@@ -100,7 +108,7 @@ export function useRegistryPreflight(
       // ⚠取り直しの間は分類を「読めていない」に戻す(古い分類で実行させない)。
       setTargetsUnavailable(true);
     });
-    fetchRegistryPreflight(idsKey.split(","))
+    fetchRegistryPreflight(idsKey.split(","), targetParcelId)
       .then((res) => {
         if (cancelled) return;
         setFailed(false);
@@ -123,7 +131,7 @@ export function useRegistryPreflight(
     return () => {
       cancelled = true;
     };
-  }, [active, cacheKey, idsKey]);
+  }, [active, cacheKey, idsKey, targetParcelId]);
 
   return {
     flagsById,
