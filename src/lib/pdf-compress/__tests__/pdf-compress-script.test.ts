@@ -3,6 +3,7 @@
  *
  * ⚠他のテストは実行部分を差し替えているので、pikepdf の API 名の違い(本番は apt の 8.7)や
  *   JPEG への書き換えの誤りは捕まえられない(提出前レビュー)。ここで実物を通す。
+ * 本番と同じ実行部分(execScript)で動かす=環境変数は許可リストだけ・閉じ込めた中で縮める。
  * 部品が無い環境(開発機・CI)では skip する。使う Python は PDF_COMPRESS_PYTHON(既定 python3)。
  */
 import { describe, it, expect } from "vitest";
@@ -10,7 +11,7 @@ import { execFileSync } from "node:child_process";
 import { mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import path from "node:path";
-import { compressPdf } from "../run";
+import { compressPdf, execScript } from "../run";
 
 const PYTHON = process.env.PDF_COMPRESS_PYTHON || "python3";
 
@@ -52,6 +53,13 @@ const MAKE_PDF = [
 ].join("\n");
 
 describe.skipIf(!available())("scripts/pdf-compress.py(実物)", () => {
+  it("自己診断(反映後の点検と同じ)が、閉じ込めた中で縮められ、外に出られないことを示す", () => {
+    const stdout = execFileSync(PYTHON, [path.join(process.cwd(), "scripts", "pdf-compress.py"), "--self-test"], {
+      timeout: 120_000,
+    }).toString();
+    expect(JSON.parse(stdout.trim().split("\n").pop() ?? "")).toMatchObject({ selfTest: "ok", level: "jpeg85", sandbox: "ok" });
+  }, 120_000);
+
   it("写真のような図版を JPEG にして上限以下へ縮め、ページ数を保つ", async () => {
     const dir = mkdtempSync(path.join(tmpdir(), "pdfc-test-"));
     try {
@@ -60,15 +68,7 @@ describe.skipIf(!available())("scripts/pdf-compress.py(実物)", () => {
       const input = readFileSync(src);
       const max = Math.floor(input.length / 3);
       const r = await compressPdf(input, max, {
-        exec: (file, args, opts) =>
-          new Promise((resolve, reject) => {
-            try {
-              const stdout = execFileSync(file, args, { timeout: opts.timeout }).toString();
-              resolve({ stdout, stderr: "" });
-            } catch (e) {
-              reject(e);
-            }
-          }),
+        exec: execScript,
         python: PYTHON,
         script: path.join(process.cwd(), "scripts", "pdf-compress.py"),
       });
@@ -94,7 +94,7 @@ describe.skipIf(!available())("scripts/pdf-compress.py(実物)", () => {
       execFileSync(PYTHON, ["-c", MAKE_PDF, src], { timeout: 60_000 });
       const input = readFileSync(src);
       const r = await compressPdf(input, input.length, {
-        exec: async (file, args, opts) => ({ stdout: execFileSync(file, args, { timeout: opts.timeout }).toString(), stderr: "" }),
+        exec: execScript,
         python: PYTHON,
         script: path.join(process.cwd(), "scripts", "pdf-compress.py"),
       });
@@ -111,10 +111,7 @@ describe.skipIf(!available())("scripts/pdf-compress.py(実物)", () => {
       execFileSync(PYTHON, ["-c", MAKE_PDF, src], { timeout: 60_000 });
       const input = readFileSync(src);
       const deps = {
-        exec: async (file: string, args: string[], opts: { timeout: number }) => ({
-          stdout: execFileSync(file, args, { timeout: opts.timeout }).toString(),
-          stderr: "",
-        }),
+        exec: execScript,
         python: PYTHON,
         script: path.join(process.cwd(), "scripts", "pdf-compress.py"),
       };

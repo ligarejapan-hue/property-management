@@ -36,10 +36,15 @@ jobs:
         env:
           NODE_OPTIONS: --max-old-space-size=4096
 
+      # 大きい PDF の圧縮の部品を本番と同じ apt のもので入れる(runner も Ubuntu 24.04)。
+      # 入れないと実物のスクリプトのテスト(閉じ込めた中で本当に縮むか)が skip になる(2026-11-06)。
+      - run: sudo apt-get update -q && sudo apt-get install -y -q python3-pikepdf python3-pil
+
       # 同じ理由で、テストも heap 不足で落ちた(2026-10-30 21時台)。テストの子プロセスにも同じ上限を渡す。
       - run: npm test
         env:
           NODE_OPTIONS: --max-old-space-size=4096
+          PDF_COMPRESS_PYTHON: /usr/bin/python3
 
   # 通知の送信(段階4)の記録づくり・送信を、本物の Postgres に対して確かめる。
   # (取り合い・同時実行・カーソル・時間帯など、モックでは確かめられない所。使い捨ての DB を立てて流す)

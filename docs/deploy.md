@@ -17,7 +17,7 @@
 - [ ] 大きいPDFの自動圧縮の部品(OS パッケージ `python3-pikepdf` `python3-pil`)が入っていて、自己診断が通ること(→ [ステップ 0.5](#ステップ-05-大きいpdfの自動圧縮の部品を入れる))
   ```bash
   sudo -u www-data python3 /opt/property-management/scripts/pdf-compress.py --self-test
-  # 期待: {"selfTest": "ok", "level": "jpeg85", "pikepdf": "8.7.1"} (pikepdf の版は環境による)
+  # 期待: {"selfTest": "ok", "level": "jpeg85", "sandbox": "ok", "pikepdf": "8.7.1"} (pikepdf の版は環境による)
   ```
 
 ### コード・ビルド
@@ -213,6 +213,11 @@ sudo -u www-data python3 -c "import pikepdf, PIL; print(pikepdf.__version__)"
 - Ubuntu 24.04 の `python3-pikepdf` は 8.7.1(MPL-2.0)。AGPL の MuPDF は使わない
 - 使う Python を変えるときは app.env に `PDF_COMPRESS_PYTHON=/path/to/python3`(既定 `python3`)
 - 一時ファイルは systemd の `PrivateTmp` の /tmp に作り、毎回消す
+- **閉じ込め(2026-11-06)**: 圧縮の処理には環境変数を許可リスト(PATH・LANG・作業フォルダの HOME/TMPDIR など)だけ渡し、
+  app.env の値は渡さない。読み書きはその回の作業フォルダだけ(/usr は読むだけ)に、Linux の **Landlock** で絞る
+  (`scripts/pdf_sandbox.py`・root 不要)。Landlock が効かない、または版(ABI)が 3 未満(カーネル 6.2 より前=外のファイルを空にするのを止められない)のカーネルでは縮めずに失敗する(8MB を超える PDF は断られる)。
+  効いているかは自己診断の `"sandbox": "ok"`、またはカーネルの `cat /sys/kernel/security/lsm` に `landlock` があることで分かる
+- 1回の時間の上限は社内の添付が 2 分、お客様の提出(`/submit/`)が 60 秒
 - ⚠**nginx でアプリ全体を出す構成**では、`deploy/nginx/property-management.conf.example` の
   「大きいPDFを受け取る4つの口」の location(上限 52MB・待ち 300 秒)も入れること。全体の上限 12MB・
   待ち 60 秒のままだと、大きい PDF が手前で断られるか、圧縮の順番待ちの途中で 504 になる。
@@ -263,7 +268,7 @@ sudo -u www-data env HOME=/var/www npm_config_cache=/var/www/.npm npm ci --inclu
 
 # 大きいPDFの自動圧縮の自己診断(ステップ 0.5 の部品+取得したスクリプト・www-data で実際に縮める)
 sudo -u www-data python3 /opt/property-management/scripts/pdf-compress.py --self-test
-# 期待: {"selfTest": "ok", "level": "jpeg85", "pikepdf": "…"} と終了コード 0
+# 期待: {"selfTest": "ok", "level": "jpeg85", "sandbox": "ok", "pikepdf": "…"} と終了コード 0
 
 # Prisma クライアント生成（src/generated/prisma/ に出力）
 # ⚠ postinstall では自動実行されないため必須
@@ -561,7 +566,7 @@ sudo -u www-data env HOME=/var/www npm_config_cache=/var/www/.npm npm prune --om
 #    nginx でアプリ全体を出す構成なら、nginx の見本の「大きいPDFを受け取る4つの口」も反映する(ステップ 0.5 の注)。
 sudo apt-get install -y python3-pikepdf python3-pil
 sudo -u www-data python3 /opt/property-management/scripts/pdf-compress.py --self-test
-# 期待: {"selfTest": "ok", "level": "jpeg85", "pikepdf": "…"} と終了コード 0
+# 期待: {"selfTest": "ok", "level": "jpeg85", "sandbox": "ok", "pikepdf": "…"} と終了コード 0
 
 # 8. サービス再起動
 sudo systemctl restart property-management

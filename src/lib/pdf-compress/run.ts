@@ -1,9 +1,11 @@
 /**
  * 大きい PDF の自動圧縮 — 実行(scripts/pdf-compress.py を別プロセスで動かす)。
  *
- * ⚠利用者が上げた PDF は**信用しない入力**。解析は別プロセスで行い、
- *   ・時間の上限(TIMEOUT_MS)を過ぎたら止める
+ * ⚠利用者が上げた PDF は**信用しない入力**(お客様の提出からも来る)。解析は別プロセスで行い、
+ *   ・時間の上限(既定 TIMEOUT_MS・お客様のファイルは呼び出し側が短くする)を過ぎたら SIGKILL で止める
  *   ・メモリの上限はスクリプト側(RLIMIT_AS)
+ *   ・環境変数は許可リスト(scriptEnv)だけ渡す=app.env の秘密(DATABASE_URL・合言葉)を渡さない
+ *   ・読み書きはその回の作業フォルダだけ(scripts/pdf_sandbox.py・Linux の Landlock。効かなければ縮めずに失敗)
  *   ・一時ファイルはこの処理専用のフォルダ(0700)に置き、成否に関係なく必ず消す
  *   ・同時に動かすのは1本だけ(大きい PDF が重なってメモリを食わないように)
  * ⚠部品が無い環境(開発機・CI)では "unavailable" を返す=従来どおり 8MB で断る。
@@ -28,29 +30,49 @@ export interface RunDeps {
   exec: (
     file: string,
     args: string[],
-    opts: { timeout: number },
+    opts: { timeout: number; env: Record<string, string> },
   ) => Promise<{ stdout: string; stderr: string }>;
   python: string;
   script: string;
 }
 
+/**
+ * 圧縮の処理に渡す環境変数(許可リスト)。⚠process.env をそのまま渡さない:
+ *   本体の環境には app.env の値(DATABASE_URL・DEAL_DOC_LINK_SECRET など)が入っている。
+ *   HOME と TMPDIR はその回の作業フォルダ(閉じ込めた中で書ける場所はそこだけ)。
+ */
+export function scriptEnv(workDir: string, source: Record<string, string | undefined> = process.env): Record<string, string> {
+  return {
+    PATH: source.PATH || "/usr/bin:/bin",
+    LANG: "C.UTF-8",
+    LC_ALL: "C.UTF-8",
+    HOME: workDir,
+    TMPDIR: workDir,
+    PYTHONDONTWRITEBYTECODE: "1",
+    PYTHONNOUSERSITE: "1",
+  };
+}
+
+/** 既定の実行部分。env は渡されたものだけを使う(本体の環境を引き継がない)。 */
+export const execScript: RunDeps["exec"] = (file, args, opts) =>
+  new Promise((resolve, reject) => {
+    execFile(
+      file,
+      args,
+      { timeout: opts.timeout, env: opts.env as NodeJS.ProcessEnv, killSignal: "SIGKILL", maxBuffer: 1024 * 1024, windowsHide: true },
+      (err, stdout, stderr) => {
+        if (err) {
+          Object.assign(err, { stdout: String(stdout), stderr: String(stderr) });
+          reject(err);
+        } else {
+          resolve({ stdout: String(stdout), stderr: String(stderr) });
+        }
+      },
+    );
+  });
+
 const defaultDeps: RunDeps = {
-  exec: (file, args, opts) =>
-    new Promise((resolve, reject) => {
-      execFile(
-        file,
-        args,
-        { timeout: opts.timeout, killSignal: "SIGKILL", maxBuffer: 1024 * 1024, windowsHide: true },
-        (err, stdout, stderr) => {
-          if (err) {
-            Object.assign(err, { stdout: String(stdout), stderr: String(stderr) });
-            reject(err);
-          } else {
-            resolve({ stdout: String(stdout), stderr: String(stderr) });
-          }
-        },
-      );
-    }),
+  exec: execScript,
   python: process.env.PDF_COMPRESS_PYTHON || "python3",
   script: path.join(process.cwd(), "scripts", "pdf-compress.py"),
 };
@@ -142,12 +164,15 @@ function isUnavailable(err: unknown): boolean {
  * ⚠呼び出し側は「上限を超えた PDF」でだけ呼ぶこと(上限以下には手を触れない決まり)。
  * acceptBytes: maxBytes まで縮まなくても受け取ってよい大きさ(2026-10-19)。
  *   スクリプトは一番小さくできた形が acceptBytes 以下ならそれを返す。
+ * timeoutMs: 1回の上限。社内の添付は既定の 2 分・お客様のファイルは 60 秒(fit-pdf.ts)。
+ *   ⚠順番待ちの時間は含まない(自分の番が来てから数える)。
  */
 export function compressPdf(
   input: Buffer,
   maxBytes: number,
   deps: RunDeps = defaultDeps,
   acceptBytes: number = maxBytes,
+  timeoutMs: number = TIMEOUT_MS,
 ): Promise<PdfCompressResult> {
   const accept = Math.max(acceptBytes, maxBytes);
   return serialize(async () => {
@@ -168,7 +193,7 @@ export function compressPdf(
             String(maxBytes),
             ...(accept > maxBytes ? ["--accept-bytes", String(accept)] : []),
           ],
-          { timeout: TIMEOUT_MS },
+          { timeout: timeoutMs, env: scriptEnv(dir) },
         ));
       } catch (err) {
         const reason: PdfCompressFailure = isUnavailable(err) ? "unavailable" : "error";
