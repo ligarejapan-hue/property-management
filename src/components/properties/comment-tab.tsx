@@ -5,6 +5,34 @@ import { Send, Loader2, MessageCircle, CornerDownRight } from "lucide-react";
 import { fetchComments as apiFetchComments, postComment } from "@/lib/api-client";
 import { formatJaDateTime } from "@/lib/format-datetime";
 import { Button } from "@/components/ui/button";
+import Link from "next/link";
+
+/**
+ * コメントの本文。この画面の物件へのリンク(「/properties/物件の id」)だけを押せるようにする
+ * (「この筆を別の物件にする」が両方の物件に残すリンク・2026-11-06)。⚠ほかの URL はリンクにしない(文字のまま)。
+ */
+const PROPERTY_LINK_RE = /\/properties\/[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}(?![0-9a-z-])/gi;
+export function commentBodyParts(body: string): ({ text: string } | { href: string })[] {
+  const out: ({ text: string } | { href: string })[] = [];
+  let last = 0;
+  for (const m of body.matchAll(PROPERTY_LINK_RE)) {
+    const at = m.index ?? 0;
+    if (at > last) out.push({ text: body.slice(last, at) });
+    out.push({ href: m[0] });
+    last = at + m[0].length;
+  }
+  if (last < body.length) out.push({ text: body.slice(last) });
+  return out;
+}
+function CommentBody({ body }: { body: string }) {
+  return (
+    <>
+      {commentBodyParts(body).map((p, i) => ("href" in p ? (
+        <Link key={i} href={p.href} className="text-indigo-700 underline dark:text-indigo-400">物件を開く</Link>
+      ) : <span key={i}>{p.text}</span>))}
+    </>
+  );
+}
 
 interface Author {
   id: string;
@@ -179,7 +207,7 @@ function CommentItem({
         </span>
       </div>
       <p className="text-sm text-gray-700 whitespace-pre-wrap dark:text-gray-200">
-        {comment.body}
+        <CommentBody body={comment.body} />
       </p>
       <Button
         variant="ghost"
@@ -205,7 +233,7 @@ function CommentItem({
                 </span>
               </div>
               <p className="text-sm text-gray-600 whitespace-pre-wrap dark:text-gray-300">
-                {reply.body}
+                <CommentBody body={reply.body} />
               </p>
             </div>
           ))}

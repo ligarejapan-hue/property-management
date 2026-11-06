@@ -272,6 +272,7 @@ const ACTION_LABELS: Record<string, string> = {
   deal_target_parcels: "取引の土地・建物を選択",
   property_parcel_split: "分筆を記録",
   property_parcel_merge: "合筆を記録",
+  property_parcel_detach: "土地・建物を別の物件に",
   deal_party_create: "取引の当事者を追加",
   deal_party_from_owners: "物件の所有者を売主に追加",
   deal_party_update: "取引の当事者を更新",

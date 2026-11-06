@@ -12,6 +12,7 @@ import { BackLink } from "@/components/ui/back-link";
 import { Button } from "@/components/ui/button";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
+import ParcelDetachDialog from "@/components/properties/parcel-detach-dialog";
 import { formatBuiltYearMonth } from "@/lib/built-year-month";
 import { initialPropertyTab } from "@/lib/property-detail-tab";
 import {
@@ -20,6 +21,7 @@ import {
   Building2,
   Edit,
   FileCheck,
+  SquareArrowOutUpRight,
   Handshake,
   Loader2,
   Mail,
@@ -397,6 +399,10 @@ export default function PropertyDetailPage({
   // 読み込みで「開き直したい」と分かった印。開くのは物件の書き込み権限を確かめてから(下の描画の頭)。
   const [editDraftReopenPending, setEditDraftReopenPending] = useState(false);
   const [deleting, setDeleting] = useState(false);
+  // 土地・建物を別の物件にする(2026-11-06 3回目の3つ目)。
+  // ⚠開いた物件の id で持つ(戻る/進むで別の物件に移ったら出さない)。
+  const [parcelDetachFor, setParcelDetachFor] = useState<string | null>(null);
+  const [parcelDetached, setParcelDetached] = useState<{ sourceId: string; newPropertyId: string; message: string } | null>(null);
   // 棟へつないだ結果の知らせ(設計 §6.2)。編集の保存後か、新規登録・貼り付けから
   // 預かったもの(読み込みが終わった後に1回だけ取り出す)。
   const [buildingNotice, setBuildingNotice] = useState<BuildingLinkOutcome | null>(null);
@@ -892,6 +898,10 @@ export default function PropertyDetailPage({
     ...(canAutoFetchRegistry
       ? [{ key: "registry-search", label: "所在で謄本を検索", icon: MapPinned, onSelect: () => setRegistrySearch((s) => (s === "closed" ? "start" : s)) }]
       : []),
+    // 足した土地・建物を別の物件にする。物件を書ける人・区分以外・足した行がある物件だけ(編集中の人がいれば小窓の中で止める)。
+    ...(canWriteProperty && !supportsUnitFields(property.propertyType) && readExtraParcels(property.extraParcels).length > 0
+      ? [{ key: "parcel-detach", label: "土地・建物を別の物件にする", icon: SquareArrowOutUpRight, onSelect: () => { setParcelDetached(null); setParcelDetachFor(property.id); } }]
+      : []),
     // 済んでいる操作は出さない。サーバーは property:write を要るので、書けない人には出さない。
     ...(canWriteProperty && property.registryStatus !== "obtained"
       ? [{
@@ -974,6 +984,23 @@ export default function PropertyDetailPage({
           />
         </div>
       </div>
+
+      {parcelDetachFor === property.id && (
+        <ParcelDetachDialog
+          propertyId={property.id}
+          version={property.version}
+          extraParcels={property.extraParcels}
+          blocked={propertyNoLockWritesBlocked}
+          onClose={() => setParcelDetachFor(null)}
+          onDone={(r) => { setParcelDetachFor(null); setParcelDetached({ ...r, sourceId: property.id }); void fetchProperty(); }}
+        />
+      )}
+      {parcelDetached?.sourceId === property.id && (
+        <p className="mb-4 rounded-md border border-green-300 bg-green-50 px-4 py-2 text-sm text-green-800 dark:border-green-800 dark:bg-green-950/40 dark:text-green-300" role="status">
+          {parcelDetached.message}{" "}
+          <Link href={`/properties/${parcelDetached.newPropertyId}`} className="text-indigo-700 underline dark:text-indigo-400">新しい物件を開く</Link>
+        </p>
+      )}
 
       {/* 見ている側の帯(仕様 6.3)。物件が他の人(または自分の別画面)の鍵なら
           上部に出す。管理者には「鍵を外す」(EditLockHolderBanner自身が
