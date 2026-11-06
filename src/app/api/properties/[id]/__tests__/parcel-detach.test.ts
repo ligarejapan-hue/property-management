@@ -37,6 +37,7 @@ vi.mock("@/lib/prisma", () => ({ default: { $transaction: vi.fn(async (fn: (t: u
 
 import { getApiSession, getUserPermissions } from "@/lib/api-helpers";
 import { assertNotEditLockedByOther } from "@/lib/edit-lock/service";
+import { lockPropertyRow } from "@/lib/property-record-guard";
 import { POST } from "../parcel-detach/route";
 
 const PID = "11111111-1111-4111-8111-111111111111";
@@ -60,6 +61,7 @@ beforeEach(() => {
   tx.property.updateMany.mockResolvedValue({ count: 1 });
   tx.property.create.mockResolvedValue({ id: NEW });
   tx.propertyOwner.findMany.mockResolvedValue([{ ownerId: "o1", relationship: null, isPrimary: true, startDate: null, endDate: null }]);
+  tx.$queryRaw.mockResolvedValue([]);
   tx.deal.findMany.mockResolvedValue([]);
 });
 
@@ -91,6 +93,22 @@ describe("この筆を別の物件にする", () => {
   it("全部(null)を扱っている取引の数を返す(その取引からは行が外れる=知らせる)", async () => {
     tx.deal.findMany.mockResolvedValue([{ targetParcels: null }, { targetParcels: ["main:land"] }, { targetParcels: null }]);
     expect(await (await POST(req({ version: 4, rowId: "a" }), ctx)).json()).toMatchObject({ dealsCoveringAll: 2 });
+  });
+  it("★所有者を物件の行より先にロックする・ロックのあとで所有者が増えていたら止める(@codex P2)", async () => {
+    await POST(req({ version: 4, rowId: "a" }), ctx);
+    const ownerLock = tx.$queryRaw.mock.invocationCallOrder[0];
+    expect(ownerLock).toBeLessThan((lockPropertyRow as Mock).mock.invocationCallOrder[0]);
+    vi.clearAllMocks();
+    tx.property.findUnique.mockResolvedValue(CUR);
+    tx.property.updateMany.mockResolvedValue({ count: 1 });
+    tx.property.create.mockResolvedValue({ id: NEW });
+    tx.deal.findMany.mockResolvedValue([]);
+    tx.propertyOwner.findMany
+      .mockResolvedValueOnce([{ ownerId: "o1" }])
+      .mockResolvedValueOnce([{ ownerId: "o1", relationship: null, isPrimary: true, startDate: null, endDate: null }, { ownerId: "o2", relationship: null, isPrimary: false, startDate: null, endDate: null }]);
+    const res = await POST(req({ version: 4, rowId: "a" }), ctx);
+    expect(res.status).toBe(409);
+    expect(tx.propertyOwner.createMany).not.toHaveBeenCalled();
   });
   it("所有者を書けない人は、所有者のつながりを写さない(物件は作る)", async () => {
     hasPermission.mockImplementation((_p, resource) => resource !== "owner");

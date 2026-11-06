@@ -6,6 +6,7 @@ import { ApiError, getApiSession, getUserPermissions, handleApiError } from "@/l
 import { writeAuditLog } from "@/lib/audit";
 import { hasPermission } from "@/lib/permissions";
 import { lockPropertyRow } from "@/lib/property-record-guard";
+import { lockOwnersForShare, type RawTx } from "@/lib/dm-batch/locks";
 import { assertNotEditLockedByOther } from "@/lib/edit-lock/service";
 import { readScreenTokenHash, readLockId } from "@/lib/edit-lock/screen-token";
 import { canAccessPropertyRecord } from "@/lib/property-access";
@@ -39,6 +40,12 @@ export async function POST(request: NextRequest, ctx: Ctx) {
     const lockId = readLockId(request);
 
     const done = await prisma.$transaction(async (tx) => {
+      // ⚠ロック順は「所有者 → 物件の行」(DM の配信停止などと同じ・@codex P2)。つながりを写すときは、
+      //   先に所有者を読んで(無ロック)ロックし、物件の行のあとで読み直して増えていたら止める。
+      const preOwnerIds = canLinkOwners
+        ? (await tx.propertyOwner.findMany({ where: { propertyId: id }, select: { ownerId: true } })).map((l) => l.ownerId)
+        : [];
+      await lockOwnersForShare(tx as unknown as RawTx, preOwnerIds);
       await lockPropertyRow(tx, id);
       await assertNotEditLockedByOther(tx, {
         resourceType: "property", resourceId: id, userId: session.id, screenTokenHash: readScreenTokenHash(request), lockId,
@@ -97,6 +104,9 @@ export async function POST(request: NextRequest, ctx: Ctx) {
         const links = await tx.propertyOwner.findMany({
           where: { propertyId: id }, select: { ownerId: true, relationship: true, isPrimary: true, startDate: true, endDate: true },
         });
+        if (links.some((l) => !preOwnerIds.includes(l.ownerId))) {
+          throw new ApiError(409, "所有者のつながりが変わりました。画面を読み込み直して、もう一度お試しください", "OWNERS_CHANGED");
+        }
         if (links.length) {
           await tx.propertyOwner.createMany({ data: links.map((l) => ({ ...l, propertyId: created.id })) });
           ownersCopied = links.length;
