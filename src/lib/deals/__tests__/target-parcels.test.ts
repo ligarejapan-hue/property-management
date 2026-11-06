@@ -51,8 +51,12 @@ describe("この取引の土地・建物(2026-11-06 3回目の1つ目)", () => {
     expect(selectedParcelKeys(P, null)).toBeNull();
     expect(selectedParcelKeys(P, ["a", "消えた"])).toEqual(["a"]);
     expect(selectedParcelKeys(P, ["消えた"])).toBeNull();
-    // 足した行を全部消した物件=今までどおり全部。
-    expect(selectedParcelKeys({ ...P, extraParcels: [] }, [MAIN_LAND_KEY])).toBeNull();
+    // ★合筆で足した行が無くなっても、選んでいた1筆目・1棟目は効かせる(建物を書類に戻さない・@codex P1)。
+    expect(selectedParcelKeys({ ...P, extraParcels: [] }, [MAIN_LAND_KEY])).toEqual([MAIN_LAND_KEY]);
+    expect(applyTargetParcels({ ...P, extraParcels: [] }, [MAIN_LAND_KEY])).toEqual({ lotNumber: "1番1", buildingNumber: null, extraParcels: [] });
+    // 選ぶ欄は、選んでいる取引にだけ出す(always)。
+    expect(dealParcelOptions({ ...P, extraParcels: [] })).toEqual([]);
+    expect(dealParcelOptions({ ...P, extraParcels: [] }, { always: true }).map((o) => o.key)).toEqual([MAIN_LAND_KEY, MAIN_BUILDING_KEY]);
   });
 
   it("★選んだ土地・建物だけの物件の形: 選ばなかった1筆目は空・足した行は選んだものだけ", () => {

@@ -2,6 +2,8 @@
 
 import { extraParcelsText, parcelNumberLabel, readExtraParcels } from "@/lib/property-parcels";
 import { supportsUnitFields } from "@/lib/property-building-name";
+import ParcelChangeDialog from "@/components/properties/parcel-change-dialog";
+import { landChoices } from "@/lib/property-parcel-changes";
 import { useState, useEffect, useCallback, useMemo, useRef, use, type Dispatch, type SetStateAction } from "react";
 import { clearDraft, draftKey, readDraft } from "@/lib/drafts/draft-store";
 import { decideEditDraftOnLoad, parsePropertyEditDraft } from "@/lib/drafts/screens/property-edit";
@@ -10,6 +12,7 @@ import { BackLink } from "@/components/ui/back-link";
 import { Button } from "@/components/ui/button";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
+import ParcelDetachDialog from "@/components/properties/parcel-detach-dialog";
 import { formatBuiltYearMonth } from "@/lib/built-year-month";
 import { initialPropertyTab } from "@/lib/property-detail-tab";
 import {
@@ -18,10 +21,12 @@ import {
   Building2,
   Edit,
   FileCheck,
+  SquareArrowOutUpRight,
   Handshake,
   Loader2,
   Mail,
   MapPinned,
+  Split,
   MoreHorizontal,
   Trash2,
   UserPlus,
@@ -397,6 +402,10 @@ export default function PropertyDetailPage({
   // 読み込みで「開き直したい」と分かった印。開くのは物件の書き込み権限を確かめてから(下の描画の頭)。
   const [editDraftReopenPending, setEditDraftReopenPending] = useState(false);
   const [deleting, setDeleting] = useState(false);
+  // 土地・建物を別の物件にする(2026-11-06 3回目の3つ目)。
+  // ⚠開いた物件の id で持つ(戻る/進むで別の物件に移ったら出さない)。
+  const [parcelDetachFor, setParcelDetachFor] = useState<string | null>(null);
+  const [parcelDetached, setParcelDetached] = useState<{ sourceId: string; newPropertyId: string; message: string } | null>(null);
   // 棟へつないだ結果の知らせ(設計 §6.2)。編集の保存後か、新規登録・貼り付けから
   // 預かったもの(読み込みが終わった後に1回だけ取り出す)。
   const [buildingNotice, setBuildingNotice] = useState<BuildingLinkOutcome | null>(null);
@@ -590,6 +599,9 @@ export default function PropertyDetailPage({
     setShowEditForm(false);
     setEditDraftStale(false);
     setEditDraftReopenPending(false);
+    // 分筆・合筆の小窓と結果の知らせも引き継がない。
+    setParcelChangeOpen(false);
+    setParcelChangeDone(null);
   }, [id]);
 
   // 編集中の鍵(仕様 6.1)。複製タブ確認(ensureUniqueScreenToken・最大300ms)は
@@ -836,6 +848,9 @@ export default function PropertyDetailPage({
   // 「所在で謄本を検索」は「その他 ▾」から開く。start=開いた直後(確認から始める)/open=開いたまま。
   const [registrySearch, setRegistrySearch] = useState<"closed" | "start" | "open">("closed");
   const consumeRegistryAutoStart = useCallback(() => setRegistrySearch("open"), []);
+  // 分筆・合筆の記録(2026-11-06 3回目の2つ目)。「その他 ▾」から開く。
+  const [parcelChangeOpen, setParcelChangeOpen] = useState(false);
+  const [parcelChangeDone, setParcelChangeDone] = useState<string | null>(null);
 
   if (loading) {
     return (
@@ -859,36 +874,6 @@ export default function PropertyDetailPage({
   // 販売図面テンプレの対応種別（土地/区分マンション/戸建/一棟）。対応外は null。
   const salesSheetKind = salesSheetTemplateKindFor(property.propertyType);
 
-  // 「その他 ▾」の中身(画面すっきり化 第3回)。出す条件は表に置いていたときと同じ。
-  const moreMenuItems: MenuItem[] = [
-    ...(canCreateDeal
-      ? [{ key: "new-deal", label: "この物件で取引を作成", icon: Handshake, href: newDealHref(property.id, property.businessType) }]
-      : []),
-    // DM 送付履歴ページは property:read + owner:read + record-scope を要するため canReadOwner で出し分ける(403 の行き止まりを避ける)。
-    ...(canReadOwner
-      ? [{ key: "dm-logs", label: "DM送付履歴", icon: Mail, href: `/properties/${property.id}/dm-logs`, title: "この物件の DM 送付履歴" }]
-      : []),
-    // 謄本の所在検索は registry:auto_fetch のある人だけ(部品の中でも同じ条件で出し分けている)。
-    ...(canAutoFetchRegistry
-      ? [{ key: "registry-search", label: "所在で謄本を検索", icon: MapPinned, onSelect: () => setRegistrySearch((s) => (s === "closed" ? "start" : s)) }]
-      : []),
-    // 済んでいる操作は出さない。サーバーは property:write を要るので、書けない人には出さない。
-    ...(canWriteProperty && property.registryStatus !== "obtained"
-      ? [{
-          key: "registry-obtained",
-          label: "登記取得済にする",
-          icon: FileCheck,
-          busy: propertyAction.loading === "mark_registry_obtained",
-          disabled: propertyAction.loading !== null,
-          onSelect: () => void propertyAction.run("mark_registry_obtained"),
-        }]
-      : []),
-    // 削除は DELETE /api/properties/[id] が property:delete を要求する。
-    ...(canDeleteProperty
-      ? [{ key: "delete", label: "物件を削除", icon: Trash2, danger: true, busy: deleting, onSelect: () => void handleDelete(), title: "この物件を削除" }]
-      : []),
-  ];
-
   // 見ている側(仕様 6.3・Task 9)。この物件の行が held_by_other/
   // held_by_self_other_screen なら、編集ボタン・案件ステータス・導入ルート・
   // 所在検索の地番保存を止める(6.3の表)。`lockId`は管理者にだけ届く
@@ -902,6 +887,52 @@ export default function PropertyDetailPage({
   //   帯・編集ボタンは `propertyEditLockHeld` のまま(編集ウィンドウは自分で確認を待つ)。
   const propertyNoLockWritesBlocked = propertyEditLockHeld || !ownerLockTokenReady;
   const propertyEditLockIsAdmin = propertyEditLockRow?.lockId !== undefined;
+
+  // 「その他 ▾」の中身(画面すっきり化 第3回)。出す条件は表に置いていたときと同じ。
+  const moreMenuItems: MenuItem[] = [
+    ...(canCreateDeal
+      ? [{ key: "new-deal", label: "この物件で取引を作成", icon: Handshake, href: newDealHref(property.id, property.businessType) }]
+      : []),
+    // DM 送付履歴ページは property:read + owner:read + record-scope を要するため canReadOwner で出し分ける(403 の行き止まりを避ける)。
+    ...(canReadOwner
+      ? [{ key: "dm-logs", label: "DM送付履歴", icon: Mail, href: `/properties/${property.id}/dm-logs`, title: "この物件の DM 送付履歴" }]
+      : []),
+    // 謄本の所在検索は registry:auto_fetch のある人だけ(部品の中でも同じ条件で出し分けている)。
+    ...(canAutoFetchRegistry
+      ? [{ key: "registry-search", label: "所在で謄本を検索", icon: MapPinned, onSelect: () => setRegistrySearch((s) => (s === "closed" ? "start" : s)) }]
+      : []),
+    // 足した土地・建物を別の物件にする。物件を書ける人・区分以外・足した行がある物件だけ(編集中の人がいれば小窓の中で止める)。
+    ...(canWriteProperty && !supportsUnitFields(property.propertyType) && readExtraParcels(property.extraParcels).length > 0
+      ? [{ key: "parcel-detach", label: "土地・建物を別の物件にする", icon: SquareArrowOutUpRight, onSelect: () => { setParcelDetached(null); setParcelDetachFor(property.id); } }]
+      : []),
+    // 済んでいる操作は出さない。サーバーは property:write を要るので、書けない人には出さない。
+    ...(canWriteProperty && property.registryStatus !== "obtained"
+      ? [{
+          key: "registry-obtained",
+          label: "登記取得済にする",
+          icon: FileCheck,
+          busy: propertyAction.loading === "mark_registry_obtained",
+          disabled: propertyAction.loading !== null,
+          onSelect: () => void propertyAction.run("mark_registry_obtained"),
+        }]
+      : []),
+    // 分筆・合筆は土地だけ(区分マンションは対象外)。物件を書ける人だけ。⚠編集中の人がいれば押せない(サーバーも 409)。
+    ...(canWriteProperty && !supportsUnitFields(property.propertyType) && landChoices({ lotNumber: property.lotNumber, extraParcels: property.extraParcels }).length > 0
+      ? [{
+          key: "parcel-change",
+          label: "分筆・合筆を記録",
+          icon: Split,
+          disabled: propertyNoLockWritesBlocked,
+          title: propertyNoLockWritesBlocked ? "ほかの人が編集中です" : "登記で分筆・合筆をしたあとに地番を書き換える",
+          onSelect: () => { setParcelChangeDone(null); setParcelChangeOpen(true); },
+        }]
+      : []),
+    // 削除は DELETE /api/properties/[id] が property:delete を要求する。
+    ...(canDeleteProperty
+      ? [{ key: "delete", label: "物件を削除", icon: Trash2, danger: true, busy: deleting, onSelect: () => void handleDelete(), title: "この物件を削除" }]
+      : []),
+  ];
+
 
   return (
     <div data-pii-protected data-pii-surface="property">
@@ -956,6 +987,23 @@ export default function PropertyDetailPage({
           />
         </div>
       </div>
+
+      {parcelDetachFor === property.id && (
+        <ParcelDetachDialog
+          propertyId={property.id}
+          version={property.version}
+          extraParcels={property.extraParcels}
+          blocked={propertyNoLockWritesBlocked}
+          onClose={() => setParcelDetachFor(null)}
+          onDone={(r) => { setParcelDetachFor(null); setParcelDetached({ ...r, sourceId: property.id }); void fetchProperty(); }}
+        />
+      )}
+      {parcelDetached?.sourceId === property.id && (
+        <p className="mb-4 rounded-md border border-green-300 bg-green-50 px-4 py-2 text-sm text-green-800 dark:border-green-800 dark:bg-green-950/40 dark:text-green-300" role="status">
+          {parcelDetached.message}{" "}
+          <Link href={`/properties/${parcelDetached.newPropertyId}`} className="text-indigo-700 underline dark:text-indigo-400">新しい物件を開く</Link>
+        </p>
+      )}
 
       {/* 見ている側の帯(仕様 6.3)。物件が他の人(または自分の別画面)の鍵なら
           上部に出す。管理者には「鍵を外す」(EditLockHolderBanner自身が
@@ -1017,6 +1065,22 @@ export default function PropertyDetailPage({
         onAutoStartConsumed={consumeRegistryAutoStart}
         onClose={() => setRegistrySearch("closed")}
       />
+      )}
+
+      {parcelChangeOpen && (
+        <ParcelChangeDialog
+          propertyId={property.id}
+          version={property.version}
+          lotNumber={property.lotNumber}
+          extraParcels={property.extraParcels}
+          onClose={() => setParcelChangeOpen(false)}
+          onSaved={(message) => { setParcelChangeOpen(false); setParcelChangeDone(message); void fetchProperty(); }}
+        />
+      )}
+      {parcelChangeDone && (
+        <p className="mb-4 rounded-md border border-green-300 bg-green-50 px-4 py-2 text-sm text-green-800 dark:border-green-800 dark:bg-green-950/40 dark:text-green-300" role="status">
+          {parcelChangeDone}
+        </p>
       )}
 
       {/* 品質警告セクション (§8-6): 一覧から外した警告を詳細で表示。ゼロ件=非表示。 */}
