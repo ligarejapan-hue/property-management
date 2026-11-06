@@ -35,6 +35,7 @@ import {
   validateSegments,
 } from "@/lib/pdf-split/segments";
 import { reserveSplitSlot } from "@/lib/pdf-split/slot";
+import { autoMarkRegistryObtainedBestEffort } from "@/lib/registry-status-auto";
 // 謄本が入っている1冊を保存するときの名前(元の名前は所有者名を含み得るので使わない)。画面の「分けずに保存」と同じ。
 import { GENERIC_BUNDLE_NAME } from "@/lib/attachments/unified-drop";
 
@@ -244,6 +245,9 @@ export async function POST(request: NextRequest, { params }: { params: Promise<{
         detail: { propertyId, ...(hasRegistry ? {} : { fileName: p.fileName }) },
       });
     }
+
+    // 謄本の部分があれば、未取得の登記状況を取得済に(2026-11-06・添付の POST と同じ)。
+    if (prepared.some((p) => p.type === "registry")) await autoMarkRegistryObtainedBestEffort({ propertyId, changedBy: session.id });
 
     // 謄本の部分は、添付と同じく読んで物件の空の欄に入れる(読めなくても保存は成功のまま・読めないことは画面に出す)。
     const registryNotices = new Set<string>();

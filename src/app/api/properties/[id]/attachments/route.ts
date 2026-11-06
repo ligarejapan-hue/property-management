@@ -32,6 +32,7 @@ import { fitPdfToLimit, reserveLargePdfSlot } from "@/lib/pdf-compress/fit";
 import { extractHeadTextFromPdf, isPdfBuffer } from "@/lib/pdf-extract";
 import { docColumnsForNewAttachment } from "@/lib/doc-classify/assign";
 import { parseScopeInput } from "@/lib/attachments/deal-scope";
+import { autoMarkRegistryObtainedBestEffort } from "@/lib/registry-status-auto";
 
 const ATTACHMENT_TYPES = ["general", "registry"] as const;
 type AttachmentType = (typeof ATTACHMENT_TYPES)[number];
@@ -353,6 +354,11 @@ export async function POST(
         ...(dealScope ? { dealId: dealScope.dealId, dealCommon: dealScope.dealCommon } : {}),
       },
     });
+
+    // 謄本を添付したら、未取得の登記状況を取得済に(2026-11-06 発注者・取得中は変えない)。
+    if (attachmentType === "registry") {
+      await autoMarkRegistryObtainedBestEffort({ propertyId, changedBy: session.id });
+    }
 
     // 謄本PDFを添付したら、面積・地番・家屋番号・構造・築年月を読んで空の欄に入れる(2026-10-25・11-01 発注者)。
     // ⚠添付そのものは成功させる=読めない・失敗しても添付は残す(読めないことは画面に出す)。

@@ -9,6 +9,7 @@ import { canAccessPropertyRecord } from "@/lib/property-access";
 import { writeAuditLog } from "@/lib/audit";
 import { fillBasicInfoFromRegistryPdfBestEffort } from "@/lib/registry-pdf/fill-areas";
 import { matchProperty, type PropertyIndex } from "./match";
+import { autoMarkRegistryObtainedBestEffort } from "@/lib/registry-status-auto";
 
 /**
  * 所有者事項PDF一括取込: 1行(=1ファイル)の処理。
@@ -397,6 +398,9 @@ export async function processRegistryPdfBulkRow(args: {
       } catch (e) {
         console.error("registry-pdf-bulk: audit failed (non-fatal):", e);
       }
+      // 謄本を付けたら、未取得の登記状況を取得済に(2026-11-06・失敗しても投げない)。
+      // ⚠行の確定のあと=確定に失敗すると添付は取り消されるので、その前に上げない(@codex P2)。
+      await autoMarkRegistryObtainedBestEffort({ propertyId: match.propertyId, changedBy: executor.id });
       // 面積・地番・家屋番号・構造・築年月を読んで物件の空の欄に入れる(添付と同じ)。
       // ⚠失敗しても行は成功のまま(添付は済んでいる)。
       await fillBasicInfoFromRegistryPdfBestEffort({ propertyId: match.propertyId, pdf: buf, changedBy: executor.id });

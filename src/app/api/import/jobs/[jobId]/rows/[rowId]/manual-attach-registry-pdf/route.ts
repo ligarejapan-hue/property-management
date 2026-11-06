@@ -13,6 +13,7 @@ import { hasPermission } from "@/lib/permissions";
 import { assertImportJobMutable } from "@/lib/import-job-guard";
 import { canAccessPropertyRecord } from "@/lib/property-access";
 import { writeAuditLog } from "@/lib/audit";
+import { autoMarkRegistryObtainedBestEffort } from "@/lib/registry-status-auto";
 import {
   getStorage,
   validateFile,
@@ -263,6 +264,10 @@ export async function POST(
       }
       throw finalizeErr;
     }
+
+    // 謄本を付けたら、未取得の登記状況を取得済に(2026-11-06・失敗しても投げない)。
+    // ⚠行の確定のあと=確定に失敗すると添付は取り消されるので、その前に上げない(@codex P2)。
+    await autoMarkRegistryObtainedBestEffort({ propertyId, changedBy: session.id });
 
     try {
       await storage.delete(stagedKey);

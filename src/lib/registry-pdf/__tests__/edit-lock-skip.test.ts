@@ -227,8 +227,11 @@ describe("物件の空欄補完と編集中の鍵", () => {
   it("物件に鍵があれば3項目の補完は見送り、取得状況だけ進める。PDF保存は従来どおり", async () => {
     (isResourceEditLocked as unknown as Mock).mockResolvedValue(true);
     const result = (await run({ pdfBuffer: PDF })) as Record<string, unknown>;
-    expect(pm.property.updateMany).toHaveBeenCalledTimes(1);
-    const data = pm.property.updateMany.mock.calls[0][0].data;
+    // 補完・取得状況の前進は1回(版を進める更新)。⚠2回目は、謄本を付けたあとの登記状況の自動(2026-11-06)=
+    // このモックは更新しても未取得のまま返すので呼ばれる(本物では取得済になっていて何もしない)。版は進めない。
+    const versioned = pm.property.updateMany.mock.calls.filter((c) => "version" in (c[0] as { data: Record<string, unknown> }).data);
+    expect(versioned).toHaveLength(1);
+    const data = versioned[0][0].data;
     expect(data.registryStatus).toBe("obtained");
     expect(data.version).toEqual({ increment: 1 });
     expect(data).not.toHaveProperty("realEstateNumber");
