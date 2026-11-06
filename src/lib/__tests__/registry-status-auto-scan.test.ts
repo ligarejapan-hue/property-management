@@ -61,6 +61,29 @@ describe("謄本の添付を作る入口は、どれも登記状況を取得済�
   });
 });
 
+describe("行の確定に失敗すると添付を取り消す入口は、確定のあとで上げる(@codex P2)", () => {
+  it("一括取り込みの行: finalizeRow の成功(取り消しの分岐)より後", () => {
+    const src = read(join(SRC, "lib/registry-pdf-bulk/process-row.ts"));
+    const lastUndo = src.lastIndexOf("await undoAttachmentBestEffort(");
+    const mark = src.indexOf("await autoMarkRegistryObtainedBestEffort(");
+    expect(lastUndo).toBeGreaterThan(0);
+    expect(mark).toBeGreaterThan(lastUndo);
+    // 呼ぶのは1か所だけ(確定の前に残っていない)。
+    expect(src.indexOf("autoMarkRegistryObtainedBestEffort(", mark + "await autoMarkRegistryObtainedBestEffort(".length)).toBe(-1);
+  });
+
+  it("取込の行から謄本を付ける画面: 行の確定と取り消しの catch より後", () => {
+    const src = read(join(SRC, "app/api/import/jobs/[jobId]/rows/[rowId]/manual-attach-registry-pdf/route.ts"));
+    const undo = src.indexOf("await prisma.attachment.delete({ where: { id: attachmentId } });");
+    const rethrow = src.indexOf("throw finalizeErr;", undo);
+    const mark = src.indexOf("await autoMarkRegistryObtainedBestEffort(");
+    expect(undo).toBeGreaterThan(0);
+    expect(mark).toBeGreaterThan(rethrow);
+    // 呼ぶのは1か所だけ(確定の前に残っていない)。
+    expect(src.indexOf("autoMarkRegistryObtainedBestEffort(", mark + "await autoMarkRegistryObtainedBestEffort(".length)).toBe(-1);
+  });
+});
+
 describe("謄本の取得の成功で変更履歴を残す", () => {
   const src = read(join(SRC, "lib/registry-fetch/auto-fetch.ts"));
 
