@@ -11,13 +11,14 @@ import { registryDocInfo } from "./registry-rights";
 /**
  * 書類確認書に使う形(名前なし)。読み取りが壊れても書類は出す=判定できない扱い(計画の読み替え 5)。
  * 土地のある物件は、土地と建物の全筆の合計(照合と同じ数え方。発行し直せば照合と合うように)。
+ * targetParcels=この取引の土地・建物(null=全部)。選んでいれば、その筆・棟の謄本だけ(照合と同じ)。
  */
 export async function loadRegistryDocInfo(
-  propertyId: string | null, kindBase: BasePropertyKind | null = null,
+  propertyId: string | null, kindBase: BasePropertyKind | null = null, targetParcels: readonly string[] | null = null,
 ): Promise<{ activeRights: number; caution: string | null }> {
   try {
     if (propertyId && isLandedKind(kindBase)) {
-      const data = await loadLandedCertificates(propertyId, { kindBase, includeOwners: false });
+      const data = await loadLandedCertificates(propertyId, { kindBase, includeOwners: false, targetParcels });
       if (!data.hasRows) return { activeRights: 0, caution: null };
       const infos = data.certs.map((c) => registryDocInfo(
         c.summary ? { status: "ok", attachmentCreatedAt: c.createdAt, summary: c.summary } : { status: "unreadable" },

@@ -32,7 +32,7 @@ export async function GET(_request: Request, ctx: Ctx) {
       prisma.dealRateTable.findMany(), loadDealSettings(), loadCompanyProfile(), loadDealStaffNames(deal),
     ]);
     // 書類確認書の抹消の項目のため、謄本を1回だけ読む(物件の無い取引は読まない)。
-    const registry = await loadRegistryDocInfo(await registryPropertyFor(session, perms, deal.propertyId), kindBaseOf(settings, deal.propertyKind));
+    const registry = await loadRegistryDocInfo(await registryPropertyFor(session, perms, deal.propertyId), kindBaseOf(settings, deal.propertyKind), deal.targetParcels ?? null);
     const bctx = {
       deal, calc: computeDealCalc(deal, rateRows, settings.propertyKinds, today), settings, company, rateRows, today, logo: null, seal: null, staff, registry,
     };

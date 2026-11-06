@@ -2329,6 +2329,8 @@ model Deal {
   overrides          Json      @default("{}") @db.JsonB
   /// 段取りの判定の控え(担保の有無・読んだ謄本の印・朝の見回りの日)。src/lib/deals/schedule-sync.ts。氏名は入れない。
   scheduleFacts      Json      @default("{}") @map("schedule_facts") @db.JsonB
+  /// この取引の土地・建物(2026-11-06 発注者 案A 3回目)。null=全部。鍵の配列=main:land・main:building・物件の extra_parcels の行の id。src/lib/deals/target-parcels.ts。
+  targetParcels      Json?     @map("target_parcels") @db.JsonB
   version            Int       @default(1)
   createdById        String    @map("created_by_id") @db.Uuid
   createdAt          DateTime  @default(now()) @map("created_at")

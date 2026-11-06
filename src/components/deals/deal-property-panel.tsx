@@ -12,6 +12,8 @@ import type { DealView } from "@/lib/deals/view";
 import { LAND_RIGHT_LABELS } from "@/lib/deals/constants";
 import { ASSESSMENT_MONEY_KEYS, AssessmentsEditor, type AssessmentsForm } from "./assessments-editor";
 import { textify, untextify } from "@/lib/deals/money-forms";
+import type { DealParcelOption } from "@/lib/deals/target-parcels";
+import DealTargetParcels from "./deal-target-parcels";
 
 const TEXT_FIELDS: [keyof SnapshotForm, string, number][] = [
   ["buildingName", "物件名", 200], ["roomNo", "号室", 50], ["address", "住居表示", 300], ["lotNumber", "所在・地番", 300],
@@ -28,8 +30,8 @@ const conflictText = (e: unknown) =>
     : errorText(e);
 
 export default function DealPropertyPanel({
-  deal, canOpenProperty, onSaved,
-}: { deal: DealView; canOpenProperty: boolean; onSaved: () => Promise<void> }) {
+  deal, canOpenProperty, parcelOptions = [], onSaved,
+}: { deal: DealView; canOpenProperty: boolean; parcelOptions?: DealParcelOption[]; onSaved: () => Promise<void> }) {
   const [form, setForm] = useState<SnapshotForm>(() => snapshotFormFromDeal(deal));
   const [busy, setBusy] = useState(false);
   const [confirming, setConfirming] = useState(false);
@@ -78,6 +80,14 @@ export default function DealPropertyPanel({
         <p className="text-sm text-gray-600 dark:text-gray-400">手入力の物件です(物件の一覧には登録しません)。</p>
       )}
       {error && <p className="text-sm text-red-600 dark:text-red-400" role="alert">{error}</p>}
+
+      {/* 2筆以上・2棟以上の物件の取引だけ(2026-11-06 3回目)。 */}
+      {deal.propertyId && canOpenProperty && parcelOptions.length > 0 && (
+        <DealTargetParcels
+          options={parcelOptions} target={deal.targetParcels ?? null} dirtyElsewhere={dirty} busy={busy}
+          onSave={(keys) => void run(() => dealsApi.saveTargetParcels(deal.id, deal.version, keys))}
+        />
+      )}
 
       <div className="grid gap-4 sm:grid-cols-2">
         {TEXT_FIELDS.map(([k, label, max]) => (

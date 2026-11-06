@@ -109,7 +109,7 @@ export async function POST(request: Request, ctx: Ctx) {
         deal, calc: computeDealCalc(deal, rateRows, settings.propertyKinds, today), settings, company, rateRows, today,
         logo: branding.logo, seal: branding.seal, staff: await loadDealStaffNames(deal),
         // 謄本は書類確認書と、謄本の状況を使う書類(売主属性調査書)のときだけ読む(計画 段5c-2 の読み替え 5・第2段階 段B)。
-        registry: businessDoc.group === "checklist" || businessDoc.usesRegistry ? await loadRegistryDocInfo(await registryPropertyFor(session, perms, deal.propertyId), kindBaseOf(settings, deal.propertyKind)) : undefined,
+        registry: businessDoc.group === "checklist" || businessDoc.usesRegistry ? await loadRegistryDocInfo(await registryPropertyFor(session, perms, deal.propertyId), kindBaseOf(settings, deal.propertyKind), deal.targetParcels ?? null) : undefined,
         receivedItemIds: businessDoc.group === "checklist" ? await loadReceivedChecklistItemIds(id) : undefined,
       };
       docRegistry = bctx.registry;

@@ -1,6 +1,7 @@
 import { normalizeRealEstateNumber } from "@/lib/address-normalizer";
 import { parcelNumberKey, pickParcelByLocation, readExtraParcels } from "@/lib/property-parcels";
 import type { RegistrySide } from "./crosscheck";
+import { MAIN_BUILDING_KEY, MAIN_LAND_KEY } from "./target-parcels";
 
 /**
  * 2筆以上・2棟以上の物件で、どの筆(棟)の謄本が無いかを見る(2026-11-05 発注者 案A 2回目)。
@@ -10,6 +11,8 @@ import type { RegistrySide } from "./crosscheck";
 
 /** 謄本が要る筆(棟)。label は画面に出す文字(「土地 1番2」)。location は見分けに使う所在(行の所在が空なら物件の住所)。 */
 export interface ExpectedParcel {
+  /** この取引の土地・建物の鍵(1筆目=MAIN_LAND_KEY・1棟目=MAIN_BUILDING_KEY・足した行=行の id)。 */
+  key: string;
   side: RegistrySide;
   number: string;
   realEstateNumber: string | null;
@@ -44,16 +47,16 @@ export function expectedParcels(
   const extras = readExtraParcels(p.extraParcels);
   if (!extras.length) return [];
   const out: ExpectedParcel[] = [];
-  const add = (side: RegistrySide, number: string | null | undefined, realEstateNumber: string | null, location: string | null) => {
+  const add = (key: string, side: RegistrySide, number: string | null | undefined, realEstateNumber: string | null, location: string | null) => {
     const n = number?.trim();
     if (!n || !required.includes(side)) return;
     // 所在が空の筆は物件の住所で見分ける(見出しには出さない)。
     const own = location?.trim() || null;
-    out.push({ side, number: n, realEstateNumber, location: own ?? (p.address?.trim() || null), label: `${side} ${own ? `${own} ` : ""}${n}` });
+    out.push({ key, side, number: n, realEstateNumber, location: own ?? (p.address?.trim() || null), label: `${side} ${own ? `${own} ` : ""}${n}` });
   };
-  add("土地", p.lotNumber, null, null);
-  add("建物", p.buildingNumber, null, null);
-  for (const x of extras) add(x.kind === "land" ? "土地" : "建物", x.number, x.realEstateNumber, x.location);
+  add(MAIN_LAND_KEY, "土地", p.lotNumber, null, null);
+  add(MAIN_BUILDING_KEY, "建物", p.buildingNumber, null, null);
+  for (const x of extras) add(x.id, x.kind === "land" ? "土地" : "建物", x.number, x.realEstateNumber, x.location);
   return out;
 }
 
@@ -62,7 +65,7 @@ export function expectedParcels(
  * 不動産番号が両方にあって一致すればそれ。無ければ地番・家屋番号で、同じ番号が2つ以上なら所在で決める(@codex P1)。
  * ⚠1通で2つの筆を満たしたことにしない。
  */
-function placeOf(c: CertificateParcel, expected: ExpectedParcel[]): ExpectedParcel | null {
+export function placeCertificate(c: CertificateParcel, expected: ExpectedParcel[]): ExpectedParcel | null {
   const re = reKey(c.realEstateNumber);
   const sameSide = expected.filter((p) => p.side === c.side);
   const byRe = re ? sameSide.filter((p) => reKey(p.realEstateNumber) === re) : [];
@@ -75,19 +78,21 @@ function placeOf(c: CertificateParcel, expected: ExpectedParcel[]): ExpectedParc
 }
 
 /**
- * 謄本が無い筆(棟)の文字。
+ * 謄本が無い筆(棟)の文字。scope=この取引の土地・建物の鍵(省略=全部)。行き先は expected 全部で決め、抜けは scope の中だけ出す。
  * unplaced=番号を読めない・同じ番号の筆を所在でも決められないなど、どの筆か分からない全部事項がある
  * (抜けを「無い」と言い切れない)。
  */
-export function parcelCoverage(expected: ExpectedParcel[], certs: CertificateParcel[]): { missing: string[]; unplaced: boolean } {
+export function parcelCoverage(
+  expected: ExpectedParcel[], certs: CertificateParcel[], scope?: readonly string[],
+): { missing: string[]; unplaced: boolean } {
   if (!expected.length) return { missing: [], unplaced: false };
   const covered = new Set<ExpectedParcel>();
   let unplaced = false;
   for (const c of certs) {
-    const p = placeOf(c, expected);
+    const p = placeCertificate(c, expected);
     if (p) covered.add(p);
     // 番号が読めて、どの筆とも合わない謄本(物件と関係ない筆)は抜けの判定に使わない。
     else if (!parcelNumberKey(c.number) || expected.filter((x) => x.side === c.side && parcelNumberKey(x.number) === parcelNumberKey(c.number)).length > 1) unplaced = true;
   }
-  return { missing: expected.filter((p) => !covered.has(p)).map((p) => p.label), unplaced };
+  return { missing: expected.filter((p) => !covered.has(p) && (!scope || scope.includes(p.key))).map((p) => p.label), unplaced };
 }

@@ -15,6 +15,7 @@ import type { ScheduleItemView } from "./schedule-sync";
 import type { DocLinksResponse, DocProgress } from "./doc-links/staff-store";
 import type { RequestDraftCopyView, RequestDraftResponse } from "./request-drafts/store";
 import type { FormDef } from "@/lib/deals/documents/forms/types";
+import type { DealParcelOption } from "./target-parcels";
 
 /** 取引の画面から API を呼ぶ。失敗はサーバーの文言とコードを持った DealApiError にする。 */
 export class DealApiError extends Error {
@@ -67,6 +68,8 @@ export type RelatedDeal = PropertyDealSummary & { price: number | null };
 export interface DealDetailResponse {
   deal: DealView; canOpenProperty: boolean; canChangeStatus: boolean; canChangeAssignee: boolean; canMoveCaseStatus: boolean;
   relatedDeals: RelatedDeal[];
+  /** この取引の土地・建物で選べるもの(空=選ぶ欄を出さない)。 */
+  parcelOptions?: DealParcelOption[];
 }
 
 export const dealsApi = {
@@ -95,6 +98,9 @@ export const dealsApi = {
     call<{ ok: true }>(`/api/deals/${id}/doc-links/requests/${requestId}`, { method: "POST", body }),
   docFileUrl: (id: string, fileId: string) => `/api/deals/${id}/doc-links/files/${fileId}`,
   completePreScheduleItems: (id: string) => call<{ count: number }>(`/api/deals/${id}/schedule/complete-pre`, { method: "POST" }),
+  /** この取引の土地・建物(null=全部)。 */
+  saveTargetParcels: (id: string, version: number, targetParcels: string[] | null) =>
+    call<{ version: number }>(`/api/deals/${id}/target-parcels`, { method: "POST", body: { version, targetParcels } }),
   refreshProperty: (id: string, version: number) =>
     call<{ version: number }>(`/api/deals/${id}/refresh-property`, { method: "POST", body: { version } }),
   /** ownerIds なし=売主がいない取引の全員。あり=選んだ人だけ。 */

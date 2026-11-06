@@ -72,13 +72,13 @@ describe("GET /api/deals/[id]/crosscheck", () => {
     expect(seller(body)?.status).toBe("mismatch");
     expect(seller(body)?.message).toBe(SELLER_MISMATCH_MESSAGE);
     expect(JSON.stringify(body)).not.toContain(REG_NAME);
-    expect(loadCrosscheckRegistry).toHaveBeenCalledWith(PROP_ID, { kindBase: "unit", includeOwners: true });
+    expect(loadCrosscheckRegistry).toHaveBeenCalledWith(PROP_ID, { kindBase: "unit", includeOwners: true, targetParcels: null });
   });
   it("所有者の閲覧が無い人: 氏名を読まず、比べない(件数に数えない)", async () => {
     (getUserPermissions as Fn).mockResolvedValue([...DEAL_PERMS, REGISTRY_PERM]);
     loadCrosscheckRegistry.mockResolvedValue({ ...registry, owners: null });
     const { body } = await call();
-    expect(loadCrosscheckRegistry).toHaveBeenCalledWith(PROP_ID, { kindBase: "unit", includeOwners: false });
+    expect(loadCrosscheckRegistry).toHaveBeenCalledWith(PROP_ID, { kindBase: "unit", includeOwners: false, targetParcels: null });
     expect(seller(body)?.status).toBe("unverifiable");
     expect(seller(body)?.message).toContain("権限");
     expect(body.crosscheck.items.filter((i: { key: string; status: string }) => i.key === "seller" && i.status === "mismatch")).toEqual([]);

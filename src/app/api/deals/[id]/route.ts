@@ -18,6 +18,8 @@ import type { ScheduleEvent } from "@/lib/deals/schedule";
 import { canChangeDealAssignee, canChangeDealStatus, caseStatusWouldMove, syncCaseStatusFromDeals, syncDealDocRetention } from "@/lib/deals/status-link";
 import { lockPropertyRow } from "@/lib/property-record-guard";
 import { summarizePropertyDeals } from "@/lib/property-business-type";
+import { supportsUnitFields } from "@/lib/property-building-name";
+import { dealParcelOptions } from "@/lib/deals/target-parcels";
 
 type Ctx = { params: Promise<{ id: string }> };
 const NO_STORE = { "Cache-Control": "no-store" };
@@ -28,6 +30,7 @@ const idOf = async (ctx: Ctx) => z.string().uuid().parse((await ctx.params).id);
 /**
  * 取引の詳しい中身。物件を開くリンクは、その物件を見られる人にだけ出す。
  * relatedDeals = 同じ物件のほかの取引(買取再販の仕入と売却を行き来する・2026-11-05)。取引を見られる人なら見られる。
+ * parcelOptions = この取引の土地・建物で選べるもの(物件を見られる人だけ・足した行の無い物件と区分は空=選ぶ欄を出さない)。
  */
 export async function GET(_req: Request, ctx: Ctx) {
   try {
@@ -36,7 +39,10 @@ export async function GET(_req: Request, ctx: Ctx) {
     const row = await prisma.deal.findUnique({ where: { id }, select: { ...DEAL_DETAIL_SELECT, createdById: true } });
     if (!row) throw new ApiError(404, "取引が見つかりません", "NOT_FOUND");
     const p = row.propertyId
-      ? await prisma.property.findUnique({ where: { id: row.propertyId }, select: { createdBy: true, assignedTo: true } })
+      ? await prisma.property.findUnique({
+        where: { id: row.propertyId },
+        select: { createdBy: true, assignedTo: true, propertyType: true, lotNumber: true, buildingNumber: true, extraParcels: true },
+      })
       : null;
     const canOpenProperty = !!p && hasPermission(perms, "property", "read") && canAccessPropertyRecord(session, p);
     const canChangeStatus = canChangeDealStatus(session, row, p);
@@ -47,7 +53,8 @@ export async function GET(_req: Request, ctx: Ctx) {
       select: { id: true, dealNo: true, businessType: true, status: true, price: true, settlementAt: true, createdAt: true, parties: { select: { role: true, isSelf: true } } },
     }) : [];
     const relatedDeals = summarizePropertyDeals(related).map((d, i) => ({ ...d, price: related[i].price === null ? null : Number(related[i].price) }));
-    return NextResponse.json({ deal: toDealView(row), canOpenProperty, canChangeStatus, canChangeAssignee, canMoveCaseStatus, relatedDeals }, { headers: NO_STORE });
+    const parcelOptions = p && canOpenProperty && !supportsUnitFields(p.propertyType) ? dealParcelOptions(p) : [];
+    return NextResponse.json({ deal: toDealView(row), canOpenProperty, canChangeStatus, canChangeAssignee, canMoveCaseStatus, relatedDeals, parcelOptions }, { headers: NO_STORE });
   } catch (error) {
     return handleApiError(error);
   }

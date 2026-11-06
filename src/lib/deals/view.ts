@@ -4,6 +4,7 @@ import { readBroker, readSnapshot } from "./snapshot";
 import { readAssessments, readCosts, readLeases, readOverrides, readTerms } from "./inputs";
 import { readFundingInputs, type FundingInputs } from "./funding-schema";
 import { readBusinessInputs, type BusinessInputs } from "./business-schema";
+import { readTargetParcels } from "./target-parcels";
 import type { Assessments, CounterpartyBroker, Costs, Lease, Overrides, PropertySnapshot, SettlementTerms } from "./schemas";
 
 const iso = (d: Date | null) => (d ? d.toISOString() : null);
@@ -40,7 +41,7 @@ export const DEAL_DETAIL_SELECT = {
   contractAt: true, contractPlace: true, settlementAt: true, settlementPlace: true,
   price: true, buildingTax: true, deposit: true, taxRateBp: true,
   propertySnapshot: true, counterpartyBroker: true, version: true, createdAt: true, updatedAt: true,
-  assessments: true, costs: true, settlementTerms: true, leases: true, overrides: true, planInputs: true,
+  assessments: true, costs: true, settlementTerms: true, leases: true, overrides: true, planInputs: true, targetParcels: true,
   parties: { select: DEAL_PARTY_SELECT, orderBy: [{ role: "asc" }, { sortOrder: "asc" }, { createdAt: "asc" }] },
 } satisfies Prisma.DealSelect;
 
@@ -56,6 +57,8 @@ export interface DealView {
   fundingPlan: FundingInputs;
   /** 事業計画書の入力(`plan_inputs.business`)。 */
   businessPlan: BusinessInputs;
+  /** この取引の土地・建物(null・省略=全部)。src/lib/deals/target-parcels.ts。 */
+  targetParcels?: string[] | null;
   version: number; createdAt: string; updatedAt: string; parties: DealPartyView[];
 }
 
@@ -69,7 +72,7 @@ export function toDealView(r: Prisma.DealGetPayload<{ select: typeof DEAL_DETAIL
     propertySnapshot: readSnapshot(r.propertySnapshot), counterpartyBroker: readBroker(r.counterpartyBroker),
     assessments: readAssessments(r.assessments), costs: readCosts(r.costs), settlementTerms: readTerms(r.settlementTerms),
     leases: readLeases(r.leases), overrides: readOverrides(r.overrides), fundingPlan: readFundingInputs(r.planInputs),
-    businessPlan: readBusinessInputs(r.planInputs),
+    businessPlan: readBusinessInputs(r.planInputs), targetParcels: readTargetParcels(r.targetParcels),
     version: r.version, createdAt: r.createdAt.toISOString(), updatedAt: r.updatedAt.toISOString(), parties: r.parties,
   };
 }
