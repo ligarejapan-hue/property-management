@@ -19,6 +19,10 @@
 実測(2026-10-09・SRE AI査定の報告書 46ページ): 18.8MB → lossless 13.3MB → jpeg85 7.9MB。
 全ページの文字が一致・描画の差は最悪ページでも PSNR 43.6dB(目で区別できない)。
 
+⚠閉じ込め(2026-11-06・お客様の提出からも来る): 入力を開く前に pdf_sandbox.confine で、
+  読み書きを入力と同じフォルダ(その回の作業フォルダ)と /usr(読むだけ)に絞る。
+  閉じ込められなければ縮めずに失敗する。出力先は入力と同じフォルダでなければならない。
+
 ⚠ライセンス: pikepdf(MPL-2.0)・Pillow(HPND)。AGPL の MuPDF は使わない。
 """
 import argparse
@@ -38,7 +42,20 @@ except Exception:  # Windows 等では無い。呼び出し側の時間制限が
     pass
 
 import pikepdf  # noqa: E402
-from PIL import Image  # noqa: E402,F401  (pikepdf の画像変換が使う)
+from PIL import Image  # noqa: E402  (pikepdf の画像変換が使う)
+
+from pdf_sandbox import confine, probe_outside  # noqa: E402
+
+
+def _preload():
+    """閉じ込める前に、あとで読み込まれる部品(Pillow の JPEG・PNG など)を先に読んでおく。"""
+    Image.preinit()
+    Image.init()
+
+
+def _confine_to(workdir):
+    _preload()
+    confine(workdir)
 
 LEVELS = (("lossless", None), ("jpeg85", 85), ("jpeg75", 75))
 MIN_SIDE = 64          # これより小さい図版は縮めても得が無い(アイコン等)
@@ -142,46 +159,76 @@ def _self_test():
 
     写真のような図版(600x600・Flate)を4ページに貼った PDF を一時フォルダに作り、
     大きさの 1/3 を上限にして縮める。縮んでページ数が保たれていれば ok。
+    2026-11-06: 本番と同じく閉じ込めた中で縮め、外のファイルを読めず外に書けないことも確かめる
+    ("sandbox": "ok")。閉じ込めると後片付け(作業フォルダごと消す)ができないので、子で動かす。
     """
-    import random
+    import shutil
     import tempfile
+
+    d = tempfile.mkdtemp(prefix="pdfc-selftest-")
+    fd, outside = tempfile.mkstemp(prefix="pdfc-selftest-outside-")
+    os.close(fd)
+    escape = os.path.join(os.path.dirname(outside), "pdfc-escape-probe")
+    try:
+        sys.stdout.flush()
+        pid = os.fork()
+        if pid == 0:
+            code = 1
+            try:
+                _confine_to(d)
+                code = _self_test_body(d, outside)
+            except Exception as e:  # 中身は出さず種類だけ
+                print(json.dumps({"selfTest": "ng", "reason": type(e).__name__}))
+            sys.stdout.flush()
+            os._exit(code)
+        _, status = os.waitpid(pid, 0)
+        return os.waitstatus_to_exitcode(status)
+    finally:
+        shutil.rmtree(d, ignore_errors=True)
+        for p in (outside, escape):
+            if os.path.exists(p):
+                os.remove(p)
+
+
+def _self_test_body(d, outside):
+    import random
     import zlib
 
-    with tempfile.TemporaryDirectory(prefix="pdfc-selftest-") as d:
-        src = os.path.join(d, "in.pdf")
-        dst = os.path.join(d, "out.pdf")
-        pdf = pikepdf.new()
-        images = []
-        for seed in (1, 2):
-            random.seed(seed)
-            rows = bytearray()
-            for y in range(600):
-                for x in range(600):
-                    rows += bytes(((x + seed * 40) % 256, (y * 2) % 256, random.randint(0, 40)))
-            s = pikepdf.Stream(pdf, zlib.compress(bytes(rows)))
-            s.Type = pikepdf.Name.XObject
-            s.Subtype = pikepdf.Name.Image
-            s.Width = 600
-            s.Height = 600
-            s.ColorSpace = pikepdf.Name.DeviceRGB
-            s.BitsPerComponent = 8
-            s.Filter = pikepdf.Name.FlateDecode
-            images.append(s)
-        for i in range(4):
-            page = pdf.add_blank_page(page_size=(600, 600))
-            page.Resources = pikepdf.Dictionary(XObject=pikepdf.Dictionary(Im0=images[i % 2]))
-            page.Contents = pdf.make_stream(b"q 600 0 0 600 0 0 cm /Im0 Do Q")
-        pdf.save(src)
-        limit = os.path.getsize(src) // 3
-        for level, quality in LEVELS:
-            pages = _build(src, dst, quality)
-            if os.path.getsize(dst) <= limit:
-                ok = pages == 4 and level != "lossless"
-                print(json.dumps({"selfTest": "ok" if ok else "ng", "level": level,
-                                  "pikepdf": pikepdf.__version__}))
-                return 0 if ok else 1
-        print(json.dumps({"selfTest": "ng", "reason": "too_large", "pikepdf": pikepdf.__version__}))
-        return 1
+    sandbox = "ok" if probe_outside(d, outside) == {"readOutside": "denied", "writeOutside": "denied"} else "ng"
+    src = os.path.join(d, "in.pdf")
+    dst = os.path.join(d, "out.pdf")
+    pdf = pikepdf.new()
+    images = []
+    for seed in (1, 2):
+        random.seed(seed)
+        rows = bytearray()
+        for y in range(600):
+            for x in range(600):
+                rows += bytes(((x + seed * 40) % 256, (y * 2) % 256, random.randint(0, 40)))
+        s = pikepdf.Stream(pdf, zlib.compress(bytes(rows)))
+        s.Type = pikepdf.Name.XObject
+        s.Subtype = pikepdf.Name.Image
+        s.Width = 600
+        s.Height = 600
+        s.ColorSpace = pikepdf.Name.DeviceRGB
+        s.BitsPerComponent = 8
+        s.Filter = pikepdf.Name.FlateDecode
+        images.append(s)
+    for i in range(4):
+        page = pdf.add_blank_page(page_size=(600, 600))
+        page.Resources = pikepdf.Dictionary(XObject=pikepdf.Dictionary(Im0=images[i % 2]))
+        page.Contents = pdf.make_stream(b"q 600 0 0 600 0 0 cm /Im0 Do Q")
+    pdf.save(src)
+    limit = os.path.getsize(src) // 3
+    for level, quality in LEVELS:
+        pages = _build(src, dst, quality)
+        if os.path.getsize(dst) <= limit:
+            ok = pages == 4 and level != "lossless" and sandbox == "ok"
+            print(json.dumps({"selfTest": "ok" if ok else "ng", "level": level, "sandbox": sandbox,
+                              "pikepdf": pikepdf.__version__}))
+            return 0 if ok else 1
+    print(json.dumps({"selfTest": "ng", "reason": "too_large", "sandbox": sandbox, "pikepdf": pikepdf.__version__}))
+    return 1
 
 
 def main():
@@ -194,6 +241,12 @@ def main():
     # max-bytes まで縮まなくても、一番小さい形がこれ以下なら受け取る(2026-10-19)。
     ap.add_argument("--accept-bytes", type=int, default=None)
     a = ap.parse_args()
+
+    # 入力を開く前に、読み書きをその回の作業フォルダ(入力のあるフォルダ)だけにする。
+    workdir = os.path.dirname(os.path.realpath(a.src))
+    if os.path.dirname(os.path.realpath(a.dst)) != workdir:
+        raise ValueError("dst-outside-workdir")
+    _confine_to(workdir)
 
     in_bytes = os.path.getsize(a.src)
     try:

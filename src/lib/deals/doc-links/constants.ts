@@ -21,6 +21,11 @@ export const DOC_FILE_MAX_BYTES = 8 * 1024 * 1024;
 export const DOC_PDF_UPLOAD_MAX_BYTES = 30 * 1024 * 1024;
 /** 縮めても 8MB に届かないとき、保存してよい大きさ(社内の添付と同じ 20MB・2026-10-19 発注者決定)。 */
 export const DOC_FILE_ACCEPT_BYTES = 20 * 1024 * 1024;
+/**
+ * お客様の PDF を縮める1回の時間の上限(社内の添付の 2 分より短く・2026-11-06 発注者)。
+ * 18.8MB で実測 7〜10 秒なので 30MB でも足りる。過ぎたら止めて断る。
+ */
+export const DOC_PDF_COMPRESS_TIMEOUT_MS = 60_000;
 /** 差し戻したものを除いて、1書類あたりのファイル数。 */
 export const DOC_FILES_PER_REQUEST = 5;
 /** 差し戻したものも含めて、1リンクあたりのファイル数(ディスクを使い切られない上限)。 */

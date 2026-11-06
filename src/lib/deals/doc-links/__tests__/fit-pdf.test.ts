@@ -1,5 +1,5 @@
 import { describe, expect, it, vi } from "vitest";
-import { DOC_FILE_ACCEPT_BYTES, DOC_FILE_MAX_BYTES, DOC_PDF_UPLOAD_MAX_BYTES } from "../constants";
+import { DOC_FILE_ACCEPT_BYTES, DOC_FILE_MAX_BYTES, DOC_PDF_COMPRESS_TIMEOUT_MS, DOC_PDF_UPLOAD_MAX_BYTES } from "../constants";
 import { fitSubmittedPdf } from "../fit-pdf";
 
 const MB = 1024 * 1024;
@@ -31,7 +31,10 @@ describe("お客様の PDF を縮める(2026-11-06 発注者「8MBを超えた�
     expectKept(await fitSubmittedPdf(input, compress), small, true);
     const args = compress.mock.calls[0] as unknown[];
     expect(args[0]).toBe(input);
-    expect(args.slice(1)).toEqual([DOC_FILE_MAX_BYTES, undefined, DOC_FILE_ACCEPT_BYTES]);
+    expect(args.slice(1)).toEqual([DOC_FILE_MAX_BYTES, undefined, DOC_FILE_ACCEPT_BYTES, DOC_PDF_COMPRESS_TIMEOUT_MS]);
+  });
+  it("お客様のファイルの圧縮は 60 秒で止める(社内の添付の 2 分より短く・2026-11-06 発注者)", () => {
+    expect(DOC_PDF_COMPRESS_TIMEOUT_MS).toBe(60_000);
   });
   it("縮められなくても、元が 20MB 以下なら元のまま保存する", async () => {
     const compress = vi.fn(async () => ({ ok: false as const, reason: "too_large" as const, inBytes: 9 * MB, bestBytes: 9 * MB }));

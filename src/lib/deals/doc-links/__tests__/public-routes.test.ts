@@ -23,7 +23,7 @@ vi.mock("@/lib/prisma", () => {
 import prismaMock from "@/lib/prisma";
 import { GET } from "@/app/submit/[token]/route";
 import { POST } from "@/app/submit/[token]/upload/route";
-import { DOC_BYTES_PER_LINK, DOC_FILE_ACCEPT_BYTES, DOC_FILE_MAX_BYTES, DOC_PDF_UPLOAD_MAX_BYTES } from "../constants";
+import { DOC_BYTES_PER_LINK, DOC_FILE_ACCEPT_BYTES, DOC_FILE_MAX_BYTES, DOC_PDF_COMPRESS_TIMEOUT_MS, DOC_PDF_UPLOAD_MAX_BYTES } from "../constants";
 import { buildDocLinkToken } from "../token";
 import { DIRTY_JPEG } from "./fixtures";
 
@@ -269,7 +269,7 @@ describe("提出", () => {
       expect(buffer.equals(small)).toBe(true);
       expect(meta.mimeType).toBe("application/pdf");
       expect(meta.key).toMatch(/\.pdf$/);
-      expect(compress.compressPdf).toHaveBeenCalledWith(expect.any(Buffer), DOC_FILE_MAX_BYTES, undefined, DOC_FILE_ACCEPT_BYTES);
+      expect(compress.compressPdf).toHaveBeenCalledWith(expect.any(Buffer), DOC_FILE_MAX_BYTES, undefined, DOC_FILE_ACCEPT_BYTES, DOC_PDF_COMPRESS_TIMEOUT_MS);
       expect(compress.reserve).toHaveBeenCalledTimes(1);
       expect(compress.release).toHaveBeenCalledTimes(1);
     });
