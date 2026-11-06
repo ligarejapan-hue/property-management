@@ -13,6 +13,7 @@ import { hasPermission } from "@/lib/permissions";
 import { assertImportJobMutable } from "@/lib/import-job-guard";
 import { canAccessPropertyRecord } from "@/lib/property-access";
 import { writeAuditLog } from "@/lib/audit";
+import { autoMarkRegistryObtainedBestEffort } from "@/lib/registry-status-auto";
 import {
   getStorage,
   validateFile,
@@ -177,6 +178,8 @@ export async function POST(
         });
       });
       attachmentId = attachment.id;
+      // 謄本を付けたら、未取得の登記状況を取得済に(2026-11-06・失敗しても投げない)。
+      await autoMarkRegistryObtainedBestEffort({ propertyId, changedBy: session.id });
     } catch (err) {
       if (uploadedKey) {
         try {

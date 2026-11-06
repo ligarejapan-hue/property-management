@@ -12,6 +12,7 @@ import {
 import { writeAuditLog } from "@/lib/audit";
 import { hasPermission, hasExplicitWritePerm } from "@/lib/permissions";
 import { lockPropertyRow } from "@/lib/property-record-guard";
+import { latestRegistryObtainedAt } from "@/lib/registry-obtained-date";
 import { assertNotEditLockedByOther, deleteEditLocksFor } from "@/lib/edit-lock/service";
 import { readScreenTokenHash, readLockId } from "@/lib/edit-lock/screen-token";
 import { updatePropertySchema } from "@/lib/validators";
@@ -184,6 +185,10 @@ export async function GET(
     let registryAttachmentCounts:
       | { owner: number; all: number; other: number }
       | null = null;
+    // 登記状況「取得済」の右に出す取得日(2026-11-06)。謄本の件数と同じ人だけ・取得済のときだけ。
+    //   謄本の添付(未削除)のいちばん新しい日時と、謄本の取得の成功の記録のいちばん新しい日時の新しいほう。
+    //   どちらも無ければ null(手で取得済にしただけ=出さない)。
+    let registryObtainedAt: string | null = null;
     if (hasPermission(permissions, "registry_pdf", "preview")) {
       const grouped = await prisma.attachment.groupBy({
         by: ["registryCertificateType"],
@@ -194,6 +199,7 @@ export async function GET(
           isDeleted: false,
         },
         _count: { _all: true },
+        _max: { createdAt: true },
       });
       const counts = { owner: 0, all: 0, other: 0 };
       for (const g of grouped) {
@@ -203,6 +209,20 @@ export async function GET(
         else counts.other += n;
       }
       registryAttachmentCounts = counts;
+      if (property.registryStatus === "obtained") {
+        const fetched = await prisma.auditLog.findFirst({
+          where: {
+            action: "registry_auto_fetch",
+            targetTable: "properties",
+            targetId: id,
+            detail: { path: ["status"], equals: "success" },
+          },
+          orderBy: { createdAt: "desc" },
+          select: { createdAt: true },
+        });
+        registryObtainedAt =
+          latestRegistryObtainedAt([...grouped.map((g) => g._max?.createdAt), fetched?.createdAt])?.toISOString() ?? null;
+      }
     }
 
     // この物件の取引(取扱区分の横に並べる・2026-11-04)。⚠取引を見る権限(deal:read)が無い人には
@@ -232,6 +252,7 @@ export async function GET(
       propertyOwners: maskedPropertyOwners,
       importSource,
       registryAttachmentCounts,
+      registryObtainedAt,
       deals,
     });
   } catch (error) {

@@ -114,6 +114,7 @@ import { SalesSheetList } from "@/components/sales-sheet/SalesSheetList";
 import { salesSheetTemplateKindFor } from "@/lib/sales-sheet/template-kind";
 import { landBuildingAreaRows } from "@/lib/property-area-display";
 import { formatPhoneJp, isValidPhoneJp } from "@/lib/phone-format-jp";
+import { registryObtainedDateLabel } from "@/lib/registry-obtained-date";
 import {
   beginRefresh,
   createRefreshState,
@@ -252,6 +253,8 @@ interface ApiProperty {
    * null = registry_pdf:preview を持たない閲覧者(=行自体を出さない)。
    */
   registryAttachmentCounts: { owner: number; all: number; other: number } | null;
+  /** 取得日の元(ISO)。謄本を見られない人・記録が無いときは null(mock では無いことがある)。 */
+  registryObtainedAt?: string | null;
   /** 取扱区分(brokerage/resale・null=未定・2026-11-04)。 */
   businessType?: string | null;
   /** この物件の取引。null=取引を見る権限が無い(取引の行を出さない)。 */
@@ -1392,6 +1395,7 @@ function BasicTab({
         value={property.registryStatus}
         badgeStyle={registryBadgeStyles[property.registryStatus]}
         badgeLabel={REGISTRY_STATUS_LABELS[property.registryStatus]}
+        note={registryObtainedDateLabel(property.registryStatus, property.registryObtainedAt)}
       />
       {/* 謄本(registry)添付の件数。⚠registryAttachmentCounts が null のとき
           (謄本を見る権限が無い閲覧者)は行自体を出さない。件数と種別だけを出し、
@@ -2878,6 +2882,7 @@ function Field({
   multiline,
   badgeStyle,
   badgeLabel,
+  note,
 }: {
   label: string;
   value: string | null | undefined;
@@ -2886,6 +2891,8 @@ function Field({
   multiline?: boolean;
   badgeStyle?: string;
   badgeLabel?: string;
+  /** バッジの右に添える小さな文字(登記状況の取得日・2026-11-06)。 */
+  note?: string | null;
 }) {
   return (
     <div>
@@ -2906,6 +2913,9 @@ function Field({
         ) : (
           value || "—"
         )}
+        {badgeStyle && note ? (
+          <span className="ml-2 text-xs text-gray-500 dark:text-gray-400">{note}</span>
+        ) : null}
       </dd>
     </div>
   );

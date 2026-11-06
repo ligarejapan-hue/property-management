@@ -9,6 +9,7 @@ import { canAccessPropertyRecord } from "@/lib/property-access";
 import { writeAuditLog } from "@/lib/audit";
 import { fillBasicInfoFromRegistryPdfBestEffort } from "@/lib/registry-pdf/fill-areas";
 import { matchProperty, type PropertyIndex } from "./match";
+import { autoMarkRegistryObtainedBestEffort } from "@/lib/registry-status-auto";
 
 /**
  * 所有者事項PDF一括取込: 1行(=1ファイル)の処理。
@@ -338,6 +339,8 @@ export async function processRegistryPdfBulkRow(args: {
         });
       });
       attachmentId = attachment.id;
+      // 謄本を付けたら、未取得の登記状況を取得済に(2026-11-06・失敗しても投げない)。
+      await autoMarkRegistryObtainedBestEffort({ propertyId: match.propertyId, changedBy: executor.id });
     } catch (err) {
       if (uploadedKey) {
         try {

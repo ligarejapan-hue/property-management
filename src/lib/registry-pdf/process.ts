@@ -43,6 +43,7 @@ import {
 } from "@/lib/registry-strike";
 import { buildErrorRawDataExtras } from "@/lib/import-error-display";
 import { getStorage, validateFile, ALLOWED_ATTACHMENT_MIMES } from "@/lib/storage";
+import { autoMarkRegistryObtainedBestEffort } from "@/lib/registry-status-auto";
 import {
   decideCorporateImport,
   emptyCorporateImportSummary,
@@ -1450,6 +1451,9 @@ export async function processRegistryPdf(
           });
         });
         attachmentId = attachment.id;
+        // 謄本を付けたら、未取得の登記状況を取得済に(2026-11-06・失敗しても投げない)。
+        // 謄本の自動取得から来たときは物件が取得中(取得の鍵)なので、ここでは変わらない。
+        await autoMarkRegistryObtainedBestEffort({ propertyId: targetPropertyId, changedBy: session.id });
       } catch (err) {
         // 取込本体は成功扱いのまま継続し、保存失敗のみ warning として返す。
         console.error("Failed to save registry PDF attachment:", err);

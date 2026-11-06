@@ -27,6 +27,7 @@ import { ApiError } from "@/lib/api-helpers";
 import { writeAuditLog } from "@/lib/audit";
 import { canAccessPropertyRecord } from "@/lib/property-access";
 import { lockPropertyRow } from "@/lib/property-record-guard";
+import { logRegistryObtainedByFetch } from "@/lib/registry-status-auto";
 import { extractTextFromPdf, isPdfBuffer } from "@/lib/pdf-extract";
 import { REGISTRY_PURCHASE_LEDGER_ACTION } from "@/lib/registry-fetch/monthly-cap";
 import {
@@ -4589,6 +4590,10 @@ export async function runRegistryAutoFetch(
       }
       throw postErr;
     }
+
+    // 取得済にしたことを変更履歴に「自動」で残す(2026-11-06 発注者・取得の前から取得済なら残さない)。
+    // ⚠上の try の外=書けなくても課金後の成功を失敗にしない(関数の中でも投げない)。
+    await logRegistryObtainedByFetch({ propertyId, previousStatus, changedBy: session.id });
 
     // 台帳は provider 返却直後に outcome:"charged" で記録済み(@codex #345 P1)。
     // ここでの追記は不要(照合は purchaseKeyHash のみで行い outcome は見ない)。

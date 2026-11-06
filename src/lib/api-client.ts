@@ -182,6 +182,8 @@ export type PropertyDetailResult = (typeof MOCK_PROPERTIES)[0] & {
     all: number;
     other: number;
   } | null;
+  /** 登記状況「取得済」の右に出す取得日の元(ISO)。謄本の件数と同じ人だけ・取得済で記録があるときだけ。 */
+  registryObtainedAt?: string | null;
 };
 
 export async function fetchPropertyDetail(id: string): Promise<PropertyDetailResult> {
