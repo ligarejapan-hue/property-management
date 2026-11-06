@@ -6,6 +6,7 @@ import { ApiError, handleApiError, parseJsonBody } from "@/lib/api-helpers";
 import { hasPermission } from "@/lib/permissions";
 import { writeAuditLog } from "@/lib/audit";
 import { canAccessPropertyRecord } from "@/lib/property-access";
+import { lockPropertyRow } from "@/lib/property-record-guard";
 import { supportsUnitFields } from "@/lib/property-building-name";
 import { requireDeal, DEAL_VERSION_CONFLICT_MESSAGE } from "@/lib/deals/guard";
 import { buildSnapshotFromProperty, readSnapshot, SNAPSHOT_PROPERTY_SELECT } from "@/lib/deals/snapshot";
@@ -37,6 +38,8 @@ export async function POST(request: Request, ctx: Ctx) {
       if (!deal) throw new ApiError(404, "取引が見つかりません", "NOT_FOUND");
       if (deal.version !== version) throw new ApiError(409, DEAL_VERSION_CONFLICT_MESSAGE, "VERSION_CONFLICT");
       if (!deal.propertyId) throw new ApiError(422, "手入力の物件の取引です", "NO_PROPERTY");
+      // ⚠物件の行をロックしてから物件を読む(分筆・合筆・別の物件にするとの交差で、消えた行を選びに書かない)。
+      await lockPropertyRow(tx, deal.propertyId);
       const p = await tx.property.findUnique({ where: { id: deal.propertyId }, select: SNAPSHOT_PROPERTY_SELECT });
       if (!p || !canAccessPropertyRecord(session, p)) throw new ApiError(404, "物件が見つかりません", "PROPERTY_NOT_FOUND");
       const options = supportsUnitFields(p.propertyType) ? [] : dealParcelOptions(p);

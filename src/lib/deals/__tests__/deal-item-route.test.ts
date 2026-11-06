@@ -1,4 +1,6 @@
 import { describe, it, expect, vi, beforeEach } from "vitest";
+import { readFileSync } from "node:fs";
+import { join } from "node:path";
 const { syncDealScheduleSafe } = vi.hoisted(() => ({ syncDealScheduleSafe: vi.fn(async () => undefined) }));
 vi.mock("@/lib/deals/schedule-sync", async (orig) => ({ ...(await orig<typeof import("../schedule-sync")>()), syncDealScheduleSafe }));
 vi.mock("next/server", async () => (await import("./route-mocks")).nextServerMock());
@@ -491,6 +493,11 @@ describe("この取引の土地・建物(2026-11-06 3回目)", () => {
     expect((await TARGET(json("POST", { version: 3, targetParcels: ["x"] }), ctx)).status).toBe(422);
     expect((await TARGET(json("POST", { version: 3, targetParcels: "x" }), ctx)).status).toBeGreaterThanOrEqual(400);
     expect(pm.deal.updateMany).not.toHaveBeenCalled();
+  });
+  it("★保存は物件の行をロックしてから物件を読む(分筆・別の物件にするとの交差で消えた行を書かない)", () => {
+    const src = readFileSync(join(process.cwd(), "src/app/api/deals/[id]/target-parcels/route.ts"), "utf8");
+    expect(src.indexOf("await lockPropertyRow(tx, deal.propertyId)")).toBeGreaterThan(-1);
+    expect(src.indexOf("await lockPropertyRow(tx, deal.propertyId)")).toBeLessThan(src.indexOf("tx.property.findUnique"));
   });
   it("物件から取り直すときも、選んだ土地・建物だけの地番にする", async () => {
     pm.deal.findUnique.mockResolvedValue({ propertyId: PROP_ID, targetParcels: ["y"] });

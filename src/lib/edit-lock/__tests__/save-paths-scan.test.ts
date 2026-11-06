@@ -13,6 +13,8 @@ import { join } from "node:path";
 const GUARDED: Array<{ path: string; rowLock: RegExp }> = [
   { path: "src/app/api/properties/[id]/route.ts", rowLock: /lockPropertyRow\(/ },
   { path: "src/app/api/owners/[id]/route.ts", rowLock: /lockOwnerRow\(/ },
+  // この筆を別の物件にする(2026-11-06)。物件の「ほかの土地・建物」を書くので同じ鍵の確認を通す。
+  { path: "src/app/api/properties/[id]/parcel-detach/route.ts", rowLock: /lockPropertyRow\(/ },
   { path: "src/app/api/owners/[id]/corporate-apply/route.ts", rowLock: /lockOwnerRow\(/ },
   // 売却DMの「種類を変える」(DMの種類 PR-S2 Task 5)。物件の dmScenarioId を書くので同じ鍵の確認を通す。
   {
