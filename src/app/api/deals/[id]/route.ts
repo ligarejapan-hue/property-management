@@ -19,7 +19,7 @@ import { canChangeDealAssignee, canChangeDealStatus, caseStatusWouldMove, syncCa
 import { lockPropertyRow } from "@/lib/property-record-guard";
 import { summarizePropertyDeals } from "@/lib/property-business-type";
 import { supportsUnitFields } from "@/lib/property-building-name";
-import { dealParcelOptions } from "@/lib/deals/target-parcels";
+import { dealParcelOptions, readTargetParcels } from "@/lib/deals/target-parcels";
 
 type Ctx = { params: Promise<{ id: string }> };
 const NO_STORE = { "Cache-Control": "no-store" };
@@ -53,7 +53,7 @@ export async function GET(_req: Request, ctx: Ctx) {
       select: { id: true, dealNo: true, businessType: true, status: true, price: true, settlementAt: true, createdAt: true, parties: { select: { role: true, isSelf: true } } },
     }) : [];
     const relatedDeals = summarizePropertyDeals(related).map((d, i) => ({ ...d, price: related[i].price === null ? null : Number(related[i].price) }));
-    const parcelOptions = p && canOpenProperty && !supportsUnitFields(p.propertyType) ? dealParcelOptions(p) : [];
+    const parcelOptions = p && canOpenProperty && !supportsUnitFields(p.propertyType) ? dealParcelOptions(p, { always: !!readTargetParcels(row.targetParcels) }) : [];
     return NextResponse.json({ deal: toDealView(row), canOpenProperty, canChangeStatus, canChangeAssignee, canMoveCaseStatus, relatedDeals, parcelOptions }, { headers: NO_STORE });
   } catch (error) {
     return handleApiError(error);

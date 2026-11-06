@@ -27,10 +27,13 @@ export interface DealParcelOption {
   label: string;
 }
 
-/** 選べる土地・建物。足した行が無い物件は空(=選ぶ欄を出さない・今までどおり全部)。 */
-export function dealParcelOptions(p: ParcelSource): DealParcelOption[] {
+/**
+ * 選べる土地・建物。足した行が無い物件は空(=選ぶ欄を出さない・今までどおり全部)。
+ * always=足した行が無くても1筆目・1棟目を返す(合筆で最後の足した行が消えたあとも、取引の選びを効かせる・@codex P1)。
+ */
+export function dealParcelOptions(p: ParcelSource, o: { always?: boolean } = {}): DealParcelOption[] {
   const extras = extrasOf(p);
-  if (!extras.length) return [];
+  if (!extras.length && !o.always) return [];
   const lot = p.lotNumber?.trim();
   const building = p.buildingNumber?.trim();
   return [
@@ -70,7 +73,8 @@ export function normalizeTargetParcels(
  */
 export function selectedParcelKeys(p: ParcelSource, target: readonly string[] | null): string[] | null {
   if (!target) return null;
-  const known = new Set(dealParcelOptions(p).map((o) => o.key));
+  // ⚠足した行が無くなった物件でも、選んでいた1筆目・1棟目は効かせる(全部に戻すと選ばなかった建物が書類に入る)。
+  const known = new Set(dealParcelOptions(p, { always: true }).map((o) => o.key));
   const keys = target.filter((k) => known.has(k));
   return keys.length ? keys : null;
 }

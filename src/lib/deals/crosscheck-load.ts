@@ -85,7 +85,7 @@ interface LoadOptions { kindBase: BasePropertyKind; includeOwners: boolean; targ
  * (土地だけを売る取引で「建物の謄本が無い」と出さない)。選べる行の無い種類は今までどおり要る。
  */
 function scopedSides(property: Parameters<typeof dealParcelOptions>[0], keys: readonly string[], base: readonly RegistrySide[]): RegistrySide[] {
-  const options = dealParcelOptions(property);
+  const options = dealParcelOptions(property, { always: true });
   return base.filter((side) => {
     const ofSide = options.filter((x) => (x.kind === "land" ? "土地" : "建物") === side);
     return !ofSide.length || ofSide.some((x) => keys.includes(x.key));
