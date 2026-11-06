@@ -184,7 +184,7 @@ export default function DealDetailPage({ params }: { params: Promise<{ id: strin
           <DealBasicPanel key={k(basicFormFromDeal(deal))} deal={deal} canChangeStatus={data.canChangeStatus} canChangeAssignee={data.canChangeAssignee} canMoveCaseStatus={data.canMoveCaseStatus} users={users} kinds={options?.propertyKinds ?? []} onSaved={reload} onCaseStatusNotChanged={setCaseStatusNotChanged} />
         </div>
         <div hidden={tab !== "property"}>
-          <DealPropertyPanel key={k([deal.propertySnapshot, deal.assessments])} deal={deal} canOpenProperty={data.canOpenProperty} onSaved={reload} />
+          <DealPropertyPanel key={k([deal.propertySnapshot, deal.assessments, deal.targetParcels, data.parcelOptions])} deal={deal} canOpenProperty={data.canOpenProperty} parcelOptions={data.parcelOptions ?? []} onSaved={reload} />
         </div>
         <div hidden={tab !== "parties"}>
           <DealPartiesPanel deal={deal} selfParty={options?.selfParty ?? null} canOpenProperty={data.canOpenProperty} sellerMismatch={sellerNameMismatch(crosscheckResult)} onSaved={reload} />

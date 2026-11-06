@@ -463,5 +463,56 @@ describe("土地のある物件の謄本", () => {
       expect(r).toMatchObject({ missing: [], uncertain: null });
       expect(r).not.toHaveProperty("missingParcels");
     });
+
+    describe("この取引の土地・建物を選んだ取引(2026-11-06 3回目)", () => {
+      const twoByTwo = { lotNumber: "1番", buildingNumber: "1番1", extraParcels: [extra("x", "land", "2番"), extra("y", "building", "1番2")] };
+      const all = (): Parameters<typeof setup>[0] => [
+        ["b2", "all", "2026-10-04T00:00:00Z", { ...BLDG("B2"), buildingNumber: "1番2" }, summary(4), bldgTx("１番２")],
+        ["b", "all", "2026-10-03T00:00:00Z", BLDG(), summary(3), bldgTx("１番１")],
+        ["l2", "all", "2026-10-02T00:00:00Z", LAND("2番", "20.25", "L2"), summary(2), landTx("２番")],
+        ["l", "all", "2026-10-01T00:00:00Z", LAND("1番", "120.50"), summary(1), landTx("１番")],
+      ];
+      /** 読み飛ばした謄本の分だけ要約の順がずれないよう、要約は本文で引く。 */
+      const scoped = (entries: Parameters<typeof setup>[0]) => {
+        setup(entries);
+        const byText = new Map(entries.map(([, , , , sum, text]) => [text, sum]));
+        (summarizeRegistryRights as Fn).mockReset();
+        (summarizeRegistryRights as Fn).mockImplementation(async ({ text }: { text: string }) => byText.get(text) ?? null);
+      };
+      it("★選んだ筆の謄本だけで担保を数える・選ばなかった種類(建物)は要らない", async () => {
+        findProperty.mockResolvedValue(twoByTwo);
+        scoped(all());
+        const r = await loadCrosscheckRegistry("p", { ...house, targetParcels: ["x"] });
+        expect(r).toMatchObject({ status: "ok", missing: [], uncertain: null, rights: { activeRights: 2 }, certificates: [{ side: "土地" }] });
+        expect(r).not.toHaveProperty("missingParcels");
+      });
+      it("★選んだ筆の謄本が無ければ、ほかの筆の謄本で足りた扱いにしない", async () => {
+        findProperty.mockResolvedValue(twoByTwo);
+        scoped(all().filter(([id]) => id !== "l2"));
+        const r = await loadCrosscheckRegistry("p", { ...house, targetParcels: ["x", "main:building"] });
+        expect(r).toMatchObject({ missing: ["土地"], missingParcels: ["土地 2番"], rights: { activeRights: 3 } });
+      });
+      it("選ばなかった筆の所有者事項は名義に入れない", async () => {
+        findProperty.mockResolvedValue(twoByTwo);
+        scoped([
+          ["o", "owner", "2026-10-05T00:00:00Z", { ...LAND("1番", "1"), owners: [] }, undefined, `${landTx("１番").replace(FULL, "")}\n${OWNER_TABLE}`],
+          ["l2", "all", "2026-10-02T00:00:00Z", LAND("2番", "20.25", "L2"), summary(0, [{ name: "架空花子", share: null }]), landTx("２番")],
+        ]);
+        const r = await loadCrosscheckRegistry("p", { kindBase: "land", includeOwners: true, targetParcels: ["x"] });
+        expect(r).toMatchObject({ uncertain: null, owners: { list: [{ name: "架空花子" }] } });
+      });
+      it("選ばなければ(null)・選んだ行が物件から消えていれば、今までどおり全部", async () => {
+        findProperty.mockResolvedValue(twoByTwo);
+        scoped(all());
+        expect(await loadCrosscheckRegistry("p", { ...house, targetParcels: null })).toMatchObject({ rights: { activeRights: 10 } });
+        scoped(all());
+        expect(await loadCrosscheckRegistry("p", { ...house, targetParcels: ["消えた"] })).toMatchObject({ rights: { activeRights: 10 } });
+      });
+      it("書類確認書も選んだ筆だけ", async () => {
+        findProperty.mockResolvedValue(twoByTwo);
+        scoped(all());
+        expect(await loadRegistryDocInfo("p", "house", ["x", "y"])).toEqual({ activeRights: 6, caution: null });
+      });
+    });
   });
 });

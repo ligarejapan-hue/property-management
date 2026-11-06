@@ -38,7 +38,7 @@ export async function GET(_request: Request, ctx: Ctx) {
     let registry: RegistryFacts = { status: deal.propertyId ? "denied" : "none" };
     if (registryProperty) {
       try {
-        registry = await loadCrosscheckRegistry(registryProperty, { kindBase, includeOwners: canCompareNames });
+        registry = await loadCrosscheckRegistry(registryProperty, { kindBase, includeOwners: canCompareNames, targetParcels: deal.targetParcels ?? null });
       } catch {
         // 中身に氏名が入りうるので例外は出さない。読めないだけで画面は止めない。
         registry = { status: "unreadable" };

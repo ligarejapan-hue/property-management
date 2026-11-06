@@ -6,6 +6,7 @@ import { jstDateToDbDate } from "@/lib/notifications/reminder-schedule";
 import { kindBaseOf, type BasePropertyKind } from "./constants";
 import { buildCrosscheck, type RegistryFacts } from "./crosscheck";
 import { loadCrosscheckRegistry } from "./crosscheck-load";
+import { applyTargetParcels, readTargetParcels } from "./target-parcels";
 import { jstDateString } from "./datetime";
 import { dealTitle } from "./deal-title";
 import { loadDealSettings } from "./settings-store";
@@ -40,18 +41,30 @@ function parseFacts(raw: unknown): ScheduleFacts {
   };
 }
 
-async function registryFingerprint(propertyId: string, kindBase: BasePropertyKind | null): Promise<string> {
-  const rows = await prisma.attachment.findMany({
-    where: { propertyId, type: "registry", isDeleted: false }, select: { id: true }, orderBy: { id: "asc" },
-  });
-  return createHash("sha256").update([propertyId, kindBase ?? "", ...rows.map((r) => r.id)].join("|")).digest("hex");
+/**
+ * 判定に使った謄本の印。この取引の土地・建物を選んでいれば、その選びと、物件の土地・建物の今の値も入れる
+ * (選びを変えた・行を直した=読み直す)。選んでいない取引は今までと同じ印(全部の取引を読み直させない)。
+ */
+export async function registryFingerprint(propertyId: string, kindBase: BasePropertyKind | null, targetParcels: readonly string[] | null): Promise<string> {
+  const [rows, parcels] = await Promise.all([
+    prisma.attachment.findMany({
+      where: { propertyId, type: "registry", isDeleted: false }, select: { id: true }, orderBy: { id: "asc" },
+    }),
+    targetParcels
+      ? prisma.property.findUnique({ where: { id: propertyId }, select: { lotNumber: true, buildingNumber: true, extraParcels: true } })
+      : Promise.resolve(null),
+  ]);
+  const scope = targetParcels ? [JSON.stringify([targetParcels, parcels ? applyTargetParcels(parcels, targetParcels) : null])] : [];
+  return createHash("sha256").update([propertyId, kindBase ?? "", ...rows.map((r) => r.id), ...scope].join("|")).digest("hex");
 }
 
 /** 照合の判定をそのまま使う(取引の値は比べない=注意と謄本の状態だけを読む)。 */
-export async function readMortgageState(propertyId: string, kindBase: BasePropertyKind | null): Promise<MortgageState> {
+export async function readMortgageState(
+  propertyId: string, kindBase: BasePropertyKind | null, targetParcels: readonly string[] | null = null,
+): Promise<MortgageState> {
   let registry: RegistryFacts;
   try {
-    registry = await loadCrosscheckRegistry(propertyId, { kindBase, includeOwners: false });
+    registry = await loadCrosscheckRegistry(propertyId, { kindBase, includeOwners: false, targetParcels });
   } catch {
     // 中身に氏名が入りうるので例外は出さない。
     registry = { status: "unreadable" };
@@ -117,13 +130,14 @@ export async function syncDealSchedule(dealId: string, o: SyncOptions = {}): Pro
   const now = o.now ?? new Date();
   const today = jstDateString(now);
   const base = await prisma.deal.findUnique({
-    where: { id: dealId }, select: { propertyId: true, propertyKind: true, scheduleFacts: true, contractAt: true, settlementAt: true },
+    where: { id: dealId }, select: { propertyId: true, propertyKind: true, scheduleFacts: true, contractAt: true, settlementAt: true, targetParcels: true },
   });
   if (!base) return { read: false, readSkipped: false };
   const settings = await loadDealSettings();
   const kindBase = kindBaseOf(settings, base.propertyKind);
   const facts = parseFacts(base.scheduleFacts);
   const usesMortgage = settings.scheduleTemplate.some((t) => t.condition === "active_mortgage");
+  const targetParcels = readTargetParcels(base.targetParcels);
 
   // 担保の判定はトランザクションの外で。日付が無ければ項目を作らないので読まない。
   let mortgage: MortgageState = facts.mortgage ?? "unknown";
@@ -134,12 +148,12 @@ export async function syncDealSchedule(dealId: string, o: SyncOptions = {}): Pro
     mortgage = "unknown";
     fingerprint = undefined;
   } else if (usesMortgage && (base.contractAt || base.settlementAt)) {
-    const fp = await registryFingerprint(base.propertyId, kindBase);
+    const fp = await registryFingerprint(base.propertyId, kindBase, targetParcels);
     if (fp !== facts.fingerprint || !facts.mortgage || (o.retryUnknown && facts.mortgage === "unknown")) {
       if (o.allowRead === false) {
         readSkipped = true;
       } else {
-        mortgage = await readMortgageState(base.propertyId, kindBase);
+        mortgage = await readMortgageState(base.propertyId, kindBase, targetParcels);
         fingerprint = fp;
         read = true;
       }

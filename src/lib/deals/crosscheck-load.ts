@@ -8,7 +8,8 @@ import {
   LANDED_REQUIRED_SIDES, foldNameVariants, isLandedKind, normalizeName, parseShare,
   type RegistryFacts, type RegistrySide, type RegistryUncertain,
 } from "./crosscheck";
-import { expectedParcels, parcelCoverage, type CertificateParcel } from "./parcel-coverage";
+import { expectedParcels, parcelCoverage, placeCertificate, type CertificateParcel, type ExpectedParcel } from "./parcel-coverage";
+import { applyTargetParcels, dealParcelOptions, selectedParcelKeys } from "./target-parcels";
 import { readRegistryPdf } from "./registry-rights-load";
 
 /** 見る添付の数(新しい順)。全部事項と所有者事項が混ざるので、登記の現況より少し多めに見る。 */
@@ -76,9 +77,22 @@ function hasSeveralProperties(text: string): boolean {
  * 抜けた筆を見落とさないよう、読めない謄本・土地か建物か判定できない謄本があれば uncertain を返す。
  * ⚠結果には氏名が入る。ログ・監査に出さない。includeOwners=false なら所有者事項の氏名を持たない。
  */
-export async function loadLandedCertificates(
-  propertyId: string, o: { kindBase: BasePropertyKind; includeOwners: boolean },
-): Promise<LandedCertificates> {
+/** 照合の読み方。targetParcels=この取引の土地・建物(null・省略=全部=今までどおり)。 */
+interface LoadOptions { kindBase: BasePropertyKind; includeOwners: boolean; targetParcels?: readonly string[] | null }
+
+/**
+ * この取引の土地・建物を選んでいるとき、要る種類。選べる行のある種類で1つも選ばなかったものは要らない
+ * (土地だけを売る取引で「建物の謄本が無い」と出さない)。選べる行の無い種類は今までどおり要る。
+ */
+function scopedSides(property: Parameters<typeof dealParcelOptions>[0], keys: readonly string[], base: readonly RegistrySide[]): RegistrySide[] {
+  const options = dealParcelOptions(property);
+  return base.filter((side) => {
+    const ofSide = options.filter((x) => (x.kind === "land" ? "土地" : "建物") === side);
+    return !ofSide.length || ofSide.some((x) => keys.includes(x.key));
+  });
+}
+
+export async function loadLandedCertificates(propertyId: string, o: LoadOptions): Promise<LandedCertificates> {
   const [rows, property] = await Promise.all([
     prisma.attachment.findMany({
       where: { propertyId, type: "registry", isDeleted: false },
@@ -88,9 +102,20 @@ export async function loadLandedCertificates(
     }),
     prisma.property.findUnique({ where: { id: propertyId }, select: { address: true, lotNumber: true, buildingNumber: true, extraParcels: true } }),
   ]);
-  const required = LANDED_REQUIRED_SIDES[o.kindBase] ?? [];
-  // 2筆以上・2棟以上の物件だけ、筆(棟)ごとに謄本があるかも見る。
-  const expected = property ? expectedParcels(property, required) : [];
+  const keys = property ? selectedParcelKeys(property, o.targetParcels ?? null) : null;
+  const required = property && keys ? scopedSides(property, keys, LANDED_REQUIRED_SIDES[o.kindBase] ?? []) : LANDED_REQUIRED_SIDES[o.kindBase] ?? [];
+  // 2筆以上・2棟以上の物件だけ、筆(棟)ごとに謄本があるかも見る(この取引の土地・建物を選んでいれば、その中で)。
+  const expected = property ? expectedParcels(keys ? { ...property, ...applyTargetParcels(property, keys) } : property, required) : [];
+  // 選ばなかった筆(棟)の謄本は、担保・名義・抜けの判定に使わない(どの筆か決められない謄本は今までどおり使う)。
+  const everyParcel: ExpectedParcel[] = property && keys ? expectedParcels(property, ["土地", "建物"]) : [];
+  // 番号は表の欄から読めればそれ、読めなければ全文から(identityOf と同じ)。
+  const outOfDeal = (side: RegistrySide | null, text: string, p: ReturnType<typeof parseRegistryText>) => {
+    if (!keys || !side) return false;
+    const id = registryIdentityOf(text);
+    const number = side === "建物" ? (id.buildingNumber ?? p.buildingNumber) : (id.lotNumber ?? p.lotNumber);
+    const hit = placeCertificate({ side, number, realEstateNumber: p.realEstateNumber, address: p.address }, everyParcel);
+    return !!hit && !keys.includes(hit.key);
+  };
   const certParcels: CertificateParcel[] = [];
   const certs: LandedCertificate[] = [];
   const ownerCerts: LandedCertificates["ownerCerts"] = [];
@@ -122,6 +147,7 @@ export async function loadLandedCertificates(
       const parsedOwner = parseRegistryText(pdf.text);
       const ownerSide = sideOf(pdf.text, parsedOwner);
       const ownerIdentity = identityOf(parsedOwner, ownerSide, pdf.text);
+      if (outOfDeal(ownerSide, pdf.text, parsedOwner)) continue;
       if (hasSeveralProperties(pdf.text)) unclassified = true;
       // ⚠読めるのに物件を特定できない所有者事項では止めない(表だけの所有者事項で、いつまでも確認できなくなるため)。
       if (ownerIdentity && ownerSide && required.includes(ownerSide)) ownerOnly.add(ownerIdentity);
@@ -142,7 +168,7 @@ export async function loadLandedCertificates(
       unclassified = true;
       continue;
     }
-    if (!required.includes(side) || seen.has(identity)) continue;
+    if (!required.includes(side) || seen.has(identity) || outOfDeal(side, pdf.text, parsed)) continue;
     seen.add(identity);
     if (expected.length) {
       // 番号は表の欄から(parseRegistryText は「1番1の2」を「1番1」に切る・@codex P2)。
@@ -210,7 +236,7 @@ function ownersFacts(data: LandedCertificates): Extract<RegistryFacts, { status:
   };
 }
 
-async function loadLandedFacts(propertyId: string, o: { kindBase: BasePropertyKind; includeOwners: boolean }): Promise<RegistryFacts> {
+async function loadLandedFacts(propertyId: string, o: LoadOptions): Promise<RegistryFacts> {
   const data = await loadLandedCertificates(propertyId, o);
   if (!data.hasRows) return { status: "none" };
   if (!data.readAny) return { status: "unreadable" };
@@ -239,9 +265,9 @@ async function loadLandedFacts(propertyId: string, o: { kindBase: BasePropertyKi
  * ⚠結果には氏名が入る。ログ・監査に出さない(例外の中身も出さない)。includeOwners=false なら氏名を持たない。
  */
 export async function loadCrosscheckRegistry(
-  propertyId: string, o: { kindBase: BasePropertyKind | null; includeOwners: boolean },
+  propertyId: string, o: { kindBase: BasePropertyKind | null; includeOwners: boolean; targetParcels?: readonly string[] | null },
 ): Promise<RegistryFacts> {
-  if (isLandedKind(o.kindBase)) return loadLandedFacts(propertyId, { kindBase: o.kindBase, includeOwners: o.includeOwners });
+  if (isLandedKind(o.kindBase)) return loadLandedFacts(propertyId, { kindBase: o.kindBase, includeOwners: o.includeOwners, targetParcels: o.targetParcels });
 
   const rows = await prisma.attachment.findMany({
     where: { propertyId, type: "registry", isDeleted: false },

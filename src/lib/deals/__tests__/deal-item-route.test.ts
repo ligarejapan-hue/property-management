@@ -28,6 +28,7 @@ import { DEFAULT_FUNDING_INPUTS } from "../funding-schema";
 import { DEFAULT_BUSINESS_INPUTS } from "../business-schema";
 import { GET, PATCH } from "../../../app/api/deals/[id]/route";
 import { POST as REFRESH } from "../../../app/api/deals/[id]/refresh-property/route";
+import { POST as TARGET } from "../../../app/api/deals/[id]/target-parcels/route";
 
 type Fn = ReturnType<typeof vi.fn>;
 const pm = prismaMock as never as {
@@ -417,5 +418,85 @@ describe("POST /api/deals/[id]/refresh-property", () => {
     pm.deal.findUnique.mockResolvedValue({ propertyId: PROP_ID });
     pm.property.findUnique.mockResolvedValue({ ...propRow, createdBy: "other" });
     expect((await REFRESH(json("POST", { version: 3 }), ctx)).status).toBe(404);
+  });
+});
+
+describe("この取引の土地・建物(2026-11-06 3回目)", () => {
+  const extra = (id: string, kind: "land" | "building", number: string, location: string | null = null) => ({ id, kind, location, number, realEstateNumber: null, area: null });
+  const parcels = { lotNumber: "1番1", buildingNumber: "1番1", extraParcels: [extra("x", "land", "1番2"), extra("y", "building", "1番2", "架空町二丁目")] };
+  const propRow = {
+    propertyType: "house", address: "東京都試験区2-2", ...parcels, buildingName: null, roomNo: null,
+    exclusiveArea: null, totalFloorArea: "98.5", landArea: "120", structureType: null, builtYear: null, builtMonth: null,
+    access: null, layoutType: null, createdBy: "u-office", assignedTo: null,
+  };
+  const dealRow = { propertyId: PROP_ID, version: 3, propertySnapshot: { roomNo: "201", lotNumber: "手で直した", buildingNumber: "手で直した", address: "手の住所" } };
+
+  it("GET: 選べる一覧を返す(足した行の無い物件・区分・物件を見られない人は空)", async () => {
+    pm.property.findUnique.mockResolvedValue({ createdBy: "u-office", assignedTo: null, propertyType: "house", ...parcels });
+    pm.deal.findUnique.mockResolvedValue({ ...detailRow, targetParcels: ["x"] });
+    let body = await (await GET(new Request("http://x"), ctx)).json();
+    expect(body.parcelOptions.map((o: { key: string }) => o.key)).toEqual(["main:land", "main:building", "x", "y"]);
+    expect(body.deal.targetParcels).toEqual(["x"]);
+    pm.property.findUnique.mockResolvedValue({ createdBy: "u-office", assignedTo: null, propertyType: "apartment_unit", ...parcels });
+    body = await (await GET(new Request("http://x"), ctx)).json();
+    expect(body.parcelOptions).toEqual([]);
+    (getApiSession as Fn).mockResolvedValue({ id: "u-field", role: "field_staff" });
+    pm.property.findUnique.mockResolvedValue({ createdBy: "other", assignedTo: null, propertyType: "house", ...parcels });
+    body = await (await GET(new Request("http://x"), ctx)).json();
+    expect(body.parcelOptions).toEqual([]);
+  });
+
+  it("★保存: 選びを書き、写しの所在・地番と家屋番号だけを選んだもので入れ直す(ほかの写しは触らない)", async () => {
+    pm.deal.findUnique.mockResolvedValue(dealRow);
+    pm.property.findUnique.mockResolvedValue(propRow);
+    const res = await TARGET(json("POST", { version: 3, targetParcels: ["x", "main:building"] }), ctx);
+    expect(res.status).toBe(200);
+    const call = pm.deal.updateMany.mock.calls[0][0];
+    expect(call.where).toEqual({ id: DEAL_ID, version: 3 });
+    expect(call.data.targetParcels).toEqual(["main:building", "x"]);
+    expect(call.data.propertySnapshot).toMatchObject({ roomNo: "201", address: "手の住所", lotNumber: "1番2", buildingNumber: "1番1" });
+    expect(syncDealScheduleSafe).toHaveBeenCalledWith(DEAL_ID, expect.anything());
+    expect(writeAuditLog).toHaveBeenCalledWith(expect.objectContaining({ action: "deal_target_parcels", detail: { selected: 2 } }));
+    // ⚠監査に地番を出さない。
+    expect(JSON.stringify((writeAuditLog as Fn).mock.calls)).not.toContain("1番");
+  });
+  it("全部を選んだら null(全部)で保存し、写しは全部の地番に戻る", async () => {
+    pm.deal.findUnique.mockResolvedValue(dealRow);
+    pm.property.findUnique.mockResolvedValue(propRow);
+    await TARGET(json("POST", { version: 3, targetParcels: ["main:land", "main:building", "x", "y"] }), ctx);
+    const call = pm.deal.updateMany.mock.calls[0][0];
+    expect(call.data.targetParcels).not.toEqual(expect.any(Array));
+    expect(call.data.propertySnapshot.lotNumber).toBe("1番1、1番2");
+  });
+  it("★物件に無い行・空の選択・足した行の無い物件・区分は 422(黙って全部にしない)", async () => {
+    pm.deal.findUnique.mockResolvedValue(dealRow);
+    pm.property.findUnique.mockResolvedValue(propRow);
+    expect((await TARGET(json("POST", { version: 3, targetParcels: ["消えた"] }), ctx)).status).toBe(422);
+    expect((await TARGET(json("POST", { version: 3, targetParcels: [] }), ctx)).status).toBe(422);
+    pm.property.findUnique.mockResolvedValue({ ...propRow, extraParcels: [] });
+    expect((await TARGET(json("POST", { version: 3, targetParcels: ["main:land"] }), ctx)).status).toBe(422);
+    pm.property.findUnique.mockResolvedValue({ ...propRow, propertyType: "apartment_unit" });
+    expect((await TARGET(json("POST", { version: 3, targetParcels: ["x"] }), ctx)).status).toBe(422);
+    expect(pm.deal.updateMany).not.toHaveBeenCalled();
+  });
+  it("版が違えば 409・見られない物件は 404・手入力の物件は 422・形の違う値は 400 系", async () => {
+    pm.deal.findUnique.mockResolvedValue(dealRow);
+    pm.property.findUnique.mockResolvedValue(propRow);
+    expect((await TARGET(json("POST", { version: 2, targetParcels: ["x"] }), ctx)).status).toBe(409);
+    (getApiSession as Fn).mockResolvedValue({ id: "u-field", role: "field_staff" });
+    pm.property.findUnique.mockResolvedValue({ ...propRow, createdBy: "other" });
+    expect((await TARGET(json("POST", { version: 3, targetParcels: ["x"] }), ctx)).status).toBe(404);
+    (getApiSession as Fn).mockResolvedValue({ id: "u-office", role: "office_staff" });
+    pm.deal.findUnique.mockResolvedValue({ ...dealRow, propertyId: null });
+    expect((await TARGET(json("POST", { version: 3, targetParcels: ["x"] }), ctx)).status).toBe(422);
+    expect((await TARGET(json("POST", { version: 3, targetParcels: "x" }), ctx)).status).toBeGreaterThanOrEqual(400);
+    expect(pm.deal.updateMany).not.toHaveBeenCalled();
+  });
+  it("物件から取り直すときも、選んだ土地・建物だけの地番にする", async () => {
+    pm.deal.findUnique.mockResolvedValue({ propertyId: PROP_ID, targetParcels: ["y"] });
+    pm.property.findUnique.mockResolvedValue(propRow);
+    await REFRESH(json("POST", { version: 3 }), ctx);
+    const snap = pm.deal.updateMany.mock.calls[0][0].data.propertySnapshot;
+    expect(snap).toMatchObject({ lotNumber: null, buildingNumber: "架空町二丁目 1番2" });
   });
 });
