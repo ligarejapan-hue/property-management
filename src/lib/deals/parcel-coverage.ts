@@ -78,11 +78,13 @@ export function placeCertificate(c: CertificateParcel, expected: ExpectedParcel[
 }
 
 /**
- * 謄本が無い筆(棟)の文字。
+ * 謄本が無い筆(棟)の文字。scope=この取引の土地・建物の鍵(省略=全部)。行き先は expected 全部で決め、抜けは scope の中だけ出す。
  * unplaced=番号を読めない・同じ番号の筆を所在でも決められないなど、どの筆か分からない全部事項がある
  * (抜けを「無い」と言い切れない)。
  */
-export function parcelCoverage(expected: ExpectedParcel[], certs: CertificateParcel[]): { missing: string[]; unplaced: boolean } {
+export function parcelCoverage(
+  expected: ExpectedParcel[], certs: CertificateParcel[], scope?: readonly string[],
+): { missing: string[]; unplaced: boolean } {
   if (!expected.length) return { missing: [], unplaced: false };
   const covered = new Set<ExpectedParcel>();
   let unplaced = false;
@@ -92,5 +94,5 @@ export function parcelCoverage(expected: ExpectedParcel[], certs: CertificatePar
     // 番号が読めて、どの筆とも合わない謄本(物件と関係ない筆)は抜けの判定に使わない。
     else if (!parcelNumberKey(c.number) || expected.filter((x) => x.side === c.side && parcelNumberKey(x.number) === parcelNumberKey(c.number)).length > 1) unplaced = true;
   }
-  return { missing: expected.filter((p) => !covered.has(p)).map((p) => p.label), unplaced };
+  return { missing: expected.filter((p) => !covered.has(p) && (!scope || scope.includes(p.key))).map((p) => p.label), unplaced };
 }

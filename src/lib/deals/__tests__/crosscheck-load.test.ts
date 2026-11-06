@@ -508,6 +508,18 @@ describe("土地のある物件の謄本", () => {
         scoped(all());
         expect(await loadCrosscheckRegistry("p", { ...house, targetParcels: ["消えた"] })).toMatchObject({ rights: { activeRights: 10 } });
       });
+      it("★同じ番号の別の筆があるとき、どちらか決められない謄本で選んだ筆を足りた扱いにしない(@codex P1)", async () => {
+        findProperty.mockResolvedValue({ address: "架空市架空町一丁目3", lotNumber: "1番", buildingNumber: null, extraParcels: [extra("x", "land", "1番", null, "架空町二丁目")] });
+        scoped([["l", "all", "2026-10-01T00:00:00Z", { ...LAND("1番", "120.50"), address: null }, summary(1), landTx("１番")]]);
+        expect(await loadCrosscheckRegistry("p", { kindBase: "land", includeOwners: true, targetParcels: ["x"] }))
+          .toMatchObject({ uncertain: "unplaced_parcel", missingParcels: ["土地 架空町二丁目 1番"] });
+      });
+      it("1筆目だけを選んだ取引でも、1筆目の謄本が無ければ出す", async () => {
+        findProperty.mockResolvedValue(twoByTwo);
+        scoped(all().filter(([id]) => id !== "l"));
+        expect(await loadCrosscheckRegistry("p", { kindBase: "land", includeOwners: true, targetParcels: ["main:land"] }))
+          .toMatchObject({ missing: ["土地"], missingParcels: ["土地 1番"] });
+      });
       it("書類確認書も選んだ筆だけ", async () => {
         findProperty.mockResolvedValue(twoByTwo);
         scoped(all());

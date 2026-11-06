@@ -6,7 +6,7 @@ import { jstDateToDbDate } from "@/lib/notifications/reminder-schedule";
 import { kindBaseOf, type BasePropertyKind } from "./constants";
 import { buildCrosscheck, type RegistryFacts } from "./crosscheck";
 import { loadCrosscheckRegistry } from "./crosscheck-load";
-import { applyTargetParcels, readTargetParcels } from "./target-parcels";
+import { readTargetParcels } from "./target-parcels";
 import { jstDateString } from "./datetime";
 import { dealTitle } from "./deal-title";
 import { loadDealSettings } from "./settings-store";
@@ -42,7 +42,7 @@ function parseFacts(raw: unknown): ScheduleFacts {
 }
 
 /**
- * 判定に使った謄本の印。この取引の土地・建物を選んでいれば、その選びと、物件の土地・建物の今の値も入れる
+ * 判定に使った謄本の印。この取引の土地・建物を選んでいれば、その選びと、物件の住所・全部の土地・建物の今の値も入れる
  * (選びを変えた・行を直した=読み直す)。選んでいない取引は今までと同じ印(全部の取引を読み直させない)。
  */
 export async function registryFingerprint(propertyId: string, kindBase: BasePropertyKind | null, targetParcels: readonly string[] | null): Promise<string> {
@@ -51,10 +51,11 @@ export async function registryFingerprint(propertyId: string, kindBase: BaseProp
       where: { propertyId, type: "registry", isDeleted: false }, select: { id: true }, orderBy: { id: "asc" },
     }),
     targetParcels
-      ? prisma.property.findUnique({ where: { id: propertyId }, select: { lotNumber: true, buildingNumber: true, extraParcels: true } })
+      ? prisma.property.findUnique({ where: { id: propertyId }, select: { address: true, lotNumber: true, buildingNumber: true, extraParcels: true } })
       : Promise.resolve(null),
   ]);
-  const scope = targetParcels ? [JSON.stringify([targetParcels, parcels ? applyTargetParcels(parcels, targetParcels) : null])] : [];
+  // ⚠選ばなかった行と住所も入れる(謄本がどの筆のものかは物件の全部の筆・棟と住所で決まる・@codex P2)。
+  const scope = targetParcels ? [JSON.stringify([targetParcels, parcels])] : [];
   return createHash("sha256").update([propertyId, kindBase ?? "", ...rows.map((r) => r.id), ...scope].join("|")).digest("hex");
 }
 

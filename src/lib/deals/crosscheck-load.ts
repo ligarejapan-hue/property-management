@@ -9,7 +9,7 @@ import {
   type RegistryFacts, type RegistrySide, type RegistryUncertain,
 } from "./crosscheck";
 import { expectedParcels, parcelCoverage, placeCertificate, type CertificateParcel, type ExpectedParcel } from "./parcel-coverage";
-import { applyTargetParcels, dealParcelOptions, selectedParcelKeys } from "./target-parcels";
+import { dealParcelOptions, selectedParcelKeys } from "./target-parcels";
 import { readRegistryPdf } from "./registry-rights-load";
 
 /** 見る添付の数(新しい順)。全部事項と所有者事項が混ざるので、登記の現況より少し多めに見る。 */
@@ -104,8 +104,10 @@ export async function loadLandedCertificates(propertyId: string, o: LoadOptions)
   ]);
   const keys = property ? selectedParcelKeys(property, o.targetParcels ?? null) : null;
   const required = property && keys ? scopedSides(property, keys, LANDED_REQUIRED_SIDES[o.kindBase] ?? []) : LANDED_REQUIRED_SIDES[o.kindBase] ?? [];
-  // 2筆以上・2棟以上の物件だけ、筆(棟)ごとに謄本があるかも見る(この取引の土地・建物を選んでいれば、その中で)。
-  const expected = property ? expectedParcels(keys ? { ...property, ...applyTargetParcels(property, keys) } : property, required) : [];
+  // 2筆以上・2棟以上の物件だけ、筆(棟)ごとに謄本があるかも見る。
+  // ⚠この取引の土地・建物を選んでいても、謄本の行き先は物件の全部の筆・棟で決め、抜けだけを選んだものに絞る
+  //   (先に絞ると、同じ番号の別の筆の謄本が選んだ筆のものに見える・@codex P1)。
+  const expected = property ? expectedParcels(property, required) : [];
   // 選ばなかった筆(棟)の謄本は、担保・名義・抜けの判定に使わない(どの筆か決められない謄本は今までどおり使う)。
   const everyParcel: ExpectedParcel[] = property && keys ? expectedParcels(property, ["土地", "建物"]) : [];
   // 番号は表の欄から読めればそれ、読めなければ全文から(identityOf と同じ)。
@@ -183,7 +185,7 @@ export async function loadLandedCertificates(propertyId: string, o: LoadOptions)
     });
   }
 
-  const coverage = parcelCoverage(expected, certParcels);
+  const coverage = parcelCoverage(expected, certParcels, keys ?? undefined);
   const uncertain: RegistryUncertain | null = rows.length > LANDED_CANDIDATES ? "too_many"
     : unreadable ? "unreadable" : unclassified ? "unclassified"
       : [...ownerOnly].some((id) => !seen.has(id)) ? "no_full_certificate"
