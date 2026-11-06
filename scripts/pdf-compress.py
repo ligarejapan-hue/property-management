@@ -167,6 +167,7 @@ def _self_test():
 
     d = tempfile.mkdtemp(prefix="pdfc-selftest-")
     fd, outside = tempfile.mkstemp(prefix="pdfc-selftest-outside-")
+    os.write(fd, b"keep")  # 空にできないこと(truncate)を確かめるため中身を入れる
     os.close(fd)
     escape = os.path.join(os.path.dirname(outside), "pdfc-escape-probe")
     try:
@@ -194,7 +195,8 @@ def _self_test_body(d, outside):
     import random
     import zlib
 
-    sandbox = "ok" if probe_outside(d, outside) == {"readOutside": "denied", "writeOutside": "denied"} else "ng"
+    sandbox = "ok" if probe_outside(d, outside) == {"readOutside": "denied", "truncateOutside": "denied",
+                                                  "writeOutside": "denied"} else "ng"
     src = os.path.join(d, "in.pdf")
     dst = os.path.join(d, "out.pdf")
     pdf = pikepdf.new()

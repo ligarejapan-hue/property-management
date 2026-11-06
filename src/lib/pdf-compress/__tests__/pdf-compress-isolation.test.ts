@@ -6,7 +6,7 @@
  */
 import { describe, it, expect, vi, afterEach } from "vitest";
 import { execFileSync } from "node:child_process";
-import { mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { existsSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import path from "node:path";
@@ -106,10 +106,17 @@ describe("scripts/pdf-compress.py は入力を開く前に閉じ込める", () =
     expect(confineAt).toBeLessThan(main.indexOf("os.path.getsize(a.src)"));
     expect(confineAt).toBeLessThan(main.indexOf("pikepdf.open(a.src)"));
   });
+  it("Landlock の版が 3 未満(外のファイルを空にするのを止められない)なら閉じ込めを断る", () => {
+    const sandbox = readFileSync(path.join(process.cwd(), "scripts", "pdf_sandbox.py"), "utf8").replace(/\r\n/g, "\n");
+    expect(sandbox).toMatch(/^_MIN_ABI = 3$/m);
+    expect(sandbox).toMatch(/if abi < _MIN_ABI:\n\s+raise SandboxUnavailable/);
+    expect(sandbox).toMatch(/^\s+handled = _ABI1_ALL \| _REFER \| _TRUNCATE$/m);
+  });
   it("自己診断も閉じ込めた中で縮め、外に書けないことを確かめる", () => {
     const selfTest = src.slice(src.indexOf("def _self_test():"), src.indexOf("def main():"));
     expect(selfTest).toContain("_confine_to(");
     expect(selfTest).toContain('"sandbox"');
+    expect(selfTest).toContain('"truncateOutside": "denied"');
   });
 });
 
@@ -138,10 +145,14 @@ describe.skipIf(process.platform !== "linux" || !pythonAvailable())("scripts/pdf
       expect(JSON.parse(stdout.trim())).toEqual({
         writeInside: "ok",
         readOutside: "denied",
+        truncateOutside: "denied",
         writeOutside: "denied",
         readUsr: "ok",
       });
       expect(readFileSync(path.join(work, "probe.txt"), "utf8")).toBe("ok");
+      // 外のファイルは空にされていない(Landlock の版が 3 未満なら閉じ込め自体を断る・@codex P2)。
+      expect(readFileSync(secret, "utf8")).toBe("do-not-read");
+      expect(existsSync(path.join(outside, "pdfc-escape-probe"))).toBe(false);
     } finally {
       rmSync(work, { recursive: true, force: true });
       rmSync(outside, { recursive: true, force: true });

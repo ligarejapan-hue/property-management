@@ -8,14 +8,17 @@ confine(作業フォルダ) を呼んだあと、このプロセス(と子)は:
   ・それ以外 ………………… 読むことも書くこともできない(保存ファイルの置き場所・app.env・/tmp のほかの場所)
 ⚠閉じ込められないとき(Landlock が無い・Linux でない)は SandboxUnavailable を投げる=縮めずに失敗する。
   閉じ込めずに続けることはしない(お客様の提出からも信用しない PDF が来るため)。
+⚠Landlock の版(ABI)は 3 以上が要る(カーネル 6.2 以降・Ubuntu 24.04 の 6.8 は 4 以上)。
+  2 以下では外のファイルを空にする(truncate)ことを止められない=保存ファイルを消せてしまうので断る(@codex P2)。
 
 確かめ方(テストと反映後の点検):
   python3 pdf_sandbox.py --probe <作業フォルダ> <外のファイル>
-  → {"writeInside": "ok", "readOutside": "denied", "writeOutside": "denied", "readUsr": "ok"}
+  → {"writeInside": "ok", "readOutside": "denied", "writeOutside": "denied", "truncateOutside": "denied", "readUsr": "ok"}
 """
 import ctypes
 import json
 import os
+import struct
 import sys
 
 # syscall 番号(x86_64・aarch64 とも共通の表)
@@ -34,6 +37,7 @@ _READ_DIR = 1 << 3
 _ABI1_ALL = (1 << 13) - 1  # EXECUTE 〜 MAKE_SYM
 _REFER = 1 << 13  # ABI 2
 _TRUNCATE = 1 << 14  # ABI 3
+_MIN_ABI = 3
 
 _READ_ONLY_DIR = _EXECUTE | _READ_FILE | _READ_DIR
 # 1つのファイルに付けてよいのはファイル向けの扱いだけ(READ_DIR を付けると EINVAL)。
@@ -52,9 +56,9 @@ class _RulesetAttr(ctypes.Structure):
     _fields_ = [("handled_access_fs", ctypes.c_uint64)]
 
 
-class _PathBeneathAttr(ctypes.Structure):
-    _pack_ = 1
-    _fields_ = [("allowed_access", ctypes.c_uint64), ("parent_fd", ctypes.c_int32)]
+def _path_beneath_attr(access, fd):
+    """struct landlock_path_beneath_attr(__u64 + __s32・詰めて 12 バイト)。"""
+    return ctypes.create_string_buffer(struct.pack("=Qi", access, fd), 12)
 
 
 def _libc():
@@ -69,9 +73,9 @@ def _libc():
 def _add_rule(libc, ruleset_fd, path, access):
     fd = os.open(path, os.O_PATH | os.O_CLOEXEC)
     try:
-        attr = _PathBeneathAttr(allowed_access=access, parent_fd=fd)
+        attr = _path_beneath_attr(access, fd)
         if libc.syscall(_SYS_ADD_RULE, ctypes.c_int(ruleset_fd), ctypes.c_int(_RULE_PATH_BENEATH),
-                        ctypes.byref(attr), ctypes.c_uint32(0)) != 0:
+                        attr, ctypes.c_uint32(0)) != 0:
             raise SandboxUnavailable("add-rule errno=%d" % ctypes.get_errno())
     finally:
         os.close(fd)
@@ -84,11 +88,9 @@ def confine(workdir):
                        ctypes.c_uint32(_CREATE_RULESET_VERSION))
     if abi < 1:
         raise SandboxUnavailable("landlock errno=%d" % ctypes.get_errno())
-    handled = _ABI1_ALL
-    if abi >= 2:
-        handled |= _REFER
-    if abi >= 3:
-        handled |= _TRUNCATE
+    if abi < _MIN_ABI:
+        raise SandboxUnavailable("landlock-abi=%d" % abi)
+    handled = _ABI1_ALL | _REFER | _TRUNCATE
     attr = _RulesetAttr(handled_access_fs=handled)
     ruleset_fd = libc.syscall(_SYS_CREATE_RULESET, ctypes.byref(attr), ctypes.c_size_t(ctypes.sizeof(attr)),
                               ctypes.c_uint32(0))
@@ -111,7 +113,7 @@ def confine(workdir):
 
 
 def probe_outside(workdir, outside_file):
-    """閉じ込めたあとに呼ぶ。外のファイルを読めず、外に書けないことを確かめる。"""
+    """閉じ込めたあとに呼ぶ。外のファイルを読めず・空にできず、外に書けないことを確かめる。"""
     result = {}
     try:
         with open(outside_file, "rb") as fh:
@@ -119,6 +121,11 @@ def probe_outside(workdir, outside_file):
         result["readOutside"] = "ok"
     except PermissionError:
         result["readOutside"] = "denied"
+    try:
+        os.truncate(outside_file, 0)
+        result["truncateOutside"] = "ok"
+    except PermissionError:
+        result["truncateOutside"] = "denied"
     escape = os.path.join(os.path.dirname(os.path.realpath(outside_file)), "pdfc-escape-probe")
     try:
         with open(escape, "w") as fh:

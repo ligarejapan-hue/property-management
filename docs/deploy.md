@@ -215,7 +215,7 @@ sudo -u www-data python3 -c "import pikepdf, PIL; print(pikepdf.__version__)"
 - 一時ファイルは systemd の `PrivateTmp` の /tmp に作り、毎回消す
 - **閉じ込め(2026-11-06)**: 圧縮の処理には環境変数を許可リスト(PATH・LANG・作業フォルダの HOME/TMPDIR など)だけ渡し、
   app.env の値は渡さない。読み書きはその回の作業フォルダだけ(/usr は読むだけ)に、Linux の **Landlock** で絞る
-  (`scripts/pdf_sandbox.py`・root 不要)。Landlock が効かないカーネルでは縮めずに失敗する(8MB を超える PDF は断られる)。
+  (`scripts/pdf_sandbox.py`・root 不要)。Landlock が効かない、または版(ABI)が 3 未満(カーネル 6.2 より前=外のファイルを空にするのを止められない)のカーネルでは縮めずに失敗する(8MB を超える PDF は断られる)。
   効いているかは自己診断の `"sandbox": "ok"`、またはカーネルの `cat /sys/kernel/security/lsm` に `landlock` があることで分かる
 - 1回の時間の上限は社内の添付が 2 分、お客様の提出(`/submit/`)が 60 秒
 - ⚠**nginx でアプリ全体を出す構成**では、`deploy/nginx/property-management.conf.example` の
