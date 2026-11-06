@@ -475,6 +475,11 @@ describe("この取引の土地・建物(2026-11-06 3回目)", () => {
     expect((await TARGET(json("POST", { version: 3, targetParcels: [] }), ctx)).status).toBe(422);
     pm.property.findUnique.mockResolvedValue({ ...propRow, extraParcels: [] });
     expect((await TARGET(json("POST", { version: 3, targetParcels: ["main:land"] }), ctx)).status).toBe(422);
+    // 選んでいる取引は、足した行が無くなっても選び直せる(全部に戻す・@codex P1)。
+    pm.deal.findUnique.mockResolvedValue({ ...dealRow, targetParcels: ["main:land"] });
+    expect((await TARGET(json("POST", { version: 3, targetParcels: null }), ctx)).status).toBe(200);
+    pm.deal.updateMany.mockClear();
+    pm.deal.findUnique.mockResolvedValue(dealRow);
     pm.property.findUnique.mockResolvedValue({ ...propRow, propertyType: "apartment_unit" });
     expect((await TARGET(json("POST", { version: 3, targetParcels: ["x"] }), ctx)).status).toBe(422);
     expect(pm.deal.updateMany).not.toHaveBeenCalled();

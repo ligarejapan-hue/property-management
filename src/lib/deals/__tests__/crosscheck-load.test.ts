@@ -520,6 +520,11 @@ describe("土地のある物件の謄本", () => {
         expect(await loadCrosscheckRegistry("p", { kindBase: "land", includeOwners: true, targetParcels: ["main:land"] }))
           .toMatchObject({ missing: ["土地"], missingParcels: ["土地 1番"] });
       });
+      it("★合筆で足した行が無くなっても、土地だけを選んだ取引では建物の謄本を要らないままにする(@codex P1)", async () => {
+        findProperty.mockResolvedValue({ lotNumber: "1番", buildingNumber: "1番1", extraParcels: [] });
+        scoped([["l", "all", "2026-10-01T00:00:00Z", LAND("1番", "120.50"), summary(1), landTx("１番")]]);
+        expect(await loadCrosscheckRegistry("p", { ...house, targetParcels: ["main:land"] })).toMatchObject({ missing: [], uncertain: null, rights: { activeRights: 1 } });
+      });
       it("書類確認書も選んだ筆だけ", async () => {
         findProperty.mockResolvedValue(twoByTwo);
         scoped(all());
