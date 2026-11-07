@@ -5,6 +5,7 @@ import { buildPasteDraft } from "../build-draft";
 import { parseLabeledLines } from "../parse-labeled-lines";
 import { detectSourceProfile, parseOptionsFor } from "../source-profiles";
 import { introductionRouteForLeadSource } from "../lead-source-route";
+import { withFallbackLinkKey } from "../lead-sheet";
 
 const fixture = (name: string) =>
   readFileSync(join(__dirname, "fixtures", name), "utf8").replace(/\r\n/g, "\n");
@@ -49,6 +50,17 @@ describe("buildPasteDraft — イエイ 査定依頼", () => {
     for (const piece of ["簡易査定", "仲介", "私は名義人の家族・親族です", "資産整理のため", "1年以内", "連絡希望日: 特になし", "12時〜15時"]) {
       expect(draft.noteFromUnmapped).toContain(piece);
     }
+  });
+
+  it("★「ご名義：私は名義人の家族・親族です」なら、申込者が名義人ではないかもしれないと知らせる(@codex)", () => {
+    expect(draft.warnings.map((w) => w.code)).toContain("applicant_may_not_be_holder");
+    const self = buildPasteDraft(text.replace("私は名義人の家族・親族です", "私は名義人です"), { maxYear: 2026 });
+    expect(self.warnings.map((w) => w.code)).not.toContain("applicant_may_not_be_holder");
+  });
+
+  it("★Excel 取込が先頭に足す鍵の行(反響番号)を読み落とさない(@codex)", () => {
+    const withKey = withFallbackLinkKey(text, draft, "xlsx-sample-1");
+    expect(buildPasteDraft(withKey, { maxYear: 2026 }).externalLinkKey).toBe("xlsx-sample-1");
   });
 
   it("年齢・氏名・フリガナ・現住所・連絡先は備考に入れない(所有者の個人情報)", () => {

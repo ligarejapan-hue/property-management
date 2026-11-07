@@ -114,6 +114,8 @@ const PAREN_WRAPPED = /^[（(](.+)[）)]$/;
 const NAME_HEADINGS: ReadonlySet<string> = new Set(["姓名", "お名前", "氏名"]);
 /** 「見出し：値」の行を並べる見出し(イエイ `［連絡先］` の下の `電話番号1：…`)。 */
 const CONTACT_HEADING = "連絡先";
+/** Excel 取込が本文の先頭に足す鍵の行の見出し(lead-sheet.ts withFallbackLinkKey と同じ)。 */
+const LINK_KEY_LABEL = "反響番号";
 
 /** 罫線だけの行(─ ━ = などの連なり)。住所の本体としてつながない。 */
 const RULE_LINE = /^[\s　]*[─━═=＝\-－_]{4,}[\s　]*$/;
@@ -206,7 +208,12 @@ export function parseLabeledLines(text: string, options: ParseOptions = {}): Par
       // ⚠「見出し：値」で割るのは［連絡先］の下だけ(電話番号1：…)。ほかの値の中のコロン
       //   (`12:00〜15:00`・`（地番：45）`)や冒頭の `（2026-11-06 10:45:10）に…` は割らない
       //   (提出前レビュー)。空行のあとの自由記述の2段落目の `TEL：…` が電話の欄に先に入るのも防ぐ。
-      const contactLine = lastHeading === CONTACT_HEADING && firstSeparatorIndex(raw) !== -1;
+      // ⚠Excel 取込が先頭に足す鍵の行 `反響番号：xlsx-…`(lead-sheet.ts withFallbackLinkKey)は
+      //   どこにあっても割る(@codex PR#676)。割らないと鍵が消え、二重登録の守りが効かない。
+      const sepIdx = firstSeparatorIndex(raw);
+      const contactLine =
+        sepIdx !== -1 &&
+        (lastHeading === CONTACT_HEADING || stripOrnament(raw.slice(0, sepIdx)) === LINK_KEY_LABEL);
       if (pending !== null && !contactLine) {
         pending.lines.push(trimmed);
         continue;
