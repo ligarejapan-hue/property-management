@@ -58,11 +58,15 @@ describe("buildPasteDraft — イエイ 査定依頼", () => {
     }
   });
 
-  it("⚠「ご名義」「ご依頼理由」の見出しは送り元を問わず安全扱いにしない(知らない値は備考に入れない)", () => {
-    const other = buildPasteDraft("物件所在地：東京都A区1\nご名義：Jonathan Smith\nご依頼理由：山田花子様の相続のため", { maxYear: 2026 });
-    expect(other.withheldFromNote.map((w) => w.label)).toEqual(expect.arrayContaining(["ご名義", "ご依頼理由"]));
-    expect(other.noteFromUnmapped).not.toContain("Jonathan");
-    expect(other.noteFromUnmapped).not.toContain("山田");
+  it("⚠イエイの見出しは送り元を問わず安全扱いにしない(知らない値は備考に入れない)", () => {
+    const other = buildPasteDraft(
+      "物件所在地：東京都A区1\nご名義：Jonathan Smith\nご依頼理由：山田花子様の相続のため\n希望連絡時間：山田の携帯へ夜に\n連絡希望日：佐藤様が戻る日\n査定種別：鈴木様経由",
+      { maxYear: 2026 },
+    );
+    expect(other.withheldFromNote.map((w) => w.label)).toEqual(
+      expect.arrayContaining(["ご名義", "ご依頼理由", "希望連絡時間", "連絡希望日", "査定種別"]),
+    );
+    for (const piece of ["Jonathan", "山田", "佐藤", "鈴木"]) expect(other.noteFromUnmapped).not.toContain(piece);
   });
 
   it("★冒頭の受信日時・イエイの署名欄は見出しで割らない(読み取れなかった行に残す)", () => {
