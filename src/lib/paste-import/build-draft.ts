@@ -318,7 +318,10 @@ export function buildPasteDraft(text: string, options?: YearBoundOptions): Paste
   // 送り元は見出しの顔ぶれで決まるので、まず共通の読み方で割ってから見分け、
   // 送り元に固有の読み方があれば読み直す(HOME4U の2書式は読み直さない＝従来どおり)。
   const firstPass = parseLabeledLines(text);
-  const sourceProfile = detectSourceProfile(firstPass.labeled.map((l) => l.label));
+  const sourceProfile = detectSourceProfile(
+    firstPass.labeled.map((l) => l.label),
+    firstPass.unlabeled,
+  );
   const parseOptions = parseOptionsFor(sourceProfile);
   const parsed =
     Object.keys(parseOptions).length === 0 ? firstPass : parseLabeledLines(text, parseOptions);

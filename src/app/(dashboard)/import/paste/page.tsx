@@ -482,7 +482,7 @@ function PasteImportScreen({ draftEnabled }: { draftEnabled: boolean }) {
         externalLinkKey: externalLinkKey.trim() || null,
         linkExistingOwnerId: ownerMode === "link" ? linkedOwnerId : null,
         buildingChoice: propertyValues.propertyType === "apartment_unit" ? buildingChoice : undefined,
-        // 読み取った書式(HOME4U・タカウルなら導入ルートが「一括査定」になる)。
+        // 読み取った書式(HOME4U・タカウル・イエイなら導入ルートが「一括査定」になる)。
         leadSource: draft.sourceProfile,
       };
 
