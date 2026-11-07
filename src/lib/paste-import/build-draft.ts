@@ -318,7 +318,10 @@ export function buildPasteDraft(text: string, options?: YearBoundOptions): Paste
   // 送り元は見出しの顔ぶれで決まるので、まず共通の読み方で割ってから見分け、
   // 送り元に固有の読み方があれば読み直す(HOME4U の2書式は読み直さない＝従来どおり)。
   const firstPass = parseLabeledLines(text);
-  const sourceProfile = detectSourceProfile(firstPass.labeled.map((l) => l.label));
+  const sourceProfile = detectSourceProfile(
+    firstPass.labeled.map((l) => l.label),
+    firstPass.unlabeled,
+  );
   const parseOptions = parseOptionsFor(sourceProfile);
   const parsed =
     Object.keys(parseOptions).length === 0 ? firstPass : parseLabeledLines(text, parseOptions);
@@ -531,10 +534,14 @@ export function buildPasteDraft(text: string, options?: YearBoundOptions): Paste
       };
   // 「名義」(HOME4U)が本人でなければ、申込者は名義人ではないかもしれない。
   //   ご所有者様名が別にあるとき(上の警告)は所有者がはっきりしているので出さない。
-  const holderLine = labeled.find((l) => l.label === "名義" && !isBlankValue(l.value));
+  //   イエイは「ご名義：私は名義人です／私は名義人の家族・親族です」(2026-11-06・@codex PR#676)。
+  const holderLine = labeled.find((l) => (l.label === "名義" || l.label === "ご名義") && !isBlankValue(l.value));
   //   「本人以外」「本人ではない」も本人でない側(NOT_OWNER と同じ形)。
+  const holderValue = holderLine?.value.replace(/[\s　]/g, "") ?? "";
   const holderIsSelf =
-    holderLine !== undefined && holderLine.value.includes("本人") && !NOT_OWNER.test(holderLine.value);
+    holderLine !== undefined &&
+    (holderValue.includes("本人") || /^(私は)?名義人(です)?$/.test(holderValue)) &&
+    !NOT_OWNER.test(holderValue);
   if (holderLine && !holderIsSelf && declaredOwnerName === null) {
     warnings.push({
       code: "applicant_may_not_be_holder",

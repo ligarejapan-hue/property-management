@@ -12,12 +12,14 @@ export type SourceProfileId =
   | "home4u_assessment"
   | "home4u_vacant_house"
   | "takauru_assessment"
+  | "ieyi_assessment"
   | "generic";
 
 export const SOURCE_PROFILE_LABELS: Record<SourceProfileId, string> = {
   home4u_assessment: "HOME4U 査定依頼",
   home4u_vacant_house: "HOME4U 空き家相談",
   takauru_assessment: "タカウル 査定依頼",
+  ieyi_assessment: "イエイ 査定依頼",
   generic: "その他（共通の読み取り）",
 };
 
@@ -27,7 +29,21 @@ function has(labels: readonly string[], needle: string): boolean {
 
 const TAKAURU_MARKERS = ["査定物件の郵便番号", "不動産会社からのご希望連絡先", "マンションレビューを見る"];
 
-export function detectSourceProfile(labels: readonly string[]): SourceProfileId {
+/**
+ * イエイの査定依頼メール(実物 2026-11-06)は「［見出し］」の行の次の行に値がある。
+ * 共通の読み方では見出しに割れないので、**読み取れなかった行**の顔ぶれで見分ける。
+ * ⚠「［物件所在地］」だけでは決めない(タカウルと同じ考え)。イエイに固有の見出しがもう1つあるときだけ。
+ */
+const IEYI_MARKERS = ["［査定種別］", "［ご名義］", "［ご依頼理由］"];
+
+function hasLine(lines: readonly string[], needle: string): boolean {
+  return lines.some((l) => l.replace(/[\s　]/g, "") === needle);
+}
+
+export function detectSourceProfile(
+  labels: readonly string[],
+  unlabeledLines: readonly string[] = [],
+): SourceProfileId {
   if (has(labels, "査定ナンバー")) return "home4u_assessment";
   if (has(labels, "空き家所有者との関係性")) return "home4u_vacant_house";
   // タカウル(マンションレビュー)の査定依頼メール(実物 2026-10-07 で確認)。
@@ -39,6 +55,12 @@ export function detectSourceProfile(labels: readonly string[]): SourceProfileId 
     TAKAURU_MARKERS.some((m) => has(labels, m))
   ) {
     return "takauru_assessment";
+  }
+  if (
+    hasLine(unlabeledLines, "［物件所在地］") &&
+    IEYI_MARKERS.some((m) => hasLine(unlabeledLines, m))
+  ) {
+    return "ieyi_assessment";
   }
   return "generic";
 }
@@ -55,6 +77,12 @@ export function parseOptionsFor(profile: SourceProfileId): ParseOptions {
   // HOME4U 査定依頼の表の形(タブ区切り)は、この行だけタブが抜けていた(実物 2026-10-26)。
   // ⚠メールの形(■見出し：値)には無い見出しなので、メールの読み方は変わらない。
   if (profile === "home4u_assessment") return { gluedLabels: ["査定依頼者建物名号室"] };
+  // イエイ(実物 2026-11-06): 「［見出し］」の次の行が値。お客様情報の節の「［住所］」は
+  // お客様の住所(物件は「［物件所在地］」)。⚠「住所」単独を辞書に入れると物件と紛れるので、
+  // イエイのときだけ現住所の見出しに読み替える。
+  if (profile === "ieyi_assessment") {
+    return { bracketHeadings: true, labelAliases: { 住所: "ご住所" } };
+  }
   return {};
 }
 

@@ -64,7 +64,8 @@ const LOCKED_DECLS: Array<{ file: string; name: string; rev: string; hash: strin
   { file: "src/lib/drafts/screens/paste-excel.ts", name: "PasteExcelDraft", rev: "excel rev 1", hash: "a370ecd5b537bce5" },
   { file: "src/lib/building-link/resolve.ts", name: "BuildingChoice", rev: "paste rev 1", hash: "2602bc115ea2dc6b" },
   { file: "src/lib/paste-import/lead-sheet.ts", name: "LeadRowStatus", rev: "excel rev 1", hash: "0f6e872f3df5c97d" },
-  { file: "src/lib/paste-import/source-profiles.ts", name: "SourceProfileId", rev: "paste rev 1 / excel rev 1", hash: "7a8ef0d30c3369bd" },
+  // 2026-11-07: "ieyi_assessment" を足した(値を増やしただけ=前の控えの値はそのまま読める=rev は上げない)。
+  { file: "src/lib/paste-import/source-profiles.ts", name: "SourceProfileId", rev: "paste rev 1 / excel rev 1", hash: "35b34ebfcf07c0d9" },
 ];
 
 const MESSAGE = "の型が変わりました。控えの形に関わるなら src/lib/drafts/screens/paste.ts・paste-excel.ts の rev を上げてから、この指紋を書き換えてください。";

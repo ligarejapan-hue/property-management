@@ -88,7 +88,34 @@ export interface ParseOptions {
    *   見出しに当たって値にされる。
    */
   gluedLabels?: readonly string[];
+  /**
+   * 「［見出し］」だけの行の次の行(空行まで)を、その見出しの値にする。
+   * 実サンプル(イエイ 2026-11-06): `［物件所在地］` の次の行に住所。
+   * - 氏名の見出し(［姓名］)の下で、値の2行目以降が括弧で囲まれた行(`（ヤマダ ハナコ）`)は
+   *   見出し「フリガナ」の値にする。ほかの2行目以降は空白でつなぐ。
+   * - 空行・「▼」で始まる節の行・次の「［見出し］」の行で値は終わる。
+   * - 「見出し：値」で割るのは［連絡先］の下の行だけ。ほかの行のコロンでは割らない。
+   * - `━` で始まる行(`━ ZIGExN Co.,Ltd.━━━`)から後ろは署名欄として見出しで割らない。
+   * ⚠捨てない。読まなかった行は「読み取れなかった行」に残す。
+   */
+  bracketHeadings?: boolean;
+  /**
+   * 見出しの読み替え(送り元に固有の見出しだけ)。キーは原文の見出し(前後の空白なし)。
+   * 例: イエイの「お客様情報」の節の `［住所］` → 「ご住所」(現住所)。
+   */
+  labelAliases?: Readonly<Record<string, string>>;
 }
+
+/** 「［見出し］」だけの行。中にコロンがあるもの(`［受付時間：10:00～19:00］`)は見出しにしない。 */
+const BRACKET_HEADING = /^［([^［］：:]+)］$/;
+/** 括弧で囲まれた行(フリガナ)。 */
+const PAREN_WRAPPED = /^[（(](.+)[）)]$/;
+/** 値の2行目の括弧をフリガナとして読む見出し。 */
+const NAME_HEADINGS: ReadonlySet<string> = new Set(["姓名", "お名前", "氏名"]);
+/** 「見出し：値」の行を並べる見出し(イエイ `［連絡先］` の下の `電話番号1：…`)。 */
+const CONTACT_HEADING = "連絡先";
+/** Excel 取込が本文の先頭に足す鍵の行の見出し(lead-sheet.ts withFallbackLinkKey と同じ)。 */
+const LINK_KEY_LABEL = "反響番号";
 
 /** 罫線だけの行(─ ━ = などの連なり)。住所の本体としてつながない。 */
 const RULE_LINE = /^[\s　]*[─━═=＝\-－_]{4,}[\s　]*$/;
@@ -112,12 +139,37 @@ export function parseLabeledLines(text: string, options: ParseOptions = {}): Par
   //   セルが署名欄の途中で切れていると、運営会社の `T E L：` が所有者の電話に入る。
   //   読まなかった行は「読み取れなかった行」に残る(捨てない)。Excel 取込の
   //   鍵(反響番号)は本文の先頭に置くので飲み込まれない(lead-sheet.ts)。
+  const aliasOf = (label: string): string => options.labelAliases?.[label] ?? label;
+  /** 「［見出し］」の行のあと、値の行を集めている途中(bracketHeadings のときだけ)。 */
+  let pending: { label: string; lineNumber: number; lines: string[] } | null = null;
+  /** `━` で始まる行から後ろ(bracketHeadings の署名欄)。閉じない。 */
+  let inSignature = false;
+  /** 最後に出た「［見出し］」(▼の節の行で消える)。 */
+  let lastHeading: string | null = null;
+  const flushPending = () => {
+    if (pending === null) return;
+    const { label, lineNumber, lines: valueLines } = pending;
+    pending = null;
+    if (valueLines.length === 0) return; // 値の無い見出し(`［賃料］` の下が空)は拾わない
+    let value = valueLines[0];
+    const kana: string[] = [];
+    for (const extra of valueLines.slice(1)) {
+      // ⚠フリガナにするのは氏名の見出しの下だけ(提出前レビュー)。`［ご要望など］` の
+      //   `（午前中に電話希望）` が所有者のフリガナの欄を先に取らないように。
+      const m = NAME_HEADINGS.has(label) ? PAREN_WRAPPED.exec(extra) : null;
+      if (m) kana.push(trimWide(m[1]));
+      else value = `${value} ${extra}`;
+    }
+    labeled.push({ label: aliasOf(label), value, lineNumber });
+    for (const k of kana) labeled.push({ label: "フリガナ", value: k, lineNumber });
+  };
 
   for (let idx = 0; idx < lines.length; idx++) {
     const raw = lines[idx];
     const lineNumber = idx + 1;
     if (trimWide(raw) === "") {
       continuable = null; // 空行で続きは切れる
+      if (pending !== null && pending.lines.length > 0) flushPending();
       continue; // 空行は捨てる
     }
 
@@ -127,9 +179,50 @@ export function parseLabeledLines(text: string, options: ParseOptions = {}): Par
       unlabeled.push(trimWide(raw));
       continue;
     }
-    if (inFooter) {
+    if (options.bracketHeadings && !inSignature && /^[\s　]*━/.test(raw)) {
+      flushPending();
+      inSignature = true;
+    }
+    if (inFooter || inSignature) {
       unlabeled.push(trimWide(raw));
       continue;
+    }
+
+    if (options.bracketHeadings) {
+      const trimmed = trimWide(raw);
+      const heading = BRACKET_HEADING.exec(trimmed);
+      if (heading) {
+        flushPending();
+        pending = { label: trimWide(heading[1]), lineNumber, lines: [] };
+        lastHeading = pending.label;
+        continuable = null;
+        continue;
+      }
+      if (trimmed.startsWith("▼")) {
+        // 節の行(▼お客様情報)で値は終わる。
+        flushPending();
+        lastHeading = null;
+        unlabeled.push(trimmed);
+        continue;
+      }
+      // ⚠「見出し：値」で割るのは［連絡先］の下だけ(電話番号1：…)。ほかの値の中のコロン
+      //   (`12:00〜15:00`・`（地番：45）`)や冒頭の `（2026-11-06 10:45:10）に…` は割らない
+      //   (提出前レビュー)。空行のあとの自由記述の2段落目の `TEL：…` が電話の欄に先に入るのも防ぐ。
+      // ⚠Excel 取込が先頭に足す鍵の行 `反響番号：xlsx-…`(lead-sheet.ts withFallbackLinkKey)は
+      //   どこにあっても割る(@codex PR#676)。割らないと鍵が消え、二重登録の守りが効かない。
+      const sepIdx = firstSeparatorIndex(raw);
+      const contactLine =
+        sepIdx !== -1 &&
+        (lastHeading === CONTACT_HEADING || stripOrnament(raw.slice(0, sepIdx)) === LINK_KEY_LABEL);
+      if (pending !== null && !contactLine) {
+        pending.lines.push(trimmed);
+        continue;
+      }
+      flushPending();
+      if (!contactLine) {
+        unlabeled.push(trimmed);
+        continue;
+      }
     }
 
     let sepAt = firstSeparatorIndex(raw);
@@ -168,10 +261,11 @@ export function parseLabeledLines(text: string, options: ParseOptions = {}): Par
       unlabeled.push(trimWide(raw));
       continue;
     }
-    const line: LabeledLine = { label, value, lineNumber };
+    const line: LabeledLine = { label: aliasOf(label), value, lineNumber };
     labeled.push(line);
     continuable = options.joinAfterPostalCode && POSTAL_CODE_ONLY.test(value) ? line : null;
   }
+  flushPending();
 
   return { labeled, unlabeled };
 }
