@@ -30,6 +30,7 @@ import { useScreenProtection } from "@/components/screen-protection/screen-prote
 // 鍵のヘッダを送るすべての画面が呼ぶ契約(外部レビュー@codex P1 round2)。
 import { useEditScreenToken } from "@/hooks/use-edit-screen-token";
 import { ownerFilteredPropertyListHref } from "@/lib/owner-property-link";
+import { displayHalfWidth } from "@/lib/notation";
 
 type FieldEditable = {
   name: boolean;
@@ -329,12 +330,12 @@ export default function AdminOwnerDetailPage() {
               {/* ⚠「現住所」は引っ越し先の住所を指す言葉になった。登記上の住所を
                   そう呼ぶと、どちらを直しているのか分からなくなる。 */}
               <div className="md:col-span-2">
-                <Field label="登記上住所" value={owner.ownerAddressMasked} />
+                <Field label="登記上住所" value={displayHalfWidth(owner.ownerAddressMasked)} />
               </div>
               <div className="md:col-span-2">
                 <Field
                   label="現住所"
-                  value={owner.ownerCurrentAddressMasked ?? "（未設定＝登記上へ送る）"}
+                  value={displayHalfWidth(owner.ownerCurrentAddressMasked) ??"（未設定＝登記上へ送る）"}
                 />
               </div>
               <Field label="バージョン" value={String(owner.version)} mono />
@@ -383,8 +384,8 @@ export default function AdminOwnerDetailPage() {
                             (SalesSheetPropertyPicker と同方式)。所有者面ではなく
                             物件面: ここに載るのは物件住所であって所有者住所ではない。 */}
                         <span data-pii-protected data-pii-surface="property">
-                          {p.address}
-                          {p.lotNumber ? ` ${p.lotNumber}` : ""}
+                          {displayHalfWidth(p.address)}
+                          {p.lotNumber ? ` ${displayHalfWidth(p.lotNumber)}` : ""}
                         </span>
                       </Link>
                     </li>

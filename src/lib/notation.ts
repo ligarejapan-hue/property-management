@@ -73,6 +73,15 @@ export function savedTextValue(model: string, field: string, value: string): str
   return HALF_WIDTH_FIELDS[model]?.includes(field) ? toHalfWidthDigits(value) : value;
 }
 
+/**
+ * 画面に出すときだけ数字を半角にする(2026-11-07 発注者「進めて」)。保存のときと同じ変え方=数字だけ。
+ * ⚠データは書き換えない(今ある全角は残る)。⚠帳票・DM の宛名・販売図面・謄本には使わない(縦書きや原本の写しは元の字のまま)。
+ * ⚠入力欄の値には使わない(打っていないのに変わったことになる)。
+ */
+export function displayHalfWidth<T extends string | null | undefined>(value: T): T {
+  return (typeof value === "string" ? toHalfWidthDigits(value) : value) as T;
+}
+
 type Row = Record<string, unknown>;
 
 function convertRow(row: Row, fields: readonly string[]): Row {

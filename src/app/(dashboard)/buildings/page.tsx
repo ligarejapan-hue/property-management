@@ -18,6 +18,7 @@ import { useScreenProtection } from "@/components/screen-protection/screen-prote
 import { hasPermission } from "@/lib/permissions";
 import { isLatestRequest } from "@/lib/building-link/combobox-model";
 import { debounce } from "@/lib/debounce";
+import { displayHalfWidth } from "@/lib/notation";
 import { AddressLookupControls } from "@/components/address/address-lookup-controls";
 
 interface BuildingItem {
@@ -156,7 +157,7 @@ export default function BuildingsPage() {
               <Building className="h-6 w-6 shrink-0 text-blue-500" />
               <div className="flex-1 min-w-0">
                 <p className="font-medium text-gray-800 dark:text-gray-100">{b.name}</p>
-                <p className="text-sm text-gray-500 truncate dark:text-gray-400">{b.address}</p>
+                <p className="text-sm text-gray-500 truncate dark:text-gray-400">{displayHalfWidth(b.address)}</p>
               </div>
               <div className="hidden sm:flex items-center gap-6 text-xs text-gray-500 dark:text-gray-400">
                 {b.totalFloors && <span>{b.totalFloors}階建</span>}

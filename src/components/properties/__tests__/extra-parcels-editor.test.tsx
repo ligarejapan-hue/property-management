@@ -87,7 +87,7 @@ describe("取引の写し・横の物件情報", () => {
   });
   it("物件の基本情報は「ほか◯筆」と、ほかの土地・建物の行", () => {
     const src = read("src/app/(dashboard)/properties/[id]/page.tsx");
-    expect(src).toContain('<Field label="地番" value={parcelNumberLabel(property.lotNumber, property.extraParcels, "land")} />');
-    expect(src).toContain('<Field label="ほかの土地・建物" value={extraParcelsText(property.extraParcels)} multiline />');
+    expect(src).toContain('<Field label="地番" value={displayHalfWidth(parcelNumberLabel(property.lotNumber, property.extraParcels, "land"))} />');
+    expect(src).toContain('<Field label="ほかの土地・建物" value={displayHalfWidth(extraParcelsText(property.extraParcels))} multiline />');
   });
 });

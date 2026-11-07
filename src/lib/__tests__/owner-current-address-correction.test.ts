@@ -217,7 +217,8 @@ describe("管理画面の所有者詳細 — ラベルが実体と合ってい�
   );
 
   it("登記上の住所を「現住所」と呼ばない", () => {
-    expect(page).toContain('label="登記上住所" value={owner.ownerAddressMasked}');
+    // 数字は画面に出すときだけ半角(2026-11-07)。
+    expect(page).toContain('label="登記上住所" value={displayHalfWidth(owner.ownerAddressMasked)}');
   });
 
   it("現住所も表示する（未設定なら送り先が分かる文言）", () => {

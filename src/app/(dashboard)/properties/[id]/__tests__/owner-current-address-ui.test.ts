@@ -59,7 +59,8 @@ describe("所有者カード — 現住所の2段化", () => {
   });
 
   it("閲覧時は現住所があればそれを主に出し、登記上住所も併記する", () => {
-    expect(src).toMatch(/OwnerField label="現住所" value=\{po\.owner\.currentAddress\}/);
-    expect(src).toMatch(/OwnerField label="登記上住所" value=\{po\.owner\.address\}/);
+    // 数字は画面に出すときだけ半角(2026-11-07)。
+    expect(src).toMatch(/OwnerField label="現住所" value=\{displayHalfWidth\(po\.owner\.currentAddress\)\}/);
+    expect(src).toMatch(/OwnerField label="登記上住所" value=\{displayHalfWidth\(po\.owner\.address\)\}/);
   });
 });
