@@ -2,6 +2,7 @@
 
 import { AlertTriangle, Lock } from "lucide-react";
 import { detectCorporateNumberInOwnerLike } from "@/lib/corporate-number";
+import { displayHalfWidth } from "@/lib/notation";
 
 interface OwnerData {
   name: string | null;
@@ -74,7 +75,7 @@ export default function OwnerDetailPanel({ owner }: OwnerDetailPanelProps) {
         {renderField("電話番号", owner.phone)}
         {renderField("郵便番号", owner.zip)}
         <div className="md:col-span-2">
-          {renderField("現住所", owner.address)}
+          {renderField("現住所", displayHalfWidth(owner.address))}
         </div>
         {/* 法人番号（display-level に応じて null/masked/full）。
             将来 (Phase B) に「法人情報を検索」ボタンを置きやすい位置として

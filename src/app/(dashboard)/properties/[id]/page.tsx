@@ -120,6 +120,7 @@ import { salesSheetTemplateKindFor } from "@/lib/sales-sheet/template-kind";
 import { landBuildingAreaRows } from "@/lib/property-area-display";
 import { formatPhoneJp, isValidPhoneJp } from "@/lib/phone-format-jp";
 import { registryObtainedDateLabel } from "@/lib/registry-obtained-date";
+import { displayHalfWidth } from "@/lib/notation";
 import {
   beginRefresh,
   createRefreshState,
@@ -948,7 +949,7 @@ export default function PropertyDetailPage({
           </Link>
           <span className="text-gray-300 dark:text-gray-600">/</span>
           <h2 className="text-xl font-bold text-gray-800 dark:text-gray-100">
-            {property.address}
+            {displayHalfWidth(property.address)}
           </h2>
         </div>
         <div className="flex flex-wrap items-center gap-2">
@@ -1325,7 +1326,7 @@ function BasicTab({
         </div>
       )}
 
-      <Field label="物件住所" value={property.address} />
+      <Field label="物件住所" value={displayHalfWidth(property.address)} />
       {/* 物件名は集合住宅の種別でのみ入る (任意)。値があるときだけ出す＝
           土地や戸建の詳細に空欄が増えない。 */}
       {property.buildingName && nameMode === "text" && (
@@ -1388,10 +1389,10 @@ function BasicTab({
         />
       )}
       {/* 2筆目・2棟目があれば「ほか◯筆」と出し、下に1行ずつ並べる(無ければ今のまま・2026-11-05)。 */}
-      <Field label="地番" value={parcelNumberLabel(property.lotNumber, property.extraParcels, "land")} />
-      <Field label="家屋番号" value={parcelNumberLabel(property.buildingNumber, property.extraParcels, "building")} />
+      <Field label="地番" value={displayHalfWidth(parcelNumberLabel(property.lotNumber, property.extraParcels, "land"))} />
+      <Field label="家屋番号" value={displayHalfWidth(parcelNumberLabel(property.buildingNumber, property.extraParcels, "building"))} />
       {readExtraParcels(property.extraParcels).length > 0 && (
-        <Field label="ほかの土地・建物" value={extraParcelsText(property.extraParcels)} multiline />
+        <Field label="ほかの土地・建物" value={displayHalfWidth(extraParcelsText(property.extraParcels))} multiline />
       )}
       {/* 不動産番号は「今後も作らない」運用(本番は0件)。空なら行ごと出さない(実機確認 2026-10-22)。 */}
       {property.realEstateNumber && (
@@ -2549,12 +2550,12 @@ function OwnerCard({
             {(po.owner.currentAddress ?? "").trim() !== "" ? (
               <>
                 <OwnerField label="郵便番号（現住所）" value={po.owner.currentZip} mono />
-                <OwnerField label="現住所" value={po.owner.currentAddress} />
+                <OwnerField label="現住所" value={displayHalfWidth(po.owner.currentAddress)} />
                 <OwnerField label="郵便番号（登記上）" value={po.owner.zip} mono />
-                <OwnerField label="登記上住所" value={po.owner.address} />
+                <OwnerField label="登記上住所" value={displayHalfWidth(po.owner.address)} />
               </>
             ) : (
-              <OwnerField label="現住所" value={po.owner.address} />
+              <OwnerField label="現住所" value={displayHalfWidth(po.owner.address)} />
             )}
           </div>
           {/* 法人番号: display-level に応じて null（hidden）/ masked / full のいずれかが返る。

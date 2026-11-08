@@ -44,6 +44,7 @@ import { PROPERTY_BUSINESS_TYPE_FILTER_OPTIONS } from "@/lib/property-business-t
 import { InquirerOrOwnerNames, LeadExclusionListBadge } from "@/components/properties/property-list-cells";
 import { ownerColumnDisplay } from "@/lib/inquirer-name";
 import { LEAD_EXCLUSION_FILTER_OPTIONS, jstTodayDateOnly } from "@/lib/lead-exclusion";
+import { displayHalfWidth } from "@/lib/notation";
 
 // v2: バッジ色は共通レシピ(status-badge.tsx)の intent に集約。
 // scheduled は yellow → amber(warning)に統一。
@@ -1307,7 +1308,7 @@ function PropertiesPageInner() {
                     className={`flex w-full flex-col gap-0.5 px-3 py-2 text-left text-sm hover:bg-indigo-50 dark:hover:bg-gray-800 ${suggestResults[activeSuggest]?.id === item.id ? "bg-indigo-50 dark:bg-gray-800" : ""}`}
                   >
                     <div className="flex items-center gap-2">
-                      <span className="flex-1 font-medium text-gray-800 truncate dark:text-gray-100">{item.address}</span>
+                      <span className="flex-1 font-medium text-gray-800 truncate dark:text-gray-100">{displayHalfWidth(item.address)}</span>
                       <span className={`shrink-0 rounded-full px-1.5 py-0.5 text-[10px] font-medium ${dmStatusStyles[item.dmStatus] ?? badgeIntentClass("neutral")}`}>
                         {DM_STATUS_LABELS[item.dmStatus] ?? item.dmStatus}
                       </span>
@@ -1332,12 +1333,12 @@ function PropertiesPageInner() {
                             登記上だけを出すと、現住所で検索して当たった人が
                             別人に見えてしまう。 */}
                         {o.currentAddress && (
-                          <span className="truncate">現住所: {o.currentAddress}</span>
+                          <span className="truncate">現住所: {displayHalfWidth(o.currentAddress)}</span>
                         )}
                         {o.address && (
                           <span className="truncate">
                             {o.currentAddress ? "登記上: " : ""}
-                            {o.address}
+                            {displayHalfWidth(o.address)}
                           </span>
                         )}
                       </div>
@@ -1760,7 +1761,7 @@ function PropertiesPageInner() {
             <ul className="mt-2 max-h-40 list-disc space-y-0.5 overflow-auto pl-5 text-xs">
               {bulkDeleteResult.failures.map((f) => (
                 <li key={f.id}>
-                  <span className="font-medium">{f.address}</span>
+                  <span className="font-medium">{displayHalfWidth(f.address)}</span>
                   <span className="ml-2 text-amber-700">{f.reason}</span>
                 </li>
               ))}
@@ -1886,11 +1887,11 @@ function PropertiesPageInner() {
                           {property.buildingName}
                         </span>
                       )}
-                      {property.address}
+                      {displayHalfWidth(property.address)}
                     </Link>
                   </td>
                   <td className="whitespace-nowrap px-4 py-3">
-                    {property.lotNumber ?? "-"}
+                    {displayHalfWidth(property.lotNumber) ?? "-"}
                   </td>
                   <td className="whitespace-nowrap px-4 py-3">
                     <StatusBadge
@@ -2049,7 +2050,7 @@ function PropertiesPageInner() {
                         </p>
                       )}
                       <p className="text-sm text-gray-900 dark:text-gray-100 break-all">
-                        {property.address}
+                        {displayHalfWidth(property.address)}
                       </p>
                     </Link>
                   </div>
