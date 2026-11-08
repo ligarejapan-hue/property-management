@@ -156,6 +156,14 @@ export interface ProcessRegistryPdfArgs {
    */
   beforeCommit?: (tx: DbClient, summary: { linked: number }) => Promise<void>;
   /**
+   * **置き換え**(謄本の名義に直す・2026-11-08)。今の所有者のうち謄本にない人を外す処理。
+   * 指定すると requireNoExistingOwners と同じく全員ぶんを**1つのトランザクション**で入れ、
+   * 「0件か」の見直しの代わりに、物件行のロックの中・最初の書き込みの前で
+   * beforeFirstWrite → これ の順に1回だけ呼ぶ(足す人が0人でも必ず呼ぶ)。
+   * 投げれば外した分も足した分もすべて巻き戻る。beforeCommit もこの場合に呼ばれる。
+   */
+  replaceExistingOwners?: (tx: DbClient) => Promise<void>;
+  /**
    * 有料取得の請求種別（owner|all）。有料取得フローからのみ渡る（手動取込は undefined）。
    * ⚠**"all"(全部事項)のときは所有者を物件へ反映しない**。全部事項には抹消された
    * 旧所有者が載り、今の解析は現在/抹消を区別できないため、旧所有者を現在の所有者
@@ -304,6 +312,8 @@ async function reflectParsedOwners(args: {
   beforeFirstWrite?: (tx: DbClient) => Promise<void>;
   /** → ProcessRegistryPdfArgs.beforeCommit */
   beforeCommit?: (tx: DbClient, summary: { linked: number }) => Promise<void>;
+  /** → ProcessRegistryPdfArgs.replaceExistingOwners */
+  replaceExistingOwners?: (tx: DbClient) => Promise<void>;
 }): Promise<{ matched: number; created: number; linked: number }> {
   const { propertyId, owners, recordCorporateDecision, markOwnerCorporateFillSkipped } = args;
 
@@ -327,7 +337,17 @@ async function reflectParsedOwners(args: {
    *   中途半端な結果になる。以降に別の人が所有者を足した場合は、共有者が
    *   増えただけ＝正当な操作として受け入れる。
    */
+  /** 置き換えの「外す」処理を、このトランザクションで済ませたか(1回だけ呼ぶ)。 */
+  let replacedExisting = false;
   const assertStillEmpty = async (tx: DbClient) => {
+    if (args.replaceExistingOwners) {
+      // 置き換え: 所有者がいるのが前提なので「0件か」は見ない。受付時点の確認を見直してから外す。
+      if (replacedExisting) return;
+      replacedExisting = true;
+      await args.beforeFirstWrite?.(tx);
+      await args.replaceExistingOwners(tx);
+      return;
+    }
     if (!args.requireNoExistingOwners) return;
     if (linkedByThisRun.length > 0) return;
     const existing = await tx.propertyOwner.count({ where: { propertyId } });
@@ -339,7 +359,7 @@ async function reflectParsedOwners(args: {
   };
 
   /** 1件のトランザクションでまとめるか(=呼び出し元が空の物件を前提にしているか)。 */
-  const asOneBatch = Boolean(args.requireNoExistingOwners);
+  const asOneBatch = Boolean(args.requireNoExistingOwners || args.replaceExistingOwners);
 
   /** 法人番号の判定。skipCorporateNumber のときは常に「何もしない」。 */
   const decide: typeof decideCorporateImport = (owner, existing) =>
@@ -755,6 +775,11 @@ async function reflectParsedOwners(args: {
     await prisma.$transaction(
       async (tx) => {
         await applyAll(tx as DbClient);
+        // 置き換えで足す人が0人(謄本にない人を外すだけ)のときも、外す処理は必ず通す。
+        if (args.replaceExistingOwners && !replacedExisting) {
+          await lockProperty(tx as DbClient);
+          await assertStillEmpty(tx as DbClient);
+        }
         // 呼び出し元の記録を、所有者と一緒に確定させる(→ ProcessRegistryPdfArgs.beforeCommit)
         await args.beforeCommit?.(tx as DbClient, { linked: linkedCount });
       },
@@ -1079,6 +1104,7 @@ export async function processRegistryPdf(
           scopedSession: args.enforcePropertyScope ? session : undefined,
           beforeFirstWrite: args.beforeFirstWrite,
           beforeCommit: args.beforeCommit,
+          replaceExistingOwners: args.replaceExistingOwners,
           owners: parsed.owners,
           recordCorporateDecision,
           markOwnerCorporateFillSkipped,

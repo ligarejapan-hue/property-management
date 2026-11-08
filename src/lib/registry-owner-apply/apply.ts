@@ -18,6 +18,7 @@ import { getStorage } from "@/lib/storage";
 import { extractTextFromPdf } from "@/lib/pdf-extract";
 import { parseRegistryOwnerTable } from "@/lib/registry-owner-table";
 import { REGISTRY_OWNER_BULK_ROW_JOB_LABEL } from "@/lib/registry-owner-bulk/marker";
+import { planOwnerReplacement } from "@/lib/registry-owner-check/compare";
 import {
   processRegistryPdf,
   type ProcessRegistryPdfArgs,
@@ -31,6 +32,8 @@ export const SUPPORTED_CERTIFICATE_TYPE = "owner";
  * 利用者が見る下見には、別途ほんとうのファイル名を返している。
  */
 export const REGISTRY_OWNER_APPLY_AUDIT_LABEL = "添付済みの謄本から所有者を反映";
+/** 置き換え(謄本の名義に直す)の取込記録・監査に残す名前。 */
+export const REGISTRY_OWNER_REPLACE_AUDIT_LABEL = "謄本の名義に直す";
 
 export interface LoadedRegistry {
   attachmentId: string;
@@ -266,4 +269,184 @@ export async function applyRegistryOwnersToProperty(
     parsedOwners: owners.length,
     result,
   };
+}
+
+/** トランザクションの中の DB の口(processRegistryPdf の beforeCommit と同じ形)。 */
+export type ReplaceTx = Parameters<NonNullable<ProcessRegistryPdfArgs["beforeCommit"]>>[0];
+
+/** 置き換えの受付で、確認画面に見せた内容(これと今が違えば 409)。 */
+export interface ReplaceRegistryOwnersArgs {
+  session: { id: string; role: string };
+  perms: PermissionEntry[];
+  propertyId: string;
+  /** 確認画面で見せた謄本の添付 */
+  expectedAttachmentId: string;
+  /** 確認画面を開いたときに物件につながっていた所有者(全員) */
+  expectedLinkedOwnerIds: string[];
+  /** 確認画面で「外れる」と見せた所有者 */
+  expectedRemoveOwnerIds: string[];
+  /**
+   * 外す・足すと同じトランザクションの確定直前に呼ぶ(比べた結果の記録・DM を戻すなど)。
+   * 投げれば外した分も足した分も巻き戻る。registryNames=謄本の名義(比べ直しに使う)。
+   */
+  beforeCommit?: (tx: ReplaceTx, registryNames: string[]) => Promise<void>;
+}
+
+export const ownersChangedError = () =>
+  new ApiError(
+    409,
+    "確認画面を開いたあとに所有者が変わりました。開き直してもう一度確認してください",
+    "OWNERS_CHANGED",
+  );
+
+function sortedEqual(a: readonly string[], b: readonly string[]): boolean {
+  if (a.length !== b.length) return false;
+  const x = [...a].sort();
+  const y = [...b].sort();
+  return x.every((v, i) => v === y[i]);
+}
+
+/**
+ * 「謄本の名義に直す」(置き換え・2026-11-08 発注者決定)。
+ * 今の所有者のうち謄本に載っていない人を物件から外し、システムにいない謄本の人を足す。
+ * ⚠**外す・足すは1つのトランザクション**(途中で失敗したら何も変わらない)。足す側は
+ *   添付済み謄本からの所有者反映と同じ処理(processRegistryPdf)を通る。
+ * ⚠外した所有者は変更履歴から元に戻せるように、所有者のID・主所有者か・関係・期間を残す
+ *   (所有者の記録そのものは消さない)。物件ごとのメモがある所有者は外さない(履歴に
+ *   個人の文を残さないため・先にメモを確かめてもらう)。
+ * ⚠名前は照合と同じそろえ方で比べる(表記の違いだけの人は外さない・足さない)。
+ */
+export async function replaceRegistryOwnersOnProperty(
+  args: ReplaceRegistryOwnersArgs,
+): Promise<{ removed: number; added: number; result: Awaited<ReturnType<typeof processRegistryPdf>> }> {
+  const { session, perms, propertyId, expectedAttachmentId } = args;
+  const property = await prisma.property.findUnique({
+    where: { id: propertyId },
+    select: { id: true, assignedTo: true, createdBy: true },
+  });
+  if (!property) throw new ApiError(404, "物件が見つかりません", "NOT_FOUND");
+  if (!canAccessPropertyRecord(session, property)) {
+    throw new ApiError(403, "この物件を扱う権限がありません", "FORBIDDEN");
+  }
+
+  const registry = await loadLatestRegistryText(propertyId, expectedAttachmentId);
+  const registryOwners = parseRegistryOwnerTable(registry.text);
+  if (!registryOwners || registryOwners.length === 0) {
+    throw new ApiError(
+      422,
+      "謄本から所有者を読み取れませんでした。手入力で直してください",
+      "REGISTRY_OWNERS_NOT_FOUND",
+    );
+  }
+  const registryNames = registryOwners.map((o) => o.name);
+
+  // 受付時点の計画(確認画面と同じか)。⚠ロックの中でもう一度作り直して比べる。
+  const linkedNow = await prisma.propertyOwner.findMany({
+    where: { propertyId },
+    select: { ownerId: true, owner: { select: { name: true } } },
+  });
+  const plan = planOwnerReplacement(
+    registryOwners,
+    linkedNow.map((l) => ({ ownerId: l.ownerId, name: l.owner.name })),
+  );
+  if (
+    !sortedEqual(linkedNow.map((l) => l.ownerId), args.expectedLinkedOwnerIds) ||
+    !sortedEqual(plan.removeOwnerIds, args.expectedRemoveOwnerIds)
+  ) {
+    throw ownersChangedError();
+  }
+  if (plan.removeOwnerIds.length === 0 && plan.add.length === 0) {
+    throw new ApiError(409, "すでに謄本の名義と同じです", "ALREADY_SAME");
+  }
+  assertOwnerFieldWritePerms(perms, plan.add);
+
+  let removed = 0;
+  const result = await processRegistryPdf({
+    session,
+    text: registry.text,
+    propertyId,
+    // ⚠生ファイル名ではなく固定ラベル(ImportJob と AuditLog に残るため)
+    fileName: REGISTRY_OWNER_REPLACE_AUDIT_LABEL,
+    // ⚠足すのは「システムにいない謄本の人」だけ(確認画面で見せた人)
+    edited: { owners: plan.add.map((o) => ({ name: o.name, address: o.address, share: o.share })) },
+    // ⚠必ず null(添付は既にある)
+    pdfBuffer: null,
+    certificateType: SUPPORTED_CERTIFICATE_TYPE,
+    enforcePropertyScope: true,
+    ownersOnly: true,
+    sanitizeFailureDetails: true,
+    beforeFirstWrite: async (tx) => {
+      // 順序は 物件 → 添付(反映と同じ)。読んだ謄本が今も最新か。
+      await tx.$queryRaw`
+        SELECT id FROM attachments
+        WHERE property_id = ${propertyId}::uuid AND type = 'registry'
+        FOR UPDATE
+      `;
+      const latest = await findLatestOwnerRegistryAttachment(tx, propertyId);
+      if (!latest || latest.id !== registry.attachmentId) throw attachmentChangedError();
+    },
+    replaceExistingOwners: async (tx) => {
+      const links = await tx.propertyOwner.findMany({
+        where: { propertyId },
+        select: {
+          id: true,
+          ownerId: true,
+          isPrimary: true,
+          relationship: true,
+          note: true,
+          startDate: true,
+          endDate: true,
+          owner: { select: { name: true } },
+        },
+      });
+      // ⚠ロックの中で作り直した計画が、確認画面で見せたものと同じか
+      const fresh = planOwnerReplacement(
+        registryOwners,
+        links.map((l) => ({ ownerId: l.ownerId, name: l.owner.name })),
+      );
+      if (
+        !sortedEqual(links.map((l) => l.ownerId), args.expectedLinkedOwnerIds) ||
+        !sortedEqual(fresh.removeOwnerIds, args.expectedRemoveOwnerIds) ||
+        fresh.add.length !== plan.add.length
+      ) {
+        throw ownersChangedError();
+      }
+      const toRemove = links.filter((l) => fresh.removeOwnerIds.includes(l.ownerId));
+      if (toRemove.some((l) => l.note && l.note.trim())) {
+        throw new ApiError(
+          409,
+          "外す所有者に、この物件についてのメモがあります。所有者タブでメモを確かめてから直してください",
+          "OWNER_LINK_HAS_NOTE",
+        );
+      }
+      for (const link of toRemove) {
+        await tx.propertyOwner.delete({ where: { id: link.id } });
+        // ⚠元に戻せるように、つながりの中身を残す(形は「外す」ボタンと同じ印+関係・期間)。
+        //   氏名・メモは入れない(所有者のIDから引ける)。
+        const base = {
+          targetTable: "property_owners",
+          targetId: link.id,
+          newValue: null,
+          source: "manual" as const,
+          changedBy: session.id,
+          propertyId,
+        };
+        await tx.changeLog.createMany({
+          data: [
+            { ...base, fieldName: "_unlinked_from_property", oldValue: link.ownerId },
+            { ...base, fieldName: "isPrimary", oldValue: String(link.isPrimary) },
+            ...(link.relationship ? [{ ...base, fieldName: "relationship", oldValue: link.relationship }] : []),
+            ...(link.startDate ? [{ ...base, fieldName: "startDate", oldValue: link.startDate.toISOString().slice(0, 10) }] : []),
+            ...(link.endDate ? [{ ...base, fieldName: "endDate", oldValue: link.endDate.toISOString().slice(0, 10) }] : []),
+          ],
+        });
+      }
+      removed = toRemove.length;
+    },
+    beforeCommit: args.beforeCommit
+      ? async (tx) => args.beforeCommit!(tx, registryNames)
+      : undefined,
+  });
+
+  return { removed, added: plan.add.length, result };
 }

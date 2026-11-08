@@ -209,6 +209,9 @@ export const SIDEBAR_GROUPS: NavGroup[] = [
     description: "名寄せ・誤りの一括修正・チェック",
     collapsible: true,
     items: [
+      // 謄本の名義とシステムの所有者が違う物件(2026-11-08)。⚠開けるのは氏名を伏せずに見られて
+      //   謄本も見られる人だけ(API が判定)。直すのは管理者・「このままでよい」は所有者を編集できる人。
+      { label: "謄本の名義の確認", href: "/properties/registry-owner-review", icon: ic(FileSearch), minRole: "office_staff" },
       { label: "所有者補正候補", href: "/admin/owners/correction", icon: ic(UserCog), minRole: "admin" },
       { label: "法人番号紐づけ", href: "/admin/owners/correction?tab=corporate_restore", icon: ic(Link2), minRole: "admin" },
       { label: "表示名監査", href: "/admin/display-name-audit", icon: ic(ScanSearch), minRole: "admin" },

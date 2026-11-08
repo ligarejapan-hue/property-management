@@ -144,6 +144,9 @@ const ACTION_LABELS: Record<string, string> = {
   // --- 謄本・取込 ---
   registry_search: "謄本検索",
   registry_owner_bulk_apply: "謄本から所有者をまとめて反映",
+  registry_owner_check_run: "謄本の名義をまとめて比べる",
+  registry_owner_check_keep: "謄本の名義の確認（このままでよい）",
+  registry_owner_replace: "謄本の名義に直す",
   registry_auto_fetch: "謄本自動取得",
   registry_location_purchase: "謄本の有料請求（台帳）",
   registry_settings_update: "謄本設定更新",
@@ -299,6 +302,7 @@ const ACTION_LABELS: Record<string, string> = {
 };
 
 const TARGET_TABLE_LABELS: Record<string, string> = {
+  registry_owner_checks: "謄本の名義の確認",
   drive_connection: "ドライブの接続",
   property_drive_folders: "ドライブのフォルダの紐づけ",
   deals: "取引",

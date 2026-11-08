@@ -17,3 +17,16 @@ describe("propertyHistoryValue(登記状況)", () => {
     expect(propertyHistoryValue("registryStatus", null)).toBeNull();
   });
 });
+
+describe("propertyHistoryValue(DM判断・2026-11-08)", () => {
+  it("★送付可・未判断・送付不可で出す(send → hold と英字で出さない)", () => {
+    expect(propertyHistoryValue("dmStatus", "send")).toBe("送付可");
+    expect(propertyHistoryValue("dmStatus", "hold")).toBe("未判断");
+    expect(propertyHistoryValue("dmStatus", "no_send")).toBe("送付不可");
+  });
+
+  it("知らない値・空は手を付けない", () => {
+    expect(propertyHistoryValue("dmStatus", "toString")).toBeNull();
+    expect(propertyHistoryValue("dmStatus", null)).toBeNull();
+  });
+});
