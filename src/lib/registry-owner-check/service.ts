@@ -27,6 +27,13 @@ type Tx = ReplaceTx;
 /** 1回の「比べる」で扱う上限(謄本を読むので重い)。 */
 export const REGISTRY_OWNER_CHECK_RUN_MAX = 50;
 
+/**
+ * 謄本1件の文字を抜き出す時間の上限(2026-11-08 発注者依頼)。とても大きい PDF で、夜の自動の比べが
+ * 2分ごとの呼び出しの持ち時間を食わないため。超えたら「読めない」で確定させず、思わぬ失敗と
+ * 同じく比べ直し待ちのまま残す(前の結果も残す・夜は1時間あけて試し直す)。
+ */
+export const REGISTRY_OWNER_READ_TIMEOUT_MS = 20_000;
+
 /** 謄本の名義を読む。読めなければ null。謄本が無ければ "none"。 */
 async function readRegistryNames(
   propertyId: string,
@@ -34,7 +41,9 @@ async function readRegistryNames(
   const latest = await findLatestOwnerRegistryAttachment(prisma, propertyId);
   if (!latest) return "none";
   try {
-    const registry = await loadLatestRegistryText(propertyId, latest.id);
+    const registry = await loadLatestRegistryText(propertyId, latest.id, {
+      timeoutMs: REGISTRY_OWNER_READ_TIMEOUT_MS,
+    });
     const owners = parseRegistryOwnerTable(registry.text);
     const names = owners?.map((o) => o.name).filter((n) => n && n.trim()) ?? [];
     return { attachmentId: latest.id, names: names.length > 0 ? names : null };
@@ -45,6 +54,7 @@ async function readRegistryNames(
     }
     // 読んでいる間に別の謄本が付いた(=比べ直しの印が立つ)・消えた
     if (code === "REGISTRY_ATTACHMENT_CHANGED" || code === "REGISTRY_NOT_FOUND") return "none";
+    // 時間切れ(REGISTRY_TEXT_TIMEOUT)・保存場所の故障などは投げる=呼び出し元が比べ直し待ちに残す
     throw e;
   }
 }

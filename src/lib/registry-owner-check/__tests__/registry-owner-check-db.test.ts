@@ -49,8 +49,18 @@ vi.mock("@/lib/storage", async (importOriginal) => {
     }),
   };
 });
+// 中身が HANG の謄本は「上限を渡されたら時間切れ」の作り物(本物の打ち切りは pdf-extract-timeout.test)
+const HANG = "__HANG__";
+const READ_TIMEOUTS: Array<number | undefined> = [];
 vi.mock("@/lib/pdf-extract", () => ({
-  extractTextFromPdf: async (buf: Buffer) => TEXTS.get(buf.toString()) ?? "",
+  extractTextFromPdf: async (buf: Buffer, opts: { timeoutMs?: number } = {}) => {
+    READ_TIMEOUTS.push(opts.timeoutMs);
+    const text = TEXTS.get(buf.toString()) ?? "";
+    if (text === HANG && opts.timeoutMs !== undefined) {
+      throw Object.assign(new Error("PDF read timed out"), { code: "PDF_READ_TIMEOUT" });
+    }
+    return text;
+  },
 }));
 
 import { randomUUID } from "crypto";
@@ -63,6 +73,7 @@ import {
   runNightlyRegistryOwnerChecks,
   runRegistryOwnerChecks,
   NIGHTLY_REGISTRY_OWNER_CHECK,
+  REGISTRY_OWNER_READ_TIMEOUT_MS,
 } from "@/lib/registry-owner-check/service";
 import { QUALITY_RULES, qualityWarningWhere } from "@/lib/quality-check-rules";
 import { replaceRegistryOwnersOnProperty } from "@/lib/registry-owner-apply/apply";
@@ -481,6 +492,25 @@ async function main() {
     check("10c 警告ありのみにも入る(同じ定義)", warnAll.includes(send) && warnAll.includes(hold), warnAll);
     await prisma.property.update({ where: { id: hold }, data: { registryStatus: "unconfirmed" } });
     check("10d 登記が取得済でなければ出さない", (await ruleIds("REGISTRY_OWNER_MISMATCH")).length === 0);
+  }
+
+  // ---- 11. 謄本1件の読み込みの時間切れ(20秒): 読めないで確定させず、比べ直し待ちのまま・前の結果は残す ----
+  await reset();
+  {
+    const u = await user();
+    const slow = await property(u);
+    await link(slow, await owner("佐藤一郎"));
+    const attachmentId = await registry(slow, u, [{ name: "鈴木一郎" }]);
+    READ_TIMEOUTS.length = 0;
+    await checkPropertyRegistryOwners(slow);
+    check("11a 比べるときは20秒の上限を渡す", READ_TIMEOUTS.length === 1 && READ_TIMEOUTS[0] === REGISTRY_OWNER_READ_TIMEOUT_MS && REGISTRY_OWNER_READ_TIMEOUT_MS === 20_000, READ_TIMEOUTS);
+    // 同じ謄本の中身が、次に読むときは時間内に読み終わらない
+    const url = (await prisma.attachment.findUniqueOrThrow({ where: { id: attachmentId }, select: { fileUrl: true } })).fileUrl;
+    TEXTS.set(url, HANG);
+    await prisma.registryOwnerCheck.update({ where: { propertyId: slow }, data: { stale: true } });
+    const r = await runRegistryOwnerChecks(50);
+    const after = await row(slow);
+    check("11b 時間切れは失敗と数え、読めないにしない・前の結果(違う)は残す", r.failed === 1 && after?.stale === true && after?.result === "mismatch", { r, after });
   }
 }
 
