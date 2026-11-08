@@ -5691,3 +5691,84 @@ export async function createDriveLink(propertyId: string, folderId: string): Pro
 export async function deleteDriveLink(id: string): Promise<void> {
   await apiFetch(`/api/admin/drive/links/${encodeURIComponent(id)}`, { method: "DELETE" });
 }
+
+// ---------- 謄本の名義の確認(2026-11-08) ----------
+
+export interface RegistryOwnerReviewList {
+  data: Array<{ propertyId: string; address: string; dmStatus: string; checkedAt: string }>;
+  total: number;
+  offset: number;
+  pageSize: number;
+  canRun: boolean;
+  /** まだ比べていない件数(管理者だけ・それ以外は null) */
+  pending: number | null;
+  runMax: number;
+  canKeep: boolean;
+  /** DM を「送付可」に戻せるか(物件を編集できる人) */
+  canRestoreDm: boolean;
+  canReplace: boolean;
+}
+
+export function fetchRegistryOwnerReviewList(offset = 0): Promise<RegistryOwnerReviewList> {
+  return apiFetch(`/api/registry-owner-checks?offset=${offset}`);
+}
+
+export interface RegistryOwnerCheckRunResult {
+  processed: number;
+  counts: Record<string, number>;
+  failed: number;
+  remaining: number;
+}
+
+export function runRegistryOwnerCheckBatch(limit: number): Promise<RegistryOwnerCheckRunResult> {
+  return apiFetch(`/api/registry-owner-checks/run`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ limit }),
+  });
+}
+
+export interface RegistryOwnerReviewDetail {
+  propertyId: string;
+  address: string;
+  dmStatus: string;
+  check: { result: string; stale: boolean; decision: string | null; checkedAt: string; attachmentId: string | null } | null;
+  attachment: { id: string; label: string };
+  systemOwners: Array<{
+    ownerId: string;
+    name: string;
+    address: string | null;
+    isPrimary: boolean;
+    willBeRemoved: boolean;
+    hasNote: boolean;
+  }>;
+  registryOwners: Array<{ name: string; address: string | null; share: string | null; willBeAdded: boolean }>;
+  plan: { linkedOwnerIds: string[]; removeOwnerIds: string[]; addCount: number };
+  readable: boolean;
+}
+
+export function fetchRegistryOwnerReviewDetail(propertyId: string): Promise<RegistryOwnerReviewDetail> {
+  return apiFetch(`/api/registry-owner-checks/${encodeURIComponent(propertyId)}`);
+}
+
+export function keepRegistryOwnerCheck(
+  propertyId: string,
+  body: { attachmentId: string; restoreDm: boolean },
+): Promise<{ dmRestored: boolean }> {
+  return apiFetch(`/api/registry-owner-checks/${encodeURIComponent(propertyId)}/keep`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(body),
+  });
+}
+
+export function replaceRegistryOwnerCheck(
+  propertyId: string,
+  body: { attachmentId: string; linkedOwnerIds: string[]; removeOwnerIds: string[]; restoreDm: boolean },
+): Promise<{ removed: number; added: number; dmRestored: boolean; resultAfter: string | null }> {
+  return apiFetch(`/api/registry-owner-checks/${encodeURIComponent(propertyId)}/replace`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(body),
+  });
+}

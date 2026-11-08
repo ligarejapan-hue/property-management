@@ -87,5 +87,5 @@ jobs:
 
       - run: npx prisma migrate deploy
 
-      # 3つのファイルは同じ DB を空にして使うので、順番に流す。
-      - run: npx vitest run --no-file-parallelism src/lib/push/__tests__/deliveries-db.test.ts src/lib/push/__tests__/edit-lock-loss-db.test.ts src/lib/push/__tests__/deal-schedule-db.test.ts
+      # 4つのファイルは同じ DB を空にして使うので、順番に流す。
+      - run: npx vitest run --no-file-parallelism src/lib/push/__tests__/deliveries-db.test.ts src/lib/push/__tests__/edit-lock-loss-db.test.ts src/lib/push/__tests__/deal-schedule-db.test.ts src/lib/registry-owner-check/__tests__/registry-owner-check-db.test.ts

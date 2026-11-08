@@ -212,6 +212,7 @@ model User {
   permissionChangesFor    PermissionChangeLog[]    @relation("PermissionChangedFor")
   buildings               Building[]
   ownerMemos              OwnerMemo[]              @relation("OwnerMemoCreatedBy")
+  registryOwnerCheckDecisions RegistryOwnerCheck[] @relation("RegistryOwnerCheckDecidedBy")
   fieldSurveySessions     FieldSurveySession[]
   fieldSurveyPins         FieldSurveyPin[]
   fieldSurveyPinPhotos    FieldSurveyPinPhoto[]
@@ -512,6 +513,7 @@ model Property {
   adPermissions      PropertyAdPermission[]
   deals              Deal[]
   driveFolder        PropertyDriveFolder?
+  registryOwnerCheck RegistryOwnerCheck?
 
   @@index([caseStatus])
   @@index([introductionRoute])
@@ -530,6 +532,32 @@ model Property {
   // の range 検索なので、equality (isArchived) を先頭に置く構成にする。
   @@index([isArchived, gpsLat, gpsLng])
   @@map("properties")
+}
+
+/// 謄本(所有者事項)の名義と、システムの所有者を比べた結果(物件ごとに1行・2026-11-08 発注者依頼)。
+/// ⚠**氏名・住所は保存しない**(結果と判断だけ)。名前は画面を開くたびに謄本から読む。
+/// ⚠比べ方は取引の照合(crosscheck)と同じそろえ方。表記の違いだけ= same_notation(一覧に出さない)。
+/// 所有者の付け外し・氏名の変更・謄本の添付の変化は **DB のトリガー**が stale=true にする
+/// (書き込みの経路ごとに付け忘れないため・migration 20261108000000)。→ src/lib/registry-owner-check/
+model RegistryOwnerCheck {
+  propertyId   String    @id @map("property_id") @db.Uuid
+  /// 比べた謄本の添付。新しい謄本が付いたら比べ直す(判断「このままでよい」もそこで消える)。
+  attachmentId String?   @map("attachment_id") @db.Uuid
+  /// same | same_notation | mismatch | unreadable | no_owner
+  result       String
+  /// null | keep(このままでよい)
+  decision     String?
+  decidedBy    String?   @map("decided_by") @db.Uuid
+  decidedAt    DateTime? @map("decided_at")
+  /// 比べたあとに所有者・謄本が変わった=比べ直しが要る(トリガーが立てる)。
+  stale        Boolean   @default(false)
+  checkedAt    DateTime  @default(now()) @map("checked_at")
+
+  property Property @relation(fields: [propertyId], references: [id], onDelete: Cascade)
+  decider  User?    @relation("RegistryOwnerCheckDecidedBy", fields: [decidedBy], references: [id])
+
+  @@index([result, stale])
+  @@map("registry_owner_checks")
 }
 
 model Owner {
