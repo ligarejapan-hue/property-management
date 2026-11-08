@@ -6,15 +6,16 @@
  * next.config.ts で serverExternalPackages: ["pdf-parse"] を設定すること。
  */
 
-import { PDF_READ_TIMEOUT, trackTimedOutPdfRead } from "@/lib/pdf-read-timeout";
+import { PDF_READ_TIMEOUT } from "@/lib/pdf-read-timeout";
+import { extractTextInWorker } from "@/lib/pdf-extract-worker";
 
 export { PDF_READ_TIMEOUT };
 
 /**
  * PDF バイナリから本文テキストを抽出する。
  * @param buffer PDF ファイルの Buffer
- * @param opts.timeoutMs 渡したときだけ、その時間で打ち切って code=PDF_READ_TIMEOUT を投げる
- *   (使い終わった parser は destroy する)。渡さない呼び出しは今までどおり打ち切らない。
+ * @param opts.timeoutMs 渡したときだけ、別のスレッド(worker)で読み、その時間で worker ごと止めて
+ *   code=PDF_READ_TIMEOUT を投げる(pdf-extract-worker.ts)。渡さない呼び出しは今までどおり。
  * @returns 抽出されたテキスト (全ページ連結)
  * @throws テキスト抽出に失敗した場合
  */
@@ -22,44 +23,15 @@ export async function extractTextFromPdf(
   buffer: Buffer,
   opts: { timeoutMs?: number } = {},
 ): Promise<string> {
+  // 謄本の名義の比べ(2026-11-08): とても大きい PDF で2分ごとの呼び出しの持ち時間を食わない
+  if (opts.timeoutMs !== undefined) return extractTextInWorker(buffer, opts.timeoutMs);
+
   // dynamic import で webpack バンドルを回避
   const { PDFParse } = await import("pdf-parse");
 
   const parser = new PDFParse({ data: buffer });
-  if (opts.timeoutMs === undefined) {
-    const result = await parser.getText();
-    return result.text;
-  }
-  // 謄本の名義の比べ(2026-11-08): とても大きい PDF で2分ごとの呼び出しの持ち時間を食わない
-  let timer: ReturnType<typeof setTimeout> | undefined;
-  let timedOut = false;
-  const destroyQuietly = async () => {
-    try {
-      await parser.destroy();
-    } catch {
-      // 後始末の失敗は握りつぶす(読めた結果には影響しない)
-    }
-  };
-  const text = parser.getText().then((r) => r.text);
-  try {
-    const timeout = new Promise<never>((_, reject) => {
-      timer = setTimeout(() => {
-        timedOut = true;
-        reject(Object.assign(new Error("PDF read timed out"), { code: PDF_READ_TIMEOUT }));
-      }, opts.timeoutMs);
-    });
-    return await Promise.race([text, timeout]);
-  } finally {
-    if (timer !== undefined) clearTimeout(timer);
-    await destroyQuietly();
-    if (timedOut) {
-      // 文書の読み込みの最中に打ち切ると、上の destroy は(まだ文書が無いので)何もしない。
-      // 読み取りが終わった・失敗した時点でもう一度 destroy して、文書を残さない。
-      // (読み取り側の失敗もここで拾う=拾われない例外にしない)
-      // 読み取りそのものは止められないので、終わるまで「裏で続いている」として数える(@codex #681)
-      trackTimedOutPdfRead(text.then(destroyQuietly, destroyQuietly));
-    }
-  }
+  const result = await parser.getText();
+  return result.text;
 }
 
 /**

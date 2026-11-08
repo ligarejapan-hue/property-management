@@ -1,72 +1,71 @@
 /**
- * extractTextFromPdf の時間の上限(謄本の名義の比べ・2026-11-08 発注者依頼):
- * 上限を渡したときだけ打ち切り、打ち切ったら code=PDF_READ_TIMEOUT を投げて destroy する。
- * 上限を渡さない呼び出しは今までどおり(打ち切らない)。
+ * extractTextFromPdf の時間の上限(謄本の名義の比べ・2026-11-08 発注者依頼・@codex #681):
+ * 上限を渡したときだけ別のスレッド(worker)で読み、時間切れなら worker ごと止めて
+ * code=PDF_READ_TIMEOUT を投げる。**本物の pdf-parse を worker で動かす**(作り物にしない)。
+ * ⚠同じスレッドの Promise.race では、重い PDF の解析中に時計が回らず上限が効かなかった
+ *   (@codex の実測)。ここでは重い PDF でも上限どおりに戻ることを確かめる。
  */
-import { describe, it, expect, vi, beforeEach } from "vitest";
-
-const { getText, destroy } = vi.hoisted(() => ({ getText: vi.fn(), destroy: vi.fn(async () => {}) }));
-vi.mock("pdf-parse", () => ({
-  PDFParse: class {
-    getText = getText;
-    destroy = destroy;
-  },
-}));
-
+import { describe, it, expect } from "vitest";
 import { extractTextFromPdf, PDF_READ_TIMEOUT } from "../pdf-extract";
-import { hasPendingTimedOutPdfRead } from "../pdf-read-timeout";
+import { extractTextInWorker } from "../pdf-extract-worker";
 
-beforeEach(() => {
-  vi.clearAllMocks();
-});
+/** 1ページに1行の文字を置いた、最小限の本物の PDF(架空の文字だけ)。 */
+function buildPdf(pages: number, line = "OWNER TEST"): Buffer {
+  const objs: string[] = [];
+  const kids: string[] = [];
+  // 1=Catalog 2=Pages 3=Font、4 以降にページと中身
+  for (let i = 0; i < pages; i++) {
+    const pageNo = 4 + i * 2;
+    kids.push(`${pageNo} 0 R`);
+  }
+  objs[1] = `<< /Type /Catalog /Pages 2 0 R >>`;
+  objs[2] = `<< /Type /Pages /Kids [${kids.join(" ")}] /Count ${pages} >>`;
+  objs[3] = `<< /Type /Font /Subtype /Type1 /BaseFont /Helvetica >>`;
+  for (let i = 0; i < pages; i++) {
+    const pageNo = 4 + i * 2;
+    const stream = `BT /F1 12 Tf 72 720 Td (${line} ${i + 1}) Tj ET`;
+    objs[pageNo] = `<< /Type /Page /Parent 2 0 R /MediaBox [0 0 612 792] /Resources << /Font << /F1 3 0 R >> >> /Contents ${pageNo + 1} 0 R >>`;
+    objs[pageNo + 1] = `<< /Length ${stream.length} >>\nstream\n${stream}\nendstream`;
+  }
+  let out = "%PDF-1.4\n";
+  const offsets: number[] = [];
+  for (let n = 1; n < objs.length; n++) {
+    offsets[n] = Buffer.byteLength(out);
+    out += `${n} 0 obj\n${objs[n]}\nendobj\n`;
+  }
+  const xref = Buffer.byteLength(out);
+  out += `xref\n0 ${objs.length}\n0000000000 65535 f \n`;
+  for (let n = 1; n < objs.length; n++) out += `${String(offsets[n]).padStart(10, "0")} 00000 n \n`;
+  out += `trailer\n<< /Size ${objs.length} /Root 1 0 R >>\nstartxref\n${xref}\n%%EOF\n`;
+  return Buffer.from(out, "latin1");
+}
 
-describe("extractTextFromPdf の時間の上限", () => {
-  it("上限の中で読めれば全文を返し、destroy する", async () => {
-    getText.mockResolvedValue({ text: "所有者事項" });
-    const text = await extractTextFromPdf(Buffer.from("%PDF-"), { timeoutMs: 1000 });
-    expect(text).toBe("所有者事項");
-    expect(getText).toHaveBeenCalledWith();
-    expect(destroy).toHaveBeenCalledTimes(1);
-  });
+describe("extractTextFromPdf の時間の上限(worker)", () => {
+  it("上限の中で読めれば全文を返す", async () => {
+    const text = await extractTextFromPdf(buildPdf(2), { timeoutMs: 15_000 });
+    expect(text).toContain("OWNER TEST 1");
+    expect(text).toContain("OWNER TEST 2");
+  }, 20_000);
 
-  it("時間切れなら code=PDF_READ_TIMEOUT を投げ、destroy は呼ぶ", async () => {
-    getText.mockReturnValue(new Promise((resolve) => setTimeout(() => resolve({ text: "" }), 50)));
-    const err = await extractTextFromPdf(Buffer.from("%PDF-"), { timeoutMs: 20 }).catch((e: unknown) => e);
+  it("重い PDF でも上限どおりに打ち切る(解析が続いて上限を越えない)", async () => {
+    const heavy = buildPdf(12000); // 打ち切らずに読むと数秒かかる重さ
+    const started = Date.now();
+    const err = await extractTextFromPdf(heavy, { timeoutMs: 100 }).catch((e: unknown) => e);
+    const elapsed = Date.now() - started;
     expect((err as { code?: unknown }).code).toBe(PDF_READ_TIMEOUT);
-    expect(destroy).toHaveBeenCalledTimes(1);
-    await new Promise((r) => setTimeout(r, 80)); // 裏の読み取りを終わらせる(次のテストに残さない)
-  });
+    expect(elapsed).toBeLessThan(1_000);
+  }, 20_000);
 
-  it("時間切れのあとに読み取りが終わったら、もう一度 destroy する(読み込み中の打ち切りで文書が残らない)", async () => {
-    getText.mockReturnValue(new Promise((resolve) => setTimeout(() => resolve({ text: "遅い" }), 60)));
-    await extractTextFromPdf(Buffer.from("%PDF-"), { timeoutMs: 20 }).catch(() => {});
-    expect(destroy).toHaveBeenCalledTimes(1);
-    await new Promise((r) => setTimeout(r, 100));
-    expect(destroy).toHaveBeenCalledTimes(2);
-  });
+  it("止まらない処理でも worker ごと止める", async () => {
+    const started = Date.now();
+    const err = await extractTextInWorker(Buffer.from("x"), 100, "for(;;){}").catch((e: unknown) => e);
+    expect((err as { code?: unknown }).code).toBe(PDF_READ_TIMEOUT);
+    expect(Date.now() - started).toBeLessThan(2_000);
+  }, 20_000);
 
-  it("時間切れの読み取りは、裏で終わるまで「続いている」と数える(@codex #681)", async () => {
-    let finish!: (v: { text: string }) => void;
-    getText.mockReturnValue(new Promise((resolve) => (finish = resolve)));
-    expect(hasPendingTimedOutPdfRead()).toBe(false);
-    await extractTextFromPdf(Buffer.from("%PDF-"), { timeoutMs: 20 }).catch(() => {});
-    expect(hasPendingTimedOutPdfRead()).toBe(true);
-    finish({ text: "遅い" });
-    await new Promise((r) => setTimeout(r, 10));
-    expect(hasPendingTimedOutPdfRead()).toBe(false);
-  });
-
-  it("読み取りの失敗はそのまま上がる(時間切れとは別)", async () => {
-    getText.mockRejectedValue(new Error("broken"));
-    const err = await extractTextFromPdf(Buffer.from("%PDF-"), { timeoutMs: 1000 }).catch((e: unknown) => e);
-    expect((err as Error).message).toBe("broken");
+  it("壊れた PDF は読み取りの失敗(時間切れとは別)", async () => {
+    const err = await extractTextFromPdf(Buffer.from("not a pdf"), { timeoutMs: 15_000 }).catch((e: unknown) => e);
+    expect(err).toBeInstanceOf(Error);
     expect((err as { code?: unknown }).code).toBeUndefined();
-    expect(destroy).toHaveBeenCalledTimes(1);
-  });
-
-  it("上限を渡さなければ今までどおり(打ち切らない)", async () => {
-    getText.mockResolvedValue({ text: "本文" });
-    expect(await extractTextFromPdf(Buffer.from("%PDF-"))).toBe("本文");
-    expect(destroy).not.toHaveBeenCalled();
-  });
+  }, 20_000);
 });
