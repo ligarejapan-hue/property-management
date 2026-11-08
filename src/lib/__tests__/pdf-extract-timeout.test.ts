@@ -27,17 +27,21 @@ function buildPdf(pages: number, line = "OWNER TEST"): Buffer {
     objs[pageNo] = `<< /Type /Page /Parent 2 0 R /MediaBox [0 0 612 792] /Resources << /Font << /F1 3 0 R >> >> /Contents ${pageNo + 1} 0 R >>`;
     objs[pageNo + 1] = `<< /Length ${stream.length} >>\nstream\n${stream}\nendstream`;
   }
-  let out = "%PDF-1.4\n";
+  // ⚠位置は足し上げて数える(毎回全体の長さを数え直すと、大きい PDF で組み立てだけで数十秒かかる=@codex #681)
+  const parts: string[] = ["%PDF-1.4\n"];
+  let pos = parts[0].length; // 文字はすべて ASCII=1文字1バイト
   const offsets: number[] = [];
   for (let n = 1; n < objs.length; n++) {
-    offsets[n] = Buffer.byteLength(out);
-    out += `${n} 0 obj\n${objs[n]}\nendobj\n`;
+    offsets[n] = pos;
+    const s = `${n} 0 obj\n${objs[n]}\nendobj\n`;
+    parts.push(s);
+    pos += s.length;
   }
-  const xref = Buffer.byteLength(out);
-  out += `xref\n0 ${objs.length}\n0000000000 65535 f \n`;
-  for (let n = 1; n < objs.length; n++) out += `${String(offsets[n]).padStart(10, "0")} 00000 n \n`;
-  out += `trailer\n<< /Size ${objs.length} /Root 1 0 R >>\nstartxref\n${xref}\n%%EOF\n`;
-  return Buffer.from(out, "latin1");
+  const xref = pos;
+  parts.push(`xref\n0 ${objs.length}\n0000000000 65535 f \n`);
+  for (let n = 1; n < objs.length; n++) parts.push(`${String(offsets[n]).padStart(10, "0")} 00000 n \n`);
+  parts.push(`trailer\n<< /Size ${objs.length} /Root 1 0 R >>\nstartxref\n${xref}\n%%EOF\n`);
+  return Buffer.from(parts.join(""), "latin1");
 }
 
 describe("extractTextFromPdf の時間の上限(worker)", () => {
