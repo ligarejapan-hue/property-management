@@ -77,6 +77,7 @@ import {
 } from "@/lib/registry-owner-check/service";
 import { QUALITY_RULES, qualityWarningWhere } from "@/lib/quality-check-rules";
 import { replaceRegistryOwnersOnProperty } from "@/lib/registry-owner-apply/apply";
+import { trackTimedOutPdfRead } from "@/lib/pdf-read-timeout";
 
 const failures: string[] = [];
 function check(name: string, cond: boolean, extra?: unknown) {
@@ -511,6 +512,16 @@ async function main() {
     const r = await runRegistryOwnerChecks(50);
     const after = await row(slow);
     check("11b 時間切れは失敗と数え、読めないにしない・前の結果(違う)は残す", r.failed === 1 && after?.stale === true && after?.result === "mismatch", { r, after });
+    // 時間切れの読み取りが裏でまだ続いている間は、次の物件を始めない(@codex #681)
+    TEXTS.set(url, registryText([{ name: "鈴木一郎" }]));
+    let finish!: () => void;
+    trackTimedOutPdfRead(new Promise<void>((res) => (finish = res)));
+    const blocked = await runRegistryOwnerChecks(50);
+    check("11c 裏の読み取りが残っている間は始めない", blocked.processed === 0 && (await row(slow))?.stale === true, blocked);
+    finish();
+    await new Promise((res) => setTimeout(res, 10));
+    const resumed = await runRegistryOwnerChecks(50);
+    check("11d 終われば続きを比べる", resumed.processed === 1 && resumed.failed === 0 && (await row(slow))?.stale === false, resumed);
   }
 }
 

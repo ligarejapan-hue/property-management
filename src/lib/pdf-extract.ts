@@ -6,7 +6,7 @@
  * next.config.ts で serverExternalPackages: ["pdf-parse"] を設定すること。
  */
 
-import { PDF_READ_TIMEOUT } from "@/lib/pdf-read-timeout";
+import { PDF_READ_TIMEOUT, trackTimedOutPdfRead } from "@/lib/pdf-read-timeout";
 
 export { PDF_READ_TIMEOUT };
 
@@ -56,7 +56,8 @@ export async function extractTextFromPdf(
       // 文書の読み込みの最中に打ち切ると、上の destroy は(まだ文書が無いので)何もしない。
       // 読み取りが終わった・失敗した時点でもう一度 destroy して、文書を残さない。
       // (読み取り側の失敗もここで拾う=拾われない例外にしない)
-      void text.then(destroyQuietly, destroyQuietly);
+      // 読み取りそのものは止められないので、終わるまで「裏で続いている」として数える(@codex #681)
+      trackTimedOutPdfRead(text.then(destroyQuietly, destroyQuietly));
     }
   }
 }

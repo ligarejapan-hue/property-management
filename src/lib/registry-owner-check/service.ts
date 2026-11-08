@@ -14,6 +14,7 @@ import prisma from "@/lib/prisma";
 import { ApiError } from "@/lib/api-helpers";
 import { lockPropertyRecordForWrite, lockPropertyRow } from "@/lib/property-record-guard";
 import { parseRegistryOwnerTable } from "@/lib/registry-owner-table";
+import { hasPendingTimedOutPdfRead } from "@/lib/pdf-read-timeout";
 import {
   findLatestOwnerRegistryAttachment,
   loadLatestRegistryText,
@@ -220,6 +221,10 @@ export async function runRegistryOwnerChecks(
   let processed = 0;
   for (const { id } of targets) {
     if (opts.deadline !== undefined && Date.now() >= opts.deadline) break;
+    // 時間切れで打ち切った読み取りが裏でまだ続いている間は、次を始めない(@codex #681)。
+    // pdf.js の読み取りは止められないので、続けて読むと重い解析を裏に積み上げてしまう。
+    // (画面のボタンは processed=0 で止まる・夜の自動は次の回にまた試す)
+    if (hasPendingTimedOutPdfRead()) break;
     processed += 1;
     try {
       const r = await checkPropertyRegistryOwners(id);
