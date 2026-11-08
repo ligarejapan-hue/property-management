@@ -39,16 +39,20 @@ ALTER TABLE "registry_owner_checks" ADD CONSTRAINT "registry_owner_checks_proper
 -- AddForeignKey
 ALTER TABLE "registry_owner_checks" ADD CONSTRAINT "registry_owner_checks_decided_by_fkey" FOREIGN KEY ("decided_by") REFERENCES "users"("id") ON DELETE SET NULL ON UPDATE CASCADE;
 
+-- ⚠「すでに stale の行は飛ばす」条件は付けない(@codex #678 R1 P2)。付けると、比べている最中
+--   (結果の行を押さえて氏名を読んだあと)に氏名が変わったとき、トリガーが行を待たずに通り抜け、
+--   古い氏名の結果が stale=false で確定してしまう。必ず行を更新して、比べている処理の確定を待たせる。
+
 -- 所有者の付け外し・付け替え
 CREATE FUNCTION "registry_owner_checks_stale_from_links"() RETURNS trigger AS $$
 BEGIN
   IF TG_OP IN ('INSERT', 'UPDATE') THEN
     UPDATE "registry_owner_checks" SET "stale" = true
-      WHERE "property_id" = NEW."property_id" AND NOT "stale";
+      WHERE "property_id" = NEW."property_id";
   END IF;
   IF TG_OP IN ('DELETE', 'UPDATE') THEN
     UPDATE "registry_owner_checks" SET "stale" = true
-      WHERE "property_id" = OLD."property_id" AND NOT "stale";
+      WHERE "property_id" = OLD."property_id";
   END IF;
   RETURN NULL;
 END;
@@ -63,7 +67,7 @@ CREATE FUNCTION "registry_owner_checks_stale_from_owner_name"() RETURNS trigger 
 BEGIN
   UPDATE "registry_owner_checks" c SET "stale" = true
     FROM "property_owners" po
-    WHERE po."owner_id" = NEW."id" AND c."property_id" = po."property_id" AND NOT c."stale";
+    WHERE po."owner_id" = NEW."id" AND c."property_id" = po."property_id";
   RETURN NULL;
 END;
 $$ LANGUAGE plpgsql;
@@ -78,11 +82,11 @@ CREATE FUNCTION "registry_owner_checks_stale_from_registry"() RETURNS trigger AS
 BEGIN
   IF TG_OP IN ('INSERT', 'UPDATE') AND NEW."type" = 'registry' AND NEW."property_id" IS NOT NULL THEN
     UPDATE "registry_owner_checks" SET "stale" = true
-      WHERE "property_id" = NEW."property_id" AND NOT "stale";
+      WHERE "property_id" = NEW."property_id";
   END IF;
   IF TG_OP IN ('DELETE', 'UPDATE') AND OLD."type" = 'registry' AND OLD."property_id" IS NOT NULL THEN
     UPDATE "registry_owner_checks" SET "stale" = true
-      WHERE "property_id" = OLD."property_id" AND NOT "stale";
+      WHERE "property_id" = OLD."property_id";
   END IF;
   RETURN NULL;
 END;

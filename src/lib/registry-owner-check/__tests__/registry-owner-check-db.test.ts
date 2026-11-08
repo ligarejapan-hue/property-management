@@ -350,6 +350,32 @@ async function main() {
     });
     check("6c 足す人がいなくても外す", out.removed === 1 && out.added === 0 && JSON.stringify(await linkedNames(p)) === JSON.stringify(["山田太郎"]), out);
   }
+
+  // ---- 7. すでに比べ直し待ちの行でも、比べている最中の氏名の変更は待たされ、印が残る(@codex #678 R1) ----
+  await reset();
+  {
+    const u = await user();
+    const p = await property(u);
+    const o = await owner("佐藤一郎");
+    await link(p, o);
+    await registry(p, u, [{ name: "鈴木一郎" }]);
+    await checkPropertyRegistryOwners(p);
+    await prisma.registryOwnerCheck.update({ where: { propertyId: p }, data: { stale: true } });
+    let renamed = false;
+    let renamePromise: Promise<unknown> | null = null;
+    await prisma.$transaction(async (tx) => {
+      // 比べる処理と同じく、結果の行を押さえてから(古い)氏名を読んだ状態
+      await tx.$queryRaw`SELECT 1 FROM registry_owner_checks WHERE property_id = ${p}::uuid FOR UPDATE`;
+      renamePromise = prisma.owner.update({ where: { id: o }, data: { name: "鈴木一郎" } }).then(() => {
+        renamed = true;
+      });
+      await new Promise((r) => setTimeout(r, 500));
+      check("7a 氏名の変更は比べている処理の確定を待つ", renamed === false);
+      await tx.registryOwnerCheck.update({ where: { propertyId: p }, data: { stale: false, result: "mismatch" } });
+    });
+    await renamePromise;
+    check("7b 変更のあとは比べ直し待ちに戻る", renamed && (await row(p))?.stale === true);
+  }
 }
 
 describe.skipIf(!process.env.PUSH_DB_TEST_URL)("謄本の名義の確認(本物の Postgres)", () => {
