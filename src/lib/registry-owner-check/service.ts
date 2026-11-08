@@ -132,8 +132,17 @@ export async function checkPropertyRegistryOwners(
   });
 }
 
-/** まだ比べていない・比べ直しが要る物件(アーカイブを除く・所有者事項の謄本あり)。 */
-function pendingWhereSql(limit: number | null) {
+/** 夜の自動の比べで、失敗した(・つい1時間以内に試した)物件をもう一度試すまでの間。 */
+export const REGISTRY_OWNER_CHECK_RETRY_AFTER_HOURS = 1;
+
+/**
+ * まだ比べていない・比べ直しが要る物件(アーカイブを除く・所有者事項の謄本あり)。
+ * backoff=true(夜の自動)のときは、比べ直し待ちのうち1時間以内に試した物件を後回しにする
+ * (一時的な失敗の物件を2分ごとに読み続けない)。画面のボタンは後回しにしない(今すぐ試す)。
+ * ⚠checked_at は UTC で入っている(Prisma)ので、比べる時刻も UTC にそろえる。
+ */
+function pendingWhereSql(limit: number | null, backoff = false) {
+  const backoffHours = backoff ? REGISTRY_OWNER_CHECK_RETRY_AFTER_HOURS : 0;
   return limit === null
     ? prisma.$queryRaw<{ n: bigint }[]>`
         SELECT count(*)::bigint AS n FROM properties p
@@ -147,6 +156,9 @@ function pendingWhereSql(limit: number | null) {
           AND EXISTS (SELECT 1 FROM attachments a WHERE a.property_id = p.id AND a.type = 'registry'
                       AND a.is_deleted = false AND a.registry_certificate_type = ${SUPPORTED_CERTIFICATE_TYPE})
           AND NOT EXISTS (SELECT 1 FROM registry_owner_checks c WHERE c.property_id = p.id AND c.stale = false)
+          AND NOT EXISTS (SELECT 1 FROM registry_owner_checks c WHERE c.property_id = p.id AND c.stale = true
+                          AND ${backoffHours}::int > 0
+                          AND c.checked_at > (now() AT TIME ZONE 'UTC') - make_interval(hours => ${backoffHours}::int))
         ORDER BY p.id
         LIMIT ${limit}`;
 }
@@ -157,19 +169,19 @@ export async function countPendingRegistryOwnerChecks(): Promise<number> {
 }
 
 /**
- * 比べられなかった(思わぬ失敗)物件を「謄本を読めない」として残す。
- * ⚠残さないと、同じ物件が対象の先頭に居座り、毎回同じ物件を読み直して先へ進まない
- *   (夜の自動の比べでは1晩じゅう同じ物件を読み続ける)。所有者や謄本が変われば
- *   トリガーがまた「比べ直し待ち」に戻す。
+ * 比べられなかった(思わぬ失敗=保存場所の一時的な故障・ロック待ちの打ち切りなど)物件に、
+ * 「試した時刻」だけを残す。**比べ直し待ちのまま**にして、あとでもう一度試す(@codex #679 R1 P2)。
+ * ⚠「読めない」で確定させると、一時的な故障でも二度と比べられず、名義の警告が出なくなる。
+ * ⚠前に比べた結果(違う など)と判断はそのまま残す(故障の間に警告が消えないように)。
+ * 夜の自動の比べは、試した時刻から1時間は後回しにする(同じ物件を2分ごとに読み続けない)。
  */
-async function markUnreadableAfterFailure(propertyId: string): Promise<void> {
+async function markRetryAfterFailure(propertyId: string): Promise<void> {
   try {
     await prisma.$executeRaw`
       INSERT INTO registry_owner_checks (property_id, result, stale, checked_at)
-      VALUES (${propertyId}::uuid, 'unreadable', false, now())
+      VALUES (${propertyId}::uuid, 'unreadable', true, (now() AT TIME ZONE 'UTC'))
       ON CONFLICT (property_id) DO UPDATE
-        SET result = 'unreadable', stale = false, checked_at = now(),
-            decision = NULL, decided_by = NULL, decided_at = NULL
+        SET stale = true, checked_at = (now() AT TIME ZONE 'UTC')
     `;
   } catch {
     // 物件が消えた等。次の回で対象から外れる
@@ -183,7 +195,8 @@ async function markUnreadableAfterFailure(propertyId: string): Promise<void> {
  */
 export async function runRegistryOwnerChecks(
   limit: number,
-  opts: { deadline?: number } = {},
+  /** backoff=夜の自動(失敗して1時間以内の物件を後回し) */
+  opts: { deadline?: number; backoff?: boolean } = {},
 ): Promise<{
   processed: number;
   counts: Record<string, number>;
@@ -191,7 +204,7 @@ export async function runRegistryOwnerChecks(
   remaining: number;
 }> {
   const n = Math.max(1, Math.min(Math.floor(limit), REGISTRY_OWNER_CHECK_RUN_MAX));
-  const targets = (await pendingWhereSql(n)) as { id: string }[];
+  const targets = (await pendingWhereSql(n, opts.backoff ?? false)) as { id: string }[];
   const counts: Record<string, number> = {};
   let failed = 0;
   let processed = 0;
@@ -207,7 +220,7 @@ export async function runRegistryOwnerChecks(
       // ⚠生のエラー文は出さない(謄本由来の文字を含みうる)
       const kind = e instanceof Error ? e.name : typeof e;
       console.error(`[registry-owner-check] 比べられませんでした kind=${kind}`);
-      await markUnreadableAfterFailure(id);
+      await markRetryAfterFailure(id);
     }
   }
   return { processed, counts, failed, remaining: await countPendingRegistryOwnerChecks() };
@@ -258,7 +271,10 @@ export async function runNightlyRegistryOwnerChecks(
   if (quota <= 0) return { skipped: "nightly_cap" };
   const deadline = Math.min(Date.now() + NIGHTLY_REGISTRY_OWNER_CHECK.tickBudgetMs, opts.deadline ?? Infinity);
   if (Date.now() >= deadline) return { skipped: "no_time" };
-  const r = await runRegistryOwnerChecks(Math.min(opts.perTick ?? NIGHTLY_REGISTRY_OWNER_CHECK.perTick, quota), { deadline });
+  const r = await runRegistryOwnerChecks(Math.min(opts.perTick ?? NIGHTLY_REGISTRY_OWNER_CHECK.perTick, quota), {
+    deadline,
+    backoff: true,
+  });
   return { ...r, doneTonight: doneTonight + r.processed };
 }
 

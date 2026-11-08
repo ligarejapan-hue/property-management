@@ -384,23 +384,42 @@ async function main() {
     check("7b 変更のあとは比べ直し待ちに戻る", renamed && (await row(p))?.stale === true);
   }
 
-  // ---- 8. 思わぬ失敗の物件は「読めない」で残し、次の回に同じ物件を読み直さない ----
+  // ---- 8. 思わぬ失敗(一時的な故障)は比べ直し待ちのまま残し、前の結果も消さない(@codex #679 R1) ----
   await reset();
   {
     const u = await user();
     const bad = await property(u);
     await link(bad, await owner("佐藤一郎"));
-    const a = await prisma.attachment.create({
+    // 前に一度「違う」と比べてある物件の謄本の保存場所が、一時的に壊れた
+    const brokenUrl = `/uploads/broken/${randomUUID()}.pdf`;
+    const okUrl = brokenUrl.replace("/broken/", "/ok/");
+    TEXTS.set(okUrl, registryText([{ name: "鈴木一郎" }]));
+    await prisma.attachment.create({
       data: {
         targetType: "property", targetId: bad, propertyId: bad, type: "registry", registryCertificateType: "owner",
-        fileName: "x.pdf", fileUrl: `/uploads/broken/${randomUUID()}.pdf`, fileSize: 1, mimeType: "application/pdf", uploadedBy: u,
+        fileName: "x.pdf", fileUrl: okUrl, fileSize: 1, mimeType: "application/pdf", uploadedBy: u,
       },
     });
-    void a;
+    await checkPropertyRegistryOwners(bad);
+    await prisma.$executeRawUnsafe(`UPDATE attachments SET file_url = $1 WHERE property_id = $2::uuid`, brokenUrl, bad);
+    // (保存先の文字列はトリガーの対象外=比べ直し待ちは手で立てる)
+    await prisma.registryOwnerCheck.update({ where: { propertyId: bad }, data: { stale: true } });
     const r1 = await runRegistryOwnerChecks(50);
+    const after1 = await row(bad);
+    check("8a 失敗は数え、比べ直し待ちのまま・前の結果(違う)は残す", r1.failed === 1 && after1?.stale === true && after1?.result === "mismatch", { r1, after1 });
+    // 夜の自動は1時間後回し、画面のボタンは今すぐ試す
+    const jstNow = new Date(Date.now() + 9 * 3600_000);
+    let night3 = Date.UTC(jstNow.getUTCFullYear(), jstNow.getUTCMonth(), jstNow.getUTCDate(), 3) - 9 * 3600_000;
+    if (night3 > Date.now()) night3 -= 24 * 3600_000;
+    const nightly = await runNightlyRegistryOwnerChecks(new Date(night3));
+    check("8b 夜の自動は失敗したばかりの物件を後回しにする", "processed" in nightly && nightly.processed === 0, nightly);
     const r2 = await runRegistryOwnerChecks(50);
-    check("8a 失敗は数え、読めないで残す", r1.failed === 1 && (await row(bad))?.result === "unreadable" && (await row(bad))?.stale === false, r1);
-    check("8b 2回目は対象にならない(先へ進む)", r2.processed === 0, r2);
+    check("8c 画面のボタンはもう一度試す", r2.processed === 1 && r2.failed === 1, r2);
+    // 故障が直れば、次に比べたとき結果が確定する
+    await prisma.$executeRawUnsafe(`UPDATE attachments SET file_url = $1 WHERE property_id = $2::uuid`, okUrl, bad);
+    await prisma.registryOwnerCheck.update({ where: { propertyId: bad }, data: { stale: true } });
+    const r3 = await runRegistryOwnerChecks(50);
+    check("8d 直れば比べられる", r3.processed === 1 && r3.failed === 0 && (await row(bad))?.stale === false, r3);
   }
 
   // ---- 9. 夜の自動の比べ: 日本時間 2〜5時だけ・1回の上限・1晩の上限 ----
