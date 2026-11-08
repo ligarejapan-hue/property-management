@@ -6,13 +6,26 @@
  * next.config.ts で serverExternalPackages: ["pdf-parse"] を設定すること。
  */
 
+import { PDF_READ_TIMEOUT } from "@/lib/pdf-read-timeout";
+import { extractTextInWorker } from "@/lib/pdf-extract-worker";
+
+export { PDF_READ_TIMEOUT };
+
 /**
  * PDF バイナリから本文テキストを抽出する。
  * @param buffer PDF ファイルの Buffer
+ * @param opts.timeoutMs 渡したときだけ、別のスレッド(worker)で読み、その時間で worker ごと止めて
+ *   code=PDF_READ_TIMEOUT を投げる(pdf-extract-worker.ts)。渡さない呼び出しは今までどおり。
  * @returns 抽出されたテキスト (全ページ連結)
  * @throws テキスト抽出に失敗した場合
  */
-export async function extractTextFromPdf(buffer: Buffer): Promise<string> {
+export async function extractTextFromPdf(
+  buffer: Buffer,
+  opts: { timeoutMs?: number } = {},
+): Promise<string> {
+  // 謄本の名義の比べ(2026-11-08): とても大きい PDF で2分ごとの呼び出しの持ち時間を食わない
+  if (opts.timeoutMs !== undefined) return extractTextInWorker(buffer, opts.timeoutMs);
+
   // dynamic import で webpack バンドルを回避
   const { PDFParse } = await import("pdf-parse");
 

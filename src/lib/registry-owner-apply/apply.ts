@@ -16,6 +16,7 @@ import { canAccessPropertyRecord } from "@/lib/property-access";
 import { findMissingOwnerFieldWritePerm } from "@/lib/owner-create";
 import { getStorage } from "@/lib/storage";
 import { extractTextFromPdf } from "@/lib/pdf-extract";
+import { PDF_READ_TIMEOUT } from "@/lib/pdf-read-timeout";
 import { parseRegistryOwnerTable } from "@/lib/registry-owner-table";
 import { REGISTRY_OWNER_BULK_ROW_JOB_LABEL } from "@/lib/registry-owner-bulk/marker";
 import { planOwnerReplacement } from "@/lib/registry-owner-check/compare";
@@ -76,10 +77,13 @@ export const attachmentChangedError = () =>
  * @param expectedAttachmentId 下見で見せた添付のID。渡されたときは、いちばん新しい
  *   添付がそれと同じであることを確かめる(違えば 409)。確認画面を開いている間に
  *   別の謄本が添付された場合に、見ていない方の所有者を入れてしまわないため。
+ * @param opts.timeoutMs 渡したときだけ、文字の抜き出しをその時間で打ち切る
+ *   (超えたら 504 REGISTRY_TEXT_TIMEOUT=読めないとは別。あとで試し直せる)。
  */
 export async function loadLatestRegistryText(
   propertyId: string,
   expectedAttachmentId?: string,
+  opts: { timeoutMs?: number } = {},
 ): Promise<LoadedRegistry> {
   const attachment = await findLatestOwnerRegistryAttachment(prisma, propertyId);
   if (!attachment) {
@@ -105,8 +109,14 @@ export async function loadLatestRegistryText(
 
   let text = "";
   try {
-    text = await extractTextFromPdf(file.body);
-  } catch {
+    text =
+      opts.timeoutMs === undefined
+        ? await extractTextFromPdf(file.body)
+        : await extractTextFromPdf(file.body, { timeoutMs: opts.timeoutMs });
+  } catch (e) {
+    if ((e as { code?: unknown } | null)?.code === PDF_READ_TIMEOUT) {
+      throw new ApiError(504, "謄本の読み取りが時間内に終わりませんでした", "REGISTRY_TEXT_TIMEOUT");
+    }
     throw new ApiError(
       422,
       "謄本から文字を読み取れませんでした。手入力で登録してください",

@@ -127,7 +127,7 @@ const VERSIONED: Record<string, string> = {
   "src/lib/registry-pdf/fill-areas.ts:157":
     "property.exclusiveAreaRegistry/landArea/landAreaMethod/totalFloorArea/lotNumber/buildingNumber/structureType/builtYear/builtMonth(謄本から空欄補完・2026-10-25/11-01)+version increment" +
     "(行ロック後に読み直し・編集中の鍵の間は見送り・where に version)",
-  "src/lib/registry-owner-check/service.ts:283":
+  "src/lib/registry-owner-check/service.ts:293":
     "property.dmStatus hold→send(謄本の名義の確認で「送付可に戻す」・2026-11-08)+version increment",
 };
 
