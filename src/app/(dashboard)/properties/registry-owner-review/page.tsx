@@ -141,7 +141,7 @@ export default function RegistryOwnerReviewPage() {
               ) : null}
             </div>
             <p className="mt-2 text-xs text-gray-500 dark:text-gray-400">
-              添付済みの謄本を読むだけで、費用はかかりません。{list.runMax}件ずつ順番に比べます（100件で1分ほど）。この画面を開いたままにしてください。
+              毎晩（日本時間 2〜5時）自動で少しずつ比べています（1晩2,000件まで）。急ぐときはこのボタンで今すぐ比べられます。添付済みの謄本を読むだけで、費用はかかりません。{list.runMax}件ずつ順番に比べます（100件で1分ほど）。この画面を開いたままにしてください。
             </p>
             {runCounts ? (
               <ul className="mt-2 text-xs text-gray-600 dark:text-gray-300">

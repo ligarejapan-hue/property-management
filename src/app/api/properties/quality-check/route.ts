@@ -8,6 +8,8 @@ import {
 } from "@/lib/api-helpers";
 import { hasPermission } from "@/lib/permissions";
 import { propertyVisibilityScopeWhere } from "@/lib/property-list-query";
+import { QUALITY_RULES, qualityWarningWhere, type QualityRule } from "@/lib/quality-check-rules";
+import { findMissingRegistryOwnerReviewPerm } from "@/lib/registry-owner-check/permissions";
 import { z } from "zod";
 import type { Prisma } from "@/generated/prisma";
 
@@ -64,52 +66,7 @@ const propertyIdSchema = z.string().uuid();
 const NOT_ARCHIVED: Prisma.PropertyWhereInput = { isArchived: false };
 
 // 各品質ルール。where は NOT_ARCHIVED と AND して「その問題を持つ物件」を抽出する。
-// 旧実装（全件取得して JS で判定）と同一の判定になるよう条件を表現する。
-const QUALITY_RULES: ReadonlyArray<{
-  code: string;
-  severity: QualityIssue["severity"];
-  message: string;
-  where: Prisma.PropertyWhereInput;
-}> = [
-  {
-    code: "NO_OWNER",
-    severity: "warning",
-    message: "所有者が紐付けられていません",
-    where: { propertyOwners: { none: {} } },
-  },
-  {
-    code: "REGISTRY_DM_MISMATCH",
-    severity: "error",
-    message: "登記未取得なのにDM送付可になっています",
-    where: { registryStatus: "unconfirmed", dmStatus: "send" },
-  },
-  {
-    code: "NO_LOT_NUMBER",
-    severity: "info",
-    message: "地番が未入力です",
-    where: { OR: [{ lotNumber: null }, { lotNumber: "" }] },
-  },
-  // ⚠`NO_REAL_ESTATE_NUMBER`(不動産番号が未入力です)は**意図的に廃止**
-  //   (2026-09-08 発注者判断=不動産番号は今後も作らない)。
-  //   この指摘は「番号を入れてください」と促すが、番号が入った物件は所在検索の
-  //   対象外になり、番号での取得は実サイトへ未配線 = **謄本が取れない行き止まり**
-  //   になる。**システムが自ら詰む操作を勧めていた**ため、ルールごと外す。
-  //   再開する場合は「番号での取得」を実サイトへ配線してからにすること。
-  {
-    code: "INVESTIGATION_NOT_CONFIRMED",
-    severity: "warning",
-    message: "調査情報が未確認です",
-    where: { investigationConfirmedAt: null },
-  },
-  {
-    code: "NO_ASSIGNEE",
-    severity: "warning",
-    message: "担当者が未設定です",
-    where: { assignedTo: null },
-  },
-];
-
-type QualityRule = (typeof QUALITY_RULES)[number];
+// ⚠決まりの表は 1か所(`@/lib/quality-check-rules`)。一覧の「警告ありのみ」も同じ表を見る。
 
 function findRule(code: string): QualityRule | undefined {
   return QUALITY_RULES.find((r) => r.code === code);
@@ -158,6 +115,8 @@ export async function GET(request: Request) {
     // 追加条件なし。条件は property-list-query.ts の単一定義元を再利用＝一覧とズレない。
     // これにより count / 件数 / id / address のいずれにも一覧で見えない物件が漏れない。
     const visibilityScope = propertyVisibilityScopeWhere(session);
+    // 警告は品質チェックを見られる人全員に出す(名前は出ない)。確認の画面へのリンクは開ける人にだけ(2026-11-08 発注者決定)。
+    const canOpenRegistryOwnerReview = findMissingRegistryOwnerReviewPerm(perms, "view") === null;
     const scopeAnd: Pick<Prisma.PropertyWhereInput, "AND"> = visibilityScope
       ? { AND: [visibilityScope] }
       : {};
@@ -234,13 +193,11 @@ export async function GET(request: Request) {
 
       // 可視範囲スコープ（scopeAnd・handler 冒頭で算出）は件数（warningPropertiesTotal）と
       // 警告結果（任意 propertyIds 指定）の両方に適用される（Codex P1 対応）。
-      // hasWarning 一覧フィルタ（property-list-query.ts）と同じ「error/warning ルールの OR」。
-      // info ルール（地番・不動産番号未入力）はバッジ・チップの対象外なので含めない。
+      // hasWarning 一覧フィルタ（property-list-query.ts）と同じ「error/warning ルールの OR」
+      // (1か所の定義 qualityWarningWhere)。info ルールはバッジ・チップの対象外なので含めない。
       const warningWhere: Prisma.PropertyWhereInput = {
         ...NOT_ARCHIVED,
-        OR: QUALITY_RULES.filter((r) => r.severity !== "info").map(
-          (r) => r.where,
-        ),
+        ...qualityWarningWhere(),
         ...scopeAnd,
       };
 
@@ -326,13 +283,26 @@ export async function GET(request: Request) {
         // additive（非PII）: scoped モード識別子と「警告あり物件の全体実数」。
         scope: { propertyIds: ids.length },
         warningPropertiesTotal,
+        canOpenRegistryOwnerReview,
       });
     }
 
     // ---- (1) 既定モード: 非アーカイブ件数(count) と 各ルールの count + 先頭ページ ----
     // いずれも可視範囲スコープ込み（field_staff は自分の担当分のみが対象になる）。
-    const [propertiesChecked, ruleResults] = await Promise.all([
+    const [propertiesChecked, registryOwnerCheckPending, ruleResults] = await Promise.all([
       prisma.property.count({ where: { ...NOT_ARCHIVED, ...scopeAnd } }),
+      // 謄本の名義を比べ直し待ち(まだ比べていない物件も含む)の件数。警告ではなく情報(2026-11-08)。
+      // 見える範囲は他の件数と同じ。所有者事項の謄本がある物件だけ(比べる対象と同じ条件)。
+      prisma.property.count({
+        where: {
+          ...NOT_ARCHIVED,
+          ...scopeAnd,
+          attachments: {
+            some: { type: "registry", isDeleted: false, registryCertificateType: "owner" },
+          },
+          OR: [{ registryOwnerCheck: null }, { registryOwnerCheck: { is: { stale: true } } }],
+        },
+      }),
       Promise.all(
         QUALITY_RULES.map(async (rule) => {
           const where: Prisma.PropertyWhereInput = {
@@ -420,6 +390,9 @@ export async function GET(request: Request) {
       },
       // 各ルールの全体件数・続き取得情報（非PII）。hasMore のルールは ?rule=CODE&offset=nextOffset で追加取得可。
       rules,
+      // additive（非PII・件数だけ）: 謄本の名義の比べ直し待ち(情報)・確認の画面を開けるか。
+      registryOwnerCheckPending,
+      canOpenRegistryOwnerReview,
     });
   } catch (error) {
     return handleApiError(error);

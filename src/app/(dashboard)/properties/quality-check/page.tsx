@@ -12,6 +12,8 @@ import {
   RefreshCw,
 } from "lucide-react";
 import { fetchQualityCheck, type QualityRuleMeta } from "@/lib/api-client";
+import { REGISTRY_OWNER_MISMATCH_CODES, REGISTRY_OWNER_REVIEW_HREF } from "@/lib/quality-check-rules";
+import RegistryOwnerPendingNote from "@/components/registry-owner-review/pending-note";
 
 interface QualityIssue {
   propertyId: string;
@@ -34,6 +36,8 @@ interface Summary {
 const CODE_LABELS: Record<string, string> = {
   NO_OWNER: "所有者未紐づけ",
   REGISTRY_DM_MISMATCH: "登記とDMの不整合",
+  REGISTRY_OWNER_MISMATCH_DM_SEND: "謄本の名義と違う（DM送付可）",
+  REGISTRY_OWNER_MISMATCH: "謄本の名義と違う",
   NO_LOT_NUMBER: "地番未入力",
   // ⚠ルール自体は 2026-09-08 に廃止済み(「番号を入れろ」と促すと謄本が
   //   取れない行き止まりを作るため)。過去データ表示用に残すだけで、
@@ -76,6 +80,9 @@ export default function QualityCheckPage() {
   // 各ルールの続き取得情報。hasMore のルールは「さらに読み込む」で追加取得する。
   const [rules, setRules] = useState<QualityRuleMeta[]>([]);
   const [loadingMore, setLoadingMore] = useState(false);
+  // 謄本の名義の比べ直し待ち(情報・警告ではない)と、確認の画面を開けるか(2026-11-08)。
+  const [registryOwnerCheckPending, setRegistryOwnerCheckPending] = useState<number | null>(null);
+  const [canOpenRegistryOwnerReview, setCanOpenRegistryOwnerReview] = useState(false);
 
   const runCheck = async () => {
     setLoading(true);
@@ -85,6 +92,8 @@ export default function QualityCheckPage() {
       setIssues(json.data as QualityIssue[]);
       setSummary(json.summary as Summary);
       setRules((json.rules ?? []) as QualityRuleMeta[]);
+      setRegistryOwnerCheckPending(json.registryOwnerCheckPending ?? null);
+      setCanOpenRegistryOwnerReview(json.canOpenRegistryOwnerReview === true);
     } catch (err) {
       setError(
         err instanceof Error ? err.message : "品質チェックに失敗しました",
@@ -94,8 +103,9 @@ export default function QualityCheckPage() {
     }
   };
 
+  // 最初の読み込みは描画のあとに回す(effect の中で同期に state を変えない=react-hooks の決まり)
   useEffect(() => {
-    runCheck();
+    void Promise.resolve().then(runCheck);
   }, []);
 
   // いずれかのルールに続き(上限超で未取得の issue)があるか。
@@ -181,6 +191,11 @@ export default function QualityCheckPage() {
         </div>
       )}
 
+      {/* 謄本の名義の比べ直し待ち(情報)。0件なら出さない。 */}
+      {registryOwnerCheckPending ? (
+        <RegistryOwnerPendingNote count={registryOwnerCheckPending} canOpen={canOpenRegistryOwnerReview} />
+      ) : null}
+
       {/* Filter */}
       <div className="mb-4">
         <select
@@ -235,6 +250,14 @@ export default function QualityCheckPage() {
                     </span>
                   </div>
                   <p className={`text-sm ${config.text}`}>{issue.message}</p>
+                  {canOpenRegistryOwnerReview && REGISTRY_OWNER_MISMATCH_CODES.has(issue.code) ? (
+                    <Link
+                      href={REGISTRY_OWNER_REVIEW_HREF}
+                      className="mt-1 mr-3 inline-block text-xs text-indigo-600 hover:underline"
+                    >
+                      謄本の名義の確認を開く
+                    </Link>
+                  ) : null}
                   <Link
                     href={`/properties/${issue.propertyId}`}
                     className="mt-1 inline-block text-xs text-indigo-600 hover:underline"

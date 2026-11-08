@@ -18,6 +18,7 @@ import prisma from "@/lib/prisma";
 import { resolveMgmtIdMatches } from "@/lib/property-mgmt-id-search";
 import { buildLeadExclusionWhere, jstTodayDateOnly } from "@/lib/lead-exclusion";
 import { businessTypeWhere } from "@/lib/property-business-type";
+import { qualityWarningWhere } from "@/lib/quality-check-rules";
 import { propertyListQuerySchema } from "@/lib/validators";
 import type { z } from "zod";
 
@@ -178,23 +179,9 @@ export async function buildPropertyListWhere(
 
   // hasWarning: quality-check の "error" / "warning" 条件を OR で表現し、
   // 既存 where と AND する。"info" (NO_LOT_NUMBER 等) は粒度が細かいため除外。
+  // ⚠条件は品質チェックと**1か所の定義**(qualityWarningWhere)。ここに書き写さない(2026-11-08)。
   if (hasWarning === true) {
-    where.AND = [
-      ...(where.AND ?? []),
-      {
-        OR: [
-          { propertyOwners: { none: {} } }, // NO_OWNER
-          {
-            AND: [
-              { registryStatus: "unconfirmed" },
-              { dmStatus: "send" },
-            ],
-          }, // REGISTRY_DM_MISMATCH
-          { investigationConfirmedAt: null }, // INVESTIGATION_NOT_CONFIRMED
-          { assignedTo: null }, // NO_ASSIGNEE
-        ],
-      },
-    ];
+    where.AND = [...(where.AND ?? []), qualityWarningWhere()];
   }
 
   // DM送信回数フィルタは「未送信(0回)」のみ。dmLogs none でネイティブに絞れる(大規模でも高速・ID materialize 無し)。

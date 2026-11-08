@@ -75,6 +75,8 @@ type RuleScenario = { count: number; sample: Row[] };
 type RuleCode =
   | "NO_OWNER"
   | "REGISTRY_DM_MISMATCH"
+  | "REGISTRY_OWNER_MISMATCH_DM_SEND"
+  | "REGISTRY_OWNER_MISMATCH"
   | "NO_LOT_NUMBER"
   | "NO_REAL_ESTATE_NUMBER"
   | "INVESTIGATION_NOT_CONFIRMED"
@@ -86,6 +88,10 @@ type Scenario = { TOTAL?: number } & Partial<Record<RuleCode, RuleScenario>>;
 
 function whereCode(where: Where): RuleCode | "TOTAL" {
   if (where.propertyOwners) return "NO_OWNER";
+  // 謄本の名義と違う(2026-11-08)は registryStatus も持つので先に見分ける
+  if (where.registryOwnerCheck) {
+    return where.dmStatus === "send" ? "REGISTRY_OWNER_MISMATCH_DM_SEND" : "REGISTRY_OWNER_MISMATCH";
+  }
   if (where.registryStatus) return "REGISTRY_DM_MISMATCH";
   if (Array.isArray(where.OR)) {
     const firstKey = Object.keys(where.OR[0] as object)[0];
@@ -175,7 +181,7 @@ describe("GET /api/properties/quality-check", () => {
       nextOffset: 1000,
     });
     // 全 5 ルール分のメタが返る
-    expect(body.rules).toHaveLength(5);
+    expect(body.rules).toHaveLength(7);
   });
 
   it("03. ?rule=CODE&offset で当該ルールの続きを取得できる", async () => {

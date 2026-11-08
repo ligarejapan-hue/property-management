@@ -7,6 +7,10 @@ import { resolve } from "node:path";
 
 const run = vi.fn();
 vi.mock("@/lib/push/deliveries/run", () => ({ runPushNotifications: (...a: unknown[]) => run(...a) }));
+const nightly = vi.fn();
+vi.mock("@/lib/registry-owner-check/service", () => ({
+  runNightlyRegistryOwnerChecks: (...a: unknown[]) => nightly(...a),
+}));
 vi.mock("@/lib/api-helpers", async () => {
   class MockApiError extends Error {
     status: number;
@@ -47,6 +51,8 @@ const req = (secret?: string) =>
 beforeEach(() => {
   run.mockReset();
   run.mockResolvedValue({ planned: { nextAction: 1, inquiry: 0, registryJob: 0 }, sent: { sent: 1 }, purged: { deliveries: 0, events: 0 } });
+  nightly.mockReset();
+  nightly.mockResolvedValue({ skipped: "outside_window" });
   for (const k of KEYS) {
     saved[k] = process.env[k];
     delete process.env[k];
@@ -85,7 +91,28 @@ describe("POST /api/notifications/push-run", () => {
     const res = await POST(req(SECRET));
     expect(res.status).toBe(200);
     expect(run).toHaveBeenCalledTimes(1);
-    expect(await res.json()).toEqual({ planned: { nextAction: 1, inquiry: 0, registryJob: 0 }, sent: { sent: 1 }, purged: { deliveries: 0, events: 0 } });
+    expect(await res.json()).toEqual({
+      planned: { nextAction: 1, inquiry: 0, registryJob: 0 }, sent: { sent: 1 }, purged: { deliveries: 0, events: 0 },
+      registryOwnerChecks: { skipped: "outside_window" },
+    });
+  });
+  it("通知のあとに夜の謄本の名義の比べを呼ぶ(持ち時間つき)・失敗しても通知の結果は 200 で返す", async () => {
+    Object.assign(process.env, VAPID, { NOTIFICATIONS_PUSH_RUN_SECRET: SECRET });
+    const before = Date.now();
+    await POST(req(SECRET));
+    expect(nightly).toHaveBeenCalledTimes(1);
+    const deadline = (nightly.mock.calls[0][1] as { deadline: number }).deadline;
+    expect(deadline).toBeGreaterThanOrEqual(before + 200_000);
+    expect(deadline).toBeLessThan(before + 240_000);
+    nightly.mockRejectedValue(new Error("boom"));
+    const res = await POST(req(SECRET));
+    expect(res.status).toBe(200);
+    expect((await res.json()).registryOwnerChecks).toEqual({ failed: true });
+  });
+  it("鍵がそろっていなければ夜の比べも動かない", async () => {
+    process.env.NOTIFICATIONS_PUSH_RUN_SECRET = SECRET;
+    expect((await POST(req(SECRET))).status).toBe(503);
+    expect(nightly).not.toHaveBeenCalled();
   });
   it("実行中の失敗(カーソルが無い等)は 500 で返す(timer の失敗になる)", async () => {
     Object.assign(process.env, VAPID, { NOTIFICATIONS_PUSH_RUN_SECRET: SECRET });

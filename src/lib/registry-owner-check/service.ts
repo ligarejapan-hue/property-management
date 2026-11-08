@@ -132,8 +132,17 @@ export async function checkPropertyRegistryOwners(
   });
 }
 
-/** まだ比べていない・比べ直しが要る物件(アーカイブを除く・所有者事項の謄本あり)。 */
-function pendingWhereSql(limit: number | null) {
+/** 夜の自動の比べで、失敗した(・つい1時間以内に試した)物件をもう一度試すまでの間。 */
+export const REGISTRY_OWNER_CHECK_RETRY_AFTER_HOURS = 1;
+
+/**
+ * まだ比べていない・比べ直しが要る物件(アーカイブを除く・所有者事項の謄本あり)。
+ * backoff=true(夜の自動)のときは、比べ直し待ちのうち1時間以内に試した物件を後回しにする
+ * (一時的な失敗の物件を2分ごとに読み続けない)。画面のボタンは後回しにしない(今すぐ試す)。
+ * ⚠checked_at は UTC で入っている(Prisma)ので、比べる時刻も UTC にそろえる。
+ */
+function pendingWhereSql(limit: number | null, backoff = false) {
+  const backoffHours = backoff ? REGISTRY_OWNER_CHECK_RETRY_AFTER_HOURS : 0;
   return limit === null
     ? prisma.$queryRaw<{ n: bigint }[]>`
         SELECT count(*)::bigint AS n FROM properties p
@@ -147,6 +156,9 @@ function pendingWhereSql(limit: number | null) {
           AND EXISTS (SELECT 1 FROM attachments a WHERE a.property_id = p.id AND a.type = 'registry'
                       AND a.is_deleted = false AND a.registry_certificate_type = ${SUPPORTED_CERTIFICATE_TYPE})
           AND NOT EXISTS (SELECT 1 FROM registry_owner_checks c WHERE c.property_id = p.id AND c.stale = false)
+          AND NOT EXISTS (SELECT 1 FROM registry_owner_checks c WHERE c.property_id = p.id AND c.stale = true
+                          AND ${backoffHours}::int > 0
+                          AND c.checked_at > (now() AT TIME ZONE 'UTC') - make_interval(hours => ${backoffHours}::int))
         ORDER BY p.id
         LIMIT ${limit}`;
 }
@@ -156,18 +168,49 @@ export async function countPendingRegistryOwnerChecks(): Promise<number> {
   return Number(rows[0]?.n ?? 0);
 }
 
-/** まだ比べていない物件を最大 limit 件比べる。結果ごとの件数を返す(名前・物件は返さない)。 */
-export async function runRegistryOwnerChecks(limit: number): Promise<{
+/**
+ * 比べられなかった(思わぬ失敗=保存場所の一時的な故障・ロック待ちの打ち切りなど)物件に、
+ * 「試した時刻」だけを残す。**比べ直し待ちのまま**にして、あとでもう一度試す(@codex #679 R1 P2)。
+ * ⚠「読めない」で確定させると、一時的な故障でも二度と比べられず、名義の警告が出なくなる。
+ * ⚠前に比べた結果(違う など)と判断はそのまま残す(故障の間に警告が消えないように)。
+ * 夜の自動の比べは、試した時刻から1時間は後回しにする(同じ物件を2分ごとに読み続けない)。
+ */
+async function markRetryAfterFailure(propertyId: string): Promise<void> {
+  try {
+    await prisma.$executeRaw`
+      INSERT INTO registry_owner_checks (property_id, result, stale, checked_at)
+      VALUES (${propertyId}::uuid, 'unreadable', true, (now() AT TIME ZONE 'UTC'))
+      ON CONFLICT (property_id) DO UPDATE
+        SET stale = true, checked_at = (now() AT TIME ZONE 'UTC')
+    `;
+  } catch {
+    // 物件が消えた等。次の回で対象から外れる
+  }
+}
+
+/**
+ * まだ比べていない物件を最大 limit 件比べる。結果ごとの件数を返す(名前・物件は返さない)。
+ * deadline を渡すと、その時刻を過ぎたら次の物件を始めない(夜の自動の比べで、2分ごとの
+ * 呼び出しの持ち時間を越えないため)。
+ */
+export async function runRegistryOwnerChecks(
+  limit: number,
+  /** backoff=夜の自動(失敗して1時間以内の物件を後回し) */
+  opts: { deadline?: number; backoff?: boolean } = {},
+): Promise<{
   processed: number;
   counts: Record<string, number>;
   failed: number;
   remaining: number;
 }> {
   const n = Math.max(1, Math.min(Math.floor(limit), REGISTRY_OWNER_CHECK_RUN_MAX));
-  const targets = (await pendingWhereSql(n)) as { id: string }[];
+  const targets = (await pendingWhereSql(n, opts.backoff ?? false)) as { id: string }[];
   const counts: Record<string, number> = {};
   let failed = 0;
+  let processed = 0;
   for (const { id } of targets) {
+    if (opts.deadline !== undefined && Date.now() >= opts.deadline) break;
+    processed += 1;
     try {
       const r = await checkPropertyRegistryOwners(id);
       const k = r ?? "skipped";
@@ -177,9 +220,62 @@ export async function runRegistryOwnerChecks(limit: number): Promise<{
       // ⚠生のエラー文は出さない(謄本由来の文字を含みうる)
       const kind = e instanceof Error ? e.name : typeof e;
       console.error(`[registry-owner-check] 比べられませんでした kind=${kind}`);
+      await markRetryAfterFailure(id);
     }
   }
-  return { processed: targets.length, counts, failed, remaining: await countPendingRegistryOwnerChecks() };
+  return { processed, counts, failed, remaining: await countPendingRegistryOwnerChecks() };
+}
+
+/**
+ * 夜の自動の比べ(2026-11-08 発注者決定)。**新しい timer は置かず**、通知の送信で2分ごとに
+ * 呼ばれている `/api/notifications/push-run` の最後に相乗りする。
+ * - 日本時間の 2:00〜5:00 だけ動く(昼の画面を遅くしない)
+ * - 1回(2分ごと)に最大 perTick 件・持ち時間 tickBudgetMs まで
+ * - 1晩(その夜の 2:00 以降)に比べた件数が perNight に達したら、その夜はもう動かない
+ *   (数え方は結果の行の checked_at=手で比べた分も含む)
+ * 対象は画面のボタンと同じ「まだ比べていない・比べ直し待ち」。
+ */
+export const NIGHTLY_REGISTRY_OWNER_CHECK = {
+  startHourJst: 2,
+  endHourJst: 5,
+  perTick: 20,
+  perNight: 2000,
+  tickBudgetMs: 30_000,
+} as const;
+
+const JST_OFFSET_MS = 9 * 60 * 60 * 1000;
+
+/** その時刻が夜の枠の中なら、その夜の始まり(日本時間 2:00)を返す。枠の外なら null。 */
+export function nightlyWindowStart(now: Date): Date | null {
+  const jst = new Date(now.getTime() + JST_OFFSET_MS);
+  const hour = jst.getUTCHours();
+  if (hour < NIGHTLY_REGISTRY_OWNER_CHECK.startHourJst || hour >= NIGHTLY_REGISTRY_OWNER_CHECK.endHourJst) {
+    return null;
+  }
+  const startJst = Date.UTC(jst.getUTCFullYear(), jst.getUTCMonth(), jst.getUTCDate(), NIGHTLY_REGISTRY_OWNER_CHECK.startHourJst);
+  return new Date(startJst - JST_OFFSET_MS);
+}
+
+export async function runNightlyRegistryOwnerChecks(
+  now: Date,
+  /** perTick / perNight はテストで小さくするためだけの差し替え口(既定=上の定数) */
+  opts: { deadline?: number; perTick?: number; perNight?: number } = {},
+): Promise<
+  | { skipped: "outside_window" | "nightly_cap" | "no_time" }
+  | { processed: number; counts: Record<string, number>; failed: number; remaining: number; doneTonight: number }
+> {
+  const windowStart = nightlyWindowStart(now);
+  if (!windowStart) return { skipped: "outside_window" };
+  const doneTonight = await prisma.registryOwnerCheck.count({ where: { checkedAt: { gte: windowStart } } });
+  const quota = (opts.perNight ?? NIGHTLY_REGISTRY_OWNER_CHECK.perNight) - doneTonight;
+  if (quota <= 0) return { skipped: "nightly_cap" };
+  const deadline = Math.min(Date.now() + NIGHTLY_REGISTRY_OWNER_CHECK.tickBudgetMs, opts.deadline ?? Infinity);
+  if (Date.now() >= deadline) return { skipped: "no_time" };
+  const r = await runRegistryOwnerChecks(Math.min(opts.perTick ?? NIGHTLY_REGISTRY_OWNER_CHECK.perTick, quota), {
+    deadline,
+    backoff: true,
+  });
+  return { ...r, doneTonight: doneTonight + r.processed };
 }
 
 /** DM が「未判断」(hold)なら「送付可」(send)に戻す(ロックの中)。戻したら true。 */

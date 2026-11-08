@@ -106,15 +106,15 @@ describe("quality-check 既定モード — ロール別可視範囲", () => {
     const res = await GET(makeRequest(""));
     expect(res.status).toBe(200);
 
-    // count = propertiesChecked(1) + 各ルール(6) = 7 本すべてにスコープ
-    expect(pm.property.count).toHaveBeenCalledTimes(6);
+    // count = propertiesChecked(1) + 謄本の名義の比べ直し待ち(1) + 各ルール(7) = 9 本すべてにスコープ
+    expect(pm.property.count).toHaveBeenCalledTimes(9);
     for (const call of pm.property.count.mock.calls) {
       const where = (call[0] as { where: Where }).where;
       expect(where.isArchived).toBe(false);
       expect(where.AND).toEqual([FS_SCOPE]);
     }
     // findMany = 各ルール 6 本すべてにスコープ・take は従来どおり 1000
-    expect(pm.property.findMany).toHaveBeenCalledTimes(5);
+    expect(pm.property.findMany).toHaveBeenCalledTimes(7);
     for (const call of pm.property.findMany.mock.calls) {
       const args = call[0] as { where: Where; take?: number };
       expect(args.where.isArchived).toBe(false);
@@ -128,11 +128,11 @@ describe("quality-check 既定モード — ロール別可視範囲", () => {
   it("admin: 既定モードは AND なし＝従来どおり全体対象（回帰lock）", async () => {
     const res = await GET(makeRequest(""));
     expect(res.status).toBe(200);
-    expect(pm.property.count).toHaveBeenCalledTimes(6);
+    expect(pm.property.count).toHaveBeenCalledTimes(9);
     for (const call of pm.property.count.mock.calls) {
       expect((call[0] as { where: Where }).where.AND).toBeUndefined();
     }
-    expect(pm.property.findMany).toHaveBeenCalledTimes(5);
+    expect(pm.property.findMany).toHaveBeenCalledTimes(7);
     for (const call of pm.property.findMany.mock.calls) {
       expect((call[0] as { where: Where }).where.AND).toBeUndefined();
     }
