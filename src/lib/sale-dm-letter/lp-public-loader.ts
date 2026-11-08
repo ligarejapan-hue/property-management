@@ -13,6 +13,8 @@ import { normalizePublicSlug, readAdParams, buildPublicLpHeaders, publicLpPath, 
 export interface PublicLpScenarioRow {
   id: string;
   name: string;
+  /** 添え書きを決める(種類ごと・2026-11-08)。 */
+  autoKey: string | null;
   lpHeadline: string | null;
   lpLead: string | null;
   lpBodyText: string | null;
@@ -25,7 +27,7 @@ export interface PublicLpClientLike {
     findFirst: (args: {
       where: { publicSlug: string; deletedAt: null; active: true };
       select: {
-        id: true; name: true; lpHeadline: true; lpLead: true; lpBodyText: true; lpFaqJson: true;
+        id: true; name: true; autoKey: true; lpHeadline: true; lpLead: true; lpBodyText: true; lpFaqJson: true;
         media: { select: { slot: true; heading: true; figureKind: true; asset: { select: { publicId: true; width: true; height: true; deletedAt: true } } }; orderBy: { sortOrder: "asc" } };
       };
     }) => Promise<PublicLpScenarioRow | null>;
@@ -50,7 +52,7 @@ export async function loadPublicLpPage(
   const s = await client.dmScenario.findFirst({
     where: { publicSlug: slug, deletedAt: null, active: true },
     select: {
-      id: true, name: true, lpHeadline: true, lpLead: true, lpBodyText: true, lpFaqJson: true,
+      id: true, name: true, autoKey: true, lpHeadline: true, lpLead: true, lpBodyText: true, lpFaqJson: true,
       media: {
         select: { slot: true, heading: true, figureKind: true, asset: { select: { publicId: true, width: true, height: true, deletedAt: true } } },
         orderBy: { sortOrder: "asc" },
@@ -72,6 +74,7 @@ export async function loadPublicLpPage(
       media: s.media,
       property: { address: null, propertyType: null },
       company: { senderName: cfg.senderName, senderContact: cfg.senderContact },
+      scenario: { autoKey: s.autoKey },
     },
     {
       mode: "public",

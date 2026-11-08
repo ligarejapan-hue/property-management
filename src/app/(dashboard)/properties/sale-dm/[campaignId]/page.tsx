@@ -15,6 +15,7 @@ import {
   type SaleDmDraft,
 } from "@/lib/api-client";
 import { renderLetterHtml } from "@/lib/sale-dm-letter/templates";
+import { DEFAULT_TAGLINE } from "@/lib/sale-dm-letter/scenario-tagline";
 import { composeAddresseeHonorific } from "@/lib/sale-dm-letter/addressee";
 import SaleDmAdjustPanel from "@/components/sale-dm/adjust-panel";
 import SaleDmVariantManager from "@/components/sale-dm/variant-manager";
@@ -97,6 +98,8 @@ export default function SaleDmWorkspacePage() {
       recipientAddress: selected.recipientAddress,
       senderName: "",
       senderContact: "",
+      // 添え書きは種類ごと(印刷と同じ字)。古い応答で無いときは種類なしの字。
+      tagline: selectedVariant.tagline ?? DEFAULT_TAGLINE,
       trackingToken: selected.id,
       // 手紙のイラスト(設計 2026-10-05)。印刷と同じ位置に出す。
       illustration: selectedVariant.illustration ?? null,

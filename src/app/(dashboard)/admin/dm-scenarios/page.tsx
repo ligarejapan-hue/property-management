@@ -18,7 +18,7 @@ import {
 /**
  * DMの種類(台帳)の一覧(管理者・設計 2026-09-27 §3.6)。
  * 種類ごとに手紙とLPの文面を1回だけ作り、物件の「DMの種類」や発送で使い回す。
- * 自動で選ばれる種類(autoKey あり=相続・相続（マンション）・空き家)は削除できない(止めるときは「使わない」)。
+ * 自動で選ばれる種類(autoKey あり=相続・相続（マンション）・空き家・古い家)は削除できない(止めるときは「使わない」)。
  */
 export default function AdminDmScenariosPage() {
   const [rows, setRows] = useState<SaleDmScenarioSummary[] | null>(null);

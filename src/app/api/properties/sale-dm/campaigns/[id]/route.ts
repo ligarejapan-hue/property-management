@@ -4,6 +4,7 @@ import { handleApiError } from "@/lib/api-helpers";
 import { requireSaleDmAccess, filterDraftsByFieldStaffScope } from "@/lib/sale-dm-letter/route-guard";
 import { writeAuditLog } from "@/lib/audit";
 import { findTerminalExclusions, isTerminalExcluded, type TerminalExclusionTx } from "@/lib/dm-batch/terminal-exclusion";
+import { taglineForAutoKey } from "@/lib/sale-dm-letter/scenario-tagline";
 import { letterIllustrationFromAsset } from "@/lib/sale-dm-letter/letter-illustration";
 
 export async function GET(_req: NextRequest, { params }: { params: Promise<{ id: string }> }) {
@@ -13,7 +14,7 @@ export async function GET(_req: NextRequest, { params }: { params: Promise<{ id:
     const campaign = await prisma.dmCampaign.findUnique({
       where: { id },
       include: {
-        variants: { include: { illustrationAsset: { select: { publicId: true, width: true, height: true, deletedAt: true } } } },
+        variants: { include: { illustrationAsset: { select: { publicId: true, width: true, height: true, deletedAt: true } }, scenario: { select: { autoKey: true } } } },
         lpVariants: { orderBy: { label: "asc" } },
         recipients: {
           orderBy: { createdAt: "asc" },
@@ -91,9 +92,11 @@ export async function GET(_req: NextRequest, { params }: { params: Promise<{ id:
       detail: { campaignId: id, count: recipients.length, viewedAt: new Date().toISOString() },
     });
     // 型ごとの手紙のイラスト(見本用)。写真の行そのものは返さず、描画用の形だけ付ける。
-    const variants = campaign.variants.map(({ illustrationAsset, ...v }) => ({
+    // 添え書きは種類ごと(2026-11-08)。見本も印刷と同じ字にする。
+    const variants = campaign.variants.map(({ illustrationAsset, scenario, ...v }) => ({
       ...v,
       illustration: letterIllustrationFromAsset(illustrationAsset),
+      tagline: taglineForAutoKey(scenario?.autoKey),
     }));
     return NextResponse.json(
       { campaign: { ...campaign, variants, recipients } },

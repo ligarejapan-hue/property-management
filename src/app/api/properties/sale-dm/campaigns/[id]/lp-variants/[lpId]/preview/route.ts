@@ -46,6 +46,8 @@ export async function GET(request: NextRequest, { params }: { params: Promise<{ 
     const v = await prisma.dmLpVariant.findFirst({
       where: { id: lpId, campaignId: id },
       select: {
+        // 添え書きは種類ごと(2026-11-08)。種類なしの LP型は「住まい」。
+        scenario: { select: { autoKey: true } },
         headline: true,
         lead: true,
         bodyText: true,
@@ -76,6 +78,7 @@ export async function GET(request: NextRequest, { params }: { params: Promise<{ 
         media: v.media,
         property: { address: SAMPLE_ADDRESS, propertyType },
         company: { senderName: cfg.senderName, senderContact: cfg.senderContact },
+        scenario: v.scenario,
       },
       { mode: "preview", unsubscribeUrl: null, phoneTapToken: null, form: { action: "#", privacyText: cfg.privacyText ?? DEFAULT_PRIVACY_TEXT, disabled: true } },
     ));

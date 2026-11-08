@@ -8,6 +8,7 @@ import { expandLetterTags, hasUnresolvedTag, coarsePropertyLocation, propertyTyp
 import type { LpFaqItem } from "./lp-template";
 import { isFigureKind, type FigureKind } from "./lp-figures";
 import type { AdParams, GoogleTagConfig } from "./lp-public";
+import { taglineForAutoKey } from "./scenario-tagline";
 
 /** live=送付済みの宛先 / preview=送付前・社内確認 / public=広告用の公開ページ(宛先なし・設計 2026-10-20) */
 export type LpMode = "live" | "preview" | "public";
@@ -40,8 +41,10 @@ export interface LpRenderInput {
   form: LpFormInput | null;
   /** 広告用の公開ページの入力(mode=public のときだけ)。省略・null=DM 用。 */
   public?: LpPublicInput | null;
+  /** ヘッダーの社名の横の添え書き。DMの種類ごと(手紙と同じ字・scenario-tagline.ts・2026-11-08)。 */
+  tagline: string;
 }
-export const LP_RENDER_INPUT_KEYS = ["mode", "headline", "lead", "intro", "sections", "faq", "hero", "company", "unsubscribeUrl", "phoneTapToken", "form", "public"] as const satisfies readonly (keyof LpRenderInput)[];
+export const LP_RENDER_INPUT_KEYS = ["mode", "headline", "lead", "intro", "sections", "faq", "hero", "company", "unsubscribeUrl", "phoneTapToken", "form", "public", "tagline"] as const satisfies readonly (keyof LpRenderInput)[];
 
 /**
  * LP型が実際にフォームを描画できるか(見出し・本文の両方が空白以外)の唯一の判定。
@@ -106,6 +109,8 @@ export interface LpSourceRows {
   media: Array<{ slot: string; heading: string | null; figureKind: string | null; asset: { publicId: string; width: number; height: number; deletedAt: Date | null } | null }>;
   property: { address: string | null; propertyType: string | null };
   company: { senderName: string | null; senderContact: string | null };
+  /** どの種類のページか(添え書きを決める)。種類なし=null。 */
+  scenario: { autoKey: string | null } | null;
 }
 
 function parseFaq(v: unknown): LpFaqItem[] {
@@ -145,5 +150,6 @@ export function buildLpRenderInput(rows: LpSourceRows, opts: { mode: LpMode; uns
     phoneTapToken: opts.phoneTapToken,
     form: opts.form,
     public: opts.public ?? null,
+    tagline: taglineForAutoKey(rows.scenario?.autoKey),
   };
 }

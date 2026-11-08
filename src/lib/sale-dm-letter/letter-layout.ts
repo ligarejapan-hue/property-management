@@ -30,8 +30,7 @@ export interface LetterLayout {
 
 /** 紙面の決まり文句(文面に依らない固定の文字)。変えるときはここだけ */
 export const LETTER_FIXED_TEXT = {
-  /** 社名の横の添え書き(地域名は入れない=都内全域に出す可能性があるため) */
-  tagline: "相続・不動産のご相談窓口",
+  // 社名の横の添え書きは DMの種類ごと=scenario-tagline.ts(2026-11-08)。
   badge: "査定・ご相談",
   badgeStrong: "無料",
   contactHead: "まずは、今の価値を知ることから。",

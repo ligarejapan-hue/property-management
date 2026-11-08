@@ -18,9 +18,14 @@ export type ResolveResult =
   | { ok: true; scenarioId: string; via: "property" | "auto" | "default" }
   | { ok: false; reason: "no_default" | "property_scenario_missing" };
 
-export const AUTO_KEY_BY_ROUTE: Readonly<Record<string, string>> = Object.freeze({
-  reception_csv: "inheritance",
-  field_survey: "vacant",
+/**
+ * 導入ルートの自動。並びの先から使える種類を選ぶ。
+ * 現地調査は「古い家」→ 使えない・削除済み・台帳に無いときは「空き家」(2026-11-08 発注者決定。空き家の手紙は、
+ * 空き家と分かった物件に物件の欄で選ぶ)。
+ */
+export const AUTO_KEY_BY_ROUTE: Readonly<Record<string, readonly string[]>> = Object.freeze({
+  reception_csv: Object.freeze(["inheritance"]),
+  field_survey: Object.freeze(["old_house", "vacant"]),
 });
 
 /**
@@ -41,8 +46,8 @@ function autoKeysFor(introductionRoute: string | null, propertyType: string | nu
   const keys: string[] = [];
   const byType = propertyType ? AUTO_KEY_BY_ROUTE_AND_TYPE[introductionRoute]?.[propertyType] : undefined;
   if (byType) keys.push(byType);
-  const byRoute = AUTO_KEY_BY_ROUTE[introductionRoute];
-  if (byRoute) keys.push(byRoute);
+  const byRoute = Object.hasOwn(AUTO_KEY_BY_ROUTE, introductionRoute) ? AUTO_KEY_BY_ROUTE[introductionRoute] : undefined;
+  if (byRoute) keys.push(...byRoute);
   return keys;
 }
 

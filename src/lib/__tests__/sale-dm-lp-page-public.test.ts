@@ -17,6 +17,7 @@ const publicInput = (over: Partial<LpRenderInput> = {}): LpRenderInput => ({
   faq: [{ q: "費用は？", a: "無料です。" }],
   hero: { publicId: "a".repeat(32), width: 1600, height: 900 },
   company: { name: "株式会社リガーレ", contact: "TEL 03-1234-5678", phone: "0312345678" },
+  tagline: "相続・不動産のご相談窓口",
   unsubscribeUrl: null,
   phoneTapToken: null,
   form: { action: "/lp/souzoku/inquiry", privacyText: "同意文", disabled: false },

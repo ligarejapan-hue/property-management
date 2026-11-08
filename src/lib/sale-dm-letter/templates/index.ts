@@ -174,6 +174,7 @@ export function renderLetterHtml(input: LetterRenderInput): string {
   // 連絡先は設定の自由文(「TEL 03-… (平日 9-18時)」のような長い値もあり得る)。電話番号の長さを超えるときは小さくして、
   // 問い合わせ枠が縦に伸びてロゴが2枚目へ押し出されるのを防ぐ。
   const telCls = contactText.length > 16 ? "letter-tel letter-tel--long" : "letter-tel";
+  const tagline = escapeHtml(input.tagline);
   const body = bodyHtml(input.body, input.illustration);
   const logo = LP_BRAND.logo;
   // QR の枠が未指定(画面の見本)でも、印刷と同じ大きさの仮の枠を置く(@codex #524 R2 P2:
@@ -191,7 +192,7 @@ export function renderLetterHtml(input: LetterRenderInput): string {
     ${pageCss(S)}
   </style>
   <div class="letter-masthead">
-    <div class="letter-brand"><span class="letter-brand-name">${sender}</span><span class="letter-brand-sub">${T.tagline}</span></div>
+    <div class="letter-brand"><span class="letter-brand-name">${sender}</span><span class="letter-brand-sub">${tagline}</span></div>
     <div class="letter-badge">${T.badge}<b>${T.badgeStrong}</b></div>
   </div>
   <div class="letter-addr-block">
@@ -201,7 +202,7 @@ export function renderLetterHtml(input: LetterRenderInput): string {
   <div class="letter-body">${body.html}</div>
   <div class="letter-sign">
     <div class="letter-sign-name">${sender}</div>
-    <div class="letter-sign-sub">${T.tagline}</div>
+    <div class="letter-sign-sub">${tagline}</div>
   </div>
   <div class="letter-contact">
     <div class="letter-contact-head">${T.contactHead}<span>${T.contactSub}</span></div>

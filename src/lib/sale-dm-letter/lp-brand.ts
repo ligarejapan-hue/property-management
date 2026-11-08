@@ -13,8 +13,7 @@ export const LP_BRAND = {
   license: "宅地建物取引業 東京都知事(1)第108344号",
   privacyPolicyUrl: "https://ligarejapan.com/privacypolicy/",
   logo: { src: "/lp-assets/brand/logo.png", width: 1664, height: 243, alt: "Ligare Japan(株式会社リガーレジャパン)" },
-  /** ヘッダーの小さな添え書き */
-  tagline: "相続・空き家・不動産のご相談窓口",
+  // ヘッダーの添え書きは DMの種類ごと=scenario-tagline.ts(2026-11-08・手紙と同じ字)。
   /** 電話の受付時間(発注者指定 2026-10-06) */
   phoneHours: "平日 10:00〜19:00",
   /** ヒーローの上の一言(QRから開いた人向け) */

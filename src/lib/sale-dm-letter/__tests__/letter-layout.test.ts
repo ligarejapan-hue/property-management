@@ -117,6 +117,6 @@ describe("parseLetterBody(段落の形から枠を決める)", () => {
     expect(LETTER_FIXED_TEXT.aiLine).toContain("AI査定");
     expect(LETTER_FIXED_TEXT.badgeStrong).toBe("無料");
     expect(LETTER_FIXED_TEXT.contactHead).toContain("今の価値");
-    expect(LETTER_FIXED_TEXT.tagline).not.toContain("城南");
+    expect("tagline" in LETTER_FIXED_TEXT).toBe(false); // 添え書きは種類ごと=scenario-tagline.ts
   });
 });
