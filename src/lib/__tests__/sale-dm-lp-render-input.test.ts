@@ -11,6 +11,7 @@ const rows = (over: Partial<LpSourceRows> = {}): LpSourceRows => ({
   ],
   property: { address: "東京都世田谷区経堂1-2-3 ○○ハイツ101", propertyType: "house" },
   company: { senderName: "株式会社リガーレ", senderContact: "TEL 03-1234-5678 / info@example.com" },
+  scenario: null,
   ...over,
 });
 
@@ -116,8 +117,16 @@ describe("buildLpRenderInput", () => {
   it("入力型のキー集合は固定(氏名・番地・所有者住所・token 以外の識別子が増えたら落ちる)", () => {
     const out = buildLpRenderInput(rows(), { mode: "live", unsubscribeUrl: null, phoneTapToken: "t", form: null });
     expect(Object.keys(out).sort()).toEqual([...LP_RENDER_INPUT_KEYS].sort());
-    expect(LP_RENDER_INPUT_KEYS).toEqual(["mode", "headline", "lead", "intro", "sections", "faq", "hero", "company", "unsubscribeUrl", "phoneTapToken", "form", "public"]);
+    expect(LP_RENDER_INPUT_KEYS).toEqual(["mode", "headline", "lead", "intro", "sections", "faq", "hero", "company", "unsubscribeUrl", "phoneTapToken", "form", "public", "tagline"]);
     for (const k of LP_RENDER_INPUT_KEYS) expect(/name|zip|address|owner|recipient/i.test(k) && k !== "company").toBe(false);
+  });
+  it("添え書きは種類ごと(手紙と同じ字・2026-11-08)", () => {
+    const opts = { mode: "live" as const, unsubscribeUrl: null, phoneTapToken: "t", form: null };
+    expect(buildLpRenderInput(rows({ scenario: { autoKey: "inheritance_unit" } }), opts).tagline).toBe("相続・不動産のご相談窓口");
+    expect(buildLpRenderInput(rows({ scenario: { autoKey: "vacant" } }), opts).tagline).toBe("空き家・不動産のご相談窓口");
+    expect(buildLpRenderInput(rows({ scenario: { autoKey: "old_house" } }), opts).tagline).toBe("住まい・不動産のご相談窓口");
+    expect(buildLpRenderInput(rows({ scenario: { autoKey: null } }), opts).tagline).toBe("住まい・不動産のご相談窓口");
+    expect(buildLpRenderInput(rows(), opts).tagline).toBe("住まい・不動産のご相談窓口");
   });
   it("form は opts から素通しで渡る(PII を足さない)", () => {
     const form = { action: "/t/tok/inquiry", privacyText: "文", disabled: false };

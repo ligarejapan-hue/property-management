@@ -24,6 +24,7 @@ const input = (over: Partial<LpRenderInput> = {}): LpRenderInput => ({
   faq: [],
   hero: { publicId: "a".repeat(32), width: 1680, height: 944 },
   company: { name: "株式会社リガーレジャパン", contact: "TEL 03-6823-2760", phone: "0368232760" },
+  tagline: "相続・不動産のご相談窓口",
   unsubscribeUrl: "https://lp.example.com/u/tok.sig",
   phoneTapToken: "tok",
   form: FORM,

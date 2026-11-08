@@ -18,11 +18,14 @@ const SELECT = {
   trackingToken: true,
   lpVariant: {
     select: {
+      scenario: { select: { autoKey: true } },
       headline: true, lead: true, bodyText: true, faqJson: true,
       media: { select: { slot: true, heading: true, figureKind: true, asset: { select: { publicId: true, width: true, height: true, deletedAt: true } } }, orderBy: { sortOrder: "asc" as const } },
     },
   },
   property: { select: { address: true, propertyType: true } },
+  // 添え書きは種類ごと(2026-11-08)。届いた手紙と同じ字にするため、手紙の型の種類を見る(手紙の型が無いときだけ LP型の種類)。
+  variant: { select: { scenario: { select: { autoKey: true } } } },
 } as const;
 
 type Row = {
@@ -30,7 +33,8 @@ type Row = {
   propertyId: string;
   status: "draft" | "confirmed" | "sent";
   trackingToken: string;
-  lpVariant: { headline: string | null; lead: string | null; bodyText: string | null; faqJson: unknown; media: Array<{ slot: string; heading: string | null; figureKind: string | null; asset: { publicId: string; width: number; height: number; deletedAt: Date | null } | null }> } | null;
+  variant?: { scenario: { autoKey: string | null } | null } | null;
+  lpVariant: { scenario?: { autoKey: string | null } | null; headline: string | null; lead: string | null; bodyText: string | null; faqJson: unknown; media: Array<{ slot: string; heading: string | null; figureKind: string | null; asset: { publicId: string; width: number; height: number; deletedAt: Date | null } | null }> } | null;
   property: { address: string | null; propertyType: string | null };
 };
 export interface LpPageClientLike { dmRecipientDraft: { findUnique: (args: { where: { trackingToken: string }; select: typeof SELECT }) => Promise<Row | null> } }
@@ -79,6 +83,8 @@ export async function loadLpPageData(client: LpPageClientLike, token: string): P
       media: v.media,
       property: row.property,
       company: { senderName: cfg.senderName, senderContact: cfg.senderContact },
+      // ⚠手紙の型があればその種類だけを見る(種類なしの手紙=「住まい」と刷られる → ページも「住まい」)。
+      scenario: row.variant ? row.variant.scenario : (v.scenario ?? null),
     },
     {
       mode,

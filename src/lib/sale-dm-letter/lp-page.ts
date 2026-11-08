@@ -834,7 +834,7 @@ export function renderLpPage(input: LpRenderInput): string {
   const telBtn = telHref ? `<a class="cta secondary tel" href="${telHref}" data-phone-tap="1">電話で相談する</a>` : "";
   const header = `<header class="top"><div class="top-in"><div class="brand">` +
     `<a class="brand-link" href="${escapeHtml(LP_BRAND.homepageUrl)}" target="_blank" rel="noopener">${brandImg(LP_BRAND.logo, "logo", true)}</a>` +
-    `<small>${escapeHtml(LP_BRAND.tagline)}</small></div>` +
+    `<small>${escapeHtml(input.tagline)}</small></div>` +
     (telHref && input.company.phone
       ? `<div class="top-tel"><span class="hours">お電話でのご相談</span><span class="hours">${escapeHtml(LP_BRAND.phoneHours)}</span><a href="${telHref}" data-phone-tap="1">${escapeHtml(formatTel(input.company.phone))}</a></div>`
       : "") +

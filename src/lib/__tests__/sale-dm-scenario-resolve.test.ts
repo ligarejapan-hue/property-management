@@ -37,8 +37,31 @@ describe("resolveScenario(設計 §3.2)", () => {
     expect(resolveScenario({ propertyScenarioId: null, introductionRoute: "other", propertyType: null, defaultScenarioId: "x", scenarios: [inh, vac, S("x", null, false)] }))
       .toEqual({ ok: false, reason: "no_default" });
   });
-  it("自動の対応表は2つだけ", () => {
-    expect(AUTO_KEY_BY_ROUTE).toEqual({ reception_csv: "inheritance", field_survey: "vacant" });
+  it("自動の対応表は2つだけ(現地調査は 古い家→空き家 の順・2026-11-08)", () => {
+    expect(AUTO_KEY_BY_ROUTE).toEqual({ reception_csv: ["inheritance"], field_survey: ["old_house", "vacant"] });
+  });
+});
+
+describe("resolveScenario: 現地調査は古い家へ(2026-11-08 発注者決定)", () => {
+  const old = S("old", "old_house"), vac = S("vac", "vacant"), area = S("area", null);
+  const base = { propertyScenarioId: null, introductionRoute: "field_survey", propertyType: null, defaultScenarioId: "area" } as const;
+
+  it("古い家があれば古い家", () => {
+    expect(resolveScenario({ ...base, scenarios: [old, vac, area] })).toEqual({ ok: true, scenarioId: "old", via: "auto" });
+  });
+  it("古い家が「使わない」「削除済み」「台帳に無い」なら空き家", () => {
+    for (const scenarios of [[S("old", "old_house", false), vac, area], [S("old", "old_house", true, true), vac, area], [vac, area]]) {
+      expect(resolveScenario({ ...base, scenarios })).toEqual({ ok: true, scenarioId: "vac", via: "auto" });
+    }
+  });
+  it("古い家も空き家も使えなければ既定", () => {
+    expect(resolveScenario({ ...base, scenarios: [S("old", "old_house", false), S("vac", "vacant", false), area] })).toEqual({ ok: true, scenarioId: "area", via: "default" });
+  });
+  it("物件の欄で選んだ空き家が古い家より先", () => {
+    expect(resolveScenario({ ...base, propertyScenarioId: "vac", scenarios: [old, vac, area] })).toEqual({ ok: true, scenarioId: "vac", via: "property" });
+  });
+  it("受付帳取込は古い家があっても相続のまま", () => {
+    expect(resolveScenario({ ...base, introductionRoute: "reception_csv", scenarios: [old, vac, S("inh", "inheritance"), area] })).toEqual({ ok: true, scenarioId: "inh", via: "auto" });
   });
 });
 

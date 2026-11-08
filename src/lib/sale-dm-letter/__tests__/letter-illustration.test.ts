@@ -12,6 +12,7 @@ const base = {
   recipientAddress: "東京都世田谷区桜丘",
   senderName: "テスト不動産",
   senderContact: "03-0000-0000",
+  tagline: "相続・不動産のご相談窓口",
   trackingToken: "t1",
 };
 

@@ -18,6 +18,7 @@ const base: LetterRenderInput = {
   recipientAddress: "東京都〇〇区△△1-2-3",
   senderName: "△△不動産",
   senderContact: "000-000-0000",
+  tagline: "空き家・不動産のご相談窓口",
   trackingToken: "tok_abc",
 };
 
@@ -121,9 +122,19 @@ describe("renderLetterHtml の紙面", () => {
   it("上の帯: 差出人名+添え書き+「査定・ご相談 無料」の札", () => {
     const head = between(html, 'class="letter-masthead"', 'class="letter-addr-block"');
     expect(head).toContain("△△不動産");
-    expect(head).toContain(LETTER_FIXED_TEXT.tagline);
+    expect(head).toContain(base.tagline);
     expect(head).toContain(LETTER_FIXED_TEXT.badge);
     expect(head).toContain(`<b>${LETTER_FIXED_TEXT.badgeStrong}</b>`);
+  });
+
+  it("添え書きは種類ごと(2026-11-08): 上の帯と署名の下の2か所に同じ字・エスケープする", () => {
+    const sign = between(html, 'class="letter-sign"', 'class="letter-contact"');
+    expect(sign).toContain(base.tagline);
+    expect(html.split(base.tagline).length - 1).toBe(2);
+    const other = renderLetterHtml({ ...base, tagline: "相続・不動産のご相談窓口" });
+    expect(other.split("相続・不動産のご相談窓口").length - 1).toBe(2);
+    expect(other).not.toContain(base.tagline);
+    expect(renderLetterHtml({ ...base, tagline: "<b>x</b>" })).toContain("&lt;b&gt;x&lt;/b&gt;");
   });
 
   it("本文: 最初の段落=キャッチ / ・=困りごと(✓の li) / なお=ご参考 / 追伸", () => {

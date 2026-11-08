@@ -10,6 +10,8 @@ export interface LetterRenderInput {
   recipientAddress: string | null;
   senderName: string;
   senderContact: string;
+  // 社名の横・署名の下の添え書き。DMの種類ごと(taglineForAutoKey・2026-11-08)。ご案内ページと同じ字にするため必須。
+  tagline: string;
   trackingToken: string; // 宛先固有の opaque トークン(slot の data 属性に出す)。
   // 問い合わせ枠の右側(無料査定QR)に差し込む HTML 断片(renderTrackingSlotHtml の出力=QR+短縮URL)。
   // 呼び出し側(印刷route)が確定済み draft から生成して渡す。未指定なら枠は空。

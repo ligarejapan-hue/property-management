@@ -93,6 +93,7 @@ const input = (over: Partial<LpRenderInput> = {}): LpRenderInput => ({
   faq: [{ q: "古くて傷んでいる家でも売れますか？", a: "はい。" }],
   hero: null,
   company: { name: "株式会社リガーレ", contact: "TEL 03-6823-2760", phone: "0368232760" },
+  tagline: "相続・不動産のご相談窓口",
   unsubscribeUrl: null,
   phoneTapToken: null,
   form: { action: "/t/x/inquiry", privacyText: "同意文", disabled: false },

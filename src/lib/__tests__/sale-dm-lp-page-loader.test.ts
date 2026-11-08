@@ -41,6 +41,21 @@ describe("loadLpPageData", () => {
     expect(r.kind === "page" && r.html.includes("プレビュー") && !r.html.includes("sendBeacon") && !r.html.includes("fetch(f.action")).toBe(true);
     expect(r.kind === "page" && (r.html.match(/<script/g) ?? []).length).toBe(2); // 固定バー+動き(計測・送信の script は無い・2026-10-19)
   });
+  it("添え書きは届いた手紙の型の種類(手紙の型が無いときだけ LP型の種類)・どちらも無ければ住まい(2026-11-08)", async () => {
+    const page = async (over: Record<string, unknown>) => {
+      const r = await loadLpPageData(client(draft(over)) as never, "tok");
+      return r.kind === "page" ? r.html : "";
+    };
+    const lp = (autoKey: string | null) => ({ scenario: autoKey === null ? null : { autoKey }, headline: "見出し", lead: null, bodyText: "■A\nx", faqJson: null, media: [] });
+    expect(await page({ variant: { scenario: { autoKey: "vacant" } }, lpVariant: lp("inheritance") })).toContain("<small>空き家・不動産のご相談窓口</small>");
+    // 種類なしの手紙(「住まい」と刷られる)は、LP型に種類があってもページも「住まい」。
+    expect(await page({ variant: { scenario: null }, lpVariant: lp("inheritance") })).toContain("<small>住まい・不動産のご相談窓口</small>");
+    expect(await page({ variant: null, lpVariant: lp("inheritance") })).toContain("<small>相続・不動産のご相談窓口</small>");
+    expect(await page({ variant: { scenario: null }, lpVariant: lp(null) })).toContain("<small>住まい・不動産のご相談窓口</small>");
+    const c = client(draft());
+    await loadLpPageData(c as never, "tok");
+    expect(JSON.stringify(findUniqueArg(c))).toMatch(/"variant":{"select":{"scenario":{"select":{"autoKey":true}}}}/);
+  });
   it("未知 token・LP型なし・文章未保存は none", async () => {
     expect((await loadLpPageData(client(null) as never, "tok")).kind).toBe("none");
     expect((await loadLpPageData(client(draft({ lpVariant: null })) as never, "tok")).kind).toBe("none");

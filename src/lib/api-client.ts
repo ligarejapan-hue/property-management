@@ -328,6 +328,8 @@ export interface SaleDmVariant {
   scenarioId: string | null;
   // 手紙のイラスト(種類から写した型だけ・見本用)。src は /lp-assets/<publicId>。
   illustration?: { src: string; width: number; height: number } | null;
+  // 社名の横の添え書き(種類ごと・2026-11-08)。見本用。
+  tagline?: string;
 }
 
 export interface SaleDmLpVariantOptions {

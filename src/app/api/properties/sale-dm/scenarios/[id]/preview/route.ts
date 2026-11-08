@@ -43,6 +43,7 @@ export async function GET(request: NextRequest, { params }: { params: Promise<{ 
     const s = await prisma.dmScenario.findFirst({
       where: { id, deletedAt: null },
       select: {
+        autoKey: true,
         lpHeadline: true,
         lpLead: true,
         lpBodyText: true,
@@ -65,6 +66,7 @@ export async function GET(request: NextRequest, { params }: { params: Promise<{ 
         media: s.media,
         property: { address: null, propertyType: null },
         company: { senderName: cfg.senderName, senderContact: cfg.senderContact },
+        scenario: { autoKey: s.autoKey },
       },
       { mode: "preview", unsubscribeUrl: null, phoneTapToken: null, form: { action: "#", privacyText: cfg.privacyText ?? DEFAULT_PRIVACY_TEXT, disabled: true } },
     ));

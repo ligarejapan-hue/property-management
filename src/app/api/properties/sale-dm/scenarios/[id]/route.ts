@@ -107,7 +107,7 @@ export async function PATCH(request: Request, { params }: Ctx) {
 
 /**
  * DMの種類の削除(論理削除。設計 §3.1)。参照(物件/発送の既定/型)があれば 409、
- * auto_key の行(相続・空き家)は消せない(409)。物理 DELETE は使わない
+ * auto_key の行(相続・相続（マンション）・空き家・古い家)は消せない(409)。物理 DELETE は使わない
  * (RESTRICT の参照検査が物件行を読み、物件の保存と逆向きに待ち合うのを避ける)。
  */
 export async function DELETE(_req: Request, { params }: Ctx) {
