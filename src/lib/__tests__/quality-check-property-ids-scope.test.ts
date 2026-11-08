@@ -93,6 +93,7 @@ type Where = Record<string, unknown>;
 // 各ルール where の識別（properties-quality-check-route.test.ts と同方式）。
 function ruleCode(where: Where): string {
   if (where.propertyOwners) return "NO_OWNER";
+  if (where.registryOwnerCheck) return where.dmStatus === "send" ? "REGISTRY_OWNER_MISMATCH_DM_SEND" : "REGISTRY_OWNER_MISMATCH";
   if (where.registryStatus) return "REGISTRY_DM_MISMATCH";
   if (Array.isArray(where.OR) && !("propertyOwners" in (where.OR[0] as object))) {
     const firstKey = Object.keys(where.OR[0] as object)[0];
@@ -139,8 +140,8 @@ describe("quality-check scoped モード（?propertyIds=）", () => {
     expect(res.status).toBe(200);
     const body = await res.json();
 
-    // 5 ルールぶんの findMany すべてに id:{in:[UUID1,UUID2]} と isArchived:false、take なし
-    expect(pm.property.findMany).toHaveBeenCalledTimes(5);
+    // 7 ルールぶんの findMany すべてに id:{in:[UUID1,UUID2]} と isArchived:false、take なし
+    expect(pm.property.findMany).toHaveBeenCalledTimes(7);
     for (const call of pm.property.findMany.mock.calls) {
       const args = call[0] as { where: Where; take?: number; select: Where };
       expect(args.where.id).toEqual({ in: [UUID1, UUID2] });
@@ -154,12 +155,14 @@ describe("quality-check scoped モード（?propertyIds=）", () => {
     const countWhere = pm.property.count.mock.calls[0][0].where as Where;
     expect(countWhere.isArchived).toBe(false);
     const orList = countWhere.OR as Where[];
-    expect(orList).toHaveLength(4); // error/warning の 4 ルールのみ
+    expect(orList).toHaveLength(6); // error/warning の 6 ルールのみ
     const orCodes = orList.map((w) => ruleCode(w));
     expect(orCodes).toEqual(
       expect.arrayContaining([
         "NO_OWNER",
         "REGISTRY_DM_MISMATCH",
+        "REGISTRY_OWNER_MISMATCH_DM_SEND",
+        "REGISTRY_OWNER_MISMATCH",
         "INVESTIGATION_NOT_CONFIRMED",
         "NO_ASSIGNEE",
       ]),
@@ -177,7 +180,7 @@ describe("quality-check scoped モード（?propertyIds=）", () => {
     expect(body.summary.issuesLimited).toBe(false);
     expect(body.summary.propertiesChecked).toBe(2);
     // rules は全ルール hasMore=false / totalCount=実数
-    expect(body.rules).toHaveLength(5);
+    expect(body.rules).toHaveLength(7);
     for (const meta of body.rules) {
       expect(meta.hasMore).toBe(false);
       expect(meta.nextOffset).toBeNull();
@@ -195,7 +198,7 @@ describe("quality-check scoped モード（?propertyIds=）", () => {
         "?propertyIds=" + encodeURIComponent(` ${UUID1} , ,${UUID2},${UUID1},`),
       ),
     );
-    expect(pm.property.findMany).toHaveBeenCalledTimes(5);
+    expect(pm.property.findMany).toHaveBeenCalledTimes(7);
     const args = pm.property.findMany.mock.calls[0][0] as { where: Where };
     expect(args.where.id).toEqual({ in: [UUID1, UUID2] });
   });
@@ -255,7 +258,7 @@ describe("quality-check scoped モード（?propertyIds=）", () => {
     const upper = UUID1.toUpperCase();
     const res = await GET(makeRequest(`?propertyIds=${upper}`));
     expect(res.status).toBe(200);
-    expect(pm.property.findMany).toHaveBeenCalledTimes(5);
+    expect(pm.property.findMany).toHaveBeenCalledTimes(7);
     const args = pm.property.findMany.mock.calls[0][0] as { where: Where };
     expect(args.where.id).toEqual({ in: [upper] });
   });
@@ -291,7 +294,7 @@ describe("quality-check scoped モード — ロール別可視範囲（Codex P1
     expect(body.warningPropertiesTotal).toBe(3);
     const countWhere = pm.property.count.mock.calls[0][0].where as Where;
     expect(countWhere.isArchived).toBe(false);
-    expect((countWhere.OR as Where[]).length).toBe(4); // 警告述語は従来どおり
+    expect((countWhere.OR as Where[]).length).toBe(6); // 警告述語(error/warning の決まり)
     expect(countWhere.AND).toEqual([FS_SCOPE]); // 可視範囲スコープが追加
   });
 
@@ -299,7 +302,7 @@ describe("quality-check scoped モード — ロール別可視範囲（Codex P1
     vi.mocked(getApiSession).mockResolvedValue(FS_SESSION as never);
     pm.property.count.mockResolvedValue(0);
     await GET(makeRequest(`?propertyIds=${UUID1},${UUID2}`));
-    expect(pm.property.findMany).toHaveBeenCalledTimes(5);
+    expect(pm.property.findMany).toHaveBeenCalledTimes(7);
     for (const call of pm.property.findMany.mock.calls) {
       const where = (call[0] as { where: Where }).where;
       expect(where.id).toEqual({ in: [UUID1, UUID2] });
@@ -314,7 +317,7 @@ describe("quality-check scoped モード — ロール別可視範囲（Codex P1
     await GET(makeRequest(`?propertyIds=${UUID1}`));
     const countWhere = pm.property.count.mock.calls[0][0].where as Where;
     expect(countWhere.AND).toBeUndefined();
-    expect(pm.property.findMany).toHaveBeenCalledTimes(5);
+    expect(pm.property.findMany).toHaveBeenCalledTimes(7);
     for (const call of pm.property.findMany.mock.calls) {
       expect((call[0] as { where: Where }).where.AND).toBeUndefined();
     }
@@ -354,13 +357,13 @@ describe("quality-check scoped モード — モード優先・既定回帰・�
 
   it("既定モード（propertyIds なし）は where に id が入らない（回帰防止）", async () => {
     await GET(makeRequest(""));
-    expect(pm.property.findMany).toHaveBeenCalledTimes(5);
+    expect(pm.property.findMany).toHaveBeenCalledTimes(7);
     for (const call of pm.property.findMany.mock.calls) {
       const args = call[0] as { where: Where; take?: number };
       expect(args.where.id).toBeUndefined();
       expect(args.take).toBe(1000); // 既定モードは従来どおり take あり
     }
-    expect(pm.property.count).toHaveBeenCalledTimes(6); // NOT_ARCHIVED + 5 ルール
+    expect(pm.property.count).toHaveBeenCalledTimes(9); // NOT_ARCHIVED + 比べ直し待ち + 7 ルール
   });
 
   it("property:read 欠如 → 403・DB 未実行（scoped モード）", async () => {

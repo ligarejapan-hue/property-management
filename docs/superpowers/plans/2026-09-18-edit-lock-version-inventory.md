@@ -95,7 +95,7 @@ Task 7 が直した「謄本取込が所有者の法人番号を版番号を進�
 | `src/lib/registry-pdf/process.ts:191` | `owner.corporateNumber`(Task 7 で修正済) |
 | `src/lib/registry-pdf/process.ts:682` | `property.registryStatus`/`realEstateNumber`/`lotNumber`/`buildingNumber` |
 | `src/lib/registry-pdf/fill-areas.ts:62` | (2026-10-25 謄本から面積)`property.exclusiveAreaRegistry`/`landArea`/`landAreaMethod`/`totalFloorArea` の空欄補完(物件の画面の添付・一括取込・物件を指定しない取込から) |
-| `src/lib/registry-owner-check/service.ts:187` | (2026-11-08 謄本の名義の確認)`property.dmStatus` を未判断→送付可に戻す(このままでよい・謄本の名義に直すで選んだとき) |
+| `src/lib/registry-owner-check/service.ts:267` | (2026-11-08 謄本の名義の確認)`property.dmStatus` を未判断→送付可に戻す(このままでよい・謄本の名義に直すで選んだとき) |
 
 合計: 要修正11 + 対象外15 + 対応済28 = **54件**(全件解決・unresolved行なし)。
 

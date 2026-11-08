@@ -1456,6 +1456,10 @@ export async function fetchQualityCheck(params?: {
     summary?: unknown;
     rules?: QualityRuleMeta[];
     warningPropertiesTotal?: number;
+    /** 謄本の名義の比べ直し待ち(情報・既定のモードだけ) */
+    registryOwnerCheckPending?: number;
+    /** 謄本の名義の確認の画面を開けるか(リンクを出すか) */
+    canOpenRegistryOwnerReview?: boolean;
   }>(`/api/properties/quality-check${suffix}`);
 }
 

@@ -41,7 +41,11 @@ vi.mock("@/lib/storage", async (importOriginal) => {
     ...actual,
     getStorage: () => ({
       keyFromUrl: (u: string) => u,
-      read: async (key: string) => (TEXTS.has(key) ? { body: Buffer.from(key) } : null),
+      read: async (key: string) => {
+        // 思わぬ失敗(保存場所の故障など)の作り物
+        if (key.includes("/broken/")) throw new Error("storage down");
+        return TEXTS.has(key) ? { body: Buffer.from(key) } : null;
+      },
     }),
   };
 });
@@ -56,8 +60,11 @@ import {
   keepRegistryOwners,
   recordCheckAfterReplace,
   restoreDmSendIfHold,
+  runNightlyRegistryOwnerChecks,
   runRegistryOwnerChecks,
+  NIGHTLY_REGISTRY_OWNER_CHECK,
 } from "@/lib/registry-owner-check/service";
+import { QUALITY_RULES, qualityWarningWhere } from "@/lib/quality-check-rules";
 import { replaceRegistryOwnersOnProperty } from "@/lib/registry-owner-apply/apply";
 
 const failures: string[] = [];
@@ -375,6 +382,86 @@ async function main() {
     });
     await renamePromise;
     check("7b 変更のあとは比べ直し待ちに戻る", renamed && (await row(p))?.stale === true);
+  }
+
+  // ---- 8. 思わぬ失敗の物件は「読めない」で残し、次の回に同じ物件を読み直さない ----
+  await reset();
+  {
+    const u = await user();
+    const bad = await property(u);
+    await link(bad, await owner("佐藤一郎"));
+    const a = await prisma.attachment.create({
+      data: {
+        targetType: "property", targetId: bad, propertyId: bad, type: "registry", registryCertificateType: "owner",
+        fileName: "x.pdf", fileUrl: `/uploads/broken/${randomUUID()}.pdf`, fileSize: 1, mimeType: "application/pdf", uploadedBy: u,
+      },
+    });
+    void a;
+    const r1 = await runRegistryOwnerChecks(50);
+    const r2 = await runRegistryOwnerChecks(50);
+    check("8a 失敗は数え、読めないで残す", r1.failed === 1 && (await row(bad))?.result === "unreadable" && (await row(bad))?.stale === false, r1);
+    check("8b 2回目は対象にならない(先へ進む)", r2.processed === 0, r2);
+  }
+
+  // ---- 9. 夜の自動の比べ: 日本時間 2〜5時だけ・1回の上限・1晩の上限 ----
+  await reset();
+  {
+    const u = await user();
+    const ids: string[] = [];
+    for (let i = 0; i < NIGHTLY_REGISTRY_OWNER_CHECK.perTick + 5; i++) {
+      const p = await property(u);
+      await link(p, await owner("佐藤一郎"));
+      await registry(p, u, [{ name: "佐藤一郎" }]);
+      ids.push(p);
+    }
+    // 日本時間 1:59(=UTC 16:59)は動かない、3:00(=UTC 18:00)は動く
+    const before = await runNightlyRegistryOwnerChecks(new Date(Date.UTC(2026, 10, 8, 16, 59)));
+    check("9a 枠の外は動かない", "skipped" in before && before.skipped === "outside_window", before);
+    const afterWindow = await runNightlyRegistryOwnerChecks(new Date(Date.UTC(2026, 10, 8, 20, 0)));
+    check("9b 5時を過ぎたら動かない", "skipped" in afterWindow && afterWindow.skipped === "outside_window", afterWindow);
+    // 夜の枠の中の時刻=「今」より前の夜(日本時間)の 3:00。比べた件数は checked_at>=その夜の2:00 で数える
+    // (今比べた行は必ずその夜の2:00より後=数えに入る)。
+    const jstNow = new Date(Date.now() + 9 * 3600_000);
+    let night3 = Date.UTC(jstNow.getUTCFullYear(), jstNow.getUTCMonth(), jstNow.getUTCDate(), 3) - 9 * 3600_000;
+    if (night3 > Date.now()) night3 -= 24 * 3600_000;
+    const t1 = await runNightlyRegistryOwnerChecks(new Date(night3));
+    check("9c 1回は perTick 件まで", "processed" in t1 && t1.processed === NIGHTLY_REGISTRY_OWNER_CHECK.perTick && t1.counts.same === NIGHTLY_REGISTRY_OWNER_CHECK.perTick, t1);
+    const t2 = await runNightlyRegistryOwnerChecks(new Date(night3), { perNight: NIGHTLY_REGISTRY_OWNER_CHECK.perTick + 2 });
+    check("9d 1晩の上限までの残りだけ比べる", "processed" in t2 && t2.processed === 2 && t2.doneTonight === NIGHTLY_REGISTRY_OWNER_CHECK.perTick + 2, t2);
+    const t3 = await runNightlyRegistryOwnerChecks(new Date(night3), { perNight: NIGHTLY_REGISTRY_OWNER_CHECK.perTick + 2 });
+    check("9e 上限に達したらその夜はもう動かない", "skipped" in t3 && t3.skipped === "nightly_cap", t3);
+    const t4 = await runNightlyRegistryOwnerChecks(new Date(night3), { deadline: Date.now() - 1 });
+    check("9f 持ち時間が無ければ始めない", "skipped" in t4 && t4.skipped === "no_time", t4);
+    void ids;
+  }
+
+  // ---- 10. 品質チェックの警告: 取得済+違う+未判断+比べ直し待ちでない だけ・DM で重さが分かれる ----
+  await reset();
+  {
+    const u = await user();
+    const send = await property(u, "send");
+    const hold = await property(u, "hold");
+    const kept = await property(u, "send");
+    const staleP = await property(u, "send");
+    for (const p of [send, hold, kept, staleP]) {
+      await link(p, await owner("佐藤一郎"));
+      await registry(p, u, [{ name: "鈴木一郎" }]);
+      await checkPropertyRegistryOwners(p);
+    }
+    await prisma.registryOwnerCheck.update({ where: { propertyId: kept }, data: { decision: "keep" } });
+    await prisma.registryOwnerCheck.update({ where: { propertyId: staleP }, data: { stale: true } });
+    const ruleIds = async (code: string) => {
+      const rule = QUALITY_RULES.find((r) => r.code === code)!;
+      return (await prisma.property.findMany({ where: { isArchived: false, ...rule.where }, select: { id: true } })).map((p) => p.id);
+    };
+    const err = await ruleIds("REGISTRY_OWNER_MISMATCH_DM_SEND");
+    const warn = await ruleIds("REGISTRY_OWNER_MISMATCH");
+    check("10a DM 送付可はエラーの決まりだけ", JSON.stringify(err) === JSON.stringify([send]), err);
+    check("10b 保留は警告の決まりだけ", JSON.stringify(warn) === JSON.stringify([hold]), warn);
+    const warnAll = (await prisma.property.findMany({ where: { isArchived: false, ...qualityWarningWhere() }, select: { id: true } })).map((p) => p.id);
+    check("10c 警告ありのみにも入る(同じ定義)", warnAll.includes(send) && warnAll.includes(hold), warnAll);
+    await prisma.property.update({ where: { id: hold }, data: { registryStatus: "unconfirmed" } });
+    check("10d 登記が取得済でなければ出さない", (await ruleIds("REGISTRY_OWNER_MISMATCH")).length === 0);
   }
 }
 

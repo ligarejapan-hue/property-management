@@ -63,6 +63,7 @@ import { takeBuildingLinkNotice } from "@/lib/building-link/notice";
 import type { BuildingLinkOutcome } from "@/lib/building-link/apply";
 import InvestigationTab from "@/components/properties/investigation-tab";
 import { fetchPropertyDetail, deleteProperty, updatePropertyOwner, unlinkPropertyOwner, updateOwner, fetchQualityCheck, apiErrorCode, codeFromErrorBody, type EditLockStatusRow } from "@/lib/api-client";
+import { REGISTRY_OWNER_MISMATCH_CODES, REGISTRY_OWNER_REVIEW_HREF } from "@/lib/quality-check-rules";
 // 編集中の鍵(仕様 6.1・6.2)。所有者カードは1枚ごとに別資源として鍵を持つ(Task 6)。
 // ⚠複製タブ確認(ensureUniqueScreenToken・最大300ms)はこの画面(親)で1回だけ済ませ、
 //   結果(tokenReady)を各カードへ配る——カードごとに待たせない(下の PropertyDetailPage 内)。
@@ -417,8 +418,9 @@ export default function PropertyDetailPage({
 
   // 品質警告 (§8-6): 一覧と同じ fetchQualityCheck の scoped モードで当該物件分のみ取得。
   // severity=info は対象外。取得失敗時はセクション非表示（fail-safe: 詳細全体を壊さない）。
+  // reviewLink=謄本の名義と違う警告で、確認の画面を開ける人だけ true(2026-11-08)。
   const [qualityIssues, setQualityIssues] = useState<
-    Array<{ severity: "error" | "warning"; message: string }>
+    Array<{ severity: "error" | "warning"; message: string; reviewLink?: boolean }>
   >([]);
 
   const handleDelete = async () => {
@@ -458,21 +460,26 @@ export default function PropertyDetailPage({
     try {
       const json = await fetchQualityCheck({ propertyIds: [id] });
       if (seq !== qualityReqSeq.current) return; // 後発リクエストが来ていたら破棄（後着勝ち）
-      const data = (
-        json as {
-          data?: Array<{
-            propertyId: string;
-            severity: "error" | "warning" | "info";
-            message: string;
-          }>;
-        }
-      ).data ?? [];
+      const typed = json as {
+        data?: Array<{
+          propertyId: string;
+          severity: "error" | "warning" | "info";
+          code?: string;
+          message: string;
+        }>;
+        canOpenRegistryOwnerReview?: boolean;
+      };
+      const data = typed.data ?? [];
       setQualityIssues(
         data
           .filter((i) => i.severity !== "info")
           .map((i) => ({
             severity: i.severity as "error" | "warning",
             message: i.message,
+            reviewLink:
+              typed.canOpenRegistryOwnerReview === true &&
+              !!i.code &&
+              REGISTRY_OWNER_MISMATCH_CODES.has(i.code),
           })),
       );
     } catch {
@@ -1103,7 +1110,14 @@ export default function PropertyDetailPage({
                     : "text-amber-500 dark:text-amber-400"
                 }`}
               />
-              <span>{issue.message}</span>
+              <span>
+                {issue.message}
+                {issue.reviewLink ? (
+                  <Link href={REGISTRY_OWNER_REVIEW_HREF} className="ml-2 text-xs underline">
+                    謄本の名義の確認を開く
+                  </Link>
+                ) : null}
+              </span>
             </div>
           ))}
         </div>
