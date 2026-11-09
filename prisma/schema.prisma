@@ -552,6 +552,10 @@ model RegistryOwnerCheck {
   /// 比べたあとに所有者・謄本が変わった=比べ直しが要る(トリガーが立てる)。
   stale        Boolean   @default(false)
   checkedAt    DateTime  @default(now()) @map("checked_at")
+  /// 違い(mismatch)のときの種類の記号と人数だけ(例 "kanji,count:3:2")。氏名・字は入れない。
+  diffKind     String?   @map("diff_kind")
+  /// 一覧で種類の順に並べる値(一番重い種類)。
+  diffRank     Int?      @map("diff_rank") @db.SmallInt
 
   property Property @relation(fields: [propertyId], references: [id], onDelete: Cascade)
   decider  User?    @relation("RegistryOwnerCheckDecidedBy", fields: [decidedBy], references: [id])

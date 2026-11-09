@@ -22,6 +22,7 @@ import {
   countPendingRegistryOwnerChecks,
   REGISTRY_OWNER_CHECK_RUN_MAX,
 } from "@/lib/registry-owner-check/service";
+import { ownerDiffLabelFromStored } from "@/lib/registry-owner-check/diff";
 import type { Prisma } from "@/generated/prisma";
 
 const PAGE_SIZE = 50;
@@ -36,6 +37,8 @@ export async function GET(request: Request) {
     const { searchParams } = new URL(request.url);
     const rawOffset = Number(searchParams.get("offset"));
     const offset = Number.isFinite(rawOffset) && rawOffset > 0 ? Math.floor(rawOffset) : 0;
+    // 違いの種類の順(漢字の違い → … → 別の人・種類がまだ無い行は最後)か、今までの順
+    const sortByKind = searchParams.get("sort") === "kind";
 
     const scope = propertyVisibilityScopeWhere(session);
     const where: Prisma.RegistryOwnerCheckWhereInput = {
@@ -51,9 +54,12 @@ export async function GET(request: Request) {
         select: {
           propertyId: true,
           checkedAt: true,
+          diffKind: true,
           property: { select: { address: true, dmStatus: true } },
         },
-        orderBy: { propertyId: "asc" },
+        orderBy: sortByKind
+          ? [{ diffRank: { sort: "asc", nulls: "last" } }, { propertyId: "asc" }]
+          : { propertyId: "asc" },
         skip: offset,
         take: PAGE_SIZE,
       }),
@@ -69,7 +75,10 @@ export async function GET(request: Request) {
         address: r.property.address,
         dmStatus: r.property.dmStatus,
         checkedAt: r.checkedAt,
+        // 種類の文言だけ(名前・字は保存していない)。種類を残す前に比べた行は null
+        diffKind: ownerDiffLabelFromStored(r.diffKind),
       })),
+      sort: sortByKind ? "kind" : "default",
       total,
       offset,
       pageSize: PAGE_SIZE,

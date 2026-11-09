@@ -511,6 +511,35 @@ async function main() {
     const after = await row(slow);
     check("11b 時間切れは失敗と数え、読めないにしない・前の結果(違う)は残す", r.failed === 1 && after?.stale === true && after?.result === "mismatch", { r, after });
   }
+
+  // ---- 12. 違いの種類(2026-11-09): 違うときだけ記号と人数を残す・種類の無い「違う」は比べ直す ----
+  await reset();
+  {
+    const u = await user();
+    const diff = await property(u);
+    await link(diff, await owner("高橋一郎"));
+    await registry(diff, u, [{ name: "髙橋一郎" }, { name: "髙橋次郎" }]);
+    const same = await property(u);
+    await link(same, await owner("山田太郎"));
+    await registry(same, u, [{ name: "山田太郎" }]);
+    await runRegistryOwnerChecks(50);
+    const d = await row(diff);
+    check("12a 違うときは種類の記号と人数だけ", d?.result === "mismatch" && d?.diffKind === "kanji,count:2:1" && d?.diffRank === 4, d);
+    const s = await row(same);
+    check("12b 同じなら種類は空", s?.result === "same" && s?.diffKind === null && s?.diffRank === null, s);
+
+    // 種類を残す前に比べた「違う」の行(=今ある行)は、比べ直し待ちに数え、比べ直すと埋まる
+    await prisma.registryOwnerCheck.update({ where: { propertyId: diff }, data: { diffKind: null, diffRank: null } });
+    const kept = await property(u);
+    await link(kept, await owner("佐藤一郎"));
+    await registry(kept, u, [{ name: "鈴木一郎" }]);
+    await checkPropertyRegistryOwners(kept);
+    await prisma.registryOwnerCheck.update({ where: { propertyId: kept }, data: { diffKind: null, diffRank: null, decision: "keep" } });
+    const r = await runRegistryOwnerChecks(50);
+    check("12c 種類の無い未判断の「違う」だけを比べ直す(判断済みは比べない)", r.processed === 1 && r.counts.mismatch === 1 && r.remaining === 0, r);
+    check("12d 比べ直すと種類が埋まる", (await row(diff))?.diffKind === "kanji,count:2:1");
+    check("12e 判断済みの行はそのまま", (await row(kept))?.diffKind === null && (await row(kept))?.decision === "keep");
+  }
 }
 
 describe.skipIf(!process.env.PUSH_DB_TEST_URL)("謄本の名義の確認(本物の Postgres)", () => {
