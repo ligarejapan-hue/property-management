@@ -101,7 +101,7 @@ export async function GET(
       if (terminalCount > 0) {
         throw new ApiError(
           409,
-          `拒否・宛先不明が記録された宛先が ${terminalCount} 件含まれています(その方の別物件での記録も含みます)。宛先を作り直してから出力してください`,
+          `拒否・宛先不明が記録された宛先、または所有者が業者と同じ名前の宛先が ${terminalCount} 件含まれています(その方の別物件での記録も含みます)。宛先を作り直してから出力してください`,
           "TERMINAL_RECIPIENTS",
         );
       }

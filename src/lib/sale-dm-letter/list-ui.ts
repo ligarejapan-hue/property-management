@@ -37,6 +37,8 @@ export function buildSaleDmPartialNotice(res: {
   skippedByUnlink?: number;
   // 拒否・宛先不明(terminal 反響)の記録があり自動で除外した宛先数(A=宛名CSVと同じ規則)。
   excludedTerminal?: number;
+  // 所有者が業者(名簿・国交省の一覧)と同じ名前で自動で除外した宛先数(住所に関係なく・2026-11-09)。
+  excludedAgentName?: number;
   // 種類つきの発送: 本文を差し込めなかった宛先数(住所・種別が読めない物件)と、LPが未登録の種類名。
   blankBodyCount?: number;
   lpMissingScenarios?: string[];
@@ -50,6 +52,11 @@ export function buildSaleDmPartialNotice(res: {
   if ((res.excludedTerminal ?? 0) > 0) {
     lines.push(
       `拒否・宛先不明の反響が付いた ${res.excludedTerminal} 件の宛先は自動で除外しました(その方が別の物件で断られた記録も含みます)。`,
+    );
+  }
+  if ((res.excludedAgentName ?? 0) > 0) {
+    lines.push(
+      `所有者が業者(業者の名簿・国交省の業者一覧)と同じ名前の ${res.excludedAgentName} 件の宛先は自動で除外しました。`,
     );
   }
   if ((res.excluded ?? 0) > 0) {

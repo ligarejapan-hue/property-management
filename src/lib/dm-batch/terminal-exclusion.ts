@@ -21,9 +21,14 @@
  *  3. 対象(draft 等)を事前読取している場合は**ロック取得後に読み直して**所有者集合を
  *     検証する(所有者統合が連関を master へ付け替えると、古いIDだけの照会になる)。
  *  4. 出力(CSV/HTML)の実体化・状態遷移まで**ロックを保持したまま**行う。
+ *
+ * 2026-11-09: **業者と同じ名前の所有者**も同じ集合で外す(agent-name-exclusion.ts・発注者指示)。
+ * 拒否・宛先不明と同じ所の全経路(宛名CSV・売却DM の作成/表示/確定/印刷/CSV/送付済み)に効かせるため、
+ * 判定はこのモジュールの `isTerminalExcluded` に入れた。理由ごとの件数は `dmExclusionReason` で分ける。
  */
 
 import { TERMINAL_REACTIONS } from "@/lib/dm-reaction/core";
+import { findAgentNameOwnerIds, type AgentNameExclusionTx } from "@/lib/dm-batch/agent-name-exclusion";
 
 // ⚠集合の正本は dm-reaction/core.ts(書き込み側=Owner FOR UPDATE の要否を決める側)。
 // 提出前レビューで「このファイルが2つ目の定義になっている」ことを指摘された。
@@ -34,7 +39,12 @@ export interface TerminalExclusionSets {
   ownerIds: Set<string>;
   /** 所有者に紐づかない terminal を持つ物件(物件単位で除外)。 */
   propertyIds: Set<string>;
+  /** 業者(名簿・国交省の一覧)と同じ名前の所有者。この所有者が絡む宛先グループは除外(住所に関係なく)。 */
+  agentOwnerIds: Set<string>;
 }
+
+/** 宛先を外す理由(件数を分けて見せるため)。拒否・宛先不明を先に見る。 */
+export type DmExclusionReason = "terminal" | "agent_name";
 
 interface TerminalLogRow {
   ownerId: string | null;
@@ -43,7 +53,7 @@ interface TerminalLogRow {
 }
 
 /** tx に要求する最小の形(実 Prisma tx / route テストの mock の両方が満たす)。 */
-export interface TerminalExclusionTx {
+export interface TerminalExclusionTx extends AgentNameExclusionTx {
   propertyDmLog: {
     findMany(args: {
       where: {
@@ -62,14 +72,14 @@ export interface TerminalExclusionTx {
 const sortUnique = (ids: readonly string[]): string[] => [...new Set(ids)].sort();
 
 /**
- * terminal 反響から除外セットを作る。両方空なら DB を引かない(A の既存ガードを継承)。
+ * terminal 反響+業者と同じ名前から除外セットを作る。両方空なら DB を引かない(A の既存ガードを継承)。
  */
 export async function findTerminalExclusions(
   tx: TerminalExclusionTx,
   ownerIds: readonly string[],
   propertyIds: readonly string[],
 ): Promise<TerminalExclusionSets> {
-  const sets: TerminalExclusionSets = { ownerIds: new Set(), propertyIds: new Set() };
+  const sets: TerminalExclusionSets = { ownerIds: new Set(), propertyIds: new Set(), agentOwnerIds: new Set() };
   const owners = sortUnique(ownerIds);
   const properties = sortUnique(propertyIds);
   if (owners.length === 0 && properties.length === 0) return sets;
@@ -101,6 +111,7 @@ export async function findTerminalExclusions(
       sets.propertyIds.add(log.propertyId);
     }
   }
+  sets.agentOwnerIds = await findAgentNameOwnerIds(tx, owners);
   return sets;
 }
 
@@ -112,8 +123,15 @@ export function isTerminalExcluded(
   sets: TerminalExclusionSets,
   item: { propertyId: string; ownerIds: readonly string[] },
 ): boolean {
-  return (
-    item.ownerIds.some((id) => sets.ownerIds.has(id)) ||
-    sets.propertyIds.has(item.propertyId)
-  );
+  return dmExclusionReason(sets, item) !== null;
+}
+
+/** 外す理由(外さないなら null)。両方に当たるときは拒否・宛先不明を返す。 */
+export function dmExclusionReason(
+  sets: TerminalExclusionSets,
+  item: { propertyId: string; ownerIds: readonly string[] },
+): DmExclusionReason | null {
+  if (item.ownerIds.some((id) => sets.ownerIds.has(id)) || sets.propertyIds.has(item.propertyId)) return "terminal";
+  if (item.ownerIds.some((id) => sets.agentOwnerIds.has(id))) return "agent_name";
+  return null;
 }

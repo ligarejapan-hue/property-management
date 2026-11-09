@@ -15,7 +15,7 @@ vi.mock("@/lib/api-helpers", () => {
 });
 vi.mock("@/lib/audit", () => ({ writeAuditLog: vi.fn() }));
 // 下書き保存の引数(特に model)を検証するため tx 内の create を共有スパイにする。
-const { draftCreate, draftOwnerCreateMany, txPropertyOwnerFindMany, txDmLogFindMany, txCampaignUpdate } = vi.hoisted(() => ({
+const { draftCreate, draftOwnerCreateMany, txPropertyOwnerFindMany, txDmLogFindMany, txCampaignUpdate, txQueryRaw } = vi.hoisted(() => ({
   draftCreate: vi.fn(),
   draftOwnerCreateMany: vi.fn(),
   txPropertyOwnerFindMany: vi.fn(async () => [] as Array<{ propertyId: string; ownerId: string }>),
@@ -23,6 +23,8 @@ const { draftCreate, draftOwnerCreateMany, txPropertyOwnerFindMany, txDmLogFindM
   txDmLogFindMany: vi.fn(async (_args?: unknown) => [] as Array<{ ownerId: string | null; propertyId: string | null; logOwners: { ownerId: string }[] }>),
   // ready 更新(結果メタ __result の保存先)を検証するため共有スパイに。
   txCampaignUpdate: vi.fn(async (_args?: unknown) => ({})),
+  // ロックの照会と、業者と同じ名前の照会(agent-name-exclusion.ts)。既定=どちらも空。
+  txQueryRaw: vi.fn(async (_q?: unknown) => [] as unknown[]),
 }));
 vi.mock("@/lib/prisma", () => ({
   default: {
@@ -36,7 +38,7 @@ vi.mock("@/lib/prisma", () => ({
       dmRecipientDraftOwner: { createMany: draftOwnerCreateMany },
       propertyOwner: { findMany: txPropertyOwnerFindMany },
       propertyDmLog: { findMany: txDmLogFindMany },
-      $queryRaw: vi.fn(async () => []),
+      $queryRaw: txQueryRaw,
     })),
   },
 }));
@@ -91,6 +93,8 @@ const validBody = { name: "テスト", confirmed: true, options: { designTemplat
 
 beforeEach(() => {
   vi.clearAllMocks();
+  // 業者と同じ名前の照会は既定=一致なし(テストで差し替えた実装を次へ持ち越さない)
+  txQueryRaw.mockImplementation(async () => []);
   process.env.NEXT_PUBLIC_USE_MOCK = "true"; // generation を mock provider + 設定済みに
   // 印刷必須URL(郵送QRの絶対URL)。未設定だと生成前に 503(印刷不能な下書きへの課金を防ぐ)。
   process.env.SALE_DM_TRACKING_BASE_URL = "https://app.example.com";
@@ -677,6 +681,38 @@ describe("POST /campaigns — 拒否・宛先不明の宛先を保存しない",
     const arg = txDmLogFindMany.mock.calls[0][0] as unknown as { where: { OR: Array<Record<string, unknown>> } };
     expect(JSON.stringify(arg.where.OR)).toContain("o1");
     expect(JSON.stringify(arg.where.OR)).toContain("pB");
+  });
+
+  it("所有者が業者と同じ名前 → その宛先は保存されず excludedAgentName に数える(住所に関係なく・2026-11-09)", async () => {
+    setup();
+    txDmLogFindMany.mockResolvedValueOnce([]);
+    txQueryRaw.mockImplementation(async (q?: unknown) =>
+      q && typeof q === "object" && "sql" in q && String((q as { sql: string }).sql).includes("mlit_agents") ? [{ id: "o2" }] : [],
+    );
+    const res = await post();
+    expect(res.status).toBe(200);
+    const json = await res.json();
+    expect(json.excludedTerminal).toBe(0);
+    expect(json.excludedAgentName).toBe(1);
+    expect(draftCreate).toHaveBeenCalledTimes(1);
+    expect(draftCreate.mock.calls[0][0].data.propertyId).toBe("pA");
+    const detail = (writeAuditLog as ReturnType<typeof vi.fn>).mock.calls[0][0].detail;
+    expect(detail.excludedAgent).toBe(1);
+    const upd = txCampaignUpdate.mock.calls[0][0] as { data: { filterSnapshot: { __result: Record<string, unknown> } } };
+    expect(upd.data.filterSnapshot.__result.excludedAgentName).toBe(1);
+  });
+
+  it("全宛先が業者と同じ名前 → 400・理由に業者を含める", async () => {
+    setup();
+    txDmLogFindMany.mockResolvedValueOnce([]);
+    txQueryRaw.mockImplementation(async (q?: unknown) =>
+      q && typeof q === "object" && "sql" in q ? [{ id: "o1" }, { id: "o2" }] : [],
+    );
+    const res = await post();
+    expect(res.status).toBe(400);
+    const json = await res.json();
+    expect(json.error.message).toContain("業者");
+    expect(draftCreate).not.toHaveBeenCalled();
   });
 
   it("terminal 記録が無ければ全件保存・excludedTerminal=0", async () => {

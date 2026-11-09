@@ -44,7 +44,8 @@ describe("terminal 除外の実装は 1 本だけ", () => {
     for (const src of [CAMPAIGNS, BATCHES]) {
       expect(src).toContain('from "@/lib/dm-batch/terminal-exclusion"');
       expect(src).toContain("findTerminalExclusions(");
-      expect(src).toContain("isTerminalExcluded(");
+      // 判定も共有部品で。外す理由ごとに数える経路(業者と同じ名前・2026-11-09)は dmExclusionReason を使う
+      expect(src).toMatch(/isTerminalExcluded\(|dmExclusionReason\(/);
     }
   });
 });

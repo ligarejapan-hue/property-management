@@ -205,7 +205,7 @@ export default function SaleDmWorkspacePage() {
     const otherFailed = rejected.filter((r) => apiErrorCode(r.reason) !== "TERMINAL_RECIPIENT");
     if (terminalSkipped.length > 0) {
       window.alert(
-        `${terminalSkipped.length} 件は拒否・宛先不明が記録されているため、送付済みにしませんでした(印刷からも除外されています)。`,
+        `${terminalSkipped.length} 件は拒否・宛先不明が記録されているか、所有者が業者と同じ名前のため、送付済みにしませんでした(印刷からも除外されています)。`,
       );
     }
     if (otherFailed.length > 0) {

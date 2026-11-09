@@ -31,7 +31,7 @@ import {
 } from "@/lib/dm-batch/locks";
 import {
   findTerminalExclusions,
-  isTerminalExcluded,
+  dmExclusionReason,
   type TerminalExclusionTx,
 } from "@/lib/dm-batch/terminal-exclusion";
 import { loadSaleDmPublicPageConfig } from "@/lib/sale-dm-letter/config-store";
@@ -349,6 +349,8 @@ export async function POST(request: NextRequest) {
 
     const batchId = randomUUID();
     let excludedTerminalCount = 0;
+    // 業者(名簿・国交省の一覧)と同じ名前の所有者で外した宛先数(2026-11-09)
+    let excludedAgentNameCount = 0;
     let savedRowCount = items.length;
     try {
       await prisma.$transaction(async (tx) => {
@@ -406,14 +408,16 @@ export async function POST(request: NextRequest) {
           items.flatMap((it) => it.groupOwnerIds),
           items.map((it) => it.propertyId),
         );
-        const survivingItems = items.filter(
-          (it) =>
-            !isTerminalExcluded(exclusionSets, {
-              propertyId: it.propertyId,
-              ownerIds: [it.ownerId, ...it.groupOwnerIds],
-            }),
+        // 業者と同じ名前の所有者も同じ集合で外す(住所に関係なく・2026-11-09)。件数は理由ごとに分ける。
+        const reasons = items.map((it) =>
+          dmExclusionReason(exclusionSets, {
+            propertyId: it.propertyId,
+            ownerIds: [it.ownerId, ...it.groupOwnerIds],
+          }),
         );
-        excludedTerminalCount = items.length - survivingItems.length;
+        const survivingItems = items.filter((_, i) => reasons[i] === null);
+        excludedTerminalCount = reasons.filter((r) => r === "terminal").length;
+        excludedAgentNameCount = reasons.filter((r) => r === "agent_name").length;
         savedRowCount = survivingItems.length;
 
         await tx.dmExportBatch.create({
@@ -515,6 +519,8 @@ export async function POST(request: NextRequest) {
         batchId,
         count: savedRowCount,
         excludedTerminal: excludedTerminalCount,
+        // ⚠監査の鍵に "Name" を含めると個人情報として伏せられる → excludedAgent
+        excludedAgent: excludedAgentNameCount,
         reused: false,
         createdAt: new Date().toISOString(),
       },
@@ -527,6 +533,8 @@ export async function POST(request: NextRequest) {
       skippedAddressMissingCount,
       // 拒否・宛先不明の反響で自動除外した宛先数(UI が平易な文言で表示する)
       excludedTerminalCount,
+      // 業者と同じ名前の所有者で自動除外した宛先数
+      excludedAgentNameCount,
       reused: false,
       mailablePropertyCount,
       unsubscribeUrlAvailable: await isUnsubscribeUrlAvailable(),

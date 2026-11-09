@@ -246,8 +246,11 @@ const ACTION_EXTRA_KEYS: Readonly<Record<string, ReadonlySet<string>>> = {
   // DM送付記録(PR-A): 控えバッチと送付確定・個別記録の操作監査。detail は件数/UUID/日付のみ
   // (氏名・住所・note 本文は載せない)。batchId/logId/sentOn は ALWAYS_SAFE 外のため action 固有で許可。
   // excludedTerminal=拒否・宛先不明の反響で控え作成時に自動除外した宛先数(PR-B・非PII)
-  dm_batch_create: new Set(["batchId", "reused", "createdAt", "excludedTerminal"]),
+  // excludedAgent=業者(名簿・国交省の一覧)と同じ名前の所有者で自動除外した宛先数(2026-11-09・件数のみ)
+  dm_batch_create: new Set(["batchId", "reused", "createdAt", "excludedTerminal", "excludedAgent"]),
   property_dm_csv_export: new Set(["batchId", "retry", "exportedAt"]),
+  // 物件住所宛DM CSV: excludedAgent=所有者が業者(名簿・国交省の一覧)と同じ名前で外した物件数(2026-11-09・件数のみ)。
+  property_address_dm_csv_export: new Set(["excludedAgent"]),
   dm_sent_confirm: new Set(["batchId", "sentOn"]),
   dm_sent_record: new Set(["sentOn"]),
   // orphan=物件削除で孤児化した行への操作(admin 訂正経路=設計§2.4)を区別する boolean。
@@ -261,12 +264,12 @@ const ACTION_EXTRA_KEYS: Readonly<Record<string, ReadonlySet<string>>> = {
   // campaignId/variantId/propertyId/count/fields は ALWAYS_SAFE。本文・宛名・住所・メモ・trackingToken は
   // detail に載せておらず、ここにも含めない(perVariant の variantId キー別件数は redact のまま)。
   // scenarioCount=使ったDMの種類の数・blankBodyCount=本文を差し込めなかった宛先数(件数のみ・非PII)。
-  sale_dm_campaign_create: new Set(["requested", "generated", "saved", "skippedByUnlink", "excludedTerminal", "truncated", "scenarioCount", "blankBodyCount", "createdAt"]),
+  sale_dm_campaign_create: new Set(["requested", "generated", "saved", "skippedByUnlink", "excludedTerminal", "excludedAgent", "truncated", "scenarioCount", "blankBodyCount", "createdAt"]),
   sale_dm_assign_variants: new Set(["mode", "order", "assigned", "assignedLp", "assignedAt"]),
   // 「種類を変える」(物件単位・DMの種類 PR-S2 Task 5)。切り替えた宛先数と本文を差し込めなかった宛先数(件数のみ)。
   // campaignId/propertyId は ALWAYS_SAFE。文面・種類名は detail に載せない。
   sale_dm_scenario_change: new Set(["changedDrafts", "blankBodyCount"]),
-  sale_dm_campaign_print: new Set(["printedAt", "excludedTerminal"]),
+  sale_dm_campaign_print: new Set(["printedAt", "excludedTerminal", "excludedAgent"]),
   sale_dm_variant_create: new Set(["createdAt"]),
   sale_dm_variant_update: new Set(["updatedAt"]),
   sale_dm_variant_delete: new Set(["deletedAt"]),

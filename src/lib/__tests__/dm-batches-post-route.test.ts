@@ -364,6 +364,41 @@ describe("POST /api/properties/dm-batches", () => {
     expect(audit?.detail?.count).toBe(1);
   });
 
+  it("所有者が業者と同じ名前の宛先グループは、住所に関係なく控え作成時に除外し、件数を分けて返す(2026-11-09)", async () => {
+    pm.property.findMany.mockResolvedValue([
+      makeProp({
+        propertyOwners: [
+          makePropertyOwner({ owner: { id: "o1", address: "東京都A" } }),
+          makePropertyOwner({
+            owner: { id: "o2", address: "神奈川県B" },
+            isPrimary: false,
+          }),
+        ],
+      }),
+    ]);
+    // 業者と同じ名前の照会(agent-name-exclusion.ts・Prisma.sql の形)だけ o2 を返す。ロックの照会は今まで通り []。
+    pm.$queryRaw.mockImplementation(async (q: unknown) =>
+      q && typeof q === "object" && "sql" in q && String((q as { sql: string }).sql).includes("mlit_agents")
+        ? [{ id: "o2" }]
+        : [],
+    );
+    const res = await POST(makeRequest(BODY));
+    expect(res.status).toBe(200);
+    const body = (await res.json()) as {
+      rowCount: number;
+      excludedTerminalCount: number;
+      excludedAgentNameCount: number;
+    };
+    expect(body.rowCount).toBe(1);
+    expect(body.excludedTerminalCount).toBe(0);
+    expect(body.excludedAgentNameCount).toBe(1);
+    const itemsData = pm.dmExportBatchItem.createMany.mock.calls[0][0].data;
+    expect(itemsData.map((it: { ownerId: string }) => it.ownerId)).toEqual(["o1"]);
+    const audit = lastAudit();
+    expect(audit?.detail?.excludedAgent).toBe(1);
+    expect(audit?.detail?.excludedTerminal).toBe(0);
+  });
+
   it("個別記録(所有者紐づけなし)の拒否は物件単位で除外する(#366 R6)", async () => {
     // 個別記録 POST は ownerId=null・連関0 で作られる。拒否は dmStatus を変えないため、
     // 所有者ベースの述語だけだと同じ物件が新しい控えに入り続ける。

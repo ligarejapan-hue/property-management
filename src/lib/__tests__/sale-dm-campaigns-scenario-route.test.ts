@@ -25,8 +25,10 @@ const m = vi.hoisted(() => {
   const calls: string[] = [];
   return {
     calls,
-    queryRaw: vi.fn(async (strings: TemplateStringsArray) => {
-      const sql = strings.join("?");
+    queryRaw: vi.fn(async (strings: TemplateStringsArray | { sql: string }) => {
+      // 業者と同じ名前の照会(agent-name-exclusion.ts)は Prisma.sql の形で来る=ロックではない
+      if ("sql" in strings && typeof strings.sql === "string") return [];
+      const sql = (strings as TemplateStringsArray).join("?");
       if (sql.includes("FROM owners")) calls.push("lock:owners");
       else if (sql.includes("FROM properties")) calls.push("lock:properties");
       else if (sql.includes("FROM dm_scenarios")) calls.push("lock:dm_scenarios");

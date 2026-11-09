@@ -42,6 +42,8 @@ vi.mock("@/lib/prisma", () => {
       dmVariant: { findUnique: vi.fn() },
       // 取得時の「拒否・宛先不明」の印(手順の案内が印刷・送付の段から外すため・@codex #449 R3)。既定=記録なし。
       propertyDmLog: { findMany: vi.fn(async () => []) },
+      // 業者と同じ名前の照会(agent-name-exclusion.ts)。既定=一致なし。
+      $queryRaw: vi.fn(async () => []),
       $transaction: vi.fn(async (fn) => fn(tx)),
       _tx: tx,
     },

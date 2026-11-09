@@ -39,7 +39,8 @@ export async function GET(_req: NextRequest, { params }: { params: Promise<{ id:
     // 改竄できるため。scope 判定用に引いた property も載せない。印刷 route は token をサーバー側で使う(非露出)。
     // 未送付の宛先に「拒否・宛先不明」の印を付ける(印刷から外され、送付済みにもできない宛先)。
     // 手順の案内が、これを印刷・送付の段の対象から外す(外さないと印刷⇄送付を回り続ける・@codex #449 R3)。
-    // 判定は印刷・送付と同じ findTerminalExclusions(所有者の別物件での記録も含む)。表示用なのでロックは取らない。
+    // 判定は印刷・送付と同じ findTerminalExclusions(所有者の別物件での記録も含む・所有者が業者と同じ名前も
+    // 2026-11-09 から同じ印)。表示用なのでロックは取らない。
     const ownersOf = (r: (typeof visible)[number]) => [
       ...(r.representativeOwnerId ? [r.representativeOwnerId] : []),
       ...((r as { draftOwners?: { ownerId: string }[] }).draftOwners ?? []).map((o) => o.ownerId),

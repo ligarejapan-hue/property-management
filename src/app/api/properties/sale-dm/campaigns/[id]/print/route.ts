@@ -6,7 +6,7 @@ import { writeAuditLog } from "@/lib/audit";
 import { lockOwnersForShare, lockPropertiesForShare, type RawTx } from "@/lib/dm-batch/locks";
 import {
   findTerminalExclusions,
-  isTerminalExcluded,
+  dmExclusionReason,
   type TerminalExclusionTx,
 } from "@/lib/dm-batch/terminal-exclusion";
 import {
@@ -151,19 +151,21 @@ export async function GET(
         ownerIds,
         propertyIds,
       );
-      const printableDrafts = visibleDrafts.filter(
-        (d) =>
-          !isTerminalExcluded(exclusionSets, {
-            propertyId: d.propertyId,
-            ownerIds: ownerIdsByDraft.get(d.id) ?? [],
-          }),
+      // 業者と同じ名前の所有者も外す(2026-11-09)。件数は理由ごと(画面の注意書き・監査)。
+      const reasons = visibleDrafts.map((d) =>
+        dmExclusionReason(exclusionSets, {
+          propertyId: d.propertyId,
+          ownerIds: ownerIdsByDraft.get(d.id) ?? [],
+        }),
       );
-      const excludedTerminalCount = visibleDrafts.length - printableDrafts.length;
+      const printableDrafts = visibleDrafts.filter((_, i) => reasons[i] === null);
+      const excludedTerminalCount = reasons.filter((r) => r === "terminal").length;
+      const excludedAgentNameCount = reasons.filter((r) => r === "agent_name").length;
       // 全滅なら白紙を刷らせず理由を返す(作成時の ALL_EXCLUDED_TERMINAL と同じ扱い)。
       if (printableDrafts.length === 0 && visibleDrafts.length > 0) {
         throw new ApiError(
           409,
-          "確定済みの宛先はすべて拒否・宛先不明が記録されたため印刷できません。宛先を作り直してください",
+          "確定済みの宛先はすべて、拒否・宛先不明が記録されたか、所有者が業者と同じ名前のため印刷できません。宛先を作り直してください",
           "ALL_EXCLUDED_TERMINAL",
         );
       }
@@ -206,10 +208,11 @@ export async function GET(
       return {
         html: renderLetterSheetHtml(campaign.name, letters),
         excludedTerminalCount,
+        excludedAgentNameCount,
         printedCount: printableDrafts.length,
       };
     });
-    const { excludedTerminalCount, printedCount } = materialized;
+    const { excludedTerminalCount, excludedAgentNameCount, printedCount } = materialized;
     let html = materialized.html;
     if (printedCount === 0) {
       // 白紙だけだと理由が分からない(2026-09-26 発注者の実機テスト=送付済みにした後に
@@ -219,13 +222,17 @@ export async function GET(
         `<body$1><div style="padding:16px 20px;border:2px solid #b45309;border-radius:8px;margin:16px;font-size:15px;line-height:1.7;color:#1f2937;background:#fff">印刷できる手紙がありません。印刷の対象は、売却DMの画面で「確定」にした手紙だけです(送付済みにした手紙と、本文が空の手紙は出ません)。<br>手順は「確定」→「印刷」→「確定分を送付済みに」の順です。</div>`,
       );
     }
-    if (excludedTerminalCount > 0) {
+    if (excludedTerminalCount > 0 || excludedAgentNameCount > 0) {
+      const parts = [
+        ...(excludedTerminalCount > 0 ? [`拒否・宛先不明が記録された ${excludedTerminalCount} 件`] : []),
+        ...(excludedAgentNameCount > 0 ? [`所有者が業者と同じ名前の ${excludedAgentNameCount} 件`] : []),
+      ];
       // 黙って減らさない: 何通除外したかを**画面にだけ**示す(@codex #384 R2 P2)。
       // この文書は印刷用に開かれるため、素の div だと1通目の手紙の直前に
       // 内部運用の注意書きが**お客様の紙面へ**刷り込まれる。@media print で隠す。
       html = html.replace(
         /<body([^>]*)>/,
-        `<body$1><style>@media print{.pm-terminal-note{display:none !important}}</style><div class="pm-terminal-note" style="padding:8px 12px;border:2px solid #a00;margin:8px;font-size:14px">⚠拒否・宛先不明が記録された ${excludedTerminalCount} 件の宛先は、この印刷から除外しました(画面表示のみ・印刷には出ません)。</div>`,
+        `<body$1><style>@media print{.pm-terminal-note{display:none !important}}</style><div class="pm-terminal-note" style="padding:8px 12px;border:2px solid #a00;margin:8px;font-size:14px">⚠${parts.join("と、")}の宛先は、この印刷から除外しました(画面表示のみ・印刷には出ません)。</div>`,
       );
     }
 
@@ -236,7 +243,7 @@ export async function GET(
       targetTable: "dm_campaigns",
       // field_staff は visibleDrafts のみ印刷されるため、監査件数も実際に出力した可視分を記録する
       // (drafts.length だと担当外で隠れた宛先まで数えて実出力数を過大計上する)。
-      detail: { campaignId: id, count: printedCount, excludedTerminal: excludedTerminalCount, printedAt: new Date().toISOString() },
+      detail: { campaignId: id, count: printedCount, excludedTerminal: excludedTerminalCount, excludedAgent: excludedAgentNameCount, printedAt: new Date().toISOString() },
     });
 
     return new NextResponse(html, {

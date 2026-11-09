@@ -269,11 +269,11 @@ export interface CreateSaleDmCampaignBody {
 export async function createSaleDmCampaign(body: CreateSaleDmCampaignBody) {
   if (USE_MOCK) {
     await mockDelay();
-    return { campaignId: "mock-campaign", requested: 0, matchedProperties: 0, generated: 0, saved: 0, skippedByUnlink: 0, excludedTerminal: 0, failed: 0, truncated: false, blankBodyCount: 0, lpMissingScenarios: [] as string[], scenarioCounts: {} as Record<string, number> };
+    return { campaignId: "mock-campaign", requested: 0, matchedProperties: 0, generated: 0, saved: 0, skippedByUnlink: 0, excludedTerminal: 0, excludedAgentName: 0, failed: 0, truncated: false, blankBodyCount: 0, lpMissingScenarios: [] as string[], scenarioCounts: {} as Record<string, number> };
   }
   // blankBodyCount=本文を差し込めなかった宛先数・lpMissingScenarios=LPの無い種類名・scenarioCounts=種類名→宛先数。
   // 古い発送の冪等の再送では付かないことがあるので省略可。
-  return apiFetch<{ campaignId: string; requested?: number; matchedProperties?: number; generated?: number; saved?: number; skippedByUnlink?: number; excludedTerminal?: number; failed?: number; truncated?: boolean; idempotent?: boolean; blankBodyCount?: number; lpMissingScenarios?: string[]; scenarioCounts?: Record<string, number> }>(
+  return apiFetch<{ campaignId: string; requested?: number; matchedProperties?: number; generated?: number; saved?: number; skippedByUnlink?: number; excludedTerminal?: number; excludedAgentName?: number; failed?: number; truncated?: boolean; idempotent?: boolean; blankBodyCount?: number; lpMissingScenarios?: string[]; scenarioCounts?: Record<string, number> }>(
     "/api/properties/sale-dm/campaigns",
     {
       method: "POST",
@@ -306,7 +306,8 @@ export interface SaleDmDraft {
   phoneTapFirstAt: string | null;
   // 公開LPの査定申込の回数と初回時刻(中身は fetchSaleDmInquiries)。
   formInquiryCount: number;
-  // 拒否・宛先不明の記録がある未送付の宛先(印刷から外れ、送付済みにもできない)。手順の案内が段の判定から外す。
+  // 拒否・宛先不明の記録がある、または所有者が業者と同じ名前の未送付の宛先(印刷から外れ、送付済みにもできない)。
+  // 手順の案内が段の判定から外す。
   terminalExcluded?: boolean;
   formInquiryFirstAt: string | null;
 }
@@ -4677,6 +4678,8 @@ export async function createDmBatch(filters: Record<string, string>): Promise<{
   reused: boolean;
   /** 拒否・宛先不明の反響で自動除外した宛先数(再利用時は undefined)。 */
   excludedTerminalCount?: number;
+  /** 所有者が業者(名簿・国交省の一覧)と同じ名前で自動除外した宛先数(再利用時は undefined)。 */
+  excludedAgentNameCount?: number;
   /** CSVの「配信停止URL」の頭(売却DM設定の追跡URL)があるか。false なら列は空になる。 */
   unsubscribeUrlAvailable?: boolean;
 }> {

@@ -7,7 +7,7 @@ import { writeAuditLog } from "@/lib/audit";
 import { lockOwnersForShare, lockPropertiesForShare, type RawTx } from "@/lib/dm-batch/locks";
 import {
   findTerminalExclusions,
-  isTerminalExcluded,
+  dmExclusionReason,
   type TerminalExclusionTx,
 } from "@/lib/dm-batch/terminal-exclusion";
 import { hasPermission } from "@/lib/permissions";
@@ -311,6 +311,8 @@ export async function POST(request: NextRequest) {
     let skippedByUnlinkCount = 0;
     // 拒否・宛先不明(terminal 反響)で除外した宛先数(応答・監査に載せる=黙って外さない)。
     let excludedTerminalCount = 0;
+    // 業者(名簿・国交省の一覧)と同じ名前の所有者で外した宛先数(2026-11-09)
+    let excludedAgentNameCount = 0;
     // 種類つきの発送の結果(設計 §3.3.0)。種類なしの作成では 0/[]/{} のまま。
     let blankBodyCount = 0;
     let lpMissingScenarios: string[] = [];
@@ -358,24 +360,29 @@ export async function POST(request: NextRequest) {
           sliced.flatMap((m) => m.groupOwnerIds),
           sliced.map((m) => m.propertyId),
         );
-        const pairs = sliced.map((m, i) => ({ m, d: drafts[i] }));
-        const surviving = pairs.filter(
-          ({ m }) =>
-            !isTerminalExcluded(exclusionSets, {
-              propertyId: m.propertyId,
-              // 代表と共有者の両方で判定(A と同じ)。所有者横断=別物件での拒否も効く。
-              ownerIds: [m.representativeOwnerId, ...m.groupOwnerIds].filter(
-                (v): v is string => typeof v === "string" && v.length > 0,
-              ),
-            }),
-        );
-        excludedTerminalCount = pairs.length - surviving.length;
+        // 業者と同じ名前の所有者も同じ集合で外す(住所に関係なく・2026-11-09)。件数は理由ごと。
+        const pairs = sliced.map((m, i) => ({
+          m,
+          d: drafts[i],
+          reason: dmExclusionReason(exclusionSets, {
+            propertyId: m.propertyId,
+            // 代表と共有者の両方で判定(A と同じ)。所有者横断=別物件での拒否も効く。
+            ownerIds: [m.representativeOwnerId, ...m.groupOwnerIds].filter(
+              (v): v is string => typeof v === "string" && v.length > 0,
+            ),
+          }),
+        }));
+        const surviving = pairs.filter(({ reason }) => reason === null);
+        excludedTerminalCount = pairs.filter(({ reason }) => reason === "terminal").length;
+        excludedAgentNameCount = pairs.filter(({ reason }) => reason === "agent_name").length;
         // 全宛先が除外 → 空のキャンペーンを作らない。RECIPIENTS_CHANGED(409=再試行)とは
         // 別の恒久的な状態なので、原因が分かる文言で 400 を返す(catch がクレームを削除)。
         if (surviving.length === 0 && pairs.length > 0) {
           throw new ApiError(
             400,
-            "選択した宛先はすべて「拒否・宛先不明」の記録があるため除外されました(その方の別物件での記録も含みます)。物件のDM送付履歴をご確認ください",
+            excludedAgentNameCount === 0
+              ? "選択した宛先はすべて「拒否・宛先不明」の記録があるため除外されました(その方の別物件での記録も含みます)。物件のDM送付履歴をご確認ください"
+              : "選択した宛先はすべて、「拒否・宛先不明」の記録があるか、所有者が業者(業者の名簿・国交省の業者一覧)と同じ名前のため除外されました",
             "ALL_EXCLUDED_TERMINAL",
           );
         }
@@ -526,6 +533,7 @@ export async function POST(request: NextRequest) {
                 saved: persistedCount,
                 skippedByUnlink: skippedByUnlinkCount,
                 excludedTerminal: excludedTerminalCount,
+                excludedAgentName: excludedAgentNameCount,
                 failed: drafts.filter((d) => d.error).length,
                 truncated,
                 // 種類つきの発送だけが持つ件数(種類なしには書かない=再返却は idempotentPayload の既定値で埋まる)。
@@ -545,13 +553,13 @@ export async function POST(request: NextRequest) {
     // AuditLog は非PIIメタのみ(本文・宛名・住所は残さない)。
     await writeAuditLog({
       userId: session.id, action: "sale_dm_campaign_create", targetTable: "dm_campaigns",
-      detail: { campaignId: claimed.id, requested: recipients.length, generated: drafts.length, saved: persistedCount, skippedByUnlink: skippedByUnlinkCount, excludedTerminal: excludedTerminalCount, failed: drafts.filter((d) => d.error).length, truncated, ...(isScenarioCampaign({ defaultScenarioId }) ? { scenarioCount, blankBodyCount } : {}), createdAt: new Date().toISOString() },
+      detail: { campaignId: claimed.id, requested: recipients.length, generated: drafts.length, saved: persistedCount, skippedByUnlink: skippedByUnlinkCount, excludedTerminal: excludedTerminalCount, excludedAgent: excludedAgentNameCount, failed: drafts.filter((d) => d.error).length, truncated, ...(isScenarioCampaign({ defaultScenarioId }) ? { scenarioCount, blankBodyCount } : {}), createdAt: new Date().toISOString() },
     });
 
     return NextResponse.json(
       // requested=生成する手紙数(共有者ぶんで物件数より多くなり得る)。matchedProperties=対象になった物件数
       // (=選択のうち住所ありで生成対象になった物件)。UI の「対象外」通知は物件単位で出すため両方返す。
-      { campaignId: claimed.id, requested: recipients.length, matchedProperties, generated: drafts.length, saved: persistedCount, skippedByUnlink: skippedByUnlinkCount, excludedTerminal: excludedTerminalCount, failed: drafts.filter((d) => d.error).length, truncated, blankBodyCount, lpMissingScenarios, scenarioCounts },
+      { campaignId: claimed.id, requested: recipients.length, matchedProperties, generated: drafts.length, saved: persistedCount, skippedByUnlink: skippedByUnlinkCount, excludedTerminal: excludedTerminalCount, excludedAgentName: excludedAgentNameCount, failed: drafts.filter((d) => d.error).length, truncated, blankBodyCount, lpMissingScenarios, scenarioCounts },
       { headers: { "Cache-Control": "no-store" } },
     );
   } catch (error) {

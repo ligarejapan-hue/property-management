@@ -114,7 +114,7 @@ export async function POST(
         ) {
           throw new ApiError(
             409,
-            "この宛先には拒否・宛先不明が記録されています。送付済みにはできません",
+            "この宛先には拒否・宛先不明が記録されているか、所有者が業者と同じ名前です。送付済みにはできません",
             "TERMINAL_RECIPIENT",
           );
         }

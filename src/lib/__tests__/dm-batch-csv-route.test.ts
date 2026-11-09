@@ -151,8 +151,14 @@ function makePropRow(over: Record<string, unknown> = {}) {
 }
 
 /** $queryRaw を SQL 内容で振り分ける(owners/properties ロックは[]・バッチ行は指定値)。 */
+/** 業者と同じ名前の所有者(agent-name-exclusion.ts の照会の結果)。テストごとに変える。 */
+let agentNameHits: string[] = [];
 function armQueryRaw(batchRow: Record<string, unknown> | null) {
-  pm.$queryRaw.mockImplementation(async (strings: TemplateStringsArray) => {
+  pm.$queryRaw.mockImplementation(async (strings: TemplateStringsArray | { sql: string }) => {
+    // 業者と同じ名前の照会は Prisma.sql の形で来る(ロックの照会とは別)
+    if (!Array.isArray(strings) && "sql" in strings && strings.sql.includes("mlit_agents")) {
+      return agentNameHits.map((id) => ({ id }));
+    }
     const sql = Array.isArray(strings) ? strings.join("?") : String(strings);
     if (sql.includes("dm_export_batches")) {
       return batchRow ? [batchRow] : [];
@@ -196,6 +202,7 @@ beforeEach(() => {
   pm.property.findMany.mockResolvedValue([makePropRow()]);
   pm.importJobRow.findMany.mockResolvedValue([]);
   pm.propertyDmLog.findMany.mockResolvedValue([]);
+  agentNameHits = [];
   armQueryRaw({
     id: BATCH_ID,
     downloaded_at: null,
@@ -322,6 +329,15 @@ describe("GET /api/properties/dm-batches/[id]/csv", () => {
       { logOwners: { some: { ownerId: { in: ["o1"] } } } },
       { propertyId: { in: ["p1"] }, ownerId: null, logOwners: { none: {} } },
     ]);
+  });
+
+  it("初回GET: 控えを作ったあとに所有者が業者と同じ名前になった宛先が混ざると 409・凍結しない(2026-11-09)", async () => {
+    agentNameHits = ["o1"];
+    const res = await GET(makeRequest(), ctx);
+    expect(res.status).toBe(409);
+    const body = (await res.json()) as { error: { message: string; code?: string } };
+    expect(body.error.message).toContain("業者");
+    expect(pm.dmExportBatch.update).not.toHaveBeenCalled();
   });
 
   it("初回GET: 所有者紐づけの無い terminal 記録(個別記録の拒否)は物件単位で 409(#366 R6)", async () => {

@@ -1,4 +1,5 @@
 import { NextRequest, NextResponse } from "next/server";
+import { findAgentNameOwnerIds } from "@/lib/dm-batch/agent-name-exclusion";
 import prisma from "@/lib/prisma";
 import {
   getApiSession,
@@ -153,7 +154,7 @@ export async function GET(request: NextRequest) {
               where: { owner: { isArchived: false } },
               select: {
                 isPrimary: true,
-                owner: { select: { name: true, corporateNumber: true } },
+                owner: { select: { id: true, name: true, corporateNumber: true } },
               },
               orderBy: [{ isPrimary: "desc" }, { createdAt: "asc" }],
             },
@@ -172,8 +173,18 @@ export async function GET(request: NextRequest) {
       );
     }
 
+    // 業者(名簿・国交省の一覧)と同じ名前の所有者がいる物件は、住所に関係なく出さない(2026-11-09 発注者指示)。
+    // 判定は宛名CSV・売却DM と同じ agent-name-exclusion.ts。
+    const agentNameOwnerIds = await findAgentNameOwnerIds(
+      prisma,
+      properties.flatMap((p) => p.propertyOwners.map((po) => po.owner.id)),
+    );
+    const isAgentNameProperty = (p: (typeof properties)[number]) =>
+      p.propertyOwners.some((po) => agentNameOwnerIds.has(po.owner.id));
+    const excludedAgentNameCount = properties.filter(isAgentNameProperty).length;
+
     // some 述語で所有者ありに絞っているが、race 防御として空所有者は行にしない。
-    const exportable = properties.filter((p) => p.propertyOwners.length > 0);
+    const exportable = properties.filter((p) => p.propertyOwners.length > 0 && !isAgentNameProperty(p));
 
     // 取込元(管理ID)を一括逆引き(一覧 API と共有・N+1 回避)。
     const importSourceMap = await loadImportSourceMap(
@@ -230,6 +241,7 @@ export async function GET(request: NextRequest) {
         count: rows.length,
         resultCount: rows.length,
         skippedCount,
+        excludedAgent: excludedAgentNameCount,
         exportedAt: new Date().toISOString(),
       },
     });
