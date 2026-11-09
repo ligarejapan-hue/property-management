@@ -540,6 +540,42 @@ async function main() {
     check("12d 比べ直すと種類が埋まる", (await row(diff))?.diffKind === "kanji,count:2:1");
     check("12e 判断済みの行はそのまま", (await row(kept))?.diffKind === null && (await row(kept))?.decision === "keep");
   }
+
+  // ---- 13. 所有者が200人を超える物件でも直せる(2026-11-09・200人の上限で止まっていた) ----
+  await reset();
+  {
+    const u = await user();
+    const p = await property(u);
+    const many: string[] = [];
+    for (let i = 0; i < 260; i++) {
+      const id = await owner(`共有者${String(i).padStart(3, "0")}`);
+      await link(p, id, { isPrimary: i === 0 });
+      many.push(id);
+    }
+    const a = await registry(p, u, [{ name: "山田太郎" }]);
+    await checkPropertyRegistryOwners(p);
+    const started = Date.now();
+    const out = await replaceRegistryOwnersOnProperty({
+      session: { id: u, role: "admin" },
+      perms: PERMS,
+      propertyId: p,
+      expectedAttachmentId: a,
+      expectedLinkedOwnerIds: many,
+      expectedRemoveOwnerIds: many,
+      beforeCommit: async (tx, names) => {
+        await recordCheckAfterReplace(tx, p, a, names);
+      },
+    });
+    const elapsed = Date.now() - started;
+    const unlinked = await prisma.changeLog.count({ where: { propertyId: p, fieldName: "_unlinked_from_property" } });
+    const primaryLog = await prisma.changeLog.count({ where: { propertyId: p, fieldName: "isPrimary", oldValue: "true" } });
+    check("13a 260人を外して1人を足す", out.removed === 260 && out.added === 1, out);
+    check("13b 物件の所有者は謄本どおり", JSON.stringify(await linkedNames(p)) === JSON.stringify(["山田太郎"]));
+    check("13c 外した全員を履歴から戻せる(主所有者だった印も)", unlinked === 260 && primaryLog === 1, { unlinked, primaryLog });
+    check("13d 外した人の記録そのものは残る", (await prisma.owner.count({ where: { id: { in: many } } })) === 260);
+    check("13e トランザクションの持ち時間(30秒)に余裕で収まる", elapsed < 10_000, elapsed);
+    check("13f 比べ直した結果は同じ", (await row(p))?.result === "same");
+  }
 }
 
 describe.skipIf(!process.env.PUSH_DB_TEST_URL)("謄本の名義の確認(本物の Postgres)", () => {

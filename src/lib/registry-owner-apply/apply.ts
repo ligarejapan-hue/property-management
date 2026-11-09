@@ -421,7 +421,8 @@ export async function replaceRegistryOwnersOnProperty(
       ) {
         throw ownersChangedError();
       }
-      const toRemove = links.filter((l) => fresh.removeOwnerIds.includes(l.ownerId));
+      const removeSet = new Set(fresh.removeOwnerIds);
+      const toRemove = links.filter((l) => removeSet.has(l.ownerId));
       if (toRemove.some((l) => l.note && l.note.trim())) {
         throw new ApiError(
           409,
@@ -429,26 +430,30 @@ export async function replaceRegistryOwnersOnProperty(
           "OWNER_LINK_HAS_NOTE",
         );
       }
-      for (const link of toRemove) {
-        await tx.propertyOwner.delete({ where: { id: link.id } });
+      // ⚠所有者が何百人もつながった物件でも、トランザクションの持ち時間に収まるように
+      //   外す・履歴はまとめて1回ずつ書く(1人ずつ書くと人数ぶん往復する=2026-11-09 の 200人超)。
+      if (toRemove.length > 0) {
+        await tx.propertyOwner.deleteMany({ where: { id: { in: toRemove.map((l) => l.id) } } });
         // ⚠元に戻せるように、つながりの中身を残す(形は「外す」ボタンと同じ印+関係・期間)。
         //   氏名・メモは入れない(所有者のIDから引ける)。
-        const base = {
-          targetTable: "property_owners",
-          targetId: link.id,
-          newValue: null,
-          source: "manual" as const,
-          changedBy: session.id,
-          propertyId,
-        };
         await tx.changeLog.createMany({
-          data: [
-            { ...base, fieldName: "_unlinked_from_property", oldValue: link.ownerId },
-            { ...base, fieldName: "isPrimary", oldValue: String(link.isPrimary) },
-            ...(link.relationship ? [{ ...base, fieldName: "relationship", oldValue: link.relationship }] : []),
-            ...(link.startDate ? [{ ...base, fieldName: "startDate", oldValue: link.startDate.toISOString().slice(0, 10) }] : []),
-            ...(link.endDate ? [{ ...base, fieldName: "endDate", oldValue: link.endDate.toISOString().slice(0, 10) }] : []),
-          ],
+          data: toRemove.flatMap((link) => {
+            const base = {
+              targetTable: "property_owners",
+              targetId: link.id,
+              newValue: null,
+              source: "manual" as const,
+              changedBy: session.id,
+              propertyId,
+            };
+            return [
+              { ...base, fieldName: "_unlinked_from_property", oldValue: link.ownerId },
+              { ...base, fieldName: "isPrimary", oldValue: String(link.isPrimary) },
+              ...(link.relationship ? [{ ...base, fieldName: "relationship", oldValue: link.relationship }] : []),
+              ...(link.startDate ? [{ ...base, fieldName: "startDate", oldValue: link.startDate.toISOString().slice(0, 10) }] : []),
+              ...(link.endDate ? [{ ...base, fieldName: "endDate", oldValue: link.endDate.toISOString().slice(0, 10) }] : []),
+            ];
+          }),
         });
       }
       removed = toRemove.length;

@@ -174,4 +174,18 @@ describe("操作の権限", () => {
       expect.objectContaining({ expectedAttachmentId: AID, expectedLinkedOwnerIds: [AID], expectedRemoveOwnerIds: [AID] }),
     );
   });
+
+  it("所有者が200人を超える物件でも直せる(2026-11-09 まで 200 で止まっていた)", async () => {
+    (getUserPermissions as Mock).mockResolvedValue(ADMIN);
+    const ids = Array.from({ length: 1200 }, (_, i) => `00000000-0000-4000-8000-${String(i).padStart(12, "0")}`);
+    const ok = { attachmentId: AID, linkedOwnerIds: ids, removeOwnerIds: ids.slice(0, 1199), restoreDm: false };
+    expect((await replacePOST(post(ok) as never, params)).status).toBe(200);
+    // 入力の大きさの歯止めは残す
+    // (本物の handleApiError は入力の誤りを 422 にする。ここは作り物なので「通さない」ことだけ見る)
+    vi.mocked(replaceRegistryOwnersOnProperty).mockClear();
+    const huge = Array.from({ length: 5001 }, () => AID);
+    const ng = { attachmentId: AID, linkedOwnerIds: huge, removeOwnerIds: [], restoreDm: false };
+    expect((await replacePOST(post(ng) as never, params)).status).not.toBe(200);
+    expect(replaceRegistryOwnersOnProperty).not.toHaveBeenCalled();
+  });
 });
