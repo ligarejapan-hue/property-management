@@ -164,6 +164,11 @@ export interface OwnerDiffRow {
 }
 
 const isHan = (s: string) => s.length > 0 && /^\p{Script=Han}+$/u.test(s);
+/**
+ * 漢字1字と1字の入れ替わり(髙／高・﨑／崎 など)。2字以上が替わる(佐藤／鈴木・太郎／花子)のは
+ * 字体の違いではなく別の名前=「名前の一部が違う」(2026-11-10・自動の登録で別人を足すため)。
+ */
+const isOneHanChar = (s: string) => isHan(s) && [...s].length === 1;
 
 function classifyPair(systemName: string, registryName: string): Pick<OwnerDiffRow, "pairKinds" | "kanjiPairs"> {
   const kinds: PairKind[] = [];
@@ -172,7 +177,7 @@ function classifyPair(systemName: string, registryName: string): Pick<OwnerDiffR
   const coreReg = coreName(registryName);
   if (coreSys !== coreReg) {
     const { hunks } = diffWithHunks(coreReg, coreSys);
-    if (hunks.length > 0 && hunks.every((h) => isHan(h.a) && isHan(h.b))) {
+    if (hunks.length > 0 && hunks.every((h) => isOneHanChar(h.a) && isOneHanChar(h.b))) {
       kinds.push("kanji");
       for (const h of hunks) {
         const label = `${h.a}／${h.b}`;
@@ -341,11 +346,18 @@ export function ownerDiff(registryNames: readonly string[], systemNames: readonl
   };
 }
 
+/**
+ * 保存した種類の末尾に付ける印=「謄本にだけいる人の自動の登録まで済んだ」(2026-11-10)。
+ * 種類ではないので、一覧の文言には出さない。印の無い未判断の「違う」は比べ直しに回る。
+ */
+export const AUTO_ADD_DONE_TOKEN = "autoadd";
+
 /** 保存した形から、一覧に出す文言に戻す(字は保存していないので出さない)。 */
 export function ownerDiffLabelFromStored(stored: string | null | undefined): string | null {
   if (!stored) return null;
-  return stored
-    .split(",")
+  const tokens = stored.split(",").filter((t) => t !== AUTO_ADD_DONE_TOKEN);
+  if (tokens.length === 0) return null;
+  return tokens
     .map((token) => {
       const [code, a, b] = token.split(":");
       if (code === "count" && a && b) return countLabel(Number(a), Number(b));

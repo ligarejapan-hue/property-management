@@ -31,7 +31,12 @@ const RESULT_LABELS: Record<string, string> = {
   unreadable: "謄本を読めない",
   no_owner: "システムに所有者がいない",
   skipped: "比べられなかった(謄本が変わった・無い)",
+  auto_added: "謄本にだけいる人を自動で登録した物件",
+  auto_added_people: "自動で登録した人",
 };
+
+/** 件数の単位(人数だけ「人」) */
+const countUnit = (k: string) => (k === "auto_added_people" ? "人" : "件");
 
 export default function RegistryOwnerReviewPage() {
   const [list, setList] = useState<RegistryOwnerReviewList | null>(null);
@@ -116,6 +121,9 @@ export default function RegistryOwnerReviewPage() {
         title="謄本の名義の確認"
         description="謄本（所有者事項）の名義と、システムの所有者が違う物件です。（株）と株式会社・異体字など表記の違いだけのものは出していません。1件ずつ開いて、謄本の名義に直すか、このままでよいかを選んでください。"
       />
+      <p className="mb-4 max-w-4xl rounded-md border border-blue-200 bg-blue-50 px-4 py-2 text-sm text-blue-800 dark:border-blue-800 dark:bg-blue-950/40 dark:text-blue-200">
+        比べて違うと出たときは、謄本にだけいる人を自動でシステムの所有者に登録します（毎晩の自動の比べと「まだ比べていない物件を比べる」のたびに）。システムにだけいる人は外さず、今いる人の名前・住所も変えません。漢字1字の違い（髙／高）や法人の書き方の違いの人は登録せず、ここで確かめます。DM の保留はそのままです。謄本が古いなどで、自動で登録された人を外したいときは、先にこの一覧で「このままでよい」を選んでから外してください（選ばずに外すと、次に比べたときにまた登録されます）。
+      </p>
 
       <div className="max-w-4xl space-y-4">
         {list?.canRun ? (
@@ -151,7 +159,8 @@ export default function RegistryOwnerReviewPage() {
               <ul className="mt-2 text-xs text-gray-600 dark:text-gray-300">
                 {Object.entries(runCounts).map(([k, v]) => (
                   <li key={k}>
-                    {k === "failed" ? "失敗" : (RESULT_LABELS[k] ?? k)}: {v.toLocaleString()}件
+                    {k === "failed" ? "失敗" : (RESULT_LABELS[k] ?? k)}: {v.toLocaleString()}
+                    {countUnit(k)}
                   </li>
                 ))}
               </ul>
