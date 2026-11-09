@@ -13,6 +13,7 @@ import { writeAuditLog } from "@/lib/audit";
 import { hasPermission, hasExplicitWritePerm } from "@/lib/permissions";
 import { lockPropertyRow } from "@/lib/property-record-guard";
 import { latestRegistryObtainedAt } from "@/lib/registry-obtained-date";
+import { countRegistryAttachmentGroups } from "@/lib/attachments/registry-count-classify";
 import { assertNotEditLockedByOther, deleteEditLocksFor } from "@/lib/edit-lock/service";
 import { readScreenTokenHash, readLockId } from "@/lib/edit-lock/screen-token";
 import { updatePropertySchema } from "@/lib/validators";
@@ -201,14 +202,13 @@ export async function GET(
         _count: { _all: true },
         _max: { createdAt: true },
       });
-      const counts = { owner: 0, all: 0, other: 0 };
-      for (const g of grouped) {
-        const n = g._count._all;
-        if (g.registryCertificateType === "owner") counts.owner += n;
-        else if (g.registryCertificateType === "all") counts.all += n;
-        else counts.other += n;
-      }
-      registryAttachmentCounts = counts;
+      // 種別の列が空(手で取り込んだ謄本)は本文で見分ける=取引の画面と同じ(2026-11-09・読めなければ「その他」)。
+      registryAttachmentCounts = await countRegistryAttachmentGroups(grouped, () =>
+        prisma.attachment.findMany({
+          where: { targetType: "property", targetId: id, type: "registry", isDeleted: false, registryCertificateType: null },
+          orderBy: { createdAt: "desc" }, select: { id: true, fileUrl: true, fileSize: true, mimeType: true },
+        }),
+      );
       if (property.registryStatus === "obtained") {
         const fetched = await prisma.auditLog.findFirst({
           where: {
