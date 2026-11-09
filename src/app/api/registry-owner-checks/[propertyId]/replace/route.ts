@@ -19,10 +19,18 @@ import { findMissingRegistryOwnerReviewPerm } from "@/lib/registry-owner-check/p
 import { replaceRegistryOwnersOnProperty } from "@/lib/registry-owner-apply/apply";
 import { recordCheckAfterReplace, restoreDmSendIfHold } from "@/lib/registry-owner-check/service";
 
+/**
+ * 送られてくる所有者の ID の数の上限。所有者が何百人もつながった物件(共有の私道・一棟など)でも
+ * 直せるように、200 から上げた(2026-11-09 発注者決定)。中身は確認画面で見せたものと同じかを
+ * サーバーがロックの中で確かめるので、ここは入力の大きさの歯止めだけ。
+ * ⚠route.ts からは export しない(Next の route は決まった名前しか export できない)。
+ */
+const REPLACE_MAX_IDS = 5000;
+
 const bodySchema = z.object({
   attachmentId: z.string().uuid(),
-  linkedOwnerIds: z.array(z.string().uuid()).max(200),
-  removeOwnerIds: z.array(z.string().uuid()).max(200),
+  linkedOwnerIds: z.array(z.string().uuid()).max(REPLACE_MAX_IDS),
+  removeOwnerIds: z.array(z.string().uuid()).max(REPLACE_MAX_IDS),
   restoreDm: z.boolean(),
 });
 
