@@ -15,6 +15,27 @@ import {
   type RegistryOwnerEntry,
 } from "@/lib/registry-owner-check/compare";
 import { ownerDiff } from "@/lib/registry-owner-check/diff";
+import type { PermissionEntry } from "@/lib/api-helpers";
+import { hasPermission } from "@/lib/permissions";
+import { findMissingOwnerFieldWritePerm } from "@/lib/owner-create";
+
+/**
+ * 謄本を添付した人が、今も自分で「添付済みの謄本から所有者を反映」できるか(2026-11-10・
+ * 自動のセキュリティ点検の指摘)。自動の登録はこの人の操作として残す。
+ * ⚠所有者を書けない人が偽の謄本を添付して、だれかの名前で所有者を足させる抜け道を作らない。
+ *   反映の窓口(/api/properties/[id]/registry-owners)と同じ線: 物件を見る・謄本を見る・取込・
+ *   所有者の編集・足す人の氏名と住所を書ける。担当範囲は呼び出し元が物件の行で見る。
+ */
+export function uploaderMayAutoAdd(
+  perms: PermissionEntry[],
+  owners: ReadonlyArray<{ name: string; address: string | null }>,
+): boolean {
+  if (!hasPermission(perms, "property", "read")) return false;
+  if (!hasPermission(perms, "registry_pdf", "preview")) return false;
+  if (!hasPermission(perms, "import", "write")) return false;
+  if (!hasPermission(perms, "owner", "write")) return false;
+  return owners.every((o) => findMissingOwnerFieldWritePerm(perms, { name: o.name, address: o.address }) === null);
+}
 
 export function registryOwnersToAutoAdd<T extends RegistryOwnerEntry>(
   registryOwners: readonly T[],
@@ -24,16 +45,18 @@ export function registryOwnersToAutoAdd<T extends RegistryOwnerEntry>(
     registryOwners.map((o) => o.name),
     systemNames,
   ).rows;
-  // システムの人と表記だけ違う謄本の人(人が確かめる)
+  // システムの人と表記だけ違う謄本の人(人が確かめる)。⚠謄本に同じ人が2回載っていると組になるのは
+  //   1回目だけなので、行ではなく名前(そろえた形)で除く(@codex #688 R1)。
   const notationOnly = new Set(
     rows
       .filter(
         (r) =>
           r.status === "differs" &&
+          r.registryIndex !== null &&
           r.pairKinds.length > 0 &&
           r.pairKinds.every((k) => k === "kanji" || k === "corp"),
       )
-      .map((r) => r.registryIndex),
+      .map((r) => ownerNameKey(registryOwners[r.registryIndex!].name)),
   );
   const plan = planOwnerReplacement(
     registryOwners,
@@ -41,10 +64,9 @@ export function registryOwnersToAutoAdd<T extends RegistryOwnerEntry>(
   );
   const addKeys = new Set(plan.add.map((o) => ownerNameKey(o.name)));
   const seen = new Set<string>();
-  return registryOwners.filter((o, i) => {
-    if (notationOnly.has(i)) return false;
+  return registryOwners.filter((o) => {
     const k = ownerNameKey(o.name);
-    if (!addKeys.has(k) || seen.has(k)) return false;
+    if (notationOnly.has(k) || !addKeys.has(k) || seen.has(k)) return false;
     seen.add(k);
     return true;
   });

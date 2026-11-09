@@ -30,8 +30,20 @@ vi.mock("@/lib/api-helpers", () => {
       this.code = code;
     }
   }
-  return { ApiError };
+  // 謄本を添付した人の権限(自動の登録で見る)。NO_PERMS に入れた人だけ何も持たない
+  const getUserPermissions = async (id: string) =>
+    (globalThis as { __NO_PERMS__?: Set<string> }).__NO_PERMS__?.has(id)
+      ? []
+      : [
+          ...[["property", "read"], ["registry_pdf", "preview"], ["import", "write"], ["owner", "write"]].map(
+            ([resource, action]) => ({ resource, action, granted: true }),
+          ),
+          ...["owner_name", "owner_address"].map((resource) => ({ resource, action: "full", granted: true })),
+        ];
+  return { ApiError, getUserPermissions };
 });
+const NO_PERMS = new Set<string>();
+(globalThis as { __NO_PERMS__?: Set<string> }).__NO_PERMS__ = NO_PERMS;
 
 // 保存場所: fileUrl をそのままキーにして、登録したテキストを中身として返す
 const TEXTS = new Map<string, string>();
@@ -582,7 +594,7 @@ async function main() {
   // ---- 14. 謄本にだけいる人を自動で登録(2026-11-10): 足すだけ・外さない・住所を変えない・DM は保留のまま ----
   await reset();
   {
-    // 実行者=有効な管理者のうち一番前からいる人(止めた管理者・事務は選ばない)
+    // 実行者=その謄本を添付した人(今も有効で、自分で謄本から所有者を反映できるときだけ)
     const mkUser = async (role: string, active: boolean, createdAt: string) => {
       const id = randomUUID();
       await prisma.$executeRawUnsafe(
@@ -591,10 +603,7 @@ async function main() {
       );
       return id;
     };
-    await mkUser("admin", false, "2020-01-01");
-    await mkUser("office_staff", true, "2020-06-01");
-    const firstAdmin = await mkUser("admin", true, "2021-01-01");
-    const u = await mkUser("admin", true, "2025-01-01");
+    const u = await mkUser("office_staff", true, "2025-01-01");
 
     // a) 別の人: 謄本の人を足し、システムの人は外さない・住所はそのまま
     const changed = await property(u, "hold");
@@ -631,7 +640,7 @@ async function main() {
     check("14h 表記だけの違いの人は足さない(印つきの違う)", JSON.stringify(await linkedNames(partial)) === JSON.stringify(["山田太郎"]) && (await row(partial))?.diffKind?.endsWith(",autoadd") === true);
     check("14i このままでよいの物件には足さない", JSON.stringify(await linkedNames(kept)) === JSON.stringify(["佐藤次郎"]) && (await row(kept))?.decision === "keep");
     const jobs = await prisma.importJob.findMany({ where: { fileName: "謄本にだけいる人を自動で登録" }, select: { executedBy: true } });
-    check("14j 取込記録は固定の名前・実行者は一番前からいる有効な管理者", jobs.length === 2 && jobs.every((j) => j.executedBy === firstAdmin), jobs);
+    check("14j 取込記録は固定の名前・実行者は謄本を添付した人", jobs.length === 2 && jobs.every((j) => j.executedBy === u), jobs);
     const again = await runRegistryOwnerChecks(50);
     check("14k 2回目は何もしない", again.processed === 0, again);
 
@@ -644,13 +653,26 @@ async function main() {
     const r2 = await runRegistryOwnerChecks(50);
     check("14l 印の無い未判断の違うは比べ直して足す", r2.processed === 1 && r2.counts.auto_added === 1 && (await linkedNames(old)).includes("鈴木三郎"), r2);
 
-    // f) 有効な管理者がいない=足さず、失敗として後回し(比べ直し待ち)
-    await prisma.user.updateMany({ where: { role: "admin" }, data: { isActive: false } });
-    const noActor = await property(u, "hold");
-    await link(noActor, await owner("佐藤四郎"));
-    await registry(noActor, u, [{ name: "鈴木四郎" }]);
+    // f) 謄本を添付した人が所有者を書けない・止められた=自動では足さない(人が確かめる)。比べ直しにも回さない
+    const noPerm = await mkUser("office_staff", true, "2025-02-01");
+    NO_PERMS.add(noPerm);
+    const inactive = await mkUser("admin", false, "2025-03-01");
+    const byNoPerm = await property(u, "hold");
+    await link(byNoPerm, await owner("佐藤四郎"));
+    await registry(byNoPerm, noPerm, [{ name: "鈴木四郎" }]);
+    const byInactive = await property(u, "hold");
+    await link(byInactive, await owner("佐藤五郎"));
+    await registry(byInactive, inactive, [{ name: "鈴木五郎" }]);
     const r3 = await runRegistryOwnerChecks(50);
-    check("14m 管理者がいなければ足さず失敗・比べ直し待ち", r3.failed === 1 && JSON.stringify(await linkedNames(noActor)) === JSON.stringify(["佐藤四郎"]) && (await row(noActor))?.stale === true, { r3, row: await row(noActor) });
+    check(
+      "14m 添付した人が反映できなければ足さない・失敗にしない・印つきで残りに数えない",
+      r3.processed === 2 && r3.failed === 0 && !r3.counts.auto_added && r3.remaining === 0 &&
+        JSON.stringify(await linkedNames(byNoPerm)) === JSON.stringify(["佐藤四郎"]) &&
+        JSON.stringify(await linkedNames(byInactive)) === JSON.stringify(["佐藤五郎"]) &&
+        (await row(byNoPerm))?.diffKind?.endsWith(",autoadd") === true && (await row(byNoPerm))?.stale === false,
+      { r3, row: await row(byNoPerm) },
+    );
+    NO_PERMS.clear();
   }
 }
 

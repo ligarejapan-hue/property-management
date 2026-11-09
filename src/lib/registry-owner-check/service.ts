@@ -11,7 +11,8 @@
  *   押さえない(初回の全件比べの最中に同じ物件の氏名を直す、という重なりだけで起きる)。
  */
 import prisma from "@/lib/prisma";
-import { ApiError } from "@/lib/api-helpers";
+import { ApiError, getUserPermissions } from "@/lib/api-helpers";
+import { canAccessPropertyRecord } from "@/lib/property-access";
 import { lockPropertyRecordForWrite, lockPropertyRow } from "@/lib/property-record-guard";
 import { parseRegistryOwnerTable } from "@/lib/registry-owner-table";
 import {
@@ -25,7 +26,7 @@ import {
 import { processRegistryPdf } from "@/lib/registry-pdf/process";
 import { compareRegistryOwners, ownerNameKey, type RegistryOwnerCheckResult } from "@/lib/registry-owner-check/compare";
 import { AUTO_ADD_DONE_TOKEN, ownerDiff } from "@/lib/registry-owner-check/diff";
-import { registryOwnersToAutoAdd } from "@/lib/registry-owner-check/auto-add";
+import { registryOwnersToAutoAdd, uploaderMayAutoAdd } from "@/lib/registry-owner-check/auto-add";
 
 type Tx = ReplaceTx;
 
@@ -397,16 +398,43 @@ export async function recordCheckAfterReplace(
 export const REGISTRY_OWNER_AUTO_ADD_AUDIT_LABEL = "謄本にだけいる人を自動で登録";
 
 /**
- * 自動の登録を誰の操作として残すか(2026-11-10 発注者決定=スイッチは作らず、いつも自動)。
- * 有効な管理者のうち、いちばん前からいる人。
+ * 自動の登録を誰の操作として残すか(2026-11-10)=**その謄本を添付した人**。
+ * その人が今も有効で、自分で謄本から所有者を反映できる権限(uploaderMayAutoAdd)と、その物件の
+ * 担当範囲を持つときだけ返す。持たなければ null=自動では足さず、人が一覧で確かめる。
+ * ⚠管理者など別の人の名前を借りない(所有者を書けない人が偽の謄本を添付して、管理者の名前で
+ *   所有者を足させる抜け道になる=自動のセキュリティ点検の指摘)。
  */
-async function autoAddActor(): Promise<{ id: string; role: string } | null> {
-  const u = await prisma.user.findFirst({
-    where: { role: "admin", isActive: true },
-    orderBy: [{ createdAt: "asc" }, { id: "asc" }],
-    select: { id: true, role: true },
+async function autoAddActor(
+  propertyId: string,
+  attachmentId: string,
+  owners: ReadonlyArray<{ name: string; address: string | null }>,
+): Promise<{ id: string; role: string } | null> {
+  const a = await prisma.attachment.findUnique({ where: { id: attachmentId }, select: { uploadedBy: true } });
+  const u = a
+    ? await prisma.user.findUnique({ where: { id: a.uploadedBy }, select: { id: true, role: true, isActive: true } })
+    : null;
+  if (!u || !u.isActive) return null;
+  const property = await prisma.property.findUnique({
+    where: { id: propertyId },
+    select: { id: true, assignedTo: true, createdBy: true },
   });
-  return u ? { id: u.id, role: u.role } : null;
+  if (!property || !canAccessPropertyRecord({ id: u.id, role: u.role }, property)) return null;
+  if (!uploaderMayAutoAdd(await getUserPermissions(u.id), owners)) return null;
+  return { id: u.id, role: u.role };
+}
+
+/**
+ * 自動では足さないと決まった(添付した人に権限が無い等)=印だけ付けて、比べ直しに回さない。
+ * 1文の書き込み(結果の行だけ)。比べたあとに謄本・所有者が変わっていたら付けない。
+ */
+async function markAutoAddDone(propertyId: string, attachmentId: string): Promise<void> {
+  await prisma.$executeRaw`
+    UPDATE registry_owner_checks
+       SET diff_kind = diff_kind || ${`,${AUTO_ADD_DONE_TOKEN}`}
+     WHERE property_id = ${propertyId}::uuid AND attachment_id = ${attachmentId}::uuid
+       AND stale = false AND result = 'mismatch' AND decision IS NULL
+       AND diff_kind IS NOT NULL AND diff_kind NOT LIKE ${`%${AUTO_ADD_DONE_TOKEN}%`}
+  `;
 }
 
 const nameKeys = (owners: ReadonlyArray<{ name: string }>) =>
@@ -430,10 +458,6 @@ export async function autoAddRegistryOnlyOwners(propertyId: string): Promise<num
   });
   if (!row || row.stale || row.result !== "mismatch" || row.decision !== null || !row.attachmentId) return 0;
   if (row.diffKind?.split(",").includes(AUTO_ADD_DONE_TOKEN)) return 0;
-  const actor = await autoAddActor();
-  // 管理者がいない=誰の操作か残せない。失敗として後回しにする(同じ物件を読み続けない)
-  if (!actor) throw new ApiError(409, "自動で登録する管理者がいません", "AUTO_ADD_NO_ACTOR");
-
   const registry = await loadLatestRegistryText(propertyId, row.attachmentId, {
     timeoutMs: REGISTRY_OWNER_READ_TIMEOUT_MS,
   });
@@ -444,6 +468,12 @@ export async function autoAddRegistryOnlyOwners(propertyId: string): Promise<num
     await linkedOwnerNames(prisma as unknown as Tx, propertyId),
   );
   if (targets.length === 0 || targets.length > REGISTRY_OWNER_AUTO_ADD_MAX) return 0;
+  const actor = await autoAddActor(propertyId, registry.attachmentId, targets);
+  if (!actor) {
+    // 添付した人が自分では反映できない=自動では足さない(人が一覧で確かめる)。比べ直しには回さない
+    await markAutoAddDone(propertyId, registry.attachmentId);
+    return 0;
+  }
 
   await processRegistryPdf({
     session: actor,

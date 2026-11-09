@@ -3,7 +3,7 @@
  * ⚠守りたい事故: 表記の違いだけの人を別人として二重に登録する/今いる人を書き換える
  */
 import { describe, it, expect } from "vitest";
-import { registryOwnersToAutoAdd } from "@/lib/registry-owner-check/auto-add";
+import { registryOwnersToAutoAdd, uploaderMayAutoAdd } from "@/lib/registry-owner-check/auto-add";
 import { ownerDiffLabelFromStored, AUTO_ADD_DONE_TOKEN } from "@/lib/registry-owner-check/diff";
 
 const reg = (...names: string[]) => names.map((name) => ({ name, address: `住所-${name}`, share: null }));
@@ -25,6 +25,9 @@ describe("registryOwnersToAutoAdd", () => {
     // 異体字の表に無い1字の違いも表記の違いとして扱う
     expect(registryOwnersToAutoAdd(reg("山田太朗"), ["山田太郎"])).toEqual([]);
     expect(registryOwnersToAutoAdd(reg("株式会社山田商亊"), ["(株)山田商事"])).toEqual([]);
+    // 謄本に同じ人が2回載っていても足さない(@codex #688 R1)
+    expect(registryOwnersToAutoAdd(reg("山田太朗", "山田太朗"), ["山田太郎"])).toEqual([]);
+    expect(registryOwnersToAutoAdd(reg("山田太朗", "山田 太朗"), ["山田太郎"])).toEqual([]);
   });
 
   it("名前の一部が違う・姓や名が替わった(2字以上)=別の人として足す", () => {
@@ -51,6 +54,23 @@ describe("registryOwnersToAutoAdd", () => {
 
   it("同じなら何も足さない", () => {
     expect(registryOwnersToAutoAdd(reg("山田太郎"), ["山田太郎"])).toEqual([]);
+  });
+});
+
+describe("uploaderMayAutoAdd(謄本を添付した人が自分で反映できるか)", () => {
+  const g = (resource: string, action: string) => ({ resource, action, granted: true });
+  const FULL = [
+    g("property", "read"), g("registry_pdf", "preview"), g("import", "write"), g("owner", "write"),
+    g("owner_name", "full"), g("owner_address", "full"),
+  ];
+  const owners = [{ name: "鈴木一郎", address: "東京都" }];
+  it("反映の窓口と同じ権限がそろえば true", () => {
+    expect(uploaderMayAutoAdd(FULL, owners)).toBe(true);
+  });
+  it("どれか1つでも欠ければ false(偽の謄本で所有者を足させない)", () => {
+    for (const drop of ["property", "registry_pdf", "import", "owner", "owner_name", "owner_address"]) {
+      expect(uploaderMayAutoAdd(FULL.filter((p) => p.resource !== drop), owners)).toBe(false);
+    }
   });
 });
 
