@@ -30,8 +30,20 @@ vi.mock("@/lib/api-helpers", () => {
       this.code = code;
     }
   }
-  return { ApiError };
+  // 謄本を添付した人の権限(自動の登録で見る)。NO_PERMS に入れた人だけ何も持たない
+  const getUserPermissions = async (id: string) =>
+    (globalThis as { __NO_PERMS__?: Set<string> }).__NO_PERMS__?.has(id)
+      ? []
+      : [
+          ...[["property", "read"], ["registry_pdf", "preview"], ["import", "write"], ["owner", "write"]].map(
+            ([resource, action]) => ({ resource, action, granted: true }),
+          ),
+          ...["owner_name", "owner_address"].map((resource) => ({ resource, action: "full", granted: true })),
+        ];
+  return { ApiError, getUserPermissions };
 });
+const NO_PERMS = new Set<string>();
+(globalThis as { __NO_PERMS__?: Set<string> }).__NO_PERMS__ = NO_PERMS;
 
 // 保存場所: fileUrl をそのままキーにして、登録したテキストを中身として返す
 const TEXTS = new Map<string, string>();
@@ -516,15 +528,17 @@ async function main() {
   await reset();
   {
     const u = await user();
+    // (謄本にだけいる人がいると自動で足されるので、ここはシステムに1人多い物件で見る)
     const diff = await property(u);
     await link(diff, await owner("高橋一郎"));
-    await registry(diff, u, [{ name: "髙橋一郎" }, { name: "髙橋次郎" }]);
+    await link(diff, await owner("佐藤花子"));
+    await registry(diff, u, [{ name: "髙橋一郎" }]);
     const same = await property(u);
     await link(same, await owner("山田太郎"));
     await registry(same, u, [{ name: "山田太郎" }]);
     await runRegistryOwnerChecks(50);
     const d = await row(diff);
-    check("12a 違うときは種類の記号と人数だけ", d?.result === "mismatch" && d?.diffKind === "kanji,count:2:1" && d?.diffRank === 4, d);
+    check("12a 違うときは種類の記号と人数だけ(+自動の登録の印)", d?.result === "mismatch" && d?.diffKind === "kanji,count:1:2,autoadd" && d?.diffRank === 4, d);
     const s = await row(same);
     check("12b 同じなら種類は空", s?.result === "same" && s?.diffKind === null && s?.diffRank === null, s);
 
@@ -537,7 +551,7 @@ async function main() {
     await prisma.registryOwnerCheck.update({ where: { propertyId: kept }, data: { diffKind: null, diffRank: null, decision: "keep" } });
     const r = await runRegistryOwnerChecks(50);
     check("12c 種類の無い未判断の「違う」だけを比べ直す(判断済みは比べない)", r.processed === 1 && r.counts.mismatch === 1 && r.remaining === 0, r);
-    check("12d 比べ直すと種類が埋まる", (await row(diff))?.diffKind === "kanji,count:2:1");
+    check("12d 比べ直すと種類が埋まる", (await row(diff))?.diffKind === "kanji,count:1:2,autoadd");
     check("12e 判断済みの行はそのまま", (await row(kept))?.diffKind === null && (await row(kept))?.decision === "keep");
   }
 
@@ -575,6 +589,108 @@ async function main() {
     check("13d 外した人の記録そのものは残る", (await prisma.owner.count({ where: { id: { in: many } } })) === 260);
     check("13e トランザクションの持ち時間(30秒)に余裕で収まる", elapsed < 10_000, elapsed);
     check("13f 比べ直した結果は同じ", (await row(p))?.result === "same");
+  }
+
+  // ---- 14. 謄本にだけいる人を自動で登録(2026-11-10): 足すだけ・外さない・住所を変えない・DM は保留のまま ----
+  await reset();
+  {
+    // 実行者=その謄本を添付した人(今も有効で、自分で謄本から所有者を反映できるときだけ)
+    const mkUser = async (role: string, active: boolean, createdAt: string) => {
+      const id = randomUUID();
+      await prisma.$executeRawUnsafe(
+        `INSERT INTO users (id, email, name, password_hash, created_at, updated_at, role, is_active) VALUES ($1::uuid, $2, 'x', 'x', $3::timestamp, now(), $4::"Role", $5)`,
+        id, `${id}@x.test`, createdAt, role, active,
+      );
+      return id;
+    };
+    const u = await mkUser("office_staff", true, "2025-01-01");
+
+    // a) 別の人: 謄本の人を足し、システムの人は外さない・住所はそのまま
+    const changed = await property(u, "hold");
+    const sato = await owner("佐藤一郎", "大阪府大阪市北区梅田一丁目1番1号(システムで直した住所)");
+    await link(changed, sato, { isPrimary: true });
+    await registry(changed, u, [{ name: "鈴木一郎", address: "東京都港区芝公園四丁目2番8号" }]);
+    // b) 人数が違う: 多い人だけ足す
+    const more = await property(u, "hold");
+    await link(more, await owner("山田太郎"));
+    await registry(more, u, [{ name: "山田太郎" }, { name: "田中花子" }]);
+    // c) 漢字1字の違い(表記の違い・異体字の表に無い字): 足さない=人が確かめる
+    const partial = await property(u, "hold");
+    await link(partial, await owner("山田太郎"));
+    await registry(partial, u, [{ name: "山田太朗" }]);
+    // d) このままでよい(同じ謄本): 足さない
+    const kept = await property(u, "hold");
+    await link(kept, await owner("佐藤次郎"));
+    await registry(kept, u, [{ name: "鈴木次郎" }]);
+    await checkPropertyRegistryOwners(kept);
+    await prisma.registryOwnerCheck.update({ where: { propertyId: kept }, data: { decision: "keep", stale: true } });
+
+    const r = await runRegistryOwnerChecks(50);
+    check("14a 違う2件に足した(人数も)・失敗なし・残り0", r.counts.auto_added === 2 && r.counts.auto_added_people === 2 && r.failed === 0 && r.remaining === 0, r);
+    check("14b 別の人: 謄本の人を足し、システムの人も残る", JSON.stringify(await linkedNames(changed)) === JSON.stringify(["佐藤一郎", "鈴木一郎"]), await linkedNames(changed));
+    const satoNow = await prisma.owner.findUniqueOrThrow({ where: { id: sato } });
+    const satoLink = await prisma.propertyOwner.findFirstOrThrow({ where: { propertyId: changed, ownerId: sato } });
+    check("14c 今いる人の住所・主所有者はそのまま", satoNow.address === "大阪府大阪市北区梅田一丁目1番1号(システムで直した住所)" && satoLink.isPrimary === true, { satoNow, satoLink });
+    const suzuki = await prisma.owner.findFirstOrThrow({ where: { name: "鈴木一郎" } });
+    check("14d 足した人は謄本の住所", suzuki.address === "東京都港区芝公園四丁目2番8号", suzuki.address);
+    const rc = await row(changed);
+    check("14e 比べ直した結果を残す(違う・印つき・比べ直し待ちでない)", rc?.result === "mismatch" && rc?.stale === false && rc?.diffKind?.endsWith(",autoadd") === true && rc?.decision === null, rc);
+    check("14f DM は保留のまま", (await prisma.property.findUniqueOrThrow({ where: { id: changed } })).dmStatus === "hold");
+    check("14g 人数が違う: 多い人だけ足して同じになる", JSON.stringify(await linkedNames(more)) === JSON.stringify(["山田太郎", "田中花子"].sort()) && (await row(more))?.result === "same");
+    check("14h 表記だけの違いの人は足さない(印つきの違う)", JSON.stringify(await linkedNames(partial)) === JSON.stringify(["山田太郎"]) && (await row(partial))?.diffKind?.endsWith(",autoadd") === true);
+    check("14i このままでよいの物件には足さない", JSON.stringify(await linkedNames(kept)) === JSON.stringify(["佐藤次郎"]) && (await row(kept))?.decision === "keep");
+    const jobs = await prisma.importJob.findMany({ where: { fileName: "謄本にだけいる人を自動で登録" }, select: { executedBy: true } });
+    check("14j 取込記録は固定の名前・実行者は謄本を添付した人", jobs.length === 2 && jobs.every((j) => j.executedBy === u), jobs);
+    const again = await runRegistryOwnerChecks(50);
+    check("14k 2回目は何もしない", again.processed === 0, again);
+
+    // 足して「同じ」になった物件で、人が足された人を外す → 同じ謄本のあいだは足し直さない(@codex #688 R2)
+    const tanaka = await prisma.owner.findFirstOrThrow({ where: { name: "田中花子" } });
+    await prisma.propertyOwner.deleteMany({ where: { propertyId: more, ownerId: tanaka.id } });
+    const rRemoved = await runRegistryOwnerChecks(50);
+    const moreRow = await row(more);
+    check(
+      "14n 外した人は同じ謄本のあいだは足し直さない・一覧に出る(違う・未判断・印つき)",
+      rRemoved.processed === 1 && !rRemoved.counts.auto_added && JSON.stringify(await linkedNames(more)) === JSON.stringify(["山田太郎"]) &&
+        moreRow?.result === "mismatch" && moreRow?.decision === null && moreRow?.stale === false && moreRow?.diffKind?.endsWith(",autoadd") === true,
+      { rRemoved, moreRow },
+    );
+    const rAgain = await runRegistryOwnerChecks(50);
+    check("14o そのあとも比べ直しに回らない", rAgain.processed === 0, rAgain);
+    // 新しい謄本が付いたら、もう一度比べて足す
+    await registry(more, u, [{ name: "山田太郎" }, { name: "田中花子" }]);
+    const rNew = await runRegistryOwnerChecks(50);
+    check("14p 新しい謄本ではまた足す", rNew.counts.auto_added === 1 && (await linkedNames(more)).includes("田中花子"), rNew);
+
+    // e) この仕組みより前に比べた「違う」(印なし)は比べ直しに回り、そこで足す
+    const old = await property(u, "hold");
+    await link(old, await owner("佐藤三郎"));
+    await registry(old, u, [{ name: "鈴木三郎" }]);
+    await checkPropertyRegistryOwners(old);
+    await prisma.registryOwnerCheck.update({ where: { propertyId: old }, data: { diffKind: "different" } });
+    const r2 = await runRegistryOwnerChecks(50);
+    check("14l 印の無い未判断の違うは比べ直して足す", r2.processed === 1 && r2.counts.auto_added === 1 && (await linkedNames(old)).includes("鈴木三郎"), r2);
+
+    // f) 謄本を添付した人が所有者を書けない・止められた=自動では足さない(人が確かめる)。比べ直しにも回さない
+    const noPerm = await mkUser("office_staff", true, "2025-02-01");
+    NO_PERMS.add(noPerm);
+    const inactive = await mkUser("admin", false, "2025-03-01");
+    const byNoPerm = await property(u, "hold");
+    await link(byNoPerm, await owner("佐藤四郎"));
+    await registry(byNoPerm, noPerm, [{ name: "鈴木四郎" }]);
+    const byInactive = await property(u, "hold");
+    await link(byInactive, await owner("佐藤五郎"));
+    await registry(byInactive, inactive, [{ name: "鈴木五郎" }]);
+    const r3 = await runRegistryOwnerChecks(50);
+    check(
+      "14m 添付した人が反映できなければ足さない・失敗にしない・印つきで残りに数えない",
+      r3.processed === 2 && r3.failed === 0 && !r3.counts.auto_added && r3.remaining === 0 &&
+        JSON.stringify(await linkedNames(byNoPerm)) === JSON.stringify(["佐藤四郎"]) &&
+        JSON.stringify(await linkedNames(byInactive)) === JSON.stringify(["佐藤五郎"]) &&
+        (await row(byNoPerm))?.diffKind?.endsWith(",autoadd") === true && (await row(byNoPerm))?.stale === false,
+      { r3, row: await row(byNoPerm) },
+    );
+    NO_PERMS.clear();
   }
 }
 

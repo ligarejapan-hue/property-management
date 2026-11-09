@@ -11,17 +11,22 @@
  *   押さえない(初回の全件比べの最中に同じ物件の氏名を直す、という重なりだけで起きる)。
  */
 import prisma from "@/lib/prisma";
-import { ApiError } from "@/lib/api-helpers";
+import { ApiError, getUserPermissions } from "@/lib/api-helpers";
+import { canAccessPropertyRecord } from "@/lib/property-access";
 import { lockPropertyRecordForWrite, lockPropertyRow } from "@/lib/property-record-guard";
 import { parseRegistryOwnerTable } from "@/lib/registry-owner-table";
 import {
+  attachmentChangedError,
   findLatestOwnerRegistryAttachment,
   loadLatestRegistryText,
+  ownersChangedError,
   SUPPORTED_CERTIFICATE_TYPE,
   type ReplaceTx,
 } from "@/lib/registry-owner-apply/apply";
-import { compareRegistryOwners, type RegistryOwnerCheckResult } from "@/lib/registry-owner-check/compare";
-import { ownerDiff } from "@/lib/registry-owner-check/diff";
+import { processRegistryPdf } from "@/lib/registry-pdf/process";
+import { compareRegistryOwners, ownerNameKey, type RegistryOwnerCheckResult } from "@/lib/registry-owner-check/compare";
+import { AUTO_ADD_DONE_TOKEN, ownerDiff } from "@/lib/registry-owner-check/diff";
+import { registryOwnersToAutoAdd, uploaderMayAutoAdd } from "@/lib/registry-owner-check/auto-add";
 
 type Tx = ReplaceTx;
 
@@ -73,21 +78,47 @@ async function linkedOwnerNames(tx: Tx, propertyId: string): Promise<string[]> {
 async function lockCheckRow(
   tx: Tx,
   propertyId: string,
-): Promise<{ attachmentId: string | null; decision: string | null; result: string; stale: boolean }> {
+): Promise<{
+  attachmentId: string | null;
+  decision: string | null;
+  result: string;
+  stale: boolean;
+  diffKind: string | null;
+}> {
   await tx.$executeRaw`
     INSERT INTO registry_owner_checks (property_id, result, stale)
     VALUES (${propertyId}::uuid, 'unreadable', true)
     ON CONFLICT (property_id) DO NOTHING
   `;
   const rows = await tx.$queryRaw<
-    { attachment_id: string | null; decision: string | null; result: string; stale: boolean }[]
+    { attachment_id: string | null; decision: string | null; result: string; stale: boolean; diff_kind: string | null }[]
   >`
-    SELECT attachment_id, decision, result, stale FROM registry_owner_checks
+    SELECT attachment_id, decision, result, stale, diff_kind FROM registry_owner_checks
     WHERE property_id = ${propertyId}::uuid
     FOR UPDATE
   `;
   const r = rows[0];
-  return { attachmentId: r.attachment_id, decision: r.decision, result: r.result, stale: r.stale };
+  return {
+    attachmentId: r.attachment_id,
+    decision: r.decision,
+    result: r.result,
+    stale: r.stale,
+    diffKind: r.diff_kind,
+  };
+}
+
+/**
+ * 同じ謄本で、自動の登録をもう済ませたか(2026-11-10・@codex #688 R2)。
+ * 自動で足すのは**謄本1件につき1回だけ**。足したあと・一度「同じ」になったあとに人が所有者を
+ * 外しても、同じ謄本のあいだは足し直さない(外した判断を自動で戻さない)。新しい謄本で比べ直す。
+ */
+function autoAddAlreadyDone(
+  prev: { attachmentId: string | null; result: string; diffKind: string | null },
+  attachmentId: string,
+): boolean {
+  if (prev.attachmentId !== attachmentId) return false;
+  if (prev.diffKind?.split(",").includes(AUTO_ADD_DONE_TOKEN)) return true;
+  return prev.result === "same" || prev.result === "same_notation";
 }
 
 /**
@@ -119,15 +150,32 @@ async function writeResult(
   });
 }
 
-/** 違い(mismatch)のときだけ、種類を求める(保存するのは記号と人数だけ)。 */
+/**
+ * 違い(mismatch)のときだけ、種類を求める(保存するのは記号と人数だけ)。
+ * autoAddDone=謄本にだけいる人の自動の登録まで済んだ(足す人がいない・足し終えた・判断済み)。
+ * 済んでいなければ印を付けない=比べ直しに回り、その回で足す。
+ */
 function diffOf(
   result: RegistryOwnerCheckResult,
   registryNames: readonly string[],
   systemNames: readonly string[],
+  autoAddDone: boolean,
 ): { kind: string; rank: number } | null {
   if (result !== "mismatch") return null;
   const d = ownerDiff(registryNames, systemNames);
-  return { kind: d.stored, rank: d.rank };
+  return { kind: autoAddDone ? `${d.stored},${AUTO_ADD_DONE_TOKEN}` : d.stored, rank: d.rank };
+}
+
+/** 1物件で自動で足す人数の上限(取込処理が一度に受ける人数)。超える物件は人が確かめる。 */
+export const REGISTRY_OWNER_AUTO_ADD_MAX = 100;
+
+/** 名前だけで、自動で足す人がいるか(住所は足すときに読み直す)。 */
+function hasOwnersToAutoAdd(registryNames: readonly string[], systemNames: readonly string[]): boolean {
+  const n = registryOwnersToAutoAdd(
+    registryNames.map((name) => ({ name, address: null, share: null })),
+    systemNames,
+  ).length;
+  return n > 0 && n <= REGISTRY_OWNER_AUTO_ADD_MAX;
 }
 
 /**
@@ -157,7 +205,18 @@ export async function checkPropertyRegistryOwners(
     const result: RegistryOwnerCheckResult = read.names
       ? compareRegistryOwners(read.names, systemNames)
       : "unreadable";
-    await writeResult(tx, propertyId, read.attachmentId, result, prev, diffOf(result, read.names ?? [], systemNames));
+    // 「このままでよい」が残る(同じ謄本)物件には自動で足さない
+    const kept = prev.decision === "keep" && prev.attachmentId === read.attachmentId;
+    const autoAddDone =
+      kept || autoAddAlreadyDone(prev, read.attachmentId) || !hasOwnersToAutoAdd(read.names ?? [], systemNames);
+    await writeResult(
+      tx,
+      propertyId,
+      read.attachmentId,
+      result,
+      prev,
+      diffOf(result, read.names ?? [], systemNames, autoAddDone),
+    );
     return result;
   });
 }
@@ -169,12 +228,15 @@ export const REGISTRY_OWNER_CHECK_RETRY_AFTER_HOURS = 1;
  * まだ比べていない・比べ直しが要る物件(アーカイブを除く・所有者事項の謄本あり)。
  * 「違う」で未判断なのに違いの種類がまだ無い行(種類を残す前に比べた行)も、比べ直しに数える
  * (比べ直すと種類が埋まる・その間も一覧には出たまま)。
+ * 「違う」で未判断なのに自動の登録の印(AUTO_ADD_DONE_TOKEN)が無い行も同じ(2026-11-10・
+ * この仕組みより前に比べた行と、謄本にだけいる人をまだ足していない行)。
  * backoff=true(夜の自動)のときは、比べ直し待ちのうち1時間以内に試した物件を後回しにする
  * (一時的な失敗の物件を2分ごとに読み続けない)。画面のボタンは後回しにしない(今すぐ試す)。
  * ⚠checked_at は UTC で入っている(Prisma)ので、比べる時刻も UTC にそろえる。
  */
 function pendingWhereSql(limit: number | null, backoff = false) {
   const backoffHours = backoff ? REGISTRY_OWNER_CHECK_RETRY_AFTER_HOURS : 0;
+  const doneTokenLike = `%${AUTO_ADD_DONE_TOKEN}%`;
   return limit === null
     ? prisma.$queryRaw<{ n: bigint }[]>`
         SELECT count(*)::bigint AS n FROM properties p
@@ -182,14 +244,16 @@ function pendingWhereSql(limit: number | null, backoff = false) {
           AND EXISTS (SELECT 1 FROM attachments a WHERE a.property_id = p.id AND a.type = 'registry'
                       AND a.is_deleted = false AND a.registry_certificate_type = ${SUPPORTED_CERTIFICATE_TYPE})
           AND NOT EXISTS (SELECT 1 FROM registry_owner_checks c WHERE c.property_id = p.id AND c.stale = false
-                          AND NOT (c.result = 'mismatch' AND c.decision IS NULL AND c.diff_kind IS NULL))`
+                          AND NOT (c.result = 'mismatch' AND c.decision IS NULL
+                                   AND (c.diff_kind IS NULL OR c.diff_kind NOT LIKE ${doneTokenLike})))`
     : prisma.$queryRaw<{ id: string }[]>`
         SELECT p.id FROM properties p
         WHERE p.is_archived = false
           AND EXISTS (SELECT 1 FROM attachments a WHERE a.property_id = p.id AND a.type = 'registry'
                       AND a.is_deleted = false AND a.registry_certificate_type = ${SUPPORTED_CERTIFICATE_TYPE})
           AND NOT EXISTS (SELECT 1 FROM registry_owner_checks c WHERE c.property_id = p.id AND c.stale = false
-                          AND NOT (c.result = 'mismatch' AND c.decision IS NULL AND c.diff_kind IS NULL))
+                          AND NOT (c.result = 'mismatch' AND c.decision IS NULL
+                                   AND (c.diff_kind IS NULL OR c.diff_kind NOT LIKE ${doneTokenLike})))
           AND NOT EXISTS (SELECT 1 FROM registry_owner_checks c WHERE c.property_id = p.id AND c.stale = true
                           AND ${backoffHours}::int > 0
                           AND c.checked_at > (now() AT TIME ZONE 'UTC') - make_interval(hours => ${backoffHours}::int))
@@ -249,6 +313,14 @@ export async function runRegistryOwnerChecks(
       const r = await checkPropertyRegistryOwners(id);
       const k = r ?? "skipped";
       counts[k] = (counts[k] ?? 0) + 1;
+      // 違う → 謄本にだけいる人を自動で登録(2026-11-10 発注者決定)
+      if (r === "mismatch") {
+        const added = await autoAddRegistryOnlyOwners(id);
+        if (added > 0) {
+          counts.auto_added = (counts.auto_added ?? 0) + 1;
+          counts.auto_added_people = (counts.auto_added_people ?? 0) + added;
+        }
+      }
     } catch (e) {
       failed += 1;
       // ⚠生のエラー文は出さない(謄本由来の文字を含みうる)
@@ -344,8 +416,135 @@ export async function recordCheckAfterReplace(
   const prev = await lockCheckRow(tx, propertyId);
   const systemNames = await linkedOwnerNames(tx, propertyId);
   const result = compareRegistryOwners(registryNames, systemNames);
-  await writeResult(tx, propertyId, attachmentId, result, prev, diffOf(result, registryNames, systemNames));
+  // 直したあと(謄本の人は全員そろった)=自動で足す人はもういない
+  await writeResult(tx, propertyId, attachmentId, result, prev, diffOf(result, registryNames, systemNames, true));
   return result;
+}
+
+/** 自動の登録の履歴・取込記録に残す名前(生のファイル名は使わない)。 */
+export const REGISTRY_OWNER_AUTO_ADD_AUDIT_LABEL = "謄本にだけいる人を自動で登録";
+
+/**
+ * 自動の登録を誰の操作として残すか(2026-11-10)=**その謄本を添付した人**。
+ * その人が今も有効で、自分で謄本から所有者を反映できる権限(uploaderMayAutoAdd)と、その物件の
+ * 担当範囲を持つときだけ返す。持たなければ null=自動では足さず、人が一覧で確かめる。
+ * ⚠管理者など別の人の名前を借りない(所有者を書けない人が偽の謄本を添付して、管理者の名前で
+ *   所有者を足させる抜け道になる=自動のセキュリティ点検の指摘)。
+ */
+async function autoAddActor(
+  propertyId: string,
+  attachmentId: string,
+  owners: ReadonlyArray<{ name: string; address: string | null }>,
+): Promise<{ id: string; role: string } | null> {
+  const a = await prisma.attachment.findUnique({ where: { id: attachmentId }, select: { uploadedBy: true } });
+  const u = a
+    ? await prisma.user.findUnique({ where: { id: a.uploadedBy }, select: { id: true, role: true, isActive: true } })
+    : null;
+  if (!u || !u.isActive) return null;
+  const property = await prisma.property.findUnique({
+    where: { id: propertyId },
+    select: { id: true, assignedTo: true, createdBy: true },
+  });
+  if (!property || !canAccessPropertyRecord({ id: u.id, role: u.role }, property)) return null;
+  if (!uploaderMayAutoAdd(await getUserPermissions(u.id), owners)) return null;
+  return { id: u.id, role: u.role };
+}
+
+/**
+ * 自動では足さないと決まった(添付した人に権限が無い等)=印だけ付けて、比べ直しに回さない。
+ * 1文の書き込み(結果の行だけ)。比べたあとに謄本・所有者が変わっていたら付けない。
+ */
+async function markAutoAddDone(propertyId: string, attachmentId: string): Promise<void> {
+  await prisma.$executeRaw`
+    UPDATE registry_owner_checks
+       SET diff_kind = diff_kind || ${`,${AUTO_ADD_DONE_TOKEN}`}
+     WHERE property_id = ${propertyId}::uuid AND attachment_id = ${attachmentId}::uuid
+       AND stale = false AND result = 'mismatch' AND decision IS NULL
+       AND diff_kind IS NOT NULL AND diff_kind NOT LIKE ${`%${AUTO_ADD_DONE_TOKEN}%`}
+  `;
+}
+
+const nameKeys = (owners: ReadonlyArray<{ name: string }>) =>
+  owners.map((o) => ownerNameKey(o.name)).sort().join("\n");
+
+/**
+ * 「違う」と比べた物件で、謄本にだけいる人をシステムの所有者に足す(2026-11-10 発注者決定)。
+ * 足した人数を返す(足さなければ 0)。誰を足すかは auto-add.ts。
+ * - システムにだけいる人は外さない。今いる人の名前・住所は変えない(足すだけ)
+ * - 表記だけの違い(漢字1字ずつ・法人の書き方)の人は足さない
+ * - 「このままでよい」を選んだ物件・比べ直し待ちの物件には何もしない
+ * - DM の保留はそのまま
+ * ⚠足す処理は「謄本の名義に直す」の足す側と同じ(processRegistryPdf)。1つのトランザクションで、
+ *   ロックの中で比べた結果と足す人を見直し、比べ直した結果(印つき)も同じトランザクションで残す。
+ * ⚠氏名・住所はログに出さない(呼び出し元も人数だけ)。
+ */
+export async function autoAddRegistryOnlyOwners(propertyId: string): Promise<number> {
+  const row = await prisma.registryOwnerCheck.findUnique({
+    where: { propertyId },
+    select: { attachmentId: true, result: true, decision: true, stale: true, diffKind: true },
+  });
+  if (!row || row.stale || row.result !== "mismatch" || row.decision !== null || !row.attachmentId) return 0;
+  if (row.diffKind?.split(",").includes(AUTO_ADD_DONE_TOKEN)) return 0;
+  const registry = await loadLatestRegistryText(propertyId, row.attachmentId, {
+    timeoutMs: REGISTRY_OWNER_READ_TIMEOUT_MS,
+  });
+  const registryOwners = parseRegistryOwnerTable(registry.text) ?? [];
+  const registryNames = registryOwners.map((o) => o.name).filter((n) => n && n.trim());
+  const targets = registryOwnersToAutoAdd(
+    registryOwners,
+    await linkedOwnerNames(prisma as unknown as Tx, propertyId),
+  );
+  if (targets.length === 0 || targets.length > REGISTRY_OWNER_AUTO_ADD_MAX) return 0;
+  const actor = await autoAddActor(propertyId, registry.attachmentId, targets);
+  if (!actor) {
+    // 添付した人が自分では反映できない=自動では足さない(人が一覧で確かめる)。比べ直しには回さない
+    await markAutoAddDone(propertyId, registry.attachmentId);
+    return 0;
+  }
+
+  await processRegistryPdf({
+    session: actor,
+    text: registry.text,
+    propertyId,
+    // ⚠生ファイル名ではなく固定ラベル(ImportJob と AuditLog に残るため)
+    fileName: REGISTRY_OWNER_AUTO_ADD_AUDIT_LABEL,
+    // ⚠足すのは謄本にだけいる人だけ
+    edited: { owners: targets.map((o) => ({ name: o.name, address: o.address, share: o.share })) },
+    // ⚠必ず null(添付は既にある)
+    pdfBuffer: null,
+    certificateType: SUPPORTED_CERTIFICATE_TYPE,
+    enforcePropertyScope: true,
+    ownersOnly: true,
+    sanitizeFailureDetails: true,
+    beforeFirstWrite: async (tx) => {
+      // 順序は 物件 → 添付(反映・直すと同じ)。読んだ謄本が今も最新か。
+      await tx.$queryRaw`
+        SELECT id FROM attachments
+        WHERE property_id = ${propertyId}::uuid AND type = 'registry'
+        FOR UPDATE
+      `;
+      const latest = await findLatestOwnerRegistryAttachment(tx, propertyId);
+      if (!latest || latest.id !== registry.attachmentId) throw attachmentChangedError();
+    },
+    // 外す人はいない。ロックの中で、比べた結果と足す人が今も同じかを見直すだけ
+    replaceExistingOwners: async (tx) => {
+      const prev = await lockCheckRow(tx, propertyId);
+      if (
+        prev.stale ||
+        prev.result !== "mismatch" ||
+        prev.decision !== null ||
+        prev.attachmentId !== registry.attachmentId
+      ) {
+        throw checkChangedError();
+      }
+      const fresh = registryOwnersToAutoAdd(registryOwners, await linkedOwnerNames(tx, propertyId));
+      if (nameKeys(fresh) !== nameKeys(targets)) throw ownersChangedError();
+    },
+    beforeCommit: async (tx) => {
+      await recordCheckAfterReplace(tx, propertyId, registry.attachmentId, registryNames);
+    },
+  });
+  return targets.length;
 }
 
 export const checkChangedError = () =>
