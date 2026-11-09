@@ -60,17 +60,34 @@ export function classifyRegistryText(text: string): RegistryCountKind {
 
 export type ReadPdfText = (fileUrl: string, timeoutMs: number) => Promise<string | null>;
 
-/** 保存場所から読んで文字を抜き出す。PDF でない・ファイルが無い=null。時間切れ・失敗は投げる。 */
+/**
+ * 保存場所から読んで文字を抜き出す。PDF でない=null(ずっと「その他」)。
+ * ファイルが無い・時間切れ・失敗は投げる(一時的かもしれない=10分だけ覚える・@codex #683)。
+ */
 const readPdfText: ReadPdfText = async (fileUrl, timeoutMs) => {
   const started = Date.now();
   const storage = getStorage();
   const key = storage.keyFromUrl(fileUrl);
   const file = key ? await storage.read(key) : null;
-  if (!file || !isPdfBuffer(file.body)) return null;
+  if (!file) throw new Error("registry file unavailable");
+  if (!isPdfBuffer(file.body)) return null;
   const remaining = timeoutMs - (Date.now() - started);
   if (remaining <= 0) throw Object.assign(new Error("timeout"), { code: PDF_READ_TIMEOUT });
   return extractTextFromPdf(file.body, { timeoutMs: remaining });
 };
+
+/**
+ * 読み取り全体(保存場所から読む時間を含む)に締め切りをかける。保存場所が止まっても画面を待たせない(@codex #683)。
+ * 読み取り自体は裏で終わるまで続くが、結果は使わない(PDF の解析は worker の上限で止まる)。
+ */
+function withDeadline<T>(p: Promise<T>, ms: number): Promise<T> {
+  let timer: ReturnType<typeof setTimeout> | undefined;
+  const deadline = new Promise<never>((_, reject) => {
+    timer = setTimeout(() => reject(Object.assign(new Error("timeout"), { code: PDF_READ_TIMEOUT })), ms);
+  });
+  p.catch(() => {}); // 締め切りのあとの失敗を拾う(未処理の拒否にしない)
+  return Promise.race([p, deadline]).finally(() => clearTimeout(timer));
+}
 
 /**
  * 種別の列が空の謄本を見分けて数える。覚えている分は読まない。例外は投げない(読めなければ「その他」)。
@@ -104,7 +121,8 @@ export async function countUntypedRegistryAttachments(
         continue;
       }
       try {
-        const text = await read(a.fileUrl, Math.min(REGISTRY_COUNT_READ_TIMEOUT_MS, remaining));
+        const limit = Math.min(REGISTRY_COUNT_READ_TIMEOUT_MS, remaining);
+        const text = await withDeadline(read(a.fileUrl, limit), limit);
         kind = text && text.trim() ? classifyRegistryText(text) : "other";
       } catch {
         // 時間切れ・読み取りの失敗=「その他」。しばらく覚えて、開くたびに同じ待ちを繰り返さない

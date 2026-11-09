@@ -3,6 +3,7 @@ import { readFileSync } from "node:fs";
 import { join } from "node:path";
 
 vi.mock("@/lib/storage", () => ({ getStorage: vi.fn() }));
+import { getStorage } from "@/lib/storage";
 
 import {
   classifyRegistryText,
@@ -152,6 +153,33 @@ describe("種別の列が空の謄本の数え分け", () => {
     t = REGISTRY_COUNT_FAILURE_TTL_MS + 1;
     expect(await countUntypedRegistryAttachments(rows, { read, now })).toEqual({ owner: 0, all: 2, other: 0 });
     expect(read).toHaveBeenCalledTimes(3);
+  });
+});
+
+describe("保存場所の不調(@codex #683)", () => {
+  it("★読み取りが返ってこなくても、締め切りで「その他」にして画面を待たせない", async () => {
+    vi.useFakeTimers();
+    try {
+      const read = vi.fn(() => new Promise<string | null>(() => {})); // 保存場所が止まっている
+      const p = countUntypedRegistryAttachments([row("hang")], { read });
+      await vi.advanceTimersByTimeAsync(3_000);
+      expect(await p).toEqual({ owner: 0, all: 0, other: 1 });
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it("★ファイルが一時的に無いときは10分だけ「その他」で覚え、そのあと読み直す", async () => {
+    let t = 0;
+    const storageRead = vi.fn(async () => null);
+    vi.mocked(getStorage).mockReturnValue({ keyFromUrl: (u: string) => u, read: storageRead } as unknown as ReturnType<typeof getStorage>);
+    const rows = [row("gone")];
+    expect(await countUntypedRegistryAttachments(rows, { now: () => t })).toEqual({ owner: 0, all: 0, other: 1 });
+    await countUntypedRegistryAttachments(rows, { now: () => t });
+    expect(storageRead).toHaveBeenCalledTimes(1);
+    t = REGISTRY_COUNT_FAILURE_TTL_MS + 1;
+    await countUntypedRegistryAttachments(rows, { now: () => t });
+    expect(storageRead).toHaveBeenCalledTimes(2);
   });
 });
 
