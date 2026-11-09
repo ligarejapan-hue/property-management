@@ -56,7 +56,19 @@ describe("checkBatchEligibility", () => {
       groupMismatchCount: 0,
       terminalReactionCount: 0,
       resendStaleCount: 0,
+      agentNameCount: 0,
     });
+  });
+
+  it("(2b) 代表か共有者が業者と同じ名前なら agentNameCount(住所に関係なく・2026-11-09)", () => {
+    const empty = new Set<string>();
+    const r = checkBatchEligibility([item()], new Map([["p1", prop()]]), ADMIN, empty, empty, empty, new Set(["o1"]));
+    expect(r.agentNameCount).toBe(1);
+    expect(r.stateIssueCount).toBe(0);
+    // 拒否・宛先不明にも当たるときはそちらを理由にする
+    const both = checkBatchEligibility([item()], new Map([["p1", prop()]]), ADMIN, new Set(["o1"]), empty, empty, new Set(["o1"]));
+    expect(both.terminalReactionCount).toBe(1);
+    expect(both.agentNameCount).toBe(0);
   });
 
   it("(2) 代表が terminal 集合(拒否・宛先不明の反響持ち)にあれば terminalReactionCount(PR-B)", () => {

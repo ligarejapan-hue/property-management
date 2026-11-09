@@ -45,6 +45,7 @@ import { InquirerOrOwnerNames, LeadExclusionListBadge } from "@/components/prope
 import { ownerColumnDisplay } from "@/lib/inquirer-name";
 import { LEAD_EXCLUSION_FILTER_OPTIONS, jstTodayDateOnly } from "@/lib/lead-exclusion";
 import { displayHalfWidth } from "@/lib/notation";
+import { dmExclusionCountsText } from "@/lib/dm-batch/exclusion-notice";
 
 // v2: バッジ色は共通レシピ(status-badge.tsx)の intent に集約。
 // scheduled は yellow → amber(warning)に統一。
@@ -494,6 +495,8 @@ function PropertiesPageInner() {
         skippedByUnlink: res.skippedByUnlink,
         // 拒否・宛先不明の自動除外(A=宛名CSVと同じ規則)。黙って外さない。
         excludedTerminal: res.excludedTerminal,
+        // 所有者が業者と同じ名前の自動除外(住所に関係なく・2026-11-09)。
+        excludedAgentName: res.excludedAgentName,
         // 種類つきの発送: 本文を差し込めなかった宛先・LPが未登録の種類。
         blankBodyCount: res.blankBodyCount,
         lpMissingScenarios: res.lpMissingScenarios,
@@ -609,20 +612,19 @@ function PropertiesPageInner() {
     setError(null);
     try {
       const res = await createDmBatch(buildFilterParams());
-      const excluded = res.excludedTerminalCount ?? 0;
+      // 自動で外した宛先(拒否・宛先不明/所有者が業者と同じ名前)を理由ごとに1文で。
+      const excluded = dmExclusionCountsText(res.excludedTerminalCount, res.excludedAgentNameCount);
       if (res.rowCount === 0) {
         setError(
-          excluded > 0
-            ? `出力対象がありません(拒否・宛先不明の反響が付いた ${excluded} 件は自動で除外されました)`
+          excluded
+            ? `出力対象がありません(${excluded}は自動で除外されました)`
             : "出力対象がありません。検索条件を確認してください",
         );
         return;
       }
-      if (excluded > 0) {
+      if (excluded) {
         // 除外は黙って行わない。CSV は同一ページで DL されるため alert が見える(売却DMの部分成功通知と同型)。
-        window.alert(
-          `拒否・宛先不明の反響が付いた ${excluded} 件の宛先は自動で除外しました`,
-        );
+        window.alert(`${excluded}の宛先は自動で除外しました`);
       }
       if (res.unsubscribeUrlAvailable === false) {
         // 配信停止URLの頭(追跡URL)が無いと、列を空のまま配ることになる。初回ダウンロードで

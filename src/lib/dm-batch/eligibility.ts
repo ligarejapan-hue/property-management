@@ -73,6 +73,8 @@ export interface EligibilityResult {
   terminalReactionCount: number;
   /** (5) 再送候補の条件から外れた(控え作成後に送付が入った)item 数 → 409(PR-C) */
   resendStaleCount: number;
+  /** (2b) 業者(名簿・国交省の一覧)と同じ名前の所有者(代表or共有者)を含む item 数 → 409(2026-11-09) */
+  agentNameCount: number;
 }
 
 type OwnerWithId = DmRowPropertyOwner & { owner: { id: string } };
@@ -91,6 +93,9 @@ export function checkBatchEligibility(
    *  反響=拒否・宛先不明・連絡あり が付いた物件)。再送候補由来の控えのときだけ
    *  呼び出し側が渡す(省略時=検査(5)なし=既存の控えの挙動は変わらない)。 */
   resendStalePropertyIds: ReadonlySet<string> = new Set(),
+  /** (2b) 業者と同じ名前の所有者 id 集合(agent-name-exclusion.ts)。控えを作ったあとに業者が
+   *  一覧に載った宛先もダウンロードで止める。省略時=検査(2b)なし。 */
+  agentNameOwnerIds: ReadonlySet<string> = new Set(),
 ): EligibilityResult {
   const prunedItemIds: string[] = [];
   let scopeMissingCount = 0;
@@ -98,6 +103,7 @@ export function checkBatchEligibility(
   let groupMismatchCount = 0;
   let terminalReactionCount = 0;
   let resendStaleCount = 0;
+  let agentNameCount = 0;
   const seenGroups = new Set<string>();
 
   for (const it of items) {
@@ -120,6 +126,12 @@ export function checkBatchEligibility(
       terminalPropertyIds.has(it.propertyId)
     ) {
       terminalReactionCount += 1;
+      continue;
+    }
+    // (2b) 代表or共有者が業者と同じ名前なら、住所に関係なく除外対象(2026-11-09 発注者指示)。
+    // (2) の後=両方に当たるときは拒否・宛先不明の理由を優先する(terminal-exclusion.ts と同じ順)。
+    if (agentNameOwnerIds.has(it.ownerId) || it.groupOwnerIds.some((oid) => agentNameOwnerIds.has(oid))) {
+      agentNameCount += 1;
       continue;
     }
     // (5) 再送候補由来の控えのみ: 作成〜DLの間に送付が入った(=二重送付になる)か、
@@ -175,5 +187,6 @@ export function checkBatchEligibility(
     groupMismatchCount,
     terminalReactionCount,
     resendStaleCount,
+    agentNameCount,
   };
 }

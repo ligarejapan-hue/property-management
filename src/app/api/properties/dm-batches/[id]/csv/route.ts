@@ -1,4 +1,5 @@
 import { TERMINAL_REACTIONS } from "@/lib/dm-reaction/core";
+import { findAgentNameOwnerIds } from "@/lib/dm-batch/agent-name-exclusion";
 import { NextRequest, NextResponse } from "next/server";
 import prisma from "@/lib/prisma";
 import {
@@ -256,6 +257,10 @@ export async function GET(
         }
       }
 
+      // (2b) 業者(名簿・国交省の一覧)と同じ名前の所有者(2026-11-09)。控えの作成時に外しているが、
+      // 作成後に業者が一覧に載った宛先もここで止める(判定は作成時と同じ agent-name-exclusion.ts)。
+      const agentNameOwnerIds = await findAgentNameOwnerIds(tx, allOwnerIds);
+
       const elig = checkBatchEligibility(
         items,
         properties,
@@ -263,6 +268,7 @@ export async function GET(
         terminalOwnerIds,
         terminalPropertyIds,
         resendStalePropertyIds,
+        agentNameOwnerIds,
       );
 
       if (elig.scopeMissingCount > 0) {
@@ -277,6 +283,13 @@ export async function GET(
           409,
           `拒否・宛先不明の反響が付いた宛先が含まれています(${elig.terminalReactionCount}件)。この控えは使えません。再出力してください`,
           "TERMINAL_REACTION",
+        );
+      }
+      if (elig.agentNameCount > 0) {
+        throw new ApiError(
+          409,
+          `業者(業者の名簿・国交省の業者一覧)と同じ名前の所有者の宛先が含まれています(${elig.agentNameCount}件)。この控えは使えません。再出力してください`,
+          "AGENT_NAME",
         );
       }
       if (elig.resendStaleCount > 0) {

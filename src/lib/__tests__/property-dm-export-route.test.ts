@@ -55,6 +55,8 @@ vi.mock("@/lib/prisma", () => ({
     importJobRow: { findMany: vi.fn() },
     // export は CSV 生成であり送付履歴ではない。PropertyDmLog には一切書き込まない。
     propertyDmLog: { create: vi.fn(), createMany: vi.fn(), update: vi.fn() },
+    // 業者と同じ名前の照会(agent-name-exclusion.ts)。既定=一致なし。
+    $queryRaw: vi.fn(async () => []),
   },
 }));
 
@@ -71,6 +73,7 @@ const pm = prisma as unknown as {
   property: { findMany: Mock; count: Mock };
   importJobRow: { findMany: Mock };
   propertyDmLog: { create: Mock; createMany: Mock; update: Mock };
+  $queryRaw: Mock;
 };
 
 const PERMS_FULL = [
@@ -96,7 +99,7 @@ const FULL_DISPLAY = {
 };
 
 function makeOwner(over: Record<string, unknown> = {}) {
-  return { name: "所有 花子", corporateNumber: null, ...over };
+  return { id: "o1", name: "所有 花子", corporateNumber: null, ...over };
 }
 
 function makePropertyOwner(over: Record<string, unknown> = {}) {
@@ -158,6 +161,7 @@ beforeEach(() => {
   pm.property.findMany.mockResolvedValue([]);
   pm.property.count.mockResolvedValue(0);
   pm.importJobRow.findMany.mockResolvedValue([]);
+  pm.$queryRaw.mockResolvedValue([]);
 });
 
 describe("GET /api/properties/property-dm-export", () => {
@@ -180,6 +184,30 @@ describe("GET /api/properties/property-dm-export", () => {
     const cells = rowCells(csv, "所有 花子");
     expect(cells[headerIndex(csv, "敬称")]).toBe("様");
     expect(cells[headerIndex(csv, "DM判断")]).toBe("送付可");
+  });
+
+  it("02b. 所有者が業者と同じ名前の物件は、住所に関係なく出さない(共有者でも・2026-11-09)", async () => {
+    pm.property.findMany.mockResolvedValue([
+      makeProp({ id: "p1", address: "住所A", propertyOwners: [makePropertyOwner({ owner: { id: "o1", name: "所有 花子" } })] }),
+      makeProp({
+        id: "p2",
+        address: "住所B",
+        propertyOwners: [
+          makePropertyOwner({ owner: { id: "o2", name: "代表 太郎" }, isPrimary: true }),
+          makePropertyOwner({ owner: { id: "o3", name: "株式会社 業者" }, isPrimary: false }),
+        ],
+      }),
+    ]);
+    pm.$queryRaw.mockResolvedValue([{ id: "o3" }]);
+    const res = await GET(makeRequest());
+    expect(res.status).toBe(200);
+    const csv = await readCsv(res);
+    expect(csv).toContain("住所A");
+    expect(csv).not.toContain("住所B");
+    // 照会には全物件の所有者を渡す
+    const q = pm.$queryRaw.mock.calls[0][0] as { values: unknown[] };
+    expect(q.values).toEqual(expect.arrayContaining(["o1", "o2", "o3"]));
+    expect(lastAudit()?.detail).toMatchObject({ count: 1, excludedAgent: 1 });
   });
 
   it("03. 複数所有者でも 1物件=1行・敬称は『様 他共有者様』・共有者数2", async () => {

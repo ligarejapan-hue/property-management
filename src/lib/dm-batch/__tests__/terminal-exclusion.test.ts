@@ -2,7 +2,7 @@ import { describe, expect, it, vi } from "vitest";
 
 import { TERMINAL_REACTIONS } from "@/lib/dm-reaction/core";
 
-import { findTerminalExclusions, isTerminalExcluded } from "../terminal-exclusion";
+import { dmExclusionReason, findTerminalExclusions, isTerminalExcluded } from "../terminal-exclusion";
 
 /**
  * 拒否・宛先不明(terminal 反響)の除外セット構築と判定。
@@ -20,9 +20,14 @@ type FindArgs = {
   select: unknown;
 };
 
-const fakeTx = (rows: Array<{ ownerId: string | null; propertyId: string | null; logOwners: { ownerId: string }[] }>) => {
+const fakeTx = (
+  rows: Array<{ ownerId: string | null; propertyId: string | null; logOwners: { ownerId: string }[] }>,
+  agentOwnerIds: string[] = [],
+) => {
   const findMany = vi.fn(async (_args: FindArgs) => rows);
-  return { tx: { propertyDmLog: { findMany } }, findMany };
+  // 業者と同じ名前の所有者(agent-name-exclusion.ts の SQL の結果)
+  const $queryRaw = vi.fn(async () => agentOwnerIds.map((id) => ({ id })));
+  return { tx: { propertyDmLog: { findMany }, $queryRaw: $queryRaw as never }, findMany, $queryRaw };
 };
 
 describe("findTerminalExclusions（集合の構築）", () => {
@@ -42,9 +47,11 @@ describe("findTerminalExclusions（集合の構築）", () => {
   });
 
   it("両方とも空なら DB を引かず空集合を返す（A の既存ガードと同じ）", async () => {
-    const { tx, findMany } = fakeTx([]);
+    const { tx, findMany, $queryRaw } = fakeTx([]);
     const sets = await findTerminalExclusions(tx, [], []);
     expect(findMany).not.toHaveBeenCalled();
+    expect($queryRaw).not.toHaveBeenCalled();
+    expect(sets.agentOwnerIds.size).toBe(0);
     expect(sets.ownerIds.size).toBe(0);
     expect(sets.propertyIds.size).toBe(0);
   });
@@ -60,10 +67,18 @@ describe("findTerminalExclusions（集合の構築）", () => {
     // pX/pY は所有者へ紐づいたので物件集合には入れない(A の分類と同一)
     expect([...sets.propertyIds]).toEqual(["p9"]);
   });
+
+  it("業者と同じ名前の所有者は別の集合へ(所有者がいれば必ず照会する)", async () => {
+    const { tx, $queryRaw } = fakeTx([], ["o2"]);
+    const sets = await findTerminalExclusions(tx, ["o1", "o2"], ["p1"]);
+    expect($queryRaw).toHaveBeenCalledTimes(1);
+    expect([...sets.agentOwnerIds]).toEqual(["o2"]);
+    expect(sets.ownerIds.size).toBe(0);
+  });
 });
 
 describe("isTerminalExcluded（宛先グループの判定）", () => {
-  const sets = { ownerIds: new Set(["oBad"]), propertyIds: new Set(["pBad"]) };
+  const sets = { ownerIds: new Set(["oBad"]), propertyIds: new Set(["pBad"]), agentOwnerIds: new Set(["oAgent"]) };
 
   it("代表・共有者のどちらかが terminal なら除外", () => {
     expect(isTerminalExcluded(sets, { propertyId: "p1", ownerIds: ["oBad"] })).toBe(true);
@@ -76,5 +91,22 @@ describe("isTerminalExcluded（宛先グループの判定）", () => {
 
   it("どれにも当たらなければ残す", () => {
     expect(isTerminalExcluded(sets, { propertyId: "p1", ownerIds: ["oOk"] })).toBe(false);
+  });
+});
+
+describe("dmExclusionReason（外す理由）", () => {
+  const sets = { ownerIds: new Set(["oBad"]), propertyIds: new Set(["pBad"]), agentOwnerIds: new Set(["oAgent", "oBad"]) };
+
+  it("業者と同じ名前の所有者が代表でも共有者でも外す(住所に関係なく)", () => {
+    expect(dmExclusionReason(sets, { propertyId: "p1", ownerIds: ["oAgent"] })).toBe("agent_name");
+    expect(dmExclusionReason(sets, { propertyId: "p1", ownerIds: ["oOk", "oAgent"] })).toBe("agent_name");
+    expect(isTerminalExcluded(sets, { propertyId: "p1", ownerIds: ["oOk", "oAgent"] })).toBe(true);
+  });
+  it("両方に当たるときは拒否・宛先不明を理由にする", () => {
+    expect(dmExclusionReason(sets, { propertyId: "p1", ownerIds: ["oBad"] })).toBe("terminal");
+    expect(dmExclusionReason(sets, { propertyId: "pBad", ownerIds: ["oAgent"] })).toBe("terminal");
+  });
+  it("どれにも当たらなければ null", () => {
+    expect(dmExclusionReason(sets, { propertyId: "p1", ownerIds: ["oOk"] })).toBeNull();
   });
 });
