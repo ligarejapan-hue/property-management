@@ -21,6 +21,7 @@ import {
   fetchRegistryOwnerReviewList,
   runRegistryOwnerCheckBatch,
   type RegistryOwnerReviewList,
+  type RegistryOwnerReviewSort,
 } from "@/lib/api-client";
 
 const RESULT_LABELS: Record<string, string> = {
@@ -35,6 +36,8 @@ const RESULT_LABELS: Record<string, string> = {
 export default function RegistryOwnerReviewPage() {
   const [list, setList] = useState<RegistryOwnerReviewList | null>(null);
   const [offset, setOffset] = useState(0);
+  // 既定=違いの種類の順(漢字の違い → 法人の書き方 → … → 別の人)
+  const [sort, setSort] = useState<RegistryOwnerReviewSort>("kind");
   const [loading, setLoading] = useState(true);
   const [errorMsg, setErrorMsg] = useState<string | null>(null);
   const [notice, setNotice] = useState<string | null>(null);
@@ -42,18 +45,19 @@ export default function RegistryOwnerReviewPage() {
   const [runCounts, setRunCounts] = useState<Record<string, number> | null>(null);
   const stopRef = useRef(false);
 
-  const load = useCallback(async (nextOffset: number) => {
+  const load = useCallback(async (nextOffset: number, nextSort: RegistryOwnerReviewSort = sort) => {
     setLoading(true);
     setErrorMsg(null);
     try {
-      setList(await fetchRegistryOwnerReviewList(nextOffset));
+      setList(await fetchRegistryOwnerReviewList(nextOffset, nextSort));
       setOffset(nextOffset);
+      setSort(nextSort);
     } catch (e) {
       setErrorMsg(e instanceof Error ? e.message : "一覧を読み込めませんでした");
     } finally {
       setLoading(false);
     }
-  }, []);
+  }, [sort]);
 
   // 最初の読み込み(loading は最初から true なので、ここでは読み終えてから state を変える)
   useEffect(() => {
@@ -175,26 +179,54 @@ export default function RegistryOwnerReviewPage() {
 
         {list ? (
           <>
-            <p className="text-sm text-gray-700 dark:text-gray-200">
-              名義が違う物件: <span className="font-bold">{list.total.toLocaleString()}</span> 件
-            </p>
+            <div className="flex flex-wrap items-center gap-x-4 gap-y-1">
+              <p className="text-sm text-gray-700 dark:text-gray-200">
+                名義が違う物件: <span className="font-bold">{list.total.toLocaleString()}</span> 件
+              </p>
+              <label className="flex items-center gap-2 text-sm text-gray-700 dark:text-gray-200">
+                並べ替え
+                <select
+                  value={sort}
+                  disabled={loading}
+                  onChange={(e) => void load(0, e.target.value as RegistryOwnerReviewSort)}
+                  className="rounded border border-gray-300 bg-white px-2 py-1 text-sm dark:border-gray-700 dark:bg-gray-900"
+                >
+                  <option value="kind">違いの種類の順</option>
+                  <option value="default">今までの順</option>
+                </select>
+              </label>
+              {sort === "kind" ? (
+                <span className="text-xs text-gray-500 dark:text-gray-400">
+                  漢字の違い → 法人の書き方の違い → 名前の一部が違う → 人数が違う → 別の人
+                </span>
+              ) : null}
+            </div>
             {list.data.length === 0 ? (
               <p className="text-sm text-gray-500 dark:text-gray-400">確認が必要な物件はありません。</p>
             ) : (
-              <ul className="space-y-2">
-                {list.data.map((row) => (
-                  <ReviewItem
-                    key={row.propertyId}
-                    propertyId={row.propertyId}
-                    address={row.address}
-                    dmStatus={row.dmStatus}
-                    canKeep={list.canKeep}
-                    canReplace={list.canReplace}
-                    canRestoreDm={list.canRestoreDm}
-                    onDone={onDone}
-                  />
-                ))}
-              </ul>
+              <>
+                <div className="hidden gap-2 px-4 text-xs text-gray-500 md:flex dark:text-gray-400" aria-hidden="true">
+                  <span className="w-4" />
+                  <span className="flex-1">物件</span>
+                  <span className="w-72">違いの種類</span>
+                  <span>DM</span>
+                </div>
+                <ul className="space-y-2">
+                  {list.data.map((row) => (
+                    <ReviewItem
+                      key={row.propertyId}
+                      propertyId={row.propertyId}
+                      address={row.address}
+                      dmStatus={row.dmStatus}
+                      diffKind={row.diffKind}
+                      canKeep={list.canKeep}
+                      canReplace={list.canReplace}
+                      canRestoreDm={list.canRestoreDm}
+                      onDone={onDone}
+                    />
+                  ))}
+                </ul>
+              </>
             )}
             {list.total > list.pageSize ? (
               <Pagination

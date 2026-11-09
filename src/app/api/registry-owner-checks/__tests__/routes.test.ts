@@ -105,6 +105,26 @@ describe("一覧", () => {
     const body = await (await listGET(new Request("http://x/api/registry-owner-checks"))).json();
     expect(body).toMatchObject({ canRun: true, pending: 7, canKeep: true, canReplace: true });
   });
+
+  it("違いの種類の列(保存した記号から文言に戻す)と、種類の順の並べ替え", async () => {
+    (getUserPermissions as Mock).mockResolvedValue(VIEW);
+    pm.registryOwnerCheck.findMany.mockResolvedValue([
+      { propertyId: PID, checkedAt: new Date(0), diffKind: "kanji,count:2:1", property: { address: "x", dmStatus: "hold" } },
+      { propertyId: AID, checkedAt: new Date(0), diffKind: null, property: { address: "y", dmStatus: "hold" } },
+    ]);
+    const body = await (await listGET(new Request("http://x/api/registry-owner-checks?sort=kind"))).json();
+    expect(body.data.map((r: { diffKind: string | null }) => r.diffKind)).toEqual([
+      "漢字の違い・人数が違う（謄本2名・システム1名）",
+      null,
+    ]);
+    expect(body.sort).toBe("kind");
+    expect(pm.registryOwnerCheck.findMany.mock.calls[0][0].orderBy).toEqual([
+      { diffRank: { sort: "asc", nulls: "last" } },
+      { propertyId: "asc" },
+    ]);
+    await listGET(new Request("http://x/api/registry-owner-checks"));
+    expect(pm.registryOwnerCheck.findMany.mock.calls[1][0].orderBy).toEqual({ propertyId: "asc" });
+  });
 });
 
 describe("操作の権限", () => {

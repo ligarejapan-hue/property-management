@@ -21,6 +21,7 @@ import {
   type ReplaceTx,
 } from "@/lib/registry-owner-apply/apply";
 import { compareRegistryOwners, type RegistryOwnerCheckResult } from "@/lib/registry-owner-check/compare";
+import { ownerDiff } from "@/lib/registry-owner-check/diff";
 
 type Tx = ReplaceTx;
 
@@ -99,6 +100,8 @@ async function writeResult(
   attachmentId: string,
   result: RegistryOwnerCheckResult,
   prev: { attachmentId: string | null; decision: string | null },
+  /** 違い(mismatch)のときの種類(記号と人数だけ)。それ以外は null。 */
+  diff: { kind: string; rank: number } | null,
 ): Promise<void> {
   const keepDecision =
     prev.decision === "keep" && prev.attachmentId === attachmentId && result === "mismatch";
@@ -109,9 +112,22 @@ async function writeResult(
       result,
       stale: false,
       checkedAt: new Date(),
+      diffKind: diff?.kind ?? null,
+      diffRank: diff?.rank ?? null,
       ...(keepDecision ? {} : { decision: null, decidedBy: null, decidedAt: null }),
     },
   });
+}
+
+/** 違い(mismatch)のときだけ、種類を求める(保存するのは記号と人数だけ)。 */
+function diffOf(
+  result: RegistryOwnerCheckResult,
+  registryNames: readonly string[],
+  systemNames: readonly string[],
+): { kind: string; rank: number } | null {
+  if (result !== "mismatch") return null;
+  const d = ownerDiff(registryNames, systemNames);
+  return { kind: d.stored, rank: d.rank };
 }
 
 /**
@@ -126,6 +142,9 @@ export async function checkPropertyRegistryOwners(
     // 所有者事項の謄本が無い(消された・全部事項だけ)=比べる対象ではない
     const latest = await findLatestOwnerRegistryAttachment(prisma, propertyId);
     if (!latest) await prisma.registryOwnerCheck.deleteMany({ where: { propertyId } });
+    // 謄本はあるのに読む途中で入れ替わった・見つからなかった=比べ直し待ちにして試した時刻を残す
+    // (種類の無い「違う」の行が、夜の自動の比べの先頭に居座り続けないように)
+    else await markRetryAfterFailure(propertyId);
     return null;
   }
   return prisma.$transaction(async (tx) => {
@@ -134,10 +153,11 @@ export async function checkPropertyRegistryOwners(
     // ⚠読んでから今までに別の謄本が付いた/消えたら書かない(比べ直しの印のまま残す)
     const latest = await findLatestOwnerRegistryAttachment(tx, propertyId);
     if (!latest || latest.id !== read.attachmentId) return null;
+    const systemNames = read.names ? await linkedOwnerNames(tx, propertyId) : [];
     const result: RegistryOwnerCheckResult = read.names
-      ? compareRegistryOwners(read.names, await linkedOwnerNames(tx, propertyId))
+      ? compareRegistryOwners(read.names, systemNames)
       : "unreadable";
-    await writeResult(tx, propertyId, read.attachmentId, result, prev);
+    await writeResult(tx, propertyId, read.attachmentId, result, prev, diffOf(result, read.names ?? [], systemNames));
     return result;
   });
 }
@@ -147,6 +167,8 @@ export const REGISTRY_OWNER_CHECK_RETRY_AFTER_HOURS = 1;
 
 /**
  * まだ比べていない・比べ直しが要る物件(アーカイブを除く・所有者事項の謄本あり)。
+ * 「違う」で未判断なのに違いの種類がまだ無い行(種類を残す前に比べた行)も、比べ直しに数える
+ * (比べ直すと種類が埋まる・その間も一覧には出たまま)。
  * backoff=true(夜の自動)のときは、比べ直し待ちのうち1時間以内に試した物件を後回しにする
  * (一時的な失敗の物件を2分ごとに読み続けない)。画面のボタンは後回しにしない(今すぐ試す)。
  * ⚠checked_at は UTC で入っている(Prisma)ので、比べる時刻も UTC にそろえる。
@@ -159,13 +181,15 @@ function pendingWhereSql(limit: number | null, backoff = false) {
         WHERE p.is_archived = false
           AND EXISTS (SELECT 1 FROM attachments a WHERE a.property_id = p.id AND a.type = 'registry'
                       AND a.is_deleted = false AND a.registry_certificate_type = ${SUPPORTED_CERTIFICATE_TYPE})
-          AND NOT EXISTS (SELECT 1 FROM registry_owner_checks c WHERE c.property_id = p.id AND c.stale = false)`
+          AND NOT EXISTS (SELECT 1 FROM registry_owner_checks c WHERE c.property_id = p.id AND c.stale = false
+                          AND NOT (c.result = 'mismatch' AND c.decision IS NULL AND c.diff_kind IS NULL))`
     : prisma.$queryRaw<{ id: string }[]>`
         SELECT p.id FROM properties p
         WHERE p.is_archived = false
           AND EXISTS (SELECT 1 FROM attachments a WHERE a.property_id = p.id AND a.type = 'registry'
                       AND a.is_deleted = false AND a.registry_certificate_type = ${SUPPORTED_CERTIFICATE_TYPE})
-          AND NOT EXISTS (SELECT 1 FROM registry_owner_checks c WHERE c.property_id = p.id AND c.stale = false)
+          AND NOT EXISTS (SELECT 1 FROM registry_owner_checks c WHERE c.property_id = p.id AND c.stale = false
+                          AND NOT (c.result = 'mismatch' AND c.decision IS NULL AND c.diff_kind IS NULL))
           AND NOT EXISTS (SELECT 1 FROM registry_owner_checks c WHERE c.property_id = p.id AND c.stale = true
                           AND ${backoffHours}::int > 0
                           AND c.checked_at > (now() AT TIME ZONE 'UTC') - make_interval(hours => ${backoffHours}::int))
@@ -318,8 +342,9 @@ export async function recordCheckAfterReplace(
   registryNames: string[],
 ): Promise<RegistryOwnerCheckResult> {
   const prev = await lockCheckRow(tx, propertyId);
-  const result = compareRegistryOwners(registryNames, await linkedOwnerNames(tx, propertyId));
-  await writeResult(tx, propertyId, attachmentId, result, prev);
+  const systemNames = await linkedOwnerNames(tx, propertyId);
+  const result = compareRegistryOwners(registryNames, systemNames);
+  await writeResult(tx, propertyId, attachmentId, result, prev, diffOf(result, registryNames, systemNames));
   return result;
 }
 

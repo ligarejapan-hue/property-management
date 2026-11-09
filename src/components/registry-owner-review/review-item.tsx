@@ -27,6 +27,8 @@ export interface ReviewItemProps {
   propertyId: string;
   address: string;
   dmStatus: string;
+  /** 違いの種類の文言(一覧の列・種類を残す前に比べた物件は null) */
+  diffKind: string | null;
   canKeep: boolean;
   canReplace: boolean;
   /** DM を戻せるか(物件を編集できる人だけ) */
@@ -35,7 +37,7 @@ export interface ReviewItemProps {
   onDone: (message: string) => void;
 }
 
-export default function ReviewItem({ propertyId, address, dmStatus, canKeep, canReplace, canRestoreDm, onDone }: ReviewItemProps) {
+export default function ReviewItem({ propertyId, address, dmStatus, diffKind, canKeep, canReplace, canRestoreDm, onDone }: ReviewItemProps) {
   const [open, setOpen] = useState(false);
   const [detail, setDetail] = useState<RegistryOwnerReviewDetail | null>(null);
   const [loading, setLoading] = useState(false);
@@ -115,11 +117,14 @@ export default function ReviewItem({ propertyId, address, dmStatus, canKeep, can
         aria-expanded={open}
         // data-ui=raw: 一覧の行全体を開閉する見出し(ボタンの見た目にしない)
         data-ui="raw"
-        className="flex w-full items-center gap-2 px-4 py-3 text-left text-sm"
+        className="flex w-full flex-wrap items-center gap-x-2 gap-y-1 px-4 py-3 text-left text-sm md:flex-nowrap"
       >
         {open ? <ChevronDown className="h-4 w-4 shrink-0" /> : <ChevronRight className="h-4 w-4 shrink-0" />}
-        <span className="flex-1 text-gray-900 dark:text-gray-100">{address}</span>
-        <span className="text-xs text-gray-500 dark:text-gray-400">DM: {DM_STATUS_LABELS[dmStatus] ?? dmStatus}</span>
+        <span className="min-w-0 flex-1 text-gray-900 dark:text-gray-100">{address}</span>
+        <span className="order-last w-full pl-6 text-xs text-gray-700 md:order-none md:w-72 md:shrink-0 md:pl-0 dark:text-gray-200">
+          {diffKind ?? <span className="text-gray-400">（種類はこの次に比べたときに出ます）</span>}
+        </span>
+        <span className="shrink-0 text-xs text-gray-500 dark:text-gray-400">DM: {DM_STATUS_LABELS[dmStatus] ?? dmStatus}</span>
       </button>
 
       {open ? (

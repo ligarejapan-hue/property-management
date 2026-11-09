@@ -5701,10 +5701,12 @@ export async function deleteDriveLink(id: string): Promise<void> {
 // ---------- 謄本の名義の確認(2026-11-08) ----------
 
 export interface RegistryOwnerReviewList {
-  data: Array<{ propertyId: string; address: string; dmStatus: string; checkedAt: string }>;
+  /** diffKind=違いの種類の文言(種類を残す前に比べた行は null) */
+  data: Array<{ propertyId: string; address: string; dmStatus: string; checkedAt: string; diffKind: string | null }>;
   total: number;
   offset: number;
   pageSize: number;
+  sort: RegistryOwnerReviewSort;
   canRun: boolean;
   /** まだ比べていない件数(管理者だけ・それ以外は null) */
   pending: number | null;
@@ -5715,8 +5717,14 @@ export interface RegistryOwnerReviewList {
   canReplace: boolean;
 }
 
-export function fetchRegistryOwnerReviewList(offset = 0): Promise<RegistryOwnerReviewList> {
-  return apiFetch(`/api/registry-owner-checks?offset=${offset}`);
+/** kind=違いの種類の順 / default=今までの順 */
+export type RegistryOwnerReviewSort = "kind" | "default";
+
+export function fetchRegistryOwnerReviewList(
+  offset = 0,
+  sort: RegistryOwnerReviewSort = "kind",
+): Promise<RegistryOwnerReviewList> {
+  return apiFetch(`/api/registry-owner-checks?offset=${offset}&sort=${sort}`);
 }
 
 export interface RegistryOwnerCheckRunResult {
