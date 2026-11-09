@@ -644,6 +644,24 @@ async function main() {
     const again = await runRegistryOwnerChecks(50);
     check("14k 2回目は何もしない", again.processed === 0, again);
 
+    // 足して「同じ」になった物件で、人が足された人を外す → 同じ謄本のあいだは足し直さない(@codex #688 R2)
+    const tanaka = await prisma.owner.findFirstOrThrow({ where: { name: "田中花子" } });
+    await prisma.propertyOwner.deleteMany({ where: { propertyId: more, ownerId: tanaka.id } });
+    const rRemoved = await runRegistryOwnerChecks(50);
+    const moreRow = await row(more);
+    check(
+      "14n 外した人は同じ謄本のあいだは足し直さない・一覧に出る(違う・未判断・印つき)",
+      rRemoved.processed === 1 && !rRemoved.counts.auto_added && JSON.stringify(await linkedNames(more)) === JSON.stringify(["山田太郎"]) &&
+        moreRow?.result === "mismatch" && moreRow?.decision === null && moreRow?.stale === false && moreRow?.diffKind?.endsWith(",autoadd") === true,
+      { rRemoved, moreRow },
+    );
+    const rAgain = await runRegistryOwnerChecks(50);
+    check("14o そのあとも比べ直しに回らない", rAgain.processed === 0, rAgain);
+    // 新しい謄本が付いたら、もう一度比べて足す
+    await registry(more, u, [{ name: "山田太郎" }, { name: "田中花子" }]);
+    const rNew = await runRegistryOwnerChecks(50);
+    check("14p 新しい謄本ではまた足す", rNew.counts.auto_added === 1 && (await linkedNames(more)).includes("田中花子"), rNew);
+
     // e) この仕組みより前に比べた「違う」(印なし)は比べ直しに回り、そこで足す
     const old = await property(u, "hold");
     await link(old, await owner("佐藤三郎"));

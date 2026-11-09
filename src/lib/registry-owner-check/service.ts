@@ -78,21 +78,47 @@ async function linkedOwnerNames(tx: Tx, propertyId: string): Promise<string[]> {
 async function lockCheckRow(
   tx: Tx,
   propertyId: string,
-): Promise<{ attachmentId: string | null; decision: string | null; result: string; stale: boolean }> {
+): Promise<{
+  attachmentId: string | null;
+  decision: string | null;
+  result: string;
+  stale: boolean;
+  diffKind: string | null;
+}> {
   await tx.$executeRaw`
     INSERT INTO registry_owner_checks (property_id, result, stale)
     VALUES (${propertyId}::uuid, 'unreadable', true)
     ON CONFLICT (property_id) DO NOTHING
   `;
   const rows = await tx.$queryRaw<
-    { attachment_id: string | null; decision: string | null; result: string; stale: boolean }[]
+    { attachment_id: string | null; decision: string | null; result: string; stale: boolean; diff_kind: string | null }[]
   >`
-    SELECT attachment_id, decision, result, stale FROM registry_owner_checks
+    SELECT attachment_id, decision, result, stale, diff_kind FROM registry_owner_checks
     WHERE property_id = ${propertyId}::uuid
     FOR UPDATE
   `;
   const r = rows[0];
-  return { attachmentId: r.attachment_id, decision: r.decision, result: r.result, stale: r.stale };
+  return {
+    attachmentId: r.attachment_id,
+    decision: r.decision,
+    result: r.result,
+    stale: r.stale,
+    diffKind: r.diff_kind,
+  };
+}
+
+/**
+ * 同じ謄本で、自動の登録をもう済ませたか(2026-11-10・@codex #688 R2)。
+ * 自動で足すのは**謄本1件につき1回だけ**。足したあと・一度「同じ」になったあとに人が所有者を
+ * 外しても、同じ謄本のあいだは足し直さない(外した判断を自動で戻さない)。新しい謄本で比べ直す。
+ */
+function autoAddAlreadyDone(
+  prev: { attachmentId: string | null; result: string; diffKind: string | null },
+  attachmentId: string,
+): boolean {
+  if (prev.attachmentId !== attachmentId) return false;
+  if (prev.diffKind?.split(",").includes(AUTO_ADD_DONE_TOKEN)) return true;
+  return prev.result === "same" || prev.result === "same_notation";
 }
 
 /**
@@ -181,7 +207,8 @@ export async function checkPropertyRegistryOwners(
       : "unreadable";
     // 「このままでよい」が残る(同じ謄本)物件には自動で足さない
     const kept = prev.decision === "keep" && prev.attachmentId === read.attachmentId;
-    const autoAddDone = kept || !hasOwnersToAutoAdd(read.names ?? [], systemNames);
+    const autoAddDone =
+      kept || autoAddAlreadyDone(prev, read.attachmentId) || !hasOwnersToAutoAdd(read.names ?? [], systemNames);
     await writeResult(
       tx,
       propertyId,
