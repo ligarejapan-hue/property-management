@@ -50,11 +50,17 @@ beforeEach(() => {
 });
 
 describe("buildAppraisalDraft(査定報告書から下書きを作る)", () => {
-  it("査定報告書(report・削除されていない・この物件)だけを探す", async () => {
+  it("査定報告書(report か、直接付けた種類「査定書・査定報告書」・削除されていない・この物件)だけを探す", async () => {
     await buildAppraisalDraft(IN);
     expect(db.attachment.findFirst).toHaveBeenCalledWith(
       expect.objectContaining({
-        where: { id: "a1", targetType: "property", targetId: "p1", type: "report", isDeleted: false },
+        where: {
+          id: "a1",
+          targetType: "property",
+          targetId: "p1",
+          isDeleted: false,
+          OR: [{ type: "report" }, { type: "general", docKind: "appraisal_report" }],
+        },
       }),
     );
   });

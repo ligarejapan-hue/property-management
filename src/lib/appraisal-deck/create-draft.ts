@@ -10,7 +10,7 @@ import prisma from "@/lib/prisma";
 import { getStorage } from "@/lib/storage";
 import { extractTextFromPdf, isPdfBuffer } from "@/lib/pdf-extract";
 import { runExclusive } from "@/lib/pdf-compress/run";
-import { REPORT_ATTACHMENT_TYPE } from "@/lib/attachments/report-display-name";
+import { appraisalSourceWhere } from "./source";
 import { writeAuditLog } from "@/lib/audit";
 import { parseAppraisalReport, APPRAISAL_PARSER_VERSION } from "./parse";
 
@@ -40,7 +40,7 @@ export async function buildAppraisalDraft(input: {
 }): Promise<AppraisalDraftResult> {
   const { attachmentId, propertyId, userId } = input;
   const attachment = await prisma.attachment.findFirst({
-    where: { id: attachmentId, targetType: "property", targetId: propertyId, type: REPORT_ATTACHMENT_TYPE, isDeleted: false },
+    where: { id: attachmentId, targetType: "property", targetId: propertyId, isDeleted: false, ...appraisalSourceWhere },
     select: { id: true, fileUrl: true },
   });
   if (!attachment) return { ok: false, reason: "attachment_not_found" };

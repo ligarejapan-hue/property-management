@@ -31,6 +31,8 @@ import {
 import { fitPdfToLimit, reserveLargePdfSlot } from "@/lib/pdf-compress/fit";
 import { extractHeadTextFromPdf, isPdfBuffer } from "@/lib/pdf-extract";
 import { docColumnsForNewAttachment } from "@/lib/doc-classify/assign";
+import { scheduleAppraisalDraft } from "@/lib/appraisal-deck/schedule";
+import { isGeneralAppraisalPdf } from "@/lib/appraisal-deck/source";
 import { parseScopeInput } from "@/lib/attachments/deal-scope";
 import { autoMarkRegistryObtainedBestEffort } from "@/lib/registry-status-auto";
 
@@ -354,6 +356,12 @@ export async function POST(
         ...(dealScope ? { dealId: dealScope.dealId, dealCommon: dealScope.dealCommon } : {}),
       },
     });
+
+    // 査定報告書(種類が「査定書・査定報告書」の PDF)を直接付けたら、応答のあとで「査定のご報告」の
+    // 下書きを作る(2026-11-11 発注者・失敗しても添付はそのまま)。
+    if (isGeneralAppraisalPdf(attachment)) {
+      scheduleAppraisalDraft({ attachmentId: attachment.id, propertyId, userId: session.id });
+    }
 
     // 謄本を添付したら、未取得の登記状況を取得済に(2026-11-06 発注者・取得中は変えない)。
     if (attachmentType === "registry") {

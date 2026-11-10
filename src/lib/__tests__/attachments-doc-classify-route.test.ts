@@ -35,6 +35,8 @@ vi.mock("@/lib/api-helpers", () => {
   };
 });
 vi.mock("@/lib/audit", () => ({ writeAuditLog: vi.fn() }));
+const { scheduleAppraisalDraft } = vi.hoisted(() => ({ scheduleAppraisalDraft: vi.fn() }));
+vi.mock("@/lib/appraisal-deck/schedule", () => ({ scheduleAppraisalDraft }));
 const { storageStub } = vi.hoisted(() => ({
   storageStub: { upload: vi.fn(async () => ({ url: "/uploads/x.pdf" })), delete: vi.fn(), getUrl: vi.fn(), read: vi.fn() },
 }));
@@ -125,6 +127,19 @@ describe("添付の自動判別(POST)", () => {
     expect(d.docKind).toBe("fixtures_list");
     expect(d.docTitle).toBe("付帯設備表_ハマイハイライズ305_20260930.pdf");
     expect(extractTextFromPdf).toHaveBeenCalledTimes(1);
+  });
+
+  it("★査定報告書(種類「査定書・査定報告書」)の PDF を付けたら「査定のご報告」の下書きを作る(2026-11-11)", async () => {
+    const res = await POST(await req("不動産価格査定報告書.pdf", "application/pdf"), params);
+    expect(res.status).toBe(201);
+    expect(created().docKind).toBe("appraisal_report");
+    expect(scheduleAppraisalDraft).toHaveBeenCalledWith({ attachmentId: "a-1", propertyId: "p-1", userId: "u-admin" });
+  });
+
+  it("査定報告書以外の書類・画像では下書きを作らない", async () => {
+    await POST(await req("【完成版】売買契約書.pdf", "application/pdf"), params);
+    await POST(await req("査定書.png", "image/png", undefined, Buffer.from("png")), params);
+    expect(scheduleAppraisalDraft).not.toHaveBeenCalled();
   });
 
   it("本文の抽出が落ちても 201(名前だけで判別)", async () => {
