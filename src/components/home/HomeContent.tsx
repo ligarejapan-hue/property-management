@@ -5,6 +5,7 @@ import HomeKpiSummary from "./home-kpi-summary";
 import HomeNextActions from "./home-next-actions";
 import HomeDealSchedule from "./home-deal-schedule";
 import HomeWeekCalendar from "./home-week-calendar";
+import HomeCaseKanban from "./home-case-kanban";
 
 /** 役割別ホーム(ランチャー)。カードは既存ページへの Link。userRole は親(page)がセッションから渡す。 */
 export function HomeContent({ userRole }: { userRole: string }) {
@@ -20,6 +21,8 @@ export function HomeContent({ userRole }: { userRole: string }) {
       <HomeDealSchedule />
       {/* 今週の予定(2026-11-10 案4): 次回対応・内見・契約・決済。読めない種類は出ない。管理者は全員分に切り替え可。 */}
       <HomeWeekCalendar />
+      {/* 案件の進み具合(2026-11-10 案2): 進行中の段階ごとの件数と新しい3件。見るだけ。読めないときは出ない。 */}
+      <HomeCaseKanban />
       <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
         {cards.map((c) => (
           <Link
