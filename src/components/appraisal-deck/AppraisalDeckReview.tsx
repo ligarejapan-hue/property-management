@@ -38,6 +38,13 @@ const KIND: Record<string, string> = { house: "戸建", mansion: "マンショ�
 const PLAN_LABEL: Record<AppraisalPlanName, string> = { speed: "スピード", standard: "スタンダード", challenge: "チャレンジ" };
 const PLAN_NAMES: AppraisalPlanName[] = ["speed", "standard", "challenge"];
 const VALUE_KEYS: Array<keyof AppraisalValue> = ["total", "land", "landTsubo", "building", "tsubo"];
+/** 画面に欄は無いが、資料に使う値(既にある修正を保存のたびに消さないよう、フォームに持って回す・@codex #694)。 */
+const ALL_VALUE_KEYS: Array<keyof AppraisalValue> = [...VALUE_KEYS, "buildingTsubo"];
+const ADJ_KEYS = [
+  ["landPercent", "土地の補正"],
+  ["landAmount", "土地の評価の金額"],
+  ["liquidityPercent", "流通性比率"],
+] as const;
 const VALUE_LABEL: Record<keyof AppraisalValue, string> = {
   total: "総額",
   land: "土地",
@@ -73,10 +80,9 @@ function formFrom(merged: ReturnType<typeof mergeAppraisal>, rangeMode: boolean)
     walkMinutes: show(merged.walkMinutes),
     landSqm: show(merged.landSqm),
     landTsubo: show(merged.landTsubo),
-    "adjustment.landPercent": show(merged.adjustment.landPercent),
-    "adjustment.liquidityPercent": show(merged.adjustment.liquidityPercent),
   };
-  for (const k of VALUE_KEYS) {
+  for (const [k] of ADJ_KEYS) f[`adjustment.${k}`] = show(merged.adjustment[k]);
+  for (const k of ALL_VALUE_KEYS) {
     f[`expected.${k}`] = show(merged.expected[k]);
     f[`ai.${k}`] = show(merged.ai[k]);
   }
@@ -122,17 +128,14 @@ export function buildOverrides(
   }
   for (const which of ["expected", "ai"] as const) {
     const part: Record<string, number | null> = {};
-    for (const k of VALUE_KEYS) {
+    for (const k of ALL_VALUE_KEYS) {
       const v = n(`${which}.${k}`, `${which === "expected" ? "成約想定価格" : "AI査定価格"}の${VALUE_LABEL[k]}`);
       if (v !== undefined && v !== extracted[which][k]) part[k] = v;
     }
     if (Object.keys(part).length) o[which] = part;
   }
   const adj: Record<string, number | null> = {};
-  for (const [k, label] of [
-    ["landPercent", "土地の補正"],
-    ["liquidityPercent", "流通性比率"],
-  ] as const) {
+  for (const [k, label] of ADJ_KEYS) {
     const v = n(`adjustment.${k}`, label);
     if (v !== undefined && v !== extracted.adjustment[k]) adj[k] = v;
   }
@@ -237,7 +240,7 @@ export function AppraisalDeckReview({ propertyId, deckId, canWrite }: { property
   const exVal = (k: string): string => {
     const [a, b] = k.split(".");
     if (a === "expected" || a === "ai") return show(ex[a][b as keyof AppraisalValue]);
-    if (a === "adjustment") return show(ex.adjustment[b as "landPercent" | "liquidityPercent"]);
+    if (a === "adjustment") return show(ex.adjustment[b as "landPercent" | "landAmount" | "liquidityPercent"]);
     if (a === "plan") return show(ex.plans.find((p) => p.name === b)?.price);
     if (a === "range") return show(ex.range?.[b as "min" | "max"]);
     const v = (ex as unknown as Record<string, unknown>)[k];

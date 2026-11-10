@@ -58,10 +58,14 @@ export function defaultHeadlines(m: MergedAppraisal): Record<HeadlineKey, string
   return { result, basis, plans, fund };
 }
 
-/** 未接道の補正として「接道の条件で比べる」図を使えるか。 */
+/**
+ * 未接道の補正として「接道の条件で比べる」図を使えるか。
+ * ⚠補正の項目名「接道状況/方位」だけでは決めない(方位や一般の接道の評価も含む=未接道とは限らない)。
+ *   物件詳細の接道状況・特記事項に「接道なし」「未接道」「無道路」と**書いてある**ときだけ(@codex #694)。
+ */
 export function isUnconnectedCase(m: MergedAppraisal): boolean {
   const pct = m.adjustment.landPercent;
   if (pct == null || pct >= 0) return false;
-  const road = `${m.roadAccess ?? ""} ${m.notes ?? ""} ${m.adjustment.landReason ?? ""}`;
-  return /接道なし|未接道|無道路|接道状況/.test(road);
+  const road = `${m.roadAccess ?? ""} ${m.notes ?? ""}`;
+  return /接道なし|未接道|無道路/.test(road);
 }

@@ -32,11 +32,14 @@ const FORM = {
   "expected.landTsubo": "88",
   "expected.building": "90",
   "expected.tsubo": "",
+  "expected.buildingTsubo": "4.6",
   "ai.total": "4,137",
   "ai.land": "4,047",
   "ai.landTsubo": "293.5",
   "ai.building": "90",
   "ai.tsubo": "",
+  "ai.buildingTsubo": "4.6",
+  "adjustment.landAmount": "",
   "adjustment.landPercent": "-70",
   "adjustment.liquidityPercent": "0",
   "plan.speed": "1,080",
@@ -72,6 +75,11 @@ describe("buildOverrides(読み取り値と違う項目だけ送る)", () => {
       headlines: { result: "見出し" },
     });
   });
+  it("画面に欄の無い修正(建物の坪単価・土地の評価の金額)も保存のたびに消さない(@codex #694)", () => {
+    const r = buildOverrides({ ...FORM, "expected.buildingTsubo": "5", "adjustment.landAmount": "-100", "expected.total": "1,350" }, EX, false);
+    expect(r.overrides).toEqual({ expected: { total: 1350, buildingTsubo: 5 }, adjustment: { landAmount: -100 } });
+  });
+
   it("数字でない欄はエラーにして送らない", () => {
     const r = buildOverrides({ ...FORM, "ai.total": "よんせん" }, EX, false);
     expect(r.errors[0]).toContain("AI査定価格の総額");

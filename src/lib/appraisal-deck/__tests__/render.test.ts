@@ -66,6 +66,9 @@ describe("見出しの既定の文", () => {
     expect(isUnconnectedCase(mergeAppraisal(HOUSE, {}))).toBe(true);
     expect(isUnconnectedCase(mergeAppraisal(LAND, {}))).toBe(false);
     expect(isUnconnectedCase(mergeAppraisal({ ...HOUSE, roadAccess: "一方", notes: null, adjustment: { ...HOUSE.adjustment, landReason: "土地形状" } }, {}))).toBe(false);
+    // 補正の項目名「接道状況/方位」だけでは未接道としない(@codex #694)
+    expect(isUnconnectedCase(mergeAppraisal({ ...HOUSE, roadAccess: "一方", notes: null }, {}))).toBe(false);
+    expect(isUnconnectedCase(mergeAppraisal({ ...HOUSE, roadAccess: null, notes: "未接道地" }, {}))).toBe(true);
   });
 });
 
