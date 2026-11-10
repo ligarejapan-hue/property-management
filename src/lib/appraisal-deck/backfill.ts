@@ -1,11 +1,12 @@
 /**
  * 反映前に添付した査定報告書から、「査定のご報告」の下書きを一括で作る(2026-11-11 発注者指示)。
+ * 対象は source.ts の査定報告書(受け取り箱の type=report と、直接付けた種類「査定書・査定報告書」)。
  * 実体は buildAppraisalDraft(添付時と同じ処理)。1本ずつ順に読む(大きい PDF を同時に読まない)。
  * - dry-run(既定)は件数だけ数える(書き込まない・PDF も読まない)
  * - 既に下書きがある報告書・削除済みの添付は対象にしない(何度流しても同じ下書きを2つ作らない)
  * ⚠出すのは件数と添付の id だけ(所在地・数字・ファイルの場所は出さない)。
  */
-import { REPORT_ATTACHMENT_TYPE } from "@/lib/attachments/report-display-name";
+import { appraisalSourceWhere } from "./source";
 import type { AppraisalDraftResult } from "./create-draft";
 
 export interface BackfillDeps {
@@ -53,7 +54,7 @@ export async function prismaBackfillDeps(): Promise<BackfillDeps> {
   return {
     listReports: () =>
       prisma.attachment.findMany({
-        where: { type: REPORT_ATTACHMENT_TYPE, targetType: "property", isDeleted: false },
+        where: { targetType: "property", isDeleted: false, ...appraisalSourceWhere },
         select: { id: true, targetId: true, uploadedBy: true },
         orderBy: { createdAt: "asc" },
       }),
