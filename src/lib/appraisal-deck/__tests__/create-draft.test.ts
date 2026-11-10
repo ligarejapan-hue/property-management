@@ -117,6 +117,25 @@ describe("buildAppraisalDraft(査定報告書から下書きを作る)", () => {
     expect(extract).toHaveBeenCalledWith(expect.any(Buffer), { timeoutMs: 60_000 });
   });
 
+  it("順番待ちの間はファイルを読まず、待ちが上限を超えたら busy(@codex #692)", async () => {
+    let release!: () => void;
+    const gate = new Promise<void>((r) => (release = r));
+    extract.mockImplementation(async () => {
+      await gate;
+      return SRE;
+    });
+    const running = Array.from({ length: 4 }, () => buildAppraisalDraft(IN));
+    await new Promise((r) => setTimeout(r, 0));
+    expect(await buildAppraisalDraft(IN)).toEqual({ ok: false, reason: "busy" });
+    // runExclusive は作り物(すぐ実行)なので読んだのは走っている4本だけ。5本目は読まない
+    expect(storage.read).toHaveBeenCalledTimes(4);
+    release();
+    await Promise.all(running);
+    // 終われば数が戻る
+    extract.mockResolvedValue(SRE);
+    expect((await buildAppraisalDraft(IN)).ok).toBe(true);
+  });
+
   it("同じ報告書から同時に作ったら、先にできた方を返す", async () => {
     db.appraisalDeck.create.mockRejectedValueOnce(new Error("unique"));
     db.appraisalDeck.findUnique.mockResolvedValueOnce(null).mockResolvedValueOnce({ id: "d9" });

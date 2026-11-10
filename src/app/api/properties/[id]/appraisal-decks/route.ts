@@ -18,6 +18,7 @@ const FAIL_MESSAGES: Record<string, [number, string]> = {
   not_pdf: [422, "査定報告書が PDF ではありません"],
   read_failed: [422, "査定報告書の文字を読み取れませんでした。時間をおいてもう一度お試しください"],
   not_sre: [422, "対応している書式(SRE AI査定の不動産価格査定報告書)ではありません"],
+  busy: [503, "査定報告書の読み取りが混み合っています。少し時間をおいてもう一度お試しください"],
   already_confirmed: [409, "確認済みの資料は作り直せません。資料を下書きに戻してから作り直してください"],
 };
 
@@ -69,7 +70,11 @@ export async function POST(request: Request, { params }: { params: Promise<{ id:
     });
     if (!result.ok) {
       const [status, message] = FAIL_MESSAGES[result.reason] ?? [500, "下書きを作れませんでした"];
-      throw new ApiError(status, message, status === 409 ? "CONFLICT" : status === 404 ? "NOT_FOUND" : "VALIDATION_ERROR");
+      throw new ApiError(
+        status,
+        message,
+        status === 409 ? "CONFLICT" : status === 404 ? "NOT_FOUND" : status === 503 ? "BUSY" : "VALIDATION_ERROR",
+      );
     }
     return apiResponse({ deckId: result.deckId, created: result.created }, result.created ? 201 : 200);
   } catch (error) {

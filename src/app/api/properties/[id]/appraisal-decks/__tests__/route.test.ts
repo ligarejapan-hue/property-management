@@ -69,6 +69,7 @@ const DECK = {
   updatedAt: new Date("2026-11-10T01:00:00Z"),
   confirmedAt: null,
 };
+const REV = "2026-11-10T01:00:00.000Z";
 const ctx = { params: Promise.resolve({ id: "p1" }) };
 const dctx = { params: Promise.resolve({ id: "p1", deckId: "d1" }) };
 const req = (method: string, body?: unknown) =>
@@ -92,7 +93,7 @@ describe("権限(査定報告書を開ける人と同じ範囲)", () => {
     ["作り直し", () => listPOST(req("POST", { attachmentId: "0b6f6c1e-0000-4000-8000-000000000000" }), ctx)],
     ["詳細", () => deckGET(req("GET"), dctx)],
     ["修正", () => deckPATCH(req("PATCH", { overrides: {} }), dctx)],
-    ["確認", () => confirmPOST(req("POST"), dctx)],
+    ["確認", () => confirmPOST(req("POST", { reviewedUpdatedAt: REV }), dctx)],
   ];
   it.each(calls)("%s: 所有者の情報を見られない人は 403", async (_n, call) => {
     perms.current = [P("property", "read"), P("property", "write")];
@@ -108,7 +109,7 @@ describe("権限(査定報告書を開ける人と同じ範囲)", () => {
     perms.current = [P("property", "read"), P("owner", "read")];
     expect((await listGET(req("GET"), ctx)).status).toBe(200);
     expect((await deckPATCH(req("PATCH", { overrides: {} }), dctx)).status).toBe(403);
-    expect((await confirmPOST(req("POST"), dctx)).status).toBe(403);
+    expect((await confirmPOST(req("POST", { reviewedUpdatedAt: REV }), dctx)).status).toBe(403);
   });
 });
 
@@ -135,6 +136,7 @@ describe("POST 作り直し", () => {
     ["already_confirmed", 409],
     ["not_sre", 422],
     ["attachment_not_found", 404],
+    ["busy", 503],
   ])("%s → %i", async (reason, status) => {
     build.mockResolvedValue({ ok: false, reason });
     expect((await listPOST(req("POST", { attachmentId: "0b6f6c1e-0000-4000-8000-000000000000" }), ctx)).status).toBe(status);
@@ -167,18 +169,25 @@ describe("PATCH 修正", () => {
 
 describe("POST 確認", () => {
   it("読んだ時点の版・下書きを条件に確認済みにする", async () => {
-    expect((await confirmPOST(req("POST"), dctx)).status).toBe(200);
-    expect(db.appraisalDeck.updateMany.mock.calls[0][0].where).toEqual({ id: "d1", status: "draft", updatedAt: DECK.updatedAt });
+    expect((await confirmPOST(req("POST", { reviewedUpdatedAt: REV }), dctx)).status).toBe(200);
+    expect(db.appraisalDeck.updateMany.mock.calls[0][0].where).toEqual({ id: "d1", status: "draft", updatedAt: new Date(REV) });
   });
+  it("画面で確かめた版より後に直された・作り直された資料は確認済みにしない(@codex #692)", async () => {
+    const later = await confirmPOST(req("POST", { reviewedUpdatedAt: "2026-11-10T00:59:59.000Z" }), dctx);
+    expect(later.status).toBe(409);
+    expect((await confirmPOST(req("POST", {}), dctx)).status).toBe(422);
+    expect(db.appraisalDeck.updateMany).not.toHaveBeenCalled();
+  });
+
   it("ほかで直されていたら 409", async () => {
     db.appraisalDeck.updateMany.mockResolvedValue({ count: 0 });
-    expect((await confirmPOST(req("POST"), dctx)).status).toBe(409);
+    expect((await confirmPOST(req("POST", { reviewedUpdatedAt: REV }), dctx)).status).toBe(409);
   });
   it("成約想定価格・売出し価格が無いままでは確認済みにしない", async () => {
     db.appraisalDeck.findFirst.mockResolvedValue({ ...DECK, extracted: { ...EXTRACTED, expected: { total: null } } });
-    expect((await confirmPOST(req("POST"), dctx)).status).toBe(422);
+    expect((await confirmPOST(req("POST", { reviewedUpdatedAt: REV }), dctx)).status).toBe(422);
     db.appraisalDeck.findFirst.mockResolvedValue({ ...DECK, extracted: { ...EXTRACTED, plans: [], range: null } });
-    expect((await confirmPOST(req("POST"), dctx)).status).toBe(422);
+    expect((await confirmPOST(req("POST", { reviewedUpdatedAt: REV }), dctx)).status).toBe(422);
     expect(db.appraisalDeck.updateMany).not.toHaveBeenCalled();
   });
   it("担当者の修正で埋めた数字なら確認できる", async () => {
@@ -187,6 +196,6 @@ describe("POST 確認", () => {
       extracted: { ...EXTRACTED, expected: { total: null }, plans: [] },
       overrides: { expected: { total: 1300 }, range: { min: 1200, max: 1400, minTsubo: null, maxTsubo: null } },
     });
-    expect((await confirmPOST(req("POST"), dctx)).status).toBe(200);
+    expect((await confirmPOST(req("POST", { reviewedUpdatedAt: REV }), dctx)).status).toBe(200);
   });
 });

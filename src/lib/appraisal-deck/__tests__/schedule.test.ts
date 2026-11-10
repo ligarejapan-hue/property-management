@@ -25,6 +25,24 @@ describe("scheduleAppraisalDraft(添付の応答のあとで下書きを作る)"
     expect(JSON.stringify(warn.mock.calls)).not.toContain("見本町");
     warn.mockRestore();
   });
+  it("読み取りが混んでいたら(busy)待ってやり直す・ほかの失敗はやり直さない", async () => {
+    vi.useFakeTimers();
+    build
+      .mockResolvedValueOnce({ ok: false, reason: "busy" })
+      .mockResolvedValueOnce({ ok: true, deckId: "d1", created: true });
+    scheduleAppraisalDraft(IN);
+    const p = afterFn.mock.calls[0][0]();
+    await vi.advanceTimersByTimeAsync(20_000);
+    await p;
+    expect(build).toHaveBeenCalledTimes(2);
+    build.mockReset();
+    build.mockResolvedValue({ ok: false, reason: "not_sre" });
+    scheduleAppraisalDraft(IN);
+    await afterFn.mock.calls[1][0]();
+    expect(build).toHaveBeenCalledTimes(1);
+    vi.useRealTimers();
+  });
+
   it("リクエストの外で after が使えなくても投げない", () => {
     afterFn.mockImplementationOnce(() => {
       throw new Error("outside request scope");

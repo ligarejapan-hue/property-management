@@ -19,7 +19,17 @@ export const APPRAISAL_PDF_TIMEOUT_MS = 60_000;
 
 export type AppraisalDraftResult =
   | { ok: true; deckId: string; created: boolean }
-  | { ok: false; reason: "attachment_not_found" | "file_not_found" | "not_pdf" | "read_failed" | "not_sre" | "already_confirmed" };
+  | {
+      ok: false;
+      reason: "attachment_not_found" | "file_not_found" | "not_pdf" | "read_failed" | "not_sre" | "already_confirmed" | "busy";
+    };
+
+/**
+ * 同時に待てる読み取りの数(@codex #692)。順番待ちの間は PDF を読み込まない(ファイルは自分の番が来てから
+ * 読む)うえで、待ちの数そのものにも上限を置く。超えたら busy(作り直しで再挑戦)。
+ */
+export const MAX_PENDING_APPRAISAL_READS = 4;
+let pendingReads = 0;
 
 export async function buildAppraisalDraft(input: {
   attachmentId: string;
@@ -43,20 +53,30 @@ export async function buildAppraisalDraft(input: {
   if (existing && !input.replace) return { ok: true, deckId: existing.id, created: false };
   if (existing?.status === "confirmed") return { ok: false, reason: "already_confirmed" };
 
-  const storage = getStorage();
-  const key = storage.keyFromUrl(attachment.fileUrl);
-  const file = key ? await storage.read(key) : null;
-  if (!file) return { ok: false, reason: "file_not_found" };
-  const buffer = Buffer.from(file.body as Uint8Array);
-  if (!isPdfBuffer(buffer)) return { ok: false, reason: "not_pdf" };
-
-  let text: string;
+  if (pendingReads >= MAX_PENDING_APPRAISAL_READS) return { ok: false, reason: "busy" };
+  pendingReads++;
+  let read: { text: string } | { fail: "file_not_found" | "not_pdf" | "read_failed" };
   try {
     // 重い PDF の読み取りは同時に1本だけ(受け取り箱の圧縮・読み取りと同じ順番待ち)。
-    text = await runExclusive(() => extractTextFromPdf(buffer, { timeoutMs: APPRAISAL_PDF_TIMEOUT_MS }));
-  } catch {
-    return { ok: false, reason: "read_failed" };
+    // ⚠ファイルは順番が来てから読む(待っている間に大きい PDF をメモリに抱えない・@codex #692)。
+    read = await runExclusive(async () => {
+      const storage = getStorage();
+      const key = storage.keyFromUrl(attachment.fileUrl);
+      const file = key ? await storage.read(key) : null;
+      if (!file) return { fail: "file_not_found" as const };
+      const buffer = Buffer.from(file.body as Uint8Array);
+      if (!isPdfBuffer(buffer)) return { fail: "not_pdf" as const };
+      try {
+        return { text: await extractTextFromPdf(buffer, { timeoutMs: APPRAISAL_PDF_TIMEOUT_MS }) };
+      } catch {
+        return { fail: "read_failed" as const };
+      }
+    });
+  } finally {
+    pendingReads--;
   }
+  if ("fail" in read) return { ok: false, reason: read.fail };
+  const text = read.text;
   const extracted = parseAppraisalReport(text);
   if (extracted.source !== "sre") return { ok: false, reason: "not_sre" };
 
