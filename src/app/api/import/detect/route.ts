@@ -27,6 +27,7 @@ import {
   SheetParseError,
 } from "@/lib/sheet-parser";
 import { assertZipExpandsWithin } from "@/lib/xlsx-zip-guard";
+import { readXlsx } from "@/lib/xlsx-astral-refs";
 import { detectImportFileTypeFromContent } from "@/lib/import-content-detect";
 import { detectImportFileType, type ImportFileType } from "@/lib/import-file-type";
 import { readLeadSheet } from "@/lib/paste-import/lead-sheet";
@@ -86,7 +87,7 @@ function inspectXlsx(xlsxBase64: string): { contentType: ImportFileType | null; 
   let wb: XLSX.WorkBook;
   try {
     assertZipExpandsWithin(buf, MAX_XLSX_EXPANDED_BYTES);
-    wb = XLSX.read(buf, { type: "buffer", sheetRows: LEAD_SCAN_ROWS });
+    wb = readXlsx(buf, { type: "buffer", sheetRows: LEAD_SCAN_ROWS });
   } catch {
     throw new ApiError(422, "Excelファイルの中身が大きすぎるか、壊れています", "VALIDATION_ERROR");
   }

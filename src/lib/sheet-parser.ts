@@ -11,6 +11,7 @@
 import * as XLSX from "xlsx";
 import { parseCsv, type CsvParseResult } from "./csv-parser";
 import { assertZipExpandsWithin } from "./xlsx-zip-guard";
+import { readXlsx } from "./xlsx-astral-refs";
 
 export type ImportFileFormat = "csv" | "xlsx" | "unknown";
 
@@ -217,7 +218,7 @@ function parseXlsxFromBase64(
   }
   let wb: XLSX.WorkBook;
   try {
-    wb = XLSX.read(buf, { type: "buffer" });
+    wb = readXlsx(buf, { type: "buffer" });
   } catch {
     throw new SheetParseError("INVALID_INPUT", "Excelファイルを解析できませんでした");
   }

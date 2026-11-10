@@ -1929,7 +1929,8 @@ export async function parseFileForPreview(
   if (name.endsWith(".xlsx")) {
     const XLSX = await import("xlsx");
     const buf = await file.arrayBuffer();
-    const wb = XLSX.read(new Uint8Array(buf), { type: "array" });
+    const { readXlsx } = await import("./xlsx-astral-refs");
+    const wb = readXlsx(new Uint8Array(buf), { type: "array" });
     const sheetName = wb.SheetNames[0];
     if (!sheetName) return { headers: [], rows: [] };
     const sheet = wb.Sheets[sheetName];
