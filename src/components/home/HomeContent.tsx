@@ -4,6 +4,7 @@ import { PageHeader } from "@/components/ui/page-header";
 import HomeKpiSummary from "./home-kpi-summary";
 import HomeNextActions from "./home-next-actions";
 import HomeDealSchedule from "./home-deal-schedule";
+import HomeWeekCalendar from "./home-week-calendar";
 
 /** 役割別ホーム(ランチャー)。カードは既存ページへの Link。userRole は親(page)がセッションから渡す。 */
 export function HomeContent({ userRole }: { userRole: string }) {
@@ -17,6 +18,8 @@ export function HomeContent({ userRole }: { userRole: string }) {
       <HomeNextActions />
       {/* 自分が担当の決済までの段取り(今日・明日・期限超過)。朝の通知の行き先。0件・権限なしは何も出さない。 */}
       <HomeDealSchedule />
+      {/* 今週の予定(2026-11-10 案4): 次回対応・内見・契約・決済。読めない種類は出ない。管理者は全員分に切り替え可。 */}
+      <HomeWeekCalendar />
       <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
         {cards.map((c) => (
           <Link
