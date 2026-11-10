@@ -5170,6 +5170,10 @@ export interface UpcomingViewing {
 export interface InquiryCounts {
   open: number;
   upcomingViewings: number;
+  /** ホームの重要指標の内訳(2026-11-10)。未対応の反響の種類別。 */
+  openByKind?: Partial<Record<InquiryKindKey, number>>;
+  viewingsToday?: number;
+  viewingsTomorrow?: number;
 }
 export interface DeskAgentInput {
   companyName: string;

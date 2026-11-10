@@ -1,7 +1,7 @@
 import Link from "next/link";
 import { visibleHomeCards } from "./home-model";
 import { PageHeader } from "@/components/ui/page-header";
-import HomeInquiryCounts from "./home-inquiry-counts";
+import HomeKpiSummary from "./home-kpi-summary";
 import HomeNextActions from "./home-next-actions";
 import HomeDealSchedule from "./home-deal-schedule";
 
@@ -11,8 +11,8 @@ export function HomeContent({ userRole }: { userRole: string }) {
   return (
     <div className="mx-auto max-w-3xl">
       <PageHeader title="ホーム" description="やりたいことを選んでください。" />
-      {/* 業者からの反響(設計 2026-09-28 方針9)。権限が無い人には出ない。 */}
-      <HomeInquiryCounts />
+      {/* 重要な数字(2026-11-10): 未対応の反響・期限切れの次回対応・今日明日の内見と内訳。読めない分は出ない。 */}
+      <HomeKpiSummary />
       {/* 自分の次回対応(今日・期限切れ)。通知 段階2の「次回対応」を押したときの行き先。0件・権限なしは何も出さない。 */}
       <HomeNextActions />
       {/* 自分が担当の決済までの段取り(今日・明日・期限超過)。朝の通知の行き先。0件・権限なしは何も出さない。 */}

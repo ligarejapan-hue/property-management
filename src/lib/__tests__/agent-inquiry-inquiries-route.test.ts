@@ -12,6 +12,7 @@ vi.mock("@/lib/prisma", () => {
       findUnique: vi.fn(async () => null),
       updateMany: vi.fn(async () => ({ count: 1 })),
       count: vi.fn(async () => 0),
+      groupBy: vi.fn(async () => []),
     },
     agentViewing: { count: vi.fn(async () => 0), findMany: vi.fn(async () => []) },
     agent: { findUnique: vi.fn(async () => null) },
@@ -34,7 +35,7 @@ import { GET as UPCOMING } from "../../app/api/agent-inquiries/upcoming/route";
 
 type Fn = ReturnType<typeof vi.fn>;
 const pm = prismaMock as never as {
-  agentInquiry: { create: Fn; findFirst: Fn; findMany: Fn; findUnique: Fn; updateMany: Fn; count: Fn };
+  agentInquiry: { create: Fn; findFirst: Fn; findMany: Fn; findUnique: Fn; updateMany: Fn; count: Fn; groupBy: Fn };
   agentViewing: { count: Fn; findMany: Fn };
   agent: { findUnique: Fn };
   property: { findUnique: Fn };
@@ -211,11 +212,38 @@ describe("反響 API", () => {
     expect((await PATCH(json("PATCH", { assigneeId: UID, version: 1 }), ctx)).status).toBe(422);
     expect(pm.agentInquiry.updateMany).not.toHaveBeenCalled();
   });
-  it("件数: 未対応と今日明日の内見(取り消し除く)", async () => {
-    pm.agentInquiry.count.mockResolvedValue(3);
-    pm.agentViewing.count.mockResolvedValue(2);
-    expect(await (await COUNTS()).json()).toEqual({ open: 3, upcomingViewings: 2 });
+  it("件数: 未対応(種類別)と今日明日の内見(取り消し除く・今日と明日の内訳)", async () => {
+    pm.agentInquiry.groupBy.mockResolvedValue([
+      { kind: "viewing", _count: { _all: 2 } },
+      { kind: "material_request", _count: { _all: 1 } },
+    ]);
+    pm.agentViewing.count.mockResolvedValueOnce(2).mockResolvedValueOnce(1);
+    expect(await (await COUNTS()).json()).toEqual({
+      open: 3, upcomingViewings: 3,
+      openByKind: { viewing: 2, ad_permission: 0, material_request: 1 },
+      viewingsToday: 2, viewingsTomorrow: 1,
+    });
+    expect(pm.agentInquiry.groupBy).toHaveBeenCalledWith(expect.objectContaining({ by: ["kind"], where: { status: "open" } }));
     expect(pm.agentViewing.count).toHaveBeenCalledWith({ where: expect.objectContaining({ canceledAt: null }) });
+  });
+  it("件数: 今日と明日の境目は日本時間の 0:00", async () => {
+    vi.useFakeTimers({ toFake: ["Date"] });
+    try {
+      vi.setSystemTime(new Date("2026-11-09T16:30:00Z")); // 日本時間 11/10 1:30
+      await COUNTS();
+      const [today, tomorrow] = pm.agentViewing.count.mock.calls.slice(-2).map((c) => c[0].where.scheduledAt);
+      expect(today.gte.toISOString()).toBe("2026-11-09T15:00:00.000Z");
+      expect(today.lt.toISOString()).toBe("2026-11-10T15:00:00.000Z");
+      expect(tomorrow.gte.toISOString()).toBe("2026-11-10T15:00:00.000Z");
+      expect(tomorrow.lt.toISOString()).toBe("2026-11-11T15:00:00.000Z");
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+  it("件数: 反響の権限が無ければ 403(数えない)", async () => {
+    (getUserPermissions as Fn).mockResolvedValueOnce([]);
+    expect((await COUNTS()).status).toBe(403);
+    expect(pm.agentInquiry.groupBy).not.toHaveBeenCalled();
   });
   it("今日明日の内見は件数で切らない(2日分に限っているので全件・@codex #454 R7)", async () => {
     await UPCOMING();
