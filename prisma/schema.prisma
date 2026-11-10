@@ -506,6 +506,7 @@ model Property {
   ownerMemos         OwnerMemo[]               @relation("OwnerMemoProperty")
   fieldSurveyPins    FieldSurveyPin[]
   salesSheetDesigns  SalesSheetDesign[]
+  appraisalDecks     AppraisalDeck[]
   dmRecipientDrafts  DmRecipientDraft[]
   registryFetchJobItems RegistryFetchJobItem[]  @relation("RegistryFetchJobItemProperty")
   dmExportBatchItems DmExportBatchItem[]
@@ -1362,6 +1363,34 @@ model SalesSheetDesign {
 
   @@index([propertyId])
   @@map("sales_sheet_designs")
+}
+
+/// お客様向け資料「査定のご報告」(2026-11-10 発注者依頼)。査定報告書(Attachment type=report)を
+/// 物件に添付した時点で、PDF の文字から数字を読んだ下書き(draft)を作る。担当者が確かめて confirmed にする。
+/// ⚠依頼者の氏名・番地・PDF本文は入れない(extracted は src/lib/appraisal-deck/parse.ts の結果=所在地は町丁目まで)。
+model AppraisalDeck {
+  id                 String    @id @default(uuid()) @db.Uuid
+  propertyId         String    @map("property_id") @db.Uuid
+  /// 元の査定報告書(attachments.id)。添付が消えても資料は残す(FK を張らない)。1つの報告書から下書きは1つ。
+  sourceAttachmentId String?   @unique @map("source_attachment_id") @db.Uuid
+  /// draft(確認待ち)| confirmed(確認済み・表示できる)
+  status             String    @default("draft")
+  parserVersion      Int       @map("parser_version")
+  /// 読み取った数字(AppraisalExtract)。
+  extracted          Json      @default("{}") @db.JsonB
+  /// 担当者が直した数字・見出しの文章(extracted に上書きする)。
+  overrides          Json      @default("{}") @db.JsonB
+  createdBy          String?   @map("created_by") @db.Uuid
+  updatedBy          String?   @map("updated_by") @db.Uuid
+  confirmedBy        String?   @map("confirmed_by") @db.Uuid
+  confirmedAt        DateTime? @map("confirmed_at")
+  createdAt          DateTime  @default(now()) @map("created_at")
+  updatedAt          DateTime  @updatedAt @map("updated_at")
+
+  property Property @relation(fields: [propertyId], references: [id], onDelete: Cascade)
+
+  @@index([propertyId])
+  @@map("appraisal_decks")
 }
 
 // ============================================================
