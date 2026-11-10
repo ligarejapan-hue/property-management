@@ -199,7 +199,8 @@ function readArea(s: string | undefined): [number | null, number | null] {
  */
 export function trimToChome(address: string | null): string | null {
   if (!address) return null;
-  const out = coarsePropertyLocation(address.replace(/\s+/g, ""));
+  // ⚠空白は消さない: 空白の後の建物名を落とす判定に使われる(@codex #690 R2)
+  const out = coarsePropertyLocation(address.trim());
   if (!out) return null;
   // 番地だけ(先頭が数字)のときは町名が無い=返さない
   return /^[0-9０-９]/.test(out) ? null : out;
