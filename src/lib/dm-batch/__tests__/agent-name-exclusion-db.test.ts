@@ -18,7 +18,7 @@ vi.hoisted(() => {
 });
 
 import prisma from "@/lib/prisma";
-import { findAgentNameOwnerIds } from "../agent-name-exclusion";
+import { findAgentNameOwnerIds, findOwnerNameExclusions } from "../agent-name-exclusion";
 
 const USER = "11111111-1111-4111-8111-111111111111";
 
@@ -52,6 +52,9 @@ describe.skipIf(!process.env.PUSH_DB_TEST_URL)("業者と同じ名前の所有�
     ids.suffix = await owner("ABC不動産株式会社");
     ids.other = await owner("佐藤 花子");
     ids.blank = await owner("　");
+    // 謄本の外字(私用領域の字)を含む名前(2026-11-11)
+    ids.gaiji = await owner("大\uE0A6一郎");
+    ids.gaijiEnd = await owner("鈴木花\uF8FF");
   });
 
   it("名簿・国交省の一覧の両方と、そろえた名前で照合する", async () => {
@@ -62,6 +65,13 @@ describe.skipIf(!process.env.PUSH_DB_TEST_URL)("業者と同じ名前の所有�
   it("使っていない名簿の業者・後株と前株の違い・空の名前・別の名前は一致にしない", async () => {
     const got = await findAgentNameOwnerIds(prisma, [ids.archived, ids.suffix, ids.blank, ids.other]);
     expect(got.size).toBe(0);
+  });
+
+  it("名前に外字(私用領域の字)がある所有者を、業者とは別の集合で返す(2026-11-11)", async () => {
+    const got = await findOwnerNameExclusions(prisma, Object.values(ids));
+    expect([...got.gaijiOwnerIds].sort()).toEqual([ids.gaiji, ids.gaijiEnd].sort());
+    expect(got.agentOwnerIds.has(ids.gaiji)).toBe(false);
+    expect([...got.agentOwnerIds].sort()).toEqual([ids.abcCircle, ids.abcSpaced, ids.yamada, ids.takahashi].sort());
   });
 
   it("大文字の uuid でも同じ所有者として返す(返すのは小文字)", async () => {

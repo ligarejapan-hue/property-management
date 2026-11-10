@@ -39,6 +39,8 @@ export function buildSaleDmPartialNotice(res: {
   excludedTerminal?: number;
   // 所有者が業者(名簿・国交省の一覧)と同じ名前で自動で除外した宛先数(住所に関係なく・2026-11-09)。
   excludedAgentName?: number;
+  // 所有者の名前に謄本の外字(私用領域の字)があり自動で除外した宛先数(宛名が □ になる・2026-11-11)。
+  excludedGaijiName?: number;
   // 種類つきの発送: 本文を差し込めなかった宛先数(住所・種別が読めない物件)と、LPが未登録の種類名。
   blankBodyCount?: number;
   lpMissingScenarios?: string[];
@@ -57,6 +59,11 @@ export function buildSaleDmPartialNotice(res: {
   if ((res.excludedAgentName ?? 0) > 0) {
     lines.push(
       `所有者が業者(業者の名簿・国交省の業者一覧)と同じ名前の ${res.excludedAgentName} 件の宛先は自動で除外しました。`,
+    );
+  }
+  if ((res.excludedGaijiName ?? 0) > 0) {
+    lines.push(
+      `所有者の名前に読めない字(外字)がある ${res.excludedGaijiName} 件の宛先は自動で除外しました(宛名が正しく出せないため。所有者の名前を直すと送れます)。`,
     );
   }
   if ((res.excluded ?? 0) > 0) {

@@ -351,6 +351,8 @@ export async function POST(request: NextRequest) {
     let excludedTerminalCount = 0;
     // 業者(名簿・国交省の一覧)と同じ名前の所有者で外した宛先数(2026-11-09)
     let excludedAgentNameCount = 0;
+    // 名前に謄本の外字(私用領域の字)がある所有者で外した宛先数(2026-11-11)
+    let excludedGaijiNameCount = 0;
     let savedRowCount = items.length;
     try {
       await prisma.$transaction(async (tx) => {
@@ -418,6 +420,7 @@ export async function POST(request: NextRequest) {
         const survivingItems = items.filter((_, i) => reasons[i] === null);
         excludedTerminalCount = reasons.filter((r) => r === "terminal").length;
         excludedAgentNameCount = reasons.filter((r) => r === "agent_name").length;
+        excludedGaijiNameCount = reasons.filter((r) => r === "gaiji_name").length;
         savedRowCount = survivingItems.length;
 
         await tx.dmExportBatch.create({
@@ -521,6 +524,7 @@ export async function POST(request: NextRequest) {
         excludedTerminal: excludedTerminalCount,
         // ⚠監査の鍵に "Name" を含めると個人情報として伏せられる → excludedAgent
         excludedAgent: excludedAgentNameCount,
+        excludedGaiji: excludedGaijiNameCount,
         reused: false,
         createdAt: new Date().toISOString(),
       },
@@ -535,6 +539,8 @@ export async function POST(request: NextRequest) {
       excludedTerminalCount,
       // 業者と同じ名前の所有者で自動除外した宛先数
       excludedAgentNameCount,
+      // 名前に外字がある所有者で自動除外した宛先数
+      excludedGaijiNameCount,
       reused: false,
       mailablePropertyCount,
       unsubscribeUrlAvailable: await isUnsubscribeUrlAvailable(),

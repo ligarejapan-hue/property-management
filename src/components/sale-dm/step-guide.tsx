@@ -55,7 +55,7 @@ const getServerSnapshot = () => false;
 const STATE_MESSAGES: Partial<Record<SaleDmGuideState, ReactNode>> = {
   no_recipients: <>宛先がありません。<RoleLink href="/properties" minRole="office_staff">物件一覧</RoleLink>で、DM状態が「送付可」で住所のある所有者がいる物件を選び、売却DMを作り直してください。</>,
   done: <>すべて送付済みです。申込は<Link href="/properties/sale-dm/inquiries" className="font-semibold underline underline-offset-2">「査定の申込」</Link>に届きます。</>,
-  done_excluded: "送れる宛先はすべて送付済みです。残りの宛先は拒否・宛先不明の記録があるか、所有者が業者と同じ名前のため、印刷にも送付にも使えません。",
+  done_excluded: "送れる宛先はすべて送付済みです。残りの宛先は拒否・宛先不明の記録があるか、所有者が業者と同じ名前か、所有者の名前に読めない字(外字)があるため、印刷にも送付にも使えません。",
 };
 
 export function SaleDmStepGuide({

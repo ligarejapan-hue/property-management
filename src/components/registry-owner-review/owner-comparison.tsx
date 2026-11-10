@@ -24,6 +24,7 @@ const REGISTRY_DIFF =
 const ADDRESS_DIFF = "bg-amber-100 underline decoration-dotted underline-offset-2 dark:bg-amber-900/60";
 
 const PAIR_MARK: Record<PairKind, string> = {
+  gaiji: "外字（読めない字）",
   kanji: "字が違う",
   corp: "法人の書き方",
   partial: "名前の一部が違う",

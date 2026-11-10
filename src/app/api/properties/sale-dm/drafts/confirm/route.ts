@@ -122,7 +122,7 @@ export async function POST(request: NextRequest) {
         if (terminalCount > 0) {
           throw new ApiError(
             409,
-            `拒否・宛先不明が記録された宛先、または所有者が業者と同じ名前の宛先が ${terminalCount} 件含まれています(その方の別物件での記録も含みます)。宛先を作り直してから確定してください`,
+            `拒否・宛先不明が記録された宛先、または所有者が業者と同じ名前か所有者の名前に読めない字(外字)がある宛先が ${terminalCount} 件含まれています(その方の別物件での記録も含みます)。宛先を作り直してから確定してください`,
             "TERMINAL_RECIPIENTS",
           );
         }

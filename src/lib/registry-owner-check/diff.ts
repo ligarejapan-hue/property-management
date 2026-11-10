@@ -10,6 +10,7 @@
  */
 import { normalizeName as importNormalizeName } from "@/lib/normalize";
 import { foldNameVariants } from "@/lib/deals/crosscheck";
+import { hasPrivateUseChar, isPrivateUseChar, stripPrivateUse } from "@/lib/private-use-char";
 
 export interface Segment {
   text: string;
@@ -20,6 +21,8 @@ export interface Segment {
 /** 1文字ずつ比べる形(全角半角・大文字小文字をそろえる)。空白は比べない。 */
 const charKey = (c: string) => c.normalize("NFKC").toLowerCase();
 const isSpace = (c: string) => /^\s$/u.test(c.normalize("NFKC"));
+/** 同じ字か。謄本の外字(私用領域)はどの字とも一致しない=いつも印を付ける(2026-11-11)。 */
+const charEq = (a: string, b: string) => !isPrivateUseChar(a) && charKey(a) === charKey(b);
 
 type Op = { kind: "eq" | "del" | "ins"; a?: number; b?: number };
 
@@ -30,14 +33,14 @@ function diffOps(a: string[], b: string[]): Op[] {
   const dp: number[][] = Array.from({ length: n + 1 }, () => new Array<number>(m + 1).fill(0));
   for (let i = n - 1; i >= 0; i--) {
     for (let j = m - 1; j >= 0; j--) {
-      dp[i][j] = charKey(a[i]) === charKey(b[j]) ? dp[i + 1][j + 1] + 1 : Math.max(dp[i + 1][j], dp[i][j + 1]);
+      dp[i][j] = charEq(a[i], b[j]) ? dp[i + 1][j + 1] + 1 : Math.max(dp[i + 1][j], dp[i][j + 1]);
     }
   }
   const ops: Op[] = [];
   let i = 0;
   let j = 0;
   while (i < n && j < m) {
-    if (charKey(a[i]) === charKey(b[j])) {
+    if (charEq(a[i], b[j])) {
       ops.push({ kind: "eq", a: i++, b: j++ });
     } else if (dp[i + 1][j] >= dp[i][j + 1]) {
       ops.push({ kind: "del", a: i++ });
@@ -149,7 +152,7 @@ function similarity(a: string, b: string): number {
 /** これより似ていなければ、別の人として組にしない。 */
 const PAIR_THRESHOLD = 0.5;
 
-export type PairKind = "kanji" | "corp" | "partial";
+export type PairKind = "gaiji" | "kanji" | "corp" | "partial";
 
 export interface OwnerDiffRow {
   systemIndex: number | null;
@@ -163,6 +166,10 @@ export interface OwnerDiffRow {
   registry: Segment[] | null;
 }
 
+/** 「✓ 同じ」の線(取込と同じそろえ方)。外字を含む名前はどれとも同じにしない(2026-11-11)。 */
+const sameName = (a: string, b: string) =>
+  !hasPrivateUseChar(a) && !hasPrivateUseChar(b) && importNormalizeName(a) === importNormalizeName(b);
+
 const isHan = (s: string) => s.length > 0 && /^\p{Script=Han}+$/u.test(s);
 /**
  * 漢字1字と1字の入れ替わり(髙／高・﨑／崎 など)。2字以上が替わる(佐藤／鈴木・太郎／花子)のは
@@ -175,15 +182,29 @@ function classifyPair(systemName: string, registryName: string): Pick<OwnerDiffR
   const kanjiPairs: string[] = [];
   const coreSys = coreName(systemName);
   const coreReg = coreName(registryName);
-  if (coreSys !== coreReg) {
-    const { hunks } = diffWithHunks(coreReg, coreSys);
-    if (hunks.length > 0 && hunks.every((h) => isOneHanChar(h.a) && isOneHanChar(h.b))) {
+  // 謄本の外字(私用領域)=どの字か分からない。外字が替わっただけの所は「外字を含む」だけにし、
+  // ほかに違う所があれば今までどおり種類を足す(2026-11-11)。
+  const gaiji = hasPrivateUseChar(systemName) || hasPrivateUseChar(registryName);
+  if (gaiji) kinds.push("gaiji");
+  if (coreSys !== coreReg || gaiji) {
+    const hunks = diffWithHunks(coreReg, coreSys).hunks.flatMap((h) => {
+      if (!gaiji) return [h];
+      const a = stripPrivateUse(h.a);
+      const b = stripPrivateUse(h.b);
+      const puaA = [...h.a].length - [...a].length;
+      const puaB = [...h.b].length - [...b].length;
+      // 外字が普通の字(同じ数まで)に替わっただけ=外字の違いで説明できる
+      if ((a === "" && [...b].length <= puaA) || (b === "" && [...a].length <= puaB)) return [];
+      return [{ a, b }];
+    });
+    const onlyGaiji = gaiji && hunks.length === 0;
+    if (!onlyGaiji && hunks.length > 0 && hunks.every((h) => isOneHanChar(h.a) && isOneHanChar(h.b))) {
       kinds.push("kanji");
       for (const h of hunks) {
         const label = `${h.a}／${h.b}`;
         if (!kanjiPairs.includes(label)) kanjiPairs.push(label);
       }
-    } else {
+    } else if (!onlyGaiji) {
       kinds.push("partial");
     }
   }
@@ -195,12 +216,16 @@ function classifyPair(systemName: string, registryName: string): Pick<OwnerDiffR
 
 // ---------- 物件ごとの違いの種類 ----------
 
-export type OwnerDiffCode = "kanji" | "corp" | "partial" | "count" | "someone" | "different" | "other";
+export type OwnerDiffCode = "kanji" | "corp" | "gaiji" | "partial" | "count" | "someone" | "different" | "other";
 
-/** 一覧で並べる順(小さいほど先)。物件の中で一番大きいものを使う。 */
+/**
+ * 一覧で並べる順(小さいほど先)。物件の中で一番大きいものを使う。
+ * ⚠数は diff_rank に保存済み=今ある数は変えない(外字は「名前の一部が違う」と同じ重さ)。
+ */
 export const OWNER_DIFF_RANK: Readonly<Record<OwnerDiffCode, number>> = {
   kanji: 1,
   corp: 2,
+  gaiji: 3,
   partial: 3,
   count: 4,
   someone: 5,
@@ -211,6 +236,7 @@ export const OWNER_DIFF_RANK: Readonly<Record<OwnerDiffCode, number>> = {
 const BASE_LABEL: Readonly<Record<OwnerDiffCode, string>> = {
   kanji: "漢字の違い",
   corp: "法人の書き方の違い",
+  gaiji: "外字を含む（謄本の字が読めない）",
   partial: "名前の一部が違う",
   count: "人数が違う",
   someone: "一部が別の人（所有者が変わった可能性）",
@@ -249,7 +275,7 @@ export function ownerDiff(registryNames: readonly string[], systemNames: readonl
   const cands: { s: number; r: number; score: number }[] = [];
   for (const s of sys) {
     for (const r of reg) {
-      const exact = importNormalizeName(s.n) === importNormalizeName(r.n);
+      const exact = sameName(s.n, r.n);
       const score = exact ? 2 : similarity(s.n, r.n);
       if (score >= PAIR_THRESHOLD) cands.push({ s: s.i, r: r.i, score });
     }
@@ -279,7 +305,7 @@ export function ownerDiff(registryNames: readonly string[], systemNames: readonl
       continue;
     }
     const rn = registryNames[ri];
-    if (importNormalizeName(s.n) === importNormalizeName(rn)) {
+    if (sameName(s.n, rn)) {
       rows.push({
         systemIndex: s.i,
         registryIndex: ri,
@@ -316,6 +342,8 @@ export function ownerDiff(registryNames: readonly string[], systemNames: readonl
 
   const codes = new Set<OwnerDiffCode>();
   const kanjiPairs: string[] = [];
+  // 外字の人が組にならなくても(謄本だけ・システムだけ)、外字を含むことは種類に出す
+  if ([...sys, ...reg].some((x) => hasPrivateUseChar(x.n))) codes.add("gaiji");
   for (const row of rows) {
     for (const k of row.pairKinds) codes.add(k);
     for (const p of row.kanjiPairs) if (!kanjiPairs.includes(p)) kanjiPairs.push(p);

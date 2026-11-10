@@ -18,6 +18,7 @@ import { ownerDiff } from "@/lib/registry-owner-check/diff";
 import type { PermissionEntry } from "@/lib/api-helpers";
 import { hasPermission } from "@/lib/permissions";
 import { findMissingOwnerFieldWritePerm } from "@/lib/owner-create";
+import { hasPrivateUseChar } from "@/lib/private-use-char";
 
 /**
  * 謄本を添付した人が、今も自分で「添付済みの謄本から所有者を反映」できるか(2026-11-10・
@@ -54,7 +55,8 @@ export function registryOwnersToAutoAdd<T extends RegistryOwnerEntry>(
           r.status === "differs" &&
           r.registryIndex !== null &&
           r.pairKinds.length > 0 &&
-          r.pairKinds.every((k) => k === "kanji" || k === "corp"),
+          // 外字の違いだけ(システムに外字の名前・謄本は普通の字 など)も、同じ方の表記の違いとして足さない(2026-11-11)
+          r.pairKinds.every((k) => k === "kanji" || k === "corp" || k === "gaiji"),
       )
       .map((r) => ownerNameKey(registryOwners[r.registryIndex!].name)),
   );
@@ -65,6 +67,9 @@ export function registryOwnersToAutoAdd<T extends RegistryOwnerEntry>(
   const addKeys = new Set(plan.add.map((o) => ownerNameKey(o.name)));
   const seen = new Set<string>();
   return registryOwners.filter((o) => {
+    // 謄本の外字(私用領域)を含む名前は足さない=どの字か分からず、同じ方が2人になる・□ の宛名になる
+    //   (2026-11-11 実機確認)。名義の確認の一覧に「外字を含む」として残り、人が確かめる。
+    if (hasPrivateUseChar(o.name)) return false;
     const k = ownerNameKey(o.name);
     if (notationOnly.has(k) || !addKeys.has(k) || seen.has(k)) return false;
     seen.add(k);
