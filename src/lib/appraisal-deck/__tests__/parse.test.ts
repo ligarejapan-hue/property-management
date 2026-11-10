@@ -249,12 +249,31 @@ describe("parseAppraisalReport(査定報告書から資料の数字を読む)", 
   });
 });
 
+describe("価格の幅とコメント(@codex #690)", () => {
+  it("価格の幅のあとのコメントの金額を上限に取り違えない", () => {
+    const text = LAND.replace(
+      "成約想定価格 \t6,114",
+      ["コメント", "査定価格6400万円前後と考えられます。", "成約想定価格 \t6,114"].join("\n"),
+    );
+    const r = parseAppraisalReport(text);
+    expect(r.range).toEqual({ min: 6280, max: 6580, minTsubo: 492.3, maxTsubo: 515.8 });
+  });
+  it("金額が3つ以上並んで何の幅か分からないときは読まず missing_plans で知らせる", () => {
+    const text = LAND.replace("515.8万円/坪", "515.8万円/坪\n6,900\u0001万円");
+    const r = parseAppraisalReport(text);
+    expect(r.range).toBeNull();
+    expect(r.warnings).toContain("missing_plans");
+  });
+});
+
 describe("trimToChome(所在地を町丁目までにする)", () => {
   it.each([
     ["東京都架空区見本町4丁目26-8", "東京都架空区見本町4丁目"],
     ["東京都架空区見本町4丁目", "東京都架空区見本町4丁目"],
     ["東京都架空区見本町2-3-4", "東京都架空区見本町"],
     ["東京都架空区見本町", "東京都架空区見本町"],
+    ["東京都架空区見本町四丁目二十六番八号", "東京都架空区見本町四丁目"],
+    ["東京都架空区六本木見本1-2-3", "東京都架空区六本木見本"],
   ])("%s → %s", (input, out) => {
     expect(trimToChome(input)).toBe(out);
   });

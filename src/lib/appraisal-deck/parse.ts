@@ -18,6 +18,8 @@
  * ⚠ Prisma / next / node:fs を import しないこと。
  */
 
+import { coarsePropertyLocation } from "@/lib/sale-dm-letter/tags";
+
 export const APPRAISAL_PARSER_VERSION = 1;
 
 export type AppraisalPropertyKind = "house" | "mansion" | "land";
@@ -191,15 +193,16 @@ function readArea(s: string | undefined): [number | null, number | null] {
   return [num(sqm?.[1]), num(tsubo?.[1])];
 }
 
-/** 所在地を町丁目までにする(番地は捨てる)。 */
+/**
+ * 所在地を町丁目までにする(番地は捨てる)。漢数字の番地(「四丁目二十六番八号」)も
+ * 既存の coarsePropertyLocation(DM の文面で使う「番地を出さない」判定)に任せる(@codex #690)。
+ */
 export function trimToChome(address: string | null): string | null {
   if (!address) return null;
-  const a = address.replace(/\s+/g, "");
-  const chome = /^(.*?\d+丁目)/.exec(a);
-  if (chome) return chome[1];
-  const head = /^(.*?)(?=\d)/.exec(a);
-  const out = head ? head[1] : a;
-  return out === "" ? null : out;
+  const out = coarsePropertyLocation(address.replace(/\s+/g, ""));
+  if (!out) return null;
+  // 番地だけ(先頭が数字)のときは町名が無い=返さない
+  return /^[0-9０-９]/.test(out) ? null : out;
 }
 
 const PLAN_WORDS: Array<[AppraisalPlanName, RegExp]> = [
@@ -277,6 +280,8 @@ export function parseAppraisalReport(text: string): AppraisalExtract {
     const loose: Array<{ price: number; tsubo: number | null }> = [];
     const looseTsubo: number[] = [];
     for (const line of block) {
+      // コメント欄の金額(「査定価格1400万円前後」など)は3案・価格の幅に入れない(@codex #690)。
+      if (/^コメント/.test(line)) break;
       const word = PLAN_WORDS.find(([, re]) => re.test(line));
       if (word) cur = word[0];
       const price = num(PRICE_RE.exec(line)?.[1]);
@@ -288,7 +293,8 @@ export function parseAppraisalReport(text: string): AppraisalExtract {
         looseTsubo.push(tsubo);
       }
     }
-    if (plans.length === 0 && loose.length >= 2) {
+    // 価格の幅は「下限・上限」の2つだけのとき(3つ以上あれば何を表すか分からない=読まない)。
+    if (plans.length === 0 && loose.length === 2) {
       const a = loose[0];
       const b = loose[loose.length - 1];
       const [lo, hi] = a.price <= b.price ? [a, b] : [b, a];
