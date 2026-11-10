@@ -31,6 +31,7 @@ import {
   cellToString,
 } from "@/lib/sheet-parser";
 import { assertZipExpandsWithin } from "@/lib/xlsx-zip-guard";
+import { readXlsx } from "@/lib/xlsx-astral-refs";
 import { prisma } from "@/lib/prisma";
 import { matchAssignee } from "@/lib/paste-import/assignee-match";
 
@@ -198,7 +199,7 @@ export async function POST(request: NextRequest) {
     let wb: XLSX.WorkBook;
     try {
       // ⚠sheetRows で**読み込む行そのもの**を上限で打ち切る(本来の範囲は !fullref に残る)。
-      wb = XLSX.read(buf, {
+      wb = readXlsx(buf, {
         type: "buffer",
         sheetRows: MAX_SHEET_ROWS + 1,
       });
