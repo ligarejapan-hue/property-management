@@ -117,6 +117,7 @@ import LeadExclusionField from "@/components/properties/lead-exclusion-field";
 import BusinessTypeField from "@/components/properties/business-type-field";
 import { newDealHref, type PropertyDealSummary } from "@/lib/property-business-type";
 import { SalesSheetList } from "@/components/sales-sheet/SalesSheetList";
+import { AppraisalDeckCard } from "@/components/appraisal-deck/AppraisalDeckCard";
 import { salesSheetTemplateKindFor } from "@/lib/sales-sheet/template-kind";
 import { landBuildingAreaRows } from "@/lib/property-area-display";
 import { formatPhoneJp, isValidPhoneJp } from "@/lib/phone-format-jp";
@@ -1025,6 +1026,9 @@ export default function PropertyDetailPage({
           />
         </div>
       )}
+
+      {/* お客様向け資料「査定のご報告」(2026-11-10・権限が無い/資料が無ければ非表示) */}
+      <AppraisalDeckCard propertyId={property.id} />
 
       {/* 保存済み販売図面の一覧（再オープン導線・対応種別のみ・保存図面が無ければ非表示） */}
       {salesSheetKind && <SalesSheetList propertyId={property.id} />}
