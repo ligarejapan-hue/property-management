@@ -51,6 +51,8 @@ vi.mock("@/lib/api-helpers", () => {
 
 const { writeAuditLog } = vi.hoisted(() => ({ writeAuditLog: vi.fn() }));
 vi.mock("@/lib/audit", () => ({ writeAuditLog }));
+const { scheduleAppraisalDraft } = vi.hoisted(() => ({ scheduleAppraisalDraft: vi.fn() }));
+vi.mock("@/lib/appraisal-deck/schedule", () => ({ scheduleAppraisalDraft }));
 const { autoAdvanceCaseStatus } = vi.hoisted(() => ({ autoAdvanceCaseStatus: vi.fn(async () => true) }));
 vi.mock("@/lib/case-status-auto", () => ({ autoAdvanceCaseStatus }));
 
@@ -322,6 +324,19 @@ describe("添付", () => {
       roomNo: null,
       address: null,
     });
+  });
+
+  it("★査定報告書を付けたら、応答のあとで「査定のご報告」の下書きを作る(2026-11-10)", async () => {
+    db.property.findUnique.mockResolvedValueOnce({ id: PID, createdBy: "u-other", assignedTo: null, isArchived: false });
+    const res = await attachPOST(jsonReq("http://t/x", { propertyId: PID }), ctx());
+    expect(res.status).toBe(200);
+    expect(scheduleAppraisalDraft).toHaveBeenCalledWith({ attachmentId: "att-1", propertyId: PID, userId: expect.any(String) });
+  });
+
+  it("★すでに添付済み(409)のときは下書きを作らない", async () => {
+    db.reportInboxItem.updateMany.mockResolvedValueOnce({ count: 0 });
+    await attachPOST(jsonReq("http://t/x", { propertyId: PID }), ctx());
+    expect(scheduleAppraisalDraft).not.toHaveBeenCalled();
   });
 
   it("付けたら同じ tx で案件ステータスの自動の切り替え(査定中)を呼ぶ・記録者は付けた人", async () => {

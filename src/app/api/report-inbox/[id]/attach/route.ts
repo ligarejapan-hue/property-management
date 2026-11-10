@@ -20,6 +20,7 @@ import { autoAdvanceCaseStatus } from "@/lib/case-status-auto";
 import { docKindByCode, docStageOfKind, type DocConfidence } from "@/lib/doc-classify/classify";
 import { fileExtension } from "@/lib/doc-classify/title";
 import { docColumnsForKnownKind } from "@/lib/doc-classify/assign";
+import { scheduleAppraisalDraft } from "@/lib/appraisal-deck/schedule";
 
 // ---------- POST /api/report-inbox/:id/attach  { propertyId, docKind? } ----------
 // 受け取り箱の書類を、人が選んだ物件に添付する(2026-10-24 全書類へ)。
@@ -222,6 +223,9 @@ export async function POST(request: NextRequest, { params }: { params: Promise<{
       targetId: attachmentId,
       detail: { propertyId, reportInboxItemId: id, type: asReport ? REPORT_ATTACHMENT_TYPE : "general", docKind: kind },
     });
+
+    // 査定報告書なら、応答のあとで「査定のご報告」の下書きを作る(2026-11-10・失敗しても添付はそのまま)。
+    if (asReport) scheduleAppraisalDraft({ attachmentId, propertyId, userId: session.id });
 
     return apiResponse({ attachmentId, propertyId });
   } catch (error) {

@@ -341,6 +341,7 @@ const TARGET_TABLE_LABELS: Record<string, string> = {
   registry_fetch_config: "謄本取得設定",
   sale_dm_config: "売却DM設定",
   sales_sheet_designs: "販売図面",
+  appraisal_decks: "査定のご報告",
   screen_protection: "画面保護",
   // 実機確認 2026-10-23: 「対象」欄に dm_inquiries などの英字が残っていた。コードが記録する
   // targetTable はすべてここに載せる(走査テスト audit-target-labels-scan で固定)。
