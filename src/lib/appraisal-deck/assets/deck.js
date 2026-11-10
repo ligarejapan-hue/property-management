@@ -46,7 +46,8 @@ const EZ='cubic-bezier(.2,.8,.2,1)';
 const AN=(e,kf,o)=>{if(STATIC||!e||!e.animate)return null;return e.animate(kf,{fill:'backwards',easing:EZ,...o});};
 const drawIn=(e,dur,delay=0)=>{if(STATIC)return;const L=e.getTotalLength?e.getTotalLength():0;if(!L)return;AN(e,[{strokeDasharray:`${L} ${L}`,strokeDashoffset:L},{strokeDasharray:`${L} ${L}`,strokeDashoffset:0}],{duration:dur,delay});};
 const riseIn=(e,delay=0,dur=520,dy=18)=>AN(e,[{transform:`translateY(${dy}px)`,opacity:0},{transform:'none',opacity:1}],{duration:dur,delay});
-const countUp=(e,from,to,dur,delay,fm=f)=>{if(STATIC||!e)return;const fin=e.textContent;e.textContent=fm(from);const t0=performance.now()+delay;const st=t=>{const k=Math.min(1,Math.max(0,(t-t0)/dur));e.textContent=k>=1?fin:fm(from+(to-from)*(1-Math.pow(1-k,3)));if(k<1)requestAnimationFrame(st);};requestAnimationFrame(st);};
+// 終わりの値は to から作る(表示中の文字から取らない)。同じ要素で走っているものは止める(@codex #694)。
+const countUp=(e,from,to,dur,delay,fm=f)=>{if(STATIC||!e)return;const id=(e._cu||0)+1;e._cu=id;const fin=fm(to);e.textContent=fm(from);const t0=performance.now()+delay;const st=t=>{if(e._cu!==id)return;const k=Math.min(1,Math.max(0,(t-t0)/dur));e.textContent=k>=1?fin:fm(from+(to-from)*(1-Math.pow(1-k,3)));if(k<1)requestAnimationFrame(st);};requestAnimationFrame(st);};
 const flowDots=(p,w,delay)=>{if(STATIC)return;const q=p.cloneNode();q.removeAttribute('stroke-opacity');q.setAttribute('stroke','var(--canvas)');q.setAttribute('stroke-width',Math.max(2,Math.min(9,w*.16)));q.setAttribute('stroke-dasharray','2 26');q.setAttribute('stroke-linecap','round');q.setAttribute('opacity','.85');q.style.pointerEvents='none';p.after(q);AN(q,[{opacity:0},{opacity:0}],{duration:delay});q.animate([{strokeDashoffset:0},{strokeDashoffset:-56}],{duration:1100,iterations:Infinity});};
 const tx2=(p,x,y,lab,val,a={})=>{const t=el('text',{x,y,...a},p);const s1=document.createElementNS(NS,'tspan');s1.textContent=lab+' ';s1.setAttribute('class','nt');s1.setAttribute('font-size','18');const s2=document.createElementNS(NS,'tspan');s2.textContent=val;s2.setAttribute('class','num');s2.setAttribute('font-size','26');t.append(s1,s2);return t;};
 function sankey(s,{L,R,x0,x1,top,H,gap=14,anim=false,delay=0,lw=12,cb='R',minSlot=34}){
@@ -323,12 +324,13 @@ const PANELS={
   cost:{c:'お住み替えの資金 › 諸費用と税金',h:'入力欄のほかに、状況によって次の費用がかかります',tabs:[
     ['ご売却',P_('仲介手数料：宅地建物取引業法の上限額（400万円を超える部分は売却価格×3%＋6万円、税込）。印紙税：売買契約書の金額に応じて決まり、空欄のときは軽減税率（2027年3月31日まで）の額を入れています。抵当権の抹消費用：登録免許税と司法書士の報酬です。譲渡所得税・住民税：売却益が出た場合にかかり、取得費や特例の有無で大きく変わるため、ここでは計算していません。')],
     ['ご購入',P_('購入時の諸費用には、仲介手数料、登記費用、住宅ローンの手数料・保証料、火災保険、不動産取得税、印紙税などが含まれます。物件や借入の条件によって変わるため、見積をもとに入れてください。')]]},
-  net:{c:'売出しの価格 › 手取りの計算',h:'売出価格から仲介手数料を差し引いた目安です。「その他の費用」を入れると、さらにその分を差し引きます',tabs:[
-    ['手取り',tbl(PLANS.map(([n,v])=>[`${n}（${f(v)}）`,'手取り '+f(NET(v))]))+P_('単位は万円。仲介手数料は宅地建物取引業法の上限額（税込）で計算しています。')]]}
+  // 開いた時点の「ご希望の価格」「その他の費用」で計算する(主画面と同じ手取り・@codex #694)
+  net:()=>({c:'売出しの価格 › 手取りの計算',h:xc>0?`売出価格から仲介手数料と、入力したその他の費用（${f(xc)}万円）を差し引いた目安です`:'売出価格から仲介手数料を差し引いた目安です。「その他の費用」を入れると、さらにその分を差し引きます',tabs:[
+    ['手取り',tbl(rowsOf().map(([n,v])=>[`${n}（${f(v)}）`,'手取り '+f(NX(v))]))+P_('単位は万円。仲介手数料は宅地建物取引業法の上限額（税込）で計算しています。'+(xc>0?'その他の費用も差し引いています。':''))]]})
 };
 let lastFocus=null;
 function openPanel(key){
-  const p=PANELS[key]; if(!p)return; lastFocus=document.activeElement;
+  const p=typeof PANELS[key]==='function'?PANELS[key]():PANELS[key]; if(!p)return; lastFocus=document.activeElement;
   $('#pbody').innerHTML=`<div class="crumb">${esc(p.c)}</div><h2>${esc(p.h)}</h2><div class="tabs" role="tablist">${p.tabs.map((t,i)=>`<button role="tab" aria-selected="${i===0}" data-t="${i}">${esc(t[0])}</button>`).join('')}</div><div id="tb">${p.tabs[0][1]}</div><div class="src">${esc(SRC)}</div>`;
   $$('.tabs button',$('#pbody')).forEach(b=>b.addEventListener('click',()=>{$$('.tabs button').forEach(x=>x.setAttribute('aria-selected',x===b));$('#tb').innerHTML=p.tabs[+b.dataset.t][1];}));
   if(p.tabs.length<2)$('.tabs',$('#pbody')).hidden=true;
