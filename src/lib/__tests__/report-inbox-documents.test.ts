@@ -49,6 +49,8 @@ vi.mock("@/lib/api-helpers", () => {
 });
 const { writeAuditLog } = vi.hoisted(() => ({ writeAuditLog: vi.fn() }));
 vi.mock("@/lib/audit", () => ({ writeAuditLog }));
+const { scheduleAppraisalDraft } = vi.hoisted(() => ({ scheduleAppraisalDraft: vi.fn() }));
+vi.mock("@/lib/appraisal-deck/schedule", () => ({ scheduleAppraisalDraft }));
 const { autoAdvanceCaseStatus } = vi.hoisted(() => ({ autoAdvanceCaseStatus: vi.fn(async () => true) }));
 vi.mock("@/lib/case-status-auto", () => ({ autoAdvanceCaseStatus }));
 
@@ -257,6 +259,12 @@ describe("添付(通常の書類)", () => {
     const back = db.reportInboxItem.updateMany.mock.calls.find((c: [{ data: { status?: string } }]) => c[0].data.status === "discarding");
     expect(back).toBeTruthy();
     expect(back[0].where).toEqual({ id: "item-1", status: "attached" });
+  });
+
+  it("通常の書類(general)を付けても「査定のご報告」の下書きは作らない", async () => {
+    const res = await attachPOST(jsonReq({ propertyId: PID }), ctx());
+    expect(res.status).toBe(200);
+    expect(scheduleAppraisalDraft).not.toHaveBeenCalled();
   });
 
   it("人が種類を選び直すと manual で、その種類の名前になる", async () => {
