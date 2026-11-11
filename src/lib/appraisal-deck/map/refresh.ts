@@ -14,7 +14,7 @@ import { buildMapFromTiles, fetchGsiTiles, isUsableLocation, MAP_DATA_VERSION, t
 
 export type MapRefreshResult =
   | { ok: true; buildings: number }
-  | { ok: false; reason: "not_found" | "no_location" | "fetch_failed" | "already_has_map" };
+  | { ok: false; reason: "not_found" | "no_location" | "fetch_failed" | "already_has_map" | "not_draft" };
 
 type Deps = {
   fetchImpl?: FetchLike;
@@ -27,10 +27,12 @@ export async function refreshDeckMap(
 ): Promise<MapRefreshResult> {
   const deck = await prisma.appraisalDeck.findFirst({
     where: { id: input.deckId, propertyId: input.propertyId },
-    select: { id: true },
+    select: { id: true, status: true },
   });
   if (!deck) return { ok: false, reason: "not_found" };
   if (input.mode === "auto") {
+    // 自動は下書きだけ(確認済みの資料の中身を、確かめないまま変えない・@codex #701)。
+    if (deck.status !== "draft") return { ok: false, reason: "not_draft" };
     // 自動は「まだ地図がない」ときだけ(担当者が作り直した地図を上書きしない)。
     const has = await prisma.appraisalDeck.count({ where: { id: deck.id, mapData: { not: Prisma.DbNull } } });
     if (has > 0) return { ok: false, reason: "already_has_map" };
@@ -60,10 +62,12 @@ export async function refreshDeckMap(
       : { mapData: map as object };
   const updated = await prisma.appraisalDeck.updateMany({
     // 自動は、取りに行っている間に手動で作られていたら上書きしない。
-    where: input.mode === "auto" ? { id: deck.id, mapData: { equals: Prisma.DbNull } } : { id: deck.id },
+    // また、取りに行っている間に確認済みにされた資料には足さない(確かめていない地図を表示しない・@codex #701)。
+    where: input.mode === "auto" ? { id: deck.id, status: "draft", mapData: { equals: Prisma.DbNull } } : { id: deck.id },
     data,
   });
-  if (updated.count !== 1) return { ok: false, reason: input.mode === "auto" ? "already_has_map" : "not_found" };
+  // 自動で 0 件=取りに行っている間に地図が作られた・確認済みにされた(どちらも足さない)。
+  if (updated.count !== 1) return { ok: false, reason: input.mode === "auto" ? "not_draft" : "not_found" };
   await audit(input, { result: "ok", buildings: map.b.length });
   return { ok: true, buildings: map.b.length };
 }
@@ -92,6 +96,8 @@ export const deckMapDataSchema = z
     w: z.array(delta).max(100_000),
     v: z.array(delta).max(100_000),
     t: z.array(z.array(z.union([z.number(), z.string().max(20)]))).max(100_000),
+    bh: z.array(delta).max(100_000).default([]),
+    wh: z.array(delta).max(100_000).default([]),
   })
   .strict();
 

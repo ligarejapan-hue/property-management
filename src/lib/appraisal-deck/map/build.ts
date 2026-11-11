@@ -7,13 +7,14 @@
  * - 建物の高さは国土地理院のデータにないため、種類と面積からの目安(資料に「高さはイメージ」と書く)。
  * ⚠失敗しても下書きは作られたまま(地図なしで表示できる)。緯度経度・タイルの番号はログに出さない。
  */
-import { VectorTile, type VectorTileLayer } from "@mapbox/vector-tile";
+import { classifyRings, VectorTile, type VectorTileLayer } from "@mapbox/vector-tile";
 import { PbfReader } from "pbf";
 import {
   clipLineToRect,
   clipPolygonToRect,
-  distToRing,
+  distToSegment,
   encodeDelta,
+  pointInRing,
   makeLocalProjection,
   seededRandom,
   signedArea,
@@ -54,6 +55,10 @@ export type DeckMapData = {
   r: number[][];
   /** 水面(差分) */
   w: number[][];
+  /** 建物の中庭など(穴) [b の添字, ...輪(差分・外周と逆回り)] */
+  bh: number[][];
+  /** 水面の中の島など(穴) [w の添字, ...輪(差分・外周と逆回り)] */
+  wh: number[][];
   /** 川の線(差分) */
   v: number[][];
   /** 線路 [状態(トンネルなど), ...線(差分)] */
@@ -96,6 +101,37 @@ export function chainRings(parts: Array<Array<{ x: number; y: number }>>): Array
   return out;
 }
 
+type Poly = { outer: Pt[]; holes: Pt[][] };
+
+/**
+ * 多角形(外周と穴)を、外周=反時計回り・穴=時計回りにそろえて長方形で切る(@codex #701: 穴を塗りつぶさない)。
+ * 外周が残らなければ null。小さすぎる穴は捨てる。
+ */
+function clipPoly(rings: Pt[][], cut: { minX: number; minY: number; maxX: number; maxY: number }, tol: number): Poly | null {
+  const fix = (r: Pt[], ccw: boolean) => (signedArea(r) < 0 === ccw ? r.slice().reverse() : r);
+  const one = (r: Pt[], ccw: boolean): Pt[] | null => {
+    if (r.length < 3) return null;
+    let x = clipPolygonToRect(fix(r, ccw), cut.minX, cut.minY, cut.maxX, cut.maxY);
+    if (x.length < 3) return null;
+    x = simplifyRing(x, tol);
+    return x.length >= 3 && Math.abs(signedArea(x)) >= 1 ? fix(x, ccw) : null;
+  };
+  const outer = one(rings[0], true);
+  if (!outer) return null;
+  const holes = rings.slice(1).map((h) => one(h, false)).filter((h): h is Pt[] => !!h);
+  return { outer, holes };
+}
+
+const polyArea = (p: Poly) => signedArea(p.outer) + p.holes.reduce((a, h) => a + signedArea(h), 0);
+
+/** 点から多角形(穴あり)までの距離。中(穴の外)なら 0。 */
+function distToPoly(pt: Pt, p: Poly): number {
+  if (pointInRing(pt, p.outer) && !p.holes.some((h) => pointInRing(pt, h))) return 0;
+  // 外にいる(穴の中を含む)ときは、輪の線までの距離(distToRing は輪の中なら 0 を返すので使わない)。
+  const edge = (r: Pt[]) => Math.min(...r.map((a, i) => distToSegment(pt, a, r[(i + 1) % r.length])));
+  return Math.min(edge(p.outer), ...p.holes.map(edge));
+}
+
 const num = (v: unknown, d = 0) => (typeof v === "number" && Number.isFinite(v) ? v : d);
 
 /** 取ってきたタイルから地図のデータを作る(通信しない・テストできる部分)。 */
@@ -105,9 +141,9 @@ export function buildMapFromTiles(center: { lat: number; lng: number }, tiles: T
   const EY = MAP_EY;
   const LINE_PAD = 30;
 
-  const buildings: Array<{ kind: number; ring: Pt[]; area: number }> = [];
+  const buildings: Array<{ kind: number; poly: Poly; area: number }> = [];
   const roads: number[][] = [];
-  const water: number[][] = [];
+  const water: Poly[] = [];
   const rivers: number[][] = [];
   const rails: Array<Array<number | string>> = [];
 
@@ -134,17 +170,14 @@ export function buildMapFromTiles(center: { lat: number; lng: number }, tiles: T
       if (f.type !== 2 && f.type !== 3) return;
       const kind = BUILDING_KIND[num(f.properties.ftCode)] ?? 0;
       // 地理院のタイルは建物の外周を線(閉じた線・タイルの余白で切れた線)で持つことがある=つないで多角形にする。
-      const rings = f.type === 3 ? f.loadGeometry() : chainRings(f.loadGeometry());
-      for (const raw of rings) {
-        let ring = raw.map(c);
-        if (ring.length < 3) continue;
-        if (signedArea(ring) < 0) ring = ring.reverse(); // 向きをそろえる(反時計回り)
-        ring = clipPolygonToRect(ring, cut.minX, cut.minY, cut.maxX, cut.maxY);
-        if (ring.length < 3) continue;
-        ring = simplifyRing(ring, 0.4);
-        const area = signedArea(ring);
-        if (ring.length < 3 || area < MIN_BUILDING_AREA) continue;
-        buildings.push({ kind, ring, area });
+      // 多角形は外周と穴(中庭)に分けて持つ(穴を建物として塗らない)。
+      const polys = f.type === 3 ? classifyRings(f.loadGeometry()) : chainRings(f.loadGeometry()).map((r) => [r]);
+      for (const rings of polys) {
+        const poly = clipPoly(rings.map((r) => r.map(c)), cut, 0.4);
+        if (!poly) continue;
+        const area = polyArea(poly);
+        if (area < MIN_BUILDING_AREA) continue;
+        buildings.push({ kind, poly, area });
       }
     });
     const lineCut = { minX: Math.max(tw, -EX - LINE_PAD), maxX: Math.min(te, EX + LINE_PAD), minY: Math.max(ts, -EY - LINE_PAD), maxY: Math.min(tn, EY + LINE_PAD) };
@@ -165,14 +198,9 @@ export function buildMapFromTiles(center: { lat: number; lng: number }, tiles: T
     });
     each("waterarea", (f, c) => {
       if (f.type !== 3) return;
-      for (const raw of f.loadGeometry()) {
-        let ring = raw.map(c);
-        if (ring.length < 3) continue;
-        if (signedArea(ring) < 0) ring = ring.reverse();
-        ring = clipPolygonToRect(ring, cut.minX, cut.minY, cut.maxX, cut.maxY);
-        if (ring.length < 3) continue;
-        const d = encodeDelta(simplifyRing(ring, 0.8));
-        if (d.length >= 6) water.push(d);
+      for (const rings of classifyRings(f.loadGeometry())) {
+        const poly = clipPoly(rings.map((r) => r.map(c)), cut, 0.8);
+        if (poly) water.push(poly);
       }
     });
     each("river", (f, c) => {
@@ -189,7 +217,7 @@ export function buildMapFromTiles(center: { lat: number; lng: number }, tiles: T
   let target = -1;
   let best = Infinity;
   buildings.forEach((b, i) => {
-    const d = distToRing([0, 0], b.ring);
+    const d = distToPoly([0, 0], b.poly);
     if (d < best) {
       best = d;
       target = i;
@@ -197,8 +225,12 @@ export function buildMapFromTiles(center: { lat: number; lng: number }, tiles: T
   });
   if (best > TARGET_MAX_DIST_M) target = -1;
 
-  const b = buildings.map((x, i) => [Math.round(buildingHeight(x.kind, x.area, i + 1)), x.kind, ...encodeDelta(x.ring)]);
-  return { version: MAP_DATA_VERSION, builtAt: now.toISOString(), ex: EX, ey: EY, b, p: target, r: roads, w: water, v: rivers, t: rails };
+  const b = buildings.map((x, i) => [Math.round(buildingHeight(x.kind, x.area, i + 1)), x.kind, ...encodeDelta(x.poly.outer)]);
+  const bh = buildings.flatMap((x, i) => x.poly.holes.map((h) => [i, ...encodeDelta(h)]).filter((h) => h.length >= 7));
+  const waterKept = water.filter((x) => encodeDelta(x.outer).length >= 6);
+  const w = waterKept.map((x) => encodeDelta(x.outer));
+  const wh = waterKept.flatMap((x, i) => x.holes.map((h) => [i, ...encodeDelta(h)]).filter((h) => h.length >= 7));
+  return { version: MAP_DATA_VERSION, builtAt: now.toISOString(), ex: EX, ey: EY, b, p: target, r: roads, w, v: rivers, t: rails, bh, wh };
 }
 
 export type FetchLike = (url: string, init: { signal: AbortSignal; headers: Record<string, string> }) => Promise<{

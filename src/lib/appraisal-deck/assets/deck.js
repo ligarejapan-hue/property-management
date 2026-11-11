@@ -350,13 +350,16 @@ const mdec=(a,s)=>{const o=[];let x=0,y=0;for(let i=s;i<a.length;i+=2){x+=a[i];y
 const MX=x=>MW/2+x/MM, MY=y=>MH/2-y/MM;
 const mpath=(pts,close)=>pts.length?'M'+pts.map(([x,y])=>MX(x).toFixed(1)+' '+MY(y).toFixed(1)).join('L')+(close?'Z':''):'';
 const RW=[3,5,9,16,26]; // 道路の幅の区分ごとの見た目の幅(m)
+/* 穴(建物の中庭・水面の中の島)。外周と逆回りなので、塗りは nonzero のまま穴になる(@codex #701) */
+const holesOf=a=>{const m={};(a||[]).forEach(h=>(m[h[0]]=m[h[0]]||[]).push(mdec(h,1)));return m;};
+const BH=holesOf(MAP&&MAP.bh), WH=holesOf(MAP&&MAP.wh);
 let mapDrawn=false;
 function drawMap(anim){
   if(!MAPON)return;
   const s=$('#mp');
   if(!mapDrawn){mapDrawn=true; s.innerHTML='';
     el('rect',{x:0,y:0,width:MW,height:MH,fill:'#ECE7DD'},s);
-    el('path',{d:MAP.w.map(r=>mpath(mdec(r,0),true)).join(''),fill:'#A8CAE4'},s);
+    el('path',{d:MAP.w.map((r,i)=>mpath(mdec(r,0),true)+(WH[i]||[]).map(h=>mpath(h,true)).join('')).join(''),fill:'#A8CAE4'},s);
     el('path',{d:MAP.v.map(r=>mpath(mdec(r,0))).join(''),fill:'none',stroke:'#93BEDF','stroke-width':5/MM,'stroke-linecap':'round','stroke-linejoin':'round'},s);
     const roads=[...MAP.r].sort((a,b)=>a[0]-b[0]);
     for(const pass of [0,1]){
@@ -370,8 +373,9 @@ function drawMap(anim){
     const rl=MAP.t.filter(r=>r[0]!=='トンネル').map(r=>mpath(mdec(r,1))).join('');
     el('path',{d:rl,fill:'none',stroke:'#8E9CAB','stroke-width':3.2},s);
     el('path',{d:rl,fill:'none',stroke:'#FFFFFF','stroke-width':1.6,'stroke-dasharray':'6 6'},s);
-    el('path',{d:MAP.b.filter((b,i)=>i!==MAP.p).map(b=>mpath(mdec(b,2),true)).join(''),fill:'#DCD5CB',stroke:'#C9C0B3','stroke-width':.5},s);
-    if(MAP.p>=0)el('path',{d:mpath(mdec(MAP.b[MAP.p],2),true),fill:'var(--main)'},s);
+    const bpath=i=>mpath(mdec(MAP.b[i],2),true)+(BH[i]||[]).map(h=>mpath(h,true)).join('');
+    el('path',{d:MAP.b.map((b,i)=>i===MAP.p?'':bpath(i)).join(''),fill:'#DCD5CB',stroke:'#C9C0B3','stroke-width':.5},s);
+    if(MAP.p>=0)el('path',{d:bpath(MAP.p),fill:'var(--main)'},s);
     el('rect',{x:0,y:0,width:MW,height:MH,fill:'var(--canvas)',opacity:.18,'pointer-events':'none'},s);
     const cx=MX(0), cy=MY(0);
     const rg=el('g',{id:'mprings'},s);
@@ -405,7 +409,8 @@ function city3d(wrap){
   const g=tc.getContext('2d'), sx=TW/(2*EX), sy=TH/(2*EY), X=x=>(x+EX)*sx, Y=y=>(EY-y)*sy;
   const path=(r,s0)=>{const p=mdec(r,s0);g.beginPath();p.forEach(([x,y],i)=>i?g.lineTo(X(x),Y(y)):g.moveTo(X(x),Y(y)));};
   g.fillStyle='#ECE7DD'; g.fillRect(0,0,TW,TH);
-  g.fillStyle='#A8CAE4'; MAP.w.forEach(r=>{path(r,0);g.closePath();g.fill();});
+  const ring=p=>{p.forEach(([x,y],i)=>i?g.lineTo(X(x),Y(y)):g.moveTo(X(x),Y(y)));g.closePath();};
+  g.fillStyle='#A8CAE4'; MAP.w.forEach((r,i)=>{g.beginPath();ring(mdec(r,0));(WH[i]||[]).forEach(h=>ring(h));g.fill();});
   g.lineCap='round'; g.lineJoin='round';
   g.strokeStyle='#93BEDF'; g.lineWidth=5*sx; MAP.v.forEach(r=>{path(r,0);g.stroke();});
   const roads=[...MAP.r].sort((a,b)=>a[0]-b[0]);
@@ -419,11 +424,13 @@ function city3d(wrap){
   const push=(a,n,c)=>{pos.push(a[0],a[1],a[2]);nor.push(n[0],n[1],n[2]);col.push(c[0],c[1],c[2]);};
   let ptop=[0,0,0]; const ol=[];
   MAP.b.forEach((b,bi)=>{const h=b[0],cs=C[b[1]]||C[0],c=bi===MAP.p?PC:cs[bi%cs.length],p=mdec(b,2);if(p.length<3)return;
-    let tris; try{tris=T.ShapeUtils.triangulateShape(p.map(([x,y])=>new T.Vector2(x,y)),[]);}catch(e){return;}
-    tris.forEach(t=>{for(let k=0;k<3;k++){const q=p[t[k]];push([q[0],q[1],h],[0,0,1],c);}});
-    for(let i=0;i<p.length;i++){const a=p[i],bb=p[(i+1)%p.length],dx=bb[0]-a[0],dy=bb[1]-a[1],L=Math.hypot(dx,dy)||1,n=[dy/L,-dx/L,0];
-      push([a[0],a[1],0],n,c);push([bb[0],bb[1],0],n,c);push([bb[0],bb[1],h],n,c);push([a[0],a[1],0],n,c);push([bb[0],bb[1],h],n,c);push([a[0],a[1],h],n,c);}
-    for(let i=0;i<p.length;i++){const a=p[i],bb=p[(i+1)%p.length];ol.push(a[0],a[1],h+.15,bb[0],bb[1],h+.15);}
+    const hs=(BH[bi]||[]).filter(r=>r.length>=3), V=r=>r.map(([x,y])=>new T.Vector2(x,y));
+    const cv=V(p), hv=hs.map(V); let tris; try{tris=T.ShapeUtils.triangulateShape(cv,hv);}catch(e){return;}
+    const all=[cv,...hv].flat(); // 三角形の番号は外周→穴の順の通し番号(呼んだあとの配列で引く)
+    tris.forEach(t=>{const q=t.map(k=>all[k]);if(q.some(v=>!v))return;q.forEach(v=>push([v.x,v.y,h],[0,0,1],c));});
+    [p,...hs].forEach(r=>{for(let i=0;i<r.length;i++){const a=r[i],bb=r[(i+1)%r.length],dx=bb[0]-a[0],dy=bb[1]-a[1],L=Math.hypot(dx,dy)||1,n=[dy/L,-dx/L,0];
+      push([a[0],a[1],0],n,c);push([bb[0],bb[1],0],n,c);push([bb[0],bb[1],h],n,c);push([a[0],a[1],0],n,c);push([bb[0],bb[1],h],n,c);push([a[0],a[1],h],n,c);
+      ol.push(a[0],a[1],h+.15,bb[0],bb[1],h+.15);}});
     if(bi===MAP.p){ptop=[0,0,h];}});
   const bg=new T.BufferGeometry(); bg.setAttribute('position',new T.Float32BufferAttribute(pos,3)); bg.setAttribute('normal',new T.Float32BufferAttribute(nor,3)); bg.setAttribute('color',new T.Float32BufferAttribute(col,3));
   scene.add(new T.Mesh(bg,new T.MeshLambertMaterial({vertexColors:true,side:T.DoubleSide})));

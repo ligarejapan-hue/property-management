@@ -22,12 +22,12 @@ vi.mock("../map/build", async (orig) => ({
 
 import { refreshDeckMap, parseDeckMapData } from "../map/refresh";
 
-const MAP = { version: 1, builtAt: "2026-11-11T00:00:00.000Z", ex: 1000, ey: 650, b: [[8, 0, 1, 1, 2, 0, 0, 2]], p: 0, r: [], w: [], v: [], t: [] };
+const MAP = { version: 1, builtAt: "2026-11-11T00:00:00.000Z", ex: 1000, ey: 650, b: [[8, 0, 1, 1, 2, 0, 0, 2]], p: 0, r: [], w: [], v: [], t: [], bh: [], wh: [] };
 const IN = { deckId: "d1", propertyId: "p1", userId: "u1" };
 
 beforeEach(() => {
   vi.clearAllMocks();
-  db.appraisalDeck.findFirst.mockResolvedValue({ id: "d1" });
+  db.appraisalDeck.findFirst.mockResolvedValue({ id: "d1", status: "draft" });
   db.appraisalDeck.count.mockResolvedValue(0);
   db.appraisalDeck.updateMany.mockResolvedValue({ count: 1 });
   db.property.findUnique.mockResolvedValue({ gpsLat: "35.6447123", gpsLng: "139.6992456" });
@@ -56,13 +56,20 @@ describe("refreshDeckMap", () => {
     expect(await refreshDeckMap({ ...IN, mode: "auto" })).toEqual({ ok: false, reason: "already_has_map" });
     expect(fetchTiles).not.toHaveBeenCalled();
   });
-  it("自動: 状態(確認済みかどうか)は変えず、取りに行っている間に作られていたら上書きしない", async () => {
+  it("自動: 状態は変えず、取りに行っている間に地図が作られた・確認済みにされたら足さない(@codex #701)", async () => {
     db.appraisalDeck.updateMany.mockResolvedValueOnce({ count: 0 });
-    expect(await refreshDeckMap({ ...IN, mode: "auto" })).toEqual({ ok: false, reason: "already_has_map" });
+    expect(await refreshDeckMap({ ...IN, mode: "auto" })).toEqual({ ok: false, reason: "not_draft" });
     const arg = db.appraisalDeck.updateMany.mock.calls[0][0];
     expect(arg.data).toEqual({ mapData: MAP });
     expect(arg.where.id).toBe("d1");
+    expect(arg.where.status).toBe("draft");
     expect(arg.where.mapData).toBeDefined();
+  });
+  it("自動: 確認済みの資料には最初から作りに行かない", async () => {
+    db.appraisalDeck.findFirst.mockResolvedValue({ id: "d1", status: "confirmed" });
+    expect(await refreshDeckMap({ ...IN, mode: "auto" })).toEqual({ ok: false, reason: "not_draft" });
+    expect(fetchTiles).not.toHaveBeenCalled();
+    expect(db.appraisalDeck.updateMany).not.toHaveBeenCalled();
   });
   it("座標がない・おかしいときは作らない", async () => {
     db.property.findUnique.mockResolvedValue({ gpsLat: null, gpsLng: null });

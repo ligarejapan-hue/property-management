@@ -49,6 +49,8 @@ const MAP: DeckMapData = {
   w: [],
   v: [],
   t: [],
+  bh: [],
+  wh: [],
 };
 const LAND: AppraisalExtract = {
   ...HOUSE,

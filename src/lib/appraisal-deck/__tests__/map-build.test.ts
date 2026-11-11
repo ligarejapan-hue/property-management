@@ -224,13 +224,41 @@ describe("buildMapFromTiles", () => {
     expect(map.w).toHaveLength(1);
   });
   it("座標は整数(0.5m 単位の差分)だけ=緯度経度は入らない", () => {
-    expect(Object.keys(map).sort()).toEqual(["b", "builtAt", "ex", "ey", "p", "r", "t", "v", "version", "w"]);
-    for (const arr of [...map.b, ...map.r, ...map.w, ...map.v]) for (const n of arr) expect(Number.isInteger(n)).toBe(true);
+    expect(Object.keys(map).sort()).toEqual(["b", "bh", "builtAt", "ex", "ey", "p", "r", "t", "v", "version", "w", "wh"]);
+    for (const arr of [...map.b, ...map.r, ...map.w, ...map.v, ...map.bh, ...map.wh]) for (const n of arr) expect(Number.isInteger(n)).toBe(true);
     expect(JSON.stringify(map)).not.toMatch(/35\.6|139\.7/);
   });
   it("同じタイルなら同じ地図(作り直しても変わらない)", () => {
     const again = buildMapFromTiles(C, [{ x: TX, y: TY, buf: tile }], new Date("2026-11-11T00:00:00Z"));
     expect(again.b).toEqual(map.b);
+  });
+  it("中庭のある建物・島のある水面は穴を保つ(穴を塗らない・穴の中は建物の外・@codex #701)", () => {
+    const outer = square(0, 0, 600); // 約145m 四方
+    const hole = square(0, 0, 300).slice().reverse(); // 穴は外周と逆回り。原点(物件)は中庭の中
+    const t2 = makeTile([
+      { name: "building", features: [{ type: 3, props: { ftCode: 3102 }, parts: [outer, hole] }] },
+      { name: "waterarea", features: [{ type: 3, props: {}, parts: [square(0, -1500, 400), square(0, -1500, 100).slice().reverse()] }] },
+    ]);
+    const m = buildMapFromTiles(C, [{ x: TX, y: TY, buf: t2 }]);
+    expect(m.b).toHaveLength(1);
+    expect(m.bh).toHaveLength(1);
+    expect(m.bh[0][0]).toBe(0);
+    expect(m.w).toHaveLength(1);
+    expect(m.wh).toHaveLength(1);
+    expect(m.p).toBe(-1); // 中庭の真ん中(建物から約36m)は物件の建物とみなさない
+    // 穴は外周と逆回り(塗りの規則 nonzero で穴になる)
+    const ring = (d: number[], s0: number) => {
+      const o: Array<[number, number]> = [];
+      let x = 0;
+      let y = 0;
+      for (let i = s0; i < d.length; i += 2) {
+        x += d[i];
+        y += d[i + 1];
+        o.push([x, y]);
+      }
+      return o;
+    };
+    expect(Math.sign(signedArea(ring(m.b[0], 2)))).toBe(-Math.sign(signedArea(ring(m.bh[0], 1))));
   });
   it("近くに建物がなければ物件の建物はなし(-1)", () => {
     const far = makeTile([{ name: "building", features: [{ type: 3, props: { ftCode: 3101 }, parts: [square(1500, 1500, 60)] }] }]);
