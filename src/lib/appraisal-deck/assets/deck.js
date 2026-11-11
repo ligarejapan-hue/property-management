@@ -345,7 +345,16 @@ $$('[data-panel]').forEach(b=>b.addEventListener('click',()=>openPanel(b.dataset
  * 平面の地図(SVG)を描き、ページを開いたときに 3D の街(three)で空から物件へ降りていく動きを重ねる。
  * three が使えない・動きを減らす設定のときは平面の地図だけ。 */
 const MAPEL=$('#deck-map'); const MAP=MAPEL?JSON.parse(MAPEL.textContent):null; const MAPON=!!(MAP&&$('#mp'));
-const MW=1080, MH=620, MM=2*(MAP?MAP.ex:1000)/MW; // MM: 1px あたりのメートル
+/* 周辺施設(2026-11-11): 査定書の「周辺施設情報」の地図から読んだ位置(物件から東西 x・南北 y のメートル)。
+   色は種類のまとまり(買い物・医療・子育て/学校・公共・公園・その他)ごと */
+const FGRP={shop:'#D9822B',med:'#2F6DB5',edu:'#3B8C5A',pub:'#5C6B7A',park:'#6FAE4F',care:'#B0608E',etc:'#7E62B8'};
+const FCAT={'コンビニ':['コンビニ','shop'],'スーパー':['スーパー','shop'],'薬局・ドラッグストア':['ドラッグ','shop'],'100円ショップ・ディスカウントストア':['100円ショップ','shop'],'ホームセンター・日用雑貨':['日用品','shop'],'大型ショッピング施設':['ショッピング','shop'],'総合病院':['病院','med'],'内科':['内科','med'],'小児科':['小児科','med'],'歯科':['歯科','med'],'救急指定病院':['救急病院','med'],'介護サービス':['介護','care'],'幼稚園・保育園':['保育園','edu'],'小学校':['小学校','edu'],'中学校':['中学校','edu'],'銀行':['銀行','pub'],'郵便局':['郵便局','pub'],'図書館':['図書館','pub'],'役所・公民館':['公民館','pub'],'警察署・交番':['交番','pub'],'消防署':['消防署','pub'],'公園':['公園','park'],'フィットネス':['ジム','etc']};
+const fInfo=f=>{const c=FCAT[f.cat]||[f.cat,'etc'];return {label:c[0],color:FGRP[c[1]]};};
+const FAC=(Array.isArray(D.facilities)?D.facilities:[]).filter(f=>Number.isFinite(f.x)&&Number.isFinite(f.y)&&Math.abs(f.x)<(MAP?MAP.ex:0)&&Math.abs(f.y)<(MAP?MAP.ey:0));
+// 平面の地図に映す範囲(東西 ±VX m)。周辺施設があれば、いちばん遠い施設が収まる大きさまで寄せる(最後の 3D の真上もこの画角)
+const FMAX=FAC.reduce((a,f)=>Math.max(a,Math.abs(f.x)*1.0,Math.abs(f.y)*1080/620),0);
+const VX=MAP?(FAC.length?Math.min(MAP.ex,Math.max(450,FMAX*1.35)):MAP.ex):1000;
+const MW=1080, MH=620, MM=2*VX/MW; // MM: 1px あたりのメートル
 const mdec=(a,s)=>{const o=[];let x=0,y=0;for(let i=s;i<a.length;i+=2){x+=a[i];y+=a[i+1];o.push([x/2,y/2]);}return o;};
 const MX=x=>MW/2+x/MM, MY=y=>MH/2-y/MM;
 const mpath=(pts,close)=>pts.length?'M'+pts.map(([x,y])=>MX(x).toFixed(1)+' '+MY(y).toFixed(1)).join('L')+(close?'Z':''):'';
@@ -353,6 +362,8 @@ const RW=[3,5,9,16,26]; // 道路の幅の区分ごとの見た目の幅(m)
 /* 穴(建物の中庭・水面の中の島)。外周と逆回りなので、塗りは nonzero のまま穴になる(@codex #701) */
 const holesOf=a=>{const m={};(a||[]).forEach(h=>(m[h[0]]=m[h[0]]||[]).push(mdec(h,1)));return m;};
 const BH=holesOf(MAP&&MAP.bh), WH=holesOf(MAP&&MAP.wh);
+// 右の一覧の番号の丸を種類の色に、種類を短い名前に
+$$('.facl li').forEach(li=>{const {label,color}=fInfo({cat:li.dataset.cat}); const b=li.querySelector('b'), c=li.querySelector('.fc'); if(b)b.style.background=color; if(c)c.textContent=label;});
 let mapDrawn=false;
 function drawMap(anim){
   if(!MAPON)return;
@@ -382,6 +393,19 @@ function drawMap(anim){
     [[400,'徒歩5分'],[800,'徒歩10分']].forEach(([m,l])=>{const r=m/MM;
       el('circle',{cx,cy,r,fill:'none',stroke:'var(--main)','stroke-width':2.4,'stroke-dasharray':'8 6'},rg);
       const ly=cy-r-8; if(ly>24)tx(rg,cx,ly,l,{'font-size':18,'font-weight':700,'text-anchor':'middle',style:'fill:var(--main);paint-order:stroke;stroke:var(--canvas);stroke-width:5px'});});
+    // 周辺施設の印(番号付きの丸)と札(種類・徒歩分)。札はなるべく重ならない向きに置く
+    const fg=el('g',{id:'mpfac'},s), taken=[{x:MX(0)-24,y:MY(0)-64,w:48,h:64},...FAC.map(f=>({x:MX(f.x)-13,y:MY(f.y)-13,w:26,h:26}))];
+    const dots=[];
+    FAC.forEach((f,i)=>{const {label,color}=fInfo(f), x=MX(f.x), y=MY(f.y), t=`${label} ${f.min}分`, w=t.length*15+18, h=26;
+      const g=el('g',{class:'fac'},fg);
+      const opts=[[16,-h/2],[-16-w,-h/2],[-w/2,-16-h],[-w/2,16]].map(([dx,dy])=>({x:x+dx,y:y+dy}));
+      const hit=r=>taken.some(q=>r.x<q.x+q.w&&q.x<r.x+w&&r.y<q.y+(q.h||h)&&q.y<r.y+h)||r.x<4||r.y<4||r.x+w>MW-4||r.y+h>MH-26;
+      const o=opts.find(r=>!hit(r))||opts[0]; taken.push({x:o.x,y:o.y,w});
+      el('rect',{x:o.x,y:o.y,width:w,height:h,rx:13,fill:'var(--canvas)',stroke:color,'stroke-width':2},g);
+      tx(g,o.x+w/2,o.y+18,t,{'font-size':15,'font-weight':700,'text-anchor':'middle',style:`fill:${color}`});
+      dots.push([g,x,y,color,String(f.no||i+1)]);});
+    // 番号の丸は札より上に描く(札に隠れないように)
+    dots.forEach(([,x,y,color,n])=>{const g=el('g',{class:'fac'},fg); el('circle',{cx:x,cy:y,r:12,fill:color,stroke:'var(--canvas)','stroke-width':2.5},g); tx(g,x,y+5,n,{'font-size':13,'font-weight':700,'text-anchor':'middle',style:'fill:#fff'});});
     const pin=el('g',{id:'mppin'},s); el('path',{d:`M${cx} ${cy} c-16 -20 -21 -30 -21 -39 a21 21 0 1 1 42 0 c0 9 -5 19 -21 39z`,fill:'var(--main)',stroke:'var(--canvas)','stroke-width':2},pin); el('circle',{cx,cy:cy-39,r:8,fill:'var(--canvas)'},pin);
     const nb=el('g',{},s); el('path',{d:`M${MW-40} 40 l12 30 l-12 -8 l-12 8z`,fill:'var(--ink)'},nb); tx(nb,MW-40,32,'N',{'font-size':16,'text-anchor':'middle','font-weight':700});
     const L200=200/MM, sy=MH-30; const sb=el('g',{},s); el('path',{d:`M20 ${sy+4} v-8 M20 ${sy} H${20+L200} M${20+L200} ${sy+4} v-8`,fill:'none',stroke:'var(--ink)','stroke-width':2},sb); tx(sb,20+L200/2,sy-12,'200m',{'font-size':15,'text-anchor':'middle',style:'paint-order:stroke;stroke:var(--canvas);stroke-width:5px'});
@@ -389,11 +413,14 @@ function drawMap(anim){
   }
   if(!anim||STATIC)return;
   stopCity();
-  const DV=city3d($('.mapw'))?6900:0;
+  const DV=city3d($('.mapw'))?CITY_DUR+900:0;
   const rg=$('#mprings'), pin=$('#mppin');
   if(rg)[...rg.querySelectorAll('circle')].forEach((c,i)=>{c.style.transformBox='fill-box';c.style.transformOrigin='center';AN(c,[{transform:'scale(0)',opacity:0},{transform:'none',opacity:1}],{duration:700,delay:DV+300+i*250});});
+  $$('#mpfac .fac').forEach((g,i)=>AN(g,[{opacity:0,transform:'translateY(8px)'},{opacity:1,transform:'none'}],{duration:450,delay:DV+900+(i%Math.max(1,FAC.length))*90}));
   if(pin)AN(pin,[{transform:'translateY(-160px)',opacity:0},{transform:'translateY(0)',opacity:1,offset:.7},{transform:'translateY(-12px)',offset:.85},{transform:'none',opacity:1}],{duration:850,delay:DV?DV-1100:200,easing:'ease-out'});
 }
+/* 空から降りる動きの長さ(ミリ秒)。2026-11-11 発注者指示で 6 秒 → 10 秒(ゆっくり降りる) */
+const CITY_DUR=10000;
 function stopCity(){$$('.mapw .city3d').forEach(c=>c._stop&&c._stop()); $$('.mapw .dcap').forEach(c=>c.remove());}
 /* 3D の街(国土地理院ベクトルタイルから作成・建物の高さはイメージ)で、空から物件へ降りる。最後は真上=平面の地図と同じ見え方 */
 function city3d(wrap){
@@ -440,6 +467,18 @@ function city3d(wrap){
   const ball=new T.Mesh(new T.SphereGeometry(13,24,16),pm); ball.position.z=38; pinG.add(ball);
   const dot=new T.Mesh(new T.SphereGeometry(5.5,16,12),new T.MeshBasicMaterial({color:0xffffff})); dot.position.set(0,-10,40); pinG.add(dot);
   pinG.position.set(ptop[0],ptop[1],ptop[2]+4); pinG.scale.setScalar(1.6); scene.add(pinG);
+  // 周辺施設: 柱と玉、種類と徒歩分の札(画面上で一定の大きさ)。降りていく途中で現れ、真上に戻る前に消える
+  const facs=FAC.map((f,i)=>{const {label,color}=fInfo(f), g=new T.Group(), m=new T.MeshLambertMaterial({color:new T.Color(color),emissive:new T.Color(color).multiplyScalar(.25),transparent:true});
+    const H=55+(i%4)*18; // 札が重なりにくいよう高さを少しずつ変える
+    const pole=new T.Mesh(new T.CylinderGeometry(1.4,1.4,H,8),m); pole.rotation.x=Math.PI/2; pole.position.z=H/2; g.add(pole);
+    const top=new T.Mesh(new T.SphereGeometry(6,16,12),m); top.position.z=H+2; g.add(top);
+    const c=document.createElement('canvas'), ctx=c.getContext('2d'), t=`${f.no||i+1} ${label} ${f.min}分`; ctx.font='700 40px sans-serif';
+    c.width=Math.ceil(ctx.measureText(t).width)+48; c.height=64; ctx.font='700 40px sans-serif';
+    ctx.fillStyle='#fff'; ctx.strokeStyle=color; ctx.lineWidth=6; ctx.beginPath(); ctx.roundRect(3,3,c.width-6,c.height-6,26); ctx.fill(); ctx.stroke();
+    ctx.fillStyle=color; ctx.textBaseline='middle'; ctx.fillText(t,24,c.height/2+2);
+    const st=new T.CanvasTexture(c), sp=new T.Sprite(new T.SpriteMaterial({map:st,transparent:true,depthTest:false,sizeAttenuation:false}));
+    sp.scale.set(.03*c.width/c.height,.03,1); sp.center.set(.5,0); sp.position.z=H+10; sp.renderOrder=10; g.add(sp);
+    g.position.set(f.x,f.y,0); scene.add(g); return {g,m,sp,st};});
   const ringM=new T.Mesh(new T.RingGeometry(22,28,48),new T.MeshBasicMaterial({color:0x1F3A5F,transparent:true,opacity:.8,side:T.DoubleSide})); ringM.position.set(0,0,1.5); scene.add(ringM);
   // 明るさは平面の地図の色に近くなるよう合わせた(three r155 以降の光の強さの単位)
   scene.add(new T.HemisphereLight(0xffffff,0x9aa6b4,2.2)); const sun=new T.DirectionalLight(0xfff6e8,1.6); sun.position.set(-0.55,-0.75,1); scene.add(sun);
@@ -447,23 +486,25 @@ function city3d(wrap){
   const FOV=30, ZEND=(MH/2*MM)/Math.tan(FOV/2*Math.PI/180);
   const cam=new T.PerspectiveCamera(FOV,W/H,10,12000);
   const curve=new T.CatmullRomCurve3([new T.Vector3(-1700,-3300,2600),new T.Vector3(-520,-1500,1050),new T.Vector3(160,-560,330),new T.Vector3(420,-150,560),new T.Vector3(0,-0.02,ZEND)],false,'centripetal');
-  const ease=t=>t<.5?4*t*t*t:1-Math.pow(-2*t+2,3)/2, DUR=6000, t0=performance.now(); let raf, done=false, stopped=false;
+  const ease=t=>t<.5?4*t*t*t:1-Math.pow(-2*t+2,3)/2, DUR=CITY_DUR, t0=performance.now(); let raf, done=false, stopped=false;
   const up0=new T.Vector3(0,0,1), up1=new T.Vector3(0,1,0);
-  const cleanup=()=>{if(stopped)return;stopped=true;cancelAnimationFrame(raf);R.dispose();bg.dispose();og.dispose();tex.dispose();cv.remove();};
+  const cleanup=()=>{if(stopped)return;stopped=true;cancelAnimationFrame(raf);facs.forEach(q=>q.st.dispose());R.dispose();bg.dispose();og.dispose();tex.dispose();cv.remove();};
   function frame(now){if(stopped)return; const t=Math.max(0,Math.min(1,(now-t0)/DUR)), e=ease(t);
     cam.position.copy(curve.getPoint(e));
     const k=Math.max(0,(e-.78)/.22); cam.up.copy(up0).lerp(up1,k*k).normalize();
     cam.lookAt(0,0,0);
     pinG.position.z=ptop[2]+4+Math.sin(now/260)*4; pinG.rotation.z=now/900;
     ringM.scale.setScalar(1+((now/1400)%1)*2.4); ringM.material.opacity=.8*(1-((now/1400)%1));
+    const fo=Math.min(1,Math.max(0,(e-.3)/.12))*Math.min(1,Math.max(0,(.9-e)/.08));
+    facs.forEach((q,i)=>{const o=Math.min(1,Math.max(0,fo*1.6-i*.04));q.g.visible=o>0;q.m.opacity=o;q.sp.material.opacity=o;q.g.scale.z=.2+.8*o;});
     R.render(scene,cam);
     if(t<1)raf=requestAnimationFrame(frame);
     else if(!done){done=true; const a=cv.animate([{opacity:1},{opacity:0}],{duration:800,delay:250,fill:'forwards'}); a.onfinish=cleanup;}}
   raf=requestAnimationFrame(frame);
   cv._stop=cleanup;
   const cap=document.createElement('div'); cap.className='dcap'; cap.textContent=D.area||'物件の周辺'; wrap.appendChild(cap);
-  cap.animate([{opacity:0},{opacity:1,offset:.06},{opacity:1,offset:.9},{opacity:0}],{duration:6300,fill:'forwards'}).onfinish=()=>cap.remove();
-  setTimeout(()=>{if(cap.isConnected)cap.textContent='物件の場所へ';},3800);
+  cap.animate([{opacity:0},{opacity:1,offset:.06},{opacity:1,offset:.9},{opacity:0}],{duration:DUR+300,fill:'forwards'}).onfinish=()=>cap.remove();
+  setTimeout(()=>{if(cap.isConnected)cap.textContent='物件の場所へ';},DUR*.63);
   return true;
 }
 

@@ -108,6 +108,22 @@ export interface AppraisalExtract {
   plans: AppraisalPlan[];
   range: AppraisalPriceRange | null;
   warnings: AppraisalWarning[];
+  /** 周辺施設(2026-11-11・「周辺施設情報」の地図と表から読む)。古い下書きには無い。 */
+  facilities?: DeckFacility[];
+}
+
+/** 周辺施設。x・y は物件から東西(東が+)・南北(北が+)のメートル。地図から読めなければ null(一覧だけに出す)。 */
+export interface DeckFacility {
+  cat: string;
+  name: string;
+  /** 直線距離(m) */
+  dist: number;
+  /** 推定徒歩(分) */
+  min: number;
+  x: number | null;
+  y: number | null;
+  /** 担当者が資料から外した */
+  hidden?: boolean;
 }
 
 /** NFKC で戻らない字(pdf-parse が返す部首・異体の字)。実物で見つかったものと、同じ並びの字。 */
