@@ -1,6 +1,6 @@
 import { describe, it, expect } from "vitest";
 import { NAME_VARIANTS, foldVariantChar, nameVariantSpellings, variantSpellings } from "@/lib/name-variants";
-import { containsVariants, nameContainsVariants, nameSearchVariants } from "@/lib/notation";
+import { MAX_NAME_SEARCH_VARIANTS, containsVariants, nameContainsVariants, nameSearchVariants } from "@/lib/notation";
 import { foldNameVariants } from "@/lib/deals/crosscheck";
 import { compareRegistryOwners } from "@/lib/registry-owner-check/compare";
 
@@ -71,6 +71,14 @@ describe("名前の検索語の候補", () => {
     const got = nameVariantSpellings("沢浜高崎");
     expect(got).toHaveLength(8);
     expect(got.every((s) => s.endsWith("崎"))).toBe(true);
+  });
+
+  it("候補の総数は上限まで(数字・ケ・異体字が重なっても OR が増えすぎない)・元の語は必ず残る", () => {
+    const q = "1-2井土ケ谷千駄ヶ谷沢浜崎";
+    const got = nameSearchVariants(q);
+    expect(got.length).toBeLessThanOrEqual(MAX_NAME_SEARCH_VARIANTS);
+    expect(got[0]).toBe(q);
+    expect(nameContainsVariants("name", q).length).toBeLessThanOrEqual(MAX_NAME_SEARCH_VARIANTS);
   });
 
   it("名前の検索はケ・数字の幅の候補にも異体字を足す。住所の検索(containsVariants)は広げない", () => {

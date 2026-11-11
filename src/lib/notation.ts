@@ -50,8 +50,20 @@ export function searchVariants(q: string): string[] {
  * ⚠名前の欄だけに使う(住所に使うと候補が増えすぎる)。表示・保存の名前は変えない(2026-11-11 発注者決定)。
  */
 export function nameSearchVariants(q: string): string[] {
-  return [...new Set(searchVariants(q).flatMap(nameVariantSpellings))];
+  // ⚠数字の幅・ケ・異体字の候補は掛け算で増える。OR の数に上限を付ける(元の書き方の候補を先に残す)。
+  const base = searchVariants(q);
+  const out = new Set(base.slice(0, MAX_NAME_SEARCH_VARIANTS));
+  for (const b of base) {
+    for (const v of nameVariantSpellings(b)) {
+      if (out.size >= MAX_NAME_SEARCH_VARIANTS) return [...out];
+      out.add(v);
+    }
+  }
+  return [...out];
 }
+
+/** 名前の検索の候補の上限(1回の検索の OR の数)。 */
+export const MAX_NAME_SEARCH_VARIANTS = 64;
 
 /** 名前の欄の Prisma の OR に並べる条件(異体字の候補も探す)。 */
 export function nameContainsVariants<F extends string>(
