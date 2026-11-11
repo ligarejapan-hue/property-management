@@ -7,7 +7,7 @@
  * ⚠依頼者の氏名・番地は扱わない(所在地は町丁目まで)。
  */
 import { useCallback, useEffect, useMemo, useState } from "react";
-import { AlertTriangle, Download, Eye, RefreshCw } from "lucide-react";
+import { AlertTriangle, Download, Eye, Map as MapIcon, RefreshCw } from "lucide-react";
 import StatusBadge from "@/components/ui/status-badge";
 import { Button } from "@/components/ui/button";
 import { BackLink } from "@/components/ui/back-link";
@@ -24,6 +24,10 @@ interface DeckDetail {
   extracted: AppraisalExtract;
   overrides: AppraisalOverrides;
   updatedAt: string;
+  /** 周辺地図があるか(2026-11-11)。 */
+  hasMap?: boolean;
+  /** 物件に GPS 座標があるか(値は持たない)。 */
+  hasLocation?: boolean;
 }
 
 const WARN: Record<string, string> = {
@@ -313,6 +317,16 @@ export function AppraisalDeckReview({ propertyId, deckId, canWrite }: { property
     if (j) await reload();
   };
 
+  const rebuildMap = async () => {
+    if (dirty) {
+      setMsg({ kind: "err", text: "直した内容を先に保存してください" });
+      return;
+    }
+    if (confirmed && !window.confirm("周辺地図を作り直すと、資料は確認待ちに戻ります。よろしいですか？")) return;
+    const j = await call(`${base}/${deckId}/map`, { method: "POST" }, "周辺地図を作りました。資料の見た目を確かめてください");
+    if (j) await reload();
+  };
+
   const warnings = ex.warnings.filter((w) => WARN[w]);
 
   return (
@@ -410,6 +424,30 @@ export function AppraisalDeckReview({ propertyId, deckId, canWrite }: { property
           ))}
         </div>
         <p className="mt-2 text-xs text-gray-500 dark:text-gray-400">⚠ 依頼者のお名前や番地は書かないでください。</p>
+      </section>
+
+      <section className={card}>
+        <h2 className="mb-2 text-sm font-semibold text-gray-800 dark:text-gray-100">
+          周辺地図 <span className="ml-1 text-xs font-normal text-gray-400">資料の1ページ目に、物件の位置の地図（3Dの街並み＋平面の地図）を入れます</span>
+        </h2>
+        <p className="text-sm text-gray-700 dark:text-gray-300">
+          {deck.hasMap
+            ? "地図が入っています。物件の位置に印が立ちます（お客様にも位置がわかります）。"
+            : deck.hasLocation
+              ? "まだ地図がありません。「地図を作り直す」で作れます。"
+              : "物件の GPS 座標が登録されていないため、地図を作れません（地図のページなしで表示します）。"}
+        </p>
+        <p className="mt-1 text-xs text-gray-500 dark:text-gray-400">
+          国土地理院の地図データ（無料）から作ります。建物の高さはイメージです。作り直すと資料は確認待ちに戻ります。
+        </p>
+        {canWrite && deck.hasLocation ? (
+          <div className="mt-2">
+            <Button variant="secondary" size="sm" onClick={rebuildMap} disabled={busy}>
+              <MapIcon className="h-4 w-4" aria-hidden />
+              {deck.hasMap ? "地図を作り直す" : "地図を作る"}
+            </Button>
+          </div>
+        ) : null}
       </section>
 
       <div className="fixed inset-x-0 bottom-0 z-20 border-t border-gray-200 bg-white/95 px-4 py-3 backdrop-blur dark:border-gray-700 dark:bg-gray-900/95">

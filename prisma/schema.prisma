@@ -1380,6 +1380,8 @@ model AppraisalDeck {
   extracted          Json      @default("{}") @db.JsonB
   /// 担当者が直した数字・見出しの文章(extracted に上書きする)。
   overrides          Json      @default("{}") @db.JsonB
+  /// 周辺地図(DeckMapData・国土地理院ベクトルタイルから作成・物件を原点にしたメートル座標)。座標がない・作れなければ null。
+  mapData            Json?     @map("map_data") @db.JsonB
   createdBy          String?   @map("created_by") @db.Uuid
   updatedBy          String?   @map("updated_by") @db.Uuid
   confirmedBy        String?   @map("confirmed_by") @db.Uuid

@@ -2,9 +2,11 @@
  * 査定報告書を添付した応答のあとで、「査定のご報告」の下書きを作る(2026-11-10)。
  * ⚠添付の応答を待たせない・失敗しても添付は成立したまま(物件ページの「作り直す」で再挑戦できる)。
  * ⚠失敗の中身(数字・所在地・ファイルの場所)は出さない。
+ * 下書きができたら、続けて周辺地図を作る(2026-11-11・物件に GPS 座標があるときだけ・失敗しても下書きはそのまま)。
  */
 import { after } from "next/server";
 import { buildAppraisalDraft } from "./create-draft";
+import { refreshDeckMap } from "./map/refresh";
 
 /** 読み取りが混んでいた(busy)ときに待ってやり直す回数と間隔。 */
 export const BUSY_RETRIES = 3;
@@ -16,7 +18,11 @@ export function scheduleAppraisalDraft(input: { attachmentId: string; propertyId
     try {
       for (let i = 0; i <= BUSY_RETRIES; i++) {
         const r = await buildAppraisalDraft(input);
-        if (r.ok || r.reason !== "busy" || i === BUSY_RETRIES) return;
+        if (r.ok) {
+          await refreshDeckMap({ deckId: r.deckId, propertyId: input.propertyId, userId: input.userId, mode: "auto" });
+          return;
+        }
+        if (r.reason !== "busy" || i === BUSY_RETRIES) return;
         await sleep(BUSY_WAIT_MS);
       }
     } catch {
