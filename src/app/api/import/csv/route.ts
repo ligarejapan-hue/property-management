@@ -450,6 +450,10 @@ export async function POST(request: NextRequest) {
         if (isUnit && mapped.buildingName) {
           // 新規取込は正式値 apartment_unit に統一（旧 unit は出力しない）
           mapped.propertyType = "apartment_unit";
+          // 種別が区分に変わった=土地だけの現況(更地・古屋あり)は入れない(@codex #702 P2)。
+          if (mapped.occupancyStatus && !occupancyFitsType(mapped.propertyType, mapped.occupancyStatus)) {
+            delete mapped.occupancyStatus;
+          }
 
           // 同じ町丁目・同じ比べる形の棟だけ自動でつなぐ。紛らわしい候補があれば要確認、
           // 何も無ければ物件を作るトランザクションの中で棟を作る(設計 2026-10-04 §4.4)。
