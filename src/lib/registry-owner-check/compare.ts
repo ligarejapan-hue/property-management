@@ -8,6 +8,7 @@
  */
 import { normalizeName as importNormalizeName } from "@/lib/normalize";
 import { foldNameVariants } from "@/lib/deals/crosscheck";
+import { hasPrivateUseChar } from "@/lib/private-use-char";
 
 export type RegistryOwnerCheckResult =
   | "same"
@@ -24,6 +25,19 @@ export function ownerNameKey(name: string): string {
 function keySet(names: readonly string[], key: (s: string) => string): Set<string> {
   return new Set(names.map(key).filter((k) => k.length > 0));
 }
+
+/**
+ * 比べ合わせ用の集まり。謄本の外字(私用領域)を含む名前は、どの名前とも一致しない印にする
+ * (同じ外字の名前どうしも「同じ」にしない=確かめる一覧に出す・2026-11-11)。
+ */
+function compareKeySet(names: readonly string[], key: (s: string) => string, side: string): Set<string> {
+  return new Set(
+    names
+      .map((n, i) => (hasPrivateUseChar(n) ? `${GAIJI_KEY}${side}:${i}` : key(n)))
+      .filter((k) => k.length > 0),
+  );
+}
+const GAIJI_KEY = "〓外字:";
 
 function sameSet(a: Set<string>, b: Set<string>): boolean {
   if (a.size !== b.size) return false;
@@ -42,10 +56,10 @@ export function compareRegistryOwners(
   registryNames: readonly string[],
   systemNames: readonly string[],
 ): Exclude<RegistryOwnerCheckResult, "unreadable"> {
-  const system = keySet(systemNames, (s) => importNormalizeName(s));
+  const system = compareKeySet(systemNames, (s) => importNormalizeName(s), "s");
   if (system.size === 0) return "no_owner";
-  if (sameSet(keySet(registryNames, (s) => importNormalizeName(s)), system)) return "same";
-  if (sameSet(keySet(registryNames, ownerNameKey), keySet(systemNames, ownerNameKey))) {
+  if (sameSet(compareKeySet(registryNames, (s) => importNormalizeName(s), "r"), system)) return "same";
+  if (sameSet(compareKeySet(registryNames, ownerNameKey, "r"), compareKeySet(systemNames, ownerNameKey, "s"))) {
     return "same_notation";
   }
   return "mismatch";

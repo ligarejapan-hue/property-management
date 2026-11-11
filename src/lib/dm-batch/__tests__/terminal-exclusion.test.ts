@@ -23,10 +23,15 @@ type FindArgs = {
 const fakeTx = (
   rows: Array<{ ownerId: string | null; propertyId: string | null; logOwners: { ownerId: string }[] }>,
   agentOwnerIds: string[] = [],
+  gaijiOwnerIds: string[] = [],
 ) => {
   const findMany = vi.fn(async (_args: FindArgs) => rows);
   // 業者と同じ名前の所有者(agent-name-exclusion.ts の SQL の結果)
-  const $queryRaw = vi.fn(async () => agentOwnerIds.map((id) => ({ id })));
+  // 名前に外字がある所有者も同じ SQL の結果に agent/gaiji の印つきで返る(2026-11-11)
+  const $queryRaw = vi.fn(async () => [
+    ...agentOwnerIds.map((id) => ({ id, agent: true, gaiji: gaijiOwnerIds.includes(id) })),
+    ...gaijiOwnerIds.filter((id) => !agentOwnerIds.includes(id)).map((id) => ({ id, agent: false, gaiji: true })),
+  ]);
   return { tx: { propertyDmLog: { findMany }, $queryRaw: $queryRaw as never }, findMany, $queryRaw };
 };
 
@@ -75,10 +80,23 @@ describe("findTerminalExclusions（集合の構築）", () => {
     expect([...sets.agentOwnerIds]).toEqual(["o2"]);
     expect(sets.ownerIds.size).toBe(0);
   });
+
+  it("名前に外字がある所有者は別の集合へ(同じ SQL 1本・業者の集合には入れない)", async () => {
+    const { tx, $queryRaw } = fakeTx([], ["o2"], ["o3"]);
+    const sets = await findTerminalExclusions(tx, ["o1", "o2", "o3"], ["p1"]);
+    expect($queryRaw).toHaveBeenCalledTimes(1);
+    expect([...sets.agentOwnerIds]).toEqual(["o2"]);
+    expect([...sets.gaijiOwnerIds]).toEqual(["o3"]);
+  });
 });
 
 describe("isTerminalExcluded（宛先グループの判定）", () => {
-  const sets = { ownerIds: new Set(["oBad"]), propertyIds: new Set(["pBad"]), agentOwnerIds: new Set(["oAgent"]) };
+  const sets = {
+    ownerIds: new Set(["oBad"]),
+    propertyIds: new Set(["pBad"]),
+    agentOwnerIds: new Set(["oAgent"]),
+    gaijiOwnerIds: new Set(["oGaiji"]),
+  };
 
   it("代表・共有者のどちらかが terminal なら除外", () => {
     expect(isTerminalExcluded(sets, { propertyId: "p1", ownerIds: ["oBad"] })).toBe(true);
@@ -92,10 +110,20 @@ describe("isTerminalExcluded（宛先グループの判定）", () => {
   it("どれにも当たらなければ残す", () => {
     expect(isTerminalExcluded(sets, { propertyId: "p1", ownerIds: ["oOk"] })).toBe(false);
   });
+
+  it("名前に外字がある所有者が代表でも共有者でも除外", () => {
+    expect(isTerminalExcluded(sets, { propertyId: "p1", ownerIds: ["oGaiji"] })).toBe(true);
+    expect(isTerminalExcluded(sets, { propertyId: "p1", ownerIds: ["oOk", "oGaiji"] })).toBe(true);
+  });
 });
 
 describe("dmExclusionReason（外す理由）", () => {
-  const sets = { ownerIds: new Set(["oBad"]), propertyIds: new Set(["pBad"]), agentOwnerIds: new Set(["oAgent", "oBad"]) };
+  const sets = {
+    ownerIds: new Set(["oBad"]),
+    propertyIds: new Set(["pBad"]),
+    agentOwnerIds: new Set(["oAgent", "oBad"]),
+    gaijiOwnerIds: new Set(["oGaiji", "oAgent", "oBad"]),
+  };
 
   it("業者と同じ名前の所有者が代表でも共有者でも外す(住所に関係なく)", () => {
     expect(dmExclusionReason(sets, { propertyId: "p1", ownerIds: ["oAgent"] })).toBe("agent_name");
@@ -105,6 +133,12 @@ describe("dmExclusionReason（外す理由）", () => {
   it("両方に当たるときは拒否・宛先不明を理由にする", () => {
     expect(dmExclusionReason(sets, { propertyId: "p1", ownerIds: ["oBad"] })).toBe("terminal");
     expect(dmExclusionReason(sets, { propertyId: "pBad", ownerIds: ["oAgent"] })).toBe("terminal");
+  });
+  it("名前に外字がある所有者=gaiji_name(拒否・宛先不明と業者と同じ名前を先に見る)", () => {
+    expect(dmExclusionReason(sets, { propertyId: "p1", ownerIds: ["oGaiji"] })).toBe("gaiji_name");
+    expect(dmExclusionReason(sets, { propertyId: "p1", ownerIds: ["oOk", "oGaiji"] })).toBe("gaiji_name");
+    expect(dmExclusionReason(sets, { propertyId: "p1", ownerIds: ["oAgent"] })).toBe("agent_name");
+    expect(dmExclusionReason(sets, { propertyId: "p1", ownerIds: ["oBad"] })).toBe("terminal");
   });
   it("どれにも当たらなければ null", () => {
     expect(dmExclusionReason(sets, { propertyId: "p1", ownerIds: ["oOk"] })).toBeNull();

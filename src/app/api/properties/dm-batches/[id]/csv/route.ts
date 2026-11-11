@@ -1,5 +1,5 @@
 import { TERMINAL_REACTIONS } from "@/lib/dm-reaction/core";
-import { findAgentNameOwnerIds } from "@/lib/dm-batch/agent-name-exclusion";
+import { findOwnerNameExclusions } from "@/lib/dm-batch/agent-name-exclusion";
 import { NextRequest, NextResponse } from "next/server";
 import prisma from "@/lib/prisma";
 import {
@@ -259,7 +259,8 @@ export async function GET(
 
       // (2b) 業者(名簿・国交省の一覧)と同じ名前の所有者(2026-11-09)。控えの作成時に外しているが、
       // 作成後に業者が一覧に載った宛先もここで止める(判定は作成時と同じ agent-name-exclusion.ts)。
-      const agentNameOwnerIds = await findAgentNameOwnerIds(tx, allOwnerIds);
+      // (2c) 名前に謄本の外字(私用領域の字)がある所有者も同じ SQL で見つけて止める(宛名が □ になる・2026-11-11)。
+      const { agentOwnerIds: agentNameOwnerIds, gaijiOwnerIds } = await findOwnerNameExclusions(tx, allOwnerIds);
 
       const elig = checkBatchEligibility(
         items,
@@ -269,6 +270,7 @@ export async function GET(
         terminalPropertyIds,
         resendStalePropertyIds,
         agentNameOwnerIds,
+        gaijiOwnerIds,
       );
 
       if (elig.scopeMissingCount > 0) {
@@ -290,6 +292,13 @@ export async function GET(
           409,
           `業者(業者の名簿・国交省の業者一覧)と同じ名前の所有者の宛先が含まれています(${elig.agentNameCount}件)。この控えは使えません。再出力してください`,
           "AGENT_NAME",
+        );
+      }
+      if (elig.gaijiNameCount > 0) {
+        throw new ApiError(
+          409,
+          `所有者の名前に読めない字(外字)がある宛先が含まれています(${elig.gaijiNameCount}件)。この控えは使えません。再出力してください`,
+          "GAIJI_NAME",
         );
       }
       if (elig.resendStaleCount > 0) {

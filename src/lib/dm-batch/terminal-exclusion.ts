@@ -25,10 +25,11 @@
  * 2026-11-09: **業者と同じ名前の所有者**も同じ集合で外す(agent-name-exclusion.ts・発注者指示)。
  * 拒否・宛先不明と同じ所の全経路(宛名CSV・売却DM の作成/表示/確定/印刷/CSV/送付済み)に効かせるため、
  * 判定はこのモジュールの `isTerminalExcluded` に入れた。理由ごとの件数は `dmExclusionReason` で分ける。
+ * 2026-11-11: **名前に謄本の外字(私用領域の字)がある所有者**も同じ集合で外す(宛名が □ になる)。
  */
 
 import { TERMINAL_REACTIONS } from "@/lib/dm-reaction/core";
-import { findAgentNameOwnerIds, type AgentNameExclusionTx } from "@/lib/dm-batch/agent-name-exclusion";
+import { findOwnerNameExclusions, type AgentNameExclusionTx } from "@/lib/dm-batch/agent-name-exclusion";
 
 // ⚠集合の正本は dm-reaction/core.ts(書き込み側=Owner FOR UPDATE の要否を決める側)。
 // 提出前レビューで「このファイルが2つ目の定義になっている」ことを指摘された。
@@ -41,10 +42,12 @@ export interface TerminalExclusionSets {
   propertyIds: Set<string>;
   /** 業者(名簿・国交省の一覧)と同じ名前の所有者。この所有者が絡む宛先グループは除外(住所に関係なく)。 */
   agentOwnerIds: Set<string>;
+  /** 名前に謄本の外字(私用領域の字)がある所有者(2026-11-11)。宛名が □ になるので、この所有者が絡む宛先グループは除外。 */
+  gaijiOwnerIds: Set<string>;
 }
 
-/** 宛先を外す理由(件数を分けて見せるため)。拒否・宛先不明を先に見る。 */
-export type DmExclusionReason = "terminal" | "agent_name";
+/** 宛先を外す理由(件数を分けて見せるため)。拒否・宛先不明→業者と同じ名前→外字の名前の順に見る。 */
+export type DmExclusionReason = "terminal" | "agent_name" | "gaiji_name";
 
 interface TerminalLogRow {
   ownerId: string | null;
@@ -79,7 +82,12 @@ export async function findTerminalExclusions(
   ownerIds: readonly string[],
   propertyIds: readonly string[],
 ): Promise<TerminalExclusionSets> {
-  const sets: TerminalExclusionSets = { ownerIds: new Set(), propertyIds: new Set(), agentOwnerIds: new Set() };
+  const sets: TerminalExclusionSets = {
+    ownerIds: new Set(),
+    propertyIds: new Set(),
+    agentOwnerIds: new Set(),
+    gaijiOwnerIds: new Set(),
+  };
   const owners = sortUnique(ownerIds);
   const properties = sortUnique(propertyIds);
   if (owners.length === 0 && properties.length === 0) return sets;
@@ -111,7 +119,9 @@ export async function findTerminalExclusions(
       sets.propertyIds.add(log.propertyId);
     }
   }
-  sets.agentOwnerIds = await findAgentNameOwnerIds(tx, owners);
+  const byName = await findOwnerNameExclusions(tx, owners);
+  sets.agentOwnerIds = byName.agentOwnerIds;
+  sets.gaijiOwnerIds = byName.gaijiOwnerIds;
   return sets;
 }
 
@@ -133,5 +143,7 @@ export function dmExclusionReason(
 ): DmExclusionReason | null {
   if (item.ownerIds.some((id) => sets.ownerIds.has(id)) || sets.propertyIds.has(item.propertyId)) return "terminal";
   if (item.ownerIds.some((id) => sets.agentOwnerIds.has(id))) return "agent_name";
+  // 古い形の集合(gaijiOwnerIds が無い)でも落ちないように
+  if (item.ownerIds.some((id) => sets.gaijiOwnerIds?.has(id))) return "gaiji_name";
   return null;
 }

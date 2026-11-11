@@ -497,6 +497,8 @@ function PropertiesPageInner() {
         excludedTerminal: res.excludedTerminal,
         // 所有者が業者と同じ名前の自動除外(住所に関係なく・2026-11-09)。
         excludedAgentName: res.excludedAgentName,
+        // 所有者の名前に謄本の外字がある自動除外(宛名が □ になる・2026-11-11)。
+        excludedGaijiName: res.excludedGaijiName,
         // 種類つきの発送: 本文を差し込めなかった宛先・LPが未登録の種類。
         blankBodyCount: res.blankBodyCount,
         lpMissingScenarios: res.lpMissingScenarios,
@@ -613,7 +615,11 @@ function PropertiesPageInner() {
     try {
       const res = await createDmBatch(buildFilterParams());
       // 自動で外した宛先(拒否・宛先不明/所有者が業者と同じ名前)を理由ごとに1文で。
-      const excluded = dmExclusionCountsText(res.excludedTerminalCount, res.excludedAgentNameCount);
+      const excluded = dmExclusionCountsText(
+        res.excludedTerminalCount,
+        res.excludedAgentNameCount,
+        res.excludedGaijiNameCount,
+      );
       if (res.rowCount === 0) {
         setError(
           excluded
