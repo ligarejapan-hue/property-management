@@ -396,7 +396,8 @@ function drawMap(anim){
     // 最寄り駅までの徒歩ルート(点線)と駅の印
     if(MAP.rt&&MAP.st){const rg2=el('g',{id:'mproute'},s), sx=MX(MAP.st.x), sy=MY(MAP.st.y), wm=D.walkMinutes!=null?D.walkMinutes:Math.max(1,Math.round((MAP.rtm||0)/80)), tl=`${MAP.st.n} 徒歩${wm}分`, w=tl.length*16+24;
       el('path',{d:mpath(mdec(MAP.rt,0)),fill:'none',stroke:'var(--canvas)','stroke-width':9,'stroke-linecap':'round','stroke-linejoin':'round',opacity:.85},rg2);
-      el('path',{d:mpath(mdec(MAP.rt,0)),fill:'none',stroke:'var(--main)','stroke-width':5,'stroke-linecap':'round','stroke-linejoin':'round','stroke-dasharray':'2 11'},rg2);
+      // 丸い点の列(線の長さ0+丸い端=点)。3D を見せないときは物件から駅へ点が伸びていく
+      const dots=el('path',{id:'mprtdots',d:mpath(mdec(MAP.rt,0)),fill:'none',stroke:'var(--main)','stroke-width':6.5,'stroke-linecap':'round','stroke-dasharray':'0 11'},rg2);
       el('rect',{x:sx-11,y:sy-11,width:22,height:22,rx:4,fill:'var(--main)',stroke:'var(--canvas)','stroke-width':2.5},rg2); tx(rg2,sx,sy+5,'駅',{'font-size':12,'font-weight':700,'text-anchor':'middle',style:'fill:#fff'});
       const ly=sy+18+28>MH-26?sy-18-28:sy+18; el('rect',{x:sx-w/2,y:ly,width:w,height:28,rx:14,fill:'var(--main)'},rg2); tx(rg2,sx,ly+19,tl,{'font-size':16,'font-weight':700,'text-anchor':'middle',style:'fill:#fff'});}
     // 周辺施設の印(番号付きの丸)と札(種類・徒歩分)。札はなるべく重ならない向きに置く
@@ -424,7 +425,9 @@ function drawMap(anim){
   if(rg)[...rg.querySelectorAll('circle')].forEach((c,i)=>{c.style.transformBox='fill-box';c.style.transformOrigin='center';AN(c,[{transform:'scale(0)',opacity:0},{transform:'none',opacity:1}],{duration:700,delay:DV+300+i*250});});
   // 3D で見せ終わっていれば、平面の地図の施設・ルートはそのまま(一斉に軽く出す)
   $$('#mpfac .fac').forEach((g,i)=>AN(g,DV?[{opacity:0},{opacity:1}]:[{opacity:0,transform:'translateY(8px)'},{opacity:1,transform:'none'}],{duration:DV?400:450,delay:DV?DV-600:200+(i%Math.max(1,FAC.length))*90}));
-  const rtg=$('#mproute'); if(rtg)AN(rtg,[{opacity:0},{opacity:1}],{duration:DV?400:700,delay:DV?DV-600:300});
+  const rtg=$('#mproute'); if(rtg){AN(rtg,[{opacity:0},{opacity:1}],{duration:DV?400:300,delay:DV?DV-600:200});
+    // 3D を見せなかったときは、平面の地図で物件から駅へ点を伸ばす(点線の模様はそのまま・見える長さだけ伸ばす)
+    const dp=$('#mprtdots'); if(!DV&&dp&&dp.getTotalLength){const L=dp.getTotalLength(), n=Math.ceil(L/11), steps=[]; for(let k=0;k<=20;k++){const m=Math.ceil(n*k/20); steps.push({strokeDasharray:`${Array(m).fill('0 11').join(' ')} 0 ${L+11}`});} AN(dp,steps,{duration:2400,delay:400,easing:'linear',fill:'backwards'});}}
   if(pin)AN(pin,[{transform:'translateY(-160px)',opacity:0},{transform:'translateY(0)',opacity:1,offset:.7},{transform:'translateY(-12px)',offset:.85},{transform:'none',opacity:1}],{duration:850,delay:DV?DV-1100:200,easing:'ease-out'});
 }
 /* 空から降りる動き(2026-11-11 発注者指示)。
@@ -492,10 +495,12 @@ function city3d(wrap){
     g.position.set(f.x,f.y,0); scene.add(g); return {g,m,sp,st};});
   // 最寄り駅までの徒歩ルート(点線)と駅の札。点線は地面に置いた短い帯の並び(太さを出すため)。少しずつ見せる
   let route=null;
-  if(MAP.rt&&MAP.st){const p=mdec(MAP.rt,0), pos=[]; let carry=0;
-    for(let i=0;i+1<p.length;i++){const [ax,ay]=p[i],[bx,by]=p[i+1],L=Math.hypot(bx-ax,by-ay); if(!L)continue; const ux=(bx-ax)/L,uy=(by-ay)/L,nx=-uy*2.6,ny=ux*2.6;
-      for(let d=carry;d<L;d+=12){const e2=Math.min(L,d+6),x1=ax+ux*d,y1=ay+uy*d,x2=ax+ux*e2,y2=ay+uy*e2,z=1.6;
-        pos.push(x1+nx,y1+ny,z,x1-nx,y1-ny,z,x2+nx,y2+ny,z, x2+nx,y2+ny,z,x1-nx,y1-ny,z,x2-nx,y2-ny,z);} carry=(12-((L-carry)%12))%12;}
+  if(MAP.rt&&MAP.st){const p=mdec(MAP.rt,0), pos=[], STEP=11, R0=3.4, SEG=10; let carry=0;
+    // 物件から駅へ、丸い点を一定の間隔で並べる(足あとのように1つずつ伸びていく)
+    for(let i=0;i+1<p.length;i++){const [ax,ay]=p[i],[bx,by]=p[i+1],L=Math.hypot(bx-ax,by-ay); if(!L)continue; const ux=(bx-ax)/L,uy=(by-ay)/L;
+      for(let d=carry;d<=L;d+=STEP){const cx=ax+ux*d,cy=ay+uy*d,z=1.6;
+        for(let k=0;k<SEG;k++){const a1=k/SEG*Math.PI*2,a2=(k+1)/SEG*Math.PI*2; pos.push(cx,cy,z, cx+Math.cos(a1)*R0,cy+Math.sin(a1)*R0,z, cx+Math.cos(a2)*R0,cy+Math.sin(a2)*R0,z);}}
+      carry=(STEP-((L-carry)%STEP))%STEP;}
     const geo=new T.BufferGeometry(); geo.setAttribute('position',new T.Float32BufferAttribute(pos,3)); const mat=new T.MeshBasicMaterial({color:0x1F3A5F,transparent:true,side:T.DoubleSide,depthTest:false}); const mesh=new T.Mesh(geo,mat); mesh.renderOrder=5; scene.add(mesh);
     const st=new T.Group(), stm=new T.MeshLambertMaterial({color:0x1F3A5F,emissive:0x0c1a2c,transparent:true});
     const sb=new T.Mesh(new T.CylinderGeometry(2,2,60,8),stm); sb.rotation.x=Math.PI/2; sb.position.z=30; st.add(sb); const sh=new T.Mesh(new T.BoxGeometry(18,18,18),stm); sh.position.z=64; st.add(sh);
@@ -503,7 +508,7 @@ function city3d(wrap){
     c.width=Math.ceil(cx.measureText(tl).width)+48; c.height=64; cx.font='700 40px sans-serif'; cx.fillStyle='#1F3A5F'; cx.beginPath(); cx.roundRect(0,0,c.width,c.height,30); cx.fill(); cx.fillStyle='#fff'; cx.textBaseline='middle'; cx.fillText(tl,24,c.height/2+2);
     const stx=new T.CanvasTexture(c), sp=new T.Sprite(new T.SpriteMaterial({map:stx,transparent:true,depthTest:false,sizeAttenuation:false})); sp.scale.set(.032*c.width/c.height,.032,1); sp.center.set(.5,0); sp.position.z=80; sp.renderOrder=11; st.add(sp);
     st.position.set(MAP.st.x,MAP.st.y,0); st.visible=false; scene.add(st);
-    route={geo,mat,n:pos.length/18,st,stm,sp,stx};}
+    route={geo,mat,n:pos.length/(9*10),per:3*10,st,stm,sp,stx};}
   const ringM=new T.Mesh(new T.RingGeometry(22,28,48),new T.MeshBasicMaterial({color:0x1F3A5F,transparent:true,opacity:.8,side:T.DoubleSide})); ringM.position.set(0,0,1.5); scene.add(ringM);
   // 明るさは平面の地図の色に近くなるよう合わせた(three r155 以降の光の強さの単位)
   scene.add(new T.HemisphereLight(0xffffff,0x9aa6b4,2.2)); const sun=new T.DirectionalLight(0xfff6e8,1.6); sun.position.set(-0.55,-0.75,1); scene.add(sun);
@@ -525,7 +530,7 @@ function city3d(wrap){
     // ② の間に施設を1つずつ(各 0.4 秒で現れる)、同時に徒歩ルートを引く。③ の終わりで消える(平面の地図に引き継ぐ)
     const ms=(t-CITY_A)*DUR, out=Math.min(1,Math.max(0,(.97-t)/.05));
     facs.forEach((q,i)=>{const o=Math.min(1,Math.max(0,(ms-1200-i*650)/400))*out;q.g.visible=o>0;q.m.opacity=o;q.sp.material.opacity=o;q.g.scale.z=.15+.85*Math.min(1,o/out||0);});
-    if(route){const span=Math.max(1,(CITY_B-CITY_A)*DUR-2600-1200), r=Math.min(1,Math.max(0,(ms-1200)/span)); route.geo.setDrawRange(0,6*Math.floor(route.n*r)); route.mat.opacity=.95*out;
+    if(route){const span=Math.max(1,(CITY_B-CITY_A)*DUR-2600-1200), r=Math.min(1,Math.max(0,(ms-1200)/span)); route.geo.setDrawRange(0,route.per*Math.floor(route.n*r)); route.mat.opacity=.95*out;
       const so=Math.min(1,Math.max(0,(r-.98)/.02))*out; route.st.visible=so>0; route.stm.opacity=so; route.sp.material.opacity=so;}
     R.render(scene,cam);
     if(t<1)raf=requestAnimationFrame(frame);
