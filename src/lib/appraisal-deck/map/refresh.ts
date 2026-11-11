@@ -11,6 +11,7 @@ import { Prisma } from "@/generated/prisma";
 import prisma from "@/lib/prisma";
 import { writeAuditLog } from "@/lib/audit";
 import { buildMapFromTiles, fetchGsiTiles, isUsableLocation, MAP_DATA_VERSION, type DeckMapData, type FetchLike } from "./build";
+import { geocodeAddress } from "./geocode";
 
 export type MapRefreshResult =
   | { ok: true; buildings: number }
@@ -39,18 +40,26 @@ export async function refreshDeckMap(
   }
   const property = await prisma.property.findUnique({
     where: { id: input.propertyId },
-    select: { gpsLat: true, gpsLng: true },
+    select: { gpsLat: true, gpsLng: true, address: true },
   });
   const lat = property?.gpsLat == null ? null : Number(property.gpsLat);
   const lng = property?.gpsLng == null ? null : Number(property.gpsLng);
-  if (!isUsableLocation(lat, lng)) {
+  // GPS 座標がなければ住所から求める(2026-11-11 発注者指示・物件の GPS 座標には保存しない)。
+  let center: { lat: number; lng: number } | null = isUsableLocation(lat, lng) ? { lat, lng: lng as number } : null;
+  let loc: "gps" | "address" = "gps";
+  if (!center) {
+    center = await geocodeAddress(property?.address, deps.fetchImpl);
+    loc = "address";
+  }
+  if (!center) {
     await audit(input, { result: "no_location" });
     return { ok: false, reason: "no_location" };
   }
   let map: DeckMapData;
   try {
-    const center = { lat, lng: lng as number };
-    map = buildMapFromTiles(center, await fetchGsiTiles(center, deps.fetchImpl), deps.now?.() ?? new Date());
+    const built = buildMapFromTiles(center, await fetchGsiTiles(center, deps.fetchImpl), deps.now?.() ?? new Date());
+    // 住所から求めた位置は目安なので、近くの建物を「物件の建物」として塗らない(違う建物を塗らない)。
+    map = loc === "address" ? { ...built, p: -1, loc } : { ...built, loc };
   } catch {
     console.warn("[appraisal-deck] 周辺地図を作れませんでした", { deckId: input.deckId });
     await audit(input, { result: "fetch_failed" });
@@ -68,7 +77,7 @@ export async function refreshDeckMap(
   });
   // 自動で 0 件=取りに行っている間に地図が作られた・確認済みにされた(どちらも足さない)。
   if (updated.count !== 1) return { ok: false, reason: input.mode === "auto" ? "not_draft" : "not_found" };
-  await audit(input, { result: "ok", buildings: map.b.length });
+  await audit(input, { result: "ok", buildings: map.b.length, loc });
   return { ok: true, buildings: map.b.length };
 }
 
@@ -97,6 +106,7 @@ export const deckMapDataSchema = z
     v: z.array(delta).max(100_000),
     t: z.array(z.array(z.union([z.number(), z.string().max(20)]))).max(100_000),
     bh: z.array(delta).max(100_000).default([]),
+    loc: z.enum(["gps", "address"]).optional(),
     wh: z.array(delta).max(100_000).default([]),
   })
   .strict();

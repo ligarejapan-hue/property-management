@@ -146,6 +146,11 @@ describe("renderAppraisalDeck(資料の HTML)", () => {
     expect(html).toContain('data-go="basis"');
     expect(html).not.toMatch(/data-go="\d"/);
   });
+  it("住所から求めた地図は「位置は目安」と書く(GPS のときは書かない)", () => {
+    const m = mergeAppraisal(HOUSE, {});
+    expect(renderAppraisalDeck(m, { draft: false, map: { ...MAP, loc: "address" } })).toContain("住所から求めた目安");
+    expect(renderAppraisalDeck(m, { draft: false, map: MAP })).not.toContain("住所から求めた目安");
+  });
   it("地図のページの見出しは駅と徒歩分数から作る(「駅駅」にしない)・HTML の特殊文字を逃がす", () => {
     expect(mapHeadline(mergeAppraisal(HOUSE, {}))).toBe("東京都架空区見本町4丁目にあり、架空線「見本」駅まで徒歩10分の物件です");
     expect(mapHeadline(mergeAppraisal({ ...HOUSE, station: null }, {}))).toBe("東京都架空区見本町4丁目にある物件の場所と周りの様子です");

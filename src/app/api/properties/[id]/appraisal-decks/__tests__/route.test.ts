@@ -125,11 +125,12 @@ describe("権限(査定報告書を開ける人と同じ範囲)", () => {
 describe("周辺地図(2026-11-11)", () => {
   it("GET 詳細は地図があるか・座標があるかだけを返す(座標の値・地図の中身は返さない)", async () => {
     db.property.findUnique.mockImplementation(async ({ select }: { select: Record<string, boolean> }) =>
-      select.gpsLat ? { gpsLat: "35.6447123", gpsLng: "139.6992456" } : { id: "p1", createdBy: "u9", assignedTo: null, isArchived: false },
+      select.gpsLat ? { gpsLat: "35.6447123", gpsLng: "139.6992456", address: "東京都架空区見本町4-5-6" } : { id: "p1", createdBy: "u9", assignedTo: null, isArchived: false },
     );
     db.appraisalDeck.count.mockResolvedValue(1);
     const body = await (await deckGET(req("GET"), dctx)).json();
-    expect(body.deck).toMatchObject({ hasMap: true, hasLocation: true });
+    expect(body.deck).toMatchObject({ hasMap: true, hasLocation: true, hasAddress: true });
+    expect(JSON.stringify(body)).not.toContain("見本町4-5-6");
     expect(JSON.stringify(body)).not.toContain("35.64");
     expect(JSON.stringify(body)).not.toContain("139.69");
     expect(db.appraisalDeck.findFirst.mock.calls[0][0].select.mapData).toBeUndefined();

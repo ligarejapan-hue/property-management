@@ -98,7 +98,8 @@ export function mapHeadline(m: MergedAppraisal): string {
   return m.area ? `${m.area}にある物件の場所と周りの様子です` : "物件の場所と周りの様子です";
 }
 
-function mapSection(m: MergedAppraisal): string {
+function mapSection(m: MergedAppraisal, map: DeckMapData): string {
+  const approx = map.loc === "address";
   const h = escHtml(mapHeadline(m));
   const st = stationName(m.station);
   const walk = !!st && m.walkMinutes != null;
@@ -112,6 +113,7 @@ function mapSection(m: MergedAppraisal): string {
     <aside class="side" data-r style="--d:2200">
       ${walk ? `<div class="big">${escHtml(String(m.walkMinutes))}<u>分</u></div><div class="what">${escHtml(`${m.railLine ? m.railLine + " " : ""}${st}駅まで徒歩`)}</div>` : ""}
       <p>地図の円は物件からの直線距離で、徒歩5分（400m）・10分（800m）の目安です（80mを1分として計算）。実際の道のりはこれより長くなります。</p>
+      ${approx ? "<p>印の位置は住所から求めた目安で、実際の建物の位置とずれることがあります。</p>" : ""}
       <div class="cmp"><span class="eq">地図：国土地理院ベクトルタイル（地理院地図Vector）を加工して作成。立体の地図の建物の高さはイメージで、実際の高さではありません。</span></div>
     </aside>
   </div>
@@ -143,7 +145,7 @@ export function renderAppraisalDeck(m: MergedAppraisal, opts: { draft: boolean; 
 <title>${escHtml(deckTitle(m))}</title>
 <style>${css}</style></head><body>
 <div id="vp"><div id="stage">
-${map ? mapSection(m) : ""}
+${map ? mapSection(m, map) : ""}
 <section class="page" data-k="result" data-sec="査定結果">
   <div class="sec" data-r>査定結果<span id="sec1sub"></span></div>
   <h1 data-r style="--d:120"></h1>
