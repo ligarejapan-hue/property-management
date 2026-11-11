@@ -1,4 +1,4 @@
-import { containsVariants } from "@/lib/notation";
+import { containsVariants, nameContainsVariants } from "@/lib/notation";
 import { NextRequest } from "next/server";
 import prisma from "@/lib/prisma";
 import {
@@ -55,7 +55,7 @@ export async function POST(request: NextRequest) {
     const ownerSearchConditions: object[] = [];
     if (hasOwnerRead && displayConfig) {
       if (SEARCHABLE_LEVELS.has(displayConfig.name)) {
-        ownerSearchConditions.push(...containsVariants("name", q, "insensitive"));
+        ownerSearchConditions.push(...nameContainsVariants("name", q, "insensitive"));
       }
       if (SEARCHABLE_LEVELS.has(displayConfig.address)) {
         ownerSearchConditions.push(...containsVariants("address", q, "insensitive"));

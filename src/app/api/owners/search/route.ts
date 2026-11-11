@@ -1,4 +1,4 @@
-import { containsVariants } from "@/lib/notation";
+import { containsVariants, nameContainsVariants } from "@/lib/notation";
 import { NextRequest } from "next/server";
 import prisma from "@/lib/prisma";
 import {
@@ -73,7 +73,7 @@ export async function GET(request: NextRequest) {
 
     const orClauses: Prisma.OwnerWhereInput[] = [];
     if (searchableFields.name)
-      orClauses.push(...containsVariants("name", q, "insensitive"));
+      orClauses.push(...nameContainsVariants("name", q, "insensitive"));
     if (searchableFields.nameKana)
       orClauses.push({ nameKana: { contains: q, mode: "insensitive" } });
     if (searchableFields.phone) {

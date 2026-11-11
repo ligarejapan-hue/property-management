@@ -9,6 +9,7 @@
  * ⚠所有者の氏名・名簿・備考・ファイル名・履歴は対象にしない。
  */
 import { toHalfWidthDigits } from "@/lib/registry-fetch/chiban-input";
+import { nameVariantSpellings } from "@/lib/name-variants";
 
 const KE_LETTERS = ["ケ", "ヶ", "が"];
 /** 地名の中のケの音。⚠漢字の後ろだけ(ケアハウス・ながの を別の語にしない)。 */
@@ -42,6 +43,37 @@ function keVariants(q: string): string[] {
 /** 検索語の書き方の候補(元の語を含む・重複なし)。 */
 export function searchVariants(q: string): string[] {
   return [...new Set(widthVariants(q).flatMap(keVariants))];
+}
+
+/**
+ * 名前の検索語の書き方の候補。ケ・数字の幅の候補に、異体字の候補(山崎→山﨑 など・name-variants.ts)を足す。
+ * ⚠名前の欄だけに使う(住所に使うと候補が増えすぎる)。表示・保存の名前は変えない(2026-11-11 発注者決定)。
+ */
+export function nameSearchVariants(q: string): string[] {
+  // ⚠数字の幅・ケ・異体字の候補は掛け算で増える。OR の数に上限を付ける(元の書き方の候補を先に残す)。
+  const base = searchVariants(q);
+  const out = new Set(base.slice(0, MAX_NAME_SEARCH_VARIANTS));
+  for (const b of base) {
+    for (const v of nameVariantSpellings(b)) {
+      if (out.size >= MAX_NAME_SEARCH_VARIANTS) return [...out];
+      out.add(v);
+    }
+  }
+  return [...out];
+}
+
+/** 名前の検索の候補の上限(1回の検索の OR の数)。 */
+export const MAX_NAME_SEARCH_VARIANTS = 64;
+
+/** 名前の欄の Prisma の OR に並べる条件(異体字の候補も探す)。 */
+export function nameContainsVariants<F extends string>(
+  field: F,
+  q: string,
+  mode?: "insensitive",
+): Record<F, { contains: string; mode?: "insensitive" }>[] {
+  return nameSearchVariants(q).map(
+    (v) => ({ [field]: mode ? { contains: v, mode } : { contains: v } }) as Record<F, { contains: string; mode?: "insensitive" }>,
+  );
 }
 
 /** Prisma の OR に並べる条件。 */
