@@ -95,6 +95,36 @@ export function shortestWalk(lines: Pt[][], from: Pt, to: Pt): { path: Pt[]; met
   for (const l of lines) for (let i = 0; i + 1 < l.length; i++) link(node(l[i]), node(l[i + 1]));
   if (pts.length === 0) return null;
 
+  // 物件・駅を、一番近い道の線分の上の点(垂線の足)につなぐ(長い道の途中にいても道に乗れるように・@codex #707)
+  const onSeg = new Map<string, number[]>();
+  const attach = (q: Pt): number => {
+    let best: { a: Pt; b: Pt; f: Pt; d: number } | null = null;
+    for (const l of lines)
+      for (let i = 0; i + 1 < l.length; i++) {
+        const a = l[i];
+        const b = l[i + 1];
+        const dx = b[0] - a[0];
+        const dy = b[1] - a[1];
+        const L = dx * dx + dy * dy;
+        const t = L ? Math.max(0, Math.min(1, ((q[0] - a[0]) * dx + (q[1] - a[1]) * dy) / L)) : 0;
+        const f: Pt = [a[0] + t * dx, a[1] + t * dy];
+        const d = Math.hypot(q[0] - f[0], q[1] - f[1]);
+        if (!best || d < best.d) best = { a, b, f, d };
+      }
+    if (!best || best.d > MAX_ACCESS_M) return -1;
+    const id = node(best.f);
+    link(id, node(best.a));
+    link(id, node(best.b));
+    // 物件と駅が同じ線分の上なら、その2点も直につなぐ(線分の端まで回り道しない)
+    const key = `${best.a[0]},${best.a[1]},${best.b[0]},${best.b[1]}`;
+    for (const other of onSeg.get(key) ?? []) link(id, other);
+    onSeg.set(key, [...(onSeg.get(key) ?? []), id]);
+    return id;
+  };
+  const s = attach(from);
+  const t = attach(to);
+  if (s < 0 || t < 0) return null;
+
   // タイルの境目などでずれた点を 3m 以内ならつなぐ(格子で近いものだけ比べる)
   const cell = new Map<string, number[]>();
   const ck = (x: number, y: number) => `${Math.floor(x / SNAP_M)},${Math.floor(y / SNAP_M)}`;
@@ -112,22 +142,6 @@ export function shortestWalk(lines: Pt[][], from: Pt, to: Pt): { path: Pt[]; met
         }
   });
 
-  const nearest = (q: Pt) => {
-    let best = -1;
-    let bd = Infinity;
-    pts.forEach((p, i) => {
-      if (adj[i].length === 0) return;
-      const d = Math.hypot(p[0] - q[0], p[1] - q[1]);
-      if (d < bd) {
-        bd = d;
-        best = i;
-      }
-    });
-    return bd <= MAX_ACCESS_M ? best : -1;
-  };
-  const s = nearest(from);
-  const t = nearest(to);
-  if (s < 0 || t < 0) return null;
 
   const dist = new Float64Array(pts.length).fill(Infinity);
   const prev = new Int32Array(pts.length).fill(-1);
@@ -151,5 +165,7 @@ export function shortestWalk(lines: Pt[][], from: Pt, to: Pt): { path: Pt[]; met
   const path: Pt[] = [];
   for (let u = t; u >= 0; u = prev[u]) path.push(pts[u]);
   path.reverse();
-  return { path: [from, ...simplifyLine(path, 1.5), to], meters: Math.round(dist[t]) };
+  // 道のりには、物件・駅から道までの分も足す(@codex #707)
+  const access = Math.hypot(from[0] - pts[s][0], from[1] - pts[s][1]) + Math.hypot(to[0] - pts[t][0], to[1] - pts[t][1]);
+  return { path: [from, ...simplifyLine(path, 1.5), to], meters: Math.round(dist[t] + access) };
 }

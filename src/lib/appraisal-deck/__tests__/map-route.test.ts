@@ -68,6 +68,14 @@ describe("shortestWalk", () => {
     );
     expect(r).not.toBeNull();
   });
+  it("長い道の途中にいても、その道に乗れる(@codex #707)", () => {
+    const r = shortestWalk([[[-400, 0], [400, 0]]], [0, 0], [100, 0]);
+    expect(r?.meters).toBe(100);
+  });
+  it("道のりには物件・駅から道までの分も入る(@codex #707)", () => {
+    const r = shortestWalk([[[0, 0], [100, 0]]], [0, 100], [100, 100]);
+    expect(r?.meters).toBe(300);
+  });
   it("つながっていない・道から遠すぎるときは null", () => {
     expect(
       shortestWalk(

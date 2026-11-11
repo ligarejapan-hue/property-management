@@ -78,6 +78,11 @@ describe("refreshDeckMap", () => {
     await refreshDeckMap({ ...IN, mode: "manual" });
     expect(buildMap.mock.calls[0][3]).toEqual({ station: "見本駅" });
   });
+  it("担当者が最寄駅を直していれば、直した駅へのルートにする(@codex #707)", async () => {
+    db.appraisalDeck.findFirst.mockResolvedValue({ id: "d1", status: "draft", extracted: { station: "見本駅" }, overrides: { station: "別駅" } });
+    await refreshDeckMap({ ...IN, mode: "manual" });
+    expect(buildMap.mock.calls[0][3]).toEqual({ station: "別駅" });
+  });
   it("GPS 座標があれば住所は調べない(印は物件の建物に付く)", async () => {
     db.property.findUnique.mockResolvedValue({ gpsLat: "35.6447123", gpsLng: "139.6992456", address: "東京都架空区見本町4-5-6" });
     await refreshDeckMap({ ...IN, mode: "manual" });

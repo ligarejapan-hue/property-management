@@ -33,11 +33,12 @@ describe("parseFacilityRows", () => {
 });
 
 describe("classifyIconColor", () => {
-  it("凡例の色に近ければその種類・遠ければ null", () => {
-    expect(classifyIconColor([255, 112, 4])).toBe("コンビニ");
-    expect(classifyIconColor([185, 34, 34])).toBe("査定物件");
-    expect(classifyIconColor([128, 128, 128])).toBeNull();
-    expect(classifyIconColor(null)).toBeNull();
+  it("凡例の色に近ければその種類・遠ければ空・同じ色の種類は両方(@codex #707)", () => {
+    expect(classifyIconColor([255, 112, 4])).toEqual(["コンビニ"]);
+    expect(classifyIconColor([185, 34, 34])).toEqual(["査定物件"]);
+    expect(classifyIconColor([255, 178, 74]).sort()).toEqual(["薬局・ドラッグストア", "警察署・交番"].sort());
+    expect(classifyIconColor([128, 128, 128])).toEqual([]);
+    expect(classifyIconColor(null)).toEqual([]);
   });
 });
 
@@ -49,7 +50,7 @@ describe("locateFacilities", () => {
     lines: LINES,
     icons: [
       { ...P, rgb: SRE_ICON_COLORS["査定物件"] },
-      icon("コンビニ", -48, 24), // 150m 前後
+      icon("コンビニ", -48, 36), // 150m
       icon("コンビニ", 80, 80), // もっと遠いコンビニ
       icon("スーパー", 0, -74), // 185m 真南
       icon("薬局・ドラッグストア", 67.6, 0), // 169m 真東
@@ -63,8 +64,15 @@ describe("locateFacilities", () => {
     expect(by["スーパー"]).toMatchObject({ x: 0, y: -185 });
     expect(by["薬局・ドラッグストア"]).toMatchObject({ x: 169, y: 0 });
     expect(by["役所・公民館"]).toMatchObject({ x: 0, y: 122 });
-    expect(Math.hypot(by["コンビニ"].x!, by["コンビニ"].y!)).toBeCloseTo(134, -1);
+    expect(by["コンビニ"]).toMatchObject({ x: -120, y: 90 });
     expect(by["小学校"]).toMatchObject({ x: null, y: null }); // アイコンが無い=一覧だけ
+  });
+  it("同じ色の種類(薬局と交番)は、距離がよく合うアイコンだけに置く・薬局のアイコンが無ければ交番の場所に置かない(@codex #707)", () => {
+    const police = { x: P.x + 20, y: P.y, rgb: SRE_ICON_COLORS["警察署・交番"] }; // 50m(薬局 169m とは合わない)
+    const noPharmacy = { ...raw, icons: [...raw.icons.filter((i) => i.x !== P.x + 67.6), police] };
+    const f = locateFacilities(noPharmacy);
+    expect(f.find((x) => x.cat === "薬局・ドラッグストア")).toMatchObject({ x: null, y: null });
+    expect(f.find((x) => x.cat === "スーパー")).toMatchObject({ x: 0, y: -185 });
   });
   it("物件の印が見つからない・2つある・縮尺がそろわないときは位置なし(一覧だけ)", () => {
     expect(locateFacilities({ ...raw, icons: raw.icons.slice(1) }).every((x) => x.x === null)).toBe(true);

@@ -87,20 +87,25 @@ export function parseFacilityRows(lines: string[]): Array<Omit<DeckFacility, "x"
   return out;
 }
 
-/** アイコンの色 → 種類(凡例の色に近いもの)。遠ければ null。 */
-export function classifyIconColor(rgb: [number, number, number] | null): string | null {
-  if (!rgb) return null;
-  let best: string | null = null;
-  let bd = Infinity;
-  for (const [k, c] of Object.entries(SRE_ICON_COLORS)) {
-    const d = Math.hypot(c[0] - rgb[0], c[1] - rgb[1], c[2] - rgb[2]);
-    if (d < bd) {
-      bd = d;
-      best = k;
-    }
-  }
-  return bd <= 40 ? best : null;
+/**
+ * アイコンの色 → 当てはまる種類(凡例の色に近いもの)。遠ければ空。
+ * ⚠凡例で同じ色の種類がある(薬局・ドラッグストアと警察署・交番)。その場合は両方を返し、
+ *   どちらの施設かは表の距離で決める(@codex #707)。
+ */
+export function classifyIconColor(rgb: [number, number, number] | null): string[] {
+  if (!rgb) return [];
+  const ds = Object.entries(SRE_ICON_COLORS).map(([k, c]) => [k, Math.hypot(c[0] - rgb[0], c[1] - rgb[1], c[2] - rgb[2])] as const);
+  const bd = Math.min(...ds.map(([, d]) => d));
+  if (bd > 40) return [];
+  return ds.filter(([, d]) => d - bd < 1).map(([k]) => k);
 }
+
+/** 凡例で色が同じ種類を持つか(=色だけでは見分けられない)。 */
+const AMBIGUOUS = new Set(
+  Object.entries(SRE_ICON_COLORS)
+    .filter(([k, c]) => Object.entries(SRE_ICON_COLORS).some(([k2, c2]) => k2 !== k && c2.every((v, i) => v === c[i])))
+    .map(([k]) => k),
+);
 
 const median = (xs: number[]) => {
   const s = [...xs].sort((a, b) => a - b);
@@ -110,16 +115,18 @@ const median = (xs: number[]) => {
 /** 表の行と地図のアイコンから、施設の位置(物件から東西 x・南北 y の m)を求める。 */
 export function locateFacilities(raw: FacilityPageRaw): DeckFacility[] {
   const rows = parseFacilityRows(raw.lines);
-  const icons = raw.icons.map((i) => ({ ...i, cat: classifyIconColor(i.rgb) }));
-  const props = icons.filter((i) => i.cat === PROPERTY_MARK);
+  const icons = raw.icons.map((i, idx) => ({ ...i, idx, cats: classifyIconColor(i.rgb) }));
+  const props = icons.filter((i) => i.cats.length === 1 && i.cats[0] === PROPERTY_MARK);
   const none = rows.map((r) => ({ ...r, x: null, y: null }));
   if (rows.length === 0 || props.length !== 1) return none;
   const P = props[0];
   const pd = (i: { x: number; y: number }) => Math.hypot(i.x - P.x, i.y - P.y);
   // 縮尺(1点あたりの m)= 表の距離 ÷ 同じ種類で一番近いアイコンまでの点の数。種類ごとの値がそろっていること
+  // 縮尺は色で見分けられる種類だけで求める
   const ratios = rows
+    .filter((r) => !AMBIGUOUS.has(r.cat))
     .map((r) => {
-      const ds = icons.filter((i) => i.cat === r.cat).map(pd).filter((d) => d > 0.5);
+      const ds = icons.filter((i) => i.cats.length === 1 && i.cats[0] === r.cat).map(pd).filter((d) => d > 0.5);
       return ds.length ? r.dist / Math.min(...ds) : null;
     })
     .filter((v): v is number => v !== null && Number.isFinite(v));
@@ -128,19 +135,29 @@ export function locateFacilities(raw: FacilityPageRaw): DeckFacility[] {
   const agree = ratios.filter((v) => Math.abs(v - sc) / sc < 0.1).length;
   if (agree < Math.max(3, ratios.length * 0.6)) return none;
 
-  return rows.map((r) => {
-    const cand = icons.filter((i) => i.cat === r.cat);
-    let best: (typeof cand)[number] | null = null;
+  // 色で見分けられる種類から先に決め、使ったアイコンは他の施設に使わない。同じ色の種類は、残ったアイコンのうち
+  // 距離がよく合うもの(誤差 10m か 8% 以内)だけ=合わなければ位置なし(違う施設の場所に置かない)
+  const used = new Set<number>();
+  const pos = new Map<number, { x: number; y: number }>();
+  const order = rows.map((r, i) => i).sort((a, b) => Number(AMBIGUOUS.has(rows[a].cat)) - Number(AMBIGUOUS.has(rows[b].cat)));
+  for (const ri of order) {
+    const r = rows[ri];
+    const amb = AMBIGUOUS.has(r.cat);
+    let best: (typeof icons)[number] | null = null;
     let err = Infinity;
-    for (const c of cand) {
+    for (const c of icons) {
+      if (used.has(c.idx) || !c.cats.includes(r.cat)) continue;
       const e = Math.abs(pd(c) * sc - r.dist);
       if (e < err) {
         err = e;
         best = c;
       }
     }
-    if (!best || err > Math.max(15, r.dist * 0.15)) return { ...r, x: null, y: null };
+    const tol = amb ? Math.max(10, r.dist * 0.08) : Math.max(15, r.dist * 0.15);
+    if (!best || err > tol) continue;
+    used.add(best.idx);
     // PDF の y は上向き=北が + のまま
-    return { ...r, x: Math.round((best.x - P.x) * sc), y: Math.round((best.y - P.y) * sc) };
-  });
+    pos.set(ri, { x: Math.round((best.x - P.x) * sc), y: Math.round((best.y - P.y) * sc) });
+  }
+  return rows.map((r, i) => ({ ...r, x: pos.get(i)?.x ?? null, y: pos.get(i)?.y ?? null }));
 }
