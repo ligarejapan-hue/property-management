@@ -36,9 +36,15 @@ async function loadDeckOrThrow(propertyId: string, deckId: string) {
   // 周辺地図(2026-11-11)は大きいので中身は読まず、あるかどうかと物件に座標があるかどうかだけ返す(座標の値は返さない)。
   const [mapCount, property] = await Promise.all([
     prisma.appraisalDeck.count({ where: { id: deck.id, mapData: { not: Prisma.DbNull } } }),
-    prisma.property.findUnique({ where: { id: propertyId }, select: { gpsLat: true, gpsLng: true } }),
+    prisma.property.findUnique({ where: { id: propertyId }, select: { gpsLat: true, gpsLng: true, address: true } }),
   ]);
-  return { ...deck, hasMap: mapCount > 0, hasLocation: property?.gpsLat != null && property?.gpsLng != null };
+  // GPS 座標がなくても住所があれば住所から地図を作れる(2026-11-11)。住所そのものは返さない。
+  return {
+    ...deck,
+    hasMap: mapCount > 0,
+    hasLocation: property?.gpsLat != null && property?.gpsLng != null,
+    hasAddress: !!property?.address?.trim(),
+  };
 }
 
 function view(deck: Awaited<ReturnType<typeof loadDeckOrThrow>>) {

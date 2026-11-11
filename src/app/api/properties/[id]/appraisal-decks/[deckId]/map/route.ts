@@ -19,7 +19,7 @@ export async function POST(_request: Request, { params }: { params: Promise<{ id
     if (r.ok) return apiResponse({ result: "ok", buildings: r.buildings });
     if (r.reason === "not_found") throw new ApiError(404, "資料が見つかりません", "NOT_FOUND");
     if (r.reason === "no_location") {
-      throw new ApiError(422, "物件の GPS 座標が登録されていないため、地図を作れません。物件の基本情報で位置を登録してください", "NO_LOCATION");
+      throw new ApiError(422, "物件の位置を求められませんでした(GPS 座標がなく、住所からも見つかりません)。物件の基本情報で緯度・経度を登録してください", "NO_LOCATION");
     }
     throw new ApiError(502, "国土地理院の地図データを取得できませんでした。少し時間をおいてもう一度お試しください", "MAP_FETCH_FAILED");
   } catch (error) {

@@ -3,7 +3,7 @@
  */
 import { describe, it, expect, vi, beforeEach } from "vitest";
 
-const { db, audit, fetchTiles, buildMap } = vi.hoisted(() => ({
+const { db, audit, fetchTiles, buildMap, geocode } = vi.hoisted(() => ({
   db: {
     appraisalDeck: { findFirst: vi.fn(), count: vi.fn(), updateMany: vi.fn() },
     property: { findUnique: vi.fn() },
@@ -11,7 +11,9 @@ const { db, audit, fetchTiles, buildMap } = vi.hoisted(() => ({
   audit: vi.fn(),
   fetchTiles: vi.fn(),
   buildMap: vi.fn(),
+  geocode: vi.fn(),
 }));
+vi.mock("../map/geocode", () => ({ geocodeAddress: geocode }));
 vi.mock("@/lib/prisma", () => ({ default: db }));
 vi.mock("@/lib/audit", () => ({ writeAuditLog: audit }));
 vi.mock("../map/build", async (orig) => ({
@@ -33,6 +35,7 @@ beforeEach(() => {
   db.property.findUnique.mockResolvedValue({ gpsLat: "35.6447123", gpsLng: "139.6992456" });
   fetchTiles.mockResolvedValue([]);
   buildMap.mockReturnValue(MAP);
+  geocode.mockResolvedValue(null);
 });
 
 describe("refreshDeckMap", () => {
@@ -42,7 +45,7 @@ describe("refreshDeckMap", () => {
     expect(fetchTiles.mock.calls[0][0]).toEqual({ lat: 35.6447123, lng: 139.6992456 });
     expect(db.appraisalDeck.updateMany).toHaveBeenCalledWith({
       where: { id: "d1" },
-      data: { mapData: MAP, updatedBy: "u1", status: "draft", confirmedBy: null, confirmedAt: null },
+      data: { mapData: { ...MAP, loc: "gps" }, updatedBy: "u1", status: "draft", confirmedBy: null, confirmedAt: null },
     });
     expect(audit).toHaveBeenCalledWith(
       expect.objectContaining({ action: "appraisal_deck_map_build", targetTable: "appraisal_decks", targetId: "d1" }),
@@ -60,7 +63,7 @@ describe("refreshDeckMap", () => {
     db.appraisalDeck.updateMany.mockResolvedValueOnce({ count: 0 });
     expect(await refreshDeckMap({ ...IN, mode: "auto" })).toEqual({ ok: false, reason: "not_draft" });
     const arg = db.appraisalDeck.updateMany.mock.calls[0][0];
-    expect(arg.data).toEqual({ mapData: MAP });
+    expect(arg.data).toEqual({ mapData: { ...MAP, loc: "gps" } });
     expect(arg.where.id).toBe("d1");
     expect(arg.where.status).toBe("draft");
     expect(arg.where.mapData).toBeDefined();
@@ -71,10 +74,29 @@ describe("refreshDeckMap", () => {
     expect(fetchTiles).not.toHaveBeenCalled();
     expect(db.appraisalDeck.updateMany).not.toHaveBeenCalled();
   });
-  it("座標がない・おかしいときは作らない", async () => {
-    db.property.findUnique.mockResolvedValue({ gpsLat: null, gpsLng: null });
+  it("GPS 座標があれば住所は調べない(印は物件の建物に付く)", async () => {
+    db.property.findUnique.mockResolvedValue({ gpsLat: "35.6447123", gpsLng: "139.6992456", address: "東京都架空区見本町4-5-6" });
+    await refreshDeckMap({ ...IN, mode: "manual" });
+    expect(geocode).not.toHaveBeenCalled();
+    expect(db.appraisalDeck.updateMany.mock.calls[0][0].data.mapData).toMatchObject({ loc: "gps", p: 0 });
+  });
+  it("GPS 座標がなければ住所から求めて作る(目安=物件の建物は塗らない・物件の座標には保存しない・2026-11-11)", async () => {
+    db.property.findUnique.mockResolvedValue({ gpsLat: null, gpsLng: null, address: "東京都架空区見本町4-5-6" });
+    geocode.mockResolvedValue({ lat: 35.65, lng: 139.7 });
+    expect(await refreshDeckMap({ ...IN, mode: "manual" })).toEqual({ ok: true, buildings: 1 });
+    expect(geocode.mock.calls[0][0]).toBe("東京都架空区見本町4-5-6");
+    expect(fetchTiles.mock.calls[0][0]).toEqual({ lat: 35.65, lng: 139.7 });
+    expect(db.appraisalDeck.updateMany.mock.calls[0][0].data.mapData).toMatchObject({ loc: "address", p: -1 });
+    expect(db.property).not.toHaveProperty("update");
+    const logged = JSON.stringify(audit.mock.calls);
+    expect(logged).toContain('"loc":"address"');
+    expect(logged).not.toContain("見本町");
+    expect(logged).not.toContain("35.65");
+  });
+  it("座標がなく、住所からも求められないときは作らない", async () => {
+    db.property.findUnique.mockResolvedValue({ gpsLat: null, gpsLng: null, address: "東京都架空区見本町4-5-6" });
     expect(await refreshDeckMap({ ...IN, mode: "manual" })).toEqual({ ok: false, reason: "no_location" });
-    db.property.findUnique.mockResolvedValue({ gpsLat: "0", gpsLng: "0" });
+    db.property.findUnique.mockResolvedValue({ gpsLat: "0", gpsLng: "0", address: "" });
     expect(await refreshDeckMap({ ...IN, mode: "manual" })).toEqual({ ok: false, reason: "no_location" });
     expect(fetchTiles).not.toHaveBeenCalled();
     expect(db.appraisalDeck.updateMany).not.toHaveBeenCalled();
@@ -101,5 +123,7 @@ describe("parseDeckMapData(資料に入れる前の形の確認)", () => {
     expect(parseDeckMapData({ ...MAP, version: 2 })).toBeNull();
     expect(parseDeckMapData({ ...MAP, b: [["<img>"]] })).toBeNull();
     expect(parseDeckMapData({ ...MAP, lat: 35.6 })).toBeNull();
+    expect(parseDeckMapData({ ...MAP, loc: "address" })).toMatchObject({ loc: "address" });
+    expect(parseDeckMapData({ ...MAP, loc: "<x>" })).toBeNull();
   });
 });

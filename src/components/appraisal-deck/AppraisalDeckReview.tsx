@@ -28,6 +28,8 @@ interface DeckDetail {
   hasMap?: boolean;
   /** 物件に GPS 座標があるか(値は持たない)。 */
   hasLocation?: boolean;
+  /** 物件に住所があるか(GPS 座標がなくても住所から地図を作れる・値は持たない)。 */
+  hasAddress?: boolean;
 }
 
 const WARN: Record<string, string> = {
@@ -434,13 +436,15 @@ export function AppraisalDeckReview({ propertyId, deckId, canWrite }: { property
           {deck.hasMap
             ? "地図が入っています。物件の位置に印が立ちます（お客様にも位置がわかります）。"
             : deck.hasLocation
-              ? "まだ地図がありません。「地図を作り直す」で作れます。"
-              : "物件の GPS 座標が登録されていないため、地図を作れません（地図のページなしで表示します）。"}
+              ? "まだ地図がありません。「地図を作る」で作れます。"
+              : deck.hasAddress
+                ? "物件の GPS 座標がないため、「地図を作る」で住所から位置を求めて作ります（位置は目安です）。"
+                : "物件の GPS 座標も住所もないため、地図を作れません（地図のページなしで表示します）。"}
         </p>
         <p className="mt-1 text-xs text-gray-500 dark:text-gray-400">
           国土地理院の地図データ（無料）から作ります。建物の高さはイメージです。作り直すと資料は確認待ちに戻ります。
         </p>
-        {canWrite && deck.hasLocation ? (
+        {canWrite && (deck.hasLocation || deck.hasAddress) ? (
           <div className="mt-2">
             <Button variant="secondary" size="sm" onClick={rebuildMap} disabled={busy}>
               <MapIcon className="h-4 w-4" aria-hidden />
