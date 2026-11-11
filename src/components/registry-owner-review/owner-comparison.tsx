@@ -96,6 +96,8 @@ export default function OwnerComparison({ systemOwners, registryOwners, registry
           const reg = row.registryIndex !== null ? registryOwners[row.registryIndex] : null;
           const addr = sys?.address && reg?.address ? diffChars(sys.address, reg.address) : null;
           const replaced = row.status === "differs" && (sys?.willBeRemoved || reg?.willBeAdded);
+          // 外字の組は直してもシステムの人を残す(計画が外さない・足さない=2026-11-11 昼)
+          const keptGaiji = row.status === "differs" && !replaced && row.pairKinds.includes("gaiji");
           return (
             <li
               key={`${row.systemIndex ?? "-"}:${row.registryIndex ?? "-"}`}
@@ -142,6 +144,10 @@ export default function OwnerComparison({ systemOwners, registryOwners, registry
                 <RowMark row={row} />
                 {replaced ? (
                   <p className="mt-0.5 text-gray-500 dark:text-gray-400">直すと、この人を入れ替えます</p>
+                ) : keptGaiji ? (
+                  <p className="mt-0.5 text-gray-500 dark:text-gray-400">
+                    直しても、システムの名前のまま残します（謄本の字が読めないため）
+                  </p>
                 ) : null}
               </div>
             </li>

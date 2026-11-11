@@ -9,6 +9,7 @@
 import { normalizeName as importNormalizeName } from "@/lib/normalize";
 import { foldNameVariants } from "@/lib/deals/crosscheck";
 import { hasPrivateUseChar } from "@/lib/private-use-char";
+import { ownerDiff } from "@/lib/registry-owner-check/diff";
 
 export type RegistryOwnerCheckResult =
   | "same"
@@ -88,30 +89,61 @@ export interface OwnerReplacementPlan {
 /**
  * 「謄本の名義に直す」で何を外して何を足すか。名前は照合と同じそろえ方で比べる。
  * ⚠表記の違いだけの人は外さない・足さない(同じ人として残す=二重に登録しない)。
+ * ⚠外字の組(名義の確認で「≠ 外字（読めない字）」と並ぶ2人)は、システムの人をそのまま残し、
+ *   謄本の外字の名前は足さない(2026-11-11 昼 実機確認)。外字はどの字か分からず、直すと
+ *   正しい名前の人が外れて外字の名前の人が残っていた。外字の名前どうしもそろえて同じにしない
+ *   (組にならなかった外字の名前のシステムの人は、今までどおり外す)。
  */
 export function planOwnerReplacement(
   registryOwners: readonly RegistryOwnerEntry[],
   linked: readonly LinkedOwnerEntry[],
 ): OwnerReplacementPlan {
+  const gaiji = gaijiPairs(registryOwners, linked);
+  const matchKey = (name: string) => (hasPrivateUseChar(name) ? "" : ownerNameKey(name));
   const registryKeys = keySet(
     registryOwners.map((o) => o.name),
-    ownerNameKey,
+    matchKey,
   );
   const linkedKeys = new Set<string>();
   const keepOwnerIds: string[] = [];
   const removeOwnerIds: string[] = [];
-  for (const l of linked) {
-    const k = ownerNameKey(l.name);
-    if (k.length > 0 && registryKeys.has(k)) {
+  linked.forEach((l, i) => {
+    const k = matchKey(l.name);
+    if (gaiji.systemIndexes.has(i)) {
+      keepOwnerIds.push(l.ownerId);
+    } else if (k.length > 0 && registryKeys.has(k)) {
       keepOwnerIds.push(l.ownerId);
       linkedKeys.add(k);
     } else {
       removeOwnerIds.push(l.ownerId);
     }
-  }
-  const add = registryOwners.filter((o) => {
+  });
+  const add = registryOwners.filter((o, i) => {
+    if (gaiji.registryIndexes.has(i) || gaiji.registryKeys.has(ownerNameKey(o.name))) return false;
     const k = ownerNameKey(o.name);
     return k.length > 0 && !linkedKeys.has(k);
   });
   return { keepOwnerIds, removeOwnerIds, add };
+}
+
+/** 名義の確認の並べ方(ownerDiff)で、外字の組になった2人の位置。外字の無い物件では空。 */
+function gaijiPairs(
+  registryOwners: readonly RegistryOwnerEntry[],
+  linked: readonly LinkedOwnerEntry[],
+): { systemIndexes: Set<number>; registryIndexes: Set<number>; registryKeys: Set<string> } {
+  const out = { systemIndexes: new Set<number>(), registryIndexes: new Set<number>(), registryKeys: new Set<string>() };
+  if (![...registryOwners, ...linked].some((o) => hasPrivateUseChar(o.name))) return out;
+  const rows = ownerDiff(
+    registryOwners.map((o) => o.name),
+    linked.map((l) => l.name),
+  ).rows;
+  for (const r of rows) {
+    if (r.status !== "differs" || r.systemIndex === null || r.registryIndex === null) continue;
+    if (!r.pairKinds.includes("gaiji")) continue;
+    out.systemIndexes.add(r.systemIndex);
+    out.registryIndexes.add(r.registryIndex);
+    // 謄本に同じ人が2回載っている(持分の行)ときの2回目も足さない
+    out.registryKeys.add(ownerNameKey(registryOwners[r.registryIndex].name));
+  }
+  return out;
 }
