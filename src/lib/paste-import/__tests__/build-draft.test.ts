@@ -264,6 +264,23 @@ describe("値を解釈できなかった欄は、捨てても黙りもしない�
     expect(d.noteFromUnmapped).toContain("未定");
   });
 
+  it.each([
+    ["更地", "vacant_land"],
+    ["現況：更地", "vacant_land"],
+    ["古家あり", "old_house"],
+    ["古屋有り", "old_house"],
+    ["古家付き", "old_house"],
+    ["空き家", "vacant"],
+  ])("★土地の現況(2026-11-11): %s → %s(空き家は建物がある=更地にしない)", (text, value) => {
+    const d = buildPasteDraft("■物件所在地： 東京都A区B1-2-3" + NLL + "■現況： " + text);
+    expect(d.property.occupancyStatus.value).toBe(value);
+  });
+
+  it("★更地を含むだけの文は決めない(許可リストは値の全体で合わせる)", () => {
+    const d = buildPasteDraft("■物件所在地： 東京都A区B1-2-3" + NLL + "■現況： 来年更地にする予定");
+    expect(d.property.occupancyStatus.value).not.toBe("vacant_land");
+  });
+
   it("★読み取れた値では警告も備考行も作らない（過剰に出していない）", () => {
     const d = buildPasteDraft(
       "■物件所在地： 東京都A区B1-2-3" + NLL + "■建物（専有）面積： 70 平米" + NLL + "■築年（西暦）： 2013 年",

@@ -1202,16 +1202,16 @@ describe("区分マンション専用の欄は種別に合うときだけ保存�
     property: { ...baseBody.property, propertyType, ...unitFields },
   });
 
-  it("★種別が land なら、部屋番号も専有面積も間取りも現況も null で保存される", async () => {
+  it("★種別が land なら、部屋番号も専有面積も間取りも null で保存される(現況は土地でも残す・2026-11-11)", async () => {
     // 物件詳細は区分のときしかこれらを描かず、通常の編集画面(updatePropertySchema)にも
-    // 無い＝**見えず直せないデータ**になる。
+    // 無い＝**見えず直せないデータ**になる。現況は土地の編集画面・物件詳細にも出す。
     const res = await POST(req(withType("land")));
     expect(res.status).toBe(200);
     expect(created.property?.[0]).toMatchObject({
       roomNo: null,
       exclusiveArea: null,
       layoutType: null,
-      occupancyStatus: null,
+      occupancyStatus: "occupied",
     });
   });
 

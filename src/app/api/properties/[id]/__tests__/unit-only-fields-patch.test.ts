@@ -162,6 +162,33 @@ describe("PATCH /api/properties/[id] — 区分専用の欄", () => {
     expect(data).not.toHaveProperty("occupancyStatus");
   });
 
+  it("土地なら現況(更地・古屋あり)は保存し、ほかの区分専用の欄は null(2026-11-11)", async () => {
+    prismaMock.property.findUnique.mockResolvedValue({ ...CURRENT, propertyType: "land", buildingId: null, roomNo: null, floorNo: null, occupancyStatus: null });
+    const res = await PATCH(req({ version: 1, occupancyStatus: "vacant_land", roomNo: "305" }), ctx);
+    expect(res.status).toBe(200);
+    expect(sentData()).toMatchObject({ occupancyStatus: "vacant_land", roomNo: null });
+  });
+
+  it("種別を土地へ変えたら、現況は残し、ほかの区分専用の欄は消す", async () => {
+    applyMock.mockResolvedValue({ action: "unlinked", building: null, previousBuildingId: "b1", renamedFrom: null, warnings: [] });
+    await PATCH(req({ version: 1, propertyType: "land" }), ctx);
+    const data = sentData();
+    expect(data).not.toHaveProperty("occupancyStatus");
+    expect(data.roomNo).toBeNull();
+    expect(data.ownershipShareNote).toBeNull();
+  });
+
+  it("土地(更地)を区分マンションへ変えたら、土地だけの現況は消す(区分に更地を残さない)", async () => {
+    prismaMock.property.findUnique.mockResolvedValue({ ...CURRENT, propertyType: "land", buildingId: null, roomNo: null, floorNo: null, occupancyStatus: "vacant_land" });
+    await PATCH(req({ version: 1, propertyType: "apartment_unit" }), ctx);
+    expect(sentData().occupancyStatus).toBeNull();
+  });
+
+  it("区分マンションへ送られた更地・古屋ありは保存しない(null)", async () => {
+    await PATCH(req({ version: 1, occupancyStatus: "old_house" }), ctx);
+    expect(sentData().occupancyStatus).toBeNull();
+  });
+
   it("区分専用の欄に触れない保存では何も足さない", async () => {
     await PATCH(req({ version: 1, note: "メモだけ" }), ctx);
     expect(sentData()).not.toHaveProperty("roomNo");

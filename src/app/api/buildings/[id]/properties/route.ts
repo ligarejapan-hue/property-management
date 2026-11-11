@@ -1,7 +1,7 @@
 import { NextRequest } from "next/server";
 import { z } from "zod";
 import { clearOnlyRealEstateNumber } from "@/lib/validators";
-import { OCCUPANCY_STATUS_VALUES } from "@/lib/property-types";
+import { BUILDING_OCCUPANCY_VALUES } from "@/lib/property-types";
 import prisma from "@/lib/prisma";
 import {
   getApiSession,
@@ -28,7 +28,8 @@ const createUnitSchema = z.object({
   orientation: z.string().optional(),
   managementFee: z.number().int().optional(),
   repairReserveFee: z.number().int().optional(),
-  occupancyStatus: z.enum(OCCUPANCY_STATUS_VALUES).optional(),
+  // 棟の部屋(区分マンション)=更地・古屋ありは選べない。
+  occupancyStatus: z.enum(BUILDING_OCCUPANCY_VALUES).optional(),
   ownershipShareNote: z.string().optional(),
   // ⚠ここは**物件(Property)を作る**口(棟の中の部屋)。手入力の禁止は
   //   物件の新規作成/物件化/編集と**同じ定義元**を使う(@codex #420 R3 P2:

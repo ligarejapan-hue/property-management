@@ -23,10 +23,11 @@ import {
   normalizeBuildingName,
   normalizeUnitOnlyFields,
   supportsBuildingName,
-  supportsUnitFields,
+  supportsUnitOnlyField,
   UNIT_ONLY_PROPERTY_FIELDS,
 } from "@/lib/property-building-name";
 import { applyDisplayToOwner } from "@/lib/display-level";
+import { occupancyFitsType } from "@/lib/property-types";
 import {
   applyBuildingLink,
   finalBuildingFields,
@@ -451,7 +452,15 @@ export async function PATCH(
     const unitOnlySent: Record<string, unknown> = {};
     for (const k of UNIT_ONLY_PROPERTY_FIELDS) {
       if (k in updateFields) unitOnlySent[k] = (updateFields as Record<string, unknown>)[k];
-      else if (updateFields.propertyType !== undefined && !supportsUnitFields(effectiveType)) unitOnlySent[k] = null;
+      else if (updateFields.propertyType !== undefined && !supportsUnitOnlyField(effectiveType, k)) unitOnlySent[k] = null;
+    }
+    // 種別を変えたとき、土地だけの現況(更地・古屋あり)が土地以外に残らないようにする(区分マンションへ変えたときも)。
+    if (
+      updateFields.propertyType !== undefined &&
+      !("occupancyStatus" in unitOnlySent) &&
+      !occupancyFitsType(effectiveType, current.occupancyStatus)
+    ) {
+      unitOnlySent.occupancyStatus = null;
     }
     const unitOnlyPatch = normalizeUnitOnlyFields(effectiveType, unitOnlySent) as Partial<typeof updateFields>;
     // 除外申請: 申請中にしたら申請した日(無ければ今日)・結果を入れたら結果の日(無ければ今日)・

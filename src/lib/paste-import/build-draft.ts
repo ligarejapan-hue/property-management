@@ -146,8 +146,21 @@ const OCCUPANCY_ALLOWLIST: Record<"vacant" | "occupied" | "rented", RegExp[]> = 
   ],
 };
 
+/**
+ * 土地の現況(更地・古屋あり・2026-11-11)。値の全体がこのとおりのときだけ決める。
+ * ⚠「空家」「空き家」は建物がある=更地にしない(今までどおり空室)。
+ */
+const LAND_OCCUPANCY_ALLOWLIST: Record<"vacant_land" | "old_house", RegExp> = {
+  vacant_land: new RegExp(`^${NOW}更地$`),
+  old_house: new RegExp(`^${NOW}古(屋|家)(あり|有り|有|付き|付)$`),
+};
+
 /** 現況の言い換え → OccupancyStatus。許可リストに合う書き方だけ決める(それ以外は null)。 */
 function occupancyFor(raw: string): string | null {
+  const compact = raw.replace(/[\s　]/g, "");
+  for (const [value, re] of Object.entries(LAND_OCCUPANCY_ALLOWLIST)) {
+    if (re.test(compact)) return value;
+  }
   const judged = occupancyJudge(raw);
   if (judged !== "vacant" && judged !== "occupied" && judged !== "rented") return judged;
   const s = raw.replace(/[\s　]/g, "");

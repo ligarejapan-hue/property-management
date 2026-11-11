@@ -53,10 +53,23 @@ describe("編集の欄", () => {
       expect(fields.find((f) => f.key === "ownershipShareNote")?.label).toBe("持分メモ");
     }
   });
-  it("区分マンション以外には現況・持分メモを出さない", () => {
-    for (const type of ["land", "house", "apartment_building"]) {
+  it("戸建・一棟には現況・持分メモを出さない", () => {
+    for (const type of ["house", "apartment_building"]) {
       expect(salesFieldsFor(type).some((f) => f.key === "occupancyStatus" || f.key === "ownershipShareNote")).toBe(false);
     }
+  });
+  it("土地には現況(更地・古屋あり・賃貸中・不明)を出し、持分メモは出さない(2026-11-11)", () => {
+    const fields = salesFieldsFor("land");
+    const occ = fields.find((f) => f.key === "occupancyStatus");
+    expect(occ?.label).toBe("現況");
+    expect(occ?.options?.map((o) => o.label)).toEqual(["(未設定)", "更地", "古屋あり", "賃貸中", "不明"]);
+    expect(fields.some((f) => f.key === "ownershipShareNote")).toBe(false);
+  });
+  it("土地に前から入っている値(空室など)は日本語の名前のまま末尾に残す", () => {
+    const occ = salesFieldsFor("land", { occupancy: "vacant" }).find((f) => f.key === "occupancyStatus");
+    expect(occ?.options?.at(-1)).toEqual({ value: "vacant", label: "空室" });
+    const unit = salesFieldsFor("apartment_unit", { occupancy: "vacant_land" }).find((f) => f.key === "occupancyStatus");
+    expect(unit?.options?.at(-1)).toEqual({ value: "vacant_land", label: "更地" });
   });
   it("部屋番号は基本の欄にあり、区分マンション(新旧)のときだけ出す", () => {
     expect(formSrc).toMatch(/\{ key: "roomNo", label: "部屋番号", type: "text", section: "基本", maxLength: 50 \}/);

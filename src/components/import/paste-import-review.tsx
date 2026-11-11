@@ -18,7 +18,7 @@ import Link from "next/link";
 import type { DraftWarningCode, PasteDraft } from "@/lib/paste-import/types";
 import { goesToOwnerNote } from "@/lib/paste-import/paste-owner-note";
 import { CUSTOMER_AREA_HINT } from "@/lib/paste-import/customer-area";
-import { OCCUPANCY_STATUS_OPTIONS, PROPERTY_TYPE_OPTIONS } from "@/lib/property-types";
+import { occupancyOptionsFor, PROPERTY_TYPE_OPTIONS } from "@/lib/property-types";
 import { Button } from "@/components/ui/button";
 import BuildingNameCombobox from "@/components/buildings/building-name-combobox";
 import type { BuildingChoice } from "@/lib/building-link/resolve";
@@ -130,7 +130,6 @@ export function ownerCandidateLabel(c: OwnerCandidateSummary): string {
   return `${c.name}（${parts.join(" / ")}）`;
 }
 
-const OCCUPANCY_OPTIONS = OCCUPANCY_STATUS_OPTIONS;
 
 /** 欄の並び（設計書のサンプルに合わせた順）。 */
 const PROPERTY_FIELD_LABELS: { key: PropertyFieldKey; label: string }[] = [
@@ -668,7 +667,7 @@ export function PasteImportReview({
                       ["land", "house", "apartment_unit", "apartment_building", "apartment_block", "store", "office", "warehouse", "factory", "parking", "other", "unknown"].includes(o.value),
                     )
                   : f.key === "occupancyStatus"
-                    ? OCCUPANCY_OPTIONS
+                    ? occupancyOptionsFor(pValues.propertyType, pValues.occupancyStatus)
                     : undefined
               }
             />

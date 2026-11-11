@@ -8,6 +8,7 @@ import {
   normalizeCaseStatusInput,
   normalizeIntroductionRouteInput,
   normalizeOccupancyInput,
+  occupancyFitsType,
   OCCUPANCY_STATUS_VALUES,
   PROPERTY_TYPE_JP_TO_VALUE,
   PROPERTY_TYPE_VALUES,
@@ -259,7 +260,8 @@ export function buildPropertyCreateData(
   if (!isNaN(intOf(mapped.managementFee))) createData.managementFee = intOf(mapped.managementFee);
   if (!isNaN(intOf(mapped.repairReserveFee))) createData.repairReserveFee = intOf(mapped.repairReserveFee);
   const occupancy = normalizeOccupancyInput(mapped.occupancyStatus);
-  if (occupancy && VALID_OCCUPANCY_STATUS.includes(occupancy)) {
+  // 更地・古屋ありは土地だけ(2026-11-11)。
+  if (occupancy && VALID_OCCUPANCY_STATUS.includes(occupancy) && occupancyFitsType(String(createData.propertyType ?? propertyType), occupancy)) {
     createData.occupancyStatus = occupancy;
   }
   if (mapped.ownershipShareNote) createData.ownershipShareNote = mapped.ownershipShareNote;

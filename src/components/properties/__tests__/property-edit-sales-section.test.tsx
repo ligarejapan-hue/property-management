@@ -4,7 +4,7 @@ import { salesFieldsFor, allSalesFields } from "../property-edit-form";
 describe("salesFieldsFor — 種別ごとに出す欄", () => {
   it("土地", () => {
     expect(salesFieldsFor("land").map((f) => f.key)).toEqual([
-      "salePrice", "access", "landArea", "landAreaMethod",
+      "salePrice", "access", "landArea", "landAreaMethod", "occupancyStatus",
     ]);
   });
   it("戸建", () => {

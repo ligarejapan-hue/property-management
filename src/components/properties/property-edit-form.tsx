@@ -4,7 +4,7 @@ import { useState, useEffect, useMemo } from "react";
 import { X, Save, AlertTriangle } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { USE_MOCK, fetchUsers, apiErrorCode, codeFromErrorBody } from "@/lib/api-client";
-import { OCCUPANCY_STATUS_OPTIONS, PROPERTY_TYPE_OPTIONS } from "@/lib/property-types";
+import { occupancyOptionsFor, PROPERTY_TYPE_OPTIONS } from "@/lib/property-types";
 import { PROPERTY_BUSINESS_TYPE_OPTIONS } from "@/lib/property-business-type";
 import {
   BUILDING_NAME_MAX_LENGTH,
@@ -300,9 +300,14 @@ const SALE_TAX_TYPE_OPTIONS = [
 
 export function salesFieldsFor(
   propertyType: string,
-  opts: { hasBuilding?: boolean } = {},
+  opts: { hasBuilding?: boolean; occupancy?: string } = {},
 ): FormField[] {
   const hasBuilding = opts.hasBuilding ?? true;
+  // 現況の選択肢は種別で変わる(土地=更地・古屋あり・賃貸中・不明・2026-11-11)。今の値は日本語の名前のまま残す。
+  const occupancy: FormField = { key: "occupancyStatus", label: "現況", type: "select", section: "販売", options: [
+    { value: "", label: "(未設定)" },
+    ...occupancyOptionsFor(propertyType, opts.occupancy),
+  ] };
   const price: FormField[] = [
     { key: "salePrice", label: "価格(円)", type: "number", section: "販売" },
   ];
@@ -327,7 +332,7 @@ export function salesFieldsFor(
   ];
   switch (propertyType) {
     case "land":
-      return [...price, ...access, ...land];
+      return [...price, ...access, ...land, occupancy];
     case "house":
       return [...price, ...tax, ...access, ...land, ...buildingBody];
     case "apartment_building":
@@ -351,10 +356,7 @@ export function salesFieldsFor(
         { key: "floorNo", label: "所在階", type: "number", section: "販売" },
         { key: "managementFee", label: "管理費(円/月)", type: "number", section: "販売" },
         { key: "repairReserveFee", label: "修繕積立金(円/月)", type: "number", section: "販売" },
-        { key: "occupancyStatus", label: "現況", type: "select", section: "販売", options: [
-          { value: "", label: "(未設定)" },
-          ...OCCUPANCY_STATUS_OPTIONS,
-        ] },
+        occupancy,
         { key: "ownershipShareNote", label: "持分メモ", type: "text", section: "販売" },
         { key: "parking", label: "駐車場", type: "text", section: "販売" },
         // 棟に紐づいていない区分は、棟の項目を物件の欄として入れる。
@@ -575,6 +577,7 @@ export default function PropertyEditForm({
   //   フォールバックする(初回描画のちらつき防止)。
   const salesFields = salesFieldsFor(values.propertyType ?? property.propertyType, {
     hasBuilding: property.building != null,
+    occupancy: values.occupancyStatus,
   });
   const allFields = [
     ...FORM_FIELDS.filter((f) => f.key !== "inquirerName" || canEditInquirer),

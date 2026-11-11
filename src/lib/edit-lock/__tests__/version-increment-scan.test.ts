@@ -44,7 +44,7 @@ const VERSIONED: Record<string, string> = {
     "owner(target) の version のみ進める(付け替え先のinvalidation)",
   "src/app/api/admin/owners/correction/mislink/route.ts:545":
     "property の version のみ進める(付け替えのinvalidation)",
-  "src/app/api/import/csv/route.ts:613":
+  "src/app/api/import/csv/route.ts:615":
     "property の UPDATABLE_PROPERTY_FIELDS(CSV重複更新。棟だけつなぐ行も同じ更新で進める)+version increment" +
     "(Task 9で修正: 元は進めていなかった)",
   "src/app/api/import/jobs/[jobId]/rollback/route.ts:559":
@@ -92,7 +92,7 @@ const VERSIONED: Record<string, string> = {
   "src/app/api/properties/[id]/parcel-detach/route.ts:77":
     "property.extraParcels(この筆を別の物件にする・2026-11-06)+version increment" +
     "(物件の行ロック→編集中の鍵の確認→版の条件つき更新。新しい物件は同じトランザクションで作る)",
-  "src/app/api/properties/[id]/route.ts:587":
+  "src/app/api/properties/[id]/route.ts:596":
     "property の編集画面フィールド一式(編集画面の本体保存窓口)+version increment",
   "src/app/api/properties/bulk-update/route.ts:90":
     "property.caseStatus/registryStatus/dmStatus/assignedTo(一括更新)+version increment",

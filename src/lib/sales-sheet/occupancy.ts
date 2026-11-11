@@ -54,9 +54,13 @@ export function mapOccupancyStatusToMansionOccupancy(
 export function mapOccupancyStatusToLandOccupancy(
   status: string | null | undefined,
 ): string | undefined {
+  // 更地・古屋あり(土地の現況・2026-11-11)。古屋あり=建物がある=上物有。
+  if (status === "vacant_land" || status === "更地") return "更地";
   if (status === "vacant" || status === "空室") return "更地";
   // ⚠「入居中」は 2026-10-14 までの表示名(古い済ラベル)。居住中・賃貸中も建物がある=上物有。
   if (
+    status === "old_house" ||
+    status === "古屋あり" ||
     status === "occupied" ||
     status === "rented" ||
     status === "入居中" ||

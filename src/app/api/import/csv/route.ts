@@ -29,6 +29,7 @@ import {
   normalizeCaseStatusInput,
   normalizeIntroductionRouteInput,
   normalizeOccupancyInput,
+  occupancyFitsType,
   OCCUPANCY_STATUS_VALUES,
 } from "@/lib/property-types";
 import {
@@ -403,7 +404,8 @@ export async function POST(request: NextRequest) {
         // 日本語(空室・居住中・賃貸中・不明)も受ける(2026-10-14)。
         if (mapped.occupancyStatus) {
           const occupancy = normalizeOccupancyInput(mapped.occupancyStatus);
-          if (occupancy && VALID_OCCUPANCY_STATUS.includes(occupancy)) mapped.occupancyStatus = occupancy;
+          // 更地・古屋ありは種別が土地の行だけ(土地だけの値・2026-11-11)。
+          if (occupancy && VALID_OCCUPANCY_STATUS.includes(occupancy) && occupancyFitsType(mapped.propertyType, occupancy)) mapped.occupancyStatus = occupancy;
           else delete mapped.occupancyStatus;
         }
         // 郵便番号: 妥当な 7 桁はハイフン無しへ正規化（先頭 0 保持・全角/ハイフン吸収）。

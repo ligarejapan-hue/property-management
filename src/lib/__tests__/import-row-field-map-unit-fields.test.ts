@@ -70,6 +70,13 @@ describe("取込行の確定で部屋の欄を落とさない", () => {
     expect(buildPropertyCreateData({ "住所": ADDR, "入居状況": "ほぼ空き" }, "u")).not.toHaveProperty("occupancyStatus");
   });
 
+  it("更地・古屋ありは種別が土地の行だけ入れる(土地だけの値・2026-11-11)", () => {
+    expect(buildPropertyCreateData({ "住所": ADDR, "種別": "土地", "入居状況": "更地" }, "u").occupancyStatus).toBe("vacant_land");
+    expect(buildPropertyCreateData({ "住所": ADDR, "種別": "土地", "入居状況": "古屋あり" }, "u").occupancyStatus).toBe("old_house");
+    expect(buildPropertyCreateData({ "住所": ADDR, "種別": "戸建", "入居状況": "更地" }, "u")).not.toHaveProperty("occupancyStatus");
+    expect(buildPropertyCreateData({ "住所": ADDR, "入居状況": "古屋あり" }, "u")).not.toHaveProperty("occupancyStatus");
+  });
+
   it("郵便番号は7桁をハイフンなしにそろえ、不正な値は入れない", () => {
     expect(buildPropertyCreateData({ "住所": ADDR, "郵便番号": "145-0066" }, "u").postalCode).toBe("1450066");
     expect(buildPropertyCreateData({ "住所": ADDR, "郵便番号": "12345" }, "u")).not.toHaveProperty("postalCode");
