@@ -3,7 +3,7 @@
  *
  * 登記情報提供サービスの PDF は、外字を私用領域(U+E000〜U+F8FF)の字として埋め込む。
  * 同じ番号はどの謄本でも同じ形(本番の謄本から1字ずつ切り出して確かめた)。
- * 表の出どころ: 2026-08・09 の Excel の外字直しの表(100種) + 発注者が画像で決めた9種(2026-11-11)。
+ * 表の出どころ: 2026-08・09 の Excel の外字直しの表(100種) + 発注者が画像で決めた9種と住所の10種(2026-11-11)。
  * 異体字に別の字があるものは異体字のまま(𠮷・﨑・邊・廣・齊 など)、無いものは普通の字。
  * ⚠受付帳の PDF は別のフォントで、同じ番号が別の字(記号)になる。謄本の読み取りにだけ使う。
  * 表に無い字は置き換えず残す(読めない字として、自動の登録・名義の比べ・DM の守りが効く)。
@@ -11,6 +11,7 @@
 const ENTRIES: ReadonlyArray<readonly [string, string]> = [
   ["\uE009", "五"], // U+4E94
   ["\uE01E", "土"], // U+571F
+  ["\uE02F", "\u3427"], // U+3427
   ["\uE04D", "墅"], // U+5885
   ["\uE051", "舛"], // U+821B
   ["\uE05C", "橋"], // U+6A4B
@@ -43,6 +44,7 @@ const ENTRIES: ReadonlyArray<readonly [string, string]> = [
   ["\uE476", "萩"], // U+8429
   ["\uE4A8", "葉"], // U+8449
   ["\uE4C8", "鍢"], // U+9362
+  ["\uE54C", "萬"], // U+842C
   ["\uE54E", "葛"], // U+845B
   ["\uE5CE", "孚"], // U+5B5A
   ["\uE656", "紀"], // U+7D00
@@ -74,6 +76,7 @@ const ENTRIES: ReadonlyArray<readonly [string, string]> = [
   ["\uE9E5", "雨"], // U+96E8
   ["\uE9ED", "藤"], // U+85E4
   ["\uE9F5", "產"], // U+7522
+  ["\uEA19", "\u8879"], // U+8879
   ["\uEA4E", "逞"], // U+901E
   ["\uEA56", "笈"], // U+7B08
   ["\uEA57", "箭"], // U+7BAD
@@ -84,7 +87,9 @@ const ENTRIES: ReadonlyArray<readonly [string, string]> = [
   ["\uEA79", "邦"], // U+90A6
   ["\uEA88", "虎"], // U+864E
   ["\uEA91", "鎌"], // U+938C
+  ["\uEA9A", "閏"], // U+958F
   ["\uEA9B", "芦"], // U+82A6
+  ["\uEA9C", "茨"], // U+8328
   ["\uEA9F", "葛"], // U+845B
   ["\uEAE4", "ゐ"], // U+3090
   ["\uEAFA", "翠"], // U+7FE0
@@ -94,18 +99,23 @@ const ENTRIES: ReadonlyArray<readonly [string, string]> = [
   ["\uEC5F", "曾"], // U+66FE
   ["\uEC62", "帶"], // U+5E36
   ["\uED92", "葉"], // U+8449
+  ["\uED9A", "鯖"], // U+9BD6
+  ["\uEDA2", "鵠"], // U+9D60
   ["\uEDA4", "耒"], // U+8012
   ["\uEDAA", "祚"], // U+795A
   ["\uEDB1", "樋"], // U+6A0B
   ["\uEDBB", "漣"], // U+6F23
+  ["\uEDC4", "逗"], // U+9017
   ["\uEDC7", "溝"], // U+6E9D
   ["\uEDD6", "曙"], // U+66D9
   ["\uEDDC", "梢"], // U+68A2
   ["\uEDE0", "翠"], // U+7FE0
   ["\uEDEA", "辻"], // U+8FBB
   ["\uEDED", "片"], // U+7247
+  ["\uEDF6", "棚"], // U+68DA
   ["\uEE03", "夛"], // U+591B
   ["\uEE0B", "那"], // U+90A3
+  ["\uEE1C", "媛"], // U+5A9B
   ["\uEE3B", "總"], // U+7E3D
   ["\uEE45", "藤"], // U+85E4
   ["\uEE48", "梛"], // U+689B
@@ -122,7 +132,15 @@ const ENTRIES: ReadonlyArray<readonly [string, string]> = [
 /** 外字(1字) → 置き換える字(1字)。 */
 export const REGISTRY_GAIJI_MAP: ReadonlyMap<string, string> = new Map(ENTRIES);
 
-/** 謄本の文字の中の、表にある外字を普通の文字にする。表に無い外字はそのまま。 */
+/**
+ * 字ではなく謄本の飾り。「余白」と書かれた枠が3つの外字に分かれたもので、
+ * 読み取りの間違いで住所に入り込んでいた(本番 53本中32本の謄本にある)。外す(2026-11-11 発注者決定)。
+ */
+const REGISTRY_GAIJI_DROP: ReadonlySet<string> = new Set(["\uE042", "\uE043", "\uE044"]);
+
+/** 謄本の文字の中の、表にある外字を普通の文字にし、「余白」の枠を外す。表に無い外字はそのまま。 */
 export function replaceRegistryGaiji(text: string): string {
-  return text.replace(/[\uE000-\uF8FF]/gu, (c) => REGISTRY_GAIJI_MAP.get(c) ?? c);
+  return text.replace(/[\uE000-\uF8FF]/gu, (c) =>
+    REGISTRY_GAIJI_DROP.has(c) ? "" : (REGISTRY_GAIJI_MAP.get(c) ?? c),
+  );
 }

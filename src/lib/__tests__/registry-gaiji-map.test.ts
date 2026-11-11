@@ -20,6 +20,16 @@ describe("replaceRegistryGaiji", () => {
     expect(replaceRegistryGaiji("")).toBe("土簗鍢啓真道翠寿翔");
   });
 
+  it("住所に残っていた字(2026-11-11 発注者が画像で決めた10種)", () => {
+    const from = "";
+    expect(replaceRegistryGaiji(from)).toBe("㐧萬衹閏茨鯖鵠逗棚媛");
+  });
+
+  it("謄本の「余白」の枠(3つに分かれた外字)は字ではないので外す", () => {
+    expect(replaceRegistryGaiji("東京都渋谷区神宮前三丁目12番3号")).toBe("東京都渋谷区神宮前三丁目12番3号");
+    expect(REGISTRY_GAIJI_MAP.has("")).toBe(false);
+  });
+
   it("表に無い外字はそのまま残す(読めない字として守りが効く)", () => {
     const out = replaceRegistryGaiji("山太郎");
     expect(out).toBe("山太郎");
@@ -32,7 +42,7 @@ describe("replaceRegistryGaiji", () => {
   });
 
   it("表は外字(私用領域)の1字から、私用領域でない1字へ", () => {
-    expect(REGISTRY_GAIJI_MAP.size).toBe(108);
+    expect(REGISTRY_GAIJI_MAP.size).toBe(118);
     for (const [from, to] of REGISTRY_GAIJI_MAP) {
       expect([...from]).toHaveLength(1);
       expect(hasPrivateUseChar(from)).toBe(true);
@@ -61,6 +71,11 @@ describe("謄本の読み取りで外字を普通の字にする", () => {
   it("所有者の表: 名前と住所の外字を置き換える", () => {
     const owners = parseRegistryOwnerTable(ownerTable("東京都渋谷区原一丁目1番1号", "大一郎"));
     expect(owners).toEqual([expect.objectContaining({ name: "大塚一郎", address: "東京都渋谷区西原一丁目1番1号" })]);
+  });
+
+  it("所有者の表: 住所に入り込んだ「余白」の枠を外す", () => {
+    const owners = parseRegistryOwnerTable(ownerTable("東京都渋谷区神宮前三丁目12番3号", "山田太郎"));
+    expect(owners?.[0]?.address).toBe("東京都渋谷区神宮前三丁目12番3号");
   });
 
   it("所有者の表: 表に無い外字は残る", () => {
