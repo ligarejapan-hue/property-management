@@ -13,6 +13,7 @@
  *   `registry-owner-table.ts` で読む。
  */
 import { parseRegistryOwnerTable } from "./registry-owner-table";
+import { replaceRegistryGaiji } from "./registry-gaiji-map";
 import { joinSpacedKanji } from "./registry-text-normalize";
 import { parseUnitFloorArea } from "./registry-unit-floor-area";
 import { parseBuildingFloorArea, parseLandArea } from "./registry-area";
@@ -268,9 +269,10 @@ export function parseRegistryText(raw: string): RegistryParseResult {
 
   // 権利部の所有者セクションを探す(表として読めなかったときだけ)
   // 典型パターン: "所有者 住所 氏名" が改行区切りで現れる
+  // 謄本の外字は表にあるものを普通の文字へ(表の読み取りと同じ・家屋番号などほかの欄の読み方は変えない)
   const ownerSection =
     tableOwners === null
-      ? text.match(
+      ? replaceRegistryGaiji(text).match(
     /(?:所有権の登記|所有者|権利者)[^\n]*\n([\s\S]+?)(?:原因|受付年月日|附記|$)/,
         )
       : null;

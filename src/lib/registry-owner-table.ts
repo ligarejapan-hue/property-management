@@ -22,6 +22,7 @@
  * ⚠ 表の最後の行では、氏名の列に **サービス側の刷り込み**(検索用の番号・整理番号)が
  *   入り込む。実物300本の実測で21件あった。これを所有者にしてはいけない。
  */
+import { replaceRegistryGaiji } from "./registry-gaiji-map";
 import { joinSpacedKanji, toHalfWidthDigits } from "./registry-text-normalize";
 
 export interface RegistryTableOwner {
@@ -120,7 +121,8 @@ function cleanValue(raw: string): string {
 export function parseRegistryOwnerTable(
   rawText: string,
 ): RegistryTableOwner[] | null {
-  const lines = rawText.split(/\r?\n/);
+  // 謄本の外字(私用領域の字)のうち、表にあるものは普通の文字へ。表に無い字は残る(守りが効く)
+  const lines = replaceRegistryGaiji(rawText).split(/\r?\n/);
   if (!lines.some((line) => VERTICAL_RULE.test(line))) return null;
 
   // ⚠`let layout = null` のままだと、TSが flushGroup 内の代入を追えず
