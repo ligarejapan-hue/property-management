@@ -1,6 +1,7 @@
 import { describe, expect, it, vi } from "vitest";
 import { Prisma } from "@/generated/prisma";
 import { agentNameKeySql, findAgentNameOwnerIds } from "../agent-name-exclusion";
+import { NAME_VARIANTS } from "@/lib/name-variants";
 
 // 業者と同じ名前の所有者には DM を送らない(2026-11-09 発注者指示)。
 // ⚠名前のそろえ方は SQL の式1つを所有者・業者の両側に当てる(手元の PostgreSQL 16 で
@@ -17,7 +18,11 @@ describe("agentNameKeySql", () => {
     expect(sql.sql).toContain("'(有)', '有限会社'");
     expect(sql.sql).toContain("'(同)', '合同会社'");
     expect(sql.sql.startsWith("translate(")).toBe(true);
-    expect(sql.values).toEqual(["髙﨑齋邊邉", "高崎斎辺辺"]);
+    // 異体字の表(name-variants.ts)から作る。translate は1字ずつなので、左右の字数(符号位置の数)が同じこと。
+    expect(sql.values).toEqual([Object.keys(NAME_VARIANTS).join(""), Object.values(NAME_VARIANTS).join("")]);
+    const [from, to] = sql.values as string[];
+    expect(Array.from(from).length).toBe(Array.from(to).length);
+    expect(from.startsWith("髙﨑")).toBe(true);
   });
 });
 

@@ -1,3 +1,4 @@
+import { NAME_VARIANTS } from "@/lib/name-variants";
 import { jstDateString } from "./datetime";
 import type { BasePropertyKind } from "./constants";
 
@@ -67,11 +68,9 @@ export function registryGapText(
 
 /**
  * 登記でよく使う異体字と、そろえる先の字。名前の比較で「表記の違い」を見分けるためだけに使う。
- * ⚠一致にはしない(書類の表記を登記に合わせる必要があるため)。字を足すときはこの表に足す。
+ * ⚠一致にはしない(書類の表記を登記に合わせる必要があるため)。字を足すときは name-variants.ts の表に足す。
  */
-export const NAME_VARIANTS: Readonly<Record<string, string>> = {
-  "髙": "高", "﨑": "崎", "齋": "斎", "邊": "辺", "邉": "辺",
-};
+export { NAME_VARIANTS };
 
 /** 取引の画面のタブ・物件の画面・発行した書類のどれを開くか。 */
 export type CrosscheckLink =

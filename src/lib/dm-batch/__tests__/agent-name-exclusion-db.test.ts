@@ -29,6 +29,8 @@ async function owner(name: string): Promise<string> {
 
 describe.skipIf(!process.env.PUSH_DB_TEST_URL)("業者と同じ名前の所有者(本物の Postgres)", () => {
   const ids: Record<string, string> = {};
+  // 異体字の表を広げた分(2026-11-11)。ids とは別にして、上の照合の期待を変えない。
+  const variantIds: Record<string, string> = {};
 
   beforeAll(async () => {
     await prisma.$executeRawUnsafe(`TRUNCATE agents, mlit_agents, property_owners, owners, users CASCADE`);
@@ -55,11 +57,22 @@ describe.skipIf(!process.env.PUSH_DB_TEST_URL)("業者と同じ名前の所有�
     // 謄本の外字(私用領域の字)を含む名前(2026-11-11)
     ids.gaiji = await owner("大\uE0A6一郎");
     ids.gaijiEnd = await owner("鈴木花\uF8FF");
+    // 異体字(𠮷=サロゲートペア・澤)を SQL の translate でそろえる(2026-11-11)
+    await prisma.mlitAgent.create({ data: { licenseKey: "13000003", authority: "13", licenseLabel: "東京都知事(1)第000003号", companyName: "\u{20BB7}田不動産" } });
+    await prisma.mlitAgent.create({ data: { licenseKey: "13000004", authority: "13", licenseLabel: "東京都知事(1)第000004号", companyName: "澤田 太郎" } });
+    variantIds.yoshida = await owner("吉田不動産");
+    variantIds.sawada = await owner("沢田太郎");
+    variantIds.other = await owner("吉川不動産");
   });
 
   it("名簿・国交省の一覧の両方と、そろえた名前で照合する", async () => {
     const got = await findAgentNameOwnerIds(prisma, Object.values(ids));
     expect([...got].sort()).toEqual([ids.abcCircle, ids.abcSpaced, ids.yamada, ids.takahashi].sort());
+  });
+
+  it("広げた異体字(𠮷・澤)も SQL でそろえて照合する(2026-11-11)", async () => {
+    const got = await findAgentNameOwnerIds(prisma, Object.values(variantIds));
+    expect([...got].sort()).toEqual([variantIds.yoshida, variantIds.sawada].sort());
   });
 
   it("使っていない名簿の業者・後株と前株の違い・空の名前・別の名前は一致にしない", async () => {

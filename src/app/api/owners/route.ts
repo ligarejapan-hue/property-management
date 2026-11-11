@@ -1,4 +1,4 @@
-import { containsVariants } from "@/lib/notation";
+import { containsVariants, nameContainsVariants } from "@/lib/notation";
 import { NextRequest } from "next/server";
 import prisma from "@/lib/prisma";
 import {
@@ -50,7 +50,7 @@ export async function GET(request: NextRequest) {
     if (keyword) {
       const or: object[] = [];
       if (searchable(displayConfig.name)) {
-        or.push(...containsVariants("name", keyword, "insensitive"));
+        or.push(...nameContainsVariants("name", keyword, "insensitive"));
       }
       if (searchable(displayConfig.nameKana)) {
         or.push({ nameKana: { contains: keyword, mode: "insensitive" } });
