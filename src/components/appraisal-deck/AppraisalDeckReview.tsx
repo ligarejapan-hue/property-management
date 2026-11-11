@@ -99,6 +99,11 @@ function formFrom(merged: ReturnType<typeof mergeAppraisal>, rangeMode: boolean)
     for (const n of PLAN_NAMES) f[`plan.${n}`] = show(merged.plans?.find((p) => p.name === n)?.price);
   }
   for (const k of Object.keys(HEAD_LABEL) as HeadlineKey[]) f[`h.${k}`] = (merged.headlines as Record<string, string>)[k] ?? "";
+  // 載せない周辺施設の番号(カンマ区切り)
+  f["fac.hidden"] = merged.facilities
+    .map((x, i) => (x.hidden ? String(i) : null))
+    .filter((v): v is string => v !== null)
+    .join(",");
   return f;
 }
 
@@ -180,6 +185,12 @@ export function buildOverrides(
     if (v) heads[k] = v;
   }
   if (Object.keys(heads).length) o.headlines = heads;
+  const hidden = (form["fac.hidden"] ?? "")
+    .split(",")
+    .filter(Boolean)
+    .map(Number)
+    .filter((v) => Number.isInteger(v) && v >= 0 && v < (extracted.facilities?.length ?? 0));
+  if (hidden.length) o.hiddenFacilities = [...new Set(hidden)].sort((a, b) => a - b);
   return { overrides: o as AppraisalOverrides, errors };
 }
 
@@ -427,6 +438,44 @@ export function AppraisalDeckReview({ propertyId, deckId, canWrite }: { property
         </div>
         <p className="mt-2 text-xs text-gray-500 dark:text-gray-400">⚠ 依頼者のお名前や番地は書かないでください。</p>
       </section>
+
+      {ex.facilities?.length ? (
+        <section className={card}>
+          <h2 className="mb-2 text-sm font-semibold text-gray-800 dark:text-gray-100">
+            周辺施設 <span className="ml-1 text-xs font-normal text-gray-400">査定書の周辺施設情報から読みました。チェックを外すと資料に載せません</span>
+          </h2>
+          <ul className="grid gap-1 sm:grid-cols-2">
+            {ex.facilities.map((f, i) => {
+              const hiddenSet = new Set((form["fac.hidden"] ?? "").split(",").filter(Boolean));
+              const on = !hiddenSet.has(String(i));
+              return (
+                <li key={i}>
+                  <label className="flex items-center gap-2 text-sm text-gray-800 dark:text-gray-100">
+                    <input
+                      type="checkbox"
+                      checked={on}
+                      disabled={!canWrite}
+                      onChange={() =>
+                        setForm((fm) => {
+                          const s = new Set((fm["fac.hidden"] ?? "").split(",").filter(Boolean));
+                          if (s.has(String(i))) s.delete(String(i));
+                          else s.add(String(i));
+                          return { ...fm, "fac.hidden": [...s].join(",") };
+                        })
+                      }
+                    />
+                    <span className="font-semibold">{f.cat}</span>
+                    <span className="truncate text-gray-500 dark:text-gray-400">{f.name}</span>
+                    <span className="ml-auto whitespace-nowrap text-xs text-gray-500">
+                      徒歩{f.min}分{f.x == null ? "（地図には出ません）" : ""}
+                    </span>
+                  </label>
+                </li>
+              );
+            })}
+          </ul>
+        </section>
+      ) : null}
 
       <section className={card}>
         <h2 className="mb-2 text-sm font-semibold text-gray-800 dark:text-gray-100">

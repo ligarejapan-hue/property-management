@@ -13,9 +13,13 @@ import { runExclusive } from "@/lib/pdf-compress/run";
 import { appraisalSourceWhere } from "./source";
 import { writeAuditLog } from "@/lib/audit";
 import { parseAppraisalReport, APPRAISAL_PARSER_VERSION } from "./parse";
+import { readFacilityPageInWorker } from "./facilities-worker";
+import { locateFacilities, type FacilityPageRaw } from "./facilities";
 
 /** 大きい査定報告書(実物 50 ページ・13MB)でも読み切れる上限。超えたら作らない(作り直しで再挑戦)。 */
 export const APPRAISAL_PDF_TIMEOUT_MS = 60_000;
+/** 周辺施設のページ(地図のアイコン)の読み取りの上限。過ぎたら施設なしで下書きを作る。 */
+export const APPRAISAL_FACILITY_TIMEOUT_MS = 30_000;
 
 export type AppraisalDraftResult =
   | { ok: true; deckId: string; created: boolean }
@@ -55,7 +59,7 @@ export async function buildAppraisalDraft(input: {
 
   if (pendingReads >= MAX_PENDING_APPRAISAL_READS) return { ok: false, reason: "busy" };
   pendingReads++;
-  let read: { text: string } | { fail: "file_not_found" | "not_pdf" | "read_failed" };
+  let read: { text: string; facilityPage: FacilityPageRaw | null } | { fail: "file_not_found" | "not_pdf" | "read_failed" };
   try {
     // 重い PDF の読み取りは同時に1本だけ(受け取り箱の圧縮・読み取りと同じ順番待ち)。
     // ⚠ファイルは順番が来てから読む(待っている間に大きい PDF をメモリに抱えない・@codex #692)。
@@ -66,11 +70,15 @@ export async function buildAppraisalDraft(input: {
       if (!file) return { fail: "file_not_found" as const };
       const buffer = Buffer.from(file.body as Uint8Array);
       if (!isPdfBuffer(buffer)) return { fail: "not_pdf" as const };
+      let text: string;
       try {
-        return { text: await extractTextFromPdf(buffer, { timeoutMs: APPRAISAL_PDF_TIMEOUT_MS }) };
+        text = await extractTextFromPdf(buffer, { timeoutMs: APPRAISAL_PDF_TIMEOUT_MS });
       } catch {
         return { fail: "read_failed" as const };
       }
+      // 周辺施設(2026-11-11)。読めなくても下書きは作る(施設なし)。
+      const facilityPage = await readFacilityPageInWorker(buffer, APPRAISAL_FACILITY_TIMEOUT_MS).catch(() => null);
+      return { text, facilityPage };
     });
   } finally {
     pendingReads--;
@@ -79,6 +87,7 @@ export async function buildAppraisalDraft(input: {
   const text = read.text;
   const extracted = parseAppraisalReport(text);
   if (extracted.source !== "sre") return { ok: false, reason: "not_sre" };
+  if (read.facilityPage) extracted.facilities = locateFacilities(read.facilityPage);
 
   const data = {
     parserVersion: APPRAISAL_PARSER_VERSION,

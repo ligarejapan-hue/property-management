@@ -27,7 +27,8 @@ function geometry(f: Feat): number[] {
     out.push((1 & 7) | (1 << 3), zz(x0 - cx), zz(y0 - cy));
     cx = x0;
     cy = y0;
-    const rest = f.type === 3 ? part.slice(1) : part.slice(1);
+    const rest = part.slice(1);
+    if (f.type === 1) continue;
     out.push((2 & 7) | (rest.length << 3));
     for (const [x, y] of rest) {
       out.push(zz(x - cx), zz(y - cy));
@@ -290,5 +291,42 @@ describe("isUsableLocation", () => {
     expect(isUsableLocation(null, 139.7)).toBe(false);
     expect(isUsableLocation(0, 0)).toBe(false);
     expect(isUsableLocation(Number.NaN, 139.7)).toBe(false);
+  });
+});
+
+describe("最寄り駅までの徒歩ルート(2026-11-11)", () => {
+  // 物件から東へ 800 点、そこから南へ 800 点の道。駅はその先。もう1つ別の駅も置く
+  const t3 = makeTile([
+    {
+      name: "road",
+      features: [
+        { type: 2, props: { ftCode: 2701, rnkWidth: 1 }, parts: [[[PX, PY], [PX + 800, PY]]] },
+        { type: 2, props: { ftCode: 2701, rnkWidth: 1 }, parts: [[[PX + 800, PY], [PX + 800, PY + 800]]] },
+        { type: 2, props: { ftCode: 2701, rnkWidth: 4, rdCtg: 3 }, parts: [[[PX, PY], [PX + 800, PY + 800]]] }, // 高速の近道(歩けない)
+      ],
+    },
+    {
+      name: "label",
+      features: [
+        { type: 1, props: { knj: "見本駅", ftCode: 100 }, parts: [[[PX + 800, PY + 820]]] },
+        { type: 1, props: { knj: "別の駅", ftCode: 100 }, parts: [[[PX + 50, PY + 50]]] },
+        { type: 1, props: { knj: "見本町", ftCode: 100 }, parts: [[[PX + 10, PY]]] },
+      ],
+    },
+  ]);
+  it("査定書の駅名の駅へ、道に沿った最短の道のり(高速は通らない)", () => {
+    const m = buildMapFromTiles(C, [{ x: TX, y: TY, buf: t3 }], new Date(), { station: "見本駅" });
+    expect(m.st?.n).toBe("見本駅");
+    expect(m.st!.y).toBeLessThan(0); // 南
+    expect(m.rt!.length).toBeGreaterThanOrEqual(6);
+    // 東へ約 97m + 南へ約 97m(1点 ≒ 0.12m)。斜めの高速(約 137m)は使わない
+    expect(m.rtm!).toBeGreaterThan(180);
+    expect(m.rtm!).toBeLessThan(215);
+  });
+  it("駅名が合わなければ一番近い駅・駅がなければルートなし", () => {
+    expect(buildMapFromTiles(C, [{ x: TX, y: TY, buf: t3 }], new Date(), { station: "知らない駅" }).st?.n).toBe("別の駅");
+    const none = buildMapFromTiles(C, [{ x: TX, y: TY, buf: makeTile([{ name: "road", features: [] }]) }]);
+    expect(none.st).toBeUndefined();
+    expect(none.rt).toBeUndefined();
   });
 });

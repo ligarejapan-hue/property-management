@@ -1,6 +1,6 @@
 import { describe, it, expect, vi, beforeEach } from "vitest";
 
-const { db, storage, extract, audit } = vi.hoisted(() => ({
+const { db, storage, extract, audit, facPage } = vi.hoisted(() => ({
   db: {
     attachment: { findFirst: vi.fn() },
     appraisalDeck: { findUnique: vi.fn(), create: vi.fn(), updateMany: vi.fn() },
@@ -8,7 +8,9 @@ const { db, storage, extract, audit } = vi.hoisted(() => ({
   storage: { keyFromUrl: vi.fn((u: string) => u.replace("/uploads/", "")), read: vi.fn() },
   extract: vi.fn(),
   audit: vi.fn(),
+  facPage: vi.fn(),
 }));
+vi.mock("../facilities-worker", () => ({ readFacilityPageInWorker: facPage }));
 
 vi.mock("@/lib/prisma", () => ({ default: db }));
 vi.mock("@/lib/storage", () => ({ getStorage: () => storage }));
@@ -46,6 +48,7 @@ beforeEach(() => {
   db.appraisalDeck.create.mockResolvedValue({ id: "d1" });
   db.appraisalDeck.updateMany.mockResolvedValue({ count: 1 });
   storage.read.mockResolvedValue({ body: Buffer.from("%PDF-1.7 ...") });
+  facPage.mockResolvedValue(null);
   extract.mockResolvedValue(SRE);
 });
 
@@ -146,5 +149,33 @@ describe("buildAppraisalDraft(査定報告書から下書きを作る)", () => {
     db.appraisalDeck.create.mockRejectedValueOnce(new Error("unique"));
     db.appraisalDeck.findUnique.mockResolvedValueOnce(null).mockResolvedValueOnce({ id: "d9" });
     expect(await buildAppraisalDraft(IN)).toEqual({ ok: true, deckId: "d9", created: false });
+  });
+});
+
+describe("周辺施設(2026-11-11)", () => {
+  it("周辺施設情報のページが読めたら、施設の一覧(位置つき)も保存する", async () => {
+    extract.mockResolvedValue(SRE);
+    facPage.mockResolvedValue({
+      lines: ["最寄りの各種施設", "1 コンビニ 見本店 100 m 2 分", "2 スーパー 見本ストア 200 m 3 分", "3 公園 見本公園 50 m 1 分"],
+      icons: [
+        { x: 100, y: 100, rgb: [185, 34, 34] },
+        { x: 140, y: 100, rgb: [255, 111, 0] },
+        { x: 100, y: 20, rgb: [222, 68, 0] },
+        { x: 80, y: 100, rgb: [62, 178, 0] },
+      ],
+    });
+    await buildAppraisalDraft(IN);
+    const saved = db.appraisalDeck.create.mock.calls[0][0].data.extracted;
+    expect(saved.facilities).toEqual([
+      { cat: "コンビニ", name: "見本店", dist: 100, min: 2, x: 100, y: 0 },
+      { cat: "スーパー", name: "見本ストア", dist: 200, min: 3, x: 0, y: -200 },
+      { cat: "公園", name: "見本公園", dist: 50, min: 1, x: -50, y: 0 },
+    ]);
+  });
+  it("読めなければ施設なしで下書きを作る", async () => {
+    extract.mockResolvedValue(SRE);
+    facPage.mockResolvedValue(null);
+    expect((await buildAppraisalDraft(IN)).ok).toBe(true);
+    expect(db.appraisalDeck.create.mock.calls[0][0].data.extracted.facilities).toBeUndefined();
   });
 });

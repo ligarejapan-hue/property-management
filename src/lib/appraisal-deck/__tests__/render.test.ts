@@ -162,3 +162,29 @@ describe("renderAppraisalDeck(資料の HTML)", () => {
     expect(() => new Function(js)).not.toThrow();
   });
 });
+
+describe("周辺施設(2026-11-11)", () => {
+  const FAC = [
+    { cat: "コンビニ", name: "<b>見本店</b>", dist: 100, min: 2, x: 100, y: 0 },
+    { cat: "公園", name: "見本公園", dist: 50, min: 1, x: null, y: null },
+    { cat: "銀行", name: "外した銀行", dist: 300, min: 4, x: 0, y: 300 },
+  ];
+  it("地図のページの右に一覧(外したものは出さない・文字は逃がす)・資料のデータにも番号つきで入る", () => {
+    const m = mergeAppraisal({ ...HOUSE, facilities: FAC }, { hiddenFacilities: [2] });
+    const html = renderAppraisalDeck(m, { draft: false, map: MAP });
+    expect(html).toContain('<ol class="facl">');
+    expect(html).toContain("&lt;b&gt;見本店&lt;/b&gt;");
+    expect(html).not.toContain("外した銀行");
+    expect(html).toContain("ナビタイムジャパン");
+    const data = JSON.parse(/<script id="deck-data" type="application\/json">([\s\S]*?)<\/script>/.exec(html)![1]);
+    expect(data.facilities.map((f: { no: number; cat: string }) => [f.no, f.cat])).toEqual([
+      [1, "コンビニ"],
+      [2, "公園"],
+    ]);
+  });
+  it("施設がなければ一覧は出さず、円の説明を出す", () => {
+    const html = renderAppraisalDeck(mergeAppraisal(HOUSE, {}), { draft: false, map: MAP });
+    expect(html).not.toContain('class="facl"');
+    expect(html).toContain("地図の円は物件からの直線距離");
+  });
+});

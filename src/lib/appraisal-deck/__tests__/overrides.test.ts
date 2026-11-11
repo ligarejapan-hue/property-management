@@ -71,3 +71,19 @@ describe("mergeAppraisal", () => {
     expect(m.area).toBe(BASE.area);
   });
 });
+
+describe("載せない周辺施設(2026-11-11)", () => {
+  const FAC = [
+    { cat: "コンビニ", name: "見本店", dist: 100, min: 2, x: 100, y: 0 },
+    { cat: "公園", name: "見本公園", dist: 50, min: 1, x: null, y: null },
+  ];
+  it("番号で外したものに hidden が付く(読み取った一覧はそのまま)", () => {
+    const m = mergeAppraisal({ ...BASE, facilities: FAC }, appraisalOverridesSchema.parse({ hiddenFacilities: [1] }));
+    expect(m.facilities.map((f) => !!f.hidden)).toEqual([false, true]);
+    expect(mergeAppraisal(BASE, {}).facilities).toEqual([]);
+  });
+  it("番号は 0〜49 の整数だけ", () => {
+    expect(appraisalOverridesSchema.safeParse({ hiddenFacilities: [-1] }).success).toBe(false);
+    expect(appraisalOverridesSchema.safeParse({ hiddenFacilities: [1.5] }).success).toBe(false);
+  });
+});

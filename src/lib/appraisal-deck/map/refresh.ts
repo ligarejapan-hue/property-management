@@ -28,9 +28,12 @@ export async function refreshDeckMap(
 ): Promise<MapRefreshResult> {
   const deck = await prisma.appraisalDeck.findFirst({
     where: { id: input.deckId, propertyId: input.propertyId },
-    select: { id: true, status: true },
+    select: { id: true, status: true, extracted: true },
   });
   if (!deck) return { ok: false, reason: "not_found" };
+  // 徒歩ルートの行き先=査定書の最寄駅(2026-11-11)
+  const ex = deck.extracted as { station?: unknown } | null;
+  const station = typeof ex?.station === "string" ? ex.station : null;
   if (input.mode === "auto") {
     // 自動は下書きだけ(確認済みの資料の中身を、確かめないまま変えない・@codex #701)。
     if (deck.status !== "draft") return { ok: false, reason: "not_draft" };
@@ -57,7 +60,7 @@ export async function refreshDeckMap(
   }
   let map: DeckMapData;
   try {
-    const built = buildMapFromTiles(center, await fetchGsiTiles(center, deps.fetchImpl), deps.now?.() ?? new Date());
+    const built = buildMapFromTiles(center, await fetchGsiTiles(center, deps.fetchImpl), deps.now?.() ?? new Date(), { station });
     // 住所から求めた位置は目安なので、近くの建物を「物件の建物」として塗らない(違う建物を塗らない)。
     map = loc === "address" ? { ...built, p: -1, loc } : { ...built, loc };
   } catch {
@@ -107,6 +110,9 @@ export const deckMapDataSchema = z
     t: z.array(z.array(z.union([z.number(), z.string().max(20)]))).max(100_000),
     bh: z.array(delta).max(100_000).default([]),
     loc: z.enum(["gps", "address"]).optional(),
+    st: z.object({ n: z.string().max(40), x: z.number(), y: z.number() }).strict().optional(),
+    rt: delta.optional(),
+    rtm: z.number().nonnegative().max(100_000).optional(),
     wh: z.array(delta).max(100_000).default([]),
   })
   .strict();
