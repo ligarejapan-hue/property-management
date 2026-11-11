@@ -5,10 +5,14 @@
  * - 数字は <script type="application/json"> に入れ、deck.js が textContent で描く(HTML として解釈しない)。
  * ⚠依頼者の氏名・番地は入れない(MergedAppraisal は町丁目まで・氏名を持たない)。
  * ⚠外へ通信しない(RENDER_HEADERS の CSP で connect-src 'none')。
+ * - 周辺地図(2026-11-11)があれば先頭に「物件の場所」のページを足す。地図のデータと 3D の部品(three)も
+ *   この HTML に埋め込む(ダウンロードしたファイルでも地図が出る)。3D を作れないときは平面の地図だけ。
  */
 import { readFileSync } from "node:fs";
 import path from "node:path";
 import { defaultHeadlines, isUnconnectedCase, KIND_LABEL, type HeadlineKey, type MergedAppraisal } from "./headlines";
+import type { DeckMapData } from "./map/build";
+import { threeInlineScript } from "./map/three-inline";
 
 const ASSET_DIR = path.join(process.cwd(), "src", "lib", "appraisal-deck", "assets");
 let assets: { css: string; js: string } | null = null;
@@ -82,9 +86,55 @@ export function deckTitle(m: MergedAppraisal): string {
   return `${m.area ? m.area.replace(/^(東京都|北海道|(?:京都|大阪)府|.{2,3}県)/, "") + " " : ""}査定のご報告`;
 }
 
-export function renderAppraisalDeck(m: MergedAppraisal, opts: { draft: boolean }): string {
+/** 地図のページの見出し(担当者は直さない・査定書の駅と徒歩分数から作る)。 */
+const stationName = (s: string | null | undefined) => (s ?? "").trim().replace(/駅$/, "");
+
+export function mapHeadline(m: MergedAppraisal): string {
+  const where = m.area ? `${m.area}にあり、` : "";
+  const st = stationName(m.station);
+  if (st && m.walkMinutes != null) {
+    return `${where}${m.railLine ? `${m.railLine}「${st}」駅` : `「${st}」駅`}まで徒歩${m.walkMinutes}分の物件です`;
+  }
+  return m.area ? `${m.area}にある物件の場所と周りの様子です` : "物件の場所と周りの様子です";
+}
+
+function mapSection(m: MergedAppraisal): string {
+  const h = escHtml(mapHeadline(m));
+  const st = stationName(m.station);
+  const walk = !!st && m.walkMinutes != null;
+  return `<section class="page" data-k="map" data-sec="物件の場所" data-h="${h}">
+  <div class="sec" data-r>物件の場所<span>${escHtml(m.area ?? "")}</span></div>
+  <h1 data-r style="--d:120">${h}</h1>
+  <div class="body">
+    <div class="fig" data-r style="--d:300"><div class="ftitle">物件の周辺<small>北が上・円は直線距離400m／800m（徒歩5・10分）</small></div>
+      <div class="mapw"><svg id="mp" width="1080" height="620" viewBox="0 0 1080 620" role="img" aria-label="物件の周辺の地図"></svg></div>
+    </div>
+    <aside class="side" data-r style="--d:2200">
+      ${walk ? `<div class="big">${escHtml(String(m.walkMinutes))}<u>分</u></div><div class="what">${escHtml(`${m.railLine ? m.railLine + " " : ""}${st}駅まで徒歩`)}</div>` : ""}
+      <p>地図の円は物件からの直線距離で、徒歩5分（400m）・10分（800m）の目安です（80mを1分として計算）。実際の道のりはこれより長くなります。</p>
+      <div class="cmp"><span class="eq">地図：国土地理院ベクトルタイル（地理院地図Vector）を加工して作成。立体の地図の建物の高さはイメージで、実際の高さではありません。</span></div>
+    </aside>
+  </div>
+</section>
+`;
+}
+
+/** 3D の部品(three)。作れなければ空(平面の地図だけになる)。 */
+function threeScriptOrEmpty(): string {
+  try {
+    return threeInlineScript();
+  } catch {
+    console.warn("[appraisal-deck] 3D の部品を読み込めませんでした(平面の地図だけで表示します)");
+    return "";
+  }
+}
+
+export function renderAppraisalDeck(m: MergedAppraisal, opts: { draft: boolean; map?: DeckMapData | null }): string {
   const { css, js } = loadAssets();
   const data = buildDeckData(m, opts);
+  const map = opts.map ?? null;
+  const three = map ? threeScriptOrEmpty() : "";
+  const pageCount = map ? 5 : 4;
   const isRange = !(m.plans && m.plans.length) && !!m.range;
   const planWord = isRange ? "売出しの価格" : "売出しの3案";
   return `<!DOCTYPE html>
@@ -93,7 +143,7 @@ export function renderAppraisalDeck(m: MergedAppraisal, opts: { draft: boolean }
 <title>${escHtml(deckTitle(m))}</title>
 <style>${css}</style></head><body>
 <div id="vp"><div id="stage">
-
+${map ? mapSection(m) : ""}
 <section class="page" data-k="result" data-sec="査定結果">
   <div class="sec" data-r>査定結果<span id="sec1sub"></span></div>
   <h1 data-r style="--d:120"></h1>
@@ -104,11 +154,11 @@ export function renderAppraisalDeck(m: MergedAppraisal, opts: { draft: boolean }
   </div>
   <div class="flow" id="flow">
     <button class="step" data-r style="--d:1100" data-panel="p1"><span class="t">① 物件</span><span class="n"></span><span class="d"></span><span class="go">物件の概要 ›</span></button>
-    <button class="step" data-r style="--d:1250" data-go="1"><span class="t">② AI査定</span><span class="n"></span><span class="d"></span><span class="go">査定の根拠 p.2 ›</span></button>
-    <button class="step" data-r style="--d:1400" data-go="1"><span class="t"></span><span class="n"></span><span class="d"></span><span class="go">査定の根拠 p.2 ›</span></button>
-    <button class="step" data-r style="--d:1550" data-go="2"><span class="t"></span><span class="n"></span><span class="d"></span><span class="go"></span></button>
+    <button class="step" data-r style="--d:1250" data-go="basis"><span class="t">② AI査定</span><span class="n"></span><span class="d"></span><span class="go">査定の根拠 p.2 ›</span></button>
+    <button class="step" data-r style="--d:1400" data-go="basis"><span class="t"></span><span class="n"></span><span class="d"></span><span class="go">査定の根拠 p.2 ›</span></button>
+    <button class="step" data-r style="--d:1550" data-go="plans"><span class="t"></span><span class="n"></span><span class="d"></span><span class="go"></span></button>
   </div>
-  <div class="base" data-r style="--d:2000"><span id="base1"></span><button class="more" data-go="3" style="margin:0">お住み替えの資金を計算する p.4 ›</button></div>
+  <div class="base" data-r style="--d:2000"><span id="base1"></span><button class="more" data-go="fund" style="margin:0">お住み替えの資金を計算する p.4 ›</button></div>
 </section>
 
 <section class="page" data-k="basis" data-sec="査定の根拠">
@@ -193,12 +243,12 @@ export function renderAppraisalDeck(m: MergedAppraisal, opts: { draft: boolean }
 
 <div class="hint">→ / Space 次へ　← 前へ　O 一覧</div>
 <div class="nav"><button id="prev" aria-label="前のページ">‹</button><button id="next" aria-label="次のページ">›</button></div>
-<div class="foot"><span id="src"></span><span id="pg">1 / 4</span></div>
+<div class="foot"><span id="src"></span><span id="pg">1 / ${pageCount}</span></div>
 <div id="dimmer"></div>
 <aside id="panel" aria-hidden="true"><button class="x" aria-label="閉じる">×</button><div id="pbody"></div></aside>
 <div id="ov"><h2>全ページ一覧<small>見出しだけを縦に読むと話の流れがわかります。押すとそのページへ</small></h2><div class="g" id="ovg"></div></div>
 </div></div>
 <script id="deck-data" type="application/json">${jsonForScript(data)}</script>
-<script>${js}</script>
+${map ? `<script id="deck-map" type="application/json">${jsonForScript(map)}</script>\n` : ""}${three ? `<script>${three}</script>\n` : ""}<script>${js}</script>
 </body></html>`;
 }

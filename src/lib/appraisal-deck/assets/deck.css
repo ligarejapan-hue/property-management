@@ -161,3 +161,8 @@ input[type=range]{width:100%;accent-color:var(--main);height:30px}
 #draft{position:absolute;left:0;top:0;z-index:50;background:var(--amber);color:#fff;font-size:20px;font-weight:700;padding:8px 22px;letter-spacing:.08em}
 .page.nodata .body{display:none}
 @media print{body{overflow:visible}#vp{height:auto}.nav,.hint{display:none}}
+/* 物件の場所(周辺地図・2026-11-11) */
+.mapw{position:relative;width:1080px;height:620px;overflow:hidden;border:1px solid var(--rule)}
+.mapw svg{display:block}
+.city3d{position:absolute;inset:0;width:100%;height:100%;pointer-events:none}
+.dcap{position:absolute;left:24px;top:22px;padding:10px 20px;background:rgba(15,22,32,.66);color:#fff;font-size:20px;font-weight:700;z-index:2;pointer-events:none}

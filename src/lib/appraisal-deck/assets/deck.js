@@ -340,11 +340,142 @@ function closePanel(){if(!stage.classList.contains('pan'))return;stage.classList
 $('#panel .x').addEventListener('click',closePanel); $('#dimmer').addEventListener('click',closePanel);
 $$('[data-panel]').forEach(b=>b.addEventListener('click',()=>openPanel(b.dataset.panel)));
 
+/* ---- 物件の場所と周りの様子(周辺地図・2026-11-11) ----
+ * 地図のデータは id が deck-map の JSON の要素(物件を原点にしたメートル・0.5m 単位の差分)。
+ * 平面の地図(SVG)を描き、ページを開いたときに 3D の街(three)で空から物件へ降りていく動きを重ねる。
+ * three が使えない・動きを減らす設定のときは平面の地図だけ。 */
+const MAPEL=$('#deck-map'); const MAP=MAPEL?JSON.parse(MAPEL.textContent):null; const MAPON=!!(MAP&&$('#mp'));
+const MW=1080, MH=620, MM=2*(MAP?MAP.ex:1000)/MW; // MM: 1px あたりのメートル
+const mdec=(a,s)=>{const o=[];let x=0,y=0;for(let i=s;i<a.length;i+=2){x+=a[i];y+=a[i+1];o.push([x/2,y/2]);}return o;};
+const MX=x=>MW/2+x/MM, MY=y=>MH/2-y/MM;
+const mpath=(pts,close)=>pts.length?'M'+pts.map(([x,y])=>MX(x).toFixed(1)+' '+MY(y).toFixed(1)).join('L')+(close?'Z':''):'';
+const RW=[3,5,9,16,26]; // 道路の幅の区分ごとの見た目の幅(m)
+/* 穴(建物の中庭・水面の中の島)。外周と逆回りなので、塗りは nonzero のまま穴になる(@codex #701) */
+const holesOf=a=>{const m={};(a||[]).forEach(h=>(m[h[0]]=m[h[0]]||[]).push(mdec(h,1)));return m;};
+const BH=holesOf(MAP&&MAP.bh), WH=holesOf(MAP&&MAP.wh);
+let mapDrawn=false;
+function drawMap(anim){
+  if(!MAPON)return;
+  const s=$('#mp');
+  if(!mapDrawn){mapDrawn=true; s.innerHTML='';
+    el('rect',{x:0,y:0,width:MW,height:MH,fill:'#ECE7DD'},s);
+    el('path',{d:MAP.w.map((r,i)=>mpath(mdec(r,0),true)+(WH[i]||[]).map(h=>mpath(h,true)).join('')).join(''),fill:'#A8CAE4'},s);
+    el('path',{d:MAP.v.map(r=>mpath(mdec(r,0))).join(''),fill:'none',stroke:'#93BEDF','stroke-width':5/MM,'stroke-linecap':'round','stroke-linejoin':'round'},s);
+    const roads=[...MAP.r].sort((a,b)=>a[0]-b[0]);
+    for(const pass of [0,1]){
+      for(let w=0;w<RW.length;w++){
+        const rs=roads.filter(r=>r[0]===w); if(!rs.length)continue;
+        for(const mw of [0,1]){const q=rs.filter(r=>r[1]===mw); if(!q.length)continue;
+          el('path',{d:q.map(r=>mpath(mdec(r,2))).join(''),fill:'none','stroke-linecap':'round','stroke-linejoin':'round',
+            stroke:pass?(mw?'#F3E3C3':'#FFFFFF'):'#D3CABB','stroke-width':Math.max(.8,(RW[w]+(pass?0:2.4))/MM)},s);}
+      }
+    }
+    const rl=MAP.t.filter(r=>r[0]!=='トンネル').map(r=>mpath(mdec(r,1))).join('');
+    el('path',{d:rl,fill:'none',stroke:'#8E9CAB','stroke-width':3.2},s);
+    el('path',{d:rl,fill:'none',stroke:'#FFFFFF','stroke-width':1.6,'stroke-dasharray':'6 6'},s);
+    const bpath=i=>mpath(mdec(MAP.b[i],2),true)+(BH[i]||[]).map(h=>mpath(h,true)).join('');
+    el('path',{d:MAP.b.map((b,i)=>i===MAP.p?'':bpath(i)).join(''),fill:'#DCD5CB',stroke:'#C9C0B3','stroke-width':.5},s);
+    if(MAP.p>=0)el('path',{d:bpath(MAP.p),fill:'var(--main)'},s);
+    el('rect',{x:0,y:0,width:MW,height:MH,fill:'var(--canvas)',opacity:.18,'pointer-events':'none'},s);
+    const cx=MX(0), cy=MY(0);
+    const rg=el('g',{id:'mprings'},s);
+    [[400,'徒歩5分'],[800,'徒歩10分']].forEach(([m,l])=>{const r=m/MM;
+      el('circle',{cx,cy,r,fill:'none',stroke:'var(--main)','stroke-width':2.4,'stroke-dasharray':'8 6'},rg);
+      const ly=cy-r-8; if(ly>24)tx(rg,cx,ly,l,{'font-size':18,'font-weight':700,'text-anchor':'middle',style:'fill:var(--main);paint-order:stroke;stroke:var(--canvas);stroke-width:5px'});});
+    const pin=el('g',{id:'mppin'},s); el('path',{d:`M${cx} ${cy} c-16 -20 -21 -30 -21 -39 a21 21 0 1 1 42 0 c0 9 -5 19 -21 39z`,fill:'var(--main)',stroke:'var(--canvas)','stroke-width':2},pin); el('circle',{cx,cy:cy-39,r:8,fill:'var(--canvas)'},pin);
+    const nb=el('g',{},s); el('path',{d:`M${MW-40} 40 l12 30 l-12 -8 l-12 8z`,fill:'var(--ink)'},nb); tx(nb,MW-40,32,'N',{'font-size':16,'text-anchor':'middle','font-weight':700});
+    const L200=200/MM, sy=MH-30; const sb=el('g',{},s); el('path',{d:`M20 ${sy+4} v-8 M20 ${sy} H${20+L200} M${20+L200} ${sy+4} v-8`,fill:'none',stroke:'var(--ink)','stroke-width':2},sb); tx(sb,20+L200/2,sy-12,'200m',{'font-size':15,'text-anchor':'middle',style:'paint-order:stroke;stroke:var(--canvas);stroke-width:5px'});
+    const at=el('g',{},s); el('rect',{x:MW-500,y:MH-22,width:500,height:22,fill:'var(--canvas)',opacity:.85},at); tx(at,MW-8,MH-6,'地図：国土地理院ベクトルタイルを加工して作成',{'font-size':13,'text-anchor':'end',class:'nt'});
+  }
+  if(!anim||STATIC)return;
+  stopCity();
+  const DV=city3d($('.mapw'))?6900:0;
+  const rg=$('#mprings'), pin=$('#mppin');
+  if(rg)[...rg.querySelectorAll('circle')].forEach((c,i)=>{c.style.transformBox='fill-box';c.style.transformOrigin='center';AN(c,[{transform:'scale(0)',opacity:0},{transform:'none',opacity:1}],{duration:700,delay:DV+300+i*250});});
+  if(pin)AN(pin,[{transform:'translateY(-160px)',opacity:0},{transform:'translateY(0)',opacity:1,offset:.7},{transform:'translateY(-12px)',offset:.85},{transform:'none',opacity:1}],{duration:850,delay:DV?DV-1100:200,easing:'ease-out'});
+}
+function stopCity(){$$('.mapw .city3d').forEach(c=>c._stop&&c._stop()); $$('.mapw .dcap').forEach(c=>c.remove());}
+/* 3D の街(国土地理院ベクトルタイルから作成・建物の高さはイメージ)で、空から物件へ降りる。最後は真上=平面の地図と同じ見え方 */
+function city3d(wrap){
+  const T=window.THREE; if(!T||!MAP||!wrap)return false;
+  const cv=document.createElement('canvas'); cv.className='city3d'; wrap.appendChild(cv);
+  let R; try{R=new T.WebGLRenderer({canvas:cv,antialias:true});}catch(e){cv.remove();return false;}
+  if(T.ColorManagement)T.ColorManagement.enabled=false; R.outputColorSpace=T.LinearSRGBColorSpace;
+  const W=MW*1.5,H=MH*1.5; R.setPixelRatio(1); R.setSize(W,H,false);
+  const BG=0xF4F1EC; R.setClearColor(BG,1);
+  const scene=new T.Scene(); scene.fog=new T.Fog(BG,2600,6200);
+  const EX=MAP.ex, EY=MAP.ey;
+  const tc=document.createElement('canvas'),TW=2048,TH=Math.round(2048*EY/EX); tc.width=TW; tc.height=TH;
+  const g=tc.getContext('2d'), sx=TW/(2*EX), sy=TH/(2*EY), X=x=>(x+EX)*sx, Y=y=>(EY-y)*sy;
+  const path=(r,s0)=>{const p=mdec(r,s0);g.beginPath();p.forEach(([x,y],i)=>i?g.lineTo(X(x),Y(y)):g.moveTo(X(x),Y(y)));};
+  g.fillStyle='#ECE7DD'; g.fillRect(0,0,TW,TH);
+  const ring=p=>{p.forEach(([x,y],i)=>i?g.lineTo(X(x),Y(y)):g.moveTo(X(x),Y(y)));g.closePath();};
+  g.fillStyle='#A8CAE4'; MAP.w.forEach((r,i)=>{g.beginPath();ring(mdec(r,0));(WH[i]||[]).forEach(h=>ring(h));g.fill();});
+  g.lineCap='round'; g.lineJoin='round';
+  g.strokeStyle='#93BEDF'; g.lineWidth=5*sx; MAP.v.forEach(r=>{path(r,0);g.stroke();});
+  const roads=[...MAP.r].sort((a,b)=>a[0]-b[0]);
+  roads.forEach(r=>{path(r,2);g.strokeStyle='#D3CABB';g.lineWidth=(RW[r[0]]+2.4)*sx;g.stroke();});
+  roads.forEach(r=>{path(r,2);g.strokeStyle=r[1]?'#F3E3C3':'#FFFFFF';g.lineWidth=RW[r[0]]*sx;g.stroke();});
+  MAP.t.forEach(r=>{if(r[0]==='トンネル')return;path(r,1);g.strokeStyle='#8E9CAB';g.lineWidth=3.2*sx;g.stroke();g.strokeStyle='#FFFFFF';g.lineWidth=1.6*sx;g.setLineDash([6*sx,6*sx]);g.stroke();g.setLineDash([]);});
+  const tex=new T.CanvasTexture(tc); tex.anisotropy=R.capabilities.getMaxAnisotropy();
+  const ground=new T.Mesh(new T.PlaneGeometry(2*EX,2*EY),new T.MeshLambertMaterial({map:tex})); scene.add(ground);
+  const base=new T.Mesh(new T.BoxGeometry(2*EX,2*EY,60),new T.MeshLambertMaterial({color:0xC9BCA8})); base.position.z=-30.5; scene.add(base);
+  const pos=[],nor=[],col=[], C=[[[1,1,1],[.98,.95,.9],[.95,.93,.97],[.99,.97,.93]],[[.84,.89,.95],[.8,.87,.93]],[[.74,.82,.9]],[[.93,.92,.9]]], PC=[.12,.23,.37];
+  const push=(a,n,c)=>{pos.push(a[0],a[1],a[2]);nor.push(n[0],n[1],n[2]);col.push(c[0],c[1],c[2]);};
+  let ptop=[0,0,0]; const ol=[];
+  MAP.b.forEach((b,bi)=>{const h=b[0],cs=C[b[1]]||C[0],c=bi===MAP.p?PC:cs[bi%cs.length],p=mdec(b,2);if(p.length<3)return;
+    const hs=(BH[bi]||[]).filter(r=>r.length>=3), V=r=>r.map(([x,y])=>new T.Vector2(x,y));
+    const cv=V(p), hv=hs.map(V); let tris; try{tris=T.ShapeUtils.triangulateShape(cv,hv);}catch(e){return;}
+    const all=[cv,...hv].flat(); // 三角形の番号は外周→穴の順の通し番号(呼んだあとの配列で引く)
+    tris.forEach(t=>{const q=t.map(k=>all[k]);if(q.some(v=>!v))return;q.forEach(v=>push([v.x,v.y,h],[0,0,1],c));});
+    [p,...hs].forEach(r=>{for(let i=0;i<r.length;i++){const a=r[i],bb=r[(i+1)%r.length],dx=bb[0]-a[0],dy=bb[1]-a[1],L=Math.hypot(dx,dy)||1,n=[dy/L,-dx/L,0];
+      push([a[0],a[1],0],n,c);push([bb[0],bb[1],0],n,c);push([bb[0],bb[1],h],n,c);push([a[0],a[1],0],n,c);push([bb[0],bb[1],h],n,c);push([a[0],a[1],h],n,c);
+      ol.push(a[0],a[1],h+.15,bb[0],bb[1],h+.15);}});
+    if(bi===MAP.p){ptop=[0,0,h];}});
+  const bg=new T.BufferGeometry(); bg.setAttribute('position',new T.Float32BufferAttribute(pos,3)); bg.setAttribute('normal',new T.Float32BufferAttribute(nor,3)); bg.setAttribute('color',new T.Float32BufferAttribute(col,3));
+  scene.add(new T.Mesh(bg,new T.MeshLambertMaterial({vertexColors:true,side:T.DoubleSide})));
+  const og=new T.BufferGeometry(); og.setAttribute('position',new T.Float32BufferAttribute(ol,3)); scene.add(new T.LineSegments(og,new T.LineBasicMaterial({color:0x6B7685,transparent:true,opacity:.42})));
+  const pinG=new T.Group(); const pm=new T.MeshLambertMaterial({color:0x1F3A5F,emissive:0x0c1a2c});
+  const cone=new T.Mesh(new T.ConeGeometry(9,30,24),pm); cone.rotation.x=-Math.PI/2; cone.position.z=15; pinG.add(cone);
+  const ball=new T.Mesh(new T.SphereGeometry(13,24,16),pm); ball.position.z=38; pinG.add(ball);
+  const dot=new T.Mesh(new T.SphereGeometry(5.5,16,12),new T.MeshBasicMaterial({color:0xffffff})); dot.position.set(0,-10,40); pinG.add(dot);
+  pinG.position.set(ptop[0],ptop[1],ptop[2]+4); pinG.scale.setScalar(1.6); scene.add(pinG);
+  const ringM=new T.Mesh(new T.RingGeometry(22,28,48),new T.MeshBasicMaterial({color:0x1F3A5F,transparent:true,opacity:.8,side:T.DoubleSide})); ringM.position.set(0,0,1.5); scene.add(ringM);
+  // 明るさは平面の地図の色に近くなるよう合わせた(three r155 以降の光の強さの単位)
+  scene.add(new T.HemisphereLight(0xffffff,0x9aa6b4,2.2)); const sun=new T.DirectionalLight(0xfff6e8,1.6); sun.position.set(-0.55,-0.75,1); scene.add(sun);
+  // カメラの道すじ:遠くの斜め上 → 物件の近くを低く → 真上(平面の地図と同じ画角)
+  const FOV=30, ZEND=(MH/2*MM)/Math.tan(FOV/2*Math.PI/180);
+  const cam=new T.PerspectiveCamera(FOV,W/H,10,12000);
+  const curve=new T.CatmullRomCurve3([new T.Vector3(-1700,-3300,2600),new T.Vector3(-520,-1500,1050),new T.Vector3(160,-560,330),new T.Vector3(420,-150,560),new T.Vector3(0,-0.02,ZEND)],false,'centripetal');
+  const ease=t=>t<.5?4*t*t*t:1-Math.pow(-2*t+2,3)/2, DUR=6000, t0=performance.now(); let raf, done=false, stopped=false;
+  const up0=new T.Vector3(0,0,1), up1=new T.Vector3(0,1,0);
+  const cleanup=()=>{if(stopped)return;stopped=true;cancelAnimationFrame(raf);R.dispose();bg.dispose();og.dispose();tex.dispose();cv.remove();};
+  function frame(now){if(stopped)return; const t=Math.max(0,Math.min(1,(now-t0)/DUR)), e=ease(t);
+    cam.position.copy(curve.getPoint(e));
+    const k=Math.max(0,(e-.78)/.22); cam.up.copy(up0).lerp(up1,k*k).normalize();
+    cam.lookAt(0,0,0);
+    pinG.position.z=ptop[2]+4+Math.sin(now/260)*4; pinG.rotation.z=now/900;
+    ringM.scale.setScalar(1+((now/1400)%1)*2.4); ringM.material.opacity=.8*(1-((now/1400)%1));
+    R.render(scene,cam);
+    if(t<1)raf=requestAnimationFrame(frame);
+    else if(!done){done=true; const a=cv.animate([{opacity:1},{opacity:0}],{duration:800,delay:250,fill:'forwards'}); a.onfinish=cleanup;}}
+  raf=requestAnimationFrame(frame);
+  cv._stop=cleanup;
+  const cap=document.createElement('div'); cap.className='dcap'; cap.textContent=D.area||'物件の周辺'; wrap.appendChild(cap);
+  cap.animate([{opacity:0},{opacity:1,offset:.06},{opacity:1,offset:.9},{opacity:0}],{duration:6300,fill:'forwards'}).onfinish=()=>cap.remove();
+  setTimeout(()=>{if(cap.isConnected)cap.textContent='物件の場所へ';},3800);
+  return true;
+}
+
 /* ---- ページ送り ---- */
 let cur=0;
-const SCN={0:sceneResult,1:()=>{if(wview==='bk')drawBlocks(true);else setView('wf');},2:()=>drawPlans(true),3:()=>calcFund(true)};
+const SCN={map:()=>drawMap(true),result:sceneResult,basis:()=>{if(wview==='bk')drawBlocks(true);else setView('wf');},plans:()=>drawPlans(true),fund:()=>calcFund(true)};
+/* ページは番号か data-k(map・result・basis・plans・fund)で指す(地図のページがある資料では番号がずれるため)。 */
+const PIDX=k=>{const i=pages.findIndex(p=>p.dataset.k===k);return i<0?0:i;};
 function go(i,from){
+  if(typeof i==='string')i=PIDX(i);
   i=Math.max(0,Math.min(pages.length-1,i)); closePanel(); stage.classList.remove('ovr');
+  if(MAPON&&pages[i].dataset.k!=='map')stopCity();
   const prev=pages[cur], dir=i>=cur?1:-1;
   pages.forEach((p,j)=>{p.classList.toggle('on',j===i);p.classList.remove('enter');});
   const p=pages[i]; cur=i; setT('#pg',`${i+1} / ${pages.length}`);
@@ -356,10 +487,10 @@ function go(i,from){
       a.onfinish=a.oncancel=()=>{prev.classList.remove('leaving');prev.style.transformOrigin='';};
       p.animate(from?[{transform:'scale(.4)',opacity:0},{transform:'none',opacity:1}]:[{transform:`translateX(${dir*24}%) scale(.82)`,opacity:0},{transform:'none',opacity:1}],{duration:650,easing:CAM});}
     void p.offsetWidth;p.classList.add('enter');clearTimeout(go.t);go.t=setTimeout(()=>p.classList.remove('enter'),3400);
-    SCN[i]&&SCN[i]();
+    const sc=SCN[p.dataset.k]; sc&&sc();
   }
 }
-$$('[data-go]').forEach(b=>b.addEventListener('click',()=>go(+b.dataset.go,b)));
+$$('[data-go]').forEach(b=>b.addEventListener('click',()=>go(b.dataset.go,b)));
 $('#prev').addEventListener('click',()=>go(cur-1)); $('#next').addEventListener('click',()=>go(cur+1));
 function overview(){
   closePanel();
@@ -374,9 +505,9 @@ addEventListener('keydown',e=>{
   if(e.key==='Escape'){if(stage.classList.contains('pan'))closePanel();else if(stage.classList.contains('ovr'))stage.classList.remove('ovr');else go(0);}
   else if(e.key==='ArrowRight'||(e.key===' '&&!e.target.matches('button,[role=button]'))){e.preventDefault();go(cur+1);}
   else if(e.key==='ArrowLeft')go(cur-1);
-  else if(/^[1-4]$/.test(e.key))go(+e.key-1);
+  else if(/^[1-9]$/.test(e.key)&&+e.key<=pages.length)go(+e.key-1);
   else if(e.key==='o'||e.key==='O')overview();
 });
 
-drawCut(); if(UNCON)drawBlocks(); drawWF(); setView(wview); drawPlans(); calcFund(); go(0);
+drawCut(); if(UNCON)drawBlocks(); drawWF(); setView(wview); drawPlans(); calcFund(); if(MAPON)drawMap(false); go(0);
 })();

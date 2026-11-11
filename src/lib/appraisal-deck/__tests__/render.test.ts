@@ -1,7 +1,8 @@
 import { describe, it, expect } from "vitest";
 import { readFileSync } from "node:fs";
 import path from "node:path";
-import { renderAppraisalDeck, buildDeckData, jsonForScript, deckTitle, RENDER_HEADERS } from "../render";
+import { renderAppraisalDeck, buildDeckData, jsonForScript, deckTitle, mapHeadline, RENDER_HEADERS } from "../render";
+import type { DeckMapData } from "../map/build";
 import { defaultHeadlines, isUnconnectedCase } from "../headlines";
 import { mergeAppraisal } from "../overrides";
 import type { AppraisalExtract } from "../parse";
@@ -36,6 +37,20 @@ const HOUSE: AppraisalExtract = {
   ],
   range: null,
   warnings: [],
+};
+const MAP: DeckMapData = {
+  version: 1,
+  builtAt: "2026-11-11T00:00:00.000Z",
+  ex: 1000,
+  ey: 650,
+  b: [[8, 0, -20, -20, 40, 0, 0, 40, -40, 0]],
+  p: 0,
+  r: [[2, 0, -400, 0, 800, 0]],
+  w: [],
+  v: [],
+  t: [],
+  bh: [],
+  wh: [],
 };
 const LAND: AppraisalExtract = {
   ...HOUSE,
@@ -107,6 +122,35 @@ describe("renderAppraisalDeck(資料の HTML)", () => {
   });
   it("jsonForScript は < > & と行区切りを逃がす", () => {
     expect(jsonForScript({ a: "<>& " })).toBe('{"a":"\\u003c\\u003e\\u0026\\u2028"}');
+  });
+  it("周辺地図がなければ4ページ・3D の部品は入れない(これまでどおり)", () => {
+    const html = renderAppraisalDeck(mergeAppraisal(HOUSE, {}), { draft: false });
+    expect(html.match(/<section class="page"/g)).toHaveLength(4);
+    expect(html).not.toContain('data-k="map"');
+    expect(html).not.toContain('id="deck-map"');
+    expect(html).not.toContain("window.THREE=Object.freeze");
+    expect(html).toContain("1 / 4");
+  });
+  it("周辺地図があれば先頭に地図のページ・地図のデータと 3D の部品を埋め込む(外から読まない)", () => {
+    const map = { ...MAP, t: [["</script><img src=x>", 0, 0, 2, 2]] };
+    const html = renderAppraisalDeck(mergeAppraisal(HOUSE, {}), { draft: false, map });
+    expect(html.match(/<section class="page"/g)).toHaveLength(5);
+    expect(html.indexOf('data-k="map"')).toBeLessThan(html.indexOf('data-k="result"'));
+    expect(html).toContain("1 / 5");
+    expect(html).toContain("window.THREE=Object.freeze");
+    expect(html).not.toMatch(/<script[^>]+src=|<link[^>]+href=/);
+    expect(html).not.toContain("</script><img");
+    const data = JSON.parse(/<script id="deck-map" type="application\/json">([\s\S]*?)<\/script>/.exec(html)![1]);
+    expect(data.t[0][0]).toBe("</script><img src=x>");
+    // ページの行き先は番号ではなくページの名前(地図のページで番号がずれても行き先が変わらない)
+    expect(html).toContain('data-go="basis"');
+    expect(html).not.toMatch(/data-go="\d"/);
+  });
+  it("地図のページの見出しは駅と徒歩分数から作る(「駅駅」にしない)・HTML の特殊文字を逃がす", () => {
+    expect(mapHeadline(mergeAppraisal(HOUSE, {}))).toBe("東京都架空区見本町4丁目にあり、架空線「見本」駅まで徒歩10分の物件です");
+    expect(mapHeadline(mergeAppraisal({ ...HOUSE, station: null }, {}))).toBe("東京都架空区見本町4丁目にある物件の場所と周りの様子です");
+    const html = renderAppraisalDeck(mergeAppraisal({ ...HOUSE, area: "東京都<b>区" }, {}), { draft: false, map: MAP });
+    expect(html).not.toContain("<b>区");
   });
   it("資料の動き(deck.js)は構文として正しい", () => {
     const js = readFileSync(path.join(process.cwd(), "src/lib/appraisal-deck/assets/deck.js"), "utf8");

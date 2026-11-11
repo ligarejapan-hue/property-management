@@ -4,6 +4,7 @@
  * PATCH { overrides } … 担当者の修正を丸ごと置き換える。確認済みの資料を直すと下書きに戻る。
  */
 import { z } from "zod";
+import { Prisma } from "@/generated/prisma";
 import prisma from "@/lib/prisma";
 import { getApiSession, getUserPermissions, parseJsonBody, ApiError, handleApiError, apiResponse } from "@/lib/api-helpers";
 import { writeAuditLog } from "@/lib/audit";
@@ -32,7 +33,12 @@ async function loadDeckOrThrow(propertyId: string, deckId: string) {
     },
   });
   if (!deck) throw new ApiError(404, "資料が見つかりません", "NOT_FOUND");
-  return deck;
+  // 周辺地図(2026-11-11)は大きいので中身は読まず、あるかどうかと物件に座標があるかどうかだけ返す(座標の値は返さない)。
+  const [mapCount, property] = await Promise.all([
+    prisma.appraisalDeck.count({ where: { id: deck.id, mapData: { not: Prisma.DbNull } } }),
+    prisma.property.findUnique({ where: { id: propertyId }, select: { gpsLat: true, gpsLng: true } }),
+  ]);
+  return { ...deck, hasMap: mapCount > 0, hasLocation: property?.gpsLat != null && property?.gpsLng != null };
 }
 
 function view(deck: Awaited<ReturnType<typeof loadDeckOrThrow>>) {

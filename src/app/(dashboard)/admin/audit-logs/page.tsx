@@ -156,6 +156,7 @@ const ACTION_LABELS: Record<string, string> = {
   registry_pdf_manual_attach: "謄本PDF手動添付",
   registry_pdf_download: "謄本PDFダウンロード",
   appraisal_deck_download: "査定のご報告ダウンロード",
+  appraisal_deck_map_build: "査定のご報告の周辺地図作成",
   registry_pdf_preview: "謄本PDFプレビュー",
   pdf_import: "PDF取込",
   // --- 売却促進DM ---

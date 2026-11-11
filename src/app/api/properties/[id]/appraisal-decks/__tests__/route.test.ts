@@ -1,14 +1,15 @@
 import { describe, it, expect, vi, beforeEach } from "vitest";
 
-const { session, perms, db, build, audit } = vi.hoisted(() => ({
+const { session, perms, db, build, audit, refresh } = vi.hoisted(() => ({
   session: { current: { id: "u1", role: "office_staff" } as { id: string; role: string } },
   perms: { current: [] as { resource: string; action: string; granted: boolean }[] },
   db: {
     property: { findUnique: vi.fn() },
-    appraisalDeck: { findMany: vi.fn(), findFirst: vi.fn(), update: vi.fn(), updateMany: vi.fn() },
+    appraisalDeck: { findMany: vi.fn(), findFirst: vi.fn(), update: vi.fn(), updateMany: vi.fn(), count: vi.fn() },
   },
   build: vi.fn(),
   audit: vi.fn(),
+  refresh: vi.fn(),
 }));
 
 vi.mock("@/lib/api-helpers", () => {
@@ -40,10 +41,12 @@ vi.mock("@/lib/uploads-authorization", () => ({
 vi.mock("@/lib/prisma", () => ({ default: db }));
 vi.mock("@/lib/appraisal-deck/create-draft", () => ({ buildAppraisalDraft: build }));
 vi.mock("@/lib/audit", () => ({ writeAuditLog: audit }));
+vi.mock("@/lib/appraisal-deck/map/refresh", () => ({ refreshDeckMap: refresh }));
 
 import { GET as listGET, POST as listPOST } from "../route";
 import { GET as deckGET, PATCH as deckPATCH } from "../[deckId]/route";
 import { POST as confirmPOST } from "../[deckId]/confirm/route";
+import { POST as mapPOST } from "../[deckId]/map/route";
 
 const P = (r: string, a: string) => ({ resource: r, action: a, granted: true });
 const FULL = [P("property", "read"), P("property", "write"), P("owner", "read")];
@@ -85,6 +88,8 @@ beforeEach(() => {
   db.appraisalDeck.update.mockResolvedValue({});
   db.appraisalDeck.updateMany.mockResolvedValue({ count: 1 });
   build.mockResolvedValue({ ok: true, deckId: "d1", created: true });
+  db.appraisalDeck.count.mockResolvedValue(0);
+  refresh.mockResolvedValue({ ok: true, buildings: 120 });
 });
 
 describe("権限(査定報告書を開ける人と同じ範囲)", () => {
@@ -94,12 +99,14 @@ describe("権限(査定報告書を開ける人と同じ範囲)", () => {
     ["詳細", () => deckGET(req("GET"), dctx)],
     ["修正", () => deckPATCH(req("PATCH", { overrides: {} }), dctx)],
     ["確認", () => confirmPOST(req("POST", { reviewedUpdatedAt: REV }), dctx)],
+    ["地図", () => mapPOST(req("POST"), dctx)],
   ];
   it.each(calls)("%s: 所有者の情報を見られない人は 403", async (_n, call) => {
     perms.current = [P("property", "read"), P("property", "write")];
     expect((await call()).status).toBe(403);
     expect(db.appraisalDeck.findMany).not.toHaveBeenCalled();
     expect(build).not.toHaveBeenCalled();
+    expect(refresh).not.toHaveBeenCalled();
   });
   it.each(calls)("%s: 担当外の物件(field_staff)は 403", async (_n, call) => {
     session.current = { id: "u1", role: "field_staff" };
@@ -110,6 +117,40 @@ describe("権限(査定報告書を開ける人と同じ範囲)", () => {
     expect((await listGET(req("GET"), ctx)).status).toBe(200);
     expect((await deckPATCH(req("PATCH", { overrides: {} }), dctx)).status).toBe(403);
     expect((await confirmPOST(req("POST", { reviewedUpdatedAt: REV }), dctx)).status).toBe(403);
+    expect((await mapPOST(req("POST"), dctx)).status).toBe(403);
+    expect(refresh).not.toHaveBeenCalled();
+  });
+});
+
+describe("周辺地図(2026-11-11)", () => {
+  it("GET 詳細は地図があるか・座標があるかだけを返す(座標の値・地図の中身は返さない)", async () => {
+    db.property.findUnique.mockImplementation(async ({ select }: { select: Record<string, boolean> }) =>
+      select.gpsLat ? { gpsLat: "35.6447123", gpsLng: "139.6992456" } : { id: "p1", createdBy: "u9", assignedTo: null, isArchived: false },
+    );
+    db.appraisalDeck.count.mockResolvedValue(1);
+    const body = await (await deckGET(req("GET"), dctx)).json();
+    expect(body.deck).toMatchObject({ hasMap: true, hasLocation: true });
+    expect(JSON.stringify(body)).not.toContain("35.64");
+    expect(JSON.stringify(body)).not.toContain("139.69");
+    expect(db.appraisalDeck.findFirst.mock.calls[0][0].select.mapData).toBeUndefined();
+  });
+  it("座標がなければ hasLocation=false", async () => {
+    const body = await (await deckGET(req("GET"), dctx)).json();
+    expect(body.deck).toMatchObject({ hasMap: false, hasLocation: false });
+  });
+  it("POST 地図 … 手動で作り直す(結果は件数だけ)", async () => {
+    const res = await mapPOST(req("POST"), dctx);
+    expect(res.status).toBe(200);
+    expect(await res.json()).toEqual({ result: "ok", buildings: 120 });
+    expect(refresh).toHaveBeenCalledWith({ deckId: "d1", propertyId: "p1", userId: "u1", mode: "manual" });
+  });
+  it.each([
+    ["no_location", 422],
+    ["fetch_failed", 502],
+    ["not_found", 404],
+  ])("POST 地図 … %s は %i", async (reason, status) => {
+    refresh.mockResolvedValueOnce({ ok: false, reason });
+    expect((await mapPOST(req("POST"), dctx)).status).toBe(status);
   });
 });
 

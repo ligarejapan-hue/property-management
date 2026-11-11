@@ -1,8 +1,9 @@
 import { describe, it, expect, vi, beforeEach } from "vitest";
 
-const { afterFn, build } = vi.hoisted(() => ({ afterFn: vi.fn(), build: vi.fn() }));
+const { afterFn, build, refresh } = vi.hoisted(() => ({ afterFn: vi.fn(), build: vi.fn(), refresh: vi.fn() }));
 vi.mock("next/server", () => ({ after: afterFn }));
 vi.mock("../create-draft", () => ({ buildAppraisalDraft: build }));
+vi.mock("../map/refresh", () => ({ refreshDeckMap: refresh }));
 
 import { scheduleAppraisalDraft } from "../schedule";
 
@@ -11,6 +12,25 @@ const IN = { attachmentId: "a1", propertyId: "p1", userId: "u1" };
 beforeEach(() => vi.clearAllMocks());
 
 describe("scheduleAppraisalDraft(添付の応答のあとで下書きを作る)", () => {
+  it("下書きができたら、続けて周辺地図を作る(自動=地図がまだないときだけ)・作れなければ地図は作らない(2026-11-11)", async () => {
+    build.mockResolvedValueOnce({ ok: true, deckId: "d1", created: true });
+    scheduleAppraisalDraft(IN);
+    await afterFn.mock.calls[0][0]();
+    expect(refresh).toHaveBeenCalledWith({ deckId: "d1", propertyId: "p1", userId: "u1", mode: "auto" });
+    refresh.mockClear();
+    build.mockResolvedValueOnce({ ok: false, reason: "not_sre" });
+    scheduleAppraisalDraft(IN);
+    await afterFn.mock.calls[1][0]();
+    expect(refresh).not.toHaveBeenCalled();
+  });
+  it("地図を作れなくても投げない", async () => {
+    const warn = vi.spyOn(console, "warn").mockImplementation(() => {});
+    build.mockResolvedValueOnce({ ok: true, deckId: "d1", created: true });
+    refresh.mockRejectedValueOnce(new Error("x"));
+    scheduleAppraisalDraft(IN);
+    await expect(afterFn.mock.calls[0][0]()).resolves.toBeUndefined();
+    warn.mockRestore();
+  });
   it("応答のあと(after)で作る=添付の応答を待たせない", async () => {
     scheduleAppraisalDraft(IN);
     expect(build).not.toHaveBeenCalled();
