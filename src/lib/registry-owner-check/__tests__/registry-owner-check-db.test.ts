@@ -692,6 +692,88 @@ async function main() {
     );
     NO_PERMS.clear();
   }
+
+  // ---- 15. 外字の組(2026-11-11 昼 実機確認): 一覧の種類を比べ直しでそろえる・直してもシステムの人を残す ----
+  await reset();
+  {
+    const G = String.fromCharCode(0xe0a6); // 謄本の外字(私用領域)
+    const u = await user();
+    // 実機の形: 前からいた普通の字の人+外字のまま自動で入った人/謄本は外字の1名
+    const p = await property(u, "hold");
+    const otsuka = await owner("大塚一郎", "東京都世田谷区見本一丁目1番1号(システムの住所)");
+    const gaijiOwner = await owner(`大${G}一郎`);
+    await link(p, otsuka, { isPrimary: true });
+    await link(p, gaijiOwner);
+    const a = await registry(p, u, [{ name: `大${G}一郎` }]);
+    await checkPropertyRegistryOwners(p);
+    // 外字を見分ける前に比べた形に戻す(種類=人数だけ・自動の登録は済み・比べた時刻は前)
+    await prisma.$executeRawUnsafe(
+      `UPDATE registry_owner_checks SET diff_kind = 'count:1:2,autoadd', diff_rank = 4, checked_at = '2026-11-10 12:00:00' WHERE property_id = $1::uuid`,
+      p,
+    );
+    // 外字を見分ける前に比べた、外字の無い「違う」でも、判断済み(このままでよい)は比べ直さない
+    const keptOld = await property(u, "hold");
+    await link(keptOld, await owner("佐藤六郎"));
+    await registry(keptOld, u, [{ name: "鈴木六郎" }]);
+    await checkPropertyRegistryOwners(keptOld);
+    await prisma.$executeRawUnsafe(
+      `UPDATE registry_owner_checks SET decision = 'keep', diff_kind = 'different,autoadd', checked_at = '2026-11-10 12:00:00' WHERE property_id = $1::uuid`,
+      keptOld,
+    );
+
+    const r = await runRegistryOwnerChecks(50);
+    const rp = await row(p);
+    check(
+      "15a 外字を見分ける前の未判断の違うは1回比べ直し、一覧の種類に外字が入る(自動では足さない)",
+      r.processed === 1 && !r.counts.auto_added && r.remaining === 0 &&
+        rp?.result === "mismatch" && rp?.diffKind === "gaiji,count:1:2,autoadd" && rp?.stale === false,
+      { r, rp },
+    );
+    const again = await runRegistryOwnerChecks(50);
+    check("15b 比べ直したあとは回らない", again.processed === 0, again);
+
+    // 謄本の名義に直す: 外字の組の大塚さんは残り、システムだけ(外字のまま入った人)は今までどおり外れる
+    const out = await replaceRegistryOwnersOnProperty({
+      session: { id: u, role: "admin" },
+      perms: PERMS,
+      propertyId: p,
+      expectedAttachmentId: a,
+      expectedLinkedOwnerIds: [otsuka, gaijiOwner],
+      expectedRemoveOwnerIds: [gaijiOwner],
+    });
+    const otsukaNow = await prisma.owner.findUniqueOrThrow({ where: { id: otsuka } });
+    check(
+      "15c 外字の組のシステムの人は名前・住所そのまま残り、外字の人は足さない",
+      out.removed === 1 && out.added === 0 &&
+        JSON.stringify(await linkedNames(p)) === JSON.stringify(["大塚一郎"]) &&
+        otsukaNow.name === "大塚一郎" && otsukaNow.address === "東京都世田谷区見本一丁目1番1号(システムの住所)",
+      { out, names: await linkedNames(p), otsukaNow },
+    );
+
+    // 外字の組だけ=直す中身が無い(何も変えない)
+    const only = await property(u, "hold");
+    const otsuka2 = await owner("大塚一郎");
+    await link(only, otsuka2);
+    const a2 = await registry(only, u, [{ name: `大${G}一郎` }]);
+    let status: number | undefined;
+    try {
+      await replaceRegistryOwnersOnProperty({
+        session: { id: u, role: "admin" },
+        perms: PERMS,
+        propertyId: only,
+        expectedAttachmentId: a2,
+        expectedLinkedOwnerIds: [otsuka2],
+        expectedRemoveOwnerIds: [],
+      });
+    } catch (e) {
+      status = (e as { status?: number }).status;
+    }
+    check(
+      "15d 外字の組だけの物件は直しても何も変えない(409)",
+      status === 409 && JSON.stringify(await linkedNames(only)) === JSON.stringify(["大塚一郎"]),
+      { status, names: await linkedNames(only) },
+    );
+  }
 }
 
 describe.skipIf(!process.env.PUSH_DB_TEST_URL)("謄本の名義の確認(本物の Postgres)", () => {

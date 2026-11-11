@@ -280,7 +280,12 @@ export function ownerDiff(registryNames: readonly string[], systemNames: readonl
       if (score >= PAIR_THRESHOLD) cands.push({ s: s.i, r: r.i, score });
     }
   }
-  cands.sort((x, y) => y.score - x.score || x.s - y.s || x.r - y.r);
+  // 同じ度合いなら、外字(私用領域)の無いシステムの人を先に組にする(2026-11-11 昼)。外字のまま
+  // 入った人と普通の字の人が同じくらい似ていても、並び順で組の相手(=直しても残す人)が変わらないように。
+  // 外字の無い物件では全員 0 なので、今までの順のまま。
+  const sysGaiji = new Set(sys.filter((x) => hasPrivateUseChar(x.n)).map((x) => x.i));
+  const g = (s: number) => (sysGaiji.has(s) ? 1 : 0);
+  cands.sort((x, y) => y.score - x.score || g(x.s) - g(y.s) || x.s - y.s || x.r - y.r);
   const pairOfSys = new Map<number, number>();
   const usedReg = new Set<number>();
   for (const c of cands) {

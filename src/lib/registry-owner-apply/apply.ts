@@ -302,6 +302,13 @@ export interface ReplaceRegistryOwnersArgs {
   beforeCommit?: (tx: ReplaceTx, registryNames: string[]) => Promise<void>;
 }
 
+/** 謄本の名義の確認で、システムの所有者を並べる順(確認画面と「謄本の名義に直す」で同じ)。 */
+export const REGISTRY_OWNER_REVIEW_ORDER = [
+  { isPrimary: "desc" as const },
+  { createdAt: "asc" as const },
+  { ownerId: "asc" as const },
+];
+
 export const ownersChangedError = () =>
   new ApiError(
     409,
@@ -351,9 +358,12 @@ export async function replaceRegistryOwnersOnProperty(
   const registryNames = registryOwners.map((o) => o.name);
 
   // 受付時点の計画(確認画面と同じか)。⚠ロックの中でもう一度作り直して比べる。
+  // ⚠確認画面(GET /api/registry-owner-checks/[propertyId])と同じ順に並べる=外字の組の相手が
+  //   並び順で変わらないように(2026-11-11 昼)
   const linkedNow = await prisma.propertyOwner.findMany({
     where: { propertyId },
     select: { ownerId: true, owner: { select: { name: true } } },
+    orderBy: REGISTRY_OWNER_REVIEW_ORDER,
   });
   const plan = planOwnerReplacement(
     registryOwners,
@@ -408,6 +418,7 @@ export async function replaceRegistryOwnersOnProperty(
           endDate: true,
           owner: { select: { name: true } },
         },
+        orderBy: REGISTRY_OWNER_REVIEW_ORDER,
       });
       // ⚠ロックの中で作り直した計画が、確認画面で見せたものと同じか
       const fresh = planOwnerReplacement(

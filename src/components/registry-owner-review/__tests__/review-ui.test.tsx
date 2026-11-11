@@ -65,6 +65,41 @@ describe("OwnerComparison", () => {
   });
 });
 
+describe("OwnerComparison: 外字の組(2026-11-11 昼 実機確認)", () => {
+  const G = String.fromCharCode(0xe0a6); // 謄本の外字(私用領域)
+  const html = renderToStaticMarkup(
+    <OwnerComparison
+      registryLabel="x"
+      systemOwners={[
+        { ownerId: "a", name: "大塚一郎", address: null, isPrimary: true, willBeRemoved: false, hasNote: false },
+        { ownerId: "b", name: `大${G}一郎`, address: null, isPrimary: false, willBeRemoved: true, hasNote: false },
+      ]}
+      registryOwners={[{ name: `大${G}一郎`, address: null, share: null, willBeAdded: false }]}
+    />,
+  );
+  const rows = html.split("<li").slice(1);
+
+  it("外字の組は「入れ替えます」でなく、システムの名前のまま残すと出す", () => {
+    expect(rows[0]).toMatch(/data-row="differs"[\s\S]*塚[\s\S]*≠ 外字（読めない字）/);
+    expect(rows[0]).toContain("直しても、システムの名前のまま残します");
+    expect(rows[0]).not.toContain("この人を入れ替えます");
+  });
+  it("外字のまま入ったシステムだけの人は「− システムだけ」", () => {
+    expect(rows[1]).toMatch(/data-row="system_only"[\s\S]*− システムだけ/);
+  });
+  it("外字の無い組の「入れ替えます」は今までどおり", () => {
+    const swap = renderToStaticMarkup(
+      <OwnerComparison
+        registryLabel="x"
+        systemOwners={[{ ownerId: "a", name: "佐藤一郎", address: null, isPrimary: true, willBeRemoved: true, hasNote: false }]}
+        registryOwners={[{ name: "佐藤次郎", address: null, share: null, willBeAdded: true }]}
+      />,
+    );
+    expect(swap).toContain("直すと、この人を入れ替えます");
+    expect(swap).not.toContain("システムの名前のまま残します");
+  });
+});
+
 describe("1件ぶんの操作(ソース)", () => {
   const src = read("src/components/registry-owner-review/review-item.tsx");
   it("DM の初期値: このままでよい=チェックあり・直す=チェックなし", () => {
@@ -75,6 +110,11 @@ describe("1件ぶんの操作(ソース)", () => {
     expect(src).toContain("物件から外れる人");
     expect(src).toContain("加わる人");
     expect(src).toMatch(/onClick=\{\(\) => setConfirming\(true\)\}/);
+  });
+  it("外れる人も加わる人もいない(外字の組だけ)ときは、直すボタンを押せず理由を出す", () => {
+    expect(src).toContain("removeNames.length === 0 && addNames.length === 0");
+    expect(src).toMatch(/disabled=\{[^}]*nothingToReplace\}/);
+    expect(src).toContain("外字の人はシステムの名前のまま残します");
   });
   it("確認画面で見せた中身(つながり・外れる人)を送る", () => {
     expect(src).toContain("linkedOwnerIds: detail.plan.linkedOwnerIds");

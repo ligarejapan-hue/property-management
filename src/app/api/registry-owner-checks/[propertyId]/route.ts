@@ -21,10 +21,14 @@ import { writeAuditLog } from "@/lib/audit";
 import { canAccessPropertyRecord } from "@/lib/property-access";
 import { getOwnerFieldLevel, isMaskFreeLevel } from "@/lib/permissions";
 import { parseRegistryOwnerTable } from "@/lib/registry-owner-table";
-import { loadLatestRegistryText, SUPPORTED_CERTIFICATE_TYPE } from "@/lib/registry-owner-apply/apply";
+import {
+  loadLatestRegistryText,
+  REGISTRY_OWNER_REVIEW_ORDER,
+  SUPPORTED_CERTIFICATE_TYPE,
+} from "@/lib/registry-owner-apply/apply";
 import { registryDisplayName } from "@/lib/attachments/registry-display-name";
 import { findMissingRegistryOwnerReviewPerm } from "@/lib/registry-owner-check/permissions";
-import { ownerNameKey, planOwnerReplacement } from "@/lib/registry-owner-check/compare";
+import { planOwnerReplacement } from "@/lib/registry-owner-check/compare";
 
 export async function GET(
   _request: NextRequest,
@@ -55,7 +59,7 @@ export async function GET(
             note: true,
             owner: { select: { name: true, address: true } },
           },
-          orderBy: [{ isPrimary: "desc" }, { createdAt: "asc" }],
+          orderBy: REGISTRY_OWNER_REVIEW_ORDER,
         },
       },
     });
@@ -78,7 +82,8 @@ export async function GET(
     const linked = property.propertyOwners.map((l) => ({ ownerId: l.ownerId, name: l.owner.name }));
     const plan = planOwnerReplacement(registryOwners, linked);
     const removeSet = new Set(plan.removeOwnerIds);
-    const linkedKeys = new Set(linked.map((l) => ownerNameKey(l.name)));
+    // 加わる人は計画のとおり(外字の組の謄本の人は足さない=確認画面にも出さない)
+    const addSet = new Set<object>(plan.add);
 
     return apiResponse({
       propertyId,
@@ -103,7 +108,7 @@ export async function GET(
         name: o.name,
         address: showAddress ? o.address : null,
         share: o.share,
-        willBeAdded: !linkedKeys.has(ownerNameKey(o.name)),
+        willBeAdded: addSet.has(o),
       })),
       plan: {
         linkedOwnerIds: linked.map((l) => l.ownerId),

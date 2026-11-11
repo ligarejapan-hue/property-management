@@ -108,6 +108,8 @@ export default function ReviewItem({ propertyId, address, dmStatus, diffKind, ca
   const removeNames = detail?.systemOwners.filter((o) => o.willBeRemoved) ?? [];
   const addNames = detail?.registryOwners.filter((o) => o.willBeAdded) ?? [];
   const blockedByNote = removeNames.some((o) => o.hasNote);
+  // 外字の組だけ(システムの人を残す)など、直しても外れる人も加わる人もいない(2026-11-11 昼)
+  const nothingToReplace = !!detail?.readable && removeNames.length === 0 && addNames.length === 0;
 
   return (
     <li className="rounded-lg border border-gray-200 bg-white dark:border-gray-800 dark:bg-gray-900">
@@ -176,11 +178,16 @@ export default function ReviewItem({ propertyId, address, dmStatus, diffKind, ca
                     className="mt-3"
                     size="sm"
                     onClick={() => setConfirming(true)}
-                    disabled={!canReplace || busy || !detail.readable || blockedByNote}
+                    disabled={!canReplace || busy || !detail.readable || blockedByNote || nothingToReplace}
                   >
                     謄本の名義に直す
                   </Button>
                   {!canReplace ? <p className="mt-1 text-xs text-gray-500">管理者だけが直せます。</p> : null}
+                  {nothingToReplace ? (
+                    <p className="mt-1 text-xs text-gray-500 dark:text-gray-400">
+                      直しても外れる人・加わる人はいません(外字の人はシステムの名前のまま残します)。確かめたら「このままでよい」を選んでください。
+                    </p>
+                  ) : null}
                   {blockedByNote ? (
                     <p className="mt-1 text-xs text-amber-700 dark:text-amber-400">
                       外す人に、この物件についてのメモがあります。物件の所有者タブでメモを確かめてから直してください。

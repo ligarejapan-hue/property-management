@@ -20,6 +20,7 @@ import {
   findLatestOwnerRegistryAttachment,
   loadLatestRegistryText,
   ownersChangedError,
+  REGISTRY_OWNER_REVIEW_ORDER,
   SUPPORTED_CERTIFICATE_TYPE,
   type ReplaceTx,
 } from "@/lib/registry-owner-apply/apply";
@@ -70,6 +71,8 @@ async function linkedOwnerNames(tx: Tx, propertyId: string): Promise<string[]> {
   const rows = await tx.propertyOwner.findMany({
     where: { propertyId },
     select: { owner: { select: { name: true } } },
+    // 確認画面と同じ順(保存する違いの種類と、開いた中身の組をそろえる)
+    orderBy: REGISTRY_OWNER_REVIEW_ORDER,
   });
   return rows.map((r) => r.owner.name);
 }
@@ -225,6 +228,13 @@ export async function checkPropertyRegistryOwners(
 export const REGISTRY_OWNER_CHECK_RETRY_AFTER_HOURS = 1;
 
 /**
+ * 名義の比べが外字(私用領域の字)を見分けるようになった時刻(UTC)。本番に入ったのは 2026-11-11
+ * 11:07:27 JST(=02:07:27 UTC)で、少し後ろにずらして余裕を持たせた(後ろにずれた分は1回余分に比べるだけ)。
+ * これより前に比べた未判断の「違う」は、種類に「外字を含む」が無いことがある=1回比べ直す。
+ */
+export const REGISTRY_OWNER_GAIJI_AWARE_SINCE_UTC = "2026-11-11 02:10:00";
+
+/**
  * まだ比べていない・比べ直しが要る物件(アーカイブを除く・所有者事項の謄本あり)。
  * 「違う」で未判断なのに違いの種類がまだ無い行(種類を残す前に比べた行)も、比べ直しに数える
  * (比べ直すと種類が埋まる・その間も一覧には出たまま)。
@@ -232,11 +242,16 @@ export const REGISTRY_OWNER_CHECK_RETRY_AFTER_HOURS = 1;
  * この仕組みより前に比べた行と、謄本にだけいる人をまだ足していない行)。
  * backoff=true(夜の自動)のときは、比べ直し待ちのうち1時間以内に試した物件を後回しにする
  * (一時的な失敗の物件を2分ごとに読み続けない)。画面のボタンは後回しにしない(今すぐ試す)。
+ * 外字を見分ける前(REGISTRY_OWNER_GAIJI_AWARE_SINCE_UTC より前)に比べた未判断の「違う」で、種類に
+ * 外字が無い行も同じ(2026-11-11 昼 実機確認=一覧の種類が、開いた中身の「外字を含む」と食い違って
+ * いた)。比べ直すと checked_at が新しくなるので、1回だけ回る。
  * ⚠checked_at は UTC で入っている(Prisma)ので、比べる時刻も UTC にそろえる。
  */
 function pendingWhereSql(limit: number | null, backoff = false) {
   const backoffHours = backoff ? REGISTRY_OWNER_CHECK_RETRY_AFTER_HOURS : 0;
   const doneTokenLike = `%${AUTO_ADD_DONE_TOKEN}%`;
+  const gaijiLike = "%gaiji%";
+  const gaijiSince = REGISTRY_OWNER_GAIJI_AWARE_SINCE_UTC;
   return limit === null
     ? prisma.$queryRaw<{ n: bigint }[]>`
         SELECT count(*)::bigint AS n FROM properties p
@@ -245,7 +260,9 @@ function pendingWhereSql(limit: number | null, backoff = false) {
                       AND a.is_deleted = false AND a.registry_certificate_type = ${SUPPORTED_CERTIFICATE_TYPE})
           AND NOT EXISTS (SELECT 1 FROM registry_owner_checks c WHERE c.property_id = p.id AND c.stale = false
                           AND NOT (c.result = 'mismatch' AND c.decision IS NULL
-                                   AND (c.diff_kind IS NULL OR c.diff_kind NOT LIKE ${doneTokenLike})))`
+                                   AND (c.diff_kind IS NULL OR c.diff_kind NOT LIKE ${doneTokenLike}
+                                        OR (c.checked_at < ${gaijiSince}::timestamp
+                                            AND c.diff_kind NOT LIKE ${gaijiLike}))))`
     : prisma.$queryRaw<{ id: string }[]>`
         SELECT p.id FROM properties p
         WHERE p.is_archived = false
@@ -253,7 +270,9 @@ function pendingWhereSql(limit: number | null, backoff = false) {
                       AND a.is_deleted = false AND a.registry_certificate_type = ${SUPPORTED_CERTIFICATE_TYPE})
           AND NOT EXISTS (SELECT 1 FROM registry_owner_checks c WHERE c.property_id = p.id AND c.stale = false
                           AND NOT (c.result = 'mismatch' AND c.decision IS NULL
-                                   AND (c.diff_kind IS NULL OR c.diff_kind NOT LIKE ${doneTokenLike})))
+                                   AND (c.diff_kind IS NULL OR c.diff_kind NOT LIKE ${doneTokenLike}
+                                        OR (c.checked_at < ${gaijiSince}::timestamp
+                                            AND c.diff_kind NOT LIKE ${gaijiLike}))))
           AND NOT EXISTS (SELECT 1 FROM registry_owner_checks c WHERE c.property_id = p.id AND c.stale = true
                           AND ${backoffHours}::int > 0
                           AND c.checked_at > (now() AT TIME ZONE 'UTC') - make_interval(hours => ${backoffHours}::int))
