@@ -352,10 +352,12 @@ const FCAT={'コンビニ':['コンビニ','shop'],'スーパー':['スーパー
 const fInfo=f=>{const c=FCAT[f.cat]||[f.cat,'etc'];return {label:c[0],color:FGRP[c[1]]};};
 const FAC=(Array.isArray(D.facilities)?D.facilities:[]).filter(f=>Number.isFinite(f.x)&&Number.isFinite(f.y)&&Math.abs(f.x)<(MAP?MAP.ex:0)&&Math.abs(f.y)<(MAP?MAP.ey:0));
 // 平面の地図に映す範囲(東西 ±VX m)。周辺施設があれば、いちばん遠い施設が収まる大きさまで寄せる(最後の 3D の真上もこの画角)
-const FMAX=[...FAC,...(MAP&&MAP.st&&MAP.rt?[MAP.st]:[])].reduce((a,f)=>Math.max(a,Math.abs(f.x)*1.0,Math.abs(f.y)*1080/620),0);
+const mdec=(a,s)=>{const o=[];let x=0,y=0;for(let i=s;i<a.length;i+=2){x+=a[i];y+=a[i+1];o.push([x/2,y/2]);}return o;};
+// 施設・駅に加えて、徒歩ルートの道のり全体も入るようにする(駅の先で回り込む道が切れないように・@codex #707)
+const ROUTE_PTS=MAP&&MAP.st&&MAP.rt?mdec(MAP.rt,0).map(([x,y])=>({x,y})):[];
+const FMAX=[...FAC,...ROUTE_PTS].reduce((a,f)=>Math.max(a,Math.abs(f.x)*1.0,Math.abs(f.y)*1080/620),0);
 const VX=MAP?(FMAX?Math.min(MAP.ex,Math.max(450,FMAX*1.35)):MAP.ex):1000;
 const MW=1080, MH=620, MM=2*VX/MW; // MM: 1px あたりのメートル
-const mdec=(a,s)=>{const o=[];let x=0,y=0;for(let i=s;i<a.length;i+=2){x+=a[i];y+=a[i+1];o.push([x/2,y/2]);}return o;};
 const MX=x=>MW/2+x/MM, MY=y=>MH/2-y/MM;
 const mpath=(pts,close)=>pts.length?'M'+pts.map(([x,y])=>MX(x).toFixed(1)+' '+MY(y).toFixed(1)).join('L')+(close?'Z':''):'';
 const RW=[3,5,9,16,26]; // 道路の幅の区分ごとの見た目の幅(m)

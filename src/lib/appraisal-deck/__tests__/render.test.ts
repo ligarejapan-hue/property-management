@@ -167,6 +167,16 @@ describe("renderAppraisalDeck(資料の HTML)", () => {
     expect(stWalk({ ...map, st: { n: "別の駅", x: 0, y: 0 } }, { station: "見本駅", walkMinutes: 15 })).toBe(5);
     expect(stWalk(map, { station: "見本駅", walkMinutes: null })).toBe(5);
   });
+  it("平面の地図の範囲は、施設だけでなく徒歩ルートの道のり全体が入る大きさ(@codex #707)", () => {
+    const js = readFileSync(path.join(process.cwd(), "src/lib/appraisal-deck/assets/deck.js"), "utf8");
+    const lines = js.split("\n").filter((l) => /^const (mdec|ROUTE_PTS|FMAX|VX)=/.test(l));
+    expect(lines).toHaveLength(4);
+    const vx = (MAP: unknown, FAC: unknown[]) => new Function("MAP", "FAC", `${lines.join("\n")}\nreturn VX;`)(MAP, FAC) as number;
+    // [0,0]→[0,500]→[300,500]→[300,0](0.5m 単位の差分)。施設なし
+    const rt = [0, 0, 0, 1000, 600, 0, 0, -1000];
+    const v = vx({ ex: 1000, ey: 650, st: { n: "見本駅", x: 300, y: 0 }, rt }, []);
+    expect(v * (620 / 1080)).toBeGreaterThanOrEqual(500); // 南北に 500m 先まで見える
+  });
   it("資料の動き(deck.js)は構文として正しい", () => {
     const js = readFileSync(path.join(process.cwd(), "src/lib/appraisal-deck/assets/deck.js"), "utf8");
     expect(() => new Function(js)).not.toThrow();
