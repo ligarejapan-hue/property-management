@@ -364,6 +364,10 @@ const holesOf=a=>{const m={};(a||[]).forEach(h=>(m[h[0]]=m[h[0]]||[]).push(mdec(
 const BH=holesOf(MAP&&MAP.bh), WH=holesOf(MAP&&MAP.wh);
 // 右の一覧の番号の丸を種類の色に、種類を短い名前に
 $$('.facl li').forEach(li=>{const {label,color}=fInfo({cat:li.dataset.cat}); const b=li.querySelector('b'), c=li.querySelector('.fc'); if(b)b.style.background=color; if(c)c.textContent=label;});
+/* 駅の札の徒歩分: 査定書の駅と同じ駅なら査定書の徒歩分。違う駅(地図に査定書の駅が無く、近くの駅にした)なら
+   ルートの道のりから(80m=1分)。違う駅に査定書の徒歩分を付けない(@codex #707) */
+const stName=n=>String(n||'').normalize('NFKC').replace(/\s/g,'').replace(/駅$/,'');
+const stWalk=()=>MAP&&MAP.st&&D.walkMinutes!=null&&stName(MAP.st.n)===stName(D.station)?D.walkMinutes:Math.max(1,Math.round(((MAP&&MAP.rtm)||0)/80));
 let mapDrawn=false;
 function drawMap(anim){
   if(!MAPON)return;
@@ -394,7 +398,7 @@ function drawMap(anim){
       el('circle',{cx,cy,r,fill:'none',stroke:'var(--main)','stroke-width':2.4,'stroke-dasharray':'8 6'},rg);
       const ly=cy-r-8; if(ly>24)tx(rg,cx,ly,l,{'font-size':18,'font-weight':700,'text-anchor':'middle',style:'fill:var(--main);paint-order:stroke;stroke:var(--canvas);stroke-width:5px'});});
     // 最寄り駅までの徒歩ルート(点線)と駅の印
-    if(MAP.rt&&MAP.st){const rg2=el('g',{id:'mproute'},s), sx=MX(MAP.st.x), sy=MY(MAP.st.y), wm=D.walkMinutes!=null?D.walkMinutes:Math.max(1,Math.round((MAP.rtm||0)/80)), tl=`${MAP.st.n} 徒歩${wm}分`, w=tl.length*16+24;
+    if(MAP.rt&&MAP.st){const rg2=el('g',{id:'mproute'},s), sx=MX(MAP.st.x), sy=MY(MAP.st.y), wm=stWalk(), tl=`${MAP.st.n} 徒歩${wm}分`, w=tl.length*16+24;
       el('path',{d:mpath(mdec(MAP.rt,0)),fill:'none',stroke:'var(--canvas)','stroke-width':9,'stroke-linecap':'round','stroke-linejoin':'round',opacity:.85},rg2);
       // 丸い点の列(線の長さ0+丸い端=点)。3D を見せないときは物件から駅へ点が伸びていく
       const dots=el('path',{id:'mprtdots',d:mpath(mdec(MAP.rt,0)),fill:'none',stroke:'var(--main)','stroke-width':6.5,'stroke-linecap':'round','stroke-dasharray':'0 11'},rg2);
@@ -504,7 +508,7 @@ function city3d(wrap){
     const geo=new T.BufferGeometry(); geo.setAttribute('position',new T.Float32BufferAttribute(pos,3)); const mat=new T.MeshBasicMaterial({color:0x1F3A5F,transparent:true,side:T.DoubleSide,depthTest:false}); const mesh=new T.Mesh(geo,mat); mesh.renderOrder=5; scene.add(mesh);
     const st=new T.Group(), stm=new T.MeshLambertMaterial({color:0x1F3A5F,emissive:0x0c1a2c,transparent:true});
     const sb=new T.Mesh(new T.CylinderGeometry(2,2,60,8),stm); sb.rotation.x=Math.PI/2; sb.position.z=30; st.add(sb); const sh=new T.Mesh(new T.BoxGeometry(18,18,18),stm); sh.position.z=64; st.add(sh);
-    const c=document.createElement('canvas'), cx=c.getContext('2d'), wm=D.walkMinutes!=null?D.walkMinutes:Math.max(1,Math.round((MAP.rtm||0)/80)), tl=`${MAP.st.n} 徒歩${wm}分`; cx.font='700 40px sans-serif';
+    const c=document.createElement('canvas'), cx=c.getContext('2d'), wm=stWalk(), tl=`${MAP.st.n} 徒歩${wm}分`; cx.font='700 40px sans-serif';
     c.width=Math.ceil(cx.measureText(tl).width)+48; c.height=64; cx.font='700 40px sans-serif'; cx.fillStyle='#1F3A5F'; cx.beginPath(); cx.roundRect(0,0,c.width,c.height,30); cx.fill(); cx.fillStyle='#fff'; cx.textBaseline='middle'; cx.fillText(tl,24,c.height/2+2);
     const stx=new T.CanvasTexture(c), sp=new T.Sprite(new T.SpriteMaterial({map:stx,transparent:true,depthTest:false,sizeAttenuation:false})); sp.scale.set(.032*c.width/c.height,.032,1); sp.center.set(.5,0); sp.position.z=80; sp.renderOrder=11; st.add(sp);
     st.position.set(MAP.st.x,MAP.st.y,0); st.visible=false; scene.add(st);

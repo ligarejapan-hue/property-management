@@ -157,6 +157,16 @@ describe("renderAppraisalDeck(資料の HTML)", () => {
     const html = renderAppraisalDeck(mergeAppraisal({ ...HOUSE, area: "東京都<b>区" }, {}), { draft: false, map: MAP });
     expect(html).not.toContain("<b>区");
   });
+  it("駅の札の徒歩分: 査定書の駅なら査定書の徒歩分、違う駅ならルートの道のりから(@codex #707)", () => {
+    const js = readFileSync(path.join(process.cwd(), "src/lib/appraisal-deck/assets/deck.js"), "utf8");
+    const lines = js.split("\n").filter((l) => /^const (stName|stWalk)=/.test(l));
+    expect(lines).toHaveLength(2);
+    const stWalk = (MAP: unknown, D: unknown) => new Function("MAP", "D", `${lines.join("\n")}\nreturn stWalk();`)(MAP, D) as number;
+    const map = { st: { n: "見本駅", x: 0, y: 0 }, rtm: 400 };
+    expect(stWalk(map, { station: "見本", walkMinutes: 15 })).toBe(15);
+    expect(stWalk({ ...map, st: { n: "別の駅", x: 0, y: 0 } }, { station: "見本駅", walkMinutes: 15 })).toBe(5);
+    expect(stWalk(map, { station: "見本駅", walkMinutes: null })).toBe(5);
+  });
   it("資料の動き(deck.js)は構文として正しい", () => {
     const js = readFileSync(path.join(process.cwd(), "src/lib/appraisal-deck/assets/deck.js"), "utf8");
     expect(() => new Function(js)).not.toThrow();
