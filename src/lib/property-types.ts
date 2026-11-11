@@ -330,10 +330,13 @@ export const OCCUPANCY_STATUS_LABELS: Record<string, string> = {
   occupied: "居住中",
   rented:   "賃貸中",
   unknown:  "不明",
+  // 2026-11-11 発注者指示: 土地の現況(土地の物件だけで選ぶ)。
+  vacant_land: "更地",
+  old_house:   "古屋あり",
 };
 
 /** 現況の値(OccupancyStatus)。検証・選択肢はここから作る(値の一覧を各所に書かない)。 */
-export const OCCUPANCY_STATUS_VALUES = ["vacant", "occupied", "rented", "unknown"] as const;
+export const OCCUPANCY_STATUS_VALUES = ["vacant", "occupied", "rented", "unknown", "vacant_land", "old_house"] as const;
 
 /**
  * CSV などの現況の入力を値へ(日本語の表示名も受ける)。分からなければ null。
@@ -343,14 +346,49 @@ export function normalizeOccupancyInput(raw: string | null | undefined): string 
   const s = (raw ?? "").normalize("NFKC").trim();
   if (s === "") return null;
   if ((OCCUPANCY_STATUS_VALUES as readonly string[]).includes(s)) return s;
-  const byLabel: Record<string, string> = { 空室: "vacant", 居住中: "occupied", 入居中: "occupied", 賃貸中: "rented", 不明: "unknown" };
+  const byLabel: Record<string, string> = {
+    空室: "vacant", 居住中: "occupied", 入居中: "occupied", 賃貸中: "rented", 不明: "unknown",
+    更地: "vacant_land", 古屋あり: "old_house", 古家あり: "old_house",
+  };
   return byLabel[s] ?? null;
 }
 
-/** 現況の選択肢(画面のプルダウン用・表示順)。 */
-export const OCCUPANCY_STATUS_OPTIONS: { value: string; label: string }[] = OCCUPANCY_STATUS_VALUES.map(
+/** 土地以外の現況の選択肢(表示順)。 */
+export const BUILDING_OCCUPANCY_VALUES = ["vacant", "occupied", "rented", "unknown"] as const;
+/** 土地だけの現況(更地・古屋あり)。土地以外の物件には保存しない。 */
+const LAND_ONLY_OCCUPANCY_VALUES: readonly string[] = ["vacant_land", "old_house"];
+
+/**
+ * その種別にその現況を保存してよいか。更地・古屋ありは土地だけ。
+ * ⚠土地に前から入っている空室・居住中は消さない(選び直せるよう画面に出す)=true。
+ */
+export function occupancyFitsType(propertyType: string | null | undefined, value: string | null | undefined): boolean {
+  if (!value || !LAND_ONLY_OCCUPANCY_VALUES.includes(value)) return true;
+  return propertyType === "land";
+}
+/** 土地の現況の選択肢(表示順・2026-11-11 発注者指示=更地・古屋あり・賃貸中・不明)。 */
+const LAND_OCCUPANCY_VALUES = ["vacant_land", "old_house", "rented", "unknown"] as const;
+
+/** 現況の選択肢(土地以外・画面のプルダウン用・表示順)。 */
+export const OCCUPANCY_STATUS_OPTIONS: { value: string; label: string }[] = BUILDING_OCCUPANCY_VALUES.map(
   (value) => ({ value, label: OCCUPANCY_STATUS_LABELS[value] }),
 );
+
+/**
+ * 種別に合う現況の選択肢。土地は更地・古屋あり・賃貸中・不明、ほかは空室・居住中・賃貸中・不明。
+ * 今の値が選択肢に無いとき(土地に前から入っていた「居住中」など)は、消えて見えないよう末尾に足す。
+ */
+export function occupancyOptionsFor(
+  propertyType: string | null | undefined,
+  current?: string | null,
+): { value: string; label: string }[] {
+  const values: readonly string[] = propertyType === "land" ? LAND_OCCUPANCY_VALUES : BUILDING_OCCUPANCY_VALUES;
+  const options = values.map((value) => ({ value, label: OCCUPANCY_STATUS_LABELS[value] }));
+  if (current && !values.includes(current)) {
+    options.push({ value: current, label: OCCUPANCY_STATUS_LABELS[current] ?? current });
+  }
+  return options;
+}
 
 /**
  * 現況(OccupancyStatus)を表示ラベルへ変換する。

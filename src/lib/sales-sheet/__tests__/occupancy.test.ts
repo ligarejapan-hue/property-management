@@ -55,3 +55,12 @@ describe("mapOccupancyStatusToLandOccupancy（現況→売土地語彙の決定�
     expect(a).toBe("更地");
   });
 });
+
+describe("土地の現況(更地・古屋あり・2026-11-11)を売土地の現況へ", () => {
+  it("更地→更地・古屋あり→上物有", () => {
+    expect(mapOccupancyStatusToLandOccupancy("vacant_land")).toBe("更地");
+    expect(mapOccupancyStatusToLandOccupancy("old_house")).toBe("上物有");
+    expect(mapOccupancyStatusToLandOccupancy("更地")).toBe("更地");
+    expect(mapOccupancyStatusToLandOccupancy("古屋あり")).toBe("上物有");
+  });
+});

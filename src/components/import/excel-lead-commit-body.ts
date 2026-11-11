@@ -12,7 +12,7 @@ import {
   foldNoColumnFieldsIntoNote,
 } from "./paste-import-review";
 import type { PasteDraft } from "@/lib/paste-import/types";
-import { supportsUnitFields, supportsBuildingName } from "@/lib/property-building-name";
+import { supportsUnitFields, supportsUnitOnlyField, supportsBuildingName } from "@/lib/property-building-name";
 import { OCCUPANCY_STATUS_LABELS } from "@/lib/property-types";
 import { structuredFieldsFor } from "@/lib/paste-import/structured-fields";
 
@@ -33,7 +33,7 @@ function droppedFieldLines(pv: ReturnType<typeof defaultPropertyValues>): string
     // ⚠建物面積は登録APIが備考へ回すので、ここでは足さない。
     if (pv.roomNo) lines.push(`部屋番号: ${pv.roomNo}`);
     if (pv.layoutType) lines.push(`間取り: ${pv.layoutType}`);
-    if (pv.occupancyStatus) {
+    if (pv.occupancyStatus && !supportsUnitOnlyField(pv.propertyType, "occupancyStatus")) {
       lines.push(`現況: ${OCCUPANCY_STATUS_LABELS[pv.occupancyStatus] ?? pv.occupancyStatus}`);
     }
   }

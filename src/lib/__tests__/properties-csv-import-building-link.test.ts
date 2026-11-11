@@ -208,6 +208,20 @@ describe("POST /api/import/csv — 区分の棟", () => {
     ]);
   });
 
+  it("種別=土地でも棟名で区分になった行には、土地だけの現況(更地・古屋あり)を入れない(@codex #702 P2)", async () => {
+    const csv =
+      "住所,種別,マンション名,部屋番号,入居状況\n" +
+      "東京都大田区南雪谷1丁目164-2-45,土地,新ビル,101,古屋あり\n" +
+      "東京都大田区南雪谷1丁目164-2-46,土地,,,更地\n";
+    const res = await POST(makeRequest({ fileName: "a.csv", csvText: csv }));
+    expect(res.status).toBe(201);
+    const unit = pm.property.create.mock.calls[0][0].data as Record<string, unknown>;
+    expect(unit.propertyType).toBe("apartment_unit");
+    expect(unit).not.toHaveProperty("occupancyStatus");
+    const land = pm.property.create.mock.calls[1][0].data as Record<string, unknown>;
+    expect(land).toMatchObject({ propertyType: "land", occupancyStatus: "vacant_land" });
+  });
+
   it("棟名の無い行は棟に触れない(apply を呼ばない)", async () => {
     const csv = "住所\n東京都大田区南雪谷1丁目1-1\n";
     const res = await POST(makeRequest({ fileName: "a.csv", csvText: csv }));

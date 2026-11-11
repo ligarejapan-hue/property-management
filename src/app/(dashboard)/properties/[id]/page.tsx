@@ -1472,6 +1472,13 @@ function BasicTab({
       {landBuildingAreaRows(property).map((row) => (
         <Field key={row.label} label={row.label} value={row.value} />
       ))}
+      {/* 土地の現況(更地・古屋あり・賃貸中・不明・2026-11-11)。区分マンションは上の「入居状況」で出す。 */}
+      {property.propertyType === "land" && (
+        <Field
+          label="現況"
+          value={property.occupancyStatus ? OCCUPANCY_LABELS[property.occupancyStatus] ?? property.occupancyStatus : null}
+        />
+      )}
 
       <Field
         label="登記状況"

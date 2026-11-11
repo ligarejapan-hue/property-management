@@ -48,6 +48,10 @@ enum OccupancyStatus {
   /// 賃貸中(人に貸している)。2026-10-14 追加。
   rented
   unknown
+  /// 更地(土地の物件で選ぶ)。2026-11-11 追加。
+  vacant_land
+  /// 古屋あり(土地の物件で選ぶ)。2026-11-11 追加。
+  old_house
 }
 
 enum RegistryStatus {

@@ -15,6 +15,7 @@ import {
   normalizeBuildingName,
   supportsBuildingName,
   normalizeUnitOnlyFields,
+  supportsUnitOnlyField,
   supportsUnitFields,
   UNIT_ONLY_PROPERTY_FIELDS,
 } from "@/lib/property-building-name";
@@ -284,8 +285,30 @@ describe("normalizeUnitOnlyFields（区分専用の欄を種別で落とす）",
     expect(normalizeUnitOnlyFields("unit", filled)).toEqual(filled);
   });
 
-  it("★土地・戸建・一棟では全部 null（見えず直せないデータを残さない）", () => {
-    for (const t of ["land", "house", "apartment_building", "apartment_block", "store", "unknown"]) {
+  it("★土地は現況だけ残し、ほかは null(現況は土地でも選ぶ・2026-11-11)", () => {
+    expect(normalizeUnitOnlyFields("land", filled)).toEqual({
+      roomNo: null,
+      exclusiveArea: null,
+      layoutType: null,
+      occupancyStatus: "occupied",
+    });
+    expect(supportsUnitOnlyField("land", "occupancyStatus")).toBe(true);
+    expect(supportsUnitOnlyField("land", "ownershipShareNote")).toBe(false);
+    expect(supportsUnitOnlyField("house", "occupancyStatus")).toBe(false);
+    expect(supportsUnitOnlyField("apartment_unit", "occupancyStatus")).toBe(true);
+    expect(supportsUnitOnlyField(null, "occupancyStatus")).toBe(false);
+    expect(supportsUnitOnlyField("house", "address")).toBe(true);
+  });
+
+  it("★更地・古屋ありは土地だけ(区分マンションでも null・2026-11-11)", () => {
+    expect(normalizeUnitOnlyFields("land", { occupancyStatus: "vacant_land" }).occupancyStatus).toBe("vacant_land");
+    expect(normalizeUnitOnlyFields("apartment_unit", { occupancyStatus: "old_house" }).occupancyStatus).toBeNull();
+    expect(normalizeUnitOnlyFields("apartment_unit", { occupancyStatus: "vacant", roomNo: "303" })).toEqual({ occupancyStatus: "vacant", roomNo: "303" });
+    expect(normalizeUnitOnlyFields("house", { occupancyStatus: "vacant_land" }).occupancyStatus).toBeNull();
+  });
+
+  it("★戸建・一棟では全部 null（見えず直せないデータを残さない）", () => {
+    for (const t of ["house", "apartment_building", "apartment_block", "store", "unknown"]) {
       expect(normalizeUnitOnlyFields(t, filled), t).toEqual({
         roomNo: null,
         exclusiveArea: null,

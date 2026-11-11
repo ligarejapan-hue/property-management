@@ -13,7 +13,7 @@
  * - **どこから登録しても同じ判定**になるよう、UI と API の両方がここを参照する
  */
 
-import type { PropertyTypeValue } from "@/lib/property-types";
+import { occupancyFitsType, type PropertyTypeValue } from "@/lib/property-types";
 
 /**
  * 物件名を入力できる種別。
@@ -150,7 +150,26 @@ export function supportsUnitFields(
 }
 
 /**
+ * 区分専用の欄のうち、区分マンション以外でも持てるもの。
+ * 現況は土地でも選ぶ(更地・古屋あり・賃貸中・不明・2026-11-11 発注者指示)。
+ */
+const UNIT_ONLY_FIELD_EXTRA_TYPES: Readonly<Record<string, readonly string[]>> = {
+  occupancyStatus: ["land"],
+};
+
+/** その種別がその欄を持てるか。区分専用の欄でなければ常に true。 */
+export function supportsUnitOnlyField(
+  propertyType: string | null | undefined,
+  key: string,
+): boolean {
+  if (!UNIT_ONLY_FIELD_SET.has(key)) return true;
+  if (supportsUnitFields(propertyType)) return true;
+  return !!propertyType && (UNIT_ONLY_FIELD_EXTRA_TYPES[key] ?? []).includes(propertyType);
+}
+
+/**
  * 種別に合わない区分専用の欄を **null に落とす**（`normalizeBuildingName` と同じ姿勢）。
+ * 現況だけは土地でも残す(supportsUnitOnlyField)。
  *
  * 渡された値のうち `UNIT_ONLY_PROPERTY_FIELDS` に載っている欄だけを対象にする。
  * それ以外の欄はそのまま通す（呼び出し側が誤って混ぜても壊さない）。
@@ -159,12 +178,13 @@ export function normalizeUnitOnlyFields<T extends Record<string, unknown>>(
   propertyType: string | null | undefined,
   values: T,
 ): { [K in keyof T]: T[K] | null } {
-  if (supportsUnitFields(propertyType)) {
-    return { ...values } as { [K in keyof T]: T[K] | null };
-  }
   const out: Record<string, unknown> = { ...values };
   for (const key of Object.keys(out)) {
-    if (UNIT_ONLY_FIELD_SET.has(key)) out[key] = null;
+    if (!supportsUnitOnlyField(propertyType, key)) out[key] = null;
+  }
+  // 更地・古屋ありは土地だけの値=土地以外(区分マンションを含む)では null にする。
+  if ("occupancyStatus" in out && !occupancyFitsType(propertyType, out.occupancyStatus as string | null)) {
+    out.occupancyStatus = null;
   }
   return out as { [K in keyof T]: T[K] | null };
 }
