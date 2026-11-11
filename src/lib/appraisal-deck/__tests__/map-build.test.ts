@@ -198,7 +198,7 @@ describe("buildMapFromTiles", () => {
     {
       name: "road",
       features: [
-        { type: 2, props: { ftCode: 2701, rnkWidth: 2, motorway: 0 }, parts: [[[PX - 800, PY + 200], [PX + 800, PY + 200]]] },
+        { type: 2, props: { ftCode: 2701, rnkWidth: 2, rdCtg: 3 }, parts: [[[PX - 800, PY + 200], [PX + 800, PY + 200]]] },
         { type: 2, props: { ftCode: 2703, rnkWidth: 1 }, parts: [[[PX - 800, PY + 300], [PX + 800, PY + 300]]] },
       ],
     },
@@ -217,7 +217,7 @@ describe("buildMapFromTiles", () => {
     const b = map.b[map.p];
     expect(b[1]).toBe(0);
   });
-  it("道路は一般道だけ(幅の区分・高速の印)、線路・水面も入る", () => {
+  it("道路は中心線(2701)だけ描く(幅の区分・高速=rdCtg 3 の印)、線路・水面も入る", () => {
     expect(map.r).toHaveLength(1);
     expect(map.r[0].slice(0, 2)).toEqual([2, 1]);
     expect(map.t[0][0]).toBe("トンネル");
