@@ -324,6 +324,11 @@ export function AppraisalDeckReview({ propertyId, deckId, canWrite }: { property
     if (j) await reload();
   };
   const unconfirm = async () => {
+    // 取り消しのあと reload() で画面を読み直す=保存前の直しが消えるので、先に保存してもらう(rebuildMap と同じ)
+    if (dirty) {
+      setMsg({ kind: "err", text: "直した内容を先に保存してください" });
+      return;
+    }
     if (!window.confirm("確認を取り消して、確認待ちに戻します。中身はそのまま残ります。よろしいですか？")) return;
     const j = await call(`${base}/${deckId}/confirm`, { method: "DELETE" }, "確認を取り消しました。直してから、もう一度「確認済みにする」を押してください");
     if (j) await reload();

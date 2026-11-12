@@ -124,3 +124,18 @@ describe("載せない周辺施設(2026-11-11)", () => {
     expect(buildOverrides({ ...FORM, "fac.hidden": "" }, EXF, false).overrides.hiddenFacilities).toBeUndefined();
   });
 });
+
+describe("確認の取り消し(2026-11-12・@codex #711)", () => {
+  it("保存前の直しがあるときは取り消さない(取り消し後の読み直しで直しが消えるため)", async () => {
+    const { readFileSync } = await import("node:fs");
+    const { join } = await import("node:path");
+    const src = readFileSync(join(__dirname, "../AppraisalDeckReview.tsx"), "utf8").replace(/\r\n/g, "\n");
+    const start = src.indexOf("const unconfirm = async () => {");
+    expect(start).toBeGreaterThan(-1);
+    const body = src.slice(start, src.indexOf("\n  };", start));
+    const guard = body.indexOf("if (dirty)");
+    expect(guard).toBeGreaterThan(-1);
+    expect(guard).toBeLessThan(body.indexOf('method: "DELETE"'));
+    expect(guard).toBeLessThan(body.indexOf("window.confirm"));
+  });
+});
