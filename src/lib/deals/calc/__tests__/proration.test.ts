@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest";
-import { prorateAnnualTax, prorateMonthly } from "../proration";
+import { prorateAnnualTax, prorateMonthly, roundDiv } from "../proration";
 import { depositSuccession } from "../deposit";
 
 describe("固都税の日割り(依頼書 3.2)", () => {
@@ -12,13 +12,21 @@ describe("固都税の日割り(依頼書 3.2)", () => {
     expect(prorateAnnualTax(365_000, "01-01", "2026-01-01").buyer).toBe(365_000);
     expect(prorateAnnualTax(365_000, "01-01", "2026-12-31").buyer).toBe(1_000);
   });
+  it("円未満は四捨五入(ちょうど .5 は切り上げ・.5 未満は切り捨て)", () => {
+    // 1円 × 183日 ÷ 366日 = 0.5
+    expect(prorateAnnualTax(1, "01-01", "2028-07-02").buyer).toBe(1);
+    expect(prorateAnnualTax(1, "01-01", "2028-07-03").buyer).toBe(0);
+    expect(roundDiv(5, 10)).toBe(1);
+    expect(roundDiv(4, 10)).toBe(0);
+    expect(roundDiv(36_500 * 184, 365)).toBe(18_400);
+  });
   it("うるう年は 366日", () => {
     expect(prorateAnnualTax(366_000, "01-01", "2028-07-01")).toMatchObject({ yearDays: 366, buyerDays: 184, buyer: 184_000 });
   });
   it("4/1 起算・決済が1〜3月 → 前の年度で数え、注意文を出す(うるう日を含む年度は366日)", () => {
     const r = prorateAnnualTax(120_000, "04-01", "2028-02-15");
     expect(r).toMatchObject({ periodStart: "2027-04-01", periodEnd: "2028-03-31", yearDays: 366, buyerDays: 46 });
-    expect(r.buyer).toBe(Math.floor((120_000 * 46) / 366));
+    expect(r.buyer).toBe(15_082); // 15,081.96… → 四捨五入
     expect(r.warning).toContain("2027-04-01〜2028-03-31");
   });
   it("4/1 起算・決済が4月以降は注意文なし", () => {
@@ -29,7 +37,7 @@ describe("固都税の日割り(依頼書 3.2)", () => {
 describe("月額の日割り(管理費・賃料)", () => {
   it("決済月の日割り+前払い月数", () => {
     const r = prorateMonthly(30_000, "2026-07-11", 1);
-    expect(r).toMatchObject({ buyerDays: 21, monthDays: 31, current: Math.floor((30_000 * 21) / 31), prepaid: 30_000 });
+    expect(r).toMatchObject({ buyerDays: 21, monthDays: 31, current: 20_323, prepaid: 30_000 });
     expect(r.total).toBe(r.current + 30_000);
     expect(r.formula).toBe("30,000円×21日÷31日＋30,000円×1か月");
   });

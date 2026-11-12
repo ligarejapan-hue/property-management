@@ -1,5 +1,25 @@
 import { describe, it, expect } from "vitest";
-import { bpToPercentText, parseYen, percentTextToBp, yenText } from "../money-forms";
+import { bpToPercentText, dropTaxOverrideErrors, parseYen, percentTextToBp, taxOverrideFields, yenText } from "../money-forms";
+
+describe("固都税の手で直す欄(@codex #712)", () => {
+  it("合計額なら1つ、土地・建物ごとなら土地・建物(課税業者なら消費税も)", () => {
+    expect(taxOverrideFields("total", true).map((f) => f.key)).toEqual(["settlement.propertyTax"]);
+    expect(taxOverrideFields("items", false).map((f) => f.key)).toEqual(["settlement.propertyTaxLand", "settlement.propertyTaxBuilding"]);
+    expect(taxOverrideFields("items", true).map((f) => f.key)).toEqual(["settlement.propertyTaxLand", "settlement.propertyTaxBuilding", "settlement.propertyTaxBuildingVat"]);
+  });
+  it("切り替えで外れた欄の「読めない」印だけを消す(見えなくなった欄で保存が止まり続けない)", () => {
+    const all = [...taxOverrideFields("total", false), ...taxOverrideFields("items", true)].map((f) => f.label);
+    const bad = [...all, "管理費等(買主→売主)"];
+    // 合計額 → 土地・建物ごと: 合計額の欄だけが外れる
+    expect(dropTaxOverrideErrors(bad, taxOverrideFields("total", false), taxOverrideFields("items", true)))
+      .toEqual(bad.filter((l) => l !== "固都税(買主→売主)"));
+  });
+  it("残る欄(土地・建物)の印は消さない・課税業者を外すと消費税の欄の印だけ消す(@codex #712 2巡目)", () => {
+    const bad = ["固都税・土地(買主→売主)", "建物分の消費税(買主→売主)"];
+    expect(dropTaxOverrideErrors(bad, taxOverrideFields("items", true), taxOverrideFields("items", false))).toEqual(["固都税・土地(買主→売主)"]);
+    expect(dropTaxOverrideErrors(bad, taxOverrideFields("items", false), taxOverrideFields("items", true))).toEqual(bad);
+  });
+});
 
 describe("金額・率の入力", () => {
   it("カンマ・円・空白を無視して整数に・読めなければ null", () => {

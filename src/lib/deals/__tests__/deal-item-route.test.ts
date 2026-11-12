@@ -28,6 +28,7 @@ import { getApiSession, getUserPermissions } from "@/lib/api-helpers";
 import { jsonRequest as json, DEAL_ID, PROP_ID, USER_ID, DEAL_PERMS } from "./route-mocks";
 import { DEFAULT_FUNDING_INPUTS } from "../funding-schema";
 import { DEFAULT_BUSINESS_INPUTS } from "../business-schema";
+import { DEFAULT_TERMS } from "../schemas";
 import { GET, PATCH } from "../../../app/api/deals/[id]/route";
 import { POST as REFRESH } from "../../../app/api/deals/[id]/refresh-property/route";
 import { POST as TARGET } from "../../../app/api/deals/[id]/target-parcels/route";
@@ -114,6 +115,29 @@ describe("PATCH /api/deals/[id]", () => {
     expect(writeAuditLog).toHaveBeenCalledWith(expect.objectContaining({
       action: "deal_update", targetId: DEAL_ID, detail: { fields: ["assigneeId", "contractPlace", "status"] },
     }));
+  });
+  describe("売主が課税業者の取引は、固都税を合計額だけでは保存しない(2026-11-12)", () => {
+    const savedTotal = { taxInputMode: "total", fixedAssetTax: 100_000, cityPlanningTax: 20_000 };
+    const selfSeller = { ...detailRow, settlementTerms: savedTotal, parties: [{ role: "seller", isSelf: true }] };
+    const terms = (t: object) => ({ ...DEFAULT_TERMS, ...savedTotal, ...t });
+    it("固都税の部分を変えて合計額のままなら 422", async () => {
+      pm.deal.findUnique.mockResolvedValue(selfSeller);
+      const res = await PATCH(json("PATCH", { version: 3, settlementTerms: terms({ fixedAssetTax: 110_000 }) }), ctx);
+      expect(res.status).toBe(422);
+      expect(pm.deal.updateMany).not.toHaveBeenCalled();
+    });
+    it("課税業者のチェックを入れて合計額のままでも 422(当事者に自社がいなくても)", async () => {
+      pm.deal.findUnique.mockResolvedValue({ ...selfSeller, parties: [] });
+      expect((await PATCH(json("PATCH", { version: 3, settlementTerms: terms({ sellerTaxable: true }) }), ctx)).status).toBe(422);
+    });
+    it("固都税の部分を変えない保存(敷金の扱い・管理費)は止めない", async () => {
+      pm.deal.findUnique.mockResolvedValue(selfSeller);
+      expect((await PATCH(json("PATCH", { version: 3, settlementTerms: terms({ depositMode: "separate", managementFee: 10_000 }) }), ctx)).status).toBe(200);
+    });
+    it("課税業者のチェックを外せば合計額でも保存できる", async () => {
+      pm.deal.findUnique.mockResolvedValue(selfSeller);
+      expect((await PATCH(json("PATCH", { version: 3, settlementTerms: terms({ sellerTaxable: false, fixedAssetTax: 110_000 }) }), ctx)).status).toBe(200);
+    });
   });
   describe("状態を変えられる人", () => {
     const row = (assigneeId: string | null) => ({ ...detailRow, propertyId: PROP_ID, status: "considering", assigneeId });
@@ -398,6 +422,18 @@ describe("POST /api/deals/[id]/refresh-property", () => {
     expect((await REFRESH(json("POST", { version: 3 }), ctx)).status).toBe(200);
     expect(pm.deal.updateMany.mock.calls[0][0].data.settlementTerms).toMatchObject({ fixedAssetTax: 1000, managementFee: 12000, repairReserve: 8000 });
     expect(writeAuditLog).toHaveBeenCalledWith(expect.objectContaining({ detail: { fields: ["propertySnapshot", "settlementTerms"] } }));
+  });
+  it("年税額が空で固都税を手で直した今の取引は、取り直しても「合計額だけ」のまま(最終レビュー I-1)", async () => {
+    pm.deal.findUnique.mockResolvedValue({ propertyId: PROP_ID, settlementTerms: { managementFee: 1 }, overrides: { "settlement.propertyTax": 60_000 } });
+    pm.property.findUnique.mockResolvedValue({ ...propRow, propertyType: "apartment_unit", managementFee: 12000, repairReserveFee: 8000 });
+    expect((await REFRESH(json("POST", { version: 3 }), ctx)).status).toBe(200);
+    expect(pm.deal.updateMany.mock.calls[0][0].data.settlementTerms).toMatchObject({ taxInputMode: "total", managementFee: 12000 });
+  });
+  it("年税額が空で固都税を手で直した今の取引を、GET で開くと「合計額だけ」で読む(最終レビュー I-1)", async () => {
+    pm.property.findUnique.mockResolvedValue({ createdBy: "u-office", assignedTo: null });
+    pm.deal.findUnique.mockResolvedValue({ ...detailRow, settlementTerms: {}, overrides: { "settlement.propertyTax": 60_000 } });
+    const body = await (await GET(new Request("http://x"), ctx)).json();
+    expect(body.deal.settlementTerms.taxInputMode).toBe("total");
   });
   it("★物件が空の項目は、取引の額を消さない", async () => {
     pm.deal.findUnique.mockResolvedValue({ propertyId: PROP_ID, settlementTerms: { managementFee: 1, repairReserve: 2 } });

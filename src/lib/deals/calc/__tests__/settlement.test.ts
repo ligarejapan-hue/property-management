@@ -1,7 +1,7 @@
 import { describe, it, expect } from "vitest";
 import { DEFAULT_FUNDING_INPUTS } from "../../funding-schema";
 import { DEFAULT_BUSINESS_INPUTS } from "../../business-schema";
-import { settlementResult } from "../settlement";
+import { annualPropertyTaxOf, settlementResult, taxPartChanged, taxesEnteredOfTerms } from "../settlement";
 import { computeDealCalc } from "../deal-calc";
 import { DEFAULT_COSTS, DEFAULT_TERMS, EMPTY_BROKER, EMPTY_SNAPSHOT } from "../../schemas";
 import { DEFAULT_PROPERTY_KINDS } from "../../constants";
@@ -14,9 +14,81 @@ const lease = {
 };
 const base = {
   price: 30_000_000, deposit: 1_500_000, kindBase: "unit" as const, hasOc: false, settlementDate: "2026-07-01",
-  terms: { ...DEFAULT_TERMS, fixedAssetTax: 100_000, cityPlanningTax: 20_000, managementFee: 20_000, repairReserve: 10_000 },
-  leases: [], overrides: {},
+  terms: { ...DEFAULT_TERMS, taxInputMode: "total" as const, fixedAssetTax: 100_000, cityPlanningTax: 20_000, managementFee: 20_000, repairReserve: 10_000 },
+  leases: [], overrides: {}, sellerTaxable: false, taxRateBp: 1000,
 };
+
+const taxItem = (kind: "land" | "building", fixedTax: number, cityTax: number) => ({
+  kind, label: null, fixedBase: null, cityBase: null, shareNum: 1, shareDen: 1, fixedTax, cityTax,
+});
+const itemsBase = {
+  ...base, kindBase: "house" as const,
+  terms: { ...DEFAULT_TERMS, taxInputMode: "items" as const, taxItems: [taxItem("land", 100_000, 20_000), taxItem("building", 30_000, 6_500)] },
+};
+
+describe("固都税を土地・建物ごとに精算する", () => {
+  it("土地と建物を別の行で日割り(課税業者でなければ消費税なし)", () => {
+    const r = settlementResult(itemsBase);
+    expect(r.rows.map((x) => x.key)).toEqual(["propertyTaxLand", "propertyTaxBuilding"]);
+    expect(r.rows[0]).toMatchObject({ label: "固定資産税・都市計画税(土地)", buyerToSeller: 60_493, formula: "120,000円×184日÷365日", period: "2026-07-01〜2026-12-31" });
+    expect(r.rows[1]).toMatchObject({ label: "固定資産税・都市計画税(建物)", buyerToSeller: 18_400, formula: "36,500円×184日÷365日" });
+    expect(r.taxableTotalConflict).toBe(false);
+  });
+  it("課税業者なら建物分の精算金に消費税(四捨五入)を足す", () => {
+    const r = settlementResult({ ...itemsBase, sellerTaxable: true });
+    expect(r.rows.map((x) => x.key)).toEqual(["propertyTaxLand", "propertyTaxBuilding", "propertyTaxBuildingVat"]);
+    expect(r.rows[2]).toMatchObject({ label: "建物分の消費税", buyerToSeller: 1_840, computed: 1_840, formula: "18,400円×10%" });
+    expect(r.net).toEqual({ direction: "buyerToSeller", amount: 60_493 + 18_400 + 1_840 });
+  });
+  it("消費税は手で直した建物分の精算金に掛かる・消費税も手で直せる", () => {
+    const r = settlementResult({ ...itemsBase, sellerTaxable: true, overrides: { "settlement.propertyTaxBuilding": 20_005 } });
+    expect(r.rows[1]).toMatchObject({ buyerToSeller: 20_005, computed: 18_400, overridden: true });
+    expect(r.rows[2]).toMatchObject({ buyerToSeller: 2_001 });
+    const o = settlementResult({ ...itemsBase, sellerTaxable: true, overrides: { "settlement.propertyTaxBuildingVat": 1_800, "settlement.propertyTaxLand": 60_000 } });
+    expect(o.rows[0]).toMatchObject({ buyerToSeller: 60_000, overridden: true });
+    expect(o.rows[2]).toMatchObject({ buyerToSeller: 1_800, computed: 1_840, overridden: true });
+  });
+  it("建物が無い取引は建物・消費税の行を出さない", () => {
+    const r = settlementResult({ ...itemsBase, sellerTaxable: true, terms: { ...itemsBase.terms, taxItems: [taxItem("land", 100_000, 20_000)] } });
+    expect(r.rows.map((x) => x.key)).toEqual(["propertyTaxLand"]);
+  });
+  it("建物の行が無くても、建物分の消費税を手で直した値があれば精算に入れる(@codex #712 3巡目)", () => {
+    const r = settlementResult({ ...itemsBase, sellerTaxable: true, terms: { ...itemsBase.terms, taxItems: [] }, overrides: { "settlement.propertyTaxBuildingVat": 1_840 } });
+    expect(r.rows.map((x) => x.key)).toEqual(["propertyTaxBuildingVat"]);
+    expect(r.rows[0]).toMatchObject({ buyerToSeller: 1_840, computed: 0, overridden: true, formula: null });
+    expect(r.net.amount).toBe(1_840);
+    // 課税業者でなければ出さない(消費税の欄も画面に無い)。
+    expect(settlementResult({ ...itemsBase, terms: { ...itemsBase.terms, taxItems: [] }, overrides: { "settlement.propertyTaxBuildingVat": 1_840 } }).rows).toEqual([]);
+  });
+  it("課税業者で合計額だけ → 1行・消費税なし・食い違いの印", () => {
+    const r = settlementResult({ ...base, sellerTaxable: true });
+    expect(r.rows.find((x) => x.key === "propertyTax")).toMatchObject({ buyerToSeller: 60_493 });
+    expect(r.rows.some((x) => x.key === "propertyTaxBuildingVat")).toBe(false);
+    expect(r.taxableTotalConflict).toBe(true);
+  });
+});
+
+describe("固都税の入力の見方", () => {
+  const items = itemsBase.terms;
+  it("固都税の部分が変わったか(敷金の扱い・管理費だけなら変わっていない)", () => {
+    expect(taxPartChanged(items, { ...items, depositMode: "separate", managementFee: 1 })).toBe(false);
+    expect(taxPartChanged(items, { ...items, taxItems: [taxItem("land", 1, 1)] })).toBe(true);
+    expect(taxPartChanged(items, { ...items, taxInputMode: "total" })).toBe(true);
+    expect(taxPartChanged(items, { ...items, sellerTaxable: true })).toBe(true);
+    expect(taxPartChanged(base.terms, { ...base.terms, cityPlanningTax: 1 })).toBe(true);
+  });
+  it("年税額: 土地・建物ごとなら行の合計、合計額なら2つの合計", () => {
+    expect(annualPropertyTaxOf(items)).toBe(156_500);
+    expect(annualPropertyTaxOf(base.terms)).toBe(120_000);
+  });
+  it("税額が入ったか: 土地・建物ごとなら税額のある行が1つ以上、合計額なら2つとも", () => {
+    expect(taxesEnteredOfTerms(items)).toBe(true);
+    expect(taxesEnteredOfTerms({ ...items, taxItems: [{ ...taxItem("land", 0, 0), fixedTax: null, cityTax: null }] })).toBe(false);
+    expect(taxesEnteredOfTerms({ ...items, taxItems: [{ ...taxItem("land", 0, 0), fixedTax: null, cityTax: null, fixedBase: 1_000_000 }] })).toBe(true);
+    expect(taxesEnteredOfTerms(base.terms)).toBe(true);
+    expect(taxesEnteredOfTerms({ ...base.terms, cityPlanningTax: null })).toBe(false);
+  });
+});
 
 describe("決済の計算", () => {
   it("決済日が無ければ計算しない", () => {
@@ -98,7 +170,7 @@ describe("取引1件の計算結果", () => {
 
 describe("@codex: 元の金額が無くても、手で直した値は精算に入れる", () => {
   it("固都税が空でも上書きがあれば行を出す", () => {
-    const r = settlementResult({ ...base, terms: { ...DEFAULT_TERMS }, overrides: { "settlement.propertyTax": 60_000 } });
+    const r = settlementResult({ ...base, terms: { ...DEFAULT_TERMS, taxInputMode: "total" }, overrides: { "settlement.propertyTax": 60_000 } });
     expect(r.rows.find((x) => x.key === "propertyTax")).toMatchObject({ buyerToSeller: 60_000, overridden: true, formula: null });
     expect(r.net.amount).toBe(60_000);
   });

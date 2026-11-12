@@ -229,7 +229,10 @@ export function buildReceipt(kind: ReceiptKind, c: BusinessDocContext, o: Receip
   const payer = namesOf(partiesOf(c.deal, sides.payer));
   // 売主の当事者が出す手付金・残金は新しいひな形(2026-11-05 発注者)。精算金と自社発行は下の今の書式のまま。
   if (kind !== "settlement_receipt" && issuer.kind === "party") return buildPartyReceipt(kind, c, o, { amount, payer, stamp, exempt, party: issuer.party });
-  const breakdown = kind === "settlement_receipt" ? c.calc.settlement.rows.map((r) => r.label).join("・") : null;
+  // 内訳は項目の名前だけ。固都税の土地・建物の行は1つの名前にまとめる(細かい内訳は精算書・2026-11-12)。
+  const breakdown = kind === "settlement_receipt"
+    ? [...new Set(c.calc.settlement.rows.map((r) => (r.key === "propertyTaxLand" || r.key === "propertyTaxBuilding" ? "固定資産税・都市計画税" : r.label)))].join("・")
+    : null;
   const issuerLabel = issuer.kind === "self" ? c.company.nameJa : issuer.party.name;
   // 0円は「非課税」(個人の事業用でない売買を選んだとき)か「不要」(5万円未満など)。
   const stampNone = exempt ? "非課税" : "印紙 不要";

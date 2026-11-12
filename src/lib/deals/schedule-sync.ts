@@ -15,6 +15,8 @@ import {
   type ScheduleItemPatch, type ScheduleItemState,
 } from "./schedule";
 import type { PropertySnapshot } from "./schemas";
+import { readTerms } from "./inputs";
+import { taxesEnteredOfTerms } from "./calc/settlement";
 import { templatesForItem, type RequestTemplate } from "./request-drafts/templates";
 
 /**
@@ -80,8 +82,7 @@ const jsonObject = (v: unknown): Record<string, unknown> => (v && typeof v === "
 
 /** 固定資産税と都市計画税の両方が入っているか。 */
 export function taxesEnteredOf(settlementTerms: unknown): boolean {
-  const t = jsonObject(settlementTerms);
-  return typeof t.fixedAssetTax === "number" && typeof t.cityPlanningTax === "number";
+  return taxesEnteredOfTerms(readTerms(settlementTerms));
 }
 
 export interface SyncOptions {

@@ -31,7 +31,7 @@ const deal: DealView = {
   price: 30_000_000, buildingTax: null, deposit: 1_500_000, taxRateBp: 1000,
   propertySnapshot: { ...EMPTY_SNAPSHOT, buildingName: "試験マンション<b>", roomNo: "201", address: "架空県架空市2-2" },
   counterpartyBroker: EMPTY_BROKER, assessments: { rows: [], landRatioBp: 10000 }, costs: DEFAULT_COSTS,
-  settlementTerms: { ...DEFAULT_TERMS, fixedAssetTax: 100_000, cityPlanningTax: 20_000, managementFee: 15_000, repairReserve: 5_000 },
+  settlementTerms: { ...DEFAULT_TERMS, taxInputMode: "total", fixedAssetTax: 100_000, cityPlanningTax: 20_000, managementFee: 15_000, repairReserve: 5_000 },
   leases: [], overrides: {}, version: 1, createdAt: "", updatedAt: "", parties: [SELLER, BUYER],
   fundingPlan: DEFAULT_FUNDING_INPUTS, businessPlan: DEFAULT_BUSINESS_INPUTS,
 };
@@ -163,6 +163,26 @@ describe("領収書", () => {
     expect(html).toContain(`金 ${s.net.amount.toLocaleString("ja-JP")} 円也`);
     expect(html).toContain("内訳: 固定資産税・都市計画税・管理費・修繕積立金等");
     expect(html).toContain("架空 花子 様");
+  });
+  describe("固都税を土地・建物ごとに入れた取引(2026-11-12)", () => {
+    const item = (kind: "land" | "building", fixedTax: number, cityTax: number) => ({
+      kind, label: null, fixedBase: null, cityBase: null, shareNum: 1, shareDen: 1, fixedTax, cityTax,
+    });
+    const itemsDeal: DealView = {
+      ...deal, parties: [SELF_SELLER, BUYER],
+      settlementTerms: { ...deal.settlementTerms, taxInputMode: "items", taxItems: [item("land", 100_000, 20_000), item("building", 30_000, 6_500)] },
+    };
+    it("精算書に土地・建物・建物分の消費税(売主が自社=課税業者)の行が出る", () => {
+      const { html } = doc("settlement_statement").build(ctx(itemsDeal), {});
+      expect(html).toContain("固定資産税・都市計画税(土地)");
+      expect(html).toContain("固定資産税・都市計画税(建物)");
+      expect(html).toContain("建物分の消費税");
+    });
+    it("精算金領収書の内訳は固都税を1つの名前にまとめる(消費税額・登録番号は書かない)", () => {
+      const { html } = doc("settlement_receipt").build(ctx(itemsDeal), { issuer: "self", exempt: null, receivedOn: null });
+      expect(html).toContain("内訳: 固定資産税・都市計画税・建物分の消費税・管理費・修繕積立金等");
+      expect(html).not.toContain("登録番号");
+    });
   });
 });
 

@@ -6,6 +6,8 @@ import type { DealView } from "../view";
 import { brokerageFee } from "./brokerage";
 import { buildingPriceApportion, buildingTaxOf } from "./building-tax";
 import { daysInclusive } from "./dates";
+import { roundDiv } from "./proration";
+import { annualPropertyTaxOf } from "./settlement";
 import { pickRateContent, type DealCalc } from "./deal-calc";
 import { contractStamp } from "./stamp";
 import { BUSINESS_SECTIONS, type BusinessSectionKey } from "../business-sections";
@@ -109,11 +111,12 @@ export function businessPlanCalc(
     else days = daysInclusive(settlementDate, i.saleDate);
   }
   const t = deal.settlementTerms;
-  const annualPropertyTax = (t.fixedAssetTax ?? 0) + (t.cityPlanningTax ?? 0);
+  const annualPropertyTax = annualPropertyTaxOf(t);
   const monthlyManagement = (t.managementFee ?? 0) + (t.repairReserve ?? 0) + (t.otherMonthly ?? 0);
   const interest = days === null ? 0 : Math.floor(((i.loanAmount ?? 0) * i.loanRateBp * days) / (10000 * 365));
-  const propertyTax = days === null ? 0 : Math.floor((annualPropertyTax * days) / 365);
-  const management = days === null ? 0 : Math.floor((monthlyManagement * 12 * days) / 365);
+  // 固都税・管理費等の日割りは円未満四捨五入(2026-11-12 発注者指示)。利息は今のまま切り捨て。
+  const propertyTax = days === null ? 0 : roundDiv(annualPropertyTax * days, 365);
+  const management = days === null ? 0 : roundDiv(monthlyManagement * 12 * days, 365);
   const holding = { days, interest, propertyTax, management, total: interest + propertyTax + management };
 
   // 販売(建物消費税は仕入と同じ家屋割合で按分)

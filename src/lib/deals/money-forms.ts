@@ -43,7 +43,30 @@ export function mergeOverrides(saved: Overrides, mine: Overrides, myKeys: readon
 }
 
 export const MONEY_OVERRIDE_KEYS = ["brokerageFee", "buildingPrice", "buildingTax"] as const satisfies readonly OverrideKey[];
-export const SETTLEMENT_OVERRIDE_KEYS = ["settlement.propertyTax", "settlement.management", "settlement.rent"] as const satisfies readonly OverrideKey[];
+export const SETTLEMENT_OVERRIDE_KEYS = [
+  "settlement.propertyTax", "settlement.management", "settlement.rent",
+  "settlement.propertyTaxLand", "settlement.propertyTaxBuilding", "settlement.propertyTaxBuildingVat",
+] as const satisfies readonly OverrideKey[];
+
+/** 精算タブの固都税の「手で直す」欄(label=画面の名前・rowKey=精算の行の key)。入力のしかたと課税業者で変わる。 */
+export function taxOverrideFields(mode: "items" | "total", taxable: boolean): { label: string; rowKey: string; key: OverrideKey }[] {
+  if (mode === "total") return [{ label: "固都税(買主→売主)", rowKey: "propertyTax", key: "settlement.propertyTax" }];
+  return [
+    { label: "固都税・土地(買主→売主)", rowKey: "propertyTaxLand", key: "settlement.propertyTaxLand" },
+    { label: "固都税・建物(買主→売主)", rowKey: "propertyTaxBuilding", key: "settlement.propertyTaxBuilding" },
+    ...(taxable ? [{ label: "建物分の消費税(買主→売主)", rowKey: "propertyTaxBuildingVat", key: "settlement.propertyTaxBuildingVat" as const }] : []),
+  ];
+}
+
+/**
+ * 切り替えで外れた固都税の欄の「読めない」印を消す(@codex #712)。外れた欄で保存が止まり続けないように。
+ * 残る欄は打った文字をそのまま持っているので、その印は消さない(読めないまま保存されないように・2巡目)。
+ */
+export function dropTaxOverrideErrors(bad: string[], before: { label: string }[], after: { label: string }[]): string[] {
+  const kept = new Set(after.map((f) => f.label));
+  const removed = new Set(before.map((f) => f.label).filter((l) => !kept.has(l)));
+  return bad.filter((l) => !removed.has(l));
+}
 
 /** そのパネルの鍵だけを取り出す(パネルの key 用)。 */
 export function pickOverrides(o: Overrides, keys: readonly OverrideKey[]): Overrides {

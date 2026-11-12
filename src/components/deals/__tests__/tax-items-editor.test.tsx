@@ -1,0 +1,63 @@
+import { describe, expect, it } from "vitest";
+import { renderToStaticMarkup } from "react-dom/server";
+import { TaxItemsEditor, resolveTaxInputs, taxItemsFromForm, taxItemsToForm, type TaxItemForm } from "../tax-items-editor";
+
+const row = (p: Partial<TaxItemForm> = {}): TaxItemForm => ({
+  kind: "land", label: "", fixedBase: "", cityBase: "", shareNum: 1, shareDen: 1, fixedTax: "", cityTax: "", ...p,
+});
+const render = (rows: TaxItemForm[]) => renderToStaticMarkup(<TaxItemsEditor value={rows} onChange={() => {}} />);
+
+describe("固都税の土地・建物の行(2026-11-12)", () => {
+  it("1行に課税標準額2つ・持分・税額2つ", () => {
+    const html = render([row()]);
+    for (const l of ["固定資産税課税標準額", "都市計画税課税標準額", "持分(分子)", "持分(分母)", "固定資産税の税額", "都市計画税の税額"]) {
+      expect(html).toContain(`aria-label="土地1の${l}"`);
+    }
+  });
+  it("税額の箱が空なら、課税標準額から出した税額を薄く見せる", () => {
+    const html = render([row({ fixedBase: "1,234,567", cityBase: "1234567" })]);
+    expect(html).toContain('placeholder="17,200"');
+    expect(html).toContain('placeholder="3,700"');
+  });
+  it("土地・建物は区分ごとに番号を振り、足すボタンが2つある", () => {
+    const html = render([row(), row({ kind: "building" }), row()]);
+    expect(html).toContain('aria-label="土地2の固定資産税課税標準額"');
+    expect(html).toContain('aria-label="建物1の固定資産税課税標準額"');
+    expect(html).toContain("土地を足す");
+    expect(html).toContain("建物を足す");
+  });
+  it("持分の分子が分母より大きい行は、保存を止めて行の名前を返し、自動の税額も出さない(最終レビュー M-2)", () => {
+    const bad = row({ kind: "building", fixedBase: "1234567", shareNum: 3, shareDen: 2 });
+    expect(taxItemsFromForm([bad]).bad).toEqual(["建物1の持分(分子は分母以下にしてください)"]);
+    expect(render([bad])).not.toContain("placeholder=\"25,");
+    expect(render([bad])).toContain('placeholder=""');
+  });
+  describe("使っていない入力のしかたの欄では保存を止めない(@codex #712 2巡目)", () => {
+    const saved = { taxItems: [{ kind: "land" as const, label: null, fixedBase: 5, cityBase: null, shareNum: 1, shareDen: 1, fixedTax: null, cityTax: null }], fixedAssetTax: 100, cityPlanningTax: 20 };
+    const badRow = row({ fixedBase: "abc" });
+    it("土地・建物ごとなら行だけを見る。合計額の欄が読めなければ保存済みの値を残す", () => {
+      const r = resolveTaxInputs("items", [row({ fixedBase: "1000" })], { fixedAssetTax: "xyz", cityPlanningTax: "" }, saved);
+      expect(r.bad).toEqual([]);
+      expect(r.taxItems[0].fixedBase).toBe(1000);
+      expect(r).toMatchObject({ fixedAssetTax: 100, cityPlanningTax: null });
+    });
+    it("合計額なら合計額の欄だけを見る。行が読めなければ保存済みの行を残す", () => {
+      const r = resolveTaxInputs("total", [badRow], { fixedAssetTax: "120,000", cityPlanningTax: "" }, saved);
+      expect(r.bad).toEqual([]);
+      expect(r.taxItems).toEqual(saved.taxItems);
+      expect(r).toMatchObject({ fixedAssetTax: 120_000, cityPlanningTax: null });
+    });
+    it("使っている欄が読めなければ止める", () => {
+      expect(resolveTaxInputs("items", [badRow], { fixedAssetTax: "", cityPlanningTax: "" }, saved).bad).toEqual(["土地1の固定資産税課税標準額"]);
+      expect(resolveTaxInputs("total", [], { fixedAssetTax: "xyz", cityPlanningTax: "" }, saved).bad).toEqual(["固定資産税"]);
+    });
+  });
+  it("フォーム ↔ 保存の形: 空は null、読めない欄は名前を返す", () => {
+    const r = taxItemsFromForm([row({ fixedBase: "1,000,000", fixedTax: "0", cityTax: "abc" })]);
+    expect(r.bad).toEqual(["土地1の都市計画税の税額"]);
+    const ok = taxItemsFromForm([row({ label: " 1番 ", fixedBase: "1,000,000", fixedTax: "0" })]);
+    expect(ok.bad).toEqual([]);
+    expect(ok.value).toEqual([{ kind: "land", label: "1番", fixedBase: 1_000_000, cityBase: null, shareNum: 1, shareDen: 1, fixedTax: 0, cityTax: null }]);
+    expect(taxItemsToForm(ok.value)).toEqual([row({ label: "1番", fixedBase: "1000000", fixedTax: "0" })]);
+  });
+});

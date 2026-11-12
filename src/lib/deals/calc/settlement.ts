@@ -1,6 +1,7 @@
 import type { BasePropertyKind } from "../constants";
 import type { Lease, OverrideKey, Overrides, SettlementTerms } from "../schemas";
-import { prorateAnnualTax, prorateMonthly } from "./proration";
+import { prorateAnnualTax, prorateMonthly, roundDiv } from "./proration";
+import { annualByKind, itemTaxes } from "./property-tax";
 import { depositSuccession } from "./deposit";
 import { yen } from "./format";
 
@@ -27,9 +28,43 @@ export interface SettlementInput {
   terms: SettlementTerms;
   leases: Lease[];
   overrides: Overrides;
+  /** 売主が課税業者か(sellerTaxableOf で決めた値)。true なら建物分の精算金に消費税。 */
+  sellerTaxable: boolean;
+  /** 消費税率(1/100 % の整数・取引の税率)。 */
+  taxRateBp: number;
+}
+
+/** 売主が課税業者か。明示の値が無ければ、売主の当事者に自社がいれば課税業者とみなす。 */
+export function sellerTaxableOf(d: { settlementTerms: SettlementTerms; parties: { role: string; isSelf: boolean }[] }): boolean {
+  return d.settlementTerms.sellerTaxable ?? d.parties.some((p) => p.role === "seller" && p.isSelf);
+}
+
+/** 保存で固都税の部分(入力のしかた・課税業者・年税額・行)が変わったか。敷金の扱いや管理費だけの保存は false。 */
+export function taxPartChanged(prev: SettlementTerms, next: SettlementTerms): boolean {
+  return prev.taxInputMode !== next.taxInputMode || prev.sellerTaxable !== next.sellerTaxable
+    || prev.fixedAssetTax !== next.fixedAssetTax || prev.cityPlanningTax !== next.cityPlanningTax
+    || JSON.stringify(prev.taxItems) !== JSON.stringify(next.taxItems);
+}
+
+/** 1年分の固都税(土地・建物ごとなら行の税額の合計、合計額なら2つの合計)。 */
+export function annualPropertyTaxOf(t: SettlementTerms): number {
+  if (t.taxInputMode === "total") return (t.fixedAssetTax ?? 0) + (t.cityPlanningTax ?? 0);
+  const a = annualByKind(t.taxItems);
+  return a.land + a.building;
+}
+
+/** 税額が入ったか(段取りの「年税額を確認」の自動の完了)。土地・建物ごとなら税額のある行が1つ以上、合計額なら2つとも。 */
+export function taxesEnteredOfTerms(t: SettlementTerms): boolean {
+  if (t.taxInputMode === "total") return t.fixedAssetTax !== null && t.cityPlanningTax !== null;
+  return t.taxItems.some((i) => {
+    const x = itemTaxes(i);
+    return x.fixed + x.city > 0;
+  });
 }
 
 export interface SettlementResult {
+  /** 課税業者なのに「合計額だけ」で入っている(建物分の消費税を出せない)。画面の注意に使う。 */
+  taxableTotalConflict: boolean;
   ready: boolean;
   missing: string[];
   rows: SettlementRow[];
@@ -55,7 +90,7 @@ export function settlementResult(i: SettlementInput): SettlementResult {
   const remaining = i.price === null ? null : i.price - (i.deposit ?? 0);
   if (!i.settlementDate) {
     return {
-      ready: false, missing: ["決済日時"], rows: [], depositRow: null, totalSellerToBuyer: 0, totalBuyerToSeller: 0,
+      taxableTotalConflict: i.sellerTaxable && i.terms.taxInputMode === "total", ready: false, missing: ["決済日時"], rows: [], depositRow: null, totalSellerToBuyer: 0, totalBuyerToSeller: 0,
       net: { direction: "none", amount: 0 }, netLine: "", remaining, depositOffset: 0, paymentAtSettlement: null, warnings: [],
     };
   }
@@ -70,15 +105,38 @@ export function settlementResult(i: SettlementInput): SettlementResult {
   // 元の金額が無くても、手で直した値があれば行を出す(その値を精算に入れる)。
   const has = (k: OverrideKey) => i.overrides[k] !== undefined;
 
-  const annual = sum([i.terms.fixedAssetTax, i.terms.cityPlanningTax]);
-  if (annual > 0 || has("settlement.propertyTax")) {
+  // 固都税: 年税額を日割りして買主から売主へ。注意文は1回だけ出す。
+  let taxWarned = false;
+  const taxRow = (key: string, label: string, overrideKey: OverrideKey, annual: number): SettlementRow | null => {
+    if (annual <= 0 && !has(overrideKey)) return null;
     const p = prorateAnnualTax(annual, i.terms.taxStart, date);
-    if (p.warning && annual > 0) warnings.push(p.warning);
-    const v = pick("settlement.propertyTax", p.buyer);
-    rows.push({
-      key: "propertyTax", label: "固定資産税・都市計画税", period: `${date}〜${p.periodEnd}`, formula: annual > 0 ? p.formula : null,
+    if (p.warning && annual > 0 && !taxWarned) { warnings.push(p.warning); taxWarned = true; }
+    const v = pick(overrideKey, p.buyer);
+    return {
+      key, label, period: `${date}〜${p.periodEnd}`, formula: annual > 0 ? p.formula : null,
       sellerToBuyer: 0, buyerToSeller: v.value, computed: p.buyer, overridden: v.overridden, note: null,
-    });
+    };
+  };
+  if (i.terms.taxInputMode === "total") {
+    const r = taxRow("propertyTax", "固定資産税・都市計画税", "settlement.propertyTax", sum([i.terms.fixedAssetTax, i.terms.cityPlanningTax]));
+    if (r) rows.push(r);
+  } else {
+    const a = annualByKind(i.terms.taxItems);
+    const land = taxRow("propertyTaxLand", "固定資産税・都市計画税(土地)", "settlement.propertyTaxLand", a.land);
+    if (land) rows.push(land);
+    const building = taxRow("propertyTaxBuilding", "固定資産税・都市計画税(建物)", "settlement.propertyTaxBuilding", a.building);
+    if (building) rows.push(building);
+    // 売主が課税業者なら、建物分の精算金(手で直した後の値)に消費税。円未満四捨五入。
+    // 建物の行が無くても、手で直した値があれば行を出す(ほかの行と同じ・@codex #712 3巡目)。
+    if (i.sellerTaxable && (building || has("settlement.propertyTaxBuildingVat"))) {
+      const computed = building ? roundDiv(building.buyerToSeller * i.taxRateBp, 10000) : 0;
+      const v = pick("settlement.propertyTaxBuildingVat", computed);
+      rows.push({
+        key: "propertyTaxBuildingVat", label: "建物分の消費税", period: null,
+        formula: building ? `${yen(building.buyerToSeller)}円×${i.taxRateBp / 100}%` : null,
+        sellerToBuyer: 0, buyerToSeller: v.value, computed, overridden: v.overridden, note: null,
+      });
+    }
   }
 
   const monthly = sum([i.terms.managementFee, i.terms.repairReserve, i.terms.otherMonthly]);
@@ -130,7 +188,7 @@ export function settlementResult(i: SettlementInput): SettlementResult {
   const depositOffset = depositRow && i.terms.depositMode === "offset" ? depositRow.sellerToBuyer : 0;
   const paymentAtSettlement = remaining === null ? null : remaining + diff - depositOffset;
   return {
-    ready: true, missing: remaining === null ? ["売買価格"] : [], rows, depositRow, totalSellerToBuyer, totalBuyerToSeller,
+    taxableTotalConflict: i.sellerTaxable && i.terms.taxInputMode === "total", ready: true, missing: remaining === null ? ["売買価格"] : [], rows, depositRow, totalSellerToBuyer, totalBuyerToSeller,
     net, netLine, remaining, depositOffset, paymentAtSettlement, warnings,
   };
 }

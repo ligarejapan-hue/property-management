@@ -94,7 +94,23 @@ export const DEFAULT_COSTS: Costs = {
 const otherSettlementSchema = z.object({
   label: z.string().trim().min(1).max(50), sellerToBuyer: yenInt, buyerToSeller: yenInt,
 }).strict();
+/** 固都税の1行(土地または建物1つ)。課税標準額と持分から税額を出し、税額は手で直せる(null=自動)。 */
+export const taxItemSchema = z.object({
+  kind: z.enum(["land", "building"]),
+  label: text(100),
+  fixedBase: yenInt.nullable(),
+  cityBase: yenInt.nullable(),
+  shareNum: z.number().int().positive().max(1_000_000_000),
+  shareDen: z.number().int().positive().max(1_000_000_000),
+  fixedTax: yenInt.nullable(),
+  cityTax: yenInt.nullable(),
+}).strict().refine((r) => r.shareNum <= r.shareDen, "持分は分子≦分母");
 export const settlementTermsSchema = z.object({
+  /** items=土地・建物ごとに入れる / total=年税額(固定資産税・都市計画税)の合計だけ。 */
+  taxInputMode: z.enum(["items", "total"]),
+  taxItems: z.array(taxItemSchema).max(40),
+  /** 売主が課税業者か(null=未設定 → 売主の当事者に自社がいれば課税業者とみなす)。 */
+  sellerTaxable: z.boolean().nullable(),
   fixedAssetTax: yenInt.nullable(),
   cityPlanningTax: yenInt.nullable(),
   taxStart: z.enum(["01-01", "04-01"]),
@@ -108,6 +124,7 @@ export const settlementTermsSchema = z.object({
 }).strict();
 export type SettlementTerms = z.output<typeof settlementTermsSchema>;
 export const DEFAULT_TERMS: SettlementTerms = {
+  taxInputMode: "items", taxItems: [], sellerTaxable: null,
   fixedAssetTax: null, cityPlanningTax: null, taxStart: "01-01", managementFee: null, repairReserve: null, otherMonthly: null,
   managementPrepaidMonths: 0, rentPrepaidMonths: 0, depositMode: "offset", others: [],
 };
@@ -123,6 +140,7 @@ export const leasesSchema = z.array(leaseSchema).max(200);
 /** 手で直せる計算値の鍵(表示 = 上書き ?? 計算)。 */
 export const OVERRIDE_KEYS = [
   "brokerageFee", "buildingPrice", "buildingTax", "settlement.propertyTax", "settlement.management", "settlement.rent",
+  "settlement.propertyTaxLand", "settlement.propertyTaxBuilding", "settlement.propertyTaxBuildingVat",
 ] as const;
 export type OverrideKey = (typeof OVERRIDE_KEYS)[number];
 export const overridesSchema = z.partialRecord(z.enum(OVERRIDE_KEYS), yenInt);

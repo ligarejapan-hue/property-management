@@ -14,6 +14,8 @@ import { isKnownPropertyKind } from "@/lib/deals/settings";
 import { DEAL_TRACKED_FIELDS, dealChangeValues, toDealUpdateData } from "@/lib/deals/change-values";
 import { DEAL_DETAIL_SELECT, toDealView } from "@/lib/deals/view";
 import { syncDealScheduleSafe, taxesEnteredOf } from "@/lib/deals/schedule-sync";
+import { readTerms } from "@/lib/deals/inputs";
+import { sellerTaxableOf, taxPartChanged } from "@/lib/deals/calc/settlement";
 import type { ScheduleEvent } from "@/lib/deals/schedule";
 import { canChangeDealAssignee, canChangeDealStatus, caseStatusWouldMove, syncCaseStatusFromDeals, syncDealDocRetention } from "@/lib/deals/status-link";
 import { lockPropertyRow } from "@/lib/property-record-guard";
@@ -97,6 +99,15 @@ export async function PATCH(request: Request, ctx: Ctx) {
         }
         if (assigneeChanges && !canChangeDealAssignee(session, cur, property)) {
           throw new ApiError(403, "取引の担当者を変えられるのは、管理者と担当者だけです", "DEAL_ASSIGNEE_FORBIDDEN");
+        }
+      }
+      // 売主が課税業者の取引は、固都税を合計額だけでは保存しない(建物分の消費税を出せないため・2026-11-12 発注者指示)。
+      // 固都税の部分を変えた保存だけを止める(敷金の扱い・管理費だけの保存や物件の取り直しは止めない)。
+      if (patch.settlementTerms !== undefined) {
+        const next = patch.settlementTerms;
+        if (next.taxInputMode === "total" && taxPartChanged(readTerms(cur.settlementTerms, cur.overrides), next)
+          && sellerTaxableOf({ settlementTerms: next, parties: cur.parties })) {
+          throw new ApiError(422, "売主が課税業者の取引は、土地・建物ごとに入力してください", "TAXABLE_TOTAL_NOT_ALLOWED");
         }
       }
       const data = toDealUpdateData(patch, cur.businessType);

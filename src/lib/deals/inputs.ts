@@ -15,8 +15,18 @@ export function readCosts(json: unknown): Costs {
   const r = costsSchema.safeParse({ ...DEFAULT_COSTS, ...obj(json) });
   return r.success ? r.data : DEFAULT_COSTS;
 }
-export function readTerms(json: unknown): SettlementTerms {
-  const r = settlementTermsSchema.safeParse({ ...DEFAULT_TERMS, ...obj(json) });
+/**
+ * 精算の条件を読む。overrides は取引の上書きの JSON(作り直し前の取引の読み方を決めるため)。
+ * 入力のしかたが無い(作り直し前の)取引は、年税額が入っているか、固都税を手で直した値があれば「合計額だけ」として読む
+ * (年税額が空でも、手で直した値で精算していた取引の行を消さない・最終レビュー I-1)。
+ */
+export function readTerms(json: unknown, overrides?: unknown): SettlementTerms {
+  const src = obj(json);
+  const legacyTotal = src.taxInputMode === undefined && (
+    typeof src.fixedAssetTax === "number" || typeof src.cityPlanningTax === "number"
+    || obj(overrides)["settlement.propertyTax"] !== undefined
+  );
+  const r = settlementTermsSchema.safeParse({ ...DEFAULT_TERMS, ...(legacyTotal ? { taxInputMode: "total" } : {}), ...src });
   return r.success ? r.data : DEFAULT_TERMS;
 }
 /** 賃貸条件は行ごとに読み、壊れた行だけ落とす。 */
