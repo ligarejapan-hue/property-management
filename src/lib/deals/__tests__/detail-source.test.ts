@@ -38,8 +38,8 @@ describe("取引の詳しい画面", () => {
     const src = read("src/components/deals/deal-settlement-panel.tsx");
     for (const s of [
       "<TaxItemsEditor", "taxItemsFromForm(", "土地・建物ごと", "合計額だけ", "売主は課税業者", "taxableTotalConflict",
-      "課税業者の取引です。土地・建物ごとに入力し直してください", "settlement.propertyTaxLand", "settlement.propertyTaxBuilding",
-      "settlement.propertyTaxBuildingVat", "課税標準額×1.4%",
+      "課税業者の取引です。土地・建物ごとに入力し直してください",
+      "課税標準額×1.4%", "taxOverrideFields(terms.taxInputMode, taxable)", "setBadOverrides(dropTaxOverrideErrors)",
     ]) {
       expect(src, s).toContain(s);
     }

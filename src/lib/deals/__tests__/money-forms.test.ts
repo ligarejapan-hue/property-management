@@ -1,5 +1,17 @@
 import { describe, it, expect } from "vitest";
-import { bpToPercentText, parseYen, percentTextToBp, yenText } from "../money-forms";
+import { bpToPercentText, dropTaxOverrideErrors, parseYen, percentTextToBp, taxOverrideFields, yenText } from "../money-forms";
+
+describe("固都税の手で直す欄(@codex #712)", () => {
+  it("合計額なら1つ、土地・建物ごとなら土地・建物(課税業者なら消費税も)", () => {
+    expect(taxOverrideFields("total", true).map((f) => f.key)).toEqual(["settlement.propertyTax"]);
+    expect(taxOverrideFields("items", false).map((f) => f.key)).toEqual(["settlement.propertyTaxLand", "settlement.propertyTaxBuilding"]);
+    expect(taxOverrideFields("items", true).map((f) => f.key)).toEqual(["settlement.propertyTaxLand", "settlement.propertyTaxBuilding", "settlement.propertyTaxBuildingVat"]);
+  });
+  it("入力のしかた・課税業者を切り替えたら、固都税の欄の「読めない」印だけを消す(見えなくなった欄で保存が止まり続けない)", () => {
+    const all = [...taxOverrideFields("total", false), ...taxOverrideFields("items", true)].map((f) => f.label);
+    expect(dropTaxOverrideErrors([...all, "管理費等(買主→売主)"])).toEqual(["管理費等(買主→売主)"]);
+  });
+});
 
 describe("金額・率の入力", () => {
   it("カンマ・円・空白を無視して整数に・読めなければ null", () => {

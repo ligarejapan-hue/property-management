@@ -6,11 +6,13 @@ import { Button } from "@/components/ui/button";
 import { Field, OverrideField, SelectBox, YenInput, inputCls } from "./form-parts";
 import { TaxItemsEditor, taxItemsFromForm, taxItemsToForm } from "./tax-items-editor";
 import { dealsApi, DealApiError, errorText } from "@/lib/deals/client";
-import { SETTLEMENT_OVERRIDE_KEYS, invalidYenLabels, mergeOverrides, parseYen, textify, untextify, yenText } from "@/lib/deals/money-forms";
+import {
+  SETTLEMENT_OVERRIDE_KEYS, dropTaxOverrideErrors, invalidYenLabels, mergeOverrides, parseYen, taxOverrideFields, textify, untextify, yenText,
+} from "@/lib/deals/money-forms";
 import { sellerTaxableOf } from "@/lib/deals/calc/settlement";
 import type { DealView } from "@/lib/deals/view";
 import type { DealCalc } from "@/lib/deals/calc/deal-calc";
-import type { OverrideKey, Overrides, SettlementTerms } from "@/lib/deals/schemas";
+import type { Overrides, SettlementTerms } from "@/lib/deals/schemas";
 
 const conflictText = (e: unknown) =>
   e instanceof DealApiError && e.code === "VERSION_CONFLICT"
@@ -43,6 +45,11 @@ export default function DealSettlementPanel({ deal, calc, onSaved }: { deal: Dea
   const kindBase = calc?.kindBase ?? null;
   // 売主が課税業者か(未設定なら売主の当事者に自社がいるか)。
   const taxable = sellerTaxableOf({ settlementTerms: terms, parties: deal.parties });
+  // 入力のしかた・課税業者の切り替え。固都税の手で直す欄が外れる/付け直されるので、その欄の「読めない」印を消す(@codex #712)。
+  const setTaxMode = (patch: Partial<Pick<SettlementTerms, "taxInputMode" | "sellerTaxable">>) => {
+    setTerms((t) => ({ ...t, ...patch }));
+    setBadOverrides(dropTaxOverrideErrors);
+  };
   const st = calc?.settlement ?? null;
   const setOverride = (key: keyof Overrides, v: number | undefined) =>
     setOverrides((o) => {
@@ -103,18 +110,18 @@ export default function DealSettlementPanel({ deal, calc, onSaved }: { deal: Dea
             <input
               type="checkbox" checked={taxable}
               // 課税業者にしたら「合計額だけ」は使えないので、土地・建物ごとに切り替える。
-              onChange={(e) => setTerms((t) => ({ ...t, sellerTaxable: e.target.checked, ...(e.target.checked ? { taxInputMode: "items" as const } : {}) }))}
+              onChange={(e) => setTaxMode({ sellerTaxable: e.target.checked, ...(e.target.checked ? { taxInputMode: "items" as const } : {}) })}
             />
             売主は課税業者(建物分の精算金に消費税)
           </label>
           <fieldset className="flex flex-wrap items-center gap-4">
             <legend className="sr-only">入力のしかた</legend>
             <label className="flex items-center gap-1">
-              <input type="radio" name="taxInputMode" checked={terms.taxInputMode === "items"} onChange={() => setTerms((t) => ({ ...t, taxInputMode: "items" }))} />
+              <input type="radio" name="taxInputMode" checked={terms.taxInputMode === "items"} onChange={() => setTaxMode({ taxInputMode: "items" })} />
               土地・建物ごと
             </label>
             <label className={`flex items-center gap-1 ${taxable && terms.taxInputMode !== "total" ? "text-gray-400" : ""}`}>
-              <input type="radio" name="taxInputMode" disabled={taxable && terms.taxInputMode !== "total"} checked={terms.taxInputMode === "total"} onChange={() => setTerms((t) => ({ ...t, taxInputMode: "total" }))} />
+              <input type="radio" name="taxInputMode" disabled={taxable && terms.taxInputMode !== "total"} checked={terms.taxInputMode === "total"} onChange={() => setTaxMode({ taxInputMode: "total" })} />
               合計額だけ{taxable && <span className="text-xs">(課税業者の取引では使えません)</span>}
             </label>
           </fieldset>
@@ -184,14 +191,7 @@ export default function DealSettlementPanel({ deal, calc, onSaved }: { deal: Dea
 
       <section className="space-y-3">
         <h3 className="text-sm font-semibold text-gray-700 dark:text-gray-300">手で直す(計算の値を変えるときだけ)</h3>
-        {(terms.taxInputMode === "total"
-          ? [["固都税(買主→売主)", "propertyTax", "settlement.propertyTax"] as const]
-          : [
-            ["固都税・土地(買主→売主)", "propertyTaxLand", "settlement.propertyTaxLand"] as const,
-            ["固都税・建物(買主→売主)", "propertyTaxBuilding", "settlement.propertyTaxBuilding"] as const,
-            ...(taxable ? [["建物分の消費税(買主→売主)", "propertyTaxBuildingVat", "settlement.propertyTaxBuildingVat"] as const] : []),
-          ]
-        ).map(([label, rowKey, key]: readonly [string, string, OverrideKey]) => (
+        {taxOverrideFields(terms.taxInputMode, taxable).map(({ label, rowKey, key }) => (
           <OverrideField key={key} label={label} onValidity={validity(label)} computed={st?.rows.find((r) => r.key === rowKey)?.computed ?? null} override={overrides[key]} onChange={(v) => setOverride(key, v)} />
         ))}
         {kindBase === "unit" && (

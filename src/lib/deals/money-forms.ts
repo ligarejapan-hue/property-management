@@ -48,6 +48,26 @@ export const SETTLEMENT_OVERRIDE_KEYS = [
   "settlement.propertyTaxLand", "settlement.propertyTaxBuilding", "settlement.propertyTaxBuildingVat",
 ] as const satisfies readonly OverrideKey[];
 
+/** 精算タブの固都税の「手で直す」欄(label=画面の名前・rowKey=精算の行の key)。入力のしかたと課税業者で変わる。 */
+export function taxOverrideFields(mode: "items" | "total", taxable: boolean): { label: string; rowKey: string; key: OverrideKey }[] {
+  if (mode === "total") return [{ label: "固都税(買主→売主)", rowKey: "propertyTax", key: "settlement.propertyTax" }];
+  return [
+    { label: "固都税・土地(買主→売主)", rowKey: "propertyTaxLand", key: "settlement.propertyTaxLand" },
+    { label: "固都税・建物(買主→売主)", rowKey: "propertyTaxBuilding", key: "settlement.propertyTaxBuilding" },
+    ...(taxable ? [{ label: "建物分の消費税(買主→売主)", rowKey: "propertyTaxBuildingVat", key: "settlement.propertyTaxBuildingVat" as const }] : []),
+  ];
+}
+
+const TAX_OVERRIDE_LABELS = new Set([...taxOverrideFields("total", false), ...taxOverrideFields("items", true)].map((f) => f.label));
+
+/**
+ * 固都税の欄の「読めない」印を消す(@codex #712)。入力のしかた・課税業者を切り替えると欄が外れたり、
+ * 保存済みの値で付け直されたりするので、残った印で保存が止まり続けないようにする。
+ */
+export function dropTaxOverrideErrors(bad: string[]): string[] {
+  return bad.filter((l) => !TAX_OVERRIDE_LABELS.has(l));
+}
+
 /** そのパネルの鍵だけを取り出す(パネルの key 用)。 */
 export function pickOverrides(o: Overrides, keys: readonly OverrideKey[]): Overrides {
   const out: Overrides = {};
