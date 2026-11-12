@@ -122,9 +122,11 @@ const VERSIONED: Record<string, string> = {
   "src/lib/registry-pdf/process.ts:267":
     "owner.corporateNumber(空欄補完・fillOwnerCorporateNumberIfUnlocked)+version increment" +
     "(Task 7で修正済)",
-  "src/lib/registry-pdf/process.ts:581":
+  "src/lib/registry-pdf/process.ts:302":
+    "owner.address(同じ物件で同じ人を使い回したとき、住所が空なら謄本の住所で埋める・fillOwnerAddressIfEmptyAndUnlocked・2026-11-12 @codex #710)+version increment",
+  "src/lib/registry-pdf/process.ts:616":
     "owner.address(同じ謄本で同じ人が住所違いで2回出たとき、この実行で作った人だけ後の住所に替える・2026-11-12)+version increment",
-  "src/lib/registry-pdf/process.ts:1127":
+  "src/lib/registry-pdf/process.ts:1170":
     "property.registryStatus/realEstateNumber/lotNumber/buildingNumber/exclusiveAreaRegistry/landArea/landAreaMethod/totalFloorArea(取得状況前進+空欄補完)+version increment",
   "src/lib/registry-pdf/fill-areas.ts:157":
     "property.exclusiveAreaRegistry/landArea/landAreaMethod/totalFloorArea/lotNumber/buildingNumber/structureType/builtYear/builtMonth(謄本から空欄補完・2026-10-25/11-01)+version increment" +
@@ -215,19 +217,19 @@ const ALLOWED_WITHOUT_VERSION: Record<string, AllowedEntry> = {
       "編集画面から書けない)",
     keys: ["dmUndeliverableAt"],
   },
-  "src/lib/registry-pdf/process.ts:429": {
+  "src/lib/registry-pdf/process.ts:464": {
     reason:
       "owner.updatedAt のみ(添付済み謄本からの反映で、候補の所有者を物件行より先に" +
       "id順で押さえる touch。ロック順を /owners 窓口と同じ Owner→物件 にそろえる)",
     keys: ["updatedAt"],
   },
-  "src/lib/registry-pdf/process.ts:777": {
+  "src/lib/registry-pdf/process.ts:820": {
     reason:
       "owner.updatedAt のみ(ロック後の再探索で拾った所有者を、アーカイブされていない" +
       "条件で押さえる touch。押さえられなければ新規作成に回す)",
     keys: ["updatedAt"],
   },
-  "src/lib/registry-pdf/process.ts:652": {
+  "src/lib/registry-pdf/process.ts:695": {
     reason: "owner.updatedAt のみ(既存所有者再利用時の行ロックtouch)",
     keys: ["updatedAt"],
   },

@@ -273,6 +273,41 @@ async function fillOwnerCorporateNumberIfUnlocked(
   return outerTx ? run(outerTx) : prisma.$transaction((tx) => run(tx as DbClient));
 }
 
+// 2026-11-12(@codex #710 P2): 同じ物件で同じ人を使い回したとき、その人の登記上の住所が空なら
+// 謄本の住所で埋める(空欄の補完だけ・既存の住所は上書きしない)。
+// 例: 同じ謄本で、同じ人が住所なしの行→住所ありの行の順に載ったとき、後の行の住所を捨てない。
+// ⚠郵便番号だけが入っている人には入れない(謄本の住所は郵便番号を持たない=別の場所の郵便番号と
+//   組み合わさった宛先を作らない)。
+// ⚠法人番号の補完と同じく、所有者の行を押さえてから読み直し、**編集中は書かない**・version を進める。
+async function fillOwnerAddressIfEmptyAndUnlocked(
+  ownerId: string,
+  address: string,
+  /** → fillOwnerCorporateNumberIfUnlocked の outerTx と同じ(渡されたら新しく開かない)。 */
+  outerTx?: DbClient,
+): Promise<{ count: number; locked: boolean }> {
+  const run = async (tx: DbClient) => {
+    await lockOwnerRow(tx, ownerId);
+    const fresh = await tx.owner.findUnique({
+      where: { id: ownerId },
+      select: { address: true, zip: true, isArchived: true },
+    });
+    if (!fresh || fresh.isArchived || fresh.address?.trim() || fresh.zip?.trim()) {
+      return { count: 0, locked: false };
+    }
+    const locked = await isResourceEditLocked(tx, {
+      resourceType: "owner",
+      resourceId: ownerId,
+    });
+    if (locked) return { count: 0, locked: true };
+    const updated = await tx.owner.updateMany({
+      where: { id: ownerId, isArchived: false, OR: [{ address: null }, { address: "" }] },
+      data: { address, version: { increment: 1 } },
+    });
+    return { count: updated.count, locked: false };
+  };
+  return outerTx ? run(outerTx) : prisma.$transaction((tx) => run(tx as DbClient));
+}
+
 // A-2c: 謄本PDF取込の所有者反映（Owner 突合/作成 + PropertyOwner link）を
 // Mode A/B 共通の private 関数に括り出す。中身は従来の Mode A ループを propertyId
 // 引数化しただけで挙動は不変（突合/正規化/archive race/法人番号の各方針を維持）。
@@ -582,6 +617,14 @@ async function reflectParsedOwners(args: {
               where: { id: same.id, isArchived: false },
               data: { address: replace.address, version: { increment: 1 } },
             });
+          } else if (!same.address?.trim() && ownerInfo.address.trim()) {
+            // 使い回す人の住所が空なら、謄本の住所で埋める(@codex #710 P2)。
+            // まとめる場合に使い回すのはこの実行で紐づけた人だけ=自分が押さえている行。
+            await fillOwnerAddressIfEmptyAndUnlocked(
+              same.id,
+              ownerInfo.address,
+              asOneBatch ? db : undefined,
+            );
           }
           matchedCount++;
           // 法人番号は住所なしの経路と同じく、空のときだけ埋める(既存値は上書きしない)。

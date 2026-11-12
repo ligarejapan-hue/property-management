@@ -347,6 +347,49 @@ describe("同じ謄本を取り直しても住所なしの所有者が増えな�
     expect(pm.owner.create).toHaveBeenCalledTimes(1);
   });
 
+  it("同じ謄本に同じ人が住所なし→住所ありの順で載ったら、1人にして住所を埋める(@codex #710 P2)", async () => {
+    (parseRegistryText as Mock).mockReturnValue({
+      realEstateNumber: null,
+      address: "東京都千代田区一番町1",
+      lotNumber: null,
+      buildingNumber: null,
+      landCategory: null,
+      area: null,
+      owners: [
+        { name: "山田太郎", address: null, share: null },
+        { name: "山田太郎", address: "大阪市北区1-1", share: null },
+      ],
+      warnings: [],
+      confidence: 0.9,
+    });
+    pm.propertyOwner.findMany.mockReset();
+    pm.propertyOwner.findMany
+      .mockResolvedValueOnce([])
+      .mockResolvedValue([
+        { owner: { id: "owner-new", name: "山田太郎", address: null, isArchived: false, corporateNumber: null } },
+      ]);
+    pm.owner.findUnique.mockResolvedValue({ corporateNumber: null, address: null, zip: null, isArchived: false });
+    await run();
+    expect(pm.owner.create).toHaveBeenCalledTimes(1);
+    expect(pm.owner.updateMany).toHaveBeenCalledWith(
+      expect.objectContaining({
+        where: expect.objectContaining({ id: "owner-new", isArchived: false }),
+        data: expect.objectContaining({ address: "大阪市北区1-1", version: { increment: 1 } }),
+      }),
+    );
+  });
+
+  it("使い回す人に郵便番号だけ入っているときは住所を埋めない(別の場所の郵便番号と組ませない)", async () => {
+    withAddress([{ name: "山田太郎", address: "大阪市北区1-1" }]);
+    linkedOwners([{ id: "owner-existing", name: "山田太郎", address: null }]);
+    pm.owner.findUnique.mockResolvedValue({ corporateNumber: null, address: null, zip: "100-0001", isArchived: false });
+    await run();
+    expect(pm.owner.create).not.toHaveBeenCalled();
+    expect(pm.owner.updateMany).not.toHaveBeenCalledWith(
+      expect.objectContaining({ data: expect.objectContaining({ address: expect.anything() }) }),
+    );
+  });
+
   it("同じ謄本に同じ人が住所違いで2回載っても1人にし、住所は後の行(新しい住所)にする", async () => {
     withAddress([
       { name: "山田太郎", address: "東京都港区1-1" },
