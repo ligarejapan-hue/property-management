@@ -1,7 +1,7 @@
 import type { BasePropertyKind } from "../constants";
 import type { Lease, OverrideKey, Overrides, SettlementTerms } from "../schemas";
 import { prorateAnnualTax, prorateMonthly, roundDiv } from "./proration";
-import { annualByKind, itemTaxes } from "./property-tax";
+import { annualByKind } from "./property-tax";
 import { depositSuccession } from "./deposit";
 import { yen } from "./format";
 
@@ -53,13 +53,13 @@ export function annualPropertyTaxOf(t: SettlementTerms): number {
   return a.land + a.building;
 }
 
-/** 税額が入ったか(段取りの「年税額を確認」の自動の完了)。土地・建物ごとなら税額のある行が1つ以上、合計額なら2つとも。 */
+/**
+ * 税額が入ったか(段取りの「年税額を確認」の自動の完了)。土地・建物ごとなら、課税標準額か税額を入れた行が1つ以上
+ * (免税点などで税額を手で0にした行も入れたものとして数える・2026-11-12)。合計額なら2つとも。
+ */
 export function taxesEnteredOfTerms(t: SettlementTerms): boolean {
   if (t.taxInputMode === "total") return t.fixedAssetTax !== null && t.cityPlanningTax !== null;
-  return t.taxItems.some((i) => {
-    const x = itemTaxes(i);
-    return x.fixed + x.city > 0;
-  });
+  return t.taxItems.some((i) => i.fixedBase !== null || i.cityBase !== null || i.fixedTax !== null || i.cityTax !== null);
 }
 
 export interface SettlementResult {

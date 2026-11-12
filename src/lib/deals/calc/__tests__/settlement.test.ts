@@ -81,10 +81,18 @@ describe("固都税の入力の見方", () => {
     expect(annualPropertyTaxOf(items)).toBe(156_500);
     expect(annualPropertyTaxOf(base.terms)).toBe(120_000);
   });
-  it("税額が入ったか: 土地・建物ごとなら税額のある行が1つ以上、合計額なら2つとも", () => {
+  it("税額が入ったか: 土地・建物ごとなら課税標準額か税額を入れた行が1つ以上、合計額なら2つとも", () => {
     expect(taxesEnteredOfTerms(items)).toBe(true);
+    expect(taxesEnteredOfTerms({ ...items, taxItems: [] })).toBe(false);
     expect(taxesEnteredOfTerms({ ...items, taxItems: [{ ...taxItem("land", 0, 0), fixedTax: null, cityTax: null }] })).toBe(false);
     expect(taxesEnteredOfTerms({ ...items, taxItems: [{ ...taxItem("land", 0, 0), fixedTax: null, cityTax: null, fixedBase: 1_000_000 }] })).toBe(true);
+  });
+  it("免税点などで全部の行の税額を手で0にしても「入った」と数える(2026-11-12 先送りの直し)", () => {
+    expect(taxesEnteredOfTerms({ ...items, taxItems: [taxItem("land", 0, 0), taxItem("building", 0, 0)] })).toBe(true);
+    // 課税標準額が千円未満で自動の税額が0の行も、入れた行として数える。
+    expect(taxesEnteredOfTerms({ ...items, taxItems: [{ ...taxItem("land", 0, 0), fixedTax: null, cityTax: null, fixedBase: 999 }] })).toBe(true);
+  });
+  it("合計額なら2つとも入っているか", () => {
     expect(taxesEnteredOfTerms(base.terms)).toBe(true);
     expect(taxesEnteredOfTerms({ ...base.terms, cityPlanningTax: null })).toBe(false);
   });
