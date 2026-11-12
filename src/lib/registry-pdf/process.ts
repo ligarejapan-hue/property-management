@@ -26,7 +26,11 @@ import { writeAuditLog } from "@/lib/audit";
 import { canAccessPropertyRecord } from "@/lib/property-access";
 import { recordChanges, PROPERTY_TRACKED_FIELDS } from "@/lib/change-log";
 import { normalizeName, normalizeAddress } from "@/lib/normalize";
-import { pickReusableAddresslessOwner } from "@/lib/registry-pdf/owner-reuse";
+import {
+  pickReusableAddresslessOwner,
+  pickSamePropertyOwner,
+  planSamePropertyAddressReplace,
+} from "@/lib/registry-pdf/owner-reuse";
 import { parseRegistryText } from "@/lib/pdf-registry-parser";
 import { planRegistryAreaFill, registryAreasOf, type RegistryAreaCurrent } from "@/lib/registry-area";
 import { fillPropertyFromRegistry } from "@/lib/registry-pdf/fill-areas";
@@ -269,6 +273,56 @@ async function fillOwnerCorporateNumberIfUnlocked(
   return outerTx ? run(outerTx) : prisma.$transaction((tx) => run(tx as DbClient));
 }
 
+// 2026-11-12(@codex #710 P2×2): 同じ物件で同じ人を使い回したとき、その人の登記上の住所を
+// 謄本の行の住所にする。2つの場合だけ書く:
+//   - expected=null  … 住所が空(郵便番号も空)の人の空欄を埋める。
+//     例: 同じ謄本で、同じ人が住所なしの行→住所ありの行の順に載ったとき、後の行の住所を捨てない。
+//     ⚠郵便番号だけが入っている人には入れない(謄本の住所は郵便番号を持たない=別の場所の
+//     郵便番号と組み合わさった宛先を作らない)。
+//   - expected=文字列 … **この実行が前に書いた住所のまま**のときだけ、後の行の住所に替える。
+//     まとめない経路では所有者の作成が先に確定するので、次の行までの間に人が住所を直したり
+//     編集を始めたりできる。それを上書きしない。
+// ⚠法人番号の補完と同じく、所有者の行を押さえてから読み直し、**編集中は書かない**・version を進める。
+async function setOwnerAddressGuarded(
+  ownerId: string,
+  address: string,
+  expected: string | null,
+  /** → fillOwnerCorporateNumberIfUnlocked の outerTx と同じ(渡されたら新しく開かない)。 */
+  outerTx?: DbClient,
+): Promise<{ count: number; locked: boolean }> {
+  const run = async (tx: DbClient) => {
+    await lockOwnerRow(tx, ownerId);
+    const fresh = await tx.owner.findUnique({
+      where: { id: ownerId },
+      select: { address: true, zip: true, isArchived: true },
+    });
+    if (!fresh || fresh.isArchived) return { count: 0, locked: false };
+    // ⚠郵便番号も見る(@codex #710 P2): 謄本の取り込みは郵便番号を書かない=この実行が作った人の
+    //   郵便番号は空のはず。人が郵便番号を入れていたら、住所だけ替えると組がずれるので書かない。
+    const stillAsExpected =
+      !fresh.zip?.trim() && (expected === null ? !fresh.address?.trim() : fresh.address === expected);
+    if (!stillAsExpected) return { count: 0, locked: false };
+    const locked = await isResourceEditLocked(tx, {
+      resourceType: "owner",
+      resourceId: ownerId,
+    });
+    if (locked) return { count: 0, locked: true };
+    const updated = await tx.owner.updateMany({
+      where: {
+        id: ownerId,
+        isArchived: false,
+        AND: [
+          { OR: [{ zip: null }, { zip: "" }] },
+          expected === null ? { OR: [{ address: null }, { address: "" }] } : { address: expected },
+        ],
+      },
+      data: { address, version: { increment: 1 } },
+    });
+    return { count: updated.count, locked: false };
+  };
+  return outerTx ? run(outerTx) : prisma.$transaction((tx) => run(tx as DbClient));
+}
+
 // A-2c: 謄本PDF取込の所有者反映（Owner 突合/作成 + PropertyOwner link）を
 // Mode A/B 共通の private 関数に括り出す。中身は従来の Mode A ループを propertyId
 // 引数化しただけで挙動は不変（突合/正規化/archive race/法人番号の各方針を維持）。
@@ -328,6 +382,10 @@ async function reflectParsedOwners(args: {
 
   /** この実行で自分が紐づけた所有者(見直しの対象から外すために覚えておく)。 */
   const linkedByThisRun: string[] = [];
+  /** この実行で作った所有者(同じ物件で同じ人が住所違いで2回出たとき、後の住所に替えてよい人)。 */
+  const createdByThisRun = new Set<string>();
+  /** この実行が作った人に、この実行が書いた住所(後の行で替えてよいか=今もこの値のままか、を見る)。 */
+  const addressByThisRun = new Map<string, string>();
 
   /**
    * 物件行のロックを握った状態で「まだ所有者が0件か」を確かめる。
@@ -491,6 +549,7 @@ async function reflectParsedOwners(args: {
           // ⚠自分が入れた分として記録する。これが漏れると、次の所有者の見直しで
           //   **自分が今入れた紐付けを数えて 409** になり、承認した全員が巻き戻る。
           linkedByThisRun.push(created.id);
+          createdByThisRun.add(created.id);
           await tx.propertyOwner.create({
             data: {
               propertyId,
@@ -531,6 +590,94 @@ async function reflectParsedOwners(args: {
           recordCorporateDecision(outcome.decision);
         }
         continue;
+      }
+
+      // ── 同じ物件に、名前が同じ人(全角半角・空白・異体字をそろえて)が既に紐づいていれば、
+      //    住所が違っても同じ人として使い回す(2026-11-12 発注者決定) ──
+      // なぜ: 謄本には同じ人が住所違いで2回載ることがある(持分を別の時期に取得し、その間に
+      //   引っ越したが住所の変更登記をしていない)。名前+住所の照合だけでは同じ物件に同じ人が
+      //   2人でき、DM が古い住所にも出ていた(本番で285組)。
+      // ⚠物件をまたぐ照合(下)は従来どおり名前+住所(別の物件の同姓同名は別人であり得る)。
+      // ⚠所有者を入れ替える呼び出し(replaceExistingOwners)・空の物件だけに入れる呼び出し
+      //   (requireNoExistingOwners)では、前からいる人は使い回さない(この実行で紐づけた人だけ)。
+      // ⚠既に紐づいている=リンクは作らない。前からいる人の**住所は替えない**(人が直した住所
+      //   かもしれない)。前からいる人に書くのは、住所なしの経路と同じ法人番号の空欄補完だけ
+      //   (fillOwnerCorporateNumberIfUnlocked が所有者の行を押さえてから書く。物件行は握らない)。
+      //   住所を替えるのは、この実行で作った人(自分のトランザクションが作った/押さえた行)だけ。
+      //   ⚠この経路の住所の差し替えは変更履歴を残さない(この実行の中で作ったばかりの人の
+      //   住所を同じ謄本の後の行に合わせるだけ・謄本の取り込みは郵便番号を持たない)。
+      {
+        const allowPreexisting = !args.replaceExistingOwners && !args.requireNoExistingOwners;
+        const linkedNow = await db.propertyOwner.findMany({
+          where: { propertyId },
+          orderBy: [{ createdAt: "asc" }, { ownerId: "asc" }],
+          select: {
+            owner: {
+              select: { id: true, name: true, address: true, isArchived: true, corporateNumber: true },
+            },
+          },
+        });
+        const same = pickSamePropertyOwner(
+          linkedNow
+            .map((l) => l.owner)
+            .filter((o) => allowPreexisting || linkedByThisRun.includes(o.id)),
+          ownerInfo.name,
+        );
+        if (same) {
+          const replace = planSamePropertyAddressReplace(
+            { zip: null, address: same.address },
+            { zip: null, address: ownerInfo.address },
+            createdByThisRun.has(same.id),
+          );
+          // ⚠まとめる場合に使い回すのはこの実行で紐づけた人だけ=自分が押さえている行。
+          // ⚠住所を替えるのは、この実行が前に書いた住所のままのときだけ(@codex #710 P2:
+          //   まとめない経路では作成が先に確定するので、その間に人が直した住所・編集中を守る)。
+          const writtenByThisRun = addressByThisRun.get(same.id);
+          if (replace && writtenByThisRun !== undefined) {
+            const r = await setOwnerAddressGuarded(
+              same.id,
+              replace.address,
+              writtenByThisRun,
+              asOneBatch ? db : undefined,
+            );
+            if (r.count > 0) addressByThisRun.set(same.id, replace.address);
+          } else if (!same.address?.trim() && ownerInfo.address.trim()) {
+            // 使い回す人の住所が空なら、謄本の住所で埋める(@codex #710 P2)。
+            const r = await setOwnerAddressGuarded(
+              same.id,
+              ownerInfo.address,
+              null,
+              asOneBatch ? db : undefined,
+            );
+            if (r.count > 0 && createdByThisRun.has(same.id)) {
+              addressByThisRun.set(same.id, ownerInfo.address);
+            }
+          }
+          matchedCount++;
+          // 法人番号は住所なしの経路と同じく、空のときだけ埋める(既存値は上書きしない)。
+          const decision = decide(
+            { name: ownerInfo.name, address: ownerInfo.address ?? null },
+            same.corporateNumber,
+          );
+          if (decision.action === "save" && decision.corporateNumber) {
+            const filled = await fillOwnerCorporateNumberIfUnlocked(
+              same.id,
+              decision.corporateNumber,
+              asOneBatch ? db : undefined,
+            );
+            if (filled.locked) {
+              markOwnerCorporateFillSkipped();
+              recordCorporateDecision({ action: "noop", corporateNumber: null });
+            } else {
+              recordCorporateDecision(
+                filled.count === 0 ? { action: "noop", corporateNumber: null } : decision,
+              );
+            }
+          } else {
+            recordCorporateDecision(decision);
+          }
+          continue;
+        }
       }
 
       // address あり → normalizeName + normalizeAddress で既存 Owner 検索
@@ -757,6 +904,8 @@ async function reflectParsedOwners(args: {
         if (resolved.created) {
           createdCount++;
           recordCorporateDecision(cnDecisionForCreate);
+          createdByThisRun.add(resolved.id);
+          if (ownerInfo.address) addressByThisRun.set(resolved.id, ownerInfo.address);
         } else {
           matchedCount++;
         }

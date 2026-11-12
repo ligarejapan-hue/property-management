@@ -97,7 +97,7 @@ vi.mock("@/lib/prisma", () => {
       update: vi.fn(),
     },
     changeLog: { createMany: vi.fn() },
-    propertyOwner: { createMany: vi.fn() },
+    propertyOwner: { createMany: vi.fn(), findMany: vi.fn() },
     importJob: { update: vi.fn() },
   };
   return {
@@ -137,7 +137,7 @@ const pm = prisma as unknown as {
       update: Mock;
     };
     changeLog: { createMany: Mock };
-    propertyOwner: { createMany: Mock };
+    propertyOwner: { createMany: Mock; findMany: Mock };
     importJob: { update: Mock };
   };
 };
@@ -203,6 +203,8 @@ beforeEach(() => {
   pm._tx.owner.update.mockResolvedValue({});
   pm._tx.changeLog.createMany.mockResolvedValue({ count: 0 });
   pm._tx.propertyOwner.createMany.mockResolvedValue({ count: 1 });
+  // 同じ物件の同じ名前の人(2026-11-12)は、既定ではいない
+  pm._tx.propertyOwner.findMany.mockResolvedValue([]);
   pm._tx.importJobRow.update.mockResolvedValue({});
   pm._tx.importJobRow.findMany.mockResolvedValue([
     { status: "success" },
@@ -374,5 +376,50 @@ describe("POST manual-link-reception-owner: 物件の空欄補完は version を
     expect(call.data.version).toEqual({ increment: 1 });
     // 補完対象の項目自体は従来どおり書く(version 追加で消えていないことの確認)。
     expect(call.data.lotNumber).toBe("12番3");
+  });
+});
+
+describe("POST manual-link-reception-owner: 同じ物件の同じ名前の人を使い回す(2026-11-12 発注者決定)", () => {
+  it("物件に同じ名前の人がいれば、住所が違っても新しく作らない(前からいる人の住所は替えない)", async () => {
+    vi.mocked(parseRecoveredOwners).mockReturnValue([
+      { name: "髙橋 一郎", address: "大阪市北区1-1", zip: null, currentAddress: null, currentZip: null },
+    ]);
+    pm._tx.propertyOwner.findMany.mockResolvedValue([
+      { owner: { id: "linked-1", name: "高橋一郎", isArchived: false } },
+    ]);
+    pm._tx.owner.findMany.mockResolvedValue([]);
+    pm._tx.owner.findUnique.mockResolvedValue({
+      zip: "100-0001", address: "東京都港区芝1-2-3", currentZip: null, currentAddress: null,
+    });
+
+    const res = await POST(makeRequest(), makeParams());
+    expect(res.status).toBe(200);
+    expect(pm._tx.owner.create).not.toHaveBeenCalled();
+    expect(pm._tx.owner.update).not.toHaveBeenCalled();
+    expect(pm._tx.propertyOwner.createMany.mock.calls[0][0].data).toEqual([
+      expect.objectContaining({ ownerId: "linked-1" }),
+    ]);
+  });
+
+  it("同じ行の中で同じ人が住所違いで2回出たら1人にし、後の住所(郵便番号と組)に替える", async () => {
+    vi.mocked(parseRecoveredOwners).mockReturnValue([
+      { name: "山田太郎", address: "東京都港区芝1-2-3", zip: "100-0001", currentAddress: null, currentZip: null },
+      { name: "山田太郎", address: "大阪市北区1-1", zip: "530-0001", currentAddress: null, currentZip: null },
+    ]);
+    pm._tx.owner.findMany.mockResolvedValue([]);
+    pm._tx.owner.findFirst.mockResolvedValue(null);
+    pm._tx.owner.findUnique.mockResolvedValue({
+      zip: "100-0001", address: "東京都港区芝1-2-3", currentZip: null, currentAddress: null,
+    });
+
+    const res = await POST(makeRequest(), makeParams());
+    expect(res.status).toBe(200);
+    expect(pm._tx.owner.create).toHaveBeenCalledTimes(1);
+    expect(pm._tx.owner.update).toHaveBeenCalledTimes(1);
+    expect(pm._tx.owner.update.mock.calls[0][0].data).toMatchObject({
+      address: "大阪市北区1-1",
+      zip: "530-0001",
+    });
+    expect(pm._tx.propertyOwner.createMany.mock.calls[0][0].data).toHaveLength(1);
   });
 });

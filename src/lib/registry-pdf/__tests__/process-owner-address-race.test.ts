@@ -328,11 +328,11 @@ describe("所有者が空の物件だけに入れる指定（requireNoExistingOw
     expect(src).toMatch(
       /return outerTx\s*\?\s*run\(outerTx\)\s*:\s*prisma\.\$transaction/,
     );
-    // 呼び出し2か所とも、まとめる場合は開いているトランザクションを渡す
+    // 呼び出し3か所(住所なし・住所あり・同じ物件の同じ名前=2026-11-12)とも、まとめる場合は開いているトランザクションを渡す
     const calls = src.match(
       /fillOwnerCorporateNumberIfUnlocked\([\s\S]{0,200}?\);/g,
     );
-    expect(calls).toHaveLength(2);
+    expect(calls).toHaveLength(3);
     for (const call of calls ?? []) {
       expect(call).toContain("asOneBatch ? db : undefined");
     }

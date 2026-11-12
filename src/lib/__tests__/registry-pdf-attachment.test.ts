@@ -103,7 +103,7 @@ vi.mock("@/lib/prisma", () => {
     // A-2c: Mode B でも owner 反映が走るため、owner 反映ケース(#12)用に owner/
     // propertyOwner/$transaction を mock する（既定は新規 owner 作成パス）。
     owner: { findMany: vi.fn(), create: vi.fn(), updateMany: vi.fn() },
-    propertyOwner: { findFirst: vi.fn(), create: vi.fn() },
+    propertyOwner: { findFirst: vi.fn(), create: vi.fn(), findMany: vi.fn() },
     importJob: { create: vi.fn(), update: vi.fn() },
     importJobRow: { create: vi.fn() },
     attachment: { create: vi.fn() },
@@ -137,7 +137,7 @@ const pm = prisma as unknown as {
     updateMany: Mock;
   };
   owner: { findMany: Mock; create: Mock; updateMany: Mock };
-  propertyOwner: { findFirst: Mock; create: Mock };
+  propertyOwner: { findFirst: Mock; create: Mock; findMany: Mock };
   importJob: { create: Mock; update: Mock };
   importJobRow: { create: Mock };
   attachment: { create: Mock };
@@ -232,6 +232,8 @@ beforeEach(() => {
   pm.owner.create.mockResolvedValue({ id: "owner-x" });
   pm.owner.updateMany.mockResolvedValue({ count: 1 });
   pm.propertyOwner.findFirst.mockResolvedValue(null);
+  // 同じ物件の同じ名前の人(2026-11-12)は、既定ではいない
+  pm.propertyOwner.findMany.mockResolvedValue([]);
   pm.propertyOwner.create.mockResolvedValue({});
   pm.$transaction.mockImplementation((cb: (tx: typeof prisma) => unknown) =>
     cb(prisma),

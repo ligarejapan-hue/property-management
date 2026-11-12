@@ -90,14 +90,14 @@ vi.mock("@/lib/prisma", () => {
       findMany: vi.fn(),
       create: vi.fn(),
     },
-    propertyOwner: { findFirst: vi.fn(), create: vi.fn() },
+    propertyOwner: { findFirst: vi.fn(), create: vi.fn(), findMany: vi.fn() },
     $queryRaw: vi.fn(async () => [{ id: "p1" }]), // 親行ロック(#364 R10)
   };
   return {
     default: {
       property: { findUnique: vi.fn(), updateMany: vi.fn() },
       owner: { findMany: vi.fn(), create: vi.fn() },
-      propertyOwner: { findFirst: vi.fn(), create: vi.fn() },
+      propertyOwner: { findFirst: vi.fn(), create: vi.fn(), findMany: vi.fn() },
       importJob: { create: vi.fn(), update: vi.fn() },
       importJobRow: { create: vi.fn() },
       $transaction: vi
@@ -119,7 +119,7 @@ const OWNER_ADDRESS = "東京都港区1-1";
 const pm = prisma as unknown as {
   property: { findUnique: Mock; updateMany: Mock };
   owner: { findMany: Mock; create: Mock };
-  propertyOwner: { findFirst: Mock; create: Mock };
+  propertyOwner: { findFirst: Mock; create: Mock; findMany: Mock };
   importJob: { create: Mock; update: Mock };
   importJobRow: { create: Mock };
   $transaction: Mock;
@@ -131,7 +131,7 @@ const pm = prisma as unknown as {
       findMany: Mock;
       create: Mock;
     };
-    propertyOwner: { findFirst: Mock; create: Mock };
+    propertyOwner: { findFirst: Mock; create: Mock; findMany: Mock };
   };
 };
 
@@ -176,6 +176,8 @@ beforeEach(() => {
   pm.importJob.update.mockResolvedValue({});
   pm.importJobRow.create.mockResolvedValue({});
   pm.propertyOwner.findFirst.mockResolvedValue(null);
+  // 同じ物件の同じ名前の人(2026-11-12)は、既定ではいない
+  pm.propertyOwner.findMany.mockResolvedValue([]);
   pm.propertyOwner.create.mockResolvedValue({});
   pm.owner.create.mockImplementation(({ data }: { data: { name: string } }) =>
     Promise.resolve({ id: `owner-${data.name}` }),
@@ -204,6 +206,8 @@ beforeEach(() => {
       Promise.resolve({ id: `owner-${data.name}` }),
   );
   pm._tx.propertyOwner.findFirst.mockResolvedValue(null);
+  // 同じ物件の同じ名前の人(2026-11-12)は、既定ではいない
+  pm._tx.propertyOwner.findMany.mockResolvedValue([]);
   pm._tx.propertyOwner.create.mockResolvedValue({});
 });
 

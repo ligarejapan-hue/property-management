@@ -50,6 +50,11 @@ import {
   MAX_IMPORT_JSON_BODY_BYTES_PAIRED,
 } from "@/lib/import-body-size";
 import { resolveAddressPairBackfill } from "@/lib/owner-address-backfill";
+import { isResourceEditLocked } from "@/lib/edit-lock/service";
+import {
+  pickSamePropertyOwner,
+  planSamePropertyAddressReplace,
+} from "@/lib/registry-pdf/owner-reuse";
 import { failUnfinishedImportJob, startImportJob } from "@/lib/import-job-start";
 
 // 受付帳CSV × 所有者CSV × 既存物件 の本実行。
@@ -238,6 +243,9 @@ export async function POST(request: NextRequest) {
     const corporateSummary = emptyCorporateImportSummary();
     // 取込ガード: 割れた会社法人等番号の修復件数(非PII・audit detail 用)
     const corporateRepairSummary = emptyCorporateRepairSummary();
+    // この取り込みの中で作った所有者と、この取り込みが書いた登記上の住所(郵便番号と組)。
+    // 同じ物件で同じ人が住所違いで2回出たとき、今もこの値のままなら後の住所に替えてよい。
+    const createdOwnerIds = new Map<string, { zip: string | null; address: string | null }>();
 
     for (const c of combined) {
       const reason = getReviewReason(c);
@@ -384,6 +392,7 @@ export async function POST(request: NextRequest) {
               }
             },
             corporateRepairSummary,
+            createdOwnerIds,
           );
           if (!ownerId) {
             // name が無ければスキップ（owner 側要件）
@@ -509,6 +518,7 @@ async function upsertOwnerAndLink(
   onPropertyLinked: () => void,
   onCorporateDecision?: (decision: CorporateImportDecision) => void, // Phase D
   repairSummary?: CorporateRepairSummary, // 取込ガード: 修復件数の集計(非PII)
+  createdOwnerIds?: Map<string, { zip: string | null; address: string | null }>, // この取り込みで作った所有者と書いた住所(同じ物件の住所の差し替えに使う)
 ): Promise<string | null> {
   const rawName = nullIfBlank(o.name);
   if (!rawName) return null; // 氏名がない行は所有者レコードを作れないのでスキップ
@@ -537,7 +547,31 @@ async function upsertOwnerAndLink(
   //   手で入れることがあるため、補完はロックの下で読み直してから決める（設計 §6.3(2)）。
   // Phase D: 既存 Owner ヒット時の corporateNumber 競合判定に使う
   let existingCorporateNumber: string | null = null;
-  if (address) {
+  // ①同じ物件に、名前が同じ人(全角半角・空白・異体字をそろえて)が既に紐づいていれば、
+  //   住所が違っても同じ人として使い回す(2026-11-12 発注者決定)。謄本には同じ人が
+  //   住所違いで2回載ることがあり、名前+住所の照合だけでは同じ物件に2人できていた。
+  //   ⚠物件をまたぐ照合(下の②③)は従来どおり名前+住所(別の物件の同姓同名は別人であり得る)。
+  //   ⚠ここは読むだけ(行は下の再利用の tx で「Owner → 物件」の順に押さえる)。
+  let samePropertyHit = false;
+  {
+    const linked = await prisma.propertyOwner.findMany({
+      where: { propertyId },
+      orderBy: [{ createdAt: "asc" }, { ownerId: "asc" }],
+      select: {
+        owner: { select: { id: true, name: true, isArchived: true, corporateNumber: true } },
+      },
+    });
+    const hit = pickSamePropertyOwner(
+      linked.map((l) => l.owner),
+      name,
+    );
+    if (hit) {
+      candidateOwnerId = hit.id;
+      existingCorporateNumber = hit.corporateNumber;
+      samePropertyHit = true;
+    }
+  }
+  if (!candidateOwnerId && address) {
     const normName = normalizeName(name);
     const normAddr = normalizeAddress(address);
     const candidates = await prisma.owner.findMany({
@@ -607,19 +641,45 @@ async function upsertOwnerAndLink(
       });
       // ③⚠ペア単位で補完する（設計 §6.3(1)）。項目ごとに埋めると
       //   「別の場所の郵便番号 + この人の住所」というズレた宛先ができる。
-      const registryPatch = fresh
-        ? resolveAddressPairBackfill(
-            { zip: fresh.zip, address: fresh.address },
-            { zip, address },
-          )
-        : {};
+      // 同じ物件で同じ人を使い回し、その人がこの取り込みの中で作った人なら、後の行の
+      // 住所(謄本は古い順に載る=後のほうが新しい)に郵便番号と組で替える(発注者決定 11-12)。
+      // ⚠替えてよいのは、この取り込みが書いた住所のまま・編集中でないときだけ(@codex #710 P2:
+      //   作成は先に確定するので、次の行までの間に人が直した住所・編集中を上書きしない)。
+      const written = createdOwnerIds?.get(candidateOwnerId!);
+      const stillOurs =
+        !!fresh &&
+        samePropertyHit &&
+        written !== undefined &&
+        fresh.address === written.address &&
+        fresh.zip === written.zip &&
+        !(await isResourceEditLocked(tx, { resourceType: "owner", resourceId: candidateOwnerId! }));
+      const replace =
+        fresh && samePropertyHit
+          ? planSamePropertyAddressReplace(
+              { zip: fresh.zip, address: fresh.address },
+              { zip, address },
+              stillOurs,
+            )
+          : null;
+      const registryPatch: { zip?: string | null; address?: string } = replace
+        ? {
+            address: replace.address,
+            // 郵便番号は変わるときだけ書く(同じ値の変更履歴を残さない)
+            ...(replace.zip !== fresh!.zip ? { zip: replace.zip } : {}),
+          }
+        : fresh
+          ? resolveAddressPairBackfill(
+              { zip: fresh.zip, address: fresh.address },
+              { zip, address },
+            )
+          : {};
       const currentPatch = fresh
         ? resolveAddressPairBackfill(
             { zip: fresh.currentZip, address: fresh.currentAddress },
             { zip: currentZip, address: currentAddress },
           )
         : {};
-      const fieldPatch: Record<string, string> = {
+      const fieldPatch: Record<string, string | null> = {
         ...registryPatch,
         ...(currentPatch.zip ? { currentZip: currentPatch.zip } : {}),
         ...(currentPatch.address
@@ -631,6 +691,13 @@ async function upsertOwnerAndLink(
           where: { id: candidateOwnerId! },
           data: { ...fieldPatch, version: { increment: 1 } },
         });
+        // この取り込みで作った人なら、書いた住所を覚え直す(次の行の「今もこの値のままか」に使う)
+        if (written !== undefined && ("address" in fieldPatch || "zip" in fieldPatch)) {
+          createdOwnerIds?.set(candidateOwnerId!, {
+            zip: "zip" in fieldPatch ? (fieldPatch.zip ?? null) : fresh.zip,
+            address: "address" in fieldPatch ? (fieldPatch.address ?? null) : fresh.address,
+          });
+        }
         // ④項目ごとの変更履歴を**同じ tx で**残す。あとから名寄せの安全確認が
         //   「取込が入れたのか、人が入れたのか」を判断できるようにする。
         const before: Record<string, string | null> = {
@@ -747,6 +814,7 @@ async function upsertOwnerAndLink(
   if (onCorporateDecision) onCorporateDecision(cnDecisionForCreate);
   const ownerId = created.id;
   onOwnerCreated();
+  createdOwnerIds?.set(created.id, { zip: zip || null, address: address || null });
   await writeAuditLog({
     userId,
     action: "owner_created_from_reception",
