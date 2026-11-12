@@ -46,6 +46,34 @@ export function taxItemsFromForm(rows: TaxItemForm[]): { value: TaxItem[]; bad: 
   return { value, bad };
 }
 
+/**
+ * 保存する固都税の入力(@codex #712 2巡目)。使っている入力のしかたの欄だけを検査し、使っていない側は
+ * 読めればその値、読めなければ保存済みの値を残す(見えない欄で保存が止まらないように)。
+ */
+export function resolveTaxInputs(
+  mode: "items" | "total",
+  form: TaxItemForm[],
+  annual: { fixedAssetTax: string; cityPlanningTax: string },
+  saved: { taxItems: TaxItem[]; fixedAssetTax: number | null; cityPlanningTax: number | null },
+): { taxItems: TaxItem[]; fixedAssetTax: number | null; cityPlanningTax: number | null; bad: string[] } {
+  const items = taxItemsFromForm(form);
+  const bad: string[] = mode === "items" ? [...items.bad] : [];
+  const annualOf = (k: "fixedAssetTax" | "cityPlanningTax", label: string) => {
+    const t = annual[k];
+    if (t.trim() === "") return null;
+    const n = parseYen(t);
+    if (n !== null) return n;
+    if (mode === "total") bad.push(label);
+    return saved[k];
+  };
+  return {
+    taxItems: mode === "items" || items.bad.length === 0 ? items.value : saved.taxItems,
+    fixedAssetTax: annualOf("fixedAssetTax", "固定資産税"),
+    cityPlanningTax: annualOf("cityPlanningTax", "都市計画税"),
+    bad,
+  };
+}
+
 const emptyRow = (kind: TaxItem["kind"]): TaxItemForm => ({
   kind, label: "", fixedBase: "", cityBase: "", shareNum: 1, shareDen: 1, fixedTax: "", cityTax: "",
 });

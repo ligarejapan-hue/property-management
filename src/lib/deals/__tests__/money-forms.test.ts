@@ -7,9 +7,17 @@ describe("固都税の手で直す欄(@codex #712)", () => {
     expect(taxOverrideFields("items", false).map((f) => f.key)).toEqual(["settlement.propertyTaxLand", "settlement.propertyTaxBuilding"]);
     expect(taxOverrideFields("items", true).map((f) => f.key)).toEqual(["settlement.propertyTaxLand", "settlement.propertyTaxBuilding", "settlement.propertyTaxBuildingVat"]);
   });
-  it("入力のしかた・課税業者を切り替えたら、固都税の欄の「読めない」印だけを消す(見えなくなった欄で保存が止まり続けない)", () => {
+  it("切り替えで外れた欄の「読めない」印だけを消す(見えなくなった欄で保存が止まり続けない)", () => {
     const all = [...taxOverrideFields("total", false), ...taxOverrideFields("items", true)].map((f) => f.label);
-    expect(dropTaxOverrideErrors([...all, "管理費等(買主→売主)"])).toEqual(["管理費等(買主→売主)"]);
+    const bad = [...all, "管理費等(買主→売主)"];
+    // 合計額 → 土地・建物ごと: 合計額の欄だけが外れる
+    expect(dropTaxOverrideErrors(bad, taxOverrideFields("total", false), taxOverrideFields("items", true)))
+      .toEqual(bad.filter((l) => l !== "固都税(買主→売主)"));
+  });
+  it("残る欄(土地・建物)の印は消さない・課税業者を外すと消費税の欄の印だけ消す(@codex #712 2巡目)", () => {
+    const bad = ["固都税・土地(買主→売主)", "建物分の消費税(買主→売主)"];
+    expect(dropTaxOverrideErrors(bad, taxOverrideFields("items", true), taxOverrideFields("items", false))).toEqual(["固都税・土地(買主→売主)"]);
+    expect(dropTaxOverrideErrors(bad, taxOverrideFields("items", false), taxOverrideFields("items", true))).toEqual(bad);
   });
 });
 

@@ -4,7 +4,7 @@ import { useState } from "react";
 import { Plus, Save, Trash2 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Field, OverrideField, SelectBox, YenInput, inputCls } from "./form-parts";
-import { TaxItemsEditor, taxItemsFromForm, taxItemsToForm } from "./tax-items-editor";
+import { TaxItemsEditor, resolveTaxInputs, taxItemsToForm } from "./tax-items-editor";
 import { dealsApi, DealApiError, errorText } from "@/lib/deals/client";
 import {
   SETTLEMENT_OVERRIDE_KEYS, dropTaxOverrideErrors, invalidYenLabels, mergeOverrides, parseYen, taxOverrideFields, textify, untextify, yenText,
@@ -47,8 +47,12 @@ export default function DealSettlementPanel({ deal, calc, onSaved }: { deal: Dea
   const taxable = sellerTaxableOf({ settlementTerms: terms, parties: deal.parties });
   // 入力のしかた・課税業者の切り替え。固都税の手で直す欄が外れる/付け直されるので、その欄の「読めない」印を消す(@codex #712)。
   const setTaxMode = (patch: Partial<Pick<SettlementTerms, "taxInputMode" | "sellerTaxable">>) => {
-    setTerms((t) => ({ ...t, ...patch }));
-    setBadOverrides(dropTaxOverrideErrors);
+    const next = { ...terms, ...patch };
+    const before = taxOverrideFields(terms.taxInputMode, taxable);
+    const after = taxOverrideFields(next.taxInputMode, sellerTaxableOf({ settlementTerms: next, parties: deal.parties }));
+    setTerms(next);
+    // 外れた欄の印だけ消す(残る欄は打った文字のままなので印も残す・@codex #712 2巡目)。
+    setBadOverrides((xs) => dropTaxOverrideErrors(xs, before, after));
   };
   const st = calc?.settlement ?? null;
   const setOverride = (key: keyof Overrides, v: number | undefined) =>
@@ -61,9 +65,11 @@ export default function DealSettlementPanel({ deal, calc, onSaved }: { deal: Dea
 
   const save = async () => {
     const parsedOthers = others.map((o, i) => untextify(o, OTHER_KEYS, (k) => `その他の精算${i + 1}行目の${k === "sellerToBuyer" ? "売主→買主" : "買主→売主"}`));
-    const parsedTax = taxItemsFromForm(taxItems);
+    // 固都税は使っている入力のしかたの欄だけを検査する(見えない欄で保存を止めない・@codex #712 2巡目)。
+    const tax = resolveTaxInputs(terms.taxInputMode, taxItems, { fixedAssetTax: money.fixedAssetTax, cityPlanningTax: money.cityPlanningTax }, deal.settlementTerms);
+    const monthlyKeys = MONEY_KEYS.filter((k) => k !== "fixedAssetTax" && k !== "cityPlanningTax");
     const bad = [
-      ...invalidYenLabels(MONEY_KEYS.map((k) => [MONEY_LABELS[k], money[k]])), ...parsedTax.bad, ...parsedOthers.flatMap((p) => p.bad), ...badOverrides,
+      ...tax.bad, ...invalidYenLabels(monthlyKeys.map((k) => [MONEY_LABELS[k], money[k]])), ...parsedOthers.flatMap((p) => p.bad), ...badOverrides,
     ];
     if (bad.length > 0) {
       setError(`${bad.join("・")}は数字で入れてください(例 120000)。保存していません。`);
@@ -77,7 +83,7 @@ export default function DealSettlementPanel({ deal, calc, onSaved }: { deal: Dea
         // 敷金の扱いは OC タブのもの。今の保存済みの値を使う(最終レビュー I-2)。
         depositMode: deal.settlementTerms.depositMode,
         ...(Object.fromEntries(MONEY_KEYS.map((k) => [k, parseYen(money[k])])) as Record<MoneyKey, number | null>),
-        taxItems: parsedTax.value,
+        fixedAssetTax: tax.fixedAssetTax, cityPlanningTax: tax.cityPlanningTax, taxItems: tax.taxItems,
         others: parsedOthers.map((p) => p.value).filter((o) => o.label.trim() !== ""),
       };
       await dealsApi.update(deal.id, {

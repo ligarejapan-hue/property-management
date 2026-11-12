@@ -37,9 +37,9 @@ describe("取引の詳しい画面", () => {
   it("精算タブの固都税(2026-11-12): 土地・建物ごと/合計額だけ・課税業者・行の部品・行ごとの手で直す欄", () => {
     const src = read("src/components/deals/deal-settlement-panel.tsx");
     for (const s of [
-      "<TaxItemsEditor", "taxItemsFromForm(", "土地・建物ごと", "合計額だけ", "売主は課税業者", "taxableTotalConflict",
+      "<TaxItemsEditor", "resolveTaxInputs(terms.taxInputMode", "土地・建物ごと", "合計額だけ", "売主は課税業者", "taxableTotalConflict",
       "課税業者の取引です。土地・建物ごとに入力し直してください",
-      "課税標準額×1.4%", "taxOverrideFields(terms.taxInputMode, taxable)", "setBadOverrides(dropTaxOverrideErrors)",
+      "課税標準額×1.4%", "taxOverrideFields(terms.taxInputMode, taxable)", "dropTaxOverrideErrors(xs, before, after)",
     ]) {
       expect(src, s).toContain(s);
     }

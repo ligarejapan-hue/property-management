@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { renderToStaticMarkup } from "react-dom/server";
-import { TaxItemsEditor, taxItemsFromForm, taxItemsToForm, type TaxItemForm } from "../tax-items-editor";
+import { TaxItemsEditor, resolveTaxInputs, taxItemsFromForm, taxItemsToForm, type TaxItemForm } from "../tax-items-editor";
 
 const row = (p: Partial<TaxItemForm> = {}): TaxItemForm => ({
   kind: "land", label: "", fixedBase: "", cityBase: "", shareNum: 1, shareDen: 1, fixedTax: "", cityTax: "", ...p,
@@ -31,6 +31,26 @@ describe("固都税の土地・建物の行(2026-11-12)", () => {
     expect(taxItemsFromForm([bad]).bad).toEqual(["建物1の持分(分子は分母以下にしてください)"]);
     expect(render([bad])).not.toContain("placeholder=\"25,");
     expect(render([bad])).toContain('placeholder=""');
+  });
+  describe("使っていない入力のしかたの欄では保存を止めない(@codex #712 2巡目)", () => {
+    const saved = { taxItems: [{ kind: "land" as const, label: null, fixedBase: 5, cityBase: null, shareNum: 1, shareDen: 1, fixedTax: null, cityTax: null }], fixedAssetTax: 100, cityPlanningTax: 20 };
+    const badRow = row({ fixedBase: "abc" });
+    it("土地・建物ごとなら行だけを見る。合計額の欄が読めなければ保存済みの値を残す", () => {
+      const r = resolveTaxInputs("items", [row({ fixedBase: "1000" })], { fixedAssetTax: "xyz", cityPlanningTax: "" }, saved);
+      expect(r.bad).toEqual([]);
+      expect(r.taxItems[0].fixedBase).toBe(1000);
+      expect(r).toMatchObject({ fixedAssetTax: 100, cityPlanningTax: null });
+    });
+    it("合計額なら合計額の欄だけを見る。行が読めなければ保存済みの行を残す", () => {
+      const r = resolveTaxInputs("total", [badRow], { fixedAssetTax: "120,000", cityPlanningTax: "" }, saved);
+      expect(r.bad).toEqual([]);
+      expect(r.taxItems).toEqual(saved.taxItems);
+      expect(r).toMatchObject({ fixedAssetTax: 120_000, cityPlanningTax: null });
+    });
+    it("使っている欄が読めなければ止める", () => {
+      expect(resolveTaxInputs("items", [badRow], { fixedAssetTax: "", cityPlanningTax: "" }, saved).bad).toEqual(["土地1の固定資産税課税標準額"]);
+      expect(resolveTaxInputs("total", [], { fixedAssetTax: "xyz", cityPlanningTax: "" }, saved).bad).toEqual(["固定資産税"]);
+    });
   });
   it("フォーム ↔ 保存の形: 空は null、読めない欄は名前を返す", () => {
     const r = taxItemsFromForm([row({ fixedBase: "1,000,000", fixedTax: "0", cityTax: "abc" })]);

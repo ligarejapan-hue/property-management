@@ -58,14 +58,14 @@ export function taxOverrideFields(mode: "items" | "total", taxable: boolean): { 
   ];
 }
 
-const TAX_OVERRIDE_LABELS = new Set([...taxOverrideFields("total", false), ...taxOverrideFields("items", true)].map((f) => f.label));
-
 /**
- * 固都税の欄の「読めない」印を消す(@codex #712)。入力のしかた・課税業者を切り替えると欄が外れたり、
- * 保存済みの値で付け直されたりするので、残った印で保存が止まり続けないようにする。
+ * 切り替えで外れた固都税の欄の「読めない」印を消す(@codex #712)。外れた欄で保存が止まり続けないように。
+ * 残る欄は打った文字をそのまま持っているので、その印は消さない(読めないまま保存されないように・2巡目)。
  */
-export function dropTaxOverrideErrors(bad: string[]): string[] {
-  return bad.filter((l) => !TAX_OVERRIDE_LABELS.has(l));
+export function dropTaxOverrideErrors(bad: string[], before: { label: string }[], after: { label: string }[]): string[] {
+  const kept = new Set(after.map((f) => f.label));
+  const removed = new Set(before.map((f) => f.label).filter((l) => !kept.has(l)));
+  return bad.filter((l) => !removed.has(l));
 }
 
 /** そのパネルの鍵だけを取り出す(パネルの key 用)。 */
