@@ -38,6 +38,11 @@ import {
   DM_STATUS_INTENT,
 } from "@/components/ui/status-badge";
 import CommentTab from "@/components/properties/comment-tab";
+import {
+  RegistryEntriesPanel,
+  RegistryShareBadge,
+  type RegistryEntriesViewProps,
+} from "@/components/properties/registry-entries-panel";
 import NextActionTab from "@/components/properties/next-action-tab";
 import AgentInquiryTab from "@/components/properties/agent-inquiry-tab";
 import AttachmentTab from "@/components/properties/attachment-tab";
@@ -227,6 +232,8 @@ interface ApiPropertyOwner {
   /** 物件×所有者単位のメモ（PropertyOwner.note）。Owner.note とは別軸。 */
   note: string | null;
   owner: ApiOwner;
+  /** 登記上の記載(所有者事項の行ごとの住所と持分)。無い・見せない人には null。住所は API が伏せ済み。 */
+  registry?: RegistryEntriesViewProps | null;
 }
 
 interface ApiPhoto {
@@ -2066,6 +2073,8 @@ function OwnerCard({
             {po.relationship}
           </span>
         )}
+        {/* 持分の札(所有者事項から読んだ持分。共有者も含めて全員に出す・2026-11-12) */}
+        <RegistryShareBadge registry={po.registry} />
         {/* 編集ボタンは canEditOwner (owner:read + owner:write + 編集可能項目あり + version 取得済み) のみ表示。
             見ている側(仕様 6.3): この所有者が他の人の鍵なら押せなくする(先に取得を試みて失敗させない)。 */}
         {editAllowed && !editing && (
@@ -2108,6 +2117,9 @@ function OwnerCard({
           </Button>
         )}
       </div>
+
+      {/* 登記上の記載の内訳(同じ方が住所違い・持分ごとに何行も載っているときだけ) */}
+      <RegistryEntriesPanel registry={po.registry} />
 
       {removeError && (
         <p

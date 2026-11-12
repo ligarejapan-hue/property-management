@@ -92,7 +92,7 @@ const VERSIONED: Record<string, string> = {
   "src/app/api/properties/[id]/parcel-detach/route.ts:77":
     "property.extraParcels(この筆を別の物件にする・2026-11-06)+version increment" +
     "(物件の行ロック→編集中の鍵の確認→版の条件つき更新。新しい物件は同じトランザクションで作る)",
-  "src/app/api/properties/[id]/route.ts:596":
+  "src/app/api/properties/[id]/route.ts:606":
     "property の編集画面フィールド一式(編集画面の本体保存窓口)+version increment",
   "src/app/api/properties/bulk-update/route.ts:90":
     "property.caseStatus/registryStatus/dmStatus/assignedTo(一括更新)+version increment",
@@ -119,12 +119,12 @@ const VERSIONED: Record<string, string> = {
     "property.registryStatus=scheduled(有料取得の予約)+version increment",
   "src/lib/registry-fetch/auto-fetch.ts:4579":
     "property.registryStatus=obtained(有料取得の確定)+version increment",
-  "src/lib/registry-pdf/process.ts:267":
+  "src/lib/registry-pdf/process.ts:268":
     "owner.corporateNumber(空欄補完・fillOwnerCorporateNumberIfUnlocked)+version increment" +
     "(Task 7で修正済)",
-  "src/lib/registry-pdf/process.ts:310":
+  "src/lib/registry-pdf/process.ts:311":
     "owner.address(同じ物件で同じ人を使い回したとき、住所が空なら埋める・この実行が書いた住所のままなら後の行の住所に替える・setOwnerAddressGuarded・2026-11-12 @codex #710)+version increment",
-  "src/lib/registry-pdf/process.ts:1198":
+  "src/lib/registry-pdf/process.ts:1237":
     "property.registryStatus/realEstateNumber/lotNumber/buildingNumber/exclusiveAreaRegistry/landArea/landAreaMethod/totalFloorArea(取得状況前進+空欄補完)+version increment",
   "src/lib/registry-pdf/fill-areas.ts:157":
     "property.exclusiveAreaRegistry/landArea/landAreaMethod/totalFloorArea/lotNumber/buildingNumber/structureType/builtYear/builtMonth(謄本から空欄補完・2026-10-25/11-01)+version increment" +
@@ -215,19 +215,19 @@ const ALLOWED_WITHOUT_VERSION: Record<string, AllowedEntry> = {
       "編集画面から書けない)",
     keys: ["dmUndeliverableAt"],
   },
-  "src/lib/registry-pdf/process.ts:481": {
+  "src/lib/registry-pdf/process.ts:492": {
     reason:
       "owner.updatedAt のみ(添付済み謄本からの反映で、候補の所有者を物件行より先に" +
       "id順で押さえる touch。ロック順を /owners 窓口と同じ Owner→物件 にそろえる)",
     keys: ["updatedAt"],
   },
-  "src/lib/registry-pdf/process.ts:847": {
+  "src/lib/registry-pdf/process.ts:860": {
     reason:
       "owner.updatedAt のみ(ロック後の再探索で拾った所有者を、アーカイブされていない" +
       "条件で押さえる touch。押さえられなければ新規作成に回す)",
     keys: ["updatedAt"],
   },
-  "src/lib/registry-pdf/process.ts:722": {
+  "src/lib/registry-pdf/process.ts:735": {
     reason: "owner.updatedAt のみ(既存所有者再利用時の行ロックtouch)",
     keys: ["updatedAt"],
   },

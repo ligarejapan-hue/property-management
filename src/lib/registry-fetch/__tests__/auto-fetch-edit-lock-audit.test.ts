@@ -103,6 +103,7 @@ vi.mock("@/lib/prisma", () => {
       updateMany: vi.fn(),
     },
     propertyOwner: { findFirst: vi.fn(), findMany: vi.fn(), create: vi.fn() },
+    propertyOwnerRegistryEntry: { deleteMany: vi.fn(), createMany: vi.fn() },
     importJob: { create: vi.fn(), update: vi.fn() },
     importJobRow: { create: vi.fn() },
     attachment: { create: vi.fn(), findFirst: vi.fn(), count: vi.fn() },
@@ -131,6 +132,7 @@ const pm = prisma as unknown as {
   property: { findUnique: Mock; update: Mock; updateMany: Mock; findFirst: Mock; create: Mock };
   owner: { findUnique: Mock; findMany: Mock; create: Mock; updateMany: Mock };
   propertyOwner: { findFirst: Mock; findMany: Mock; create: Mock };
+  propertyOwnerRegistryEntry: { deleteMany: Mock; createMany: Mock };
   importJob: { create: Mock; update: Mock };
   importJobRow: { create: Mock };
   attachment: { create: Mock; findFirst: Mock; count: Mock };

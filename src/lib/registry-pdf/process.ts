@@ -32,6 +32,7 @@ import {
   planSamePropertyAddressReplace,
 } from "@/lib/registry-pdf/owner-reuse";
 import { parseRegistryText } from "@/lib/pdf-registry-parser";
+import { replaceRegistryEntries, type RegistryEntrySourceRow } from "@/lib/registry-entries/write";
 import { planRegistryAreaFill, registryAreasOf, type RegistryAreaCurrent } from "@/lib/registry-area";
 import { fillPropertyFromRegistry } from "@/lib/registry-pdf/fill-areas";
 import { parseRegistryBuildingFacts, registryIdentityOf } from "@/lib/registry-basic-info";
@@ -368,6 +369,11 @@ async function reflectParsedOwners(args: {
   beforeCommit?: (tx: DbClient, summary: { linked: number }) => Promise<void>;
   /** → ProcessRegistryPdfArgs.replaceExistingOwners */
   replaceExistingOwners?: (tx: DbClient) => Promise<void>;
+  /**
+   * 登記上の記載(所有者事項の行ごとの住所と持分)を記録する(2026-11-12)。
+   * 所有者事項・種別なしの取り込みで true。全部事項は対象外(持分の履歴の読み分けは別の話)。
+   */
+  recordRegistryEntries?: boolean;
 }): Promise<{ matched: number; created: number; linked: number }> {
   const { propertyId, owners, recordCorporateDecision, markOwnerCorporateFillSkipped } = args;
 
@@ -382,6 +388,11 @@ async function reflectParsedOwners(args: {
 
   /** この実行で自分が紐づけた所有者(見直しの対象から外すために覚えておく)。 */
   const linkedByThisRun: string[] = [];
+  /** 読んだ行と、その行を当てた所有者(登記上の記載の記録に使う・行の順のまま)。 */
+  const entryRows: RegistryEntrySourceRow[] = [];
+  const noteEntryRow = (ownerId: string, info: { address?: string | null; share?: string | null }) => {
+    entryRows.push({ ownerId, address: info.address ?? null, share: info.share ?? null });
+  };
   /** この実行で作った所有者(同じ物件で同じ人が住所違いで2回出たとき、後の住所に替えてよい人)。 */
   const createdByThisRun = new Set<string>();
   /** この実行が作った人に、この実行が書いた住所(後の行で替えてよいか=今もこの値のままか、を見る)。 */
@@ -557,8 +568,9 @@ async function reflectParsedOwners(args: {
               relationship: ownerInfo.share ? "共有者" : "所有者",
             },
           });
-          return { reused: false as const, decision };
+          return { reused: false as const, decision, ownerId: created.id };
         });
+        noteEntryRow(outcome.ownerId, ownerInfo);
         if (outcome.reused) {
           matchedCount++;
           // tx の外で法人番号を穴埋めする（空のときだけ・既存値は自動で上書きしない）。
@@ -654,6 +666,7 @@ async function reflectParsedOwners(args: {
             }
           }
           matchedCount++;
+          noteEntryRow(same.id, ownerInfo);
           // 法人番号は住所なしの経路と同じく、空のときだけ埋める(既存値は上書きしない)。
           const decision = decide(
             { name: ownerInfo.name, address: ownerInfo.address ?? null },
@@ -910,6 +923,32 @@ async function reflectParsedOwners(args: {
           matchedCount++;
         }
         if (resolved.linked) linkedCount++;
+      }
+      if (resolvedOwnerId) noteEntryRow(resolvedOwnerId, ownerInfo);
+    }
+
+    // 登記上の記載: 取り込みに出てきた所有者の行を入れ替える(物件行を押さえた tx の中で)。
+    if (args.recordRegistryEntries && entryRows.length > 0) {
+      const record = () =>
+        withTx(async (tx) => {
+          await lockProperty(tx);
+          await replaceRegistryEntries(tx, propertyId, entryRows);
+        });
+      if (asOneBatch) {
+        // まとめる場合は同じ tx の中=失敗したら所有者ごと全部取り消す(握れない)。
+        await record();
+      } else {
+        // ⚠まとめない場合、所有者はもう確定している。行は補助の情報なので、記録の失敗で
+        //   取り込み全体を失敗にしない(所有者だけ入って履歴は失敗、という食い違いを作らない)。
+        //   次に同じ所有者事項を取り込めば入り直る。ログには氏名・住所を出さない。
+        try {
+          await record();
+        } catch (err) {
+          console.error(
+            "Failed to record registry entries:",
+            err instanceof Error ? err.name : "unknown",
+          );
+        }
       }
     }
   };
@@ -1254,6 +1293,7 @@ export async function processRegistryPdf(
           beforeFirstWrite: args.beforeFirstWrite,
           beforeCommit: args.beforeCommit,
           replaceExistingOwners: args.replaceExistingOwners,
+          recordRegistryEntries: args.certificateType !== "all",
           owners: parsed.owners,
           recordCorporateDecision,
           markOwnerCorporateFillSkipped,
@@ -1350,6 +1390,7 @@ export async function processRegistryPdf(
               scopedSession: args.enforcePropertyScope ? session : undefined,
               beforeFirstWrite: args.beforeFirstWrite,
               beforeCommit: args.beforeCommit,
+              recordRegistryEntries: args.certificateType !== "all",
               owners: parsed.owners,
               recordCorporateDecision,
               markOwnerCorporateFillSkipped,

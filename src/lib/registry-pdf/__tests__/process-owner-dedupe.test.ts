@@ -21,6 +21,7 @@ vi.mock("@/lib/prisma", () => {
     },
     owner: { findMany: vi.fn(), create: vi.fn(), updateMany: vi.fn(), findUnique: vi.fn() },
     propertyOwner: { findFirst: vi.fn(), findMany: vi.fn(), create: vi.fn() },
+    propertyOwnerRegistryEntry: { deleteMany: vi.fn(), createMany: vi.fn() },
     importJob: { create: vi.fn(), update: vi.fn() },
     importJobRow: { create: vi.fn() },
     attachment: { create: vi.fn() },
@@ -78,6 +79,7 @@ const pm = prisma as unknown as {
   property: { findUnique: Mock; update: Mock };
   owner: { findMany: Mock; create: Mock; updateMany: Mock; findUnique: Mock };
   propertyOwner: { findFirst: Mock; findMany: Mock; create: Mock };
+  propertyOwnerRegistryEntry: { deleteMany: Mock; createMany: Mock };
   importJob: { create: Mock; update: Mock };
   importJobRow: { create: Mock };
   attachment: { create: Mock };
@@ -222,7 +224,17 @@ describe("同じ謄本を取り直しても住所なしの所有者が増えな�
     // ⚠末尾の lock:true は #402 で増えた**添付作成の親行ロック**(所有者処理の後に
     //   添付を作る tx が走る)。所有者側の約束(ロック→照会→作成が同一tx)は不変。
     // ⚠その次の lock:true は、謄本を付けたあとに登記状況を取得済に上げる tx の親行ロック(2026-11-06)。
-    expect(order).toEqual(["lock:true", "lookup:true", "create:true", "lock:true", "lock:true"]);
+    // ⚠create の次の lock:true・lookup:true は、登記上の記載(所有者事項の行)を記録する tx
+    //   (物件行を押さえてから、つながりを読んで行を入れ替える・2026-11-12)。
+    expect(order).toEqual([
+      "lock:true",
+      "lookup:true",
+      "create:true",
+      "lock:true",
+      "lookup:true",
+      "lock:true",
+      "lock:true",
+    ]);
   });
 
   it("物件行を握ったまま既存の所有者行を掴まない（ロック順序の食い違い＝デッドロック回避）", async () => {
@@ -258,6 +270,7 @@ describe("同じ謄本を取り直しても住所なしの所有者が増えな�
     type FakeTx = {
       $queryRaw: Mock;
       propertyOwner: { findMany: Mock };
+      propertyOwnerRegistryEntry: { deleteMany: Mock; createMany: Mock };
       owner: { findUnique: Mock; updateMany: Mock };
     };
     const propertyLockTxs: FakeTx[] = [];
@@ -277,6 +290,7 @@ describe("同じ謄本を取り直しても住所なしの所有者が増えな�
           return [{ id: "locked-row" }];
         }),
         propertyOwner: { findMany: pm.propertyOwner.findMany },
+        propertyOwnerRegistryEntry: pm.propertyOwnerRegistryEntry,
         owner: {
           // ⚠レビュー round1 #3: ロック後に corporateNumber を読み直す。まだ
           // 空(null)を返し、実際の updateMany を空振りさせない。
@@ -319,6 +333,87 @@ describe("同じ謄本を取り直しても住所なしの所有者が増えな�
       warnings: [],
       confidence: 0.9,
     });
+
+  it("登記上の記載: 同じ人が住所違い・持分ごとに3行載っていたら、1人にして3行とも記録する(2026-11-12)", async () => {
+    (parseRegistryText as Mock).mockReturnValue({
+      realEstateNumber: null,
+      address: "東京都千代田区一番町1",
+      lotNumber: null,
+      buildingNumber: null,
+      landCategory: null,
+      area: null,
+      owners: [
+        { name: "山田太郎", address: "住所A", share: "10分の2" },
+        { name: "山田太郎", address: "住所B", share: "10分の3" },
+        { name: "山田太郎", address: "住所C", share: "10分の2" },
+      ],
+      warnings: [],
+      confidence: 0.9,
+    });
+    // 1人目を作ったあとは、その人が物件に紐づいている(行の記録の照会にも同じ形で答える)
+    pm.propertyOwner.findMany.mockReset();
+    pm.propertyOwner.findMany
+      .mockResolvedValueOnce([])
+      .mockResolvedValue([
+        {
+          id: "po-1",
+          ownerId: "owner-new",
+          owner: { id: "owner-new", name: "山田太郎", address: "住所A", isArchived: false, corporateNumber: null },
+        },
+      ]);
+    pm.owner.findUnique.mockResolvedValue({ corporateNumber: null, address: "住所A", zip: null, isArchived: false });
+    await run();
+    expect(pm.owner.create).toHaveBeenCalledTimes(1);
+    expect(pm.propertyOwnerRegistryEntry.deleteMany).toHaveBeenCalledWith({
+      where: { propertyOwnerId: { in: ["po-1"] } },
+    });
+    expect(pm.propertyOwnerRegistryEntry.createMany).toHaveBeenCalledWith({
+      data: [
+        { propertyOwnerId: "po-1", position: 1, address: "住所A", shareNum: 2, shareDen: 10, sourceAttachmentId: null },
+        { propertyOwnerId: "po-1", position: 2, address: "住所B", shareNum: 3, shareDen: 10, sourceAttachmentId: null },
+        { propertyOwnerId: "po-1", position: 3, address: "住所C", shareNum: 2, shareDen: 10, sourceAttachmentId: null },
+      ],
+    });
+  });
+
+  it("登記上の記載: 全部事項の取り込みでは記録しない(対象は所有者事項)", async () => {
+    withAddress([{ name: "山田太郎", address: "住所A" }]);
+    pm.propertyOwner.findMany.mockResolvedValue([
+      { id: "po-1", ownerId: "owner-new", owner: { id: "owner-x", name: "鈴木一郎", address: "x", isArchived: false, corporateNumber: null } },
+    ]);
+    await processRegistryPdf({
+      session,
+      text: "dummy",
+      propertyId: PROP_ID,
+      fileName: "謄本.pdf",
+      edited: undefined,
+      pdfBuffer: PDF,
+      certificateType: "all",
+    });
+    expect(pm.propertyOwnerRegistryEntry.createMany).not.toHaveBeenCalled();
+  });
+
+  it("登記上の記載: 行の記録に失敗しても、取り込みは失敗にしない(所有者は確定済み・氏名や住所をログに出さない)", async () => {
+    withAddress([{ name: "山田太郎", address: "住所A" }]);
+    pm.propertyOwner.findMany.mockReset();
+    pm.propertyOwner.findMany
+      .mockResolvedValueOnce([])
+      .mockResolvedValue([
+        { id: "po-1", ownerId: "owner-new", owner: { id: "owner-new", name: "山田太郎", address: "住所A", isArchived: false, corporateNumber: null } },
+      ]);
+    pm.propertyOwnerRegistryEntry.createMany.mockRejectedValueOnce(new Error("山田太郎 住所A で失敗"));
+    const spy = vi.spyOn(console, "error").mockImplementation(() => {});
+    try {
+      await expect(run()).resolves.toBeDefined();
+      expect(pm.owner.create).toHaveBeenCalledTimes(1);
+      const logged = spy.mock.calls.map((c) => c.join(" ")).join("\n");
+      expect(logged).toContain("Failed to record registry entries");
+      expect(logged).not.toContain("山田太郎");
+      expect(logged).not.toContain("住所A");
+    } finally {
+      spy.mockRestore();
+    }
+  });
 
   it("住所ありでも、同じ物件に同じ名前の人がいれば住所が違っても使い回す(2026-11-12 発注者決定)", async () => {
     withAddress([{ name: "山田 太郎", address: "大阪市北区1-1" }]);
