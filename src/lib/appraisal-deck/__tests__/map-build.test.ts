@@ -3,7 +3,19 @@
  */
 import { describe, it, expect, vi } from "vitest";
 import { PbfWriter } from "pbf";
-import { buildMapFromTiles, chainRings, fetchGsiTiles, isUsableLocation, MAX_TILES, MAP_EX, MAP_EY } from "../map/build";
+import {
+  buildMapFromTiles,
+  chainRings,
+  fetchGsiTiles,
+  insideExtent,
+  isUsableLocation,
+  mapExtentFor,
+  MAX_TILES,
+  MAP_EX,
+  MAP_EX_MAX,
+  MAP_EY,
+  MAP_EY_MAX,
+} from "../map/build";
 import {
   clipLineToRect,
   clipPolygonToRect,
@@ -166,6 +178,11 @@ describe("座標の計算", () => {
     expect(t.length).toBeGreaterThan(4);
     expect(t.length).toBeLessThanOrEqual(MAX_TILES);
   });
+  it("広げた範囲の上限でも、覆うタイルは上限以下(2026-11-12)", () => {
+    expect(tilesCovering(C.lng, C.lat, MAP_EX_MAX, MAP_EY_MAX).length).toBeLessThanOrEqual(MAX_TILES);
+    // 北海道の北の方(タイルが細くなる)でも
+    expect(tilesCovering(141.7, 45.4, MAP_EX_MAX, MAP_EY_MAX).length).toBeLessThanOrEqual(MAX_TILES);
+  });
   it("線の切れ端をつないで輪にする", () => {
     const p = (x: number, y: number) => ({ x, y });
     const rings = chainRings([
@@ -279,9 +296,46 @@ describe("fetchGsiTiles", () => {
     expect(urls.every((u) => u.startsWith("https://cyberjapandata.gsi.go.jp/xyz/experimental_bvmap/16/"))).toBe(true);
     expect(tiles.some((t) => t.buf === null)).toBe(true);
   });
+  it("広げた範囲を取るときは、もう取ったタイルを取り直さない(2026-11-12)", async () => {
+    const ok = vi.fn(async () => ({ ok: true, status: 200, arrayBuffer: async () => new ArrayBuffer(4) }));
+    const first = await fetchGsiTiles(C, ok);
+    const n0 = ok.mock.calls.length;
+    const wider = { ex: MAP_EX, ey: 1100 };
+    const all = await fetchGsiTiles(C, ok, wider, first);
+    expect(all.length).toBe(tilesCovering(C.lng, C.lat, wider.ex, wider.ey).length);
+    expect(ok.mock.calls.length - n0).toBe(all.length - first.length);
+    expect(first.every((t) => all.includes(t))).toBe(true);
+  });
+  it("広げた範囲で作ると、その範囲の大きさで切る", () => {
+    const tile = makeTile([{ name: "building", features: [{ type: 3, props: { ftCode: 3101 }, parts: [square(0, 0, 20)] }] }]);
+    const m = buildMapFromTiles(C, [{ x: TX, y: TY, buf: tile }], new Date(), { extent: { ex: 1000, ey: 950 } });
+    expect([m.ex, m.ey]).toEqual([1000, 950]);
+  });
   it("それ以外の失敗は全体を失敗にする(欠けた地図を作らない)", async () => {
     const f = vi.fn(async () => ({ ok: false, status: 500, arrayBuffer: async () => new ArrayBuffer(0) }));
     await expect(fetchGsiTiles(C, f)).rejects.toThrow();
+  });
+});
+
+describe("地図の範囲(2026-11-12 駅・周辺施設が入る大きさ)", () => {
+  it("点がなければ基本の大きさ", () => {
+    expect(mapExtentFor([])).toEqual({ ex: MAP_EX, ey: MAP_EY });
+    expect(mapExtentFor([[100, -200]])).toEqual({ ex: MAP_EX, ey: MAP_EY });
+  });
+  it("外にある点まで余白付きで広げる(50m 単位)・上限で止める", () => {
+    expect(mapExtentFor([[254, 764]])).toEqual({ ex: MAP_EX, ey: 950 });
+    expect(mapExtentFor([[-1100, 0]])).toEqual({ ex: 1300, ey: MAP_EY });
+    expect(mapExtentFor([[5000, -5000]])).toEqual({ ex: MAP_EX_MAX, ey: MAP_EY_MAX });
+    expect(mapExtentFor([[Number.NaN, 9999]])).toEqual({ ex: MAP_EX, ey: MAP_EY });
+  });
+  it("南北に広く散らばるときは、横長の平面の地図に入るよう東西も広げる", () => {
+    // 査定書の施設と、北へ 760m の駅(本番の資料と同じ並び)
+    expect(mapExtentFor([[-407, 40], [534, -307], [-357, 382], [-169, -376], [254, 764]])).toEqual({ ex: 1350, ey: 950 });
+  });
+  it("範囲の中かどうか(端の近くは外とみなす)", () => {
+    expect(insideExtent({ x: 254, y: 764 }, { ex: 1000, ey: 650 })).toBe(false);
+    expect(insideExtent({ x: 254, y: 764 }, { ex: 1000, ey: 950 })).toBe(true);
+    expect(insideExtent({ x: 0, y: 1260 }, { ex: 1000, ey: 1300 })).toBe(false);
   });
 });
 

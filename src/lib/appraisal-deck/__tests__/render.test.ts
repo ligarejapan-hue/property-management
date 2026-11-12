@@ -167,15 +167,30 @@ describe("renderAppraisalDeck(資料の HTML)", () => {
     expect(stWalk({ ...map, st: { n: "別の駅", x: 0, y: 0 } }, { station: "見本駅", walkMinutes: 15 })).toBe(5);
     expect(stWalk(map, { station: "見本駅", walkMinutes: null })).toBe(5);
   });
-  it("平面の地図の範囲は、施設だけでなく徒歩ルートの道のり全体が入る大きさ(@codex #707)", () => {
+  // deck.js の「映す範囲」の行だけを取り出して計算する
+  const view = (MAP: unknown, FAC: unknown[]) => {
     const js = readFileSync(path.join(process.cwd(), "src/lib/appraisal-deck/assets/deck.js"), "utf8");
-    const lines = js.split("\n").filter((l) => /^const (mdec|ROUTE_PTS|FMAX|VX)=/.test(l));
-    expect(lines).toHaveLength(4);
-    const vx = (MAP: unknown, FAC: unknown[]) => new Function("MAP", "FAC", `${lines.join("\n")}\nreturn VX;`)(MAP, FAC) as number;
+    const lines = js.split("\n").filter((l) => /^const (mdec|ROUTE_PTS|VIEW_PTS|vb|VMAX|VX|VY|CX)=/.test(l));
+    expect(lines).toHaveLength(8);
+    return new Function("MAP", "FAC", `${lines.join("\n")}\nreturn {VX,VY,CX,CY};`)(MAP, FAC) as { VX: number; VY: number; CX: number; CY: number };
+  };
+  const inView = (v: { VX: number; VY: number; CX: number; CY: number }, p: { x: number; y: number }) =>
+    Math.abs(p.x - v.CX) <= v.VX && Math.abs(p.y - v.CY) <= v.VY;
+  it("平面の地図の範囲は、施設だけでなく徒歩ルートの道のり全体が入る大きさ(@codex #707)", () => {
     // [0,0]→[0,500]→[300,500]→[300,0](0.5m 単位の差分)。施設なし
     const rt = [0, 0, 0, 1000, 600, 0, 0, -1000];
-    const v = vx({ ex: 1000, ey: 650, st: { n: "見本駅", x: 300, y: 0 }, rt }, []);
-    expect(v * (620 / 1080)).toBeGreaterThanOrEqual(500); // 南北に 500m 先まで見える
+    const v = view({ ex: 1000, ey: 650, st: { n: "見本駅", x: 300, y: 0 }, rt }, []);
+    for (const p of [{ x: 0, y: 500 }, { x: 300, y: 500 }, { x: 0, y: 0 }]) expect(inView(v, p)).toBe(true);
+  });
+  it("物件から一方に離れた駅も、真ん中を寄せて枠に入れる・地図の外は映さない(2026-11-12)", () => {
+    // 北へ 764m の駅(本番の資料と同じ)。地図は駅まで広げた範囲
+    const rt = [0, 0, 508, 1528];
+    const FAC = [{ x: -407, y: 40 }, { x: 534, y: -307 }, { x: -169, y: -376 }];
+    const v = view({ ex: 1350, ey: 950, st: { n: "経堂駅", x: 254, y: 764 }, rt }, FAC);
+    for (const p of [{ x: 254, y: 764 }, { x: 0, y: 0 }, ...FAC]) expect(inView(v, p)).toBe(true);
+    expect(v.CY).toBeGreaterThan(0);
+    expect(Math.abs(v.CX) + v.VX).toBeLessThanOrEqual(1350);
+    expect(Math.abs(v.CY) + v.VY).toBeLessThanOrEqual(950 + 1e-9);
   });
   it("資料の動き(deck.js)は構文として正しい", () => {
     const js = readFileSync(path.join(process.cwd(), "src/lib/appraisal-deck/assets/deck.js"), "utf8");

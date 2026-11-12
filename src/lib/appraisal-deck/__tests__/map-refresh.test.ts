@@ -76,12 +76,12 @@ describe("refreshDeckMap", () => {
   });
   it("徒歩ルートの行き先に査定書の最寄駅を渡す(2026-11-11)", async () => {
     await refreshDeckMap({ ...IN, mode: "manual" });
-    expect(buildMap.mock.calls[0][3]).toEqual({ station: "見本駅" });
+    expect(buildMap.mock.calls[0][3]).toEqual({ station: "見本駅", extent: { ex: 1000, ey: 650 } });
   });
   it("担当者が最寄駅を直していれば、直した駅へのルートにする(@codex #707)", async () => {
     db.appraisalDeck.findFirst.mockResolvedValue({ id: "d1", status: "draft", extracted: { station: "見本駅" }, overrides: { station: "別駅" } });
     await refreshDeckMap({ ...IN, mode: "manual" });
-    expect(buildMap.mock.calls[0][3]).toEqual({ station: "別駅" });
+    expect(buildMap.mock.calls[0][3]).toMatchObject({ station: "別駅" });
   });
   it("GPS 座標があれば住所は調べない(印は物件の建物に付く)", async () => {
     db.property.findUnique.mockResolvedValue({ gpsLat: "35.6447123", gpsLng: "139.6992456", address: "東京都架空区見本町4-5-6" });
@@ -117,6 +117,43 @@ describe("refreshDeckMap", () => {
     expect(db.appraisalDeck.updateMany).not.toHaveBeenCalled();
     expect(JSON.stringify(warn.mock.calls)).not.toMatch(/58181|35\.64/);
     warn.mockRestore();
+  });
+  it("範囲は周辺施設が入る大きさ(2026-11-12)", async () => {
+    db.appraisalDeck.findFirst.mockResolvedValue({
+      id: "d1",
+      status: "draft",
+      extracted: { station: "見本駅", facilities: [{ x: -1100, y: 300 }, { x: 0, y: -700 }, { x: null, y: null }] },
+    });
+    await refreshDeckMap({ ...IN, mode: "manual" });
+    expect(fetchTiles.mock.calls[0][2]).toEqual({ ex: 1300, ey: 900 });
+    expect(buildMap.mock.calls[0][3].extent).toEqual({ ex: 1300, ey: 900 });
+  });
+  it("駅が範囲の外なら、駅まで広げて取り足し、作り直す(取ったタイルは取り直さない・2026-11-12)", async () => {
+    const tiles0 = [{ x: 1, y: 1, buf: null }];
+    fetchTiles.mockResolvedValueOnce(tiles0).mockResolvedValueOnce([...tiles0, { x: 1, y: 2, buf: null }]);
+    const st = { n: "経堂駅", x: 254, y: 764 };
+    buildMap.mockReturnValueOnce({ ...MAP, st, rt: [0, 0, 1, 1], rtm: 891 }).mockReturnValueOnce({ ...MAP, ey: 950, st, rt: [0, 0, 2, 2], rtm: 891 });
+    expect(await refreshDeckMap({ ...IN, mode: "manual" })).toEqual({ ok: true, buildings: 1 });
+    expect(fetchTiles.mock.calls[1][2]).toEqual({ ex: 1000, ey: 950 });
+    expect(fetchTiles.mock.calls[1][3]).toBe(tiles0);
+    expect(buildMap.mock.calls[1][3].extent).toEqual({ ex: 1000, ey: 950 });
+    expect(db.appraisalDeck.updateMany.mock.calls[0][0].data.mapData).toMatchObject({ ey: 950, st, rt: [0, 0, 2, 2] });
+  });
+  it("駅が範囲の中なら広げない", async () => {
+    buildMap.mockReturnValue({ ...MAP, st: { n: "見本駅", x: 200, y: 300 }, rt: [0, 0], rtm: 400 });
+    await refreshDeckMap({ ...IN, mode: "manual" });
+    expect(fetchTiles).toHaveBeenCalledTimes(1);
+    expect(db.appraisalDeck.updateMany.mock.calls[0][0].data.mapData.st).toEqual({ n: "見本駅", x: 200, y: 300 });
+  });
+  it("広げても地図に収まらない遠い駅には徒歩ルートを付けない(地図の外を写さない)", async () => {
+    const far = { ...MAP, st: { n: "遠い駅", x: 0, y: 1900 }, rt: [0, 0], rtm: 2100 };
+    buildMap.mockReturnValueOnce(far).mockReturnValueOnce({ ...far, ey: 1300 });
+    await refreshDeckMap({ ...IN, mode: "manual" });
+    expect(fetchTiles.mock.calls[1][2]).toEqual({ ex: 1600, ey: 1300 });
+    const saved = db.appraisalDeck.updateMany.mock.calls[0][0].data.mapData;
+    expect(saved.st).toBeUndefined();
+    expect(saved.rt).toBeUndefined();
+    expect(saved.rtm).toBeUndefined();
   });
   it("別の物件の資料は not_found", async () => {
     db.appraisalDeck.findFirst.mockResolvedValue(null);
