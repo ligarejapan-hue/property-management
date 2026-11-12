@@ -7,7 +7,7 @@ import type { DealView } from "../view";
 import { brokerageFee } from "./brokerage";
 import { buildingPriceApportion, buildingTaxOf } from "./building-tax";
 import { contractStamp } from "./stamp";
-import { settlementResult, type SettlementResult } from "./settlement";
+import { sellerTaxableOf, settlementResult, type SettlementResult } from "./settlement";
 
 export interface DealCalc {
   baseDate: string;
@@ -71,6 +71,7 @@ export function computeDealCalc(deal: DealView, rateRows: RateTableRow[], kinds:
   const settlement = settlementResult({
     price: deal.price, deposit: deal.deposit, kindBase, hasOc: deal.hasOc, settlementDate,
     terms: deal.settlementTerms, leases: deal.leases, overrides: o,
+    sellerTaxable: sellerTaxableOf(deal), taxRateBp: deal.taxRateBp,
   });
   for (const m of settlement.missing) if (!missing.includes(m)) missing.push(m);
   return { baseDate, kindBase, brokerage, building, contractStamp: stamp, settlement, missing };

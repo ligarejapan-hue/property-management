@@ -20,7 +20,7 @@ const deal: DealView = {
   price: 30_000_000, buildingTax: null, deposit: 1_500_000, taxRateBp: 1000,
   propertySnapshot: { ...EMPTY_SNAPSHOT, buildingName: "試験マンション<b>", roomNo: "101", address: "架空県架空市1-2-3" },
   counterpartyBroker: EMPTY_BROKER, assessments: { rows: [], landRatioBp: 10000 }, costs: DEFAULT_COSTS,
-  settlementTerms: { ...DEFAULT_TERMS, fixedAssetTax: 100_000, managementFee: 20_000, repairReserve: 10_000 },
+  settlementTerms: { ...DEFAULT_TERMS, taxInputMode: "total", fixedAssetTax: 100_000, managementFee: 20_000, repairReserve: 10_000 },
   leases: [], overrides: {}, version: 1, createdAt: "", updatedAt: "", parties: [], fundingPlan: DEFAULT_FUNDING_INPUTS, businessPlan: DEFAULT_BUSINESS_INPUTS,
 };
 const company: CompanyProfile = { nameJa: "架空不動産株式会社", license: "架空知事(1)第00000号", tel: "000-0000-0000", fax: "", email: "", hp: "", address: "架空県架空市" };

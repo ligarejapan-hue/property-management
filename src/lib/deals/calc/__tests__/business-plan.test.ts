@@ -21,7 +21,7 @@ const deal: DealView = {
   counterpartyBroker: EMPTY_BROKER,
   assessments: { rows: [{ building: 6_000_000, land: 4_000_000, shareNum: 1, shareDen: 1 }], landRatioBp: 10000 },
   costs: { ...DEFAULT_COSTS, registrationFee: 300_000 },
-  settlementTerms: { ...DEFAULT_TERMS, fixedAssetTax: 60_000, cityPlanningTax: 13_000, managementFee: 15_000, repairReserve: 5_000 },
+  settlementTerms: { ...DEFAULT_TERMS, taxInputMode: "total", fixedAssetTax: 60_000, cityPlanningTax: 13_000, managementFee: 15_000, repairReserve: 5_000 },
   leases: [], overrides: {}, version: 1, createdAt: "", updatedAt: "", parties: [],
   fundingPlan: DEFAULT_FUNDING_INPUTS, businessPlan: DEFAULT_BUSINESS_INPUTS,
 };

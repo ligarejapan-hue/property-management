@@ -29,7 +29,7 @@ const deal: DealView = {
   price: 30_000_000, buildingTax: null, deposit: 4_280_000, taxRateBp: 1000,
   propertySnapshot: { ...EMPTY_SNAPSHOT, buildingName: "試験マンション<b>", roomNo: "201", address: "架空県架空市2-2", lotNumber: "2番2" },
   counterpartyBroker: EMPTY_BROKER, assessments: { rows: [], landRatioBp: 10000 }, costs: DEFAULT_COSTS,
-  settlementTerms: { ...DEFAULT_TERMS, fixedAssetTax: 100_000, cityPlanningTax: 20_000, managementFee: 15_000, repairReserve: 5_000 },
+  settlementTerms: { ...DEFAULT_TERMS, taxInputMode: "total", fixedAssetTax: 100_000, cityPlanningTax: 20_000, managementFee: 15_000, repairReserve: 5_000 },
   leases: [], overrides: {}, version: 1, createdAt: "", updatedAt: "", parties: [SELLER, BUYER],
   fundingPlan: DEFAULT_FUNDING_INPUTS, businessPlan: DEFAULT_BUSINESS_INPUTS,
 };
