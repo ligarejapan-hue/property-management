@@ -176,6 +176,7 @@ const pm = prisma as unknown as {
     owner: { updateMany: Mock; findUnique: Mock; update: Mock };
     changeLog: { createMany: Mock };
     propertyOwner: { findUnique: Mock; create: Mock; findMany: Mock };
+    $queryRaw: Mock;
   };
 };
 
@@ -543,5 +544,44 @@ describe("POST /api/import/reception-owner: 同じ物件の同じ名前の人を
         expect.objectContaining({ fieldName: "zip", oldValue: "100-0001", newValue: "530-0001" }),
       ]),
     );
+  });
+
+  const twoSameRowsCreatedHere = () => {
+    twoRows([
+      { name: "山田太郎", address: "東京都港区芝1-2-3", zip: "100-0001" },
+      { name: "山田太郎", address: "大阪市北区1-1", zip: "530-0001" },
+    ]);
+    pm.owner.findMany.mockResolvedValue([]);
+    pm.owner.findFirst.mockResolvedValue(null);
+    pm.propertyOwner.findMany.mockReset();
+    pm.propertyOwner.findMany
+      .mockResolvedValueOnce([])
+      .mockResolvedValue([
+        { owner: { id: "owner-山田太郎", name: "山田太郎", isArchived: false, corporateNumber: null } },
+      ]);
+    pm._tx.propertyOwner.findUnique.mockResolvedValue({ propertyId: PROPERTY_ID });
+  };
+
+  it("⚠途中で人が住所を直していたら、後の行の住所で上書きしない(@codex #710 P2)", async () => {
+    twoSameRowsCreatedHere();
+    pm._tx.owner.findUnique.mockResolvedValue({
+      zip: "100-0001", address: "人が直した住所", currentZip: null, currentAddress: null,
+    });
+    const res = await POST(makeRequest());
+    expect([200, 201]).toContain(res.status);
+    expect(pm._tx.owner.update).not.toHaveBeenCalled();
+  });
+
+  it("⚠編集中の人の住所は替えない(@codex #710 P2)", async () => {
+    twoSameRowsCreatedHere();
+    pm._tx.owner.findUnique.mockResolvedValue({
+      zip: "100-0001", address: "東京都港区芝1-2-3", currentZip: null, currentAddress: null,
+    });
+    pm._tx.$queryRaw.mockImplementation(async (strings: TemplateStringsArray) =>
+      strings.join("").includes("edit_locks") ? [{ locked: true }] : [{ id: "p1" }],
+    );
+    const res = await POST(makeRequest());
+    expect([200, 201]).toContain(res.status);
+    expect(pm._tx.owner.update).not.toHaveBeenCalled();
   });
 });

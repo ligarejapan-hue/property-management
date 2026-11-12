@@ -18,10 +18,10 @@ Task 7 が直した「謄本取込が所有者の法人番号を版番号を進�
 | 1 | `src/app/api/import/csv/route.ts:619`(2026-10-05 重複更新を棟のつなぎと同じトランザクションへ移して 588→611→import 追加で612→棟郵便番号の書き先・取込の目印で615→2026-10-06 変更ログを同じ tx で書く import 追加で616→2026-10-07 取込行の確定用の import 追加で617→2026-10-15 取り込みの記録を受け取った直後に作るよう移して613→2026-11-11 土地の現況の import 追加で615→区分になった行の現況の確かめ直しで619) | `finalUpdateData`(UPDATABLE_PROPERTY_FIELDS: address/postalCode/lotNumber/buildingNumber/note/…)。棟だけつなぐ行は空の data+version で進め、続けて同じトランザクションで applyBuildingLink | `data` に `version: { increment: 1 }` を追加 | `src/lib/__tests__/properties-csv-import-postal-code.test.ts`「13. update時にversionを進める」 |
 | 2 | `src/app/api/import/jobs/[jobId]/rollback/route.ts:559`(2026-09-21 main合流で行番号ずれ・旧:461→493→外部レビュー対応で502→2026-09-28 業者からの反響の除外で525→2026-10-05 取込が作った空の棟の後始末で536→棟の復元で559) | `restoreData`(RESTORABLE_PROPERTY_FIELDS = UPDATABLE_PROPERTY_FIELDS ∩ PROPERTY_TRACKED_FIELDS、2026-10-05 から CSV 重複更新がつないだ buildingId/buildingName も組で) | `data` に `version: { increment: 1 }` を追加 | `src/lib/__tests__/import-rollback-restore-version.test.ts`(新規) |
 | 3 | `src/app/api/import/jobs/[jobId]/rows/[rowId]/manual-link-reception-owner/route.ts:380` | `propertyUpdates`(lotNumber/buildingNumber。roomNoは対象外だが同じ更新に同居) | `data` に `version: { increment: 1 }` を追加 | `src/lib/__tests__/manual-link-archive-filter.test.ts`「物件の空欄補完は version を進める」 |
-| 4 | `src/app/api/import/reception-owner/route.ts:359` | `updates`(lotNumber/buildingNumber/roomNo。同上) | `data` に `version: { increment: 1 }` を追加 | `src/lib/__tests__/reception-owner-archive-race.test.ts`「物件の空欄補完(lotNumber)は…」 |
-| 5 | `src/app/api/import/reception-owner/route.ts:411` | `dmStatus`(hold→send昇格。PropertyEditForm「DM判断」で編集可能) | `data` に `version: { increment: 1 }` を追加 | 同上「DM○による dmStatus: hold→send の昇格は…」 |
-| 6 | `src/app/api/import/reception-owner/route.ts:735` | `corporateNumber`(所有者編集カードの法人番号入力欄=`properties/[id]/page.tsx:1590`) | `data` に `version: { increment: 1 }` を追加 | `src/lib/__tests__/owner-corporate-import-integration.test.ts`「(Task 9) reuse パスの空欄埋めは…」(source-assertion。理由は本文末尾) |
-| 7 | `src/app/api/import/reception-owner/route.ts:747` | `corporateNumber`/`companyRegistryNumber`(分断型復元。同上の入力欄) | `data` に `version: { increment: 1 }` を追加 | `src/lib/__tests__/corporate-import-guard-integration.test.ts`「(Task 9) 分断型復元の空欄埋めは…」(source-assertion) |
+| 4 | `src/app/api/import/reception-owner/route.ts:361` | `updates`(lotNumber/buildingNumber/roomNo。同上) | `data` に `version: { increment: 1 }` を追加 | `src/lib/__tests__/reception-owner-archive-race.test.ts`「物件の空欄補完(lotNumber)は…」 |
+| 5 | `src/app/api/import/reception-owner/route.ts:413` | `dmStatus`(hold→send昇格。PropertyEditForm「DM判断」で編集可能) | `data` に `version: { increment: 1 }` を追加 | 同上「DM○による dmStatus: hold→send の昇格は…」 |
+| 6 | `src/app/api/import/reception-owner/route.ts:754` | `corporateNumber`(所有者編集カードの法人番号入力欄=`properties/[id]/page.tsx:1590`) | `data` に `version: { increment: 1 }` を追加 | `src/lib/__tests__/owner-corporate-import-integration.test.ts`「(Task 9) reuse パスの空欄埋めは…」(source-assertion。理由は本文末尾) |
+| 7 | `src/app/api/import/reception-owner/route.ts:766` | `corporateNumber`/`companyRegistryNumber`(分断型復元。同上の入力欄) | `data` に `version: { increment: 1 }` を追加 | `src/lib/__tests__/corporate-import-guard-integration.test.ts`「(Task 9) 分断型復元の空欄埋めは…」(source-assertion) |
 | 8 | `src/app/api/properties/sale-dm/drafts/[id]/outcome/route.ts:244` | `dmStatus`(no_send昇格。PropertyEditForm「DM判断」) | `data` に `version: { increment: 1 }` を追加 | `src/lib/__tests__/sale-dm-outcome-route.test.ts`「(Task 9) returned_undeliverable の物件連動は…」 |
 | 9 | `src/app/api/properties/[id]/clear-dm-undeliverable/route.ts:64` | `dmStatus`(`restoreDmStatus` 指定時のみ。同上) | `restoreDmStatus` 指定時のみ `data.version = { increment: 1 }` を追加(dmUndeliverableAtのみのクリアは対象外のまま) | `src/lib/__tests__/sale-dm-clear-undeliverable-route.test.ts`「(Task 9) restoreDmStatus 指定時は…」 |
 | 10 | `src/app/api/properties/[id]/dm-logs/[logId]/reaction/route.ts:276` | `dmStatus`(no_send昇格。同上) | `data` に `version: { increment: 1 }` を追加 | `src/lib/__tests__/dm-reaction-patch-route.test.ts`「(Task 9) undeliverable 連動は…」 |
@@ -42,7 +42,7 @@ Task 7 が直した「謄本取込が所有者の法人番号を版番号を進�
 | `src/app/api/import/jobs/[jobId]/rows/[rowId]/manual-link-reception-owner/route.ts:281` | `owner.updatedAt` のみ | 同上(所有者行ロックtouch) |
 | `src/app/api/import/jobs/[jobId]/rows/[rowId]/route.ts:209` | `owner.updatedAt` のみ | 同上 |
 | `src/app/api/import/paste/commit/route.ts:407` | `owner.updatedAt` のみ | 同上(既存所有者へのリンク可否確認のための行ロックtouch) |
-| `src/app/api/import/reception-owner/route.ts:622` | `owner.updatedAt` のみ | 同上 |
+| `src/app/api/import/reception-owner/route.ts:624` | `owner.updatedAt` のみ | 同上 |
 | `src/app/api/owners/[id]/memos/route.ts:241` | (コード本体ではない) | **正規表現の誤検出**。`owner.updateMany({ where: { id, isArchived: false } })` という文字列は、実際の呼び出しの使い方を説明する**コードコメント**であり、実行されるコードではない(実際の呼び出しは同ファイル252行目) |
 | `src/app/api/owners/[id]/memos/route.ts:252` | `owner.updatedAt` のみ | メモ作成時の行ロックtouch(archive/mergeとの直列化用)。owner本体のフィールドは一切書かない |
 | `src/app/api/properties/[id]/dm-logs/[logId]/reaction/route.ts:303` | `property.dmUndeliverableAt = null` のみ | 残数ゼロによる自動解除。`dmUndeliverableAt` は `updatePropertySchema` にも `property-edit-form.tsx` の FORM_FIELDS にも存在せず、編集画面から書けない(dmStatus自体は据え置きで触らない) |
@@ -77,7 +77,7 @@ Task 7 が直した「謄本取込が所有者の法人番号を版番号を進�
 | `src/app/api/admin/owners/correction/mislink/route.ts:545` | `property.version` のみ |
 | `src/app/api/import/jobs/[jobId]/rows/[rowId]/manual-link-reception-owner/route.ts:335` | `owner` の住所ペア空欄補完(2026-11-12〜: 同じ物件で同じ人が住所違いで2回出たとき、この処理で作った人は後の住所に替える) |
 | `src/app/api/import/jobs/[jobId]/rows/[rowId]/route.ts:243` | `owner` の住所ペア空欄補完 |
-| `src/app/api/import/reception-owner/route.ts:678` | `owner` の住所ペア空欄補完(2026-11-12〜: 同じ物件で同じ人が住所違いで2回出たとき、この取り込みで作った人は後の住所に替える) |
+| `src/app/api/import/reception-owner/route.ts:690` | `owner` の住所ペア空欄補完(2026-11-12〜: 同じ物件で同じ人が住所違いで2回出たとき、この取り込みで作った人は後の住所に替える) |
 | `src/app/api/owners/[id]/corporate-apply/route.ts:368` | `owner` の法人番号適用フィールド(編集画面本体の保存窓口) |
 | `src/app/api/owners/[id]/corporate-cleanup/route.ts:248` | `owner.name`/`address`/`note`/`corporateNumber` |
 | `src/app/api/owners/[id]/route.ts:213` | `owner` の編集画面フィールド一式(編集画面本体の保存窓口) |
@@ -94,8 +94,7 @@ Task 7 が直した「謄本取込が所有者の法人番号を版番号を進�
 | `src/lib/registry-fetch/auto-fetch.ts:4579` | `property.registryStatus = obtained`(有料取得の確定) |
 | `src/lib/registry-pdf/process.ts:195` | `owner.corporateNumber`(Task 7 で修正済) |
 | `src/lib/registry-pdf/process.ts:802` | `property.registryStatus`/`realEstateNumber`/`lotNumber`/`buildingNumber` |
-| `src/lib/registry-pdf/process.ts:616` | (2026-11-12 同じ物件の同じ名前)`owner.address`。同じ謄本で同じ人が住所違いで2回出たとき、**この実行で作った人だけ**後の行の住所に替える(前からいる人には触らない) |
-| `src/lib/registry-pdf/process.ts:302` | (2026-11-12 同じ物件の同じ名前)`owner.address` の空欄補完(`fillOwnerAddressIfEmptyAndUnlocked`)。使い回す人の住所も郵便番号も空のときだけ・所有者の行を押さえてから読み直し・編集中は書かない |
+| `src/lib/registry-pdf/process.ts:310` | (2026-11-12 同じ物件の同じ名前)`owner.address`(`setOwnerAddressGuarded`)。使い回す人の住所も郵便番号も空なら埋める／この実行で作った人が、この実行の書いた住所のままなら後の行の住所に替える。所有者の行を押さえてから読み直し・編集中は書かない |
 | `src/lib/registry-pdf/fill-areas.ts:62` | (2026-10-25 謄本から面積)`property.exclusiveAreaRegistry`/`landArea`/`landAreaMethod`/`totalFloorArea` の空欄補完(物件の画面の添付・一括取込・物件を指定しない取込から) |
 | `src/lib/registry-owner-check/service.ts:408` | (2026-11-08 謄本の名義の確認)`property.dmStatus` を未判断→送付可に戻す(このままでよい・謄本の名義に直すで選んだとき) |
 

@@ -402,13 +402,55 @@ describe("同じ謄本を取り直しても住所なしの所有者が増えな�
       .mockResolvedValue([
         { owner: { id: "owner-new", name: "山田太郎", address: "東京都港区1-1", isArchived: false, corporateNumber: null } },
       ]);
+    // 所有者の行を押さえて読み直すと、この実行が書いた住所のまま
+    pm.owner.findUnique.mockResolvedValue({ corporateNumber: null, address: "東京都港区1-1", zip: null, isArchived: false });
     await run();
     expect(pm.owner.create).toHaveBeenCalledTimes(1);
     expect(pm.owner.updateMany).toHaveBeenCalledWith(
       expect.objectContaining({
-        where: expect.objectContaining({ id: "owner-new" }),
+        where: expect.objectContaining({ id: "owner-new", address: "東京都港区1-1" }),
         data: expect.objectContaining({ address: "大阪市北区1-1" }),
       }),
+    );
+  });
+
+  it("⚠途中で人が住所を直していたら、後の行の住所で上書きしない(@codex #710 P2)", async () => {
+    withAddress([
+      { name: "山田太郎", address: "東京都港区1-1" },
+      { name: "山田太郎", address: "大阪市北区1-1" },
+    ]);
+    pm.propertyOwner.findMany.mockReset();
+    pm.propertyOwner.findMany
+      .mockResolvedValueOnce([])
+      .mockResolvedValue([
+        { owner: { id: "owner-new", name: "山田太郎", address: "人が直した住所", isArchived: false, corporateNumber: null } },
+      ]);
+    pm.owner.findUnique.mockResolvedValue({ corporateNumber: null, address: "人が直した住所", zip: null, isArchived: false });
+    await run();
+    expect(pm.owner.updateMany).not.toHaveBeenCalledWith(
+      expect.objectContaining({ data: expect.objectContaining({ address: "大阪市北区1-1" }) }),
+    );
+  });
+
+  it("⚠編集中の人の住所は替えない(@codex #710 P2)", async () => {
+    withAddress([
+      { name: "山田太郎", address: "東京都港区1-1" },
+      { name: "山田太郎", address: "大阪市北区1-1" },
+    ]);
+    pm.propertyOwner.findMany.mockReset();
+    pm.propertyOwner.findMany
+      .mockResolvedValueOnce([])
+      .mockResolvedValue([
+        { owner: { id: "owner-new", name: "山田太郎", address: "東京都港区1-1", isArchived: false, corporateNumber: null } },
+      ]);
+    pm.owner.findUnique.mockResolvedValue({ corporateNumber: null, address: "東京都港区1-1", zip: null, isArchived: false });
+    // 編集中の鍵の確認(SELECT EXISTS ... AS locked)だけ true を返す
+    pm.$queryRaw.mockImplementation(async (strings: TemplateStringsArray) =>
+      strings.join("").includes("edit_locks") ? [{ locked: true }] : [{ id: PROP_ID }],
+    );
+    await run();
+    expect(pm.owner.updateMany).not.toHaveBeenCalledWith(
+      expect.objectContaining({ data: expect.objectContaining({ address: "大阪市北区1-1" }) }),
     );
   });
 });

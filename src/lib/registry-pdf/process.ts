@@ -273,15 +273,20 @@ async function fillOwnerCorporateNumberIfUnlocked(
   return outerTx ? run(outerTx) : prisma.$transaction((tx) => run(tx as DbClient));
 }
 
-// 2026-11-12(@codex #710 P2): 同じ物件で同じ人を使い回したとき、その人の登記上の住所が空なら
-// 謄本の住所で埋める(空欄の補完だけ・既存の住所は上書きしない)。
-// 例: 同じ謄本で、同じ人が住所なしの行→住所ありの行の順に載ったとき、後の行の住所を捨てない。
-// ⚠郵便番号だけが入っている人には入れない(謄本の住所は郵便番号を持たない=別の場所の郵便番号と
-//   組み合わさった宛先を作らない)。
+// 2026-11-12(@codex #710 P2×2): 同じ物件で同じ人を使い回したとき、その人の登記上の住所を
+// 謄本の行の住所にする。2つの場合だけ書く:
+//   - expected=null  … 住所が空(郵便番号も空)の人の空欄を埋める。
+//     例: 同じ謄本で、同じ人が住所なしの行→住所ありの行の順に載ったとき、後の行の住所を捨てない。
+//     ⚠郵便番号だけが入っている人には入れない(謄本の住所は郵便番号を持たない=別の場所の
+//     郵便番号と組み合わさった宛先を作らない)。
+//   - expected=文字列 … **この実行が前に書いた住所のまま**のときだけ、後の行の住所に替える。
+//     まとめない経路では所有者の作成が先に確定するので、次の行までの間に人が住所を直したり
+//     編集を始めたりできる。それを上書きしない。
 // ⚠法人番号の補完と同じく、所有者の行を押さえてから読み直し、**編集中は書かない**・version を進める。
-async function fillOwnerAddressIfEmptyAndUnlocked(
+async function setOwnerAddressGuarded(
   ownerId: string,
   address: string,
+  expected: string | null,
   /** → fillOwnerCorporateNumberIfUnlocked の outerTx と同じ(渡されたら新しく開かない)。 */
   outerTx?: DbClient,
 ): Promise<{ count: number; locked: boolean }> {
@@ -291,16 +296,23 @@ async function fillOwnerAddressIfEmptyAndUnlocked(
       where: { id: ownerId },
       select: { address: true, zip: true, isArchived: true },
     });
-    if (!fresh || fresh.isArchived || fresh.address?.trim() || fresh.zip?.trim()) {
-      return { count: 0, locked: false };
-    }
+    if (!fresh || fresh.isArchived) return { count: 0, locked: false };
+    const stillAsExpected =
+      expected === null
+        ? !fresh.address?.trim() && !fresh.zip?.trim()
+        : fresh.address === expected;
+    if (!stillAsExpected) return { count: 0, locked: false };
     const locked = await isResourceEditLocked(tx, {
       resourceType: "owner",
       resourceId: ownerId,
     });
     if (locked) return { count: 0, locked: true };
     const updated = await tx.owner.updateMany({
-      where: { id: ownerId, isArchived: false, OR: [{ address: null }, { address: "" }] },
+      where: {
+        id: ownerId,
+        isArchived: false,
+        ...(expected === null ? { OR: [{ address: null }, { address: "" }] } : { address: expected }),
+      },
       data: { address, version: { increment: 1 } },
     });
     return { count: updated.count, locked: false };
@@ -369,6 +381,8 @@ async function reflectParsedOwners(args: {
   const linkedByThisRun: string[] = [];
   /** この実行で作った所有者(同じ物件で同じ人が住所違いで2回出たとき、後の住所に替えてよい人)。 */
   const createdByThisRun = new Set<string>();
+  /** この実行が作った人に、この実行が書いた住所(後の行で替えてよいか=今もこの値のままか、を見る)。 */
+  const addressByThisRun = new Map<string, string>();
 
   /**
    * 物件行のロックを握った状態で「まだ所有者が0件か」を確かめる。
@@ -612,19 +626,29 @@ async function reflectParsedOwners(args: {
             { zip: null, address: ownerInfo.address },
             createdByThisRun.has(same.id),
           );
-          if (replace) {
-            await db.owner.updateMany({
-              where: { id: same.id, isArchived: false },
-              data: { address: replace.address, version: { increment: 1 } },
-            });
-          } else if (!same.address?.trim() && ownerInfo.address.trim()) {
-            // 使い回す人の住所が空なら、謄本の住所で埋める(@codex #710 P2)。
-            // まとめる場合に使い回すのはこの実行で紐づけた人だけ=自分が押さえている行。
-            await fillOwnerAddressIfEmptyAndUnlocked(
+          // ⚠まとめる場合に使い回すのはこの実行で紐づけた人だけ=自分が押さえている行。
+          // ⚠住所を替えるのは、この実行が前に書いた住所のままのときだけ(@codex #710 P2:
+          //   まとめない経路では作成が先に確定するので、その間に人が直した住所・編集中を守る)。
+          const writtenByThisRun = addressByThisRun.get(same.id);
+          if (replace && writtenByThisRun !== undefined) {
+            const r = await setOwnerAddressGuarded(
               same.id,
-              ownerInfo.address,
+              replace.address,
+              writtenByThisRun,
               asOneBatch ? db : undefined,
             );
+            if (r.count > 0) addressByThisRun.set(same.id, replace.address);
+          } else if (!same.address?.trim() && ownerInfo.address.trim()) {
+            // 使い回す人の住所が空なら、謄本の住所で埋める(@codex #710 P2)。
+            const r = await setOwnerAddressGuarded(
+              same.id,
+              ownerInfo.address,
+              null,
+              asOneBatch ? db : undefined,
+            );
+            if (r.count > 0 && createdByThisRun.has(same.id)) {
+              addressByThisRun.set(same.id, ownerInfo.address);
+            }
           }
           matchedCount++;
           // 法人番号は住所なしの経路と同じく、空のときだけ埋める(既存値は上書きしない)。
@@ -875,9 +899,10 @@ async function reflectParsedOwners(args: {
 
         resolvedOwnerId = resolved.id;
         if (resolved.created) {
-          createdByThisRun.add(resolved.id);
           createdCount++;
           recordCorporateDecision(cnDecisionForCreate);
+          createdByThisRun.add(resolved.id);
+          if (ownerInfo.address) addressByThisRun.set(resolved.id, ownerInfo.address);
         } else {
           matchedCount++;
         }

@@ -50,6 +50,7 @@ import {
   MAX_IMPORT_JSON_BODY_BYTES_PAIRED,
 } from "@/lib/import-body-size";
 import { resolveAddressPairBackfill } from "@/lib/owner-address-backfill";
+import { isResourceEditLocked } from "@/lib/edit-lock/service";
 import {
   pickSamePropertyOwner,
   planSamePropertyAddressReplace,
@@ -242,8 +243,9 @@ export async function POST(request: NextRequest) {
     const corporateSummary = emptyCorporateImportSummary();
     // 取込ガード: 割れた会社法人等番号の修復件数(非PII・audit detail 用)
     const corporateRepairSummary = emptyCorporateRepairSummary();
-    // この取り込みの中で作った所有者(同じ物件で同じ人が住所違いで2回出たとき、後の住所に替えてよい人)
-    const createdOwnerIds = new Set<string>();
+    // この取り込みの中で作った所有者と、この取り込みが書いた登記上の住所(郵便番号と組)。
+    // 同じ物件で同じ人が住所違いで2回出たとき、今もこの値のままなら後の住所に替えてよい。
+    const createdOwnerIds = new Map<string, { zip: string | null; address: string | null }>();
 
     for (const c of combined) {
       const reason = getReviewReason(c);
@@ -516,7 +518,7 @@ async function upsertOwnerAndLink(
   onPropertyLinked: () => void,
   onCorporateDecision?: (decision: CorporateImportDecision) => void, // Phase D
   repairSummary?: CorporateRepairSummary, // 取込ガード: 修復件数の集計(非PII)
-  createdOwnerIds?: Set<string>, // この取り込みの中で作った所有者(同じ物件の住所の差し替えに使う)
+  createdOwnerIds?: Map<string, { zip: string | null; address: string | null }>, // この取り込みで作った所有者と書いた住所(同じ物件の住所の差し替えに使う)
 ): Promise<string | null> {
   const rawName = nullIfBlank(o.name);
   if (!rawName) return null; // 氏名がない行は所有者レコードを作れないのでスキップ
@@ -641,12 +643,22 @@ async function upsertOwnerAndLink(
       //   「別の場所の郵便番号 + この人の住所」というズレた宛先ができる。
       // 同じ物件で同じ人を使い回し、その人がこの取り込みの中で作った人なら、後の行の
       // 住所(謄本は古い順に載る=後のほうが新しい)に郵便番号と組で替える(発注者決定 11-12)。
+      // ⚠替えてよいのは、この取り込みが書いた住所のまま・編集中でないときだけ(@codex #710 P2:
+      //   作成は先に確定するので、次の行までの間に人が直した住所・編集中を上書きしない)。
+      const written = createdOwnerIds?.get(candidateOwnerId!);
+      const stillOurs =
+        !!fresh &&
+        samePropertyHit &&
+        written !== undefined &&
+        fresh.address === written.address &&
+        fresh.zip === written.zip &&
+        !(await isResourceEditLocked(tx, { resourceType: "owner", resourceId: candidateOwnerId! }));
       const replace =
         fresh && samePropertyHit
           ? planSamePropertyAddressReplace(
               { zip: fresh.zip, address: fresh.address },
               { zip, address },
-              createdOwnerIds?.has(candidateOwnerId!) ?? false,
+              stillOurs,
             )
           : null;
       const registryPatch: { zip?: string | null; address?: string } = replace
@@ -679,6 +691,13 @@ async function upsertOwnerAndLink(
           where: { id: candidateOwnerId! },
           data: { ...fieldPatch, version: { increment: 1 } },
         });
+        // この取り込みで作った人なら、書いた住所を覚え直す(次の行の「今もこの値のままか」に使う)
+        if (written !== undefined && ("address" in fieldPatch || "zip" in fieldPatch)) {
+          createdOwnerIds?.set(candidateOwnerId!, {
+            zip: "zip" in fieldPatch ? (fieldPatch.zip ?? null) : fresh.zip,
+            address: "address" in fieldPatch ? (fieldPatch.address ?? null) : fresh.address,
+          });
+        }
         // ④項目ごとの変更履歴を**同じ tx で**残す。あとから名寄せの安全確認が
         //   「取込が入れたのか、人が入れたのか」を判断できるようにする。
         const before: Record<string, string | null> = {
@@ -795,7 +814,7 @@ async function upsertOwnerAndLink(
   if (onCorporateDecision) onCorporateDecision(cnDecisionForCreate);
   const ownerId = created.id;
   onOwnerCreated();
-  createdOwnerIds?.add(created.id);
+  createdOwnerIds?.set(created.id, { zip: zip || null, address: address || null });
   await writeAuditLog({
     userId,
     action: "owner_created_from_reception",
