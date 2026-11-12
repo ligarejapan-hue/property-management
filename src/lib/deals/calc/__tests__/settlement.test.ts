@@ -1,7 +1,7 @@
 import { describe, it, expect } from "vitest";
 import { DEFAULT_FUNDING_INPUTS } from "../../funding-schema";
 import { DEFAULT_BUSINESS_INPUTS } from "../../business-schema";
-import { settlementResult } from "../settlement";
+import { annualPropertyTaxOf, settlementResult, taxPartChanged, taxesEnteredOfTerms } from "../settlement";
 import { computeDealCalc } from "../deal-calc";
 import { DEFAULT_COSTS, DEFAULT_TERMS, EMPTY_BROKER, EMPTY_SNAPSHOT } from "../../schemas";
 import { DEFAULT_PROPERTY_KINDS } from "../../constants";
@@ -57,6 +57,28 @@ describe("固都税を土地・建物ごとに精算する", () => {
     expect(r.rows.find((x) => x.key === "propertyTax")).toMatchObject({ buyerToSeller: 60_493 });
     expect(r.rows.some((x) => x.key === "propertyTaxBuildingVat")).toBe(false);
     expect(r.taxableTotalConflict).toBe(true);
+  });
+});
+
+describe("固都税の入力の見方", () => {
+  const items = itemsBase.terms;
+  it("固都税の部分が変わったか(敷金の扱い・管理費だけなら変わっていない)", () => {
+    expect(taxPartChanged(items, { ...items, depositMode: "separate", managementFee: 1 })).toBe(false);
+    expect(taxPartChanged(items, { ...items, taxItems: [taxItem("land", 1, 1)] })).toBe(true);
+    expect(taxPartChanged(items, { ...items, taxInputMode: "total" })).toBe(true);
+    expect(taxPartChanged(items, { ...items, sellerTaxable: true })).toBe(true);
+    expect(taxPartChanged(base.terms, { ...base.terms, cityPlanningTax: 1 })).toBe(true);
+  });
+  it("年税額: 土地・建物ごとなら行の合計、合計額なら2つの合計", () => {
+    expect(annualPropertyTaxOf(items)).toBe(156_500);
+    expect(annualPropertyTaxOf(base.terms)).toBe(120_000);
+  });
+  it("税額が入ったか: 土地・建物ごとなら税額のある行が1つ以上、合計額なら2つとも", () => {
+    expect(taxesEnteredOfTerms(items)).toBe(true);
+    expect(taxesEnteredOfTerms({ ...items, taxItems: [{ ...taxItem("land", 0, 0), fixedTax: null, cityTax: null }] })).toBe(false);
+    expect(taxesEnteredOfTerms({ ...items, taxItems: [{ ...taxItem("land", 0, 0), fixedTax: null, cityTax: null, fixedBase: 1_000_000 }] })).toBe(true);
+    expect(taxesEnteredOfTerms(base.terms)).toBe(true);
+    expect(taxesEnteredOfTerms({ ...base.terms, cityPlanningTax: null })).toBe(false);
   });
 });
 

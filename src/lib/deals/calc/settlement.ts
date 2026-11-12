@@ -1,7 +1,7 @@
 import type { BasePropertyKind } from "../constants";
 import type { Lease, OverrideKey, Overrides, SettlementTerms } from "../schemas";
 import { prorateAnnualTax, prorateMonthly, roundDiv } from "./proration";
-import { annualByKind } from "./property-tax";
+import { annualByKind, itemTaxes } from "./property-tax";
 import { depositSuccession } from "./deposit";
 import { yen } from "./format";
 
@@ -37,6 +37,29 @@ export interface SettlementInput {
 /** 売主が課税業者か。明示の値が無ければ、売主の当事者に自社がいれば課税業者とみなす。 */
 export function sellerTaxableOf(d: { settlementTerms: SettlementTerms; parties: { role: string; isSelf: boolean }[] }): boolean {
   return d.settlementTerms.sellerTaxable ?? d.parties.some((p) => p.role === "seller" && p.isSelf);
+}
+
+/** 保存で固都税の部分(入力のしかた・課税業者・年税額・行)が変わったか。敷金の扱いや管理費だけの保存は false。 */
+export function taxPartChanged(prev: SettlementTerms, next: SettlementTerms): boolean {
+  return prev.taxInputMode !== next.taxInputMode || prev.sellerTaxable !== next.sellerTaxable
+    || prev.fixedAssetTax !== next.fixedAssetTax || prev.cityPlanningTax !== next.cityPlanningTax
+    || JSON.stringify(prev.taxItems) !== JSON.stringify(next.taxItems);
+}
+
+/** 1年分の固都税(土地・建物ごとなら行の税額の合計、合計額なら2つの合計)。 */
+export function annualPropertyTaxOf(t: SettlementTerms): number {
+  if (t.taxInputMode === "total") return (t.fixedAssetTax ?? 0) + (t.cityPlanningTax ?? 0);
+  const a = annualByKind(t.taxItems);
+  return a.land + a.building;
+}
+
+/** 税額が入ったか(段取りの「年税額を確認」の自動の完了)。土地・建物ごとなら税額のある行が1つ以上、合計額なら2つとも。 */
+export function taxesEnteredOfTerms(t: SettlementTerms): boolean {
+  if (t.taxInputMode === "total") return t.fixedAssetTax !== null && t.cityPlanningTax !== null;
+  return t.taxItems.some((i) => {
+    const x = itemTaxes(i);
+    return x.fixed + x.city > 0;
+  });
 }
 
 export interface SettlementResult {
