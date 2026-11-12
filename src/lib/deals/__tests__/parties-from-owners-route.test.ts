@@ -117,6 +117,19 @@ describe("物件の所有者を売主に入れる", () => {
     });
   });
 
+  it("⚠候補から選んで足すときも、同じ名前の2人の持分を足す(選ばれた1人目の分だけにしない・@codex #717 P2)", async () => {
+    // 同じ方が二重に登録されている: 1人目 2/10・2人目 5/10。候補に出る ID は1人目だけ。
+    const OWNER_A2 = "44444444-4444-4444-8444-444444444444";
+    pm.propertyOwner.findMany.mockResolvedValue([
+      { ...taro, registryEntries: [{ shareNum: 2, shareDen: 10 }] },
+      { owner: { ...taro.owner, id: OWNER_A2, name: "試験　太郎" }, registryEntries: [{ shareNum: 5, shareDen: 10 }] },
+    ]);
+    pm.dealParty.findMany.mockResolvedValue([{ name: "相続 一郎" }]);
+    await post({ ownerIds: [OWNER_A] });
+    const rows = pm.dealParty.createMany.mock.calls[0][0].data as Array<{ name: string; shareNum: number | null; shareDen: number | null }>;
+    expect(rows.map((r) => [r.name, r.shareNum, r.shareDen])).toEqual([["試験 太郎", 7, 10]]);
+  });
+
   it("★(株)と株式会社・異体字の同じ人を二重に足さない", async () => {
     const corp = { owner: { ...taro.owner, id: OWNER_B, name: "(株)試験髙橋" }, registryEntries: [] };
     pm.propertyOwner.findMany.mockResolvedValue([corp]);

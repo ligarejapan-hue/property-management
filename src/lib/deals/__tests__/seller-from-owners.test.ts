@@ -1,8 +1,14 @@
 import { describe, expect, it, vi } from "vitest";
 vi.mock("@/lib/prisma", () => ({ default: {} }));
-import { ownersExceptCompany, sellerAccessOf, sellerPartiesFromOwners } from "../seller-from-owners";
+import {
+  ownersExceptCompany,
+  sellerAccessOf,
+  sellerPartiesFromOwners,
+  withSharesCombinedByName,
+  type OwnerForSeller,
+} from "../seller-from-owners";
 
-const owner = (over: Record<string, unknown> = {}) => ({
+const owner = (over: Record<string, unknown> = {}): OwnerForSeller => ({
   name: "試験 太郎", phone: "03-0000-0000", address: "東京都試験区1-2-3", currentAddress: null,
   corporateNumber: null, companyRegistryNumber: null, ...over,
 });
@@ -38,24 +44,56 @@ describe("物件の所有者を売主にする", () => {
 
   it("★同じ名前の所有者が2人残っていても売主は1人・持分は2人分を足す(1人目の分だけにしない)", () => {
     const [p, ...rest] = sellerPartiesFromOwners(
-      [owner({ share: { num: 2, den: 10 } }), owner({ name: "試験　太郎", share: { num: 5, den: 10 } })],
+      withSharesCombinedByName([
+        owner({ share: { num: 2, den: 10 } }),
+        owner({ name: "試験　太郎", share: { num: 5, den: 10 } }),
+      ]),
       [],
       ALL,
     );
     expect(rest).toHaveLength(0);
     expect([p.shareNum, p.shareDen]).toEqual([7, 10]);
     // 片方の持分が分からなければ、合計は入れない(一部だけを正しい持分として入れない)
-    const [q] = sellerPartiesFromOwners([owner({ share: { num: 2, den: 10 } }), owner({ share: null })], [], ALL);
+    const [q] = sellerPartiesFromOwners(
+      withSharesCombinedByName([owner({ share: { num: 2, den: 10 } }), owner({ share: null })]),
+      [],
+      ALL,
+    );
     expect([q.shareNum, q.shareDen]).toEqual([null, null]);
   });
 
   it("★合計が1を超えるなど、あり得ない持分は入れない", () => {
     const [p] = sellerPartiesFromOwners(
-      [owner({ share: { num: 2, den: 3 } }), owner({ share: { num: 2, den: 3 } })],
+      withSharesCombinedByName([owner({ share: { num: 2, den: 3 } }), owner({ share: { num: 2, den: 3 } })]),
       [],
       ALL,
     );
     expect([p.shareNum, p.shareDen]).toEqual([null, null]);
+  });
+
+  it("⚠同じ名前の人の持分は、選ぶ前の全員で足す=1人目だけを選んでも合計が入る(@codex #717 P2)", () => {
+    // 候補の一覧は同じ名前の1人目の ID だけを出し、足す処理は選ばれた人だけに絞る。
+    // 絞る前に全員で足しておけば、1人目だけ渡されても 2/10+5/10=7/10 になる。
+    const all = withSharesCombinedByName([
+      owner({ id: "a", share: { num: 2, den: 10 } }),
+      owner({ id: "b", name: "試験　太郎", share: { num: 5, den: 10 } }),
+      owner({ id: "c", name: "試験 花子", share: { num: 3, den: 10 } }),
+    ]);
+    expect(all.map((o) => o.share)).toEqual([
+      { num: 7, den: 10 },
+      { num: 7, den: 10 },
+      { num: 3, den: 10 },
+    ]);
+    const onlyFirst = all.filter((o) => (o as { id?: string }).id === "a");
+    const [p] = sellerPartiesFromOwners(onlyFirst, [], ALL);
+    expect([p.shareNum, p.shareDen]).toEqual([7, 10]);
+    // 選ばれなかった方の持分が分からないときは、選んだ方も空(一部だけを入れない)
+    const unknown = withSharesCombinedByName([
+      owner({ id: "a", share: { num: 2, den: 10 } }),
+      owner({ id: "b", share: null }),
+    ]).filter((o) => (o as { id?: string }).id === "a");
+    const [q] = sellerPartiesFromOwners(unknown, [], ALL);
+    expect([q.shareNum, q.shareDen]).toEqual([null, null]);
   });
 
   it("★現住所があれば現住所を入れる", () => {
