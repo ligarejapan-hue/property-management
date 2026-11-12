@@ -1,5 +1,9 @@
 import { describe, it, expect, vi } from "vitest";
-import { planRegistryEntries, replaceRegistryEntries } from "@/lib/registry-entries/write";
+import {
+  moveRegistryEntriesToLink,
+  planRegistryEntries,
+  replaceRegistryEntries,
+} from "@/lib/registry-entries/write";
 
 /**
  * 登記上の記載(所有者事項の行ごとの住所と持分)の記録(2026-11-12 発注者決定)。
@@ -72,5 +76,46 @@ describe("replaceRegistryEntries", () => {
     const db = makeDb([]);
     expect(await replaceRegistryEntries(db, "prop-1", [])).toBe(0);
     expect(db.propertyOwner.findMany).not.toHaveBeenCalled();
+  });
+});
+
+describe("moveRegistryEntriesToLink(所有者の統合で、消えるつながりの行を残る側へ引き継ぐ・@codex #714 P2)", () => {
+  const makeDb = (from: Array<{ id: string; position: number }>, toLast: Array<{ id: string; position: number }>) => ({
+    propertyOwnerRegistryEntry: {
+      findMany: vi.fn(async (args: { where: { propertyOwnerId: string } }) =>
+        args.where.propertyOwnerId === "from" ? from : toLast,
+      ),
+      update: vi.fn(async (_args: { where: { id: string }; data: { propertyOwnerId: string; position: number } }) => ({})),
+    },
+  });
+
+  it("残る側に行が無ければ、順番を保って 1 から引き継ぐ", async () => {
+    const db = makeDb(
+      [
+        { id: "e1", position: 2 },
+        { id: "e2", position: 5 },
+      ],
+      [],
+    );
+    expect(await moveRegistryEntriesToLink(db, "from", "to")).toBe(2);
+    expect(db.propertyOwnerRegistryEntry.update.mock.calls.map((c) => c[0])).toEqual([
+      { where: { id: "e1" }, data: { propertyOwnerId: "to", position: 1 } },
+      { where: { id: "e2" }, data: { propertyOwnerId: "to", position: 2 } },
+    ]);
+  });
+
+  it("残る側に行があれば、その後ろに足す(番号がぶつからない)", async () => {
+    const db = makeDb([{ id: "e1", position: 1 }], [{ id: "m9", position: 3 }]);
+    await moveRegistryEntriesToLink(db, "from", "to");
+    expect(db.propertyOwnerRegistryEntry.update).toHaveBeenCalledWith({
+      where: { id: "e1" },
+      data: { propertyOwnerId: "to", position: 4 },
+    });
+  });
+
+  it("消える側に行が無ければ何もしない", async () => {
+    const db = makeDb([], [{ id: "m9", position: 3 }]);
+    expect(await moveRegistryEntriesToLink(db, "from", "to")).toBe(0);
+    expect(db.propertyOwnerRegistryEntry.update).not.toHaveBeenCalled();
   });
 });

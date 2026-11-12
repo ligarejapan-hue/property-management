@@ -16,6 +16,7 @@ import {
 } from "@/lib/owner-merge";
 import { buildOwnerDuplicateCandidateKey } from "@/lib/owner-correction";
 import { deleteEditLocksFor } from "@/lib/edit-lock/service";
+import { moveRegistryEntriesToLink } from "@/lib/registry-entries/write";
 
 // ---------------------------------------------------------------------------
 // POST /api/admin/owners/correction/merge
@@ -557,6 +558,21 @@ export async function POST(request: NextRequest) {
           select: { id: true, propertyId: true },
         });
         if (dedupeTargets.length > 0) {
+          // ⚠消す前に、登記上の記載(所有者事項の行ごとの住所と持分)を master 側のつながりへ
+          //   引き継ぐ(@codex #714 P2)。行は FK の cascade で一緒に消えるため、source にだけ
+          //   内訳があると黙って無くなる。物件ごとに master のつながりを引いて、その後ろに足す。
+          const masterLinks = await tx.propertyOwner.findMany({
+            where: {
+              ownerId: masterFresh.id,
+              propertyId: { in: dedupeTargets.map((p) => p.propertyId) },
+            },
+            select: { id: true, propertyId: true },
+          });
+          const masterLinkByProperty = new Map(masterLinks.map((l) => [l.propertyId, l.id]));
+          for (const target of dedupeTargets) {
+            const masterLinkId = masterLinkByProperty.get(target.propertyId);
+            if (masterLinkId) await moveRegistryEntriesToLink(tx, target.id, masterLinkId);
+          }
           await tx.propertyOwner.deleteMany({
             where: { id: { in: dedupeTargets.map((p) => p.id) } },
           });

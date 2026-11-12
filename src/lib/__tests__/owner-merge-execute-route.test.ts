@@ -67,6 +67,8 @@ vi.mock("@/lib/prisma", () => {
       updateMany: vi.fn(),
       deleteMany: vi.fn(),
     },
+    // 登記上の記載(所有者事項の行)。重複するつながりを消す前に master 側へ引き継ぐ(#714)。
+    propertyOwnerRegistryEntry: { findMany: vi.fn(async () => []), update: vi.fn(async () => ({})) },
     // 履歴は「件数」だけでなく「項目名」も見る（現住所だけの編集は統合を許すため）。
     changeLog: { count: vi.fn(), findMany: vi.fn(), createMany: vi.fn() },
     // PR-A(送付記録): DM 参照の付け替え(反響の置き去り防止・@codex R11/R32)。
@@ -140,6 +142,7 @@ const pm = prisma as unknown as {
       updateMany: Mock;
       deleteMany: Mock;
     };
+    propertyOwnerRegistryEntry: { findMany: Mock; update: Mock };
     changeLog: { count: Mock; findMany: Mock; createMany: Mock };
   };
 };
@@ -513,8 +516,19 @@ describe("POST merge: dryRun=false 成功", () => {
         { propertyId: "prop-C" },
         { propertyId: "prop-D" },
       ]) // freshSourcePOs/Master
-      .mockResolvedValueOnce([{ id: "po-dup-1" }]) // dedupeTargets
+      .mockResolvedValueOnce([{ id: "po-dup-1", propertyId: "prop-B" }]) // dedupeTargets
+      .mockResolvedValueOnce([{ id: "po-master-B", propertyId: "prop-B" }]) // master 側のつながり(行の引き継ぎ先)
       .mockResolvedValueOnce([{ id: "po-move-1" }, { id: "po-move-2" }]); // moveTargets
+    // 消える側(po-dup-1)にだけ登記上の記載が2行ある。master 側(po-master-B)には1行ある。
+    pm._tx.propertyOwnerRegistryEntry.findMany.mockImplementation(
+      async ({ where }: { where: { propertyOwnerId: string } }) =>
+        where.propertyOwnerId === "po-dup-1"
+          ? [
+              { id: "entry-1", position: 1 },
+              { id: "entry-2", position: 2 },
+            ]
+          : [{ id: "entry-m", position: 1 }],
+    );
 
     pm._tx.ownerMemo.updateMany.mockResolvedValue({ count: 2 });
 
@@ -534,6 +548,15 @@ describe("POST merge: dryRun=false 成功", () => {
     expect(json.result.propertyOwnersDeduplicated).toBe(1);
     expect(json.result.propertyOwnersMoved).toBe(2);
     expect(json.result.sourceArchived).toBe(true);
+    // ⚠重複するつながりを消す**前に**、その登記上の記載を master 側のつながりの後ろへ引き継ぐ
+    //   (消すと FK の cascade で内訳ごと無くなる・@codex #714 P2)。
+    expect(pm._tx.propertyOwnerRegistryEntry.update.mock.calls.map((c) => c[0])).toEqual([
+      { where: { id: "entry-1" }, data: { propertyOwnerId: "po-master-B", position: 2 } },
+      { where: { id: "entry-2" }, data: { propertyOwnerId: "po-master-B", position: 3 } },
+    ]);
+    expect(pm._tx.propertyOwnerRegistryEntry.update.mock.invocationCallOrder[0]).toBeLessThan(
+      pm._tx.propertyOwner.deleteMany.mock.invocationCallOrder[0],
+    );
     expect(json.masterVersion).toBe(2);
     expect(json.sourceVersion).toBe(2);
 

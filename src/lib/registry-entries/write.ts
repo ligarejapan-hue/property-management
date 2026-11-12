@@ -103,3 +103,57 @@ export async function replaceRegistryEntries(
   await db.propertyOwnerRegistryEntry.createMany({ data });
   return data.length;
 }
+
+/** moveRegistryEntriesToLink が使う DB の口。 */
+interface MoveEntriesDb {
+  propertyOwnerRegistryEntry: {
+    findMany(args: {
+      where: { propertyOwnerId: string };
+      orderBy: { position: "asc" | "desc" };
+      select: { id: true; position: true };
+      take?: number;
+    }): Promise<Array<{ id: string; position: number }>>;
+    update(args: {
+      where: { id: string };
+      data: { propertyOwnerId: string; position: number };
+    }): Promise<unknown>;
+  };
+}
+
+/**
+ * つながり(PropertyOwner)を消す前に、その行を別のつながりへ引き継ぐ(所有者の統合で使う)。
+ *
+ * なぜ(@codex #714 P2): 所有者の統合は、同じ物件に両方がつながっているとき、消える側の
+ * つながりを削除する。行は FK の cascade で一緒に消えるため、消える側にだけ内訳があると
+ * 住所と持分の内訳が黙って無くなる(物件と所有者のつながり自体は残る側に生きているのに)。
+ * 残る側の行の後ろに、順番を保って足す(position の一意制約に当たらない番号を振る)。
+ * @returns 引き継いだ行の数
+ */
+export async function moveRegistryEntriesToLink(
+  db: MoveEntriesDb,
+  fromPropertyOwnerId: string,
+  toPropertyOwnerId: string,
+): Promise<number> {
+  if (fromPropertyOwnerId === toPropertyOwnerId) return 0;
+  const moving = await db.propertyOwnerRegistryEntry.findMany({
+    where: { propertyOwnerId: fromPropertyOwnerId },
+    orderBy: { position: "asc" },
+    select: { id: true, position: true },
+  });
+  if (moving.length === 0) return 0;
+  const last = await db.propertyOwnerRegistryEntry.findMany({
+    where: { propertyOwnerId: toPropertyOwnerId },
+    orderBy: { position: "desc" },
+    select: { id: true, position: true },
+    take: 1,
+  });
+  let next = (last[0]?.position ?? 0) + 1;
+  for (const row of moving) {
+    await db.propertyOwnerRegistryEntry.update({
+      where: { id: row.id },
+      data: { propertyOwnerId: toPropertyOwnerId, position: next },
+    });
+    next += 1;
+  }
+  return moving.length;
+}

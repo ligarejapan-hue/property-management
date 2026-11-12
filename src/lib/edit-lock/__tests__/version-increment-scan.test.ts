@@ -34,9 +34,9 @@ const VERSIONED: Record<string, string> = {
     "owner.name(断片型の救出)+version increment",
   "src/app/api/admin/owners/correction/corporate-restore-apply/route.ts:208":
     "owner.name/corporateNumber/companyRegistryNumber/address(分断型復元)+version increment",
-  "src/app/api/admin/owners/correction/merge/route.ts:638":
+  "src/app/api/admin/owners/correction/merge/route.ts:654":
     "owner.isArchived(統合で消えるsource)+version increment",
-  "src/app/api/admin/owners/correction/merge/route.ts:664":
+  "src/app/api/admin/owners/correction/merge/route.ts:680":
     "owner.currentAddress/currentZip(master引き継ぎ)+version increment",
   "src/app/api/admin/owners/correction/mislink/route.ts:518":
     "owner の version のみ進める(所有者付け替えのinvalidation)",
@@ -150,11 +150,11 @@ interface AllowedEntry {
 }
 
 const ALLOWED_WITHOUT_VERSION: Record<string, AllowedEntry> = {
-  "src/app/api/admin/owners/correction/merge/route.ts:437": {
+  "src/app/api/admin/owners/correction/merge/route.ts:438": {
     reason: "owner.updatedAt のみ(行ロック獲得のための touch。updatedAt は編集画面の送信項目に無い)",
     keys: ["updatedAt"],
   },
-  "src/app/api/admin/owners/correction/merge/route.ts:445": {
+  "src/app/api/admin/owners/correction/merge/route.ts:446": {
     reason: "owner.updatedAt のみ(同上・source側の行ロックtouch)",
     keys: ["updatedAt"],
   },

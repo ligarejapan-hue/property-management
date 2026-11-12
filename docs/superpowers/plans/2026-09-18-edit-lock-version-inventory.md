@@ -35,8 +35,8 @@ Task 7 が直した「謄本取込が所有者の法人番号を版番号を進�
 
 | ファイル:行 | 書く項目 | 編集画面で書けない理由 |
 |---|---|---|
-| `src/app/api/admin/owners/correction/merge/route.ts:437` | `owner.updatedAt` のみ | 行ロック獲得のための touch-update。`updatedAt` は `PATCH /api/owners/[id]` の `updateOwnerSchema` にも `property-edit-form.tsx`/所有者編集フォームにも無く、画面から送信できない |
-| `src/app/api/admin/owners/correction/merge/route.ts:445` | 同上(source側) | 同上 |
+| `src/app/api/admin/owners/correction/merge/route.ts:438` | `owner.updatedAt` のみ | 行ロック獲得のための touch-update。`updatedAt` は `PATCH /api/owners/[id]` の `updateOwnerSchema` にも `property-edit-form.tsx`/所有者編集フォームにも無く、画面から送信できない |
+| `src/app/api/admin/owners/correction/merge/route.ts:446` | 同上(source側) | 同上 |
 | `src/app/api/admin/owners/correction/mislink/route.ts:406` | `owner.updatedAt` のみ | 同上 |
 | `src/app/api/admin/owners/correction/mislink/route.ts:435` | `property.updatedAt` のみ | 同上。`updatedAt` は `updatePropertySchema` にも `property-edit-form.tsx` の FORM_FIELDS にも無い |
 | `src/app/api/import/jobs/[jobId]/rows/[rowId]/manual-link-reception-owner/route.ts:281` | `owner.updatedAt` のみ | 同上(所有者行ロックtouch) |
@@ -70,8 +70,8 @@ Task 7 が直した「謄本取込が所有者の法人番号を版番号を進�
 | `src/app/api/admin/owners/correction/corporate-number-bulk-apply/route.ts:124` | `owner.corporateNumber` |
 | `src/app/api/admin/owners/correction/corporate-restore-apply/route.ts:135` | `owner.name` |
 | `src/app/api/admin/owners/correction/corporate-restore-apply/route.ts:208` | `owner.name`/`corporateNumber`/`companyRegistryNumber`/`address` |
-| `src/app/api/admin/owners/correction/merge/route.ts:638` | `owner.isArchived`(source側の統合アーカイブ) |
-| `src/app/api/admin/owners/correction/merge/route.ts:664` | `owner.currentAddress`/`currentZip`(master引き継ぎ) |
+| `src/app/api/admin/owners/correction/merge/route.ts:654` | `owner.isArchived`(source側の統合アーカイブ) |
+| `src/app/api/admin/owners/correction/merge/route.ts:680` | `owner.currentAddress`/`currentZip`(master引き継ぎ) |
 | `src/app/api/admin/owners/correction/mislink/route.ts:518` | `owner.version` のみ(付け替えのinvalidation) |
 | `src/app/api/admin/owners/correction/mislink/route.ts:531` | `owner.version` のみ(target側) |
 | `src/app/api/admin/owners/correction/mislink/route.ts:545` | `property.version` のみ |

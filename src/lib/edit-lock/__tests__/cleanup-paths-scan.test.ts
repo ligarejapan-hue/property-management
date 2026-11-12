@@ -30,7 +30,7 @@ const KNOWN_CLEANUP_SITES: Record<string, string> = {
   "src/app/api/import/jobs/[jobId]/rollback/route.ts:494": "property.delete(取込の取り消し)",
   "src/app/api/admin/owners/[id]/correction/archive/route.ts:247":
     "owner.updateMany({ isArchived: true })(所有者のアーカイブ)",
-  "src/app/api/admin/owners/correction/merge/route.ts:638":
+  "src/app/api/admin/owners/correction/merge/route.ts:654":
     "owner.updateMany({ isArchived: true })(統合で消えるsourceのアーカイブ)",
 };
 
