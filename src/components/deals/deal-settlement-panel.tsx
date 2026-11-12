@@ -4,11 +4,13 @@ import { useState } from "react";
 import { Plus, Save, Trash2 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Field, OverrideField, SelectBox, YenInput, inputCls } from "./form-parts";
+import { TaxItemsEditor, taxItemsFromForm, taxItemsToForm } from "./tax-items-editor";
 import { dealsApi, DealApiError, errorText } from "@/lib/deals/client";
 import { SETTLEMENT_OVERRIDE_KEYS, invalidYenLabels, mergeOverrides, parseYen, textify, untextify, yenText } from "@/lib/deals/money-forms";
+import { sellerTaxableOf } from "@/lib/deals/calc/settlement";
 import type { DealView } from "@/lib/deals/view";
 import type { DealCalc } from "@/lib/deals/calc/deal-calc";
-import type { Overrides, SettlementTerms } from "@/lib/deals/schemas";
+import type { OverrideKey, Overrides, SettlementTerms } from "@/lib/deals/schemas";
 
 const conflictText = (e: unknown) =>
   e instanceof DealApiError && e.code === "VERSION_CONFLICT"
@@ -30,6 +32,7 @@ export default function DealSettlementPanel({ deal, calc, onSaved }: { deal: Dea
   const [money, setMoney] = useState<Record<MoneyKey, string>>(
     Object.fromEntries(MONEY_KEYS.map((k) => [k, s(deal.settlementTerms[k])])) as Record<MoneyKey, string>,
   );
+  const [taxItems, setTaxItems] = useState(() => taxItemsToForm(deal.settlementTerms.taxItems));
   const [overrides, setOverrides] = useState<Overrides>(deal.overrides);
   const [saving, setSaving] = useState(false);
   // 手で直す欄で読めない文字が入っている欄の名前(@codex 2巡目)。1つでもあれば保存しない。
@@ -38,6 +41,8 @@ export default function DealSettlementPanel({ deal, calc, onSaved }: { deal: Dea
     setBadOverrides((xs) => (ok ? xs.filter((x) => x !== label) : xs.includes(label) ? xs : [...xs, label]));
   const [error, setError] = useState<string | null>(null);
   const kindBase = calc?.kindBase ?? null;
+  // 売主が課税業者か(未設定なら売主の当事者に自社がいるか)。
+  const taxable = sellerTaxableOf({ settlementTerms: terms, parties: deal.parties });
   const st = calc?.settlement ?? null;
   const setOverride = (key: keyof Overrides, v: number | undefined) =>
     setOverrides((o) => {
@@ -49,7 +54,10 @@ export default function DealSettlementPanel({ deal, calc, onSaved }: { deal: Dea
 
   const save = async () => {
     const parsedOthers = others.map((o, i) => untextify(o, OTHER_KEYS, (k) => `その他の精算${i + 1}行目の${k === "sellerToBuyer" ? "売主→買主" : "買主→売主"}`));
-    const bad = [...invalidYenLabels(MONEY_KEYS.map((k) => [MONEY_LABELS[k], money[k]])), ...parsedOthers.flatMap((p) => p.bad), ...badOverrides];
+    const parsedTax = taxItemsFromForm(taxItems);
+    const bad = [
+      ...invalidYenLabels(MONEY_KEYS.map((k) => [MONEY_LABELS[k], money[k]])), ...parsedTax.bad, ...parsedOthers.flatMap((p) => p.bad), ...badOverrides,
+    ];
     if (bad.length > 0) {
       setError(`${bad.join("・")}は数字で入れてください(例 120000)。保存していません。`);
       return;
@@ -62,6 +70,7 @@ export default function DealSettlementPanel({ deal, calc, onSaved }: { deal: Dea
         // 敷金の扱いは OC タブのもの。今の保存済みの値を使う(最終レビュー I-2)。
         depositMode: deal.settlementTerms.depositMode,
         ...(Object.fromEntries(MONEY_KEYS.map((k) => [k, parseYen(money[k])])) as Record<MoneyKey, number | null>),
+        taxItems: parsedTax.value,
         others: parsedOthers.map((p) => p.value).filter((o) => o.label.trim() !== ""),
       };
       await dealsApi.update(deal.id, {
@@ -89,9 +98,45 @@ export default function DealSettlementPanel({ deal, calc, onSaved }: { deal: Dea
 
       <section className="space-y-3">
         <h3 className="text-sm font-semibold text-gray-700 dark:text-gray-300">固定資産税・都市計画税</h3>
+        <div className="flex flex-wrap items-center gap-x-6 gap-y-2 text-sm">
+          <label className="flex items-center gap-2">
+            <input
+              type="checkbox" checked={taxable}
+              // 課税業者にしたら「合計額だけ」は使えないので、土地・建物ごとに切り替える。
+              onChange={(e) => setTerms((t) => ({ ...t, sellerTaxable: e.target.checked, ...(e.target.checked ? { taxInputMode: "items" as const } : {}) }))}
+            />
+            売主は課税業者(建物分の精算金に消費税)
+          </label>
+          <fieldset className="flex flex-wrap items-center gap-4">
+            <legend className="sr-only">入力のしかた</legend>
+            <label className="flex items-center gap-1">
+              <input type="radio" name="taxInputMode" checked={terms.taxInputMode === "items"} onChange={() => setTerms((t) => ({ ...t, taxInputMode: "items" }))} />
+              土地・建物ごと
+            </label>
+            <label className={`flex items-center gap-1 ${taxable && terms.taxInputMode !== "total" ? "text-gray-400" : ""}`}>
+              <input type="radio" name="taxInputMode" disabled={taxable && terms.taxInputMode !== "total"} checked={terms.taxInputMode === "total"} onChange={() => setTerms((t) => ({ ...t, taxInputMode: "total" }))} />
+              合計額だけ{taxable && <span className="text-xs">(課税業者の取引では使えません)</span>}
+            </label>
+          </fieldset>
+        </div>
+        {st?.taxableTotalConflict && (
+          <p className="text-sm text-amber-700 dark:text-amber-300" role="alert">課税業者の取引です。土地・建物ごとに入力し直してください(合計額だけでは建物分の消費税を出せません)。</p>
+        )}
+        {terms.taxInputMode === "items" ? (
+          <>
+            <p className="text-xs text-gray-500">
+              評価証明書の課税標準額を入れると、税額を課税標準額×1.4%(都市計画税は0.3%)で出します(千円未満・百円未満は切り捨て)。
+              納税通知書と違うときや、税額が初めから分かっているときは、税額の欄に入れてください。
+            </p>
+            <TaxItemsEditor value={taxItems} onChange={setTaxItems} />
+          </>
+        ) : (
+          <div className="grid gap-4 sm:grid-cols-2">
+            <Field label="固定資産税(年税額)"><YenInput label="固定資産税" value={money.fixedAssetTax} onChange={(v) => setMoney((m) => ({ ...m, fixedAssetTax: v }))} /></Field>
+            <Field label="都市計画税(年税額)"><YenInput label="都市計画税" value={money.cityPlanningTax} onChange={(v) => setMoney((m) => ({ ...m, cityPlanningTax: v }))} /></Field>
+          </div>
+        )}
         <div className="grid gap-4 sm:grid-cols-3">
-          <Field label="固定資産税(年税額)"><YenInput label="固定資産税" value={money.fixedAssetTax} onChange={(v) => setMoney((m) => ({ ...m, fixedAssetTax: v }))} /></Field>
-          <Field label="都市計画税(年税額)"><YenInput label="都市計画税" value={money.cityPlanningTax} onChange={(v) => setMoney((m) => ({ ...m, cityPlanningTax: v }))} /></Field>
           <Field label="起算日">
             <SelectBox label="起算日" value={terms.taxStart} onChange={(v) => setTerms((t) => ({ ...t, taxStart: v as SettlementTerms["taxStart"] }))} options={[{ value: "01-01", label: "1月1日" }, { value: "04-01", label: "4月1日" }]} />
           </Field>
@@ -139,7 +184,16 @@ export default function DealSettlementPanel({ deal, calc, onSaved }: { deal: Dea
 
       <section className="space-y-3">
         <h3 className="text-sm font-semibold text-gray-700 dark:text-gray-300">手で直す(計算の値を変えるときだけ)</h3>
-        <OverrideField label="固都税(買主→売主)" onValidity={validity("固都税(買主→売主)")} computed={st?.rows.find((r) => r.key === "propertyTax")?.computed ?? null} override={overrides["settlement.propertyTax"]} onChange={(v) => setOverride("settlement.propertyTax", v)} />
+        {(terms.taxInputMode === "total"
+          ? [["固都税(買主→売主)", "propertyTax", "settlement.propertyTax"] as const]
+          : [
+            ["固都税・土地(買主→売主)", "propertyTaxLand", "settlement.propertyTaxLand"] as const,
+            ["固都税・建物(買主→売主)", "propertyTaxBuilding", "settlement.propertyTaxBuilding"] as const,
+            ...(taxable ? [["建物分の消費税(買主→売主)", "propertyTaxBuildingVat", "settlement.propertyTaxBuildingVat"] as const] : []),
+          ]
+        ).map(([label, rowKey, key]: readonly [string, string, OverrideKey]) => (
+          <OverrideField key={key} label={label} onValidity={validity(label)} computed={st?.rows.find((r) => r.key === rowKey)?.computed ?? null} override={overrides[key]} onChange={(v) => setOverride(key, v)} />
+        ))}
         {kindBase === "unit" && (
           <OverrideField label="管理費等(買主→売主)" onValidity={validity("管理費等(買主→売主)")} computed={st?.rows.find((r) => r.key === "management")?.computed ?? null} override={overrides["settlement.management"]} onChange={(v) => setOverride("settlement.management", v)} />
         )}

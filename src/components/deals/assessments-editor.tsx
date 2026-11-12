@@ -55,7 +55,7 @@ export function AssessmentsEditor({ value, onChange }: { value: AssessmentsForm;
  * 持分の入力。打ちかけ(空・途中)で値を書き換えないよう、欄を離れたときに読む(最終レビュー M-4)。
  * 1以上の整数でなければ元の値に戻す。
  */
-function ShareInput({ label, value, onCommit }: { label: string; value: number; onCommit: (n: number) => void }) {
+export function ShareInput({ label, value, onCommit }: { label: string; value: number; onCommit: (n: number) => void }) {
   return (
     <input
       key={value}
