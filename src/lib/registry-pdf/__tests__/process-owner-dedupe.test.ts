@@ -19,7 +19,7 @@ vi.mock("@/lib/prisma", () => {
       update: vi.fn(),
       updateMany: vi.fn(),
     },
-    owner: { findMany: vi.fn(), create: vi.fn(), updateMany: vi.fn() },
+    owner: { findMany: vi.fn(), create: vi.fn(), updateMany: vi.fn(), findUnique: vi.fn() },
     propertyOwner: { findFirst: vi.fn(), findMany: vi.fn(), create: vi.fn() },
     importJob: { create: vi.fn(), update: vi.fn() },
     importJobRow: { create: vi.fn() },
@@ -76,7 +76,7 @@ const PDF = Buffer.from([1, 2, 3, 4, 5]);
 const pm = prisma as unknown as {
   $queryRaw: Mock;
   property: { findUnique: Mock; update: Mock };
-  owner: { findMany: Mock; create: Mock; updateMany: Mock };
+  owner: { findMany: Mock; create: Mock; updateMany: Mock; findUnique: Mock };
   propertyOwner: { findFirst: Mock; findMany: Mock; create: Mock };
   importJob: { create: Mock; update: Mock };
   importJobRow: { create: Mock };
@@ -124,6 +124,7 @@ beforeEach(() => {
   pm.owner.findMany.mockResolvedValue([]);
   pm.owner.create.mockResolvedValue({ id: "owner-new" });
   pm.owner.updateMany.mockResolvedValue({ count: 1 });
+  pm.owner.findUnique.mockResolvedValue({ corporateNumber: null });
   pm.propertyOwner.findMany.mockResolvedValue([]);
   pm.propertyOwner.findFirst.mockResolvedValue(null);
   pm.propertyOwner.create.mockResolvedValue({});
@@ -306,7 +307,7 @@ describe("同じ謄本を取り直しても住所なしの所有者が増えな�
     }
   });
 
-  it("⚠住所ありの所有者は従来どおり**全体**から照合する（この変更で経路を変えない）", async () => {
+  const withAddress = (owners: Array<{ name: string; address: string }>) =>
     (parseRegistryText as Mock).mockReturnValue({
       realEstateNumber: null,
       address: "東京都千代田区一番町1",
@@ -314,13 +315,57 @@ describe("同じ謄本を取り直しても住所なしの所有者が増えな�
       buildingNumber: null,
       landCategory: null,
       area: null,
-      owners: [{ name: "山田太郎", address: "東京都港区1-1", share: null }],
+      owners: owners.map((o) => ({ ...o, share: null })),
       warnings: [],
       confidence: 0.9,
     });
-    linkedOwners([{ id: "owner-existing", name: "山田太郎" }]);
+
+  it("住所ありでも、同じ物件に同じ名前の人がいれば住所が違っても使い回す(2026-11-12 発注者決定)", async () => {
+    withAddress([{ name: "山田 太郎", address: "大阪市北区1-1" }]);
+    linkedOwners([{ id: "owner-existing", name: "山田太郎", address: "東京都港区1-1" }]);
     await run();
-    // 住所ありは owner.findMany（全体照合）を使う。物件内の再利用に流さない。
+    expect(pm.owner.create).not.toHaveBeenCalled();
+    expect(pm.propertyOwner.create).not.toHaveBeenCalled();
+    // 前からいる人の住所は替えない(人が直した住所かもしれない)
+    expect(pm.owner.updateMany).not.toHaveBeenCalledWith(
+      expect.objectContaining({ data: expect.objectContaining({ address: expect.anything() }) }),
+    );
+  });
+
+  it("異体字だけ違う名前も、同じ物件なら同じ人として使い回す", async () => {
+    withAddress([{ name: "高橋一郎", address: "大阪市北区1-1" }]);
+    linkedOwners([{ id: "owner-existing", name: "髙橋一郎", address: "東京都港区1-1" }]);
+    await run();
+    expect(pm.owner.create).not.toHaveBeenCalled();
+  });
+
+  it("⚠同じ物件に同じ名前の人がいなければ、従来どおり**全体**から名前+住所で照合する", async () => {
+    withAddress([{ name: "山田太郎", address: "東京都港区1-1" }]);
+    linkedOwners([{ id: "owner-other", name: "鈴木一郎", address: "東京都港区1-1" }]);
+    await run();
     expect(pm.owner.findMany).toHaveBeenCalled();
+    expect(pm.owner.create).toHaveBeenCalledTimes(1);
+  });
+
+  it("同じ謄本に同じ人が住所違いで2回載っても1人にし、住所は後の行(新しい住所)にする", async () => {
+    withAddress([
+      { name: "山田太郎", address: "東京都港区1-1" },
+      { name: "山田太郎", address: "大阪市北区1-1" },
+    ]);
+    // 1人目を作ったあとは、その人が物件に紐づいている状態を返す
+    pm.propertyOwner.findMany.mockReset();
+    pm.propertyOwner.findMany
+      .mockResolvedValueOnce([])
+      .mockResolvedValue([
+        { owner: { id: "owner-new", name: "山田太郎", address: "東京都港区1-1", isArchived: false, corporateNumber: null } },
+      ]);
+    await run();
+    expect(pm.owner.create).toHaveBeenCalledTimes(1);
+    expect(pm.owner.updateMany).toHaveBeenCalledWith(
+      expect.objectContaining({
+        where: expect.objectContaining({ id: "owner-new" }),
+        data: expect.objectContaining({ address: "大阪市北区1-1" }),
+      }),
+    );
   });
 });

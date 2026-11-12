@@ -21,6 +21,10 @@ import {
 } from "@/lib/reception-owner-link";
 import { normalizeName, normalizeAddress } from "@/lib/normalize";
 import { resolveAddressPairBackfill } from "@/lib/owner-address-backfill";
+import {
+  pickSamePropertyOwner,
+  planSamePropertyAddressReplace,
+} from "@/lib/registry-pdf/owner-reuse";
 
 // ============================================================
 // POST /api/import/jobs/[jobId]/rows/[rowId]/manual-link-reception-owner
@@ -197,6 +201,18 @@ export async function POST(
       //    追加しないため完全には解消していない。同一 row 二重実行は上記 atomic
       //    claim で防止済み。
       const ownerIds: string[] = [];
+      // 同じ物件の中では、名前が同じ人(全角半角・空白・異体字をそろえて)を住所が違っても
+      // 同じ人として使い回す(2026-11-12 発注者決定)。物件に既に紐づいている人と、
+      // この処理で作った/選んだ人が対象。⚠物件をまたぐ照合は従来どおり名前+住所。
+      // ⚠ここは読むだけ(物件行は従来どおり所有者の処理の後で押さえる)。
+      const samePropertyPool: { id: string; name: string; isArchived: boolean }[] = (
+        await tx.propertyOwner.findMany({
+          where: { propertyId },
+          orderBy: [{ createdAt: "asc" }, { ownerId: "asc" }],
+          select: { owner: { select: { id: true, name: true, isArchived: true } } },
+        })
+      ).map((l) => l.owner);
+      const createdHere = new Set<string>();
       for (const o of recoveredOwners) {
         const name = o.name.trim();
         if (!name) continue;
@@ -206,9 +222,11 @@ export async function POST(
         const currentZip = o.currentZip;
 
         let ownerId: string | null = null;
+        const samePropertyOwner = pickSamePropertyOwner(samePropertyPool, name);
+        if (samePropertyOwner) ownerId = samePropertyOwner.id;
         // ⚠住所・郵便番号の「今の値」はここでは覚えない。補完はロックの下で
         //   読み直してから決める（設計 §6.3(2)）。
-        if (address) {
+        if (!ownerId && address) {
           const normName = normalizeName(name);
           const normAddr = normalizeAddress(address);
           // archived owner は手動リンクでも既存候補として扱わない（Phase 2-A）。
@@ -253,6 +271,7 @@ export async function POST(
           });
           ownerId = created.id;
           ownerCreatedCount++;
+          createdHere.add(created.id);
         } else {
           // 既存所有者: 空欄の zip / address のみ補完（既存値は破壊しない）。
           // archive route との直列化のため、patch が空でも必ず updateMany を発行し
@@ -283,15 +302,29 @@ export async function POST(
             },
           });
           if (fresh) {
-            const registryPatch = resolveAddressPairBackfill(
-              { zip: fresh.zip, address: fresh.address },
-              { zip, address },
-            );
+            // 同じ物件で使い回した人がこの処理で作った人なら、後の行の住所に郵便番号と組で替える
+            // (謄本は古い順に載る=後のほうが新しい・発注者決定 11-12)。
+            const replace = samePropertyOwner
+              ? planSamePropertyAddressReplace(
+                  { zip: fresh.zip, address: fresh.address },
+                  { zip: zip ?? null, address: address ?? null },
+                  createdHere.has(ownerId),
+                )
+              : null;
+            const registryPatch: { zip?: string | null; address?: string } = replace
+              ? {
+                  address: replace.address,
+                  ...(replace.zip !== fresh.zip ? { zip: replace.zip } : {}),
+                }
+              : resolveAddressPairBackfill(
+                  { zip: fresh.zip, address: fresh.address },
+                  { zip, address },
+                );
             const currentPatch = resolveAddressPairBackfill(
               { zip: fresh.currentZip, address: fresh.currentAddress },
               { zip: currentZip, address: currentAddress },
             );
-            const fieldPatch: Record<string, string> = {
+            const fieldPatch: Record<string, string | null> = {
               ...registryPatch,
               ...(currentPatch.zip ? { currentZip: currentPatch.zip } : {}),
               ...(currentPatch.address
@@ -326,7 +359,10 @@ export async function POST(
             }
           }
         }
-        ownerIds.push(ownerId);
+        if (!ownerIds.includes(ownerId)) ownerIds.push(ownerId);
+        if (!samePropertyPool.some((p) => p.id === ownerId)) {
+          samePropertyPool.push({ id: ownerId, name, isArchived: false });
+        }
       }
 
       // 3. 物件の補完 + PropertyOwner link（冪等）。

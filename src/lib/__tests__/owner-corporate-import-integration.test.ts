@@ -187,15 +187,15 @@ describe("registry-pdf route Phase D 統合", () => {
     // 1本減ってその分「言及」が1つ増えただけでもカウントが変わらず検出できない。
     // 実際の呼び出しは必ず `await` を伴う(この関数は Promise を返す)ので、
     // `await fillOwnerCorporateNumberIfUnlocked(` を数える(定義行は対象外)。
-    // 住所なし経路・住所あり経路の2箇所のはず。
+    // 住所なし経路・住所あり経路・同じ物件の同じ名前の経路(2026-11-12)の3箇所のはず。
     const occurrences = (
       registryPdfSrc.match(/await fillOwnerCorporateNumberIfUnlocked\(/g) ?? []
     ).length;
     expect(
       occurrences,
-      `await fillOwnerCorporateNumberIfUnlocked( の出現回数が期待(呼び出し2箇所)と異なる(${occurrences}件)。` +
+      `await fillOwnerCorporateNumberIfUnlocked( の出現回数が期待(呼び出し3箇所)と異なる(${occurrences}件)。` +
         "どちらかの reuse パスが直接 updateMany を書いてヘルパーを経由しなくなった可能性がある。",
-    ).toBe(2);
+    ).toBe(3);
   });
 
   it("create パスで data.corporateNumber を save action のみ乗せる", () => {

@@ -22,7 +22,7 @@ vi.mock("@/lib/prisma", () => {
       updateMany: vi.fn(),
     },
     owner: { findMany: vi.fn(), create: vi.fn(), updateMany: vi.fn() },
-    propertyOwner: { findFirst: vi.fn(), create: vi.fn() },
+    propertyOwner: { findFirst: vi.fn(), create: vi.fn(), findMany: vi.fn() },
     importJob: { create: vi.fn(), update: vi.fn() },
     importJobRow: { create: vi.fn() },
     attachment: { create: vi.fn() },
@@ -75,7 +75,7 @@ const PDF = Buffer.from([1, 2, 3, 4, 5, 6, 7, 8, 9, 10]);
 const pm = prisma as unknown as {
   property: { findUnique: Mock; update: Mock };
   owner: { findMany: Mock; create: Mock; updateMany: Mock };
-  propertyOwner: { findFirst: Mock; create: Mock };
+  propertyOwner: { findFirst: Mock; create: Mock; findMany: Mock };
   importJob: { create: Mock; update: Mock };
   importJobRow: { create: Mock };
   attachment: { create: Mock };
@@ -102,6 +102,8 @@ beforeEach(() => {
   pm.owner.create.mockResolvedValue({ id: "owner-new" });
   pm.owner.updateMany.mockResolvedValue({ count: 1 });
   pm.propertyOwner.findFirst.mockResolvedValue(null);
+  // 同じ物件の同じ名前の人(2026-11-12)は、既定ではいない
+  pm.propertyOwner.findMany.mockResolvedValue([]);
   pm.propertyOwner.create.mockResolvedValue({});
   pm.attachment.create.mockResolvedValue({ id: "att-1" });
   pm.$transaction.mockImplementation((cb: (tx: typeof prisma) => unknown) =>

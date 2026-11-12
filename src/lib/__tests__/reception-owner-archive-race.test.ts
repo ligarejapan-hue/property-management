@@ -126,7 +126,7 @@ vi.mock("@/lib/prisma", () => {
     // 補完はロックの下で読み直してから決めるため、tx にも findUnique/update が要る。
     owner: { updateMany: vi.fn(), findUnique: vi.fn(), update: vi.fn() },
     changeLog: { createMany: vi.fn() },
-    propertyOwner: { findUnique: vi.fn(), create: vi.fn() },
+    propertyOwner: { findUnique: vi.fn(), create: vi.fn(), findMany: vi.fn() },
     $queryRaw: vi.fn(async () => [{ id: "p1" }]), // 親行ロック(#364 R10)
   };
   return {
@@ -138,7 +138,7 @@ vi.mock("@/lib/prisma", () => {
         create: vi.fn(),
         update: vi.fn(),
       },
-      propertyOwner: { findUnique: vi.fn(), create: vi.fn() },
+      propertyOwner: { findUnique: vi.fn(), create: vi.fn(), findMany: vi.fn() },
       importJob: { create: vi.fn(), update: vi.fn() },
       importJobRow: { create: vi.fn() },
       $transaction: vi
@@ -168,14 +168,14 @@ const pm = prisma as unknown as {
     create: Mock;
     update: Mock;
   };
-  propertyOwner: { findUnique: Mock; create: Mock };
+  propertyOwner: { findUnique: Mock; create: Mock; findMany: Mock };
   importJob: { create: Mock; update: Mock };
   importJobRow: { create: Mock };
   $transaction: Mock;
   _tx: {
     owner: { updateMany: Mock; findUnique: Mock; update: Mock };
     changeLog: { createMany: Mock };
-    propertyOwner: { findUnique: Mock; create: Mock };
+    propertyOwner: { findUnique: Mock; create: Mock; findMany: Mock };
   };
 };
 
@@ -264,6 +264,8 @@ beforeEach(() => {
     Promise.resolve({ id: `owner-${data.name}` }),
   );
   pm.propertyOwner.findUnique.mockResolvedValue(null);
+  // 同じ物件の同じ名前の人(2026-11-12)は、既定ではいない
+  pm.propertyOwner.findMany.mockResolvedValue([]);
   pm.propertyOwner.create.mockResolvedValue({});
 
   pm.$transaction.mockImplementation((fn: (tx: unknown) => unknown) =>
@@ -471,5 +473,75 @@ describe("POST /api/import/reception-owner: version を進める(Task 9)", () =>
     );
     expect(dmCall).toBeDefined();
     expect(dmCall![0].data).toEqual({ dmStatus: "send", version: { increment: 1 } });
+  });
+});
+
+describe("POST /api/import/reception-owner: 同じ物件の同じ名前の人を使い回す(2026-11-12 発注者決定)", () => {
+  const twoRows = (rows: Array<{ name: string; address: string; zip: string | null }>) =>
+    vi.mocked(buildCombinedMatches).mockReturnValue([
+      {
+        reception: {
+          rowNumber: 1, matchKey: "k", fColumn: "", kColumn: "", lotNumber: "",
+          buildingNumber: "", coOwnersNote: "", shinkiValue: "", dlMarked: false,
+        },
+        propertyMatch: { status: "matched", property: { id: PROPERTY_ID } },
+        owners: rows.map((r) => ({ ...r, dm: "", propertyAddress: "", roomNo: null })),
+        // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      } as any,
+    ]);
+
+  it("同じ物件に同じ名前の人がいれば、住所が違っても新しく作らない(前からいる人の住所は替えない)", async () => {
+    twoRows([{ name: "髙橋 一郎", address: "大阪市北区1-1", zip: "530-0001" }]);
+    pm.propertyOwner.findMany.mockResolvedValue([
+      { owner: { id: "linked-1", name: "高橋一郎", isArchived: false, corporateNumber: null } },
+    ]);
+    pm.owner.findMany.mockResolvedValue([]);
+    pm._tx.owner.findUnique.mockResolvedValue({
+      zip: "100-0001", address: "東京都港区芝1-2-3", currentZip: null, currentAddress: null,
+    });
+    pm._tx.propertyOwner.findUnique.mockResolvedValue({ propertyId: PROPERTY_ID });
+
+    const res = await POST(makeRequest());
+    expect([200, 201]).toContain(res.status);
+    expect(pm.owner.create).not.toHaveBeenCalled();
+    expect(pm._tx.propertyOwner.create).not.toHaveBeenCalled();
+    expect(pm._tx.owner.update).not.toHaveBeenCalled();
+  });
+
+  it("同じ取り込みで同じ人が住所違いで2回出たら1人にし、後の行の住所(郵便番号と組)に替えて履歴を残す", async () => {
+    twoRows([
+      { name: "山田太郎", address: "東京都港区芝1-2-3", zip: "100-0001" },
+      { name: "山田 太郎", address: "大阪市北区1-1", zip: "530-0001" },
+    ]);
+    pm.owner.findMany.mockResolvedValue([]);
+    pm.owner.findFirst.mockResolvedValue(null);
+    // 1人目を作ったあとは、その人が物件に紐づいている
+    pm.propertyOwner.findMany.mockReset();
+    pm.propertyOwner.findMany
+      .mockResolvedValueOnce([])
+      .mockResolvedValue([
+        { owner: { id: "owner-山田太郎", name: "山田太郎", isArchived: false, corporateNumber: null } },
+      ]);
+    pm._tx.owner.findUnique.mockResolvedValue({
+      zip: "100-0001", address: "東京都港区芝1-2-3", currentZip: null, currentAddress: null,
+    });
+    pm._tx.propertyOwner.findUnique.mockResolvedValue({ propertyId: PROPERTY_ID });
+
+    const res = await POST(makeRequest());
+    expect([200, 201]).toContain(res.status);
+    expect(pm.owner.create).toHaveBeenCalledTimes(1);
+    expect(pm._tx.owner.update).toHaveBeenCalledTimes(1);
+    expect(pm._tx.owner.update.mock.calls[0][0].data).toMatchObject({
+      address: "大阪市北区1-1",
+      zip: "530-0001",
+      version: { increment: 1 },
+    });
+    const logs = pm._tx.changeLog.createMany.mock.calls[0][0].data as Array<{ fieldName: string; oldValue: string | null; newValue: string | null }>;
+    expect(logs).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({ fieldName: "address", oldValue: "東京都港区芝1-2-3", newValue: "大阪市北区1-1" }),
+        expect.objectContaining({ fieldName: "zip", oldValue: "100-0001", newValue: "530-0001" }),
+      ]),
+    );
   });
 });

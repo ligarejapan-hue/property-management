@@ -50,25 +50,25 @@ const VERSIONED: Record<string, string> = {
   "src/app/api/import/jobs/[jobId]/rollback/route.ts:559":
     "property の RESTORABLE_PROPERTY_FIELDS+棟のつなぎ(buildingId/buildingName)(ロールバック復元)+version increment" +
     "(Task 9で修正: 元は進めていなかった)",
-  "src/app/api/import/jobs/[jobId]/rows/[rowId]/manual-link-reception-owner/route.ts:302":
+  "src/app/api/import/jobs/[jobId]/rows/[rowId]/manual-link-reception-owner/route.ts:335":
     "owner の住所ペア空欄補完(fieldPatch)+version increment",
-  "src/app/api/import/jobs/[jobId]/rows/[rowId]/manual-link-reception-owner/route.ts:344":
+  "src/app/api/import/jobs/[jobId]/rows/[rowId]/manual-link-reception-owner/route.ts:380":
     "property.lotNumber/buildingNumber(空欄補完)+version increment" +
     "(Task 9で修正: 元は進めていなかった)",
   "src/app/api/import/jobs/[jobId]/rows/[rowId]/route.ts:243":
     "owner の住所ペア空欄補完(fieldPatch)+version increment",
-  "src/app/api/import/reception-owner/route.ts:353":
+  "src/app/api/import/reception-owner/route.ts:359":
     "property.lotNumber/buildingNumber/roomNo(空欄補完)+version increment" +
     "(Task 9で修正: 元は進めていなかった)",
-  "src/app/api/import/reception-owner/route.ts:404":
+  "src/app/api/import/reception-owner/route.ts:411":
     "property.dmStatus(hold→send昇格)+version increment" +
     "(Task 9で修正: 元は進めていなかった)",
-  "src/app/api/import/reception-owner/route.ts:630":
+  "src/app/api/import/reception-owner/route.ts:678":
     "owner の住所ペア空欄補完(fieldPatch)+version increment",
-  "src/app/api/import/reception-owner/route.ts:687":
+  "src/app/api/import/reception-owner/route.ts:735":
     "owner.corporateNumber(空欄埋め)+version increment" +
     "(Task 9で修正: 元は進めていなかった)",
-  "src/app/api/import/reception-owner/route.ts:699":
+  "src/app/api/import/reception-owner/route.ts:747":
     "owner.corporateNumber/companyRegistryNumber(分断型復元の空欄埋め)+version increment" +
     "(Task 9で修正: 元は進めていなかった)",
   "src/app/api/owners/[id]/corporate-apply/route.ts:368":
@@ -119,10 +119,12 @@ const VERSIONED: Record<string, string> = {
     "property.registryStatus=scheduled(有料取得の予約)+version increment",
   "src/lib/registry-fetch/auto-fetch.ts:4579":
     "property.registryStatus=obtained(有料取得の確定)+version increment",
-  "src/lib/registry-pdf/process.ts:263":
+  "src/lib/registry-pdf/process.ts:267":
     "owner.corporateNumber(空欄補完・fillOwnerCorporateNumberIfUnlocked)+version increment" +
     "(Task 7で修正済)",
-  "src/lib/registry-pdf/process.ts:1049":
+  "src/lib/registry-pdf/process.ts:581":
+    "owner.address(同じ謄本で同じ人が住所違いで2回出たとき、この実行で作った人だけ後の住所に替える・2026-11-12)+version increment",
+  "src/lib/registry-pdf/process.ts:1127":
     "property.registryStatus/realEstateNumber/lotNumber/buildingNumber/exclusiveAreaRegistry/landArea/landAreaMethod/totalFloorArea(取得状況前進+空欄補完)+version increment",
   "src/lib/registry-pdf/fill-areas.ts:157":
     "property.exclusiveAreaRegistry/landArea/landAreaMethod/totalFloorArea/lotNumber/buildingNumber/structureType/builtYear/builtMonth(謄本から空欄補完・2026-10-25/11-01)+version increment" +
@@ -164,7 +166,7 @@ const ALLOWED_WITHOUT_VERSION: Record<string, AllowedEntry> = {
     reason: "property.updatedAt のみ(行ロック獲得のための touch)",
     keys: ["updatedAt"],
   },
-  "src/app/api/import/jobs/[jobId]/rows/[rowId]/manual-link-reception-owner/route.ts:262": {
+  "src/app/api/import/jobs/[jobId]/rows/[rowId]/manual-link-reception-owner/route.ts:281": {
     reason: "owner.updatedAt のみ(行ロック獲得のための touch)",
     keys: ["updatedAt"],
   },
@@ -177,7 +179,7 @@ const ALLOWED_WITHOUT_VERSION: Record<string, AllowedEntry> = {
     reason: "owner.updatedAt のみ(既存所有者へのリンク可否確認のための touch)",
     keys: ["updatedAt"],
   },
-  "src/app/api/import/reception-owner/route.ts:590": {
+  "src/app/api/import/reception-owner/route.ts:622": {
     reason: "owner.updatedAt のみ(行ロック獲得のための touch)",
     keys: ["updatedAt"],
   },
@@ -213,19 +215,19 @@ const ALLOWED_WITHOUT_VERSION: Record<string, AllowedEntry> = {
       "編集画面から書けない)",
     keys: ["dmUndeliverableAt"],
   },
-  "src/lib/registry-pdf/process.ts:423": {
+  "src/lib/registry-pdf/process.ts:429": {
     reason:
       "owner.updatedAt のみ(添付済み謄本からの反映で、候補の所有者を物件行より先に" +
       "id順で押さえる touch。ロック順を /owners 窓口と同じ Owner→物件 にそろえる)",
     keys: ["updatedAt"],
   },
-  "src/lib/registry-pdf/process.ts:700": {
+  "src/lib/registry-pdf/process.ts:777": {
     reason:
       "owner.updatedAt のみ(ロック後の再探索で拾った所有者を、アーカイブされていない" +
       "条件で押さえる touch。押さえられなければ新規作成に回す)",
     keys: ["updatedAt"],
   },
-  "src/lib/registry-pdf/process.ts:575": {
+  "src/lib/registry-pdf/process.ts:652": {
     reason: "owner.updatedAt のみ(既存所有者再利用時の行ロックtouch)",
     keys: ["updatedAt"],
   },

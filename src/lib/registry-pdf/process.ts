@@ -26,7 +26,11 @@ import { writeAuditLog } from "@/lib/audit";
 import { canAccessPropertyRecord } from "@/lib/property-access";
 import { recordChanges, PROPERTY_TRACKED_FIELDS } from "@/lib/change-log";
 import { normalizeName, normalizeAddress } from "@/lib/normalize";
-import { pickReusableAddresslessOwner } from "@/lib/registry-pdf/owner-reuse";
+import {
+  pickReusableAddresslessOwner,
+  pickSamePropertyOwner,
+  planSamePropertyAddressReplace,
+} from "@/lib/registry-pdf/owner-reuse";
 import { parseRegistryText } from "@/lib/pdf-registry-parser";
 import { planRegistryAreaFill, registryAreasOf, type RegistryAreaCurrent } from "@/lib/registry-area";
 import { fillPropertyFromRegistry } from "@/lib/registry-pdf/fill-areas";
@@ -328,6 +332,8 @@ async function reflectParsedOwners(args: {
 
   /** この実行で自分が紐づけた所有者(見直しの対象から外すために覚えておく)。 */
   const linkedByThisRun: string[] = [];
+  /** この実行で作った所有者(同じ物件で同じ人が住所違いで2回出たとき、後の住所に替えてよい人)。 */
+  const createdByThisRun = new Set<string>();
 
   /**
    * 物件行のロックを握った状態で「まだ所有者が0件か」を確かめる。
@@ -491,6 +497,7 @@ async function reflectParsedOwners(args: {
           // ⚠自分が入れた分として記録する。これが漏れると、次の所有者の見直しで
           //   **自分が今入れた紐付けを数えて 409** になり、承認した全員が巻き戻る。
           linkedByThisRun.push(created.id);
+          createdByThisRun.add(created.id);
           await tx.propertyOwner.create({
             data: {
               propertyId,
@@ -531,6 +538,76 @@ async function reflectParsedOwners(args: {
           recordCorporateDecision(outcome.decision);
         }
         continue;
+      }
+
+      // ── 同じ物件に、名前が同じ人(全角半角・空白・異体字をそろえて)が既に紐づいていれば、
+      //    住所が違っても同じ人として使い回す(2026-11-12 発注者決定) ──
+      // なぜ: 謄本には同じ人が住所違いで2回載ることがある(持分を別の時期に取得し、その間に
+      //   引っ越したが住所の変更登記をしていない)。名前+住所の照合だけでは同じ物件に同じ人が
+      //   2人でき、DM が古い住所にも出ていた(本番で285組)。
+      // ⚠物件をまたぐ照合(下)は従来どおり名前+住所(別の物件の同姓同名は別人であり得る)。
+      // ⚠所有者を入れ替える呼び出し(replaceExistingOwners)・空の物件だけに入れる呼び出し
+      //   (requireNoExistingOwners)では、前からいる人は使い回さない(この実行で紐づけた人だけ)。
+      // ⚠既に紐づいている=リンクは作らない。前からいる人の**住所は替えない**(人が直した住所
+      //   かもしれない)。前からいる人に書くのは、住所なしの経路と同じ法人番号の空欄補完だけ
+      //   (fillOwnerCorporateNumberIfUnlocked が所有者の行を押さえてから書く。物件行は握らない)。
+      //   住所を替えるのは、この実行で作った人(自分のトランザクションが作った/押さえた行)だけ。
+      //   ⚠この経路の住所の差し替えは変更履歴を残さない(この実行の中で作ったばかりの人の
+      //   住所を同じ謄本の後の行に合わせるだけ・謄本の取り込みは郵便番号を持たない)。
+      {
+        const allowPreexisting = !args.replaceExistingOwners && !args.requireNoExistingOwners;
+        const linkedNow = await db.propertyOwner.findMany({
+          where: { propertyId },
+          orderBy: [{ createdAt: "asc" }, { ownerId: "asc" }],
+          select: {
+            owner: {
+              select: { id: true, name: true, address: true, isArchived: true, corporateNumber: true },
+            },
+          },
+        });
+        const same = pickSamePropertyOwner(
+          linkedNow
+            .map((l) => l.owner)
+            .filter((o) => allowPreexisting || linkedByThisRun.includes(o.id)),
+          ownerInfo.name,
+        );
+        if (same) {
+          const replace = planSamePropertyAddressReplace(
+            { zip: null, address: same.address },
+            { zip: null, address: ownerInfo.address },
+            createdByThisRun.has(same.id),
+          );
+          if (replace) {
+            await db.owner.updateMany({
+              where: { id: same.id, isArchived: false },
+              data: { address: replace.address, version: { increment: 1 } },
+            });
+          }
+          matchedCount++;
+          // 法人番号は住所なしの経路と同じく、空のときだけ埋める(既存値は上書きしない)。
+          const decision = decide(
+            { name: ownerInfo.name, address: ownerInfo.address ?? null },
+            same.corporateNumber,
+          );
+          if (decision.action === "save" && decision.corporateNumber) {
+            const filled = await fillOwnerCorporateNumberIfUnlocked(
+              same.id,
+              decision.corporateNumber,
+              asOneBatch ? db : undefined,
+            );
+            if (filled.locked) {
+              markOwnerCorporateFillSkipped();
+              recordCorporateDecision({ action: "noop", corporateNumber: null });
+            } else {
+              recordCorporateDecision(
+                filled.count === 0 ? { action: "noop", corporateNumber: null } : decision,
+              );
+            }
+          } else {
+            recordCorporateDecision(decision);
+          }
+          continue;
+        }
       }
 
       // address あり → normalizeName + normalizeAddress で既存 Owner 検索
@@ -755,6 +832,7 @@ async function reflectParsedOwners(args: {
 
         resolvedOwnerId = resolved.id;
         if (resolved.created) {
+          createdByThisRun.add(resolved.id);
           createdCount++;
           recordCorporateDecision(cnDecisionForCreate);
         } else {
