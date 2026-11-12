@@ -521,16 +521,37 @@ function city3d(wrap){
   // カメラの道すじ:遠くの斜め上 → 物件の近くを低く → 真上(平面の地図と同じ画角)
   const FOV=30, ZEND=(MH/2*MM)/Math.tan(FOV/2*Math.PI/180);
   const cam=new T.PerspectiveCamera(FOV,W/H,10,12000);
-  const curve=new T.CatmullRomCurve3([new T.Vector3(-1700,-3300,2600),new T.Vector3(-520,-1500,1050),new T.Vector3(160,-560,330),new T.Vector3(420,-150,560),new T.Vector3(0,-0.02,ZEND)],false,'centripetal');
+  // ②で見せるもの(物件・施設の柱と札・駅・徒歩ルート)が全部画面に入る位置を求める(2026-11-12 札が画面からはみ出す対策)。
+  // 向きは南南西の斜め上から。札は柱の上に出るので、上側は余白を多めにとる
+  const fitPts=[[0,0,0],[0,0,70]];
+  FAC.forEach((f,i)=>{fitPts.push([f.x,f.y,0],[f.x,f.y,55+(i%4)*18+10]);});
+  if(MAP.rt&&MAP.st){fitPts.push([MAP.st.x,MAP.st.y,0],[MAP.st.x,MAP.st.y,80]); mdec(MAP.rt,0).forEach(([x,y])=>fitPts.push([x,y,0]));}
+  let fx0=Infinity,fx1=-Infinity,fy0=Infinity,fy1=-Infinity; fitPts.forEach(([x,y])=>{fx0=Math.min(fx0,x);fx1=Math.max(fx1,x);fy0=Math.min(fy0,y);fy1=Math.max(fy1,y);});
+  const FC=new T.Vector3((fx0+fx1)/2,(fy0+fy1)/2,0), EL=60*Math.PI/180, AZ=new T.Vector2(-.28,-.96).normalize();
+  const camPos=d=>new T.Vector3(FC.x+AZ.x*Math.cos(EL)*d,FC.y+AZ.y*Math.cos(EL)*d,Math.sin(EL)*d);
+  const pv=new T.Vector3();
+  const fits=d=>{cam.position.copy(camPos(d)); cam.up.set(0,0,1); cam.lookAt(FC); cam.updateMatrixWorld();
+    return fitPts.every(p=>{pv.set(p[0],p[1],p[2]).project(cam); return pv.z<1&&Math.abs(pv.x)<.8&&pv.y>-.86&&pv.y<.7;});};
+  let fd=600; while(fd<9000&&!fits(fd))fd*=1.05;
+  scene.fog.near=Math.max(2600,fd*1.5); scene.fog.far=Math.max(6200,fd*3.2);
+  pinG.scale.setScalar(1.6*Math.max(1,fd/1100)); // 遠くから見るときは物件の印も大きく
+  const Q0=camPos(fd*1.3), Q1=camPos(fd), TOP=new T.Vector3(0,-0.02,ZEND), S0=new T.Vector3(-1700,-3300,2600);
+  // ① 遠く→Q0(②の始まり) ② Q0→Q1 をゆっくり ③ Q1→真上
+  const c1=new T.CatmullRomCurve3([S0,S0.clone().lerp(Q0,.55).add(new T.Vector3(320,0,-150)),Q0],false,'centripetal');
+  const c3=new T.CatmullRomCurve3([Q1,Q1.clone().lerp(TOP,.5).add(new T.Vector3(180,120,0)),TOP],false,'centripetal');
+  const ORG=new T.Vector3(0,0,0), tgt=new T.Vector3();
   const ease=t=>t<.5?4*t*t*t:1-Math.pow(-2*t+2,3)/2, DUR=CITY_DUR, t0=performance.now(); let raf, done=false, stopped=false;
   const up0=new T.Vector3(0,0,1), up1=new T.Vector3(0,1,0);
   const cleanup=()=>{if(stopped)return;stopped=true;cancelAnimationFrame(raf);facs.forEach(q=>q.st.dispose());if(route){route.geo.dispose();route.stx.dispose();}R.dispose();bg.dispose();og.dispose();tex.dispose();cv.remove();};
-  // 時間 t → 道すじの位置 e: ①は速め、②はゆっくり(道すじの .5→.66 を長い時間で)、③で真上へ
-  const sm=x=>x*x*(3-2*x), camAt=t=>t<CITY_A?.5*ease(t/CITY_A):t<CITY_B?.5+.16*sm((t-CITY_A)/(CITY_B-CITY_A)):.66+.34*ease((t-CITY_B)/(1-CITY_B));
-  function frame(now){if(stopped)return; const t=Math.max(0,Math.min(1,(now-t0)/DUR)), e=camAt(t);
-    cam.position.copy(curve.getPoint(e));
-    const k=Math.max(0,(e-.78)/.22); cam.up.copy(up0).lerp(up1,k*k).normalize();
-    cam.lookAt(0,0,0);
+  // 時間 t → カメラ: ①は速め、②は全部が見える高さへゆっくり降りる、③で真上へ(見る先も物件へ戻す)
+  const sm=x=>x*x*(3-2*x);
+  function frame(now){if(stopped)return; const t=Math.max(0,Math.min(1,(now-t0)/DUR));
+    let k=0;
+    if(t<CITY_A){const e=ease(t/CITY_A); cam.position.copy(c1.getPoint(e)); tgt.copy(ORG).lerp(FC,e);}
+    else if(t<CITY_B){cam.position.copy(Q0).lerp(Q1,sm((t-CITY_A)/(CITY_B-CITY_A))); tgt.copy(FC);}
+    else{const e=ease((t-CITY_B)/(1-CITY_B)); cam.position.copy(c3.getPoint(e)); tgt.copy(FC).lerp(ORG,e); k=e;}
+    cam.up.copy(up0).lerp(up1,k*k).normalize();
+    cam.lookAt(tgt);
     pinG.position.z=ptop[2]+4+Math.sin(now/260)*4; pinG.rotation.z=now/900;
     ringM.scale.setScalar(1+((now/1400)%1)*2.4); ringM.material.opacity=.8*(1-((now/1400)%1));
     // ② の間に施設を1つずつ(各 0.4 秒で現れる)、同時に徒歩ルートを引く。③ の終わりで消える(平面の地図に引き継ぐ)

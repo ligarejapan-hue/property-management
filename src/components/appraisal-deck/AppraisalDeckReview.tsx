@@ -323,6 +323,16 @@ export function AppraisalDeckReview({ propertyId, deckId, canWrite }: { property
     );
     if (j) await reload();
   };
+  const unconfirm = async () => {
+    // 取り消しのあと reload() で画面を読み直す=保存前の直しが消えるので、先に保存してもらう(rebuildMap と同じ)
+    if (dirty) {
+      setMsg({ kind: "err", text: "直した内容を先に保存してください" });
+      return;
+    }
+    if (!window.confirm("確認を取り消して、確認待ちに戻します。中身はそのまま残ります。よろしいですか？")) return;
+    const j = await call(`${base}/${deckId}/confirm`, { method: "DELETE" }, "確認を取り消しました。直してから、もう一度「確認済みにする」を押してください");
+    if (j) await reload();
+  };
   const reread = async () => {
     if (!deck.sourceAttachmentId) return;
     if (!window.confirm("査定報告書をもう一度読み取ります。直した内容はそのまま残ります。よろしいですか？")) return;
@@ -544,7 +554,11 @@ export function AppraisalDeckReview({ propertyId, deckId, canWrite }: { property
                 <Button size="sm" onClick={confirm} disabled={busy || dirty}>
                   確認済みにする
                 </Button>
-              ) : null}
+              ) : (
+                <Button variant="ghost" size="sm" onClick={unconfirm} disabled={busy}>
+                  確認を取り消す
+                </Button>
+              )}
             </>
           ) : null}
         </div>

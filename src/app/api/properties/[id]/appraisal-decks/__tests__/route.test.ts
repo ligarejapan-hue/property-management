@@ -45,7 +45,7 @@ vi.mock("@/lib/appraisal-deck/map/refresh", () => ({ refreshDeckMap: refresh }))
 
 import { GET as listGET, POST as listPOST } from "../route";
 import { GET as deckGET, PATCH as deckPATCH } from "../[deckId]/route";
-import { POST as confirmPOST } from "../[deckId]/confirm/route";
+import { POST as confirmPOST, DELETE as confirmDELETE } from "../[deckId]/confirm/route";
 import { POST as mapPOST } from "../[deckId]/map/route";
 
 const P = (r: string, a: string) => ({ resource: r, action: a, granted: true });
@@ -100,6 +100,7 @@ describe("権限(査定報告書を開ける人と同じ範囲)", () => {
     ["修正", () => deckPATCH(req("PATCH", { overrides: {} }), dctx)],
     ["確認", () => confirmPOST(req("POST", { reviewedUpdatedAt: REV }), dctx)],
     ["地図", () => mapPOST(req("POST"), dctx)],
+    ["確認の取り消し", () => confirmDELETE(req("DELETE"), dctx)],
   ];
   it.each(calls)("%s: 所有者の情報を見られない人は 403", async (_n, call) => {
     perms.current = [P("property", "read"), P("property", "write")];
@@ -118,6 +119,7 @@ describe("権限(査定報告書を開ける人と同じ範囲)", () => {
     expect((await deckPATCH(req("PATCH", { overrides: {} }), dctx)).status).toBe(403);
     expect((await confirmPOST(req("POST", { reviewedUpdatedAt: REV }), dctx)).status).toBe(403);
     expect((await mapPOST(req("POST"), dctx)).status).toBe(403);
+    expect((await confirmDELETE(req("DELETE"), dctx)).status).toBe(403);
     expect(refresh).not.toHaveBeenCalled();
   });
 });
@@ -239,5 +241,35 @@ describe("POST 確認", () => {
       overrides: { expected: { total: 1300 }, range: { min: 1200, max: 1400, minTsubo: null, maxTsubo: null } },
     });
     expect((await confirmPOST(req("POST", { reviewedUpdatedAt: REV }), dctx)).status).toBe(200);
+  });
+});
+
+describe("DELETE 確認の取り消し(2026-11-12)", () => {
+  it("確認済みを確認待ちに戻す(確認した人・日時も消す)・監査ログは状態だけ", async () => {
+    db.appraisalDeck.findFirst.mockResolvedValue({ ...DECK, status: "confirmed" });
+    const r = await confirmDELETE(req("DELETE"), dctx);
+    expect(r.status).toBe(200);
+    expect(await r.json()).toEqual({ status: "draft" });
+    expect(db.appraisalDeck.updateMany.mock.calls[0][0]).toEqual({
+      where: { id: "d1", status: "confirmed" },
+      data: { status: "draft", confirmedBy: null, confirmedAt: null, updatedBy: "u1" },
+    });
+    expect(audit.mock.calls[0][0].detail).toEqual({ propertyId: "p1", status: "draft", unconfirmed: true });
+  });
+  it("確認待ちなら何も変えない", async () => {
+    expect((await confirmDELETE(req("DELETE"), dctx)).status).toBe(200);
+    expect(db.appraisalDeck.updateMany).not.toHaveBeenCalled();
+    expect(audit).not.toHaveBeenCalled();
+  });
+  it("ほかの物件の資料・無い資料は 404", async () => {
+    db.appraisalDeck.findFirst.mockResolvedValue(null);
+    expect((await confirmDELETE(req("DELETE"), dctx)).status).toBe(404);
+    expect(db.appraisalDeck.findFirst.mock.calls[0][0].where).toEqual({ id: "d1", propertyId: "p1" });
+  });
+  it("同時にほかで戻されていたら監査ログを重ねて書かない", async () => {
+    db.appraisalDeck.findFirst.mockResolvedValue({ ...DECK, status: "confirmed" });
+    db.appraisalDeck.updateMany.mockResolvedValue({ count: 0 });
+    expect((await confirmDELETE(req("DELETE"), dctx)).status).toBe(200);
+    expect(audit).not.toHaveBeenCalled();
   });
 });

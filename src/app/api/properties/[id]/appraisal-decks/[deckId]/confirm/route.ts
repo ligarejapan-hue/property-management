@@ -61,3 +61,35 @@ export async function POST(request: Request, { params }: { params: Promise<{ id:
     return handleApiError(error);
   }
 }
+
+/**
+ * 確認を取り消す(確認待ちに戻す・2026-11-12 発注者指示「誤って確認済みにすると元に戻せない」)。
+ * 中身(読み取り・直した内容・地図)はそのまま。戻したあとは資料の表示・ダウンロードが確認前の扱いになる。
+ */
+export async function DELETE(_request: Request, { params }: { params: Promise<{ id: string; deckId: string }> }) {
+  try {
+    const { id, deckId } = await params;
+    const session = await getApiSession();
+    const permissions = await getUserPermissions(session.id);
+    await assertAppraisalDeckAccess(session, permissions, id, "write");
+    const deck = await prisma.appraisalDeck.findFirst({ where: { id: deckId, propertyId: id }, select: { id: true, status: true } });
+    if (!deck) throw new ApiError(404, "資料が見つかりません", "NOT_FOUND");
+    if (deck.status !== "confirmed") return apiResponse({ status: deck.status });
+    const updated = await prisma.appraisalDeck.updateMany({
+      where: { id: deck.id, status: "confirmed" },
+      data: { status: "draft", confirmedBy: null, confirmedAt: null, updatedBy: session.id },
+    });
+    if (updated.count === 1) {
+      await writeAuditLog({
+        userId: session.id,
+        action: "update",
+        targetTable: "appraisal_decks",
+        targetId: deck.id,
+        detail: { propertyId: id, status: "draft", unconfirmed: true },
+      });
+    }
+    return apiResponse({ status: "draft" });
+  } catch (error) {
+    return handleApiError(error);
+  }
+}
