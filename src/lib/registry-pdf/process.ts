@@ -1005,6 +1005,11 @@ export async function processRegistryPdf(
   //   - 確認画面で人が直した所有者(edited.owners)は、人の判断としてそのまま使う
   //   所有者事項(=全部事項でない)の扱いは変えない。
   const isFullCertificate = isFullCertificateText(text);
+  // 登記上の記載(所有者事項の行ごとの住所と持分)を記録するのは所有者事項だけ。
+  // ⚠種別の指定(certificateType)だけで決めない(@codex #714 P2): 手で取り込んだ全部事項は
+  //   種別なしで届く。全部事項の所有者は権利の判定結果(か人の修正)で、所有者事項の行ではない
+  //   =記録すると、先に入っていた行ごとの内訳を消して置き換えてしまう。
+  const recordRegistryEntries = args.certificateType !== "all" && !isFullCertificate;
   let ownersFromFullCertificate = false;
   let fullCertificateOwnersUndetermined = false;
   if (isFullCertificate && !edited?.owners) {
@@ -1293,7 +1298,7 @@ export async function processRegistryPdf(
           beforeFirstWrite: args.beforeFirstWrite,
           beforeCommit: args.beforeCommit,
           replaceExistingOwners: args.replaceExistingOwners,
-          recordRegistryEntries: args.certificateType !== "all",
+          recordRegistryEntries: recordRegistryEntries,
           owners: parsed.owners,
           recordCorporateDecision,
           markOwnerCorporateFillSkipped,
@@ -1390,7 +1395,7 @@ export async function processRegistryPdf(
               scopedSession: args.enforcePropertyScope ? session : undefined,
               beforeFirstWrite: args.beforeFirstWrite,
               beforeCommit: args.beforeCommit,
-              recordRegistryEntries: args.certificateType !== "all",
+              recordRegistryEntries: recordRegistryEntries,
               owners: parsed.owners,
               recordCorporateDecision,
               markOwnerCorporateFillSkipped,

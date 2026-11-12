@@ -393,6 +393,25 @@ describe("同じ謄本を取り直しても住所なしの所有者が増えな�
     expect(pm.propertyOwnerRegistryEntry.createMany).not.toHaveBeenCalled();
   });
 
+  it("⚠登記上の記載: 手で取り込んだ全部事項(種別なし)でも記録しない=先に入っている行ごとの内訳を消さない(@codex #714 P2)", async () => {
+    pm.propertyOwner.findMany.mockResolvedValue([
+      { id: "po-1", ownerId: "owner-new", owner: { id: "owner-x", name: "鈴木一郎", address: "x", isArchived: false, corporateNumber: null } },
+    ]);
+    await processRegistryPdf({
+      session,
+      // 全部事項の本文(権利部・甲区がある)。種別の指定は無い=手で取り込んだもの
+      text: "表題部 権利部（甲区）（所有権に関する事項）",
+      propertyId: PROP_ID,
+      fileName: "謄本.pdf",
+      // 確認画面で人が直した所有者は全部事項でも反映される
+      edited: { owners: [{ name: "山田太郎", address: "住所A", share: "10分の7" }] } as never,
+      pdfBuffer: PDF,
+    });
+    expect(pm.owner.create).toHaveBeenCalledTimes(1);
+    expect(pm.propertyOwnerRegistryEntry.deleteMany).not.toHaveBeenCalled();
+    expect(pm.propertyOwnerRegistryEntry.createMany).not.toHaveBeenCalled();
+  });
+
   it("登記上の記載: 行の記録に失敗しても、取り込みは失敗にしない(所有者は確定済み・氏名や住所をログに出さない)", async () => {
     withAddress([{ name: "山田太郎", address: "住所A" }]);
     pm.propertyOwner.findMany.mockReset();

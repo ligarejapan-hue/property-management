@@ -124,7 +124,7 @@ const VERSIONED: Record<string, string> = {
     "(Task 7で修正済)",
   "src/lib/registry-pdf/process.ts:311":
     "owner.address(同じ物件で同じ人を使い回したとき、住所が空なら埋める・この実行が書いた住所のままなら後の行の住所に替える・setOwnerAddressGuarded・2026-11-12 @codex #710)+version increment",
-  "src/lib/registry-pdf/process.ts:1237":
+  "src/lib/registry-pdf/process.ts:1242":
     "property.registryStatus/realEstateNumber/lotNumber/buildingNumber/exclusiveAreaRegistry/landArea/landAreaMethod/totalFloorArea(取得状況前進+空欄補完)+version increment",
   "src/lib/registry-pdf/fill-areas.ts:157":
     "property.exclusiveAreaRegistry/landArea/landAreaMethod/totalFloorArea/lotNumber/buildingNumber/structureType/builtYear/builtMonth(謄本から空欄補完・2026-10-25/11-01)+version increment" +
