@@ -8,6 +8,7 @@
  * ⚠所有者事項の行の順に新旧の意味は無い。
  */
 import { parseRegistryShare } from "@/lib/registry-entries/share";
+import { pickSamePropertyOwner } from "@/lib/registry-pdf/owner-reuse";
 
 /** 取り込みで読んだ1行と、その行をどの所有者に当てたか。 */
 export interface RegistryEntrySourceRow {
@@ -156,4 +157,36 @@ export async function moveRegistryEntriesToLink(
     next += 1;
   }
   return moving.length;
+}
+
+/**
+ * 所有者事項の行を、物件につながっている所有者に当てる(純関数・添付済みの所有者事項からの
+ * 後追いの記録で使う・2026-11-12 第2回)。
+ * 同じ物件の中の「同じ人」の決め方は取り込みと同じ(名前を NFKC・空白・異体字でそろえて比べる)。
+ * つながっている人に当たらない行(まだ登録されていない人)は捨てる。
+ * ⚠住所では当てない(同じ人が住所違いで何行も載るのが、この記録の主題)。
+ *
+ * @param nameKey 名前をそろえる関数。**名義の確認から呼ぶときは、名義の確認と同じそろえ方**
+ *   (ownerNameKey=(株)と株式会社なども同じにする)を渡す。比べる側が「同じ人」とした人の行を、
+ *   当てる側が別人として捨てないため(捨てると「試し終えた」印だけ付いて二度と記録されない)。
+ *   渡さなければ取り込みと同じそろえ方。
+ */
+export function assignRegistryRowsToOwners(
+  rows: ReadonlyArray<{ name: string; address: string | null; share: string | null }>,
+  linkedOwners: ReadonlyArray<{ ownerId: string; name: string; isArchived: boolean }>,
+  nameKey?: (name: string) => string,
+): RegistryEntrySourceRow[] {
+  const out: RegistryEntrySourceRow[] = [];
+  for (const row of rows) {
+    let hit: { ownerId: string } | null = null;
+    if (nameKey) {
+      const key = nameKey(row.name);
+      // ⚠空どうしを一致させない(名前が読めていない行を巻き込まない)
+      if (key) hit = linkedOwners.find((o) => !o.isArchived && nameKey(o.name) === key) ?? null;
+    } else {
+      hit = pickSamePropertyOwner(linkedOwners, row.name);
+    }
+    if (hit) out.push({ ownerId: hit.ownerId, address: row.address, share: row.share });
+  }
+  return out;
 }

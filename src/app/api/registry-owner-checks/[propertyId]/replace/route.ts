@@ -56,8 +56,14 @@ export async function POST(
       expectedLinkedOwnerIds: body.linkedOwnerIds,
       expectedRemoveOwnerIds: body.removeOwnerIds,
       // 外す・足すと同じトランザクションで、比べ直した結果と DM を残す
-      beforeCommit: async (tx, registryNames) => {
-        resultAfter = await recordCheckAfterReplace(tx, propertyId, body.attachmentId, registryNames);
+      beforeCommit: async (tx, registryNames, registryRows) => {
+        resultAfter = await recordCheckAfterReplace(
+          tx,
+          propertyId,
+          body.attachmentId,
+          registryNames,
+          registryRows,
+        );
         if (body.restoreDm) dmRestored = await restoreDmSendIfHold(tx, propertyId, session.id);
       },
     });

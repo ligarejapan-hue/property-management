@@ -133,4 +133,12 @@ describe("保存する形(名前・文字は残さない)", () => {
     expect(ownerDiffLabelFromStored(null)).toBeNull();
     expect(ownerDiffLabelFromStored("unknown_code")).toBe("その他の違い");
   });
+  it("⚠印(自動の登録・登記上の記載の記録)は種類ではないので、一覧の文言に出さない", () => {
+    // 2026-11-12 第2回: 「記録を試し終えた」印 entries は、違う以外の行にも付く
+    expect(ownerDiffLabelFromStored("kanji,count:1:2,autoadd,entries")).toBe(
+      "漢字の違い・人数が違う（謄本1名・システム2名）",
+    );
+    expect(ownerDiffLabelFromStored("entries")).toBeNull();
+    expect(ownerDiffLabelFromStored("autoadd,entries")).toBeNull();
+  });
 });

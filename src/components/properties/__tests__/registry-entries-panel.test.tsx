@@ -80,6 +80,69 @@ describe("物件の所有者カードへの組み込み(ソース)", () => {
 
   it("見出しに持分の札・見出しの下に内訳の表を置く", () => {
     expect(src).toContain("<RegistryShareBadge registry={po.registry} />");
-    expect(src).toContain("<RegistryEntriesPanel registry={po.registry} />");
+    expect(src).toContain("<RegistryEntriesPanel");
+    expect(src).toContain("registry={po.registry}");
+  });
+
+  it("「この住所を宛先にする」は、住所と郵便番号の両方を編集できる人に・編集中でないときだけ渡す", () => {
+    const flat = src.split(/\s+/).join(" ");
+    expect(flat).toContain(
+      "onUseAddress={ editAllowed && !editing && !editLockHeld && editableFields.address && editableFields.zip ? handleUseRegistryAddress : undefined }",
+    );
+  });
+
+  it("⚠押しても保存はしない(編集を開いて住所を入れ、郵便番号を空にするだけ)", () => {
+    const start = src.indexOf("const handleUseRegistryAddress = (address: string) => {");
+    expect(start).toBeGreaterThan(0);
+    const body = src.slice(start, src.indexOf("\n  };", start));
+    expect(body).toContain("handleEdit();");
+    expect(body).toContain('setForm((f) => ({ ...f, address, zip: "" }));');
+    for (const word of ["handleSave", "updateOwner", "fetch("]) {
+      expect(body).not.toContain(word);
+    }
+  });
+});
+
+describe("この住所を宛先にする(第2回)", () => {
+  const owner = "神奈川県横浜市見本区3-3-3";
+
+  it("今の登記上の住所と同じ行には「今の宛先」・ほかの行にはボタンを出す", () => {
+    const html = renderToStaticMarkup(
+      <RegistryEntriesPanel registry={three} ownerAddress={owner} onUseAddress={() => {}} />,
+    );
+    expect(html.match(/今の宛先/g)).toHaveLength(1);
+    expect(html.split("この住所を宛先にする</button>").length - 1).toBe(2);
+    expect(html).toContain("保存で確定してください");
+  });
+
+  it("書き方だけ違う住所(全角・ハイフン)も同じ住所として「今の宛先」にする", () => {
+    const html = renderToStaticMarkup(
+      <RegistryEntriesPanel registry={three} ownerAddress={"神奈川県横浜市見本区３－３－３"} onUseAddress={() => {}} />,
+    );
+    expect(html.match(/今の宛先/g)).toHaveLength(1);
+  });
+
+  it("⚠編集できない人(onUseAddress なし)にはボタンを出さない", () => {
+    const html = renderToStaticMarkup(<RegistryEntriesPanel registry={three} ownerAddress={owner} />);
+    expect(html).not.toContain("この住所を宛先にする</button>");
+    expect(html).toContain("今の宛先");
+  });
+
+  it("住所が伏せられている行(null)にはボタンを出さない", () => {
+    const html = renderToStaticMarkup(
+      <RegistryEntriesPanel
+        registry={{ entries: [{ position: 1, address: null, share: null }, { position: 2, address: "住所B", share: null }], shareTotal: null }}
+        ownerAddress={"住所Z"}
+        onUseAddress={() => {}}
+      />,
+    );
+    expect(html.split("この住所を宛先にする</button>").length - 1).toBe(1);
+  });
+
+  it("現住所が入っている人には、DM は現住所あてと出す", () => {
+    const html = renderToStaticMarkup(
+      <RegistryEntriesPanel registry={three} ownerAddress={owner} hasCurrentAddress onUseAddress={() => {}} />,
+    );
+    expect(html).toContain("DM は現住所あてに出ます");
   });
 });

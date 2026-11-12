@@ -26,7 +26,9 @@ import {
 } from "@/lib/registry-owner-apply/apply";
 import { processRegistryPdf } from "@/lib/registry-pdf/process";
 import { compareRegistryOwners, ownerNameKey, type RegistryOwnerCheckResult } from "@/lib/registry-owner-check/compare";
-import { AUTO_ADD_DONE_TOKEN, ownerDiff } from "@/lib/registry-owner-check/diff";
+import { hasPrivateUseChar } from "@/lib/private-use-char";
+import { AUTO_ADD_DONE_TOKEN, ENTRIES_DONE_TOKEN, ownerDiff } from "@/lib/registry-owner-check/diff";
+import { assignRegistryRowsToOwners, replaceRegistryEntries } from "@/lib/registry-entries/write";
 import { registryOwnersToAutoAdd, uploaderMayAutoAdd } from "@/lib/registry-owner-check/auto-add";
 
 type Tx = ReplaceTx;
@@ -44,7 +46,15 @@ export const REGISTRY_OWNER_READ_TIMEOUT_MS = 20_000;
 /** 謄本の名義を読む。読めなければ null。謄本が無ければ "none"。 */
 async function readRegistryNames(
   propertyId: string,
-): Promise<{ attachmentId: string; names: string[] | null } | "none"> {
+): Promise<
+  | {
+      attachmentId: string;
+      names: string[] | null;
+      /** 所有者事項の行(名前・住所・持分)。登記上の記載の記録に使う。読めなければ空。 */
+      rows: { name: string; address: string | null; share: string | null }[];
+    }
+  | "none"
+> {
   const latest = await findLatestOwnerRegistryAttachment(prisma, propertyId);
   if (!latest) return "none";
   try {
@@ -52,12 +62,13 @@ async function readRegistryNames(
       timeoutMs: REGISTRY_OWNER_READ_TIMEOUT_MS,
     });
     const owners = parseRegistryOwnerTable(registry.text);
-    const names = owners?.map((o) => o.name).filter((n) => n && n.trim()) ?? [];
-    return { attachmentId: latest.id, names: names.length > 0 ? names : null };
+    const rows = (owners ?? []).filter((o) => o.name && o.name.trim());
+    const names = rows.map((o) => o.name);
+    return { attachmentId: latest.id, names: names.length > 0 ? names : null, rows };
   } catch (e) {
     const code = (e as { code?: unknown } | null)?.code;
     if (code === "REGISTRY_FILE_MISSING" || code === "REGISTRY_TEXT_UNREADABLE") {
-      return { attachmentId: latest.id, names: null };
+      return { attachmentId: latest.id, names: null, rows: [] };
     }
     // 読んでいる間に別の謄本が付いた(=比べ直しの印が立つ)・消えた
     if (code === "REGISTRY_ATTACHMENT_CHANGED" || code === "REGISTRY_NOT_FOUND") return "none";
@@ -136,6 +147,8 @@ async function writeResult(
   prev: { attachmentId: string | null; decision: string | null },
   /** 違い(mismatch)のときの種類(記号と人数だけ)。それ以外は null。 */
   diff: { kind: string; rank: number } | null,
+  /** この謄本から登記上の記載の記録を試し終えたか(→ ENTRIES_DONE_TOKEN)。 */
+  entriesDone = false,
 ): Promise<void> {
   const keepDecision =
     prev.decision === "keep" && prev.attachmentId === attachmentId && result === "mismatch";
@@ -146,7 +159,8 @@ async function writeResult(
       result,
       stale: false,
       checkedAt: new Date(),
-      diffKind: diff?.kind ?? null,
+      diffKind:
+        [diff?.kind, entriesDone ? ENTRIES_DONE_TOKEN : null].filter(Boolean).join(",") || null,
       diffRank: diff?.rank ?? null,
       ...(keepDecision ? {} : { decision: null, decidedBy: null, decidedAt: null }),
     },
@@ -167,6 +181,50 @@ function diffOf(
   if (result !== "mismatch") return null;
   const d = ownerDiff(registryNames, systemNames);
   return { kind: autoAddDone ? `${d.stored},${AUTO_ADD_DONE_TOKEN}` : d.stored, rank: d.rank };
+}
+
+/**
+ * 所有者事項の行を、物件につながっている所有者(名前が同じ人)に当てて記録する。
+ * 当たらない行は捨てる(まだ登録されていない人)。行が無ければ何もしない。
+ *
+ * ⚠名前の当て方は**名義の確認と同じそろえ方**(ownerNameKey)。比べる側が「同じ・表記の違い」と
+ *   した人の行を、当てる側が別人として捨てないため。外字(私用領域の字)の名前は当てない
+ *   (名義の確認でも、外字の名前はどの名前とも同じにしない)。
+ * ⚠**記録は補助の情報**=失敗しても、名義の確認の結果や「直す」を巻き戻さない(内部レビュー P2)。
+ *   同じトランザクションの中で SAVEPOINT を切り、失敗したら記録の分だけ取り消して続ける。
+ *   ログには氏名・住所を出さない。失敗しても「試し終えた」印は付く(毎回読み直さない)=
+ *   次に謄本か所有者が変わって比べ直すときに入り直る。
+ */
+async function recordRegistryEntriesFromCheck(
+  tx: Tx,
+  propertyId: string,
+  rows: ReadonlyArray<{ name: string; address: string | null; share: string | null }>,
+  attachmentId: string,
+): Promise<void> {
+  const usable = rows.filter((r) => !hasPrivateUseChar(r.name));
+  if (usable.length === 0) return;
+  await tx.$executeRawUnsafe("SAVEPOINT registry_entries");
+  try {
+    const linked = await tx.propertyOwner.findMany({
+      where: { propertyId },
+      orderBy: REGISTRY_OWNER_REVIEW_ORDER,
+      select: { ownerId: true, owner: { select: { name: true, isArchived: true } } },
+    });
+    const assigned = assignRegistryRowsToOwners(
+      usable,
+      linked
+        .filter((l) => !hasPrivateUseChar(l.owner.name))
+        .map((l) => ({ ownerId: l.ownerId, name: l.owner.name, isArchived: l.owner.isArchived })),
+      ownerNameKey,
+    );
+    await replaceRegistryEntries(tx, propertyId, assigned, attachmentId);
+    await tx.$executeRawUnsafe("RELEASE SAVEPOINT registry_entries");
+  } catch (e) {
+    await tx.$executeRawUnsafe("ROLLBACK TO SAVEPOINT registry_entries");
+    console.error(
+      `[registry-owner-check] 登記上の記載を記録できませんでした kind=${e instanceof Error ? e.name : typeof e}`,
+    );
+  }
 }
 
 /** 1物件で自動で足す人数の上限(取込処理が一度に受ける人数)。超える物件は人が確かめる。 */
@@ -212,6 +270,11 @@ export async function checkPropertyRegistryOwners(
     const kept = prev.decision === "keep" && prev.attachmentId === read.attachmentId;
     const autoAddDone =
       kept || autoAddAlreadyDone(prev, read.attachmentId) || !hasOwnersToAutoAdd(read.names ?? [], systemNames);
+    // 登記上の記載(所有者事項の行ごとの住所と持分)を、つながっている所有者に当てて記録する
+    // (2026-11-12 第2回)。添付済みの所有者事項の後追いと、足す人だけを渡す取り込み
+    // (自動の登録・謄本の名義に直す)のあとの記録を、ここで受け持つ。
+    // ⚠物件行を押さえたこの tx の中で。所有者(owners)の行には書かない。
+    await recordRegistryEntriesFromCheck(tx, propertyId, read.rows, read.attachmentId);
     await writeResult(
       tx,
       propertyId,
@@ -219,6 +282,7 @@ export async function checkPropertyRegistryOwners(
       result,
       prev,
       diffOf(result, read.names ?? [], systemNames, autoAddDone),
+      true,
     );
     return result;
   });
@@ -252,6 +316,8 @@ function pendingWhereSql(limit: number | null, backoff = false) {
   const doneTokenLike = `%${AUTO_ADD_DONE_TOKEN}%`;
   const gaijiLike = "%gaiji%";
   const gaijiSince = REGISTRY_OWNER_GAIJI_AWARE_SINCE_UTC;
+  // 登記上の記載の記録を試し終えた印(ENTRIES_DONE_TOKEN)。無い行は1回比べ直して記録する。
+  const entriesLike = `%${ENTRIES_DONE_TOKEN}%`;
   return limit === null
     ? prisma.$queryRaw<{ n: bigint }[]>`
         SELECT count(*)::bigint AS n FROM properties p
@@ -259,6 +325,7 @@ function pendingWhereSql(limit: number | null, backoff = false) {
           AND EXISTS (SELECT 1 FROM attachments a WHERE a.property_id = p.id AND a.type = 'registry'
                       AND a.is_deleted = false AND a.registry_certificate_type = ${SUPPORTED_CERTIFICATE_TYPE})
           AND NOT EXISTS (SELECT 1 FROM registry_owner_checks c WHERE c.property_id = p.id AND c.stale = false
+                          AND c.diff_kind LIKE ${entriesLike}
                           AND NOT (c.result = 'mismatch' AND c.decision IS NULL
                                    AND (c.diff_kind IS NULL OR c.diff_kind NOT LIKE ${doneTokenLike}
                                         OR (c.checked_at < ${gaijiSince}::timestamp
@@ -269,6 +336,7 @@ function pendingWhereSql(limit: number | null, backoff = false) {
           AND EXISTS (SELECT 1 FROM attachments a WHERE a.property_id = p.id AND a.type = 'registry'
                       AND a.is_deleted = false AND a.registry_certificate_type = ${SUPPORTED_CERTIFICATE_TYPE})
           AND NOT EXISTS (SELECT 1 FROM registry_owner_checks c WHERE c.property_id = p.id AND c.stale = false
+                          AND c.diff_kind LIKE ${entriesLike}
                           AND NOT (c.result = 'mismatch' AND c.decision IS NULL
                                    AND (c.diff_kind IS NULL OR c.diff_kind NOT LIKE ${doneTokenLike}
                                         OR (c.checked_at < ${gaijiSince}::timestamp
@@ -431,12 +499,34 @@ export async function recordCheckAfterReplace(
   propertyId: string,
   attachmentId: string,
   registryNames: string[],
+  /**
+   * 所有者事項の行(名前・住所・持分)。渡されたら、同じトランザクションで登記上の記載も記録する
+   * (2026-11-12 第2回)。足す取り込みは足す人だけを渡すので行を記録しない(partialOwners)=
+   * 書類の行を全部持っているここで記録し、もう一度読み直すむだを出さない。
+   */
+  registryRows?: ReadonlyArray<{ name: string; address: string | null; share: string | null }>,
 ): Promise<RegistryOwnerCheckResult> {
   const prev = await lockCheckRow(tx, propertyId);
   const systemNames = await linkedOwnerNames(tx, propertyId);
   const result = compareRegistryOwners(registryNames, systemNames);
+  if (registryRows) {
+    await recordRegistryEntriesFromCheck(
+      tx,
+      propertyId,
+      registryRows.filter((o) => o.name && o.name.trim()),
+      attachmentId,
+    );
+  }
   // 直したあと(謄本の人は全員そろった)=自動で足す人はもういない
-  await writeResult(tx, propertyId, attachmentId, result, prev, diffOf(result, registryNames, systemNames, true));
+  await writeResult(
+    tx,
+    propertyId,
+    attachmentId,
+    result,
+    prev,
+    diffOf(result, registryNames, systemNames, true),
+    registryRows !== undefined,
+  );
   return result;
 }
 
@@ -562,7 +652,7 @@ export async function autoAddRegistryOnlyOwners(propertyId: string): Promise<num
       if (nameKeys(fresh) !== nameKeys(targets)) throw ownersChangedError();
     },
     beforeCommit: async (tx) => {
-      await recordCheckAfterReplace(tx, propertyId, registry.attachmentId, registryNames);
+      await recordCheckAfterReplace(tx, propertyId, registry.attachmentId, registryNames, registryOwners);
     },
   });
   return targets.length;

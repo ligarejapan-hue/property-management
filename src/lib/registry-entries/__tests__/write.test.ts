@@ -1,9 +1,11 @@
 import { describe, it, expect, vi } from "vitest";
 import {
+  assignRegistryRowsToOwners,
   moveRegistryEntriesToLink,
   planRegistryEntries,
   replaceRegistryEntries,
 } from "@/lib/registry-entries/write";
+import { ownerNameKey } from "@/lib/registry-owner-check/compare";
 
 /**
  * 登記上の記載(所有者事項の行ごとの住所と持分)の記録(2026-11-12 発注者決定)。
@@ -117,5 +119,70 @@ describe("moveRegistryEntriesToLink(所有者の統合で、消えるつなが�
     const db = makeDb([], [{ id: "m9", position: 3 }]);
     expect(await moveRegistryEntriesToLink(db, "from", "to")).toBe(0);
     expect(db.propertyOwnerRegistryEntry.update).not.toHaveBeenCalled();
+  });
+});
+
+describe("assignRegistryRowsToOwners(所有者事項の行を、物件につながっている所有者に当てる・第2回)", () => {
+  const linked = [
+    { ownerId: "taro", name: "山田太郎", isArchived: false },
+    { ownerId: "takahashi", name: "髙橋一郎", isArchived: false },
+    { ownerId: "old", name: "鈴木一郎", isArchived: true },
+  ];
+
+  it("名前が同じ人に当てる(空白・異体字はそろえる・住所では当てない)", () => {
+    expect(
+      assignRegistryRowsToOwners(
+        [
+          { name: "山田太郎", address: "住所A", share: "10分の2" },
+          { name: "高橋一郎", address: "住所X", share: "10分の3" },
+          { name: "山田　太郎", address: "住所B", share: "10分の5" },
+        ],
+        linked,
+      ),
+    ).toEqual([
+      { ownerId: "taro", address: "住所A", share: "10分の2" },
+      { ownerId: "takahashi", address: "住所X", share: "10分の3" },
+      { ownerId: "taro", address: "住所B", share: "10分の5" },
+    ]);
+  });
+
+  it("つながっていない人・保管した人の行は捨てる", () => {
+    expect(
+      assignRegistryRowsToOwners(
+        [
+          { name: "田中花子", address: "住所Z", share: null },
+          { name: "鈴木一郎", address: "住所Y", share: null },
+        ],
+        linked,
+      ),
+    ).toEqual([]);
+  });
+
+  it("⚠名前のそろえ方を渡したら、そのそろえ方で当てる(名義の確認と同じ決め方にするため)", () => {
+    // 名義の確認は (株) と 株式会社 を同じ人にする。当てる側が別人として捨てると、
+    // 「試し終えた」印だけ付いて二度と記録されない(内部レビュー P2)。
+    const corp = [{ ownerId: "c1", name: "(株)見本商事", isArchived: false }];
+    const rows = [{ name: "株式会社見本商事", address: "住所C", share: "2分の1" }];
+    expect(assignRegistryRowsToOwners(rows, corp)).toEqual([]);
+    expect(assignRegistryRowsToOwners(rows, corp, ownerNameKey)).toEqual([
+      { ownerId: "c1", address: "住所C", share: "2分の1" },
+    ]);
+  });
+
+  it("そろえた名前が空の行・保管した人には当てない", () => {
+    const key = (s: string) => s.trim();
+    expect(
+      assignRegistryRowsToOwners(
+        [
+          { name: "  ", address: "住所A", share: null },
+          { name: "鈴木一郎", address: "住所B", share: null },
+        ],
+        [
+          { ownerId: "empty", name: "", isArchived: false },
+          { ownerId: "old", name: "鈴木一郎", isArchived: true },
+        ],
+        key,
+      ),
+    ).toEqual([]);
   });
 });
