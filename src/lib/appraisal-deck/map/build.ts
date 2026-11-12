@@ -9,6 +9,7 @@
  */
 import { classifyRings, VectorTile, type VectorTileLayer } from "@mapbox/vector-tile";
 import { PbfReader } from "pbf";
+import { pickStation, shortestWalk, type Station } from "./route";
 import {
   clipLineToRect,
   clipPolygonToRect,
@@ -59,6 +60,11 @@ export type DeckMapData = {
   bh: number[][];
   /** 水面の中の島など(穴) [w の添字, ...輪(差分・外周と逆回り)] */
   wh: number[][];
+  /** 最寄り駅(2026-11-11)。n=駅名・x/y=物件からのメートル。見つからなければ無い。 */
+  st?: { n: string; x: number; y: number };
+  /** 物件から最寄り駅までの徒歩ルートの目安(差分)と、その道のり(m)。 */
+  rt?: number[];
+  rtm?: number;
   /** 中心の求め方(2026-11-11)。address=住所から求めた目安(資料にそう書く)。なければ gps。 */
   loc?: "gps" | "address";
   /** 川の線(差分) */
@@ -137,7 +143,12 @@ function distToPoly(pt: Pt, p: Poly): number {
 const num = (v: unknown, d = 0) => (typeof v === "number" && Number.isFinite(v) ? v : d);
 
 /** 取ってきたタイルから地図のデータを作る(通信しない・テストできる部分)。 */
-export function buildMapFromTiles(center: { lat: number; lng: number }, tiles: TileBuffer[], now = new Date()): DeckMapData {
+export function buildMapFromTiles(
+  center: { lat: number; lng: number },
+  tiles: TileBuffer[],
+  now = new Date(),
+  opts: { station?: string | null } = {},
+): DeckMapData {
   const proj = makeLocalProjection(center.lng, center.lat);
   const EX = MAP_EX;
   const EY = MAP_EY;
@@ -148,6 +159,8 @@ export function buildMapFromTiles(center: { lat: number; lng: number }, tiles: T
   const water: Poly[] = [];
   const rivers: number[][] = [];
   const rails: Array<Array<number | string>> = [];
+  const walkLines: Pt[][] = [];
+  const stations: Station[] = [];
 
   for (const t of tiles) {
     if (!t.buf || t.buf.length === 0) continue;
@@ -193,10 +206,24 @@ export function buildMapFromTiles(center: { lat: number; lng: number }, tiles: T
             .filter((d) => d.length >= 4);
 
     each("road", (f, c) => {
-      if (num(f.properties.ftCode) !== 2701) return;
+      const ft = num(f.properties.ftCode);
+      // 道路の中心線(27xx)だけ。22xx は道路の縁。rdCtg=3 は高速自動車国道等(歩けない・色を変える)。
+      if (ft < 2700 || ft >= 2800 || f.type !== 2) return;
+      const motorway = num(f.properties.rdCtg, 9) === 3 ? 1 : 0;
+      if (!motorway) {
+        for (const l of f.loadGeometry()) {
+          for (const part of clipLineToRect(l.map(c), lineCut.minX, lineCut.minY, lineCut.maxX, lineCut.maxY)) walkLines.push(part);
+        }
+      }
+      if (ft !== 2701) return;
       const width = Math.max(0, Math.min(4, num(f.properties.rnkWidth)));
-      const motorway = num(f.properties.motorway, 9) === 0 ? 1 : 0;
       for (const d of lines(f, c)) roads.push([width, motorway, ...d]);
+    });
+    each("label", (f, c) => {
+      const name = f.properties.knj;
+      if (f.type !== 1 || typeof name !== "string" || !/駅$/.test(name)) return;
+      const p = f.loadGeometry()[0]?.[0];
+      if (p) stations.push({ name: name.slice(0, 40), x: c(p)[0], y: c(p)[1] });
     });
     each("waterarea", (f, c) => {
       if (f.type !== 3) return;
@@ -232,7 +259,18 @@ export function buildMapFromTiles(center: { lat: number; lng: number }, tiles: T
   const waterKept = water.filter((x) => encodeDelta(x.outer).length >= 6);
   const w = waterKept.map((x) => encodeDelta(x.outer));
   const wh = waterKept.flatMap((x, i) => x.holes.map((h) => [i, ...encodeDelta(h)]).filter((h) => h.length >= 7));
-  return { version: MAP_DATA_VERSION, builtAt: now.toISOString(), ex: EX, ey: EY, b, p: target, r: roads, w, v: rivers, t: rails, bh, wh };
+  const out: DeckMapData = { version: MAP_DATA_VERSION, builtAt: now.toISOString(), ex: EX, ey: EY, b, p: target, r: roads, w, v: rivers, t: rails, bh, wh };
+  // 最寄り駅までの徒歩ルート(目安)。駅が地図の中に無い・道がつながらなければ付けない。
+  const st = pickStation(stations, opts.station);
+  if (st) {
+    out.st = { n: st.name, x: Math.round(st.x), y: Math.round(st.y) };
+    const walk = shortestWalk(walkLines, [0, 0], [st.x, st.y]);
+    if (walk && walk.meters <= 3000) {
+      out.rt = encodeDelta(walk.path);
+      out.rtm = walk.meters;
+    }
+  }
+  return out;
 }
 
 export type FetchLike = (url: string, init: { signal: AbortSignal; headers: Record<string, string> }) => Promise<{

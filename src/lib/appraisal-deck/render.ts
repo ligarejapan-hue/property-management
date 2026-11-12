@@ -77,6 +77,10 @@ export function buildDeckData(m: MergedAppraisal, opts: { draft: boolean }) {
     plans: m.plans,
     range: m.range,
     unconnected: isUnconnectedCase(m),
+    facilities: (m.facilities ?? [])
+      .filter((f) => !f.hidden)
+      .slice(0, 14)
+      .map(({ cat, name, dist, min, x, y }, i) => ({ no: i + 1, cat, name, dist, min, x, y })),
     headlines,
     headlineFundCustom: !!custom.fund?.trim(),
   };
@@ -103,6 +107,7 @@ function mapSection(m: MergedAppraisal, map: DeckMapData): string {
   const h = escHtml(mapHeadline(m));
   const st = stationName(m.station);
   const walk = !!st && m.walkMinutes != null;
+  const fac = (m.facilities ?? []).filter((f) => !f.hidden).slice(0, 14);
   return `<section class="page" data-k="map" data-sec="物件の場所" data-h="${h}">
   <div class="sec" data-r>物件の場所<span>${escHtml(m.area ?? "")}</span></div>
   <h1 data-r style="--d:120">${h}</h1>
@@ -112,9 +117,12 @@ function mapSection(m: MergedAppraisal, map: DeckMapData): string {
     </div>
     <aside class="side" data-r style="--d:2200">
       ${walk ? `<div class="big">${escHtml(String(m.walkMinutes))}<u>分</u></div><div class="what">${escHtml(`${m.railLine ? m.railLine + " " : ""}${st}駅まで徒歩`)}</div>` : ""}
-      <p>地図の円は物件からの直線距離で、徒歩5分（400m）・10分（800m）の目安です（80mを1分として計算）。実際の道のりはこれより長くなります。</p>
-      ${approx ? "<p>印の位置は住所から求めた目安で、実際の建物の位置とずれることがあります。</p>" : ""}
-      <div class="cmp"><span class="eq">地図：国土地理院ベクトルタイル（地理院地図Vector）を加工して作成。立体の地図の建物の高さはイメージで、実際の高さではありません。</span></div>
+      ${fac.length ? `<ol class="facl">${fac.map((f, i) => `<li data-cat="${escHtml(f.cat)}"><b>${i + 1}</b><span class="fc">${escHtml(f.cat)}</span><span class="fn">${escHtml(f.name)}</span><span class="fm">徒歩${escHtml(String(f.min))}分</span></li>`).join("")}</ol>` : `<p>地図の円は物件からの直線距離で、徒歩5分（400m）・10分（800m）の目安です（80mを1分として計算）。実際の道のりはこれより長くなります。</p>`}
+      <div class="cmp"><span class="eq">${[
+        fac.length ? "周辺施設は査定報告書の周辺施設情報（株式会社ナビタイムジャパン提供）によります。徒歩分は直線距離からの推定です。" : "",
+        approx ? "物件の印は住所から求めた目安の位置です。" : "",
+        "地図は国土地理院ベクトルタイルを加工して作成。立体の建物の高さはイメージです。",
+      ].join("")}</span></div>
     </aside>
   </div>
 </section>

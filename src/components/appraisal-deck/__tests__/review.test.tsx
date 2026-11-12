@@ -116,3 +116,11 @@ describe("物件ページのカード", () => {
     expect(formatAppraisedOn(null)).toBe("査定日の記載なし");
   });
 });
+
+describe("載せない周辺施設(2026-11-11)", () => {
+  const EXF = { ...EX, facilities: [{ cat: "コンビニ", name: "a", dist: 1, min: 1, x: 1, y: 1 }, { cat: "公園", name: "b", dist: 1, min: 1, x: null, y: null }] } as unknown as AppraisalExtract;
+  it("外した番号だけ送る(範囲外の番号は捨てる)・外していなければ送らない", () => {
+    expect(buildOverrides({ ...FORM, "fac.hidden": "1,7" }, EXF, false).overrides.hiddenFacilities).toEqual([1]);
+    expect(buildOverrides({ ...FORM, "fac.hidden": "" }, EXF, false).overrides.hiddenFacilities).toBeUndefined();
+  });
+});

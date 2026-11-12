@@ -53,6 +53,8 @@ export const appraisalOverridesSchema = z
       .refine((ps) => new Set(ps.map((p) => p.name)).size === ps.length, { message: "同じ案が2つあります" }),
     range: rangeSchema.nullable(),
     headlines: z.object(Object.fromEntries(HEADLINE_KEYS.map((k) => [k, z.string().trim().max(120)]))).partial().strict(),
+    /** 資料に載せない周辺施設(読み取った一覧の番号・0 から)。2026-11-11 */
+    hiddenFacilities: z.array(z.number().int().min(0).max(49)).max(50),
   })
   .partial()
   .strict()
@@ -62,10 +64,12 @@ export type AppraisalOverrides = z.infer<typeof appraisalOverridesSchema>;
 
 /** 読み取った数字に担当者の修正を重ねた、資料に使う値。 */
 export function mergeAppraisal(extracted: AppraisalExtract, overrides: AppraisalOverrides) {
-  const { headlines, expected, ai, adjustment, ...rest } = overrides;
+  const { headlines, expected, ai, adjustment, hiddenFacilities, ...rest } = overrides;
+  const hidden = new Set(hiddenFacilities ?? []);
   return {
     ...extracted,
     ...rest,
+    facilities: (extracted.facilities ?? []).map((f, i) => (hidden.has(i) ? { ...f, hidden: true } : f)),
     expected: { ...extracted.expected, ...expected },
     ai: { ...extracted.ai, ...ai },
     adjustment: { ...extracted.adjustment, ...adjustment },

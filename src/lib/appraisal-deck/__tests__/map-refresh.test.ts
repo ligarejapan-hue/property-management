@@ -29,7 +29,7 @@ const IN = { deckId: "d1", propertyId: "p1", userId: "u1" };
 
 beforeEach(() => {
   vi.clearAllMocks();
-  db.appraisalDeck.findFirst.mockResolvedValue({ id: "d1", status: "draft" });
+  db.appraisalDeck.findFirst.mockResolvedValue({ id: "d1", status: "draft", extracted: { station: "見本駅" } });
   db.appraisalDeck.count.mockResolvedValue(0);
   db.appraisalDeck.updateMany.mockResolvedValue({ count: 1 });
   db.property.findUnique.mockResolvedValue({ gpsLat: "35.6447123", gpsLng: "139.6992456" });
@@ -73,6 +73,15 @@ describe("refreshDeckMap", () => {
     expect(await refreshDeckMap({ ...IN, mode: "auto" })).toEqual({ ok: false, reason: "not_draft" });
     expect(fetchTiles).not.toHaveBeenCalled();
     expect(db.appraisalDeck.updateMany).not.toHaveBeenCalled();
+  });
+  it("徒歩ルートの行き先に査定書の最寄駅を渡す(2026-11-11)", async () => {
+    await refreshDeckMap({ ...IN, mode: "manual" });
+    expect(buildMap.mock.calls[0][3]).toEqual({ station: "見本駅" });
+  });
+  it("担当者が最寄駅を直していれば、直した駅へのルートにする(@codex #707)", async () => {
+    db.appraisalDeck.findFirst.mockResolvedValue({ id: "d1", status: "draft", extracted: { station: "見本駅" }, overrides: { station: "別駅" } });
+    await refreshDeckMap({ ...IN, mode: "manual" });
+    expect(buildMap.mock.calls[0][3]).toEqual({ station: "別駅" });
   });
   it("GPS 座標があれば住所は調べない(印は物件の建物に付く)", async () => {
     db.property.findUnique.mockResolvedValue({ gpsLat: "35.6447123", gpsLng: "139.6992456", address: "東京都架空区見本町4-5-6" });
@@ -125,5 +134,7 @@ describe("parseDeckMapData(資料に入れる前の形の確認)", () => {
     expect(parseDeckMapData({ ...MAP, lat: 35.6 })).toBeNull();
     expect(parseDeckMapData({ ...MAP, loc: "address" })).toMatchObject({ loc: "address" });
     expect(parseDeckMapData({ ...MAP, loc: "<x>" })).toBeNull();
+    expect(parseDeckMapData({ ...MAP, st: { n: "見本駅", x: 1, y: -2 }, rt: [0, 0, 2, 2], rtm: 120 })).toMatchObject({ rtm: 120 });
+    expect(parseDeckMapData({ ...MAP, st: { n: "x", x: 1, y: 2, lat: 35 } })).toBeNull();
   });
 });

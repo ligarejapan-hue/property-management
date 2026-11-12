@@ -157,8 +157,54 @@ describe("renderAppraisalDeck(資料の HTML)", () => {
     const html = renderAppraisalDeck(mergeAppraisal({ ...HOUSE, area: "東京都<b>区" }, {}), { draft: false, map: MAP });
     expect(html).not.toContain("<b>区");
   });
+  it("駅の札の徒歩分: 査定書の駅なら査定書の徒歩分、違う駅ならルートの道のりから(@codex #707)", () => {
+    const js = readFileSync(path.join(process.cwd(), "src/lib/appraisal-deck/assets/deck.js"), "utf8");
+    const lines = js.split("\n").filter((l) => /^const (stName|stWalk)=/.test(l));
+    expect(lines).toHaveLength(2);
+    const stWalk = (MAP: unknown, D: unknown) => new Function("MAP", "D", `${lines.join("\n")}\nreturn stWalk();`)(MAP, D) as number;
+    const map = { st: { n: "見本駅", x: 0, y: 0 }, rtm: 400 };
+    expect(stWalk(map, { station: "見本", walkMinutes: 15 })).toBe(15);
+    expect(stWalk({ ...map, st: { n: "別の駅", x: 0, y: 0 } }, { station: "見本駅", walkMinutes: 15 })).toBe(5);
+    expect(stWalk(map, { station: "見本駅", walkMinutes: null })).toBe(5);
+  });
+  it("平面の地図の範囲は、施設だけでなく徒歩ルートの道のり全体が入る大きさ(@codex #707)", () => {
+    const js = readFileSync(path.join(process.cwd(), "src/lib/appraisal-deck/assets/deck.js"), "utf8");
+    const lines = js.split("\n").filter((l) => /^const (mdec|ROUTE_PTS|FMAX|VX)=/.test(l));
+    expect(lines).toHaveLength(4);
+    const vx = (MAP: unknown, FAC: unknown[]) => new Function("MAP", "FAC", `${lines.join("\n")}\nreturn VX;`)(MAP, FAC) as number;
+    // [0,0]→[0,500]→[300,500]→[300,0](0.5m 単位の差分)。施設なし
+    const rt = [0, 0, 0, 1000, 600, 0, 0, -1000];
+    const v = vx({ ex: 1000, ey: 650, st: { n: "見本駅", x: 300, y: 0 }, rt }, []);
+    expect(v * (620 / 1080)).toBeGreaterThanOrEqual(500); // 南北に 500m 先まで見える
+  });
   it("資料の動き(deck.js)は構文として正しい", () => {
     const js = readFileSync(path.join(process.cwd(), "src/lib/appraisal-deck/assets/deck.js"), "utf8");
     expect(() => new Function(js)).not.toThrow();
+  });
+});
+
+describe("周辺施設(2026-11-11)", () => {
+  const FAC = [
+    { cat: "コンビニ", name: "<b>見本店</b>", dist: 100, min: 2, x: 100, y: 0 },
+    { cat: "公園", name: "見本公園", dist: 50, min: 1, x: null, y: null },
+    { cat: "銀行", name: "外した銀行", dist: 300, min: 4, x: 0, y: 300 },
+  ];
+  it("地図のページの右に一覧(外したものは出さない・文字は逃がす)・資料のデータにも番号つきで入る", () => {
+    const m = mergeAppraisal({ ...HOUSE, facilities: FAC }, { hiddenFacilities: [2] });
+    const html = renderAppraisalDeck(m, { draft: false, map: MAP });
+    expect(html).toContain('<ol class="facl">');
+    expect(html).toContain("&lt;b&gt;見本店&lt;/b&gt;");
+    expect(html).not.toContain("外した銀行");
+    expect(html).toContain("ナビタイムジャパン");
+    const data = JSON.parse(/<script id="deck-data" type="application\/json">([\s\S]*?)<\/script>/.exec(html)![1]);
+    expect(data.facilities.map((f: { no: number; cat: string }) => [f.no, f.cat])).toEqual([
+      [1, "コンビニ"],
+      [2, "公園"],
+    ]);
+  });
+  it("施設がなければ一覧は出さず、円の説明を出す", () => {
+    const html = renderAppraisalDeck(mergeAppraisal(HOUSE, {}), { draft: false, map: MAP });
+    expect(html).not.toContain('class="facl"');
+    expect(html).toContain("地図の円は物件からの直線距離");
   });
 });
