@@ -70,7 +70,7 @@ export function toDealView(r: Prisma.DealGetPayload<{ select: typeof DEAL_DETAIL
     contractAt: iso(r.contractAt), contractPlace: r.contractPlace, settlementAt: iso(r.settlementAt), settlementPlace: r.settlementPlace,
     price: yen(r.price), buildingTax: yen(r.buildingTax), deposit: yen(r.deposit), taxRateBp: r.taxRateBp,
     propertySnapshot: readSnapshot(r.propertySnapshot), counterpartyBroker: readBroker(r.counterpartyBroker),
-    assessments: readAssessments(r.assessments), costs: readCosts(r.costs), settlementTerms: readTerms(r.settlementTerms),
+    assessments: readAssessments(r.assessments), costs: readCosts(r.costs), settlementTerms: readTerms(r.settlementTerms, r.overrides),
     leases: readLeases(r.leases), overrides: readOverrides(r.overrides), fundingPlan: readFundingInputs(r.planInputs),
     businessPlan: readBusinessInputs(r.planInputs), targetParcels: readTargetParcels(r.targetParcels),
     version: r.version, createdAt: r.createdAt.toISOString(), updatedAt: r.updatedAt.toISOString(), parties: r.parties,

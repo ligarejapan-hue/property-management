@@ -26,6 +26,12 @@ describe("固都税の土地・建物の行(2026-11-12)", () => {
     expect(html).toContain("土地を足す");
     expect(html).toContain("建物を足す");
   });
+  it("持分の分子が分母より大きい行は、保存を止めて行の名前を返し、自動の税額も出さない(最終レビュー M-2)", () => {
+    const bad = row({ kind: "building", fixedBase: "1234567", shareNum: 3, shareDen: 2 });
+    expect(taxItemsFromForm([bad]).bad).toEqual(["建物1の持分(分子は分母以下にしてください)"]);
+    expect(render([bad])).not.toContain("placeholder=\"25,");
+    expect(render([bad])).toContain('placeholder=""');
+  });
   it("フォーム ↔ 保存の形: 空は null、読めない欄は名前を返す", () => {
     const r = taxItemsFromForm([row({ fixedBase: "1,000,000", fixedTax: "0", cityTax: "abc" })]);
     expect(r.bad).toEqual(["土地1の都市計画税の税額"]);

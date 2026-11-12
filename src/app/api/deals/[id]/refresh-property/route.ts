@@ -22,7 +22,7 @@ export async function POST(request: Request, ctx: Ctx) {
     const { session, perms } = await requireDeal("write");
     const id = z.string().uuid().parse((await ctx.params).id);
     const { version } = bodySchema.parse(await parseJsonBody(request));
-    const deal = await prisma.deal.findUnique({ where: { id }, select: { propertyId: true, settlementTerms: true, targetParcels: true } });
+    const deal = await prisma.deal.findUnique({ where: { id }, select: { propertyId: true, settlementTerms: true, overrides: true, targetParcels: true } });
     if (!deal) throw new ApiError(404, "取引が見つかりません", "NOT_FOUND");
     if (!deal.propertyId) throw new ApiError(422, "手入力の物件の取引です", "NO_PROPERTY");
     if (!hasPermission(perms, "property", "read")) throw new ApiError(403, "物件を見る権限がありません", "FORBIDDEN");
@@ -36,7 +36,7 @@ export async function POST(request: Request, ctx: Ctx) {
       data: {
         // 所在・地番と家屋番号は、この取引の土地・建物だけ(選んでいなければ全部)。
         propertySnapshot: buildSnapshotFromProperty({ ...p, ...applyTargetParcels(p, readTargetParcels(deal.targetParcels)) }),
-        ...(hasFees ? { settlementTerms: { ...readTerms(deal.settlementTerms), ...fees } } : {}),
+        ...(hasFees ? { settlementTerms: { ...readTerms(deal.settlementTerms, deal.overrides), ...fees } } : {}),
         version: { increment: 1 },
       },
     });

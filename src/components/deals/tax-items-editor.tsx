@@ -40,6 +40,7 @@ export function taxItemsFromForm(rows: TaxItemForm[]): { value: TaxItem[]; bad: 
       if (n === null) bad.push(`${names[i]}の${MONEY_LABELS[k]}`);
       return [k, n];
     })) as Record<MoneyKey, number | null>;
+    if (r.shareNum > r.shareDen) bad.push(`${names[i]}の持分(分子は分母以下にしてください)`);
     return { kind: r.kind, label: r.label.trim() === "" ? null : r.label.trim(), ...money, shareNum: r.shareNum, shareDen: r.shareDen };
   });
   return { value, bad };
@@ -60,8 +61,11 @@ export function TaxItemsEditor({ value, onChange }: { value: TaxItemForm[]; onCh
     <div className="space-y-3">
       <ul className="space-y-3">
         {value.map((r, i) => {
+          // 持分の分子が分母より大きいと税額が膨らむので、自動の値を出さない(保存も止める)。
+          const shareOk = r.shareNum <= r.shareDen;
           const auto = itemTaxes({
-            ...r, label: null, fixedTax: null, cityTax: null, fixedBase: parseYen(r.fixedBase), cityBase: parseYen(r.cityBase),
+            ...r, label: null, fixedTax: null, cityTax: null,
+            fixedBase: shareOk ? parseYen(r.fixedBase) : null, cityBase: shareOk ? parseYen(r.cityBase) : null,
           });
           const name = names[i];
           const money = (k: MoneyKey) => <YenInput label={`${name}の${MONEY_LABELS[k]}`} value={r[k]} onChange={(v) => setRow(i, { [k]: v })} />;

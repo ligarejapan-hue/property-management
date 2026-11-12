@@ -105,7 +105,7 @@ export async function PATCH(request: Request, ctx: Ctx) {
       // 固都税の部分を変えた保存だけを止める(敷金の扱い・管理費だけの保存や物件の取り直しは止めない)。
       if (patch.settlementTerms !== undefined) {
         const next = patch.settlementTerms;
-        if (next.taxInputMode === "total" && taxPartChanged(readTerms(cur.settlementTerms), next)
+        if (next.taxInputMode === "total" && taxPartChanged(readTerms(cur.settlementTerms, cur.overrides), next)
           && sellerTaxableOf({ settlementTerms: next, parties: cur.parties })) {
           throw new ApiError(422, "売主が課税業者の取引は、土地・建物ごとに入力してください", "TAXABLE_TOTAL_NOT_ALLOWED");
         }

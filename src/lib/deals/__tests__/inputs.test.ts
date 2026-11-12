@@ -45,6 +45,12 @@ describe("精算の固都税(土地・建物ごと)", () => {
   });
   it("年税額が両方空の今の取引は土地・建物ごと", () => {
     expect(readTerms({ fixedAssetTax: null, cityPlanningTax: null }).taxInputMode).toBe("items");
+    expect(readTerms({ fixedAssetTax: null }, { "settlement.management": 1 }).taxInputMode).toBe("items");
+  });
+  it("年税額が空でも固都税を手で直した値がある今の取引は「合計額だけ」(手で直した値を消さない・最終レビュー I-1)", () => {
+    expect(readTerms({ fixedAssetTax: null, cityPlanningTax: null }, { "settlement.propertyTax": 60_000 }).taxInputMode).toBe("total");
+    // 入力のしかたが保存済みなら、そのまま。
+    expect(readTerms({ taxInputMode: "items" }, { "settlement.propertyTax": 60_000 }).taxInputMode).toBe("items");
   });
   it("行を読み戻せる", () => {
     const t = readTerms({ taxInputMode: "items", taxItems: [row], sellerTaxable: true });

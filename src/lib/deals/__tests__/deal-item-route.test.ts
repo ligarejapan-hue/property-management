@@ -423,6 +423,18 @@ describe("POST /api/deals/[id]/refresh-property", () => {
     expect(pm.deal.updateMany.mock.calls[0][0].data.settlementTerms).toMatchObject({ fixedAssetTax: 1000, managementFee: 12000, repairReserve: 8000 });
     expect(writeAuditLog).toHaveBeenCalledWith(expect.objectContaining({ detail: { fields: ["propertySnapshot", "settlementTerms"] } }));
   });
+  it("年税額が空で固都税を手で直した今の取引は、取り直しても「合計額だけ」のまま(最終レビュー I-1)", async () => {
+    pm.deal.findUnique.mockResolvedValue({ propertyId: PROP_ID, settlementTerms: { managementFee: 1 }, overrides: { "settlement.propertyTax": 60_000 } });
+    pm.property.findUnique.mockResolvedValue({ ...propRow, propertyType: "apartment_unit", managementFee: 12000, repairReserveFee: 8000 });
+    expect((await REFRESH(json("POST", { version: 3 }), ctx)).status).toBe(200);
+    expect(pm.deal.updateMany.mock.calls[0][0].data.settlementTerms).toMatchObject({ taxInputMode: "total", managementFee: 12000 });
+  });
+  it("年税額が空で固都税を手で直した今の取引を、GET で開くと「合計額だけ」で読む(最終レビュー I-1)", async () => {
+    pm.property.findUnique.mockResolvedValue({ createdBy: "u-office", assignedTo: null });
+    pm.deal.findUnique.mockResolvedValue({ ...detailRow, settlementTerms: {}, overrides: { "settlement.propertyTax": 60_000 } });
+    const body = await (await GET(new Request("http://x"), ctx)).json();
+    expect(body.deal.settlementTerms.taxInputMode).toBe("total");
+  });
   it("★物件が空の項目は、取引の額を消さない", async () => {
     pm.deal.findUnique.mockResolvedValue({ propertyId: PROP_ID, settlementTerms: { managementFee: 1, repairReserve: 2 } });
     pm.property.findUnique.mockResolvedValue({ ...propRow, propertyType: "apartment_unit", managementFee: 12000, repairReserveFee: null });
