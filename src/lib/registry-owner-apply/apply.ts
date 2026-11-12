@@ -389,6 +389,8 @@ export async function replaceRegistryOwnersOnProperty(
     fileName: REGISTRY_OWNER_REPLACE_AUDIT_LABEL,
     // ⚠足すのは「システムにいない謄本の人」だけ(確認画面で見せた人)
     edited: { owners: plan.add.map((o) => ({ name: o.name, address: o.address, share: o.share })) },
+    // ⚠足す人だけ=書類の行の全部ではない。登記上の記載は記録しない。
+    partialOwners: true,
     // ⚠必ず null(添付は既にある)
     pdfBuffer: null,
     certificateType: SUPPORTED_CERTIFICATE_TYPE,

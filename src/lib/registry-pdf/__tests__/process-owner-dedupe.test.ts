@@ -412,6 +412,40 @@ describe("同じ謄本を取り直しても住所なしの所有者が増えな�
     expect(pm.propertyOwnerRegistryEntry.createMany).not.toHaveBeenCalled();
   });
 
+  it("⚠登記上の記載: 書類の所有者の一部だけを渡す呼び出し(partialOwners)では記録しない(@codex #714 P2)", async () => {
+    // 自動の登録・謄本の名義に直すは、足す人だけ(同じ名前の行を1つにまとめた後)を渡す。
+    // そのまま記録すると 2/10+3/10+2/10 の人が 2/10 と出る。
+    pm.propertyOwner.findMany.mockResolvedValue([
+      { id: "po-1", ownerId: "owner-new", owner: { id: "owner-x", name: "鈴木一郎", address: "x", isArchived: false, corporateNumber: null } },
+    ]);
+    await processRegistryPdf({
+      session,
+      text: "dummy",
+      propertyId: PROP_ID,
+      fileName: "謄本.pdf",
+      edited: { owners: [{ name: "山田太郎", address: "住所A", share: "10分の2" }] } as never,
+      pdfBuffer: null,
+      certificateType: "owner",
+      partialOwners: true,
+    });
+    expect(pm.owner.create).toHaveBeenCalledTimes(1);
+    expect(pm.propertyOwnerRegistryEntry.deleteMany).not.toHaveBeenCalled();
+    expect(pm.propertyOwnerRegistryEntry.createMany).not.toHaveBeenCalled();
+  });
+
+  it("⚠足す人だけを渡す2つの呼び出し元は partialOwners を付けている(ソース)", async () => {
+    const { readFileSync } = await import("node:fs");
+    const { join } = await import("node:path");
+    for (const rel of [
+      "src/lib/registry-owner-check/service.ts", // 謄本にだけいる人を自動で登録
+      "src/lib/registry-owner-apply/apply.ts", // 謄本の名義に直す
+    ]) {
+      const src = readFileSync(join(process.cwd(), rel), "utf8").replace(/\r\n/g, "\n");
+      // edited.owners に「一部の人」を渡している呼び出しの直後に partialOwners: true がある
+      expect(src, rel).toMatch(/edited: \{ owners: (targets|plan\.add)\.map\([\s\S]{0,160}?partialOwners: true,/);
+    }
+  });
+
   it("登記上の記載: 行の記録に失敗しても、取り込みは失敗にしない(所有者は確定済み・氏名や住所をログに出さない)", async () => {
     withAddress([{ name: "山田太郎", address: "住所A" }]);
     pm.propertyOwner.findMany.mockReset();

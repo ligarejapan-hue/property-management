@@ -529,6 +529,8 @@ export async function autoAddRegistryOnlyOwners(propertyId: string): Promise<num
     fileName: REGISTRY_OWNER_AUTO_ADD_AUDIT_LABEL,
     // ⚠足すのは謄本にだけいる人だけ
     edited: { owners: targets.map((o) => ({ name: o.name, address: o.address, share: o.share })) },
+    // ⚠足す人は同じ名前の行を1つにまとめた後=書類の行の全部ではない。登記上の記載は記録しない。
+    partialOwners: true,
     // ⚠必ず null(添付は既にある)
     pdfBuffer: null,
     certificateType: SUPPORTED_CERTIFICATE_TYPE,

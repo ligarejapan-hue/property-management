@@ -126,6 +126,13 @@ export interface ProcessRegistryPdfArgs {
    */
   ownersOnly?: boolean;
   /**
+   * `edited.owners` が**書類の所有者の一部だけ**(足す人だけ・同じ名前の行を1つにまとめた後)。
+   * このときは登記上の記載(所有者事項の行ごとの住所と持分)を記録しない(@codex #714 P2)。
+   * 一部の行だけを「その人の内訳の全部」として残すと、2/10+3/10+2/10 の人が 2/10 と出る。
+   * 行は、書類を全部読める取り込み(と添付済みの所有者事項からの後追い)で入れる。
+   */
+  partialOwners?: boolean;
+  /**
    * ジョブ作成後の失敗を記録するとき、**生のエラー文を残さない**(種類とコードに丸める)。
    * ⚠データベースや保管庫の例外は、拒否した呼び出しの中身(登記由来の住所など)を
    *   文面に埋め込むことがある。「見せたものだけ書く」経路(添付済み謄本からの反映・
@@ -1009,7 +1016,8 @@ export async function processRegistryPdf(
   // ⚠種別の指定(certificateType)だけで決めない(@codex #714 P2): 手で取り込んだ全部事項は
   //   種別なしで届く。全部事項の所有者は権利の判定結果(か人の修正)で、所有者事項の行ではない
   //   =記録すると、先に入っていた行ごとの内訳を消して置き換えてしまう。
-  const recordRegistryEntries = args.certificateType !== "all" && !isFullCertificate;
+  const recordRegistryEntries =
+    args.certificateType !== "all" && !isFullCertificate && !args.partialOwners;
   let ownersFromFullCertificate = false;
   let fullCertificateOwnersUndetermined = false;
   if (isFullCertificate && !edited?.owners) {
