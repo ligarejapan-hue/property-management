@@ -385,10 +385,22 @@ export function ownerDiff(registryNames: readonly string[], systemNames: readonl
  */
 export const AUTO_ADD_DONE_TOKEN = "autoadd";
 
+/**
+ * 保存した種類に付ける印=「この謄本(所有者事項)から、登記上の記載(行ごとの住所と持分)の記録を
+ * 試し終えた」(2026-11-12 第2回・発注者決定=DB に列を足さない)。
+ * - 種類ではないので、一覧の文言には出さない。
+ * - 「違う」以外の結果(同じ など)の行にも付く(その行は種類が無く、この印だけになる)。
+ * - 印の無い行は比べ直しに回る=前に比べた物件も1回ずつ読み直して記録する。比べ直すと印が付くので
+ *   1回だけ回る(行が1つも当たらない物件・読めない物件も、試し終えた印で止まる)。
+ */
+export const ENTRIES_DONE_TOKEN = "entries";
+
 /** 保存した形から、一覧に出す文言に戻す(字は保存していないので出さない)。 */
 export function ownerDiffLabelFromStored(stored: string | null | undefined): string | null {
   if (!stored) return null;
-  const tokens = stored.split(",").filter((t) => t !== AUTO_ADD_DONE_TOKEN);
+  const tokens = stored
+    .split(",")
+    .filter((t) => t !== AUTO_ADD_DONE_TOKEN && t !== ENTRIES_DONE_TOKEN);
   if (tokens.length === 0) return null;
   return tokens
     .map((token) => {

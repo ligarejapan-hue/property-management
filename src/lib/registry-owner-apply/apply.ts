@@ -298,8 +298,13 @@ export interface ReplaceRegistryOwnersArgs {
   /**
    * 外す・足すと同じトランザクションの確定直前に呼ぶ(比べた結果の記録・DM を戻すなど)。
    * 投げれば外した分も足した分も巻き戻る。registryNames=謄本の名義(比べ直しに使う)。
+   * registryRows=所有者事項の行(名前・住所・持分。登記上の記載の記録に使う)。
    */
-  beforeCommit?: (tx: ReplaceTx, registryNames: string[]) => Promise<void>;
+  beforeCommit?: (
+    tx: ReplaceTx,
+    registryNames: string[],
+    registryRows: ReadonlyArray<{ name: string; address: string | null; share: string | null }>,
+  ) => Promise<void>;
 }
 
 /** 謄本の名義の確認で、システムの所有者を並べる順(確認画面と「謄本の名義に直す」で同じ)。 */
@@ -472,7 +477,7 @@ export async function replaceRegistryOwnersOnProperty(
       removed = toRemove.length;
     },
     beforeCommit: args.beforeCommit
-      ? async (tx) => args.beforeCommit!(tx, registryNames)
+      ? async (tx) => args.beforeCommit!(tx, registryNames, registryOwners)
       : undefined,
   });
 

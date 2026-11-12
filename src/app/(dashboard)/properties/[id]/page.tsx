@@ -1947,6 +1947,19 @@ function OwnerCard({
     setEditing(true);
   };
 
+  /**
+   * 「この住所を宛先にする」(登記上の記載・2026-11-12 第2回)。
+   * 編集を開き、登記上の住所にその行の住所を入れる。郵便番号は空にする(所有者事項に郵便番号は
+   * 載っていない=別の場所の郵便番号を残さない)。**ここでは保存しない**=人が「保存」を押して確定する
+   * (保存の入口・権限・編集中の鍵・変更履歴は所有者の編集と同じ)。
+   */
+  const handleUseRegistryAddress = (address: string) => {
+    handleEdit();
+    setForm((f) => ({ ...f, address, zip: "" }));
+    // ⚠住所の候補の自動の検索は起こさない(起こすのは、人が住所の欄を打ったときだけ=
+    //   owner-address-lookup-integration のテストが守る決まり)。handleEdit が印を下ろしたまま。
+  };
+
   const handleCancel = () => {
     void lock.release();
     setEditing(false);
@@ -2119,7 +2132,18 @@ function OwnerCard({
       </div>
 
       {/* 登記上の記載の内訳(同じ方が住所違い・持分ごとに何行も載っているときだけ) */}
-      <RegistryEntriesPanel registry={po.registry} />
+      {/* 「この住所を宛先にする」は、住所と郵便番号の両方を編集できる人にだけ・編集中でないときだけ出す
+          (郵便番号を空にするので両方が要る)。押すと編集が開く=保存は所有者の編集と同じ入口。 */}
+      <RegistryEntriesPanel
+        registry={po.registry}
+        ownerAddress={po.owner.address ?? null}
+        hasCurrentAddress={(po.owner.currentAddress ?? "").trim() !== ""}
+        onUseAddress={
+          editAllowed && !editing && !editLockHeld && editableFields.address && editableFields.zip
+            ? handleUseRegistryAddress
+            : undefined
+        }
+      />
 
       {removeError && (
         <p
