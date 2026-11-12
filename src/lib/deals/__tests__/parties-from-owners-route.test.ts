@@ -40,9 +40,9 @@ const OWNER_PERMS = [
 ];
 const OWNER_A = "11111111-1111-4111-8111-111111111111";
 const OWNER_B = "22222222-2222-4222-8222-222222222222";
-const taro = { owner: { id: OWNER_A, name: "試験 太郎", phone: "03-0", address: "東京都試験区1", currentAddress: "東京都新区2", corporateNumber: null, companyRegistryNumber: null } };
+const taro = { owner: { id: OWNER_A, name: "試験 太郎", phone: "03-0", address: "東京都試験区1", currentAddress: "東京都新区2", corporateNumber: null, companyRegistryNumber: null }, registryEntries: [] };
 const post = (body: Record<string, unknown> = {}) => POST(json("POST", body), ctx);
-const hanako = { owner: { ...taro.owner, id: OWNER_B, name: "試験 花子" } };
+const hanako = { owner: { ...taro.owner, id: OWNER_B, name: "試験 花子" }, registryEntries: [] };
 
 beforeEach(() => {
   vi.clearAllMocks();
@@ -98,8 +98,27 @@ describe("物件の所有者を売主に入れる", () => {
     expect(await (await post()).json()).toEqual({ added: 2 });
   });
 
+  it("★持分は登記上の記載(所有者事項の行)の合計を入れる・読めない行があれば空(2026-11-12)", async () => {
+    pm.propertyOwner.findMany.mockResolvedValue([
+      // 同じ人が住所違い・持分ごとに3行: 2/10+3/10+2/10 → 7/10(約分しない)
+      { ...taro, registryEntries: [{ shareNum: 2, shareDen: 10 }, { shareNum: 3, shareDen: 10 }, { shareNum: 2, shareDen: 10 }] },
+      // 持分が読めない行が混じる人は、合計を入れない
+      { ...hanako, registryEntries: [{ shareNum: 3, shareDen: 10 }, { shareNum: null, shareDen: null }] },
+    ]);
+    await post();
+    const rows = pm.dealParty.createMany.mock.calls[0][0].data as Array<{ name: string; shareNum: number | null; shareDen: number | null }>;
+    expect(rows.map((r) => [r.name, r.shareNum, r.shareDen])).toEqual([
+      ["試験 太郎", 7, 10],
+      ["試験 花子", null, null],
+    ]);
+    // 登記上の記載も一緒に読む(持分だけ・住所は読まない)
+    expect(pm.propertyOwner.findMany.mock.calls[0][0].select.registryEntries).toEqual({
+      select: { shareNum: true, shareDen: true },
+    });
+  });
+
   it("★(株)と株式会社・異体字の同じ人を二重に足さない", async () => {
-    const corp = { owner: { ...taro.owner, id: OWNER_B, name: "(株)試験髙橋" } };
+    const corp = { owner: { ...taro.owner, id: OWNER_B, name: "(株)試験髙橋" }, registryEntries: [] };
     pm.propertyOwner.findMany.mockResolvedValue([corp]);
     pm.dealParty.findMany.mockResolvedValue([{ name: "株式会社 試験高橋" }]);
     expect(await (await post({ ownerIds: [OWNER_B] })).json()).toEqual({ added: 0 });
@@ -150,7 +169,7 @@ describe("自社が売主の取引", () => {
     { resource: "owner_name", action: "full", granted: true },
   ];
   const ctx2 = { params: Promise.resolve({ id: DEAL_ID }) };
-  const link = (name: string) => ({ owner: { name, phone: null, address: null, currentAddress: null, corporateNumber: null, companyRegistryNumber: null } });
+  const link = (name: string) => ({ owner: { name, phone: null, address: null, currentAddress: null, corporateNumber: null, companyRegistryNumber: null }, registryEntries: [] });
   beforeEach(() => {
     (getUserPermissions as Fn).mockResolvedValue(OWNER_PERMS);
     pm.deal.findUnique.mockResolvedValue({ propertyId: PROP_ID });

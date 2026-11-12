@@ -11,8 +11,51 @@ const ALL = { name: true, address: true, phone: true };
 describe("物件の所有者を売主にする", () => {
   it("★氏名・住所・電話を入れる", () => {
     expect(sellerPartiesFromOwners([owner()], [], ALL)).toEqual([
-      { role: "seller", partyType: "individual", name: "試験 太郎", address: "東京都試験区1-2-3", phone: "03-0000-0000", isSelf: false },
+      { role: "seller", partyType: "individual", name: "試験 太郎", address: "東京都試験区1-2-3", phone: "03-0000-0000", isSelf: false, shareNum: null, shareDen: null },
     ]);
+  });
+
+  it("★持分は登記上の記載の合計を入れる(2026-11-12 発注者決定)・分からなければ空のまま", () => {
+    // 2/10+3/10+2/10 の人は 7/10(約分しない)。合計は呼び出し側が所有者事項の行から出して渡す。
+    const [p] = sellerPartiesFromOwners([owner({ share: { num: 7, den: 10 } })], [], ALL);
+    expect([p.shareNum, p.shareDen]).toEqual([7, 10]);
+    const [none] = sellerPartiesFromOwners([owner({ share: null })], [], ALL);
+    expect([none.shareNum, none.shareDen]).toEqual([null, null]);
+    // 共有: それぞれの持分が入る
+    const both = sellerPartiesFromOwners(
+      [owner({ share: { num: 7, den: 10 } }), owner({ name: "試験 花子", share: { num: 3, den: 10 } })],
+      [],
+      ALL,
+    );
+    expect(both.map((x) => `${x.name}=${x.shareNum}/${x.shareDen}`)).toEqual(["試験 太郎=7/10", "試験 花子=3/10"]);
+  });
+
+  it("⚠氏名が見られない人の操作では、持分も入らない(誰も足さない)", () => {
+    expect(
+      sellerPartiesFromOwners([owner({ share: { num: 7, den: 10 } })], [], { name: false, address: true, phone: true }),
+    ).toEqual([]);
+  });
+
+  it("★同じ名前の所有者が2人残っていても売主は1人・持分は2人分を足す(1人目の分だけにしない)", () => {
+    const [p, ...rest] = sellerPartiesFromOwners(
+      [owner({ share: { num: 2, den: 10 } }), owner({ name: "試験　太郎", share: { num: 5, den: 10 } })],
+      [],
+      ALL,
+    );
+    expect(rest).toHaveLength(0);
+    expect([p.shareNum, p.shareDen]).toEqual([7, 10]);
+    // 片方の持分が分からなければ、合計は入れない(一部だけを正しい持分として入れない)
+    const [q] = sellerPartiesFromOwners([owner({ share: { num: 2, den: 10 } }), owner({ share: null })], [], ALL);
+    expect([q.shareNum, q.shareDen]).toEqual([null, null]);
+  });
+
+  it("★合計が1を超えるなど、あり得ない持分は入れない", () => {
+    const [p] = sellerPartiesFromOwners(
+      [owner({ share: { num: 2, den: 3 } }), owner({ share: { num: 2, den: 3 } })],
+      [],
+      ALL,
+    );
+    expect([p.shareNum, p.shareDen]).toEqual([null, null]);
   });
 
   it("★現住所があれば現住所を入れる", () => {
