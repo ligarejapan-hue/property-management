@@ -43,7 +43,10 @@ export function mergeOverrides(saved: Overrides, mine: Overrides, myKeys: readon
 }
 
 export const MONEY_OVERRIDE_KEYS = ["brokerageFee", "buildingPrice", "buildingTax"] as const satisfies readonly OverrideKey[];
-export const SETTLEMENT_OVERRIDE_KEYS = ["settlement.propertyTax", "settlement.management", "settlement.rent"] as const satisfies readonly OverrideKey[];
+export const SETTLEMENT_OVERRIDE_KEYS = [
+  "settlement.propertyTax", "settlement.management", "settlement.rent",
+  "settlement.propertyTaxLand", "settlement.propertyTaxBuilding", "settlement.propertyTaxBuildingVat",
+] as const satisfies readonly OverrideKey[];
 
 /** そのパネルの鍵だけを取り出す(パネルの key 用)。 */
 export function pickOverrides(o: Overrides, keys: readonly OverrideKey[]): Overrides {

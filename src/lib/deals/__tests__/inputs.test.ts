@@ -33,6 +33,37 @@ describe("段2の入力の検証", () => {
   });
 });
 
+describe("精算の固都税(土地・建物ごと)", () => {
+  const row = { kind: "land", label: "1番", fixedBase: 1_000_000, cityBase: 1_000_000, shareNum: 1, shareDen: 1, fixedTax: null, cityTax: null };
+  it("新しい取引の初期値は土地・建物ごと・課税業者は未設定", () => {
+    expect(DEFAULT_TERMS).toMatchObject({ taxInputMode: "items", taxItems: [], sellerTaxable: null });
+  });
+  it("年税額だけが保存された今の取引は「合計額だけ」として読む", () => {
+    const t = readTerms({ fixedAssetTax: 120_000, cityPlanningTax: 30_000 });
+    expect(t).toMatchObject({ taxInputMode: "total", fixedAssetTax: 120_000, cityPlanningTax: 30_000, taxItems: [] });
+    expect(readTerms({ fixedAssetTax: null, cityPlanningTax: 30_000 }).taxInputMode).toBe("total");
+  });
+  it("年税額が両方空の今の取引は土地・建物ごと", () => {
+    expect(readTerms({ fixedAssetTax: null, cityPlanningTax: null }).taxInputMode).toBe("items");
+  });
+  it("行を読み戻せる", () => {
+    const t = readTerms({ taxInputMode: "items", taxItems: [row], sellerTaxable: true });
+    expect(t.taxItems).toEqual([row]);
+    expect(t.sellerTaxable).toBe(true);
+  });
+  it("持分は分子≦分母・分母は1以上", () => {
+    const ok = (r: object) => settlementTermsSchema.safeParse({ ...DEFAULT_TERMS, taxItems: [{ ...row, ...r }] }).success;
+    expect(ok({})).toBe(true);
+    expect(ok({ shareNum: 2, shareDen: 1 })).toBe(false);
+    expect(ok({ shareDen: 0 })).toBe(false);
+    expect(ok({ kind: "parking" })).toBe(false);
+  });
+  it("手で直す鍵に土地・建物・建物分の消費税がある", () => {
+    expect(readOverrides({ "settlement.propertyTaxLand": 1, "settlement.propertyTaxBuilding": 2, "settlement.propertyTaxBuildingVat": 3 }))
+      .toEqual({ "settlement.propertyTaxLand": 1, "settlement.propertyTaxBuilding": 2, "settlement.propertyTaxBuildingVat": 3 });
+  });
+});
+
 describe("保存済みの JSON を読む", () => {
   it("壊れていれば初期値・段1の初期値(空の配列や空の object)も読める", () => {
     expect(readAssessments([])).toEqual(DEFAULT_ASSESSMENTS);

@@ -16,7 +16,10 @@ export function readCosts(json: unknown): Costs {
   return r.success ? r.data : DEFAULT_COSTS;
 }
 export function readTerms(json: unknown): SettlementTerms {
-  const r = settlementTermsSchema.safeParse({ ...DEFAULT_TERMS, ...obj(json) });
+  const src = obj(json);
+  // 入力のしかたが無い(作り直し前の)取引は、年税額が入っていれば「合計額だけ」として読む。
+  const legacyTotal = src.taxInputMode === undefined && (typeof src.fixedAssetTax === "number" || typeof src.cityPlanningTax === "number");
+  const r = settlementTermsSchema.safeParse({ ...DEFAULT_TERMS, ...(legacyTotal ? { taxInputMode: "total" } : {}), ...src });
   return r.success ? r.data : DEFAULT_TERMS;
 }
 /** 賃貸条件は行ごとに読み、壊れた行だけ落とす。 */
