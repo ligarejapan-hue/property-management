@@ -52,6 +52,14 @@ describe("固都税を土地・建物ごとに精算する", () => {
     const r = settlementResult({ ...itemsBase, sellerTaxable: true, terms: { ...itemsBase.terms, taxItems: [taxItem("land", 100_000, 20_000)] } });
     expect(r.rows.map((x) => x.key)).toEqual(["propertyTaxLand"]);
   });
+  it("建物の行が無くても、建物分の消費税を手で直した値があれば精算に入れる(@codex #712 3巡目)", () => {
+    const r = settlementResult({ ...itemsBase, sellerTaxable: true, terms: { ...itemsBase.terms, taxItems: [] }, overrides: { "settlement.propertyTaxBuildingVat": 1_840 } });
+    expect(r.rows.map((x) => x.key)).toEqual(["propertyTaxBuildingVat"]);
+    expect(r.rows[0]).toMatchObject({ buyerToSeller: 1_840, computed: 0, overridden: true, formula: null });
+    expect(r.net.amount).toBe(1_840);
+    // 課税業者でなければ出さない(消費税の欄も画面に無い)。
+    expect(settlementResult({ ...itemsBase, terms: { ...itemsBase.terms, taxItems: [] }, overrides: { "settlement.propertyTaxBuildingVat": 1_840 } }).rows).toEqual([]);
+  });
   it("課税業者で合計額だけ → 1行・消費税なし・食い違いの印", () => {
     const r = settlementResult({ ...base, sellerTaxable: true });
     expect(r.rows.find((x) => x.key === "propertyTax")).toMatchObject({ buyerToSeller: 60_493 });

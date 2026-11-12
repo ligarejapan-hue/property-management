@@ -127,12 +127,13 @@ export function settlementResult(i: SettlementInput): SettlementResult {
     const building = taxRow("propertyTaxBuilding", "固定資産税・都市計画税(建物)", "settlement.propertyTaxBuilding", a.building);
     if (building) rows.push(building);
     // 売主が課税業者なら、建物分の精算金(手で直した後の値)に消費税。円未満四捨五入。
-    if (building && i.sellerTaxable) {
-      const computed = roundDiv(building.buyerToSeller * i.taxRateBp, 10000);
+    // 建物の行が無くても、手で直した値があれば行を出す(ほかの行と同じ・@codex #712 3巡目)。
+    if (i.sellerTaxable && (building || has("settlement.propertyTaxBuildingVat"))) {
+      const computed = building ? roundDiv(building.buyerToSeller * i.taxRateBp, 10000) : 0;
       const v = pick("settlement.propertyTaxBuildingVat", computed);
       rows.push({
         key: "propertyTaxBuildingVat", label: "建物分の消費税", period: null,
-        formula: `${yen(building.buyerToSeller)}円×${i.taxRateBp / 100}%`,
+        formula: building ? `${yen(building.buyerToSeller)}円×${i.taxRateBp / 100}%` : null,
         sellerToBuyer: 0, buyerToSeller: v.value, computed, overridden: v.overridden, note: null,
       });
     }
