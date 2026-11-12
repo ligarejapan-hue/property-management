@@ -67,13 +67,13 @@ describe("事業計画書の計算", () => {
     expect(expected).not.toBe(0);
     expect(c.acquisition.lines.find((l) => l.key === "settlement")?.amount).toBe(expected);
   });
-  it("保有コスト: 決済日〜販売予定日の日数(両端を含む)で利息・固都税・管理費等を日割り(切り捨て)", () => {
+  it("保有コスト: 決済日〜販売予定日の日数(両端を含む)で利息・固都税・管理費等を日割り(利息は切り捨て・固都税と管理費等は四捨五入)", () => {
     const h = calc().holding;
     expect(h.days).toBe(183);
     expect(h.interest).toBe(180_493);
     expect(h.propertyTax).toBe(36_600);
-    expect(h.management).toBe(120_328);
-    expect(h.total).toBe(337_421);
+    expect(h.management).toBe(120_329); // 120,328.76… → 四捨五入
+    expect(h.total).toBe(337_422);
   });
   it("販売: 建物消費税は仕入と同じ割合で按分・手で直せる・費用は入力と印紙", () => {
     const c = calc();
@@ -82,7 +82,7 @@ describe("事業計画書の計算", () => {
   });
   it("収支: 経費合計・粗利・利益率(0.01% 単位の切り捨て)・損益分岐・坪単価", () => {
     expect(calc().profit).toEqual({
-      revenue: 28_000_000, costTotal: 25_773_421, gross: 2_226_579, marginBp: 795, breakEven: 25_773_421,
+      revenue: 28_000_000, costTotal: 25_773_422, gross: 2_226_578, marginBp: 795, breakEven: 25_773_422,
       purchaseTsuboPrice: 1_092_821, saleTsuboPrice: 1_529_950,
     });
   });
