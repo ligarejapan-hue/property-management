@@ -30,6 +30,7 @@ vi.mock("@/lib/prisma", () => {
       updateMany: vi.fn(),
     },
     propertyOwner: { findFirst: vi.fn(), findMany: vi.fn(), create: vi.fn() },
+    propertyOwnerRegistryEntry: { deleteMany: vi.fn(), createMany: vi.fn() },
     importJob: { create: vi.fn(), update: vi.fn() },
     importJobRow: { create: vi.fn() },
     attachment: { create: vi.fn() },
@@ -107,6 +108,7 @@ const pm = prisma as unknown as {
   property: { findUnique: Mock; updateMany: Mock };
   owner: { findUnique: Mock; findMany: Mock; create: Mock; updateMany: Mock };
   propertyOwner: { findFirst: Mock; findMany: Mock; create: Mock };
+  propertyOwnerRegistryEntry: { deleteMany: Mock; createMany: Mock };
   importJob: { create: Mock; update: Mock };
   importJobRow: { create: Mock };
   attachment: { create: Mock };
@@ -436,7 +438,8 @@ describe("所有者の法人番号補完と編集中の鍵", () => {
       txCallCount++;
       // 呼び出し順は決まっている: ①物件の空欄補完 tx ②住所なし所有者の再利用照会 tx
       // ③(save のときだけ)所有者の法人番号補完 tx。③だけを識別用の別オブジェクトにする。
-      if (txCallCount < 3) {
+      // ④以降(登記上の記載の記録・添付の作成など)は素の作り物で通す。
+      if (txCallCount !== 3) {
         order.push(`propOrLookupTx${txCallCount}`);
         return fn(prisma);
       }

@@ -32,6 +32,7 @@ import {
   planSamePropertyAddressReplace,
 } from "@/lib/registry-pdf/owner-reuse";
 import { parseRegistryText } from "@/lib/pdf-registry-parser";
+import { replaceRegistryEntries, type RegistryEntrySourceRow } from "@/lib/registry-entries/write";
 import { planRegistryAreaFill, registryAreasOf, type RegistryAreaCurrent } from "@/lib/registry-area";
 import { fillPropertyFromRegistry } from "@/lib/registry-pdf/fill-areas";
 import { parseRegistryBuildingFacts, registryIdentityOf } from "@/lib/registry-basic-info";
@@ -124,6 +125,13 @@ export interface ProcessRegistryPdfArgs {
    * 既定 false = 従来どおり(空の項目を謄本の値で埋める)。
    */
   ownersOnly?: boolean;
+  /**
+   * `edited.owners` が**書類の所有者の一部だけ**(足す人だけ・同じ名前の行を1つにまとめた後)。
+   * このときは登記上の記載(所有者事項の行ごとの住所と持分)を記録しない(@codex #714 P2)。
+   * 一部の行だけを「その人の内訳の全部」として残すと、2/10+3/10+2/10 の人が 2/10 と出る。
+   * 行は、書類を全部読める取り込み(と添付済みの所有者事項からの後追い)で入れる。
+   */
+  partialOwners?: boolean;
   /**
    * ジョブ作成後の失敗を記録するとき、**生のエラー文を残さない**(種類とコードに丸める)。
    * ⚠データベースや保管庫の例外は、拒否した呼び出しの中身(登記由来の住所など)を
@@ -368,6 +376,11 @@ async function reflectParsedOwners(args: {
   beforeCommit?: (tx: DbClient, summary: { linked: number }) => Promise<void>;
   /** → ProcessRegistryPdfArgs.replaceExistingOwners */
   replaceExistingOwners?: (tx: DbClient) => Promise<void>;
+  /**
+   * 登記上の記載(所有者事項の行ごとの住所と持分)を記録する(2026-11-12)。
+   * 所有者事項・種別なしの取り込みで true。全部事項は対象外(持分の履歴の読み分けは別の話)。
+   */
+  recordRegistryEntries?: boolean;
 }): Promise<{ matched: number; created: number; linked: number }> {
   const { propertyId, owners, recordCorporateDecision, markOwnerCorporateFillSkipped } = args;
 
@@ -382,6 +395,11 @@ async function reflectParsedOwners(args: {
 
   /** この実行で自分が紐づけた所有者(見直しの対象から外すために覚えておく)。 */
   const linkedByThisRun: string[] = [];
+  /** 読んだ行と、その行を当てた所有者(登記上の記載の記録に使う・行の順のまま)。 */
+  const entryRows: RegistryEntrySourceRow[] = [];
+  const noteEntryRow = (ownerId: string, info: { address?: string | null; share?: string | null }) => {
+    entryRows.push({ ownerId, address: info.address ?? null, share: info.share ?? null });
+  };
   /** この実行で作った所有者(同じ物件で同じ人が住所違いで2回出たとき、後の住所に替えてよい人)。 */
   const createdByThisRun = new Set<string>();
   /** この実行が作った人に、この実行が書いた住所(後の行で替えてよいか=今もこの値のままか、を見る)。 */
@@ -557,8 +575,9 @@ async function reflectParsedOwners(args: {
               relationship: ownerInfo.share ? "共有者" : "所有者",
             },
           });
-          return { reused: false as const, decision };
+          return { reused: false as const, decision, ownerId: created.id };
         });
+        noteEntryRow(outcome.ownerId, ownerInfo);
         if (outcome.reused) {
           matchedCount++;
           // tx の外で法人番号を穴埋めする（空のときだけ・既存値は自動で上書きしない）。
@@ -654,6 +673,7 @@ async function reflectParsedOwners(args: {
             }
           }
           matchedCount++;
+          noteEntryRow(same.id, ownerInfo);
           // 法人番号は住所なしの経路と同じく、空のときだけ埋める(既存値は上書きしない)。
           const decision = decide(
             { name: ownerInfo.name, address: ownerInfo.address ?? null },
@@ -911,6 +931,32 @@ async function reflectParsedOwners(args: {
         }
         if (resolved.linked) linkedCount++;
       }
+      if (resolvedOwnerId) noteEntryRow(resolvedOwnerId, ownerInfo);
+    }
+
+    // 登記上の記載: 取り込みに出てきた所有者の行を入れ替える(物件行を押さえた tx の中で)。
+    if (args.recordRegistryEntries && entryRows.length > 0) {
+      const record = () =>
+        withTx(async (tx) => {
+          await lockProperty(tx);
+          await replaceRegistryEntries(tx, propertyId, entryRows);
+        });
+      if (asOneBatch) {
+        // まとめる場合は同じ tx の中=失敗したら所有者ごと全部取り消す(握れない)。
+        await record();
+      } else {
+        // ⚠まとめない場合、所有者はもう確定している。行は補助の情報なので、記録の失敗で
+        //   取り込み全体を失敗にしない(所有者だけ入って履歴は失敗、という食い違いを作らない)。
+        //   次に同じ所有者事項を取り込めば入り直る。ログには氏名・住所を出さない。
+        try {
+          await record();
+        } catch (err) {
+          console.error(
+            "Failed to record registry entries:",
+            err instanceof Error ? err.name : "unknown",
+          );
+        }
+      }
     }
   };
 
@@ -966,6 +1012,12 @@ export async function processRegistryPdf(
   //   - 確認画面で人が直した所有者(edited.owners)は、人の判断としてそのまま使う
   //   所有者事項(=全部事項でない)の扱いは変えない。
   const isFullCertificate = isFullCertificateText(text);
+  // 登記上の記載(所有者事項の行ごとの住所と持分)を記録するのは所有者事項だけ。
+  // ⚠種別の指定(certificateType)だけで決めない(@codex #714 P2): 手で取り込んだ全部事項は
+  //   種別なしで届く。全部事項の所有者は権利の判定結果(か人の修正)で、所有者事項の行ではない
+  //   =記録すると、先に入っていた行ごとの内訳を消して置き換えてしまう。
+  const recordRegistryEntries =
+    args.certificateType !== "all" && !isFullCertificate && !args.partialOwners;
   let ownersFromFullCertificate = false;
   let fullCertificateOwnersUndetermined = false;
   if (isFullCertificate && !edited?.owners) {
@@ -1254,6 +1306,7 @@ export async function processRegistryPdf(
           beforeFirstWrite: args.beforeFirstWrite,
           beforeCommit: args.beforeCommit,
           replaceExistingOwners: args.replaceExistingOwners,
+          recordRegistryEntries: recordRegistryEntries,
           owners: parsed.owners,
           recordCorporateDecision,
           markOwnerCorporateFillSkipped,
@@ -1350,6 +1403,7 @@ export async function processRegistryPdf(
               scopedSession: args.enforcePropertyScope ? session : undefined,
               beforeFirstWrite: args.beforeFirstWrite,
               beforeCommit: args.beforeCommit,
+              recordRegistryEntries: recordRegistryEntries,
               owners: parsed.owners,
               recordCorporateDecision,
               markOwnerCorporateFillSkipped,

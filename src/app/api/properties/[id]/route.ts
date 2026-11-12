@@ -27,6 +27,7 @@ import {
   UNIT_ONLY_PROPERTY_FIELDS,
 } from "@/lib/property-building-name";
 import { applyDisplayToOwner } from "@/lib/display-level";
+import { buildRegistryEntriesView } from "@/lib/registry-entries/view";
 import { occupancyFitsType } from "@/lib/property-types";
 import {
   applyBuildingLink,
@@ -115,6 +116,12 @@ export async function GET(
                 version: true,
               },
             },
+            // 登記上の記載(所有者事項の行ごとの住所と持分・2026-11-12)。
+            // ⚠生のまま返さない。下で buildRegistryEntriesView を通して伏せる。
+            registryEntries: {
+              select: { position: true, address: true, shareNum: true, shareDen: true },
+              orderBy: { position: "asc" },
+            },
           },
           orderBy: { createdAt: "asc" },
         },
@@ -173,11 +180,14 @@ export async function GET(
     // owner:read がある場合のみ getOwnerDisplayConfig で field-level マスキングを適用する。
     const canReadOwner = hasPermission(permissions, "owner", "read");
     const ownerDisplayConfig = canReadOwner ? await getOwnerDisplayConfig(session.id, permissions) : null;
-    const maskedPropertyOwners = property.propertyOwners.map((po) => ({
+    // ⚠registryEntries(登記上の記載)は `...po` で生のまま流さない。住所は所有者の住所と同じ
+    //   表示レベルで伏せ、owner:read が無い人には渡さない(buildRegistryEntriesView)。
+    const maskedPropertyOwners = property.propertyOwners.map(({ registryEntries, ...po }) => ({
       ...po,
       owner: canReadOwner && ownerDisplayConfig
         ? applyDisplayToOwner(po.owner, ownerDisplayConfig)
         : { id: po.owner.id },
+      registry: buildRegistryEntriesView(registryEntries, canReadOwner ? ownerDisplayConfig : null),
     }));
 
     // 謄本(registry)添付の件数を種別ごとに集計する(基本情報の「謄本 ○件」行)。
@@ -675,6 +685,12 @@ export async function PATCH(
                 version: true,
               },
             },
+            // 登記上の記載(所有者事項の行ごとの住所と持分・2026-11-12)。
+            // ⚠生のまま返さない。下で buildRegistryEntriesView を通して伏せる。
+            registryEntries: {
+              select: { position: true, address: true, shareNum: true, shareDen: true },
+              orderBy: { position: "asc" },
+            },
           },
         },
         photos: { orderBy: { sortOrder: "asc" } },
@@ -738,11 +754,13 @@ export async function PATCH(
     // owner:read gate — GET と同方針（owner:read なしでは owner PII を返さない）
     const canReadOwner = hasPermission(permissions, "owner", "read");
     const ownerDisplayConfig = canReadOwner ? await getOwnerDisplayConfig(session.id, permissions) : null;
-    const maskedUpdatedPropertyOwners = updated.propertyOwners.map((po) => ({
+    // ⚠registryEntries は GET と同じく、生のまま流さず伏せてから返す。
+    const maskedUpdatedPropertyOwners = updated.propertyOwners.map(({ registryEntries, ...po }) => ({
       ...po,
       owner: canReadOwner && ownerDisplayConfig
         ? applyDisplayToOwner(po.owner, ownerDisplayConfig)
         : { id: po.owner.id },
+      registry: buildRegistryEntriesView(registryEntries, canReadOwner ? ownerDisplayConfig : null),
     }));
 
     return apiResponse({

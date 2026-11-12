@@ -634,10 +634,37 @@ model PropertyOwner {
 
   property Property @relation(fields: [propertyId], references: [id], onDelete: Cascade)
   owner    Owner    @relation(fields: [ownerId], references: [id], onDelete: Cascade)
+  /// 所有者事項の行ごとの住所と持分(2026-11-12)。→ PropertyOwnerRegistryEntry
+  registryEntries PropertyOwnerRegistryEntry[]
 
   @@unique([propertyId, ownerId])
   @@index([ownerId])
   @@map("property_owners")
+}
+
+/// 登記上の記載(2026-11-12 発注者決定)。所有者事項に載っている行(住所・持分)を、
+/// 物件×所有者のつながりごとに行の順で持つ。同じ人が住所違い・持分ごとに何行も載る
+/// (持分を分けて登記・住所は登記した時点のもの)とき、所有者は1人のまま内訳を捨てない。
+/// ⚠所有者事項の行の順に新旧の意味は無い(受付年月日は載らない)。
+/// ⚠つながり(PropertyOwner)を外すと一緒に消える。所有者事項を読み直せば戻る。
+model PropertyOwnerRegistryEntry {
+  id              String   @id @default(uuid()) @db.Uuid
+  propertyOwnerId String   @map("property_owner_id") @db.Uuid
+  /// 行の順(1始まり)。その取り込みで読んだ順の番号=同じ所有者の中で並べるための番号で、
+  /// 書類の何行目かを表すとは限らない(名前の読めない行・足す人だけを渡す取り込みでは詰まる)。
+  position        Int
+  address         String?
+  /// 持分(分子/分母)。読めなかった行は両方 null。
+  shareNum        Int?     @map("share_num")
+  shareDen        Int?     @map("share_den")
+  /// 読み取り元の添付(分かるときだけ・FK は張らない=添付を消しても行は残す)
+  sourceAttachmentId String? @map("source_attachment_id") @db.Uuid
+  createdAt       DateTime @default(now()) @map("created_at")
+
+  propertyOwner PropertyOwner @relation(fields: [propertyOwnerId], references: [id], onDelete: Cascade)
+
+  @@unique([propertyOwnerId, position])
+  @@map("property_owner_registry_entries")
 }
 
 /// 所有者ごとに追記するメモ履歴。ownerId 単位で時系列に積み上げる追記専用テーブル。

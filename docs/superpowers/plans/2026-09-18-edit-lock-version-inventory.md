@@ -29,14 +29,14 @@ Task 7 が直した「謄本取込が所有者の法人番号を版番号を進�
 
 **#6/#7 の補足**: `owner-corporate-import-integration.test.ts` / `corporate-import-guard-integration.test.ts` は、この2ファイル(reception-owner・registry-pdf・owner-csv の法人番号統合)を**最初から source-assertion(正規表現でコード片を固定)方式**で検証する既存方針を取っている(ファイル冒頭のコメントに明記)。他の9件は full prisma mock による振る舞いテストにしたが、#6/#7 はこの既存ファイル群の慣習(reception-owner の corporateNumber 書込は同ファイル内に既に同種の source-assertion が複数ある)に合わせ、同じ形式で「version increment を伴う」ことを固定した。
 
-**#11 の補足**: この行は当初、`registryStatus` を「編集画面では変えられない運用フラグ」の例としてブリーフに挙げられていたが、実際に調べたところ **`registryStatus` は `src/components/properties/property-edit-form.tsx:129`(FORM_FIELDS の「登記状況」select)で編集画面から変更できる**。同じ `registryStatus` を書く他の2箇所(`src/lib/registry-pdf/process.ts:805`・`src/lib/registry-fetch/auto-fetch.ts:4338`)は既に version increment を伴っており、この解除処理(`releaseSchedulingLock`)だけが漏れていた。同じ資源・同じフィールドへの書き込みで一貫性が無かったため、要修正と判断し修正した。
+**#11 の補足**: この行は当初、`registryStatus` を「編集画面では変えられない運用フラグ」の例としてブリーフに挙げられていたが、実際に調べたところ **`registryStatus` は `src/components/properties/property-edit-form.tsx:129`(FORM_FIELDS の「登記状況」select)で編集画面から変更できる**。同じ `registryStatus` を書く他の2箇所(`src/lib/registry-pdf/process.ts:825`・`src/lib/registry-fetch/auto-fetch.ts:4338`)は既に version increment を伴っており、この解除処理(`releaseSchedulingLock`)だけが漏れていた。同じ資源・同じフィールドへの書き込みで一貫性が無かったため、要修正と判断し修正した。
 
 ## 対象外(許可・15件)
 
 | ファイル:行 | 書く項目 | 編集画面で書けない理由 |
 |---|---|---|
-| `src/app/api/admin/owners/correction/merge/route.ts:437` | `owner.updatedAt` のみ | 行ロック獲得のための touch-update。`updatedAt` は `PATCH /api/owners/[id]` の `updateOwnerSchema` にも `property-edit-form.tsx`/所有者編集フォームにも無く、画面から送信できない |
-| `src/app/api/admin/owners/correction/merge/route.ts:445` | 同上(source側) | 同上 |
+| `src/app/api/admin/owners/correction/merge/route.ts:438` | `owner.updatedAt` のみ | 行ロック獲得のための touch-update。`updatedAt` は `PATCH /api/owners/[id]` の `updateOwnerSchema` にも `property-edit-form.tsx`/所有者編集フォームにも無く、画面から送信できない |
+| `src/app/api/admin/owners/correction/merge/route.ts:446` | 同上(source側) | 同上 |
 | `src/app/api/admin/owners/correction/mislink/route.ts:406` | `owner.updatedAt` のみ | 同上 |
 | `src/app/api/admin/owners/correction/mislink/route.ts:435` | `property.updatedAt` のみ | 同上。`updatedAt` は `updatePropertySchema` にも `property-edit-form.tsx` の FORM_FIELDS にも無い |
 | `src/app/api/import/jobs/[jobId]/rows/[rowId]/manual-link-reception-owner/route.ts:281` | `owner.updatedAt` のみ | 同上(所有者行ロックtouch) |
@@ -49,7 +49,7 @@ Task 7 が直した「謄本取込が所有者の法人番号を版番号を進�
 | `src/app/api/properties/[id]/dm-logs/[logId]/route.ts:102` | `property.dmUndeliverableAt = null` のみ | 送付記録削除に伴う自動解除。理由は同上 |
 | `src/app/api/properties/[id]/owners/route.ts:58` | `owner.updatedAt` のみ | 所有者リンク時の行ロックtouch |
 | `src/app/api/properties/sale-dm/drafts/[id]/outcome/route.ts:267` | `property.dmUndeliverableAt = null` のみ | 訂正による自動解除。理由は上記2件と同じ |
-| `src/lib/registry-pdf/process.ts:406` | `owner.updatedAt` のみ | 既存所有者再利用時の行ロックtouch |
+| `src/lib/registry-pdf/process.ts:424` | `owner.updatedAt` のみ | 既存所有者再利用時の行ロックtouch |
 | `src/lib/building-link/apply.ts:135` | `property.buildingId = null` のみ | (2026-10-05 棟の自動づけで追加)**編集画面で書けない項目ではない**が、`applyBuildingLink` は必ず物件の保存と同じトランザクションで、物件を作った直後(新しい行)か version を進める更新の直後に呼ばれる。版番号はその保存で1回だけ進む |
 | `src/lib/building-link/apply.ts:225` | `property.buildingId`/`buildingName` | 同上(棟へつなぎ、物件名を棟の正式な表記にそろえる) |
 | `src/lib/case-status-auto.ts:77` | `property.caseStatus` のみ | (2026-10-20 案件ステータスの自動の切り替えで追加)`caseStatus` は `property-edit-form.tsx` の FORM_FIELDS に無く、鍵を持つ人の保存が上書きしない。版を進めると、所有者の申込(公開の経路)や査定報告書の添付で、編集中の人の保存が409で負ける(D9 と同じ理由)ため進めない。物件詳細のプルダウンは版を送るが、自動は前に進めるだけなので人の選択が後勝ちでよい |
@@ -70,8 +70,8 @@ Task 7 が直した「謄本取込が所有者の法人番号を版番号を進�
 | `src/app/api/admin/owners/correction/corporate-number-bulk-apply/route.ts:124` | `owner.corporateNumber` |
 | `src/app/api/admin/owners/correction/corporate-restore-apply/route.ts:135` | `owner.name` |
 | `src/app/api/admin/owners/correction/corporate-restore-apply/route.ts:208` | `owner.name`/`corporateNumber`/`companyRegistryNumber`/`address` |
-| `src/app/api/admin/owners/correction/merge/route.ts:638` | `owner.isArchived`(source側の統合アーカイブ) |
-| `src/app/api/admin/owners/correction/merge/route.ts:664` | `owner.currentAddress`/`currentZip`(master引き継ぎ) |
+| `src/app/api/admin/owners/correction/merge/route.ts:654` | `owner.isArchived`(source側の統合アーカイブ) |
+| `src/app/api/admin/owners/correction/merge/route.ts:680` | `owner.currentAddress`/`currentZip`(master引き継ぎ) |
 | `src/app/api/admin/owners/correction/mislink/route.ts:518` | `owner.version` のみ(付け替えのinvalidation) |
 | `src/app/api/admin/owners/correction/mislink/route.ts:531` | `owner.version` のみ(target側) |
 | `src/app/api/admin/owners/correction/mislink/route.ts:545` | `property.version` のみ |
@@ -82,7 +82,7 @@ Task 7 が直した「謄本取込が所有者の法人番号を版番号を進�
 | `src/app/api/owners/[id]/corporate-cleanup/route.ts:248` | `owner.name`/`address`/`note`/`corporateNumber` |
 | `src/app/api/owners/[id]/route.ts:213` | `owner` の編集画面フィールド一式(編集画面本体の保存窓口) |
 | `src/app/api/properties/[id]/actions/route.ts:157` | `property` のアクション実行結果フィールド |
-| `src/app/api/properties/[id]/route.ts:484` | `property` の編集画面フィールド一式(編集画面本体の保存窓口) |
+| `src/app/api/properties/[id]/route.ts:494` | `property` の編集画面フィールド一式(編集画面本体の保存窓口) |
 | `src/app/api/properties/[id]/parcel-change/route.ts:87` | `property` の地番(1筆目)・ほかの土地・建物(分筆・合筆の記録・2026-11-06。行ロック→編集中の鍵の確認→版の条件つき更新) |
 | `src/app/api/properties/[id]/parcel-detach/route.ts:77` | `property` のほかの土地・建物(この筆を別の物件にする・2026-11-06。行ロック→編集中の鍵の確認→版の条件つき更新) |
 | `src/lib/sales-sheet/property-writeback/apply-writeback.ts:30` | `property` の販売条件(販売図面の作成画面で入れた値の書き戻し。F3で追加。呼び出し側が `FOR UPDATE`+担当者スコープを取った上で `where` に version を付けて書く) |
@@ -92,9 +92,9 @@ Task 7 が直した「謄本取込が所有者の法人番号を版番号を進�
 | `src/lib/investigation/fetch-investigation.ts:646` | `property.zoningDistrict`/`buildingCoverageRatio`/`floorAreaRatio` |
 | `src/lib/registry-fetch/auto-fetch.ts:4338` | `property.registryStatus = scheduled`(有料取得の予約) |
 | `src/lib/registry-fetch/auto-fetch.ts:4579` | `property.registryStatus = obtained`(有料取得の確定) |
-| `src/lib/registry-pdf/process.ts:195` | `owner.corporateNumber`(Task 7 で修正済) |
-| `src/lib/registry-pdf/process.ts:805` | `property.registryStatus`/`realEstateNumber`/`lotNumber`/`buildingNumber` |
-| `src/lib/registry-pdf/process.ts:310` | (2026-11-12 同じ物件の同じ名前)`owner.address`(`setOwnerAddressGuarded`)。使い回す人の住所も郵便番号も空なら埋める／この実行で作った人が、この実行の書いた住所のままなら後の行の住所に替える。所有者の行を押さえてから読み直し・編集中は書かない |
+| `src/lib/registry-pdf/process.ts:203` | `owner.corporateNumber`(Task 7 で修正済) |
+| `src/lib/registry-pdf/process.ts:825` | `property.registryStatus`/`realEstateNumber`/`lotNumber`/`buildingNumber` |
+| `src/lib/registry-pdf/process.ts:318` | (2026-11-12 同じ物件の同じ名前)`owner.address`(`setOwnerAddressGuarded`)。使い回す人の住所も郵便番号も空なら埋める／この実行で作った人が、この実行の書いた住所のままなら後の行の住所に替える。所有者の行を押さえてから読み直し・編集中は書かない |
 | `src/lib/registry-pdf/fill-areas.ts:62` | (2026-10-25 謄本から面積)`property.exclusiveAreaRegistry`/`landArea`/`landAreaMethod`/`totalFloorArea` の空欄補完(物件の画面の添付・一括取込・物件を指定しない取込から) |
 | `src/lib/registry-owner-check/service.ts:408` | (2026-11-08 謄本の名義の確認)`property.dmStatus` を未判断→送付可に戻す(このままでよい・謄本の名義に直すで選んだとき) |
 
