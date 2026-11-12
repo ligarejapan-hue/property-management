@@ -408,7 +408,11 @@ describe("同じ謄本を取り直しても住所なしの所有者が増えな�
     expect(pm.owner.create).toHaveBeenCalledTimes(1);
     expect(pm.owner.updateMany).toHaveBeenCalledWith(
       expect.objectContaining({
-        where: expect.objectContaining({ id: "owner-new", address: "東京都港区1-1" }),
+        where: expect.objectContaining({
+          id: "owner-new",
+          // この実行が書いた住所のまま・郵便番号は空のまま、のときだけ書く
+          AND: expect.arrayContaining([{ address: "東京都港区1-1" }, { OR: [{ zip: null }, { zip: "" }] }]),
+        }),
         data: expect.objectContaining({ address: "大阪市北区1-1" }),
       }),
     );
@@ -426,6 +430,24 @@ describe("同じ謄本を取り直しても住所なしの所有者が増えな�
         { owner: { id: "owner-new", name: "山田太郎", address: "人が直した住所", isArchived: false, corporateNumber: null } },
       ]);
     pm.owner.findUnique.mockResolvedValue({ corporateNumber: null, address: "人が直した住所", zip: null, isArchived: false });
+    await run();
+    expect(pm.owner.updateMany).not.toHaveBeenCalledWith(
+      expect.objectContaining({ data: expect.objectContaining({ address: "大阪市北区1-1" }) }),
+    );
+  });
+
+  it("⚠途中で人が郵便番号を入れていたら、住所だけ替えない(組がずれる・@codex #710 P2)", async () => {
+    withAddress([
+      { name: "山田太郎", address: "東京都港区1-1" },
+      { name: "山田太郎", address: "大阪市北区1-1" },
+    ]);
+    pm.propertyOwner.findMany.mockReset();
+    pm.propertyOwner.findMany
+      .mockResolvedValueOnce([])
+      .mockResolvedValue([
+        { owner: { id: "owner-new", name: "山田太郎", address: "東京都港区1-1", isArchived: false, corporateNumber: null } },
+      ]);
+    pm.owner.findUnique.mockResolvedValue({ corporateNumber: null, address: "東京都港区1-1", zip: "105-0001", isArchived: false });
     await run();
     expect(pm.owner.updateMany).not.toHaveBeenCalledWith(
       expect.objectContaining({ data: expect.objectContaining({ address: "大阪市北区1-1" }) }),

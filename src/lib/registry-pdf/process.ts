@@ -297,10 +297,10 @@ async function setOwnerAddressGuarded(
       select: { address: true, zip: true, isArchived: true },
     });
     if (!fresh || fresh.isArchived) return { count: 0, locked: false };
+    // ⚠郵便番号も見る(@codex #710 P2): 謄本の取り込みは郵便番号を書かない=この実行が作った人の
+    //   郵便番号は空のはず。人が郵便番号を入れていたら、住所だけ替えると組がずれるので書かない。
     const stillAsExpected =
-      expected === null
-        ? !fresh.address?.trim() && !fresh.zip?.trim()
-        : fresh.address === expected;
+      !fresh.zip?.trim() && (expected === null ? !fresh.address?.trim() : fresh.address === expected);
     if (!stillAsExpected) return { count: 0, locked: false };
     const locked = await isResourceEditLocked(tx, {
       resourceType: "owner",
@@ -311,7 +311,10 @@ async function setOwnerAddressGuarded(
       where: {
         id: ownerId,
         isArchived: false,
-        ...(expected === null ? { OR: [{ address: null }, { address: "" }] } : { address: expected }),
+        AND: [
+          { OR: [{ zip: null }, { zip: "" }] },
+          expected === null ? { OR: [{ address: null }, { address: "" }] } : { address: expected },
+        ],
       },
       data: { address, version: { increment: 1 } },
     });
