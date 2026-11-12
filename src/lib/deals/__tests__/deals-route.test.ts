@@ -79,7 +79,7 @@ describe("GET /api/deals", () => {
 
 describe("POST /api/deals 買取再販の仕入・売却(2026-11-05)", () => {
   const db = pm as never as { propertyOwner: { findMany: Fn }; dealParty: { findMany: Fn; create: Fn; createMany: Fn } };
-  const ownerRow = { owner: { name: "試験 太郎", phone: "03-0", address: "東京都試験区1", currentAddress: null, corporateNumber: null, companyRegistryNumber: null } };
+  const ownerRow = { owner: { name: "試験 太郎", phone: "03-0", address: "東京都試験区1", currentAddress: null, corporateNumber: null, companyRegistryNumber: null }, registryEntries: [] };
   const allOwnerPerms = [...DEAL_PERMS, { resource: "owner", action: "read", granted: true }, { resource: "owner_name", action: "full", granted: true }, { resource: "owner_address", action: "full", granted: true }];
   const company = { nameJa: "試験不動産株式会社", license: null, tel: "03-1111-1111", fax: null, email: null, hp: null, address: "東京都試験区9-9" };
 
@@ -114,7 +114,7 @@ describe("POST /api/deals 買取再販の仕入・売却(2026-11-05)", () => {
 
 describe("POST /api/deals 物件から入れる項目", () => {
   const db = pm as never as { propertyOwner: { findMany: Fn }; dealParty: { createMany: Fn } };
-  const ownerRow = { owner: { name: "試験 太郎", phone: "03-0", address: "東京都試験区1", currentAddress: null, corporateNumber: null, companyRegistryNumber: null } };
+  const ownerRow = { owner: { name: "試験 太郎", phone: "03-0", address: "東京都試験区1", currentAddress: null, corporateNumber: null, companyRegistryNumber: null }, registryEntries: [] };
 
   it("★所有者を売主に入れる(見られる人が作ったとき)・監査に氏名を出さない", async () => {
     (getUserPermissions as Fn).mockResolvedValue([...DEAL_PERMS, { resource: "owner", action: "read", granted: true }, { resource: "owner_name", action: "full", granted: true }, { resource: "owner_address", action: "full", granted: true }]);

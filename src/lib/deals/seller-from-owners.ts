@@ -13,6 +13,7 @@ import { hasPermission, isMaskFreeLevel, resolveOwnerDisplayConfig } from "@/lib
 import { foldNameVariants } from "./crosscheck";
 import { resolveCompanyProfile } from "@/lib/sales-sheet/company-profile-store";
 import type { Prisma } from "@/generated/prisma";
+import { sumRegistryShares, type RegistryShare } from "@/lib/registry-entries/share";
 
 export interface SellerAccess { name: boolean; address: boolean; phone: boolean }
 
@@ -33,11 +34,18 @@ export const SELLER_OWNER_SELECT = {
 export interface OwnerForSeller {
   name: string; phone: string | null; address: string | null; currentAddress: string | null;
   corporateNumber: string | null; companyRegistryNumber: string | null;
+  /**
+   * この物件での持分の合計(登記上の記載=所有者事項の行の持分を足したもの・2026-11-12 発注者決定)。
+   * 持分が読めていない人・記載の無い人は null(売主の持分は空のまま=手で入れる)。
+   */
+  share?: RegistryShare | null;
 }
 
 export interface SellerParty {
   role: "seller"; partyType: "individual" | "corporation"; name: string;
   address: string | null; phone: string | null; isSelf: false;
+  /** 持分(登記上の記載の合計)。分からなければ両方 null。あとから手で直せる。 */
+  shareNum: number | null; shareDen: number | null;
 }
 
 const CORPORATE_NAME = /株式会社|有限会社|合同会社|合資会社|合名会社|[(（][株有][)）]|一般社団法人|一般財団法人|公益社団法人|公益財団法人|医療法人|学校法人|宗教法人|社会福祉法人|特定非営利活動法人|NPO法人|ＮＰＯ法人|独立行政法人/;
@@ -61,7 +69,30 @@ export function ownersExceptCompany<T extends { name: string }>(owners: T[], com
   return owners.filter((o) => !sameCompany(o.name, companyName));
 }
 
-/** 足す売主を決める。純関数。`existingNames` はすでに入っている売主の氏名。 */
+/**
+ * 同じ名前の所有者(同じ方が二重に登録されている)の持分を足し、全員に同じ合計を持たせる。純関数。
+ *
+ * - 売主は名前で1人にまとめるので、持分は1人目の分だけにせず、同じ名前の人の分を足す。
+ *   1人でも持分が分からなければ合計は出さない(一部だけを正しい持分として入れない)。
+ * - ⚠**担当者が候補から選ぶ前**(今の所有者の全員)に掛ける(@codex #717 P2)。候補の一覧は
+ *   同じ名前の1人目の ID だけを出し、足す処理は選ばれた ID の人だけに絞る。絞ったあとに足すと、
+ *   もう1人の持分が抜けて 2/10+5/10 の方が 2/10 になる(分からない人がいても空にならない)。
+ */
+export function withSharesCombinedByName<T extends OwnerForSeller>(owners: T[]): T[] {
+  const keyOf = (o: OwnerForSeller) => foldNameVariants(o.name.trim());
+  const sharesByName = new Map<string, Array<RegistryShare | null>>();
+  for (const o of owners) {
+    const k = keyOf(o);
+    sharesByName.set(k, [...(sharesByName.get(k) ?? []), o.share ?? null]);
+  }
+  return owners.map((o) => ({ ...o, share: sumRegistryShares(sharesByName.get(keyOf(o)) ?? []) }));
+}
+
+/**
+ * 足す売主を決める。純関数。`existingNames` はすでに入っている売主の氏名。
+ * ⚠持分は渡された `share` をそのまま使う。同じ名前の2人の持分を足すのは、呼ぶ前の
+ *   `withSharesCombinedByName`(今の所有者の全員に掛ける)。
+ */
 export function sellerPartiesFromOwners(owners: OwnerForSeller[], existingNames: string[], access: SellerAccess): SellerParty[] {
   if (!access.name) return [];
   const seen = new Set(existingNames.map(foldNameVariants));
@@ -72,6 +103,7 @@ export function sellerPartiesFromOwners(owners: OwnerForSeller[], existingNames:
     const key = foldNameVariants(name);
     if (seen.has(key)) continue;
     seen.add(key);
+    const share = o.share ?? null;
     out.push({
       role: "seller",
       partyType: o.corporateNumber || o.companyRegistryNumber || CORPORATE_NAME.test(name) ? "corporation" : "individual",
@@ -79,6 +111,10 @@ export function sellerPartiesFromOwners(owners: OwnerForSeller[], existingNames:
       address: access.address ? fit(o.currentAddress?.trim() ? o.currentAddress : o.address, MAX_ADDRESS) : null,
       phone: access.phone ? fit(o.phone, MAX_PHONE) : null,
       isSelf: false,
+      // 持分は所有者事項から読んだ合計(約分しない)。氏名をそのまま見られる人の操作でだけ入る
+      // (この関数の入口で access.name を見ている)。
+      shareNum: share?.num ?? null,
+      shareDen: share?.den ?? null,
     });
   }
   return out;
@@ -91,13 +127,24 @@ async function readSellersAndOwners(db: Prisma.TransactionClient, dealId: string
   const links = await db.propertyOwner.findMany({
     where: { propertyId, endDate: null, owner: { isArchived: false } },
     orderBy: [{ isPrimary: "desc" }, { createdAt: "asc" }],
-    select: { owner: { select: { id: true, ...SELLER_OWNER_SELECT } } },
+    select: {
+      owner: { select: { id: true, ...SELLER_OWNER_SELECT } },
+      // 登記上の記載(所有者事項の行ごとの持分)。合計を売主の持分に入れる。
+      registryEntries: { select: { shareNum: true, shareDen: true } },
+    },
   });
   const existing = await db.dealParty.findMany({ where: { dealId, role: "seller" }, select: { name: true, isSelf: true } });
   // 自社が売主の取引には、物件の所有者を足さない。
   if (existing.some((p) => p.isSelf)) return { existing, owners: [] as OwnerRow[] };
   const company = resolveCompanyProfile(await db.companyProfile.findUnique({ where: { id: "singleton" } }));
-  return { existing, owners: ownersExceptCompany(links.map((l) => l.owner), company.nameJa) };
+  const owners: OwnerRow[] = links.map((l) => ({
+    ...l.owner,
+    share: sumRegistryShares(
+      l.registryEntries.map((e) => (e.shareNum && e.shareDen ? { num: e.shareNum, den: e.shareDen } : null)),
+    ),
+  }));
+  // ⚠同じ名前の人の持分は、ここ(今の所有者の全員・担当者が選ぶ前)で足しておく。
+  return { existing, owners: withSharesCombinedByName(ownersExceptCompany(owners, company.nameJa)) };
 }
 
 export interface SellerCandidates { hasSellers: boolean; candidates: { ownerId: string; name: string }[] }
