@@ -31,6 +31,112 @@ export function isTerminalReaction(
   return status != null && TERMINAL_REACTIONS.has(status);
 }
 
+// ---------------------------------------------------------------------------
+// 宛先不明の解除(2026-11-13 発注者決定)
+//
+// 所有者の登記上の住所を別の住所に替えたとき、古い住所あての「宛先不明」を、送付対象から外す
+// 理由に数えないようにする。記録の reactionStatus は "undeliverable" のまま残し、解除の印
+// (undeliverableClearedAt / undeliverableClearedBy)を付ける。
+//
+// ⚠「送付対象から外す理由になる記録か」は、**このファイルの関数だけ**で決める
+//   (isActiveTerminalLog=1件の判定 / activeTerminalLogWhere ほか=DB の where)。
+//   `reactionStatus in TERMINAL_REACTIONS` を読む側に直書きしない(解除を無視して外し続ける=
+//   安全側だが食い違う/逆に拒否まで解く=いちばん避けたい間違い、のどちらも条件の散らばりから起きる)。
+// ⚠**拒否(refused)は、解除の印が付いていても必ず外す対象**。印で解けるのは宛先不明だけ。
+//   where は「印が無いこと」だけで絞らず、拒否を別の枝に置く(印が拒否の行に残っても解けない)。
+// ⚠TERMINAL_REACTIONS は「書くときに所有者の行を先に押さえる反響」の集合として今までどおり使う
+//   (解除した宛先不明も、書き換えるときは terminal の書き手の決まりに従う)。
+// ---------------------------------------------------------------------------
+
+/** 1件の記録が、送付対象から外す理由になるか(解除した宛先不明は false・拒否は常に true)。 */
+export function isActiveTerminalLog(log: {
+  reactionStatus: string | null;
+  undeliverableClearedAt: Date | null;
+}): boolean {
+  // ⚠ここは「この記録の今の反響が、送付対象から外す理由になるか」だけを見る(認可ではない)。
+  //   裏に拒否が控える古い記録(shadow)は、見た目が宛先不明=解除していなければ外す対象。
+  //   その記録を解除してよいかは isClearableUndeliverableLog が isRefusalProtected で止める。
+  const status = log.reactionStatus;
+  if (status === "refused") return true;
+  return status === "undeliverable" && log.undeliverableClearedAt === null;
+}
+
+/** DB の where: 送付対象から外す理由になる記録(=拒否 または 解除していない宛先不明)。 */
+export function activeTerminalLogWhere(): {
+  OR: [{ reactionStatus: "refused" }, { reactionStatus: "undeliverable"; undeliverableClearedAt: null }];
+} {
+  return {
+    OR: [{ reactionStatus: "refused" }, { reactionStatus: "undeliverable", undeliverableClearedAt: null }],
+  };
+}
+
+/**
+ * DB の where: その物件自身の記録で、再送の候補から外す反響
+ * (=拒否・連絡あり・解除していない宛先不明。dm-resend/candidacy.ts の SELF_EXCLUDING と同じ意味)。
+ */
+export function selfExcludingLogWhere(): {
+  OR: [
+    { reactionStatus: { in: string[] } },
+    { reactionStatus: "undeliverable"; undeliverableClearedAt: null },
+  ];
+} {
+  return {
+    OR: [
+      { reactionStatus: { in: ["refused", "replied"] } },
+      { reactionStatus: "undeliverable", undeliverableClearedAt: null },
+    ],
+  };
+}
+
+/** DB の where: 残っている(解除していない)宛先不明。物件の「宛先不明」の印の数え直しに使う。 */
+export function activeUndeliverableLogWhere(): {
+  reactionStatus: "undeliverable";
+  undeliverableClearedAt: null;
+} {
+  return { reactionStatus: "undeliverable", undeliverableClearedAt: null };
+}
+
+/**
+ * 反響を書くとき(手動・同期・配信停止など)に、解除の印をどうするか。update の data に展開して使う。
+ * - 宛先不明のまま(日付・メモの訂正・同じ返戻の再同期)なら印に触らない。
+ * - それ以外の書き換えは印を消す(別の反響になった/新しく宛先不明になった=新しい住所でまた
+ *   戻ってきたら、また外す。印が残ったまま拒否になる形も作らない)。
+ */
+export function clearedFieldsOnReactionWrite(
+  prevStatus: string | null,
+  nextStatus: string,
+): { undeliverableClearedAt?: null; undeliverableClearedBy?: null } {
+  if (prevStatus === "undeliverable" && nextStatus === "undeliverable") return {};
+  return { undeliverableClearedAt: null, undeliverableClearedBy: null };
+}
+
+/**
+ * 所有者の登記上の住所を替えたときに、解除してよい宛先不明の記録か(純関数)。
+ * 解除するのは「その所有者**だけ**に、所有者の住所あてで送った、解除していない宛先不明」。
+ * - 拒否・裏に拒否が控える古い記録(isRefusalProtected)は解除しない。
+ * - 物件の住所あて(dmType="property_address")は解除しない(所有者の住所を替えても関係がない)。
+ *   種類の無い古い記録・売却DMの記録(null)は所有者の住所あてとして扱う。
+ * - 共有でまとめて送った記録(ほかの所有者も入っている)は解除しない(発注者決定=ほかの方は
+ *   古い住所のまま。人が DM 送付履歴で確かめる)。
+ */
+export function isClearableUndeliverableLog(
+  log: {
+    reactionStatus: string | null;
+    undeliverableClearedAt: Date | null;
+    manualReactionShadow: unknown;
+    dmType: string | null;
+    ownerId: string | null;
+    logOwnerIds: readonly string[];
+  },
+  ownerId: string,
+): boolean {
+  if (log.reactionStatus !== "undeliverable" || log.undeliverableClearedAt !== null) return false;
+  if (isRefusalProtected(log)) return false;
+  if (log.dmType === "property_address") return false;
+  if (log.ownerId !== ownerId) return false;
+  return log.logOwnerIds.every((id) => id === ownerId);
+}
+
 export const JST_OFFSET_MS = 9 * 60 * 60 * 1000;
 
 /** 実時刻 → JST 暦日 "YYYY-MM-DD"(深夜0-9時は UTC 前日でも当日扱い=R37)。 */

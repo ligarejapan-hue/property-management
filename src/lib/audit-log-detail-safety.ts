@@ -302,6 +302,15 @@ const ACTION_EXTRA_KEYS: Readonly<Record<string, ReadonlySet<string>>> = {
   sale_dm_draft_mark_sent: new Set(["sentAt", "legacyGroup"]),
   sale_dm_draft_outcome_update: new Set(["deliveryStatus", "outcome", "undeliverableLinked", "undeliverableCleared", "updatedAt"]),
   sale_dm_undeliverable_clear: new Set(["restoredDmStatus", "clearedAt"]),
+  // 宛先不明の解除(2026-11-13): 物件の id と件数だけ(氏名・住所は残さない)
+  dm_undeliverable_clear: new Set([
+    "propertyId",
+    "cleared",
+    "sharedSkipped",
+    "otherSkipped",
+    "flagsCleared",
+    "dmStatusRestored",
+  ]),
   // ワークスペース閲覧(PII の本文/宛名/住所を返す read)の監査。viewedAt=ISO日時のみ action 固有許可。
   // campaignId/count は ALWAYS_SAFE。recipientName/recipientAddress/body は denylist で [REDACTED]。
   sale_dm_campaign_view: new Set(["viewedAt"]),

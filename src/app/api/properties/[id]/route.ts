@@ -28,6 +28,7 @@ import {
 } from "@/lib/property-building-name";
 import { applyDisplayToOwner } from "@/lib/display-level";
 import { buildRegistryEntriesView } from "@/lib/registry-entries/view";
+import { loadUndeliverableSummaries } from "@/lib/dm-reaction/clear-undeliverable";
 import { occupancyFitsType } from "@/lib/property-types";
 import {
   applyBuildingLink,
@@ -182,12 +183,22 @@ export async function GET(
     const ownerDisplayConfig = canReadOwner ? await getOwnerDisplayConfig(session.id, permissions) : null;
     // ⚠registryEntries(登記上の記載)は `...po` で生のまま流さない。住所は所有者の住所と同じ
     //   表示レベルで伏せ、owner:read が無い人には渡さない(buildRegistryEntriesView)。
+    // 宛先不明の解除(2026-11-13): 所有者ごとの「解除していない宛先不明」の件数(名前・住所は含まない)。
+    // 所有者を見られる人にだけ返す。分け方は解除の処理と同じ(clear-undeliverable.ts)。
+    const undeliverableByOwner = canReadOwner
+      ? await loadUndeliverableSummaries(
+          prisma,
+          property.propertyOwners.map((po) => po.ownerId),
+          session,
+        )
+      : new Map<string, never>();
     const maskedPropertyOwners = property.propertyOwners.map(({ registryEntries, ...po }) => ({
       ...po,
       owner: canReadOwner && ownerDisplayConfig
         ? applyDisplayToOwner(po.owner, ownerDisplayConfig)
         : { id: po.owner.id },
       registry: buildRegistryEntriesView(registryEntries, canReadOwner ? ownerDisplayConfig : null),
+      dmUndeliverable: undeliverableByOwner.get(po.ownerId) ?? null,
     }));
 
     // 謄本(registry)添付の件数を種別ごとに集計する(基本情報の「謄本 ○件」行)。
@@ -755,12 +766,21 @@ export async function PATCH(
     const canReadOwner = hasPermission(permissions, "owner", "read");
     const ownerDisplayConfig = canReadOwner ? await getOwnerDisplayConfig(session.id, permissions) : null;
     // ⚠registryEntries は GET と同じく、生のまま流さず伏せてから返す。
+    // 宛先不明の件数も GET と同じく返す(保存の応答で画面を組み直すため)
+    const undeliverableByOwner = canReadOwner
+      ? await loadUndeliverableSummaries(
+          prisma,
+          updated.propertyOwners.map((po) => po.ownerId),
+          session,
+        )
+      : new Map<string, never>();
     const maskedUpdatedPropertyOwners = updated.propertyOwners.map(({ registryEntries, ...po }) => ({
       ...po,
       owner: canReadOwner && ownerDisplayConfig
         ? applyDisplayToOwner(po.owner, ownerDisplayConfig)
         : { id: po.owner.id },
       registry: buildRegistryEntriesView(registryEntries, canReadOwner ? ownerDisplayConfig : null),
+      dmUndeliverable: undeliverableByOwner.get(po.ownerId) ?? null,
     }));
 
     return apiResponse({

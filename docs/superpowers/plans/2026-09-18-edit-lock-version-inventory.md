@@ -22,9 +22,10 @@ Task 7 が直した「謄本取込が所有者の法人番号を版番号を進�
 | 5 | `src/app/api/import/reception-owner/route.ts:413` | `dmStatus`(hold→send昇格。PropertyEditForm「DM判断」で編集可能) | `data` に `version: { increment: 1 }` を追加 | 同上「DM○による dmStatus: hold→send の昇格は…」 |
 | 6 | `src/app/api/import/reception-owner/route.ts:754` | `corporateNumber`(所有者編集カードの法人番号入力欄=`properties/[id]/page.tsx:1590`) | `data` に `version: { increment: 1 }` を追加 | `src/lib/__tests__/owner-corporate-import-integration.test.ts`「(Task 9) reuse パスの空欄埋めは…」(source-assertion。理由は本文末尾) |
 | 7 | `src/app/api/import/reception-owner/route.ts:766` | `corporateNumber`/`companyRegistryNumber`(分断型復元。同上の入力欄) | `data` に `version: { increment: 1 }` を追加 | `src/lib/__tests__/corporate-import-guard-integration.test.ts`「(Task 9) 分断型復元の空欄埋めは…」(source-assertion) |
-| 8 | `src/app/api/properties/sale-dm/drafts/[id]/outcome/route.ts:244` | `dmStatus`(no_send昇格。PropertyEditForm「DM判断」) | `data` に `version: { increment: 1 }` を追加 | `src/lib/__tests__/sale-dm-outcome-route.test.ts`「(Task 9) returned_undeliverable の物件連動は…」 |
+| 8 | `src/app/api/properties/sale-dm/drafts/[id]/outcome/route.ts:245` | `dmStatus`(no_send昇格。PropertyEditForm「DM判断」) | `data` に `version: { increment: 1 }` を追加 | `src/lib/__tests__/sale-dm-outcome-route.test.ts`「(Task 9) returned_undeliverable の物件連動は…」 |
 | 9 | `src/app/api/properties/[id]/clear-dm-undeliverable/route.ts:64` | `dmStatus`(`restoreDmStatus` 指定時のみ。同上) | `restoreDmStatus` 指定時のみ `data.version = { increment: 1 }` を追加(dmUndeliverableAtのみのクリアは対象外のまま) | `src/lib/__tests__/sale-dm-clear-undeliverable-route.test.ts`「(Task 9) restoreDmStatus 指定時は…」 |
-| 10 | `src/app/api/properties/[id]/dm-logs/[logId]/reaction/route.ts:276` | `dmStatus`(no_send昇格。同上) | `data` に `version: { increment: 1 }` を追加 | `src/lib/__tests__/dm-reaction-patch-route.test.ts`「(Task 9) undeliverable 連動は…」 |
+| 9b | `src/lib/dm-reaction/clear-undeliverable.ts:179` | `dmStatus`(宛先不明の解除で no_send→send に戻すときのみ。2026-11-13 追加) | 戻すときのみ `data` に `version: { increment: 1 }`(dmUndeliverableAtのみのクリアは対象外) | `src/lib/dm-reaction/__tests__/clear-undeliverable.test.ts`「★印を付け…」「印はあるが DM 可否が…」 |
+| 10 | `src/app/api/properties/[id]/dm-logs/[logId]/reaction/route.ts:280` | `dmStatus`(no_send昇格。同上) | `data` に `version: { increment: 1 }` を追加 | `src/lib/__tests__/dm-reaction-patch-route.test.ts`「(Task 9) undeliverable 連動は…」 |
 | 11 | `src/lib/registry-fetch/auto-fetch.ts:255`(`releaseSchedulingLock`) | `registryStatus`(scheduled解除。PropertyEditForm「登記状況」で編集可能) | `data` に `version: { increment: 1 }` を追加 | `src/lib/__tests__/registry-auto-fetch-api.test.ts`「8. provider失敗時に…」に追記 |
 
 **#6/#7 の補足**: `owner-corporate-import-integration.test.ts` / `corporate-import-guard-integration.test.ts` は、この2ファイル(reception-owner・registry-pdf・owner-csv の法人番号統合)を**最初から source-assertion(正規表現でコード片を固定)方式**で検証する既存方針を取っている(ファイル冒頭のコメントに明記)。他の9件は full prisma mock による振る舞いテストにしたが、#6/#7 はこの既存ファイル群の慣習(reception-owner の corporateNumber 書込は同ファイル内に既に同種の source-assertion が複数ある)に合わせ、同じ形式で「version increment を伴う」ことを固定した。
@@ -45,10 +46,10 @@ Task 7 が直した「謄本取込が所有者の法人番号を版番号を進�
 | `src/app/api/import/reception-owner/route.ts:624` | `owner.updatedAt` のみ | 同上 |
 | `src/app/api/owners/[id]/memos/route.ts:241` | (コード本体ではない) | **正規表現の誤検出**。`owner.updateMany({ where: { id, isArchived: false } })` という文字列は、実際の呼び出しの使い方を説明する**コードコメント**であり、実行されるコードではない(実際の呼び出しは同ファイル252行目) |
 | `src/app/api/owners/[id]/memos/route.ts:252` | `owner.updatedAt` のみ | メモ作成時の行ロックtouch(archive/mergeとの直列化用)。owner本体のフィールドは一切書かない |
-| `src/app/api/properties/[id]/dm-logs/[logId]/reaction/route.ts:303` | `property.dmUndeliverableAt = null` のみ | 残数ゼロによる自動解除。`dmUndeliverableAt` は `updatePropertySchema` にも `property-edit-form.tsx` の FORM_FIELDS にも存在せず、編集画面から書けない(dmStatus自体は据え置きで触らない) |
-| `src/app/api/properties/[id]/dm-logs/[logId]/route.ts:102` | `property.dmUndeliverableAt = null` のみ | 送付記録削除に伴う自動解除。理由は同上 |
+| `src/app/api/properties/[id]/dm-logs/[logId]/reaction/route.ts:293` | `property.dmUndeliverableAt = null` のみ | 残数ゼロによる自動解除。`dmUndeliverableAt` は `updatePropertySchema` にも `property-edit-form.tsx` の FORM_FIELDS にも存在せず、編集画面から書けない(dmStatus自体は据え置きで触らない) |
+| `src/app/api/properties/[id]/dm-logs/[logId]/route.ts:90` | `property.dmUndeliverableAt = null` のみ | 送付記録削除に伴う自動解除。理由は同上 |
 | `src/app/api/properties/[id]/owners/route.ts:58` | `owner.updatedAt` のみ | 所有者リンク時の行ロックtouch |
-| `src/app/api/properties/sale-dm/drafts/[id]/outcome/route.ts:267` | `property.dmUndeliverableAt = null` のみ | 訂正による自動解除。理由は上記2件と同じ |
+| `src/app/api/properties/sale-dm/drafts/[id]/outcome/route.ts:257` | `property.dmUndeliverableAt = null` のみ | 訂正による自動解除。理由は上記2件と同じ |
 | `src/lib/registry-pdf/process.ts:424` | `owner.updatedAt` のみ | 既存所有者再利用時の行ロックtouch |
 | `src/lib/building-link/apply.ts:135` | `property.buildingId = null` のみ | (2026-10-05 棟の自動づけで追加)**編集画面で書けない項目ではない**が、`applyBuildingLink` は必ず物件の保存と同じトランザクションで、物件を作った直後(新しい行)か version を進める更新の直後に呼ばれる。版番号はその保存で1回だけ進む |
 | `src/lib/building-link/apply.ts:225` | `property.buildingId`/`buildingName` | 同上(棟へつなぎ、物件名を棟の正式な表記にそろえる) |

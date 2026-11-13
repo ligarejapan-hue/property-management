@@ -9,7 +9,13 @@
  * 非対称の原則(@codex R4 P2): 誤って候補から**外れる**のは許容、
  * 誤って候補に**入る**のは不可。迷ったら除外側へ倒す。
  */
-import { TERMINAL_REACTIONS, jstCalendarDay } from "@/lib/dm-reaction/core";
+import {
+  TERMINAL_REACTIONS,
+  activeTerminalLogWhere,
+  isActiveTerminalLog,
+  jstCalendarDay,
+  selfExcludingLogWhere,
+} from "@/lib/dm-reaction/core";
 
 /** 再送候補に出るまでの間隔(日)。発注者決定=90日(設計§0)。上限(cap)は作らない。 */
 export const DEFAULT_RESEND_COOLDOWN_DAYS = 90;
@@ -68,6 +74,8 @@ export type ResendIneligibleReason =
 export interface ResendCandidacyLog {
   sentAt: Date;
   reactionStatus: string;
+  /** 宛先不明の解除の印(2026-11-13)。解除した宛先不明は候補から外す理由にしない。省略=印なし。 */
+  undeliverableClearedAt?: Date | null;
 }
 
 export interface ResendCandidacyInput {
@@ -105,8 +113,13 @@ export function decideResendCandidacy(
     return { eligible: false, reason: "within_cooldown" };
   }
   if (
-    input.logs.some((l) =>
-      SELF_EXCLUDING_REACTION_VALUES.includes(l.reactionStatus),
+    input.logs.some(
+      (l) =>
+        l.reactionStatus === "replied" ||
+        isActiveTerminalLog({
+          reactionStatus: l.reactionStatus,
+          undeliverableClearedAt: l.undeliverableClearedAt ?? null,
+        }),
     )
   ) {
     return { eligible: false, reason: "terminal_reaction" };
@@ -126,15 +139,18 @@ export function decideResendCandidacy(
 export interface ResendCandidateWhereFragment {
   dmStatus?: string;
   dmLogs?: {
-    some?: { reactionStatus?: { in: string[] } };
-    none?: { sentAt?: { gt: Date }; reactionStatus?: { in: string[] } };
+    some?: Record<string, never>;
+    // sentAt=新しい送付が無いこと / OR=候補から外す反響(拒否・連絡あり・解除していない宛先不明)が
+    // 無いこと(dm-reaction/core.ts の selfExcludingLogWhere の中身)。1つの断片にはどちらか片方。
+    none?: { sentAt?: { gt: Date }; OR?: ReturnType<typeof selfExcludingLogWhere>["OR"] };
   };
   propertyOwners?: {
     none?: {
       owner?: {
+        // 外す理由になる記録(拒否・解除していない宛先不明)=dm-reaction/core.ts の断片
         OR?: Array<{
-          dmLogs?: { some: { reactionStatus: { in: string[] } } };
-          dmLogOwners?: { some: { log: { reactionStatus: { in: string[] } } } };
+          dmLogs?: { some: ReturnType<typeof activeTerminalLogWhere> };
+          dmLogOwners?: { some: { log: ReturnType<typeof activeTerminalLogWhere> } };
         }>;
       };
     };
@@ -152,23 +168,20 @@ export function buildResendCandidateWhere(
   cooldownDays: number,
 ): ResendCandidateWhereFragment[] {
   const cutoff = resendCutoff(now, cooldownDays);
-  const terminalIn = { in: [...TERMINAL_REACTION_VALUES] };
+  // ⚠住所を替えて解除した宛先不明(2026-11-13)は、候補から外す理由にしない。拒否は印に
+  //   関係なく必ず外す。条件は dm-reaction/core.ts の断片だけを使う(ここに直書きしない)。
   return [
     { dmStatus: "send" },
     { dmLogs: { some: {} } },
     { dmLogs: { none: { sentAt: { gt: cutoff } } } },
-    {
-      dmLogs: {
-        none: { reactionStatus: { in: [...SELF_EXCLUDING_REACTION_VALUES] } },
-      },
-    },
+    { dmLogs: { none: selfExcludingLogWhere() } },
     {
       propertyOwners: {
         none: {
           owner: {
             OR: [
-              { dmLogs: { some: { reactionStatus: terminalIn } } },
-              { dmLogOwners: { some: { log: { reactionStatus: terminalIn } } } },
+              { dmLogs: { some: activeTerminalLogWhere() } },
+              { dmLogOwners: { some: { log: activeTerminalLogWhere() } } },
             ],
           },
         },

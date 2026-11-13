@@ -1,4 +1,4 @@
-import { TERMINAL_REACTIONS } from "@/lib/dm-reaction/core";
+import { activeTerminalLogWhere, selfExcludingLogWhere } from "@/lib/dm-reaction/core";
 import { findOwnerNameExclusions } from "@/lib/dm-batch/agent-name-exclusion";
 import { NextRequest, NextResponse } from "next/server";
 import prisma from "@/lib/prisma";
@@ -28,7 +28,6 @@ import { buildBatchItemUnsubscribeUrl } from "@/lib/dm-batch/unsubscribe-token";
 import { loadSaleDmPublicPageConfig } from "@/lib/sale-dm-letter/config-store";
 import { deriveUnsubscribeKey } from "@/lib/sale-dm-letter/unsubscribe-token";
 import {
-  SELF_EXCLUDING_REACTION_VALUES,
   getResendCooldownDays,
   resendCutoff,
 } from "@/lib/dm-resend/candidacy";
@@ -201,14 +200,20 @@ export async function GET(
       if (allOwnerIds.length > 0 || allPropertyIds.length > 0) {
         const terminalLogs = await tx.propertyDmLog.findMany({
           where: {
-            reactionStatus: { in: [...TERMINAL_REACTIONS] },
-            OR: [
-              { ownerId: { in: allOwnerIds } },
-              { logOwners: { some: { ownerId: { in: allOwnerIds } } } },
+            AND: [
+              // ⚠拒否と、解除していない宛先不明だけ(2026-11-13・dm-reaction/core.ts)。
+              //   住所を替えて解除した宛先不明は外す理由にしない。拒否は印に関係なく必ず外す。
+              activeTerminalLogWhere(),
               {
-                propertyId: { in: allPropertyIds },
-                ownerId: null,
-                logOwners: { none: {} },
+                OR: [
+                  { ownerId: { in: allOwnerIds } },
+                  { logOwners: { some: { ownerId: { in: allOwnerIds } } } },
+                  {
+                    propertyId: { in: allPropertyIds },
+                    ownerId: null,
+                    logOwners: { none: {} },
+                  },
+                ],
               },
             ],
           },
@@ -245,9 +250,9 @@ export async function GET(
             propertyId: { in: allPropertyIds },
             OR: [
               { sentAt: { gt: cutoff } },
-              {
-                reactionStatus: { in: [...SELF_EXCLUDING_REACTION_VALUES] },
-              },
+              // 候補から外す反響(拒否・連絡あり・解除していない宛先不明)。一覧の条件
+              // (dm-resend/candidacy.ts)と同じ dm-reaction/core.ts の断片を使う。
+              selfExcludingLogWhere(),
             ],
           },
           select: { propertyId: true },

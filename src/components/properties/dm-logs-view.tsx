@@ -35,6 +35,8 @@ interface DmLog {
   reactionNote: string | null;
   /** "manual" | "sale_dm_sync"(売却DMからの自動同期) | null */
   reactionSource: string | null;
+  /** 住所を替えて解除した宛先不明か(2026-11-13)。解除済みは DM の対象から外す理由になっていない。 */
+  undeliverableCleared?: boolean;
   sentBy: { id: string; name: string } | null;
   createdAt: string;
 }
@@ -648,6 +650,15 @@ export default function DmLogsView({ propertyId }: { propertyId: string }) {
                             {/* 売却DMの返戻・LPアクセスからの自動同期 */}
                             {log.reactionSource === "sale_dm_sync" && "(自動)"}
                           </span>
+                          {/* 住所を替えて解除した宛先不明(記録は残るが、DMの対象から外す理由にしていない) */}
+                          {log.undeliverableCleared && (
+                            <span
+                              className="inline-flex rounded-full bg-green-100 px-2 py-0.5 text-xs font-medium text-green-700 dark:bg-green-950 dark:text-green-200"
+                              title="所有者の住所を替えたときに解除しました。この記録は、DMの対象から外す理由になっていません。"
+                            >
+                              解除済み
+                            </span>
+                          )}
                           {canWrite && (
                             <Button
                               variant="ghost"

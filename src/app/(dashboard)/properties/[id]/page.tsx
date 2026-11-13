@@ -43,6 +43,12 @@ import {
   RegistryShareBadge,
   type RegistryEntriesViewProps,
 } from "@/components/properties/registry-entries-panel";
+import {
+  UndeliverableClearNotice,
+  mailingAddressChanges,
+  undeliverableClearResultMessage,
+  type UndeliverableSummaryProps,
+} from "@/components/properties/undeliverable-clear-notice";
 import NextActionTab from "@/components/properties/next-action-tab";
 import AgentInquiryTab from "@/components/properties/agent-inquiry-tab";
 import AttachmentTab from "@/components/properties/attachment-tab";
@@ -67,7 +73,7 @@ import { takeBuildingLinkNotice } from "@/lib/building-link/notice";
 // ⚠apply.ts は prisma を読むサーバー側のファイル。型だけを読む。
 import type { BuildingLinkOutcome } from "@/lib/building-link/apply";
 import InvestigationTab from "@/components/properties/investigation-tab";
-import { fetchPropertyDetail, deleteProperty, updatePropertyOwner, unlinkPropertyOwner, updateOwner, fetchQualityCheck, apiErrorCode, codeFromErrorBody, type EditLockStatusRow } from "@/lib/api-client";
+import { fetchPropertyDetail, deleteProperty, updatePropertyOwner, unlinkPropertyOwner, updateOwner, clearOwnerDmUndeliverable, fetchQualityCheck, apiErrorCode, codeFromErrorBody, type EditLockStatusRow } from "@/lib/api-client";
 import { REGISTRY_OWNER_MISMATCH_CODES, REGISTRY_OWNER_REVIEW_HREF } from "@/lib/quality-check-rules";
 // 編集中の鍵(仕様 6.1・6.2)。所有者カードは1枚ごとに別資源として鍵を持つ(Task 6)。
 // ⚠複製タブ確認(ensureUniqueScreenToken・最大300ms)はこの画面(親)で1回だけ済ませ、
@@ -234,6 +240,8 @@ interface ApiPropertyOwner {
   owner: ApiOwner;
   /** 登記上の記載(所有者事項の行ごとの住所と持分)。無い・見せない人には null。住所は API が伏せ済み。 */
   registry?: RegistryEntriesViewProps | null;
+  /** 解除していない宛先不明の件数(2026-11-13)。無い・見せない人には null。氏名・住所は含まない。 */
+  dmUndeliverable?: UndeliverableSummaryProps | null;
 }
 
 interface ApiPhoto {
@@ -1861,6 +1869,11 @@ function OwnerCard({
   // 「この物件から外す」。⚠押し間違いが起きる場所なので、確認してから実行する。
   const [removing, setRemoving] = useState(false);
   const [removeError, setRemoveError] = useState<string | null>(null);
+  // 宛先不明の解除(2026-11-13): 「この住所を宛先にする」で開いた編集のときだけ、チェックを出す。
+  // 保存できたあとに解除を呼ぶ(保存に失敗したら解除しない)。
+  const [viaRegistryAddress, setViaRegistryAddress] = useState(false);
+  const [clearUndeliverable, setClearUndeliverable] = useState(false);
+  const [undeliverableNotice, setUndeliverableNotice] = useState<string | null>(null);
 
   // email が API レスポンスに含まれているか（hidden の場合キーが存在しない）
   const emailReturned = "email" in po.owner;
@@ -1944,6 +1957,9 @@ function OwnerCard({
     // 保存値ロードは user-edit ではない＝signal をリセット（開いただけでは検索しない）。
     setAddressEdited(false);
     setSaveError(null);
+    // ふつうの編集では、宛先不明の解除のチェックは出さない(住所を替える操作のときだけ)
+    setViaRegistryAddress(false);
+    setClearUndeliverable(false);
     setEditing(true);
   };
 
@@ -1956,6 +1972,10 @@ function OwnerCard({
   const handleUseRegistryAddress = (address: string) => {
     handleEdit();
     setForm((f) => ({ ...f, address, zip: "" }));
+    // 宛先不明の解除: 解除できる記録があるときは、最初からチェックを入れておく(外せる)
+    setViaRegistryAddress(true);
+    setClearUndeliverable((po.dmUndeliverable?.clearable ?? 0) > 0);
+    setUndeliverableNotice(null);
     // ⚠住所の候補の自動の検索は起こさない(起こすのは、人が住所の欄を打ったときだけ=
     //   owner-address-lookup-integration のテストが守る決まり)。handleEdit が印を下ろしたまま。
   };
@@ -1964,6 +1984,9 @@ function OwnerCard({
     void lock.release();
     setEditing(false);
     setSaveError(null);
+    // 宛先不明の解除のチェックも戻す(取り消したら解除しない)
+    setViaRegistryAddress(false);
+    setClearUndeliverable(false);
     // ⚠(branch review #4) カードを閉じたら消す。消さないと、前回の取得が失敗した
     //   まま(lockUnavailable=true)再度「編集」を押したとき、新しい取得が終わる前の
     //   一瞬だけ古いfail open通知が出て保存ボタンも押せてしまう。
@@ -2028,6 +2051,22 @@ function OwnerCard({
       // ⚠(branch review #4) 保存できた=鍵の可否と無関係に閉じるので、次に開いたときの
       //   ためにフラグも戻しておく(handleCancelと同じ理由)。
       setLockUnavailable(false);
+      // 宛先不明の解除(2026-11-13): 住所の保存が**できたあと**にだけ呼ぶ。解除に失敗しても
+      // 住所の保存は済んでいるので、知らせだけ出す(保存の失敗として扱わない)。
+      // ⚠実際の宛先(現住所があれば現住所)が変わったときだけ解除する(@codex P2)。変わらないのに
+      //   解除すると、届かなかった同じ住所へまた送ることになる。
+      if (viaRegistryAddress && clearUndeliverable && mailingAddressChanges(po.owner, form)) {
+        try {
+          const r = await clearOwnerDmUndeliverable(propertyId, po.ownerId);
+          setUndeliverableNotice(undeliverableClearResultMessage(r));
+        } catch (clearErr) {
+          setUndeliverableNotice(
+            `住所は保存しましたが、宛先不明の解除はできませんでした（${clearErr instanceof Error ? clearErr.message : "失敗しました"}）。`,
+          );
+        }
+      }
+      setViaRegistryAddress(false);
+      setClearUndeliverable(false);
       await onRefresh();
     } catch (err) {
       // ⚠コードの写像(期限切れ・強制解除・他の人が取った 等)はTask2の純関数に任せる。
@@ -2144,6 +2183,15 @@ function OwnerCard({
             : undefined
         }
       />
+
+      {undeliverableNotice && (
+        <p
+          role="status"
+          className="mb-3 rounded border border-green-300 bg-green-50 p-2 text-xs text-green-800 dark:border-green-800 dark:bg-green-950/40 dark:text-green-200"
+        >
+          {undeliverableNotice}
+        </p>
+      )}
 
       {removeError && (
         <p
@@ -2550,6 +2598,16 @@ function OwnerCard({
               </div>
             )}
           </div>
+
+          {/* 宛先不明の解除(「この住所を宛先にする」で開いたときだけ) */}
+          {viaRegistryAddress && (
+            <UndeliverableClearNotice
+              summary={po.dmUndeliverable}
+              checked={clearUndeliverable}
+              onChange={setClearUndeliverable}
+              mailingChanges={mailingAddressChanges(po.owner, form)}
+            />
+          )}
 
           {saveError && (
             <p className="text-xs text-red-600 dark:text-red-400">{saveError}</p>

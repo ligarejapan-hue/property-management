@@ -14,8 +14,7 @@ import { dmExclusionReason, findTerminalExclusions, isTerminalExcluded } from ".
 
 type FindArgs = {
   where: {
-    reactionStatus: { in: string[] };
-    OR: unknown[];
+    AND: [unknown, { OR: unknown[] }];
   };
   select: unknown;
 };
@@ -41,10 +40,17 @@ describe("findTerminalExclusions（集合の構築）", () => {
     await findTerminalExclusions(tx, ["o2", "o1", "o1"], ["p2", "p1", "p2"]);
     expect(findMany).toHaveBeenCalledTimes(1);
     const args = findMany.mock.calls[0][0] as FindArgs;
-    expect(args.where.reactionStatus.in).toEqual([...TERMINAL_REACTIONS]);
-    expect(args.where.reactionStatus.in).toEqual(["refused", "undeliverable"]);
+    // ⚠外す理由になる記録=拒否(印に関係なく) と 解除していない宛先不明(2026-11-13)。
+    //   住所を替えて解除した宛先不明は外さない。拒否は別の枝=解除の印では解けない。
+    expect(args.where.AND[0]).toEqual({
+      OR: [
+        { reactionStatus: "refused" },
+        { reactionStatus: "undeliverable", undeliverableClearedAt: null },
+      ],
+    });
+    expect([...TERMINAL_REACTIONS]).toEqual(["refused", "undeliverable"]);
     // 経路① 代表 owner_id ② 共有者連関 log_owners ③ 所有者紐づけの無い物件単位
-    expect(args.where.OR).toEqual([
+    expect(args.where.AND[1].OR).toEqual([
       { ownerId: { in: ["o1", "o2"] } },
       { logOwners: { some: { ownerId: { in: ["o1", "o2"] } } } },
       { propertyId: { in: ["p1", "p2"] }, ownerId: null, logOwners: { none: {} } },

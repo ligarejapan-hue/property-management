@@ -869,6 +869,14 @@ model PropertyDmLog {
   reactionSource String?   @map("reaction_source") // "manual" | "sale_dm_sync"
   // 手動値を同期が上書きするときの全量退避(status/reactedAt/note=R44)。訂正の戻しで復元・消費。
   manualReactionShadow Json? @map("manual_reaction_shadow")
+  // --- 宛先不明の解除(2026-11-13 発注者決定) ---
+  // 所有者の登記上の住所を別の住所に替えたので、この「宛先不明」は送付対象から外す理由に
+  // 数えない、という印(解除した日時・人)。記録の reactionStatus は "undeliverable" のまま残す。
+  // ⚠意味を持つのは reactionStatus="undeliverable" のときだけ。反響を書き換えたら null に戻す
+  //   (新しい住所でまた宛先不明になったら、また外す)。拒否(refused)には付けない。
+  // ⚠「外す対象か」は dm-reaction/core.ts の activeTerminalLogWhere / isActiveTerminalLog だけで決める。
+  undeliverableClearedAt DateTime? @map("undeliverable_cleared_at")
+  undeliverableClearedBy String?   @map("undeliverable_cleared_by") @db.Uuid
 
   property  Property? @relation(fields: [propertyId], references: [id], onDelete: SetNull)
   owner     Owner?    @relation(fields: [ownerId], references: [id], onDelete: SetNull)

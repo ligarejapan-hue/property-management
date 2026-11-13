@@ -678,9 +678,12 @@ describe("POST /campaigns — 拒否・宛先不明の宛先を保存しない",
       txDmLogFindMany.mock.invocationCallOrder[0],
     );
     // 照会対象=対象宛先の所有者と物件の両方
-    const arg = txDmLogFindMany.mock.calls[0][0] as unknown as { where: { OR: Array<Record<string, unknown>> } };
-    expect(JSON.stringify(arg.where.OR)).toContain("o1");
-    expect(JSON.stringify(arg.where.OR)).toContain("pB");
+    // where = AND[外す理由になる記録か(拒否・解除していない宛先不明=2026-11-13), 3経路の OR]
+    const arg = txDmLogFindMany.mock.calls[0][0] as unknown as {
+      where: { AND: [unknown, { OR: Array<Record<string, unknown>> }] };
+    };
+    expect(JSON.stringify(arg.where.AND[1].OR)).toContain("o1");
+    expect(JSON.stringify(arg.where.AND[1].OR)).toContain("pB");
   });
 
   it("所有者が業者と同じ名前 → その宛先は保存されず excludedAgentName に数える(住所に関係なく・2026-11-09)", async () => {

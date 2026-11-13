@@ -175,6 +175,7 @@ const ACTION_LABELS: Record<string, string> = {
   sale_dm_draft_mark_sent: "売却DM送付済みに設定",
   sale_dm_draft_outcome_update: "売却DM反応の記録",
   sale_dm_undeliverable_clear: "売却DM宛先不明の解除",
+  dm_undeliverable_clear: "宛先不明の解除（住所を替えた所有者をDMに戻す）",
   sale_dm_tracking_hit: "売却DMリンク開封",
   sale_dm_qr_unsubscribe: "売却DM配信停止(QR)",
   sale_dm_lp_phone_tap: "売却DM LP 電話タップ",

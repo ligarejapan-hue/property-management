@@ -7,7 +7,7 @@ import {
   lockPropertiesForUpdate,
   type RawTx,
 } from "@/lib/dm-batch/locks";
-import { applySyncReaction, jstCalendarDay, type ReactionFields } from "./core";
+import { applySyncReaction, jstCalendarDay, type ReactionFields, clearedFieldsOnReactionWrite } from "./core";
 import {
   deriveSaleDmReactionEvent,
   syncSaleDmReaction,
@@ -146,6 +146,8 @@ export async function reconcileLegacySaleDmLog(
       where: { id: log.id },
       data: {
         reactionStatus: next.reactionStatus,
+        // 宛先不明の解除の印: 宛先不明のままなら触らない・それ以外の書き換えは消す(2026-11-13)
+        ...clearedFieldsOnReactionWrite(current.reactionStatus, next.reactionStatus),
         reactedAt: next.reactedAt,
         reactionNote: next.reactionNote,
         reactionSource: next.reactionSource,

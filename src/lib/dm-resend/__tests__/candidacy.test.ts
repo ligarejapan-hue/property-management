@@ -170,25 +170,28 @@ describe("buildResendCandidateWhere", () => {
   });
 
   it("§4-4 物件の記録に terminal/replied の反響が無いことを要求する", () => {
-    const values = fragments.find((x) => x.dmLogs?.none?.reactionStatus)?.dmLogs
-      ?.none?.reactionStatus?.in;
-    expect(values).toBeDefined();
-    // ⚠`.sort()` は破壊的。where 断片の配列をその場で並べ替えないよう必ずコピーしてから。
-    expect([...values!].sort()).toEqual(["refused", "replied", "undeliverable"]);
+    const or = fragments.find((x) => x.dmLogs?.none?.OR)?.dmLogs?.none?.OR;
+    // 拒否・連絡あり(印に関係なく) と、**解除していない**宛先不明(2026-11-13)。
+    // 住所を替えて解除した宛先不明の物件は、候補に戻る。
+    expect(or).toEqual([
+      { reactionStatus: { in: ["refused", "replied"] } },
+      { reactionStatus: "undeliverable", undeliverableClearedAt: null },
+    ]);
   });
 
   it("§4-5 所有者の他物件も含めた拒否/宛先不明を、代表と共有者連関の両経路で見る", () => {
     const or = fragments.find((x) => x.propertyOwners?.none)?.propertyOwners
       ?.none?.owner?.OR;
     expect(or).toHaveLength(2);
-    expect([...or![0].dmLogs!.some.reactionStatus.in].sort()).toEqual([
-      "refused",
-      "undeliverable",
-    ]);
-    expect([...or![1].dmLogOwners!.some.log.reactionStatus.in].sort()).toEqual([
-      "refused",
-      "undeliverable",
-    ]);
+    // ⚠拒否は印に関係なく必ず外す・宛先不明は解除していないものだけ(2026-11-13)。
+    const activeTerminal = {
+      OR: [
+        { reactionStatus: "refused" },
+        { reactionStatus: "undeliverable", undeliverableClearedAt: null },
+      ],
+    };
+    expect(or![0].dmLogs!.some).toEqual(activeTerminal);
+    expect(or![1].dmLogOwners!.some.log).toEqual(activeTerminal);
   });
 
   it("5条件ちょうど(条件の増減に気づける)", () => {

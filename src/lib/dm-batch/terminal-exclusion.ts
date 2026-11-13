@@ -28,7 +28,7 @@
  * 2026-11-11: **名前に謄本の外字(私用領域の字)がある所有者**も同じ集合で外す(宛名が □ になる)。
  */
 
-import { TERMINAL_REACTIONS } from "@/lib/dm-reaction/core";
+import { activeTerminalLogWhere } from "@/lib/dm-reaction/core";
 import { findOwnerNameExclusions, type AgentNameExclusionTx } from "@/lib/dm-batch/agent-name-exclusion";
 
 // ⚠集合の正本は dm-reaction/core.ts(書き込み側=Owner FOR UPDATE の要否を決める側)。
@@ -60,8 +60,8 @@ export interface TerminalExclusionTx extends AgentNameExclusionTx {
   propertyDmLog: {
     findMany(args: {
       where: {
-        reactionStatus: { in: string[] };
-        OR: unknown[];
+        // [外す理由になる記録か(拒否・解除していない宛先不明), 3経路の OR]
+        AND: [ReturnType<typeof activeTerminalLogWhere>, { OR: unknown[] }];
       };
       select: {
         ownerId: true;
@@ -94,14 +94,20 @@ export async function findTerminalExclusions(
 
   const terminalLogs = await tx.propertyDmLog.findMany({
     where: {
-      reactionStatus: { in: [...TERMINAL_REACTIONS] },
-      OR: [
-        { ownerId: { in: owners } },
-        { logOwners: { some: { ownerId: { in: owners } } } },
+      AND: [
+        // ⚠拒否と、解除していない宛先不明だけ(2026-11-13)。住所を替えて解除した宛先不明は
+        //   外す理由にしない。拒否は印に関係なく必ず外す(dm-reaction/core.ts)。
+        activeTerminalLogWhere(),
         {
-          propertyId: { in: properties },
-          ownerId: null,
-          logOwners: { none: {} },
+          OR: [
+            { ownerId: { in: owners } },
+            { logOwners: { some: { ownerId: { in: owners } } } },
+            {
+              propertyId: { in: properties },
+              ownerId: null,
+              logOwners: { none: {} },
+            },
+          ],
         },
       ],
     },

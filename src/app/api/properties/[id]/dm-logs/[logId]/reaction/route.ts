@@ -1,3 +1,4 @@
+import { countActiveUndeliverable } from "@/lib/dm-reaction/undeliverable-flag";
 import { NextRequest } from "next/server";
 import { z } from "zod";
 import prisma from "@/lib/prisma";
@@ -20,6 +21,7 @@ import { isRefusalProtected,
   REACTION_STATUSES,
   isTerminalReaction,
   applyManualReaction,
+  clearedFieldsOnReactionWrite,
 } from "@/lib/dm-reaction/core";
 import {
   syncSaleDmReaction,
@@ -223,6 +225,8 @@ export async function PATCH(
         where: { id: logId },
         data: {
           reactionStatus: next.reactionStatus,
+          // 宛先不明の解除の印: 宛先不明のままなら触らない・それ以外の書き換えは消す(2026-11-13)
+          ...clearedFieldsOnReactionWrite(fresh.reactionStatus, next.reactionStatus),
           reactedAt: next.reactedAt,
           reactionNote: next.reactionNote,
           reactionSource: next.reactionSource,
@@ -283,23 +287,9 @@ export async function PATCH(
         finalStatus !== "undeliverable"
       ) {
         // 残数ゼロなら自動フラグのみ解除(dmStatus は人の判断で戻す)。
-        const [logCount, draftCount] = await Promise.all([
-          tx.propertyDmLog.count({
-            where: {
-              propertyId,
-              reactionStatus: "undeliverable",
-              id: { not: logId },
-            },
-          }),
-          tx.dmRecipientDraft.count({
-            where: {
-              propertyId,
-              status: "sent",
-              deliveryStatus: "returned_undeliverable",
-            },
-          }),
-        ]);
-        if (logCount + draftCount === 0) {
+        // 数え方は dm-reaction/undeliverable-flag.ts(解除した宛先不明は数えない・2026-11-13)。
+        const remaining = await countActiveUndeliverable(tx, propertyId, { logId });
+        if (remaining === 0) {
           await tx.property.update({
             where: { id: propertyId },
             data: { dmUndeliverableAt: null },

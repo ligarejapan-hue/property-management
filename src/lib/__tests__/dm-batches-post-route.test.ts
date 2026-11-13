@@ -352,8 +352,14 @@ describe("POST /api/properties/dm-batches", () => {
     expect(itemsData[0].ownerId).toBe("o1");
     // 検出クエリ: terminal 2種のみ・代表/連関/所有者なし記録の物件単位の3経路
     const where = pm.propertyDmLog.findMany.mock.calls[0][0].where;
-    expect(where.reactionStatus).toEqual({ in: ["refused", "undeliverable"] });
-    expect(where.OR).toEqual([
+    // ⚠外す理由になる記録=拒否(印に関係なく) と 解除していない宛先不明(2026-11-13)
+    expect(where.AND[0]).toEqual({
+      OR: [
+        { reactionStatus: "refused" },
+        { reactionStatus: "undeliverable", undeliverableClearedAt: null },
+      ],
+    });
+    expect(where.AND[1].OR).toEqual([
       { ownerId: { in: ["o1", "o2"] } },
       { logOwners: { some: { ownerId: { in: ["o1", "o2"] } } } },
       { propertyId: { in: ["p1"] }, ownerId: null, logOwners: { none: {} } },
