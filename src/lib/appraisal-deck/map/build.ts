@@ -30,9 +30,56 @@ import {
 /** 地図の範囲(物件から東西 ±EX m・南北 ±EY m)。資料の 3D の動き(カメラの道すじ)はこの大きさに合わせてある。 */
 export const MAP_EX = 1000;
 export const MAP_EY = 650;
+/**
+ * 駅・周辺施設が上の範囲の外にあるときは、そこまで範囲を広げる(2026-11-12 発注者指示「駅が 3D の地図の外に出る」)。
+ * 広げすぎると資料が重くなるので上限を置く。上限を越える駅は徒歩ルートを付けない(地図の外を写さない)。
+ */
+export const MAP_EX_MAX = 1600;
+export const MAP_EY_MAX = 1300;
+/** 駅・施設の札が地図の端に寄りすぎないための余白(m)。 */
+const EXTENT_MARGIN = 180;
 export const MAP_DATA_VERSION = 1;
-/** 取りに行くタイルの上限(範囲の計算を誤っても大量に取りに行かない)。 */
-export const MAX_TILES = 40;
+/** 取りに行くタイルの上限(範囲の計算を誤っても大量に取りに行かない)。広げた範囲の上限でも収まる数。 */
+export const MAX_TILES = 80;
+
+export type MapExtent = { ex: number; ey: number };
+
+/** 資料の平面の地図の縦横(1080×620)と、端の札のための余白の倍率(deck.js の VX と同じ考え方)。 */
+const VIEW_ASPECT = 1080 / 620;
+const VIEW_PAD = 1.35;
+
+/**
+ * 物件(原点)と、物件からのメートル座標の点がすべて入る範囲(基本の大きさ以上・上限以下・50m 単位)。
+ * 平面の地図は横長なので、南北に離れた点を枠に入れるには東西も広く要る(東西 = 南北の幅 × 縦横比)。
+ */
+export function mapExtentFor(points: ReadonlyArray<readonly [number, number]>): MapExtent {
+  const up = (v: number) => Math.ceil(v / 50) * 50;
+  let mx = 0;
+  let my = 0;
+  let y0 = 0;
+  let y1 = 0;
+  let x0 = 0;
+  let x1 = 0;
+  for (const [x, y] of points) {
+    if (!Number.isFinite(x) || !Number.isFinite(y)) continue;
+    mx = Math.max(mx, Math.abs(x));
+    my = Math.max(my, Math.abs(y));
+    x0 = Math.min(x0, x);
+    x1 = Math.max(x1, x);
+    y0 = Math.min(y0, y);
+    y1 = Math.max(y1, y);
+  }
+  // 平面の地図に映す東西の幅(片側)。deck.js の VX と同じ求め方。
+  const view = Math.max(((x1 - x0) / 2) * VIEW_PAD, ((y1 - y0) / 2) * VIEW_PAD * VIEW_ASPECT);
+  const ex = Math.max(MAP_EX, up(mx + EXTENT_MARGIN), up(view));
+  // deck.js は映す幅を min(ex, ey×縦横比) で頭打ちにするので、東西に広い並びでは南北も広げる(@codex #718)。
+  const ey = Math.max(MAP_EY, up(my + EXTENT_MARGIN), up(Math.min(MAP_EX_MAX, view) / VIEW_ASPECT));
+  return { ex: Math.min(MAP_EX_MAX, ex), ey: Math.min(MAP_EY_MAX, ey) };
+}
+
+/** 点が範囲の中(端から margin m 以上内側)にあるか。 */
+export const insideExtent = (p: { x: number; y: number }, e: MapExtent, margin = 60) =>
+  Math.abs(p.x) <= e.ex - margin && Math.abs(p.y) <= e.ey - margin;
 export const TILE_TIMEOUT_MS = 10_000;
 const CONCURRENCY = 4;
 /** 物件の建物とみなす距離(これより遠ければ、建物に色を付けずに地点に印だけ立てる)。 */
@@ -147,11 +194,11 @@ export function buildMapFromTiles(
   center: { lat: number; lng: number },
   tiles: TileBuffer[],
   now = new Date(),
-  opts: { station?: string | null } = {},
+  opts: { station?: string | null; extent?: MapExtent } = {},
 ): DeckMapData {
   const proj = makeLocalProjection(center.lng, center.lat);
-  const EX = MAP_EX;
-  const EY = MAP_EY;
+  const EX = opts.extent?.ex ?? MAP_EX;
+  const EY = opts.extent?.ey ?? MAP_EY;
   const LINE_PAD = 30;
 
   const buildings: Array<{ kind: number; poly: Poly; area: number }> = [];
@@ -279,11 +326,21 @@ export type FetchLike = (url: string, init: { signal: AbortSignal; headers: Reco
   arrayBuffer(): Promise<ArrayBuffer>;
 }>;
 
-/** 物件の周りのタイルを国土地理院から取る。データのないタイル(404)は空。それ以外の失敗は全体を失敗にする。 */
-export async function fetchGsiTiles(center: { lat: number; lng: number }, fetchImpl: FetchLike = fetch as unknown as FetchLike): Promise<TileBuffer[]> {
-  const list = tilesCovering(center.lng, center.lat, MAP_EX, MAP_EY);
-  if (list.length === 0 || list.length > MAX_TILES) throw new Error("tile_range");
-  const out: TileBuffer[] = [];
+/**
+ * 物件の周りのタイルを国土地理院から取る。データのないタイル(404)は空。それ以外の失敗は全体を失敗にする。
+ * have に渡したタイル(範囲を広げる前に取ったもの)は取り直さない。
+ */
+export async function fetchGsiTiles(
+  center: { lat: number; lng: number },
+  fetchImpl: FetchLike = fetch as unknown as FetchLike,
+  extent: MapExtent = { ex: MAP_EX, ey: MAP_EY },
+  have: TileBuffer[] = [],
+): Promise<TileBuffer[]> {
+  const all = tilesCovering(center.lng, center.lat, extent.ex, extent.ey);
+  if (all.length === 0 || all.length > MAX_TILES) throw new Error("tile_range");
+  const got = new Map(have.map((t) => [`${t.x},${t.y}`, t]));
+  const out: TileBuffer[] = all.flatMap(([x, y]) => got.get(`${x},${y}`) ?? []);
+  const list = all.filter(([x, y]) => !got.has(`${x},${y}`));
   let next = 0;
   const worker = async () => {
     while (next < list.length) {

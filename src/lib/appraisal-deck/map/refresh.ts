@@ -10,7 +10,16 @@ import { z } from "zod";
 import { Prisma } from "@/generated/prisma";
 import prisma from "@/lib/prisma";
 import { writeAuditLog } from "@/lib/audit";
-import { buildMapFromTiles, fetchGsiTiles, isUsableLocation, MAP_DATA_VERSION, type DeckMapData, type FetchLike } from "./build";
+import {
+  buildMapFromTiles,
+  fetchGsiTiles,
+  insideExtent,
+  isUsableLocation,
+  mapExtentFor,
+  MAP_DATA_VERSION,
+  type DeckMapData,
+  type FetchLike,
+} from "./build";
 import { geocodeAddress } from "./geocode";
 import { appraisalOverridesSchema } from "../overrides";
 
@@ -33,7 +42,7 @@ export async function refreshDeckMap(
   });
   if (!deck) return { ok: false, reason: "not_found" };
   // 徒歩ルートの行き先=最寄駅(2026-11-11)。担当者が直していればその駅(見出し・徒歩分と合わせる・@codex #707)
-  const ex = deck.extracted as { station?: unknown } | null;
+  const ex = deck.extracted as { station?: unknown; facilities?: unknown } | null;
   const ov = appraisalOverridesSchema.safeParse(deck.overrides ?? {});
   const fixed = ov.success && "station" in ov.data ? ov.data.station : undefined;
   const station = fixed !== undefined ? fixed : typeof ex?.station === "string" ? ex.station : null;
@@ -63,7 +72,25 @@ export async function refreshDeckMap(
   }
   let map: DeckMapData;
   try {
-    const built = buildMapFromTiles(center, await fetchGsiTiles(center, deps.fetchImpl), deps.now?.() ?? new Date(), { station });
+    const now = deps.now?.() ?? new Date();
+    // 地図の範囲は、査定書の周辺施設が入る大きさにする。駅がその外にあれば、駅まで広げて作り直す(2026-11-12)。
+    const facPts = facilityPoints(ex?.facilities);
+    let extent = mapExtentFor(facPts);
+    let tiles = await fetchGsiTiles(center, deps.fetchImpl, extent);
+    let built = buildMapFromTiles(center, tiles, now, { station, extent });
+    if (built.st && !insideExtent(built.st, extent)) {
+      const wider = mapExtentFor([...facPts, [built.st.x, built.st.y]]);
+      if (wider.ex > extent.ex || wider.ey > extent.ey) {
+        extent = wider;
+        tiles = await fetchGsiTiles(center, deps.fetchImpl, extent, tiles);
+        built = buildMapFromTiles(center, tiles, now, { station, extent });
+      }
+    }
+    // 広げても地図の外になる駅には、徒歩ルートを付けない(3D で地図の外を写さない)。
+    if (built.st && !insideExtent(built.st, extent)) {
+      const { st: _st, rt: _rt, rtm: _rtm, ...rest } = built;
+      built = rest;
+    }
     // 住所から求めた位置は目安なので、近くの建物を「物件の建物」として塗らない(違う建物を塗らない)。
     map = loc === "address" ? { ...built, p: -1, loc } : { ...built, loc };
   } catch {
@@ -85,6 +112,16 @@ export async function refreshDeckMap(
   if (updated.count !== 1) return { ok: false, reason: input.mode === "auto" ? "not_draft" : "not_found" };
   await audit(input, { result: "ok", buildings: map.b.length, loc });
   return { ok: true, buildings: map.b.length };
+}
+
+/** 査定書の周辺施設のうち、地図上の位置が分かっているもの(物件からの m)。 */
+function facilityPoints(v: unknown): Array<[number, number]> {
+  if (!Array.isArray(v)) return [];
+  return v.flatMap((f) => {
+    const x = (f as { x?: unknown })?.x;
+    const y = (f as { y?: unknown })?.y;
+    return typeof x === "number" && typeof y === "number" && Number.isFinite(x) && Number.isFinite(y) ? [[x, y] as [number, number]] : [];
+  });
 }
 
 async function audit(input: { deckId: string; propertyId: string; userId: string; mode: string }, detail: Record<string, unknown>) {

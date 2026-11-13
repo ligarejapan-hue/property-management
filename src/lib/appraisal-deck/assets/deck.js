@@ -355,10 +355,16 @@ const FAC=(Array.isArray(D.facilities)?D.facilities:[]).filter(f=>Number.isFinit
 const mdec=(a,s)=>{const o=[];let x=0,y=0;for(let i=s;i<a.length;i+=2){x+=a[i];y+=a[i+1];o.push([x/2,y/2]);}return o;};
 // 施設・駅に加えて、徒歩ルートの道のり全体も入るようにする(駅の先で回り込む道が切れないように・@codex #707)
 const ROUTE_PTS=MAP&&MAP.st&&MAP.rt?mdec(MAP.rt,0).map(([x,y])=>({x,y})):[];
-const FMAX=[...FAC,...ROUTE_PTS].reduce((a,f)=>Math.max(a,Math.abs(f.x)*1.0,Math.abs(f.y)*1080/620),0);
-const VX=MAP?(FMAX?Math.min(MAP.ex,Math.max(450,FMAX*1.35)):MAP.ex):1000;
+/* 映す範囲の真ん中(CX,CY)は、物件・施設・駅・ルートをまとめた範囲の真ん中。物件から一方に離れた駅も枠に入るように
+   (2026-11-12 発注者指示「駅が地図の外に出る」)。地図の外は映さない(真ん中と大きさを地図の範囲の中に収める) */
+const VIEW_PTS=[{x:0,y:0},...FAC,...ROUTE_PTS,...(MAP&&MAP.st&&MAP.rt?[MAP.st]:[])];
+const vb=VIEW_PTS.reduce((a,p)=>[Math.min(a[0],p.x),Math.max(a[1],p.x),Math.min(a[2],p.y),Math.max(a[3],p.y)],[0,0,0,0]);
+const VMAX=MAP?Math.min(MAP.ex,MAP.ey*1080/620):1000;
+const VX=MAP?(VIEW_PTS.length>1?Math.min(VMAX,Math.max(450,(vb[1]-vb[0])/2*1.35,(vb[3]-vb[2])/2*1.35*1080/620)):VMAX):1000;
+const VY=VX*620/1080, clampC=(c,lim)=>Math.max(-lim,Math.min(lim,c));
+const CX=MAP&&VIEW_PTS.length>1?clampC((vb[0]+vb[1])/2,MAP.ex-VX):0, CY=MAP&&VIEW_PTS.length>1?clampC((vb[2]+vb[3])/2,MAP.ey-VY):0;
 const MW=1080, MH=620, MM=2*VX/MW; // MM: 1px あたりのメートル
-const MX=x=>MW/2+x/MM, MY=y=>MH/2-y/MM;
+const MX=x=>MW/2+(x-CX)/MM, MY=y=>MH/2-(y-CY)/MM;
 const mpath=(pts,close)=>pts.length?'M'+pts.map(([x,y])=>MX(x).toFixed(1)+' '+MY(y).toFixed(1)).join('L')+(close?'Z':''):'';
 const RW=[3,5,9,16,26]; // 道路の幅の区分ごとの見た目の幅(m)
 /* 穴(建物の中庭・水面の中の島)。外周と逆回りなので、塗りは nonzero のまま穴になる(@codex #701) */
@@ -535,11 +541,11 @@ function city3d(wrap){
   let fd=600; while(fd<9000&&!fits(fd))fd*=1.05;
   scene.fog.near=Math.max(2600,fd*1.5); scene.fog.far=Math.max(6200,fd*3.2);
   pinG.scale.setScalar(1.6*Math.max(1,fd/1100)); // 遠くから見るときは物件の印も大きく
-  const Q0=camPos(fd*1.3), Q1=camPos(fd), TOP=new T.Vector3(0,-0.02,ZEND), S0=new T.Vector3(-1700,-3300,2600);
+  const Q0=camPos(fd*1.3), Q1=camPos(fd), TOP=new T.Vector3(CX,CY-0.02,ZEND), S0=new T.Vector3(-1700,-3300,2600);
   // ① 遠く→Q0(②の始まり) ② Q0→Q1 をゆっくり ③ Q1→真上
   const c1=new T.CatmullRomCurve3([S0,S0.clone().lerp(Q0,.55).add(new T.Vector3(320,0,-150)),Q0],false,'centripetal');
   const c3=new T.CatmullRomCurve3([Q1,Q1.clone().lerp(TOP,.5).add(new T.Vector3(180,120,0)),TOP],false,'centripetal');
-  const ORG=new T.Vector3(0,0,0), tgt=new T.Vector3();
+  const ORG=new T.Vector3(0,0,0), VC=new T.Vector3(CX,CY,0), tgt=new T.Vector3(); // VC: 最後の真上=平面の地図の真ん中
   const ease=t=>t<.5?4*t*t*t:1-Math.pow(-2*t+2,3)/2, DUR=CITY_DUR, t0=performance.now(); let raf, done=false, stopped=false;
   const up0=new T.Vector3(0,0,1), up1=new T.Vector3(0,1,0);
   const cleanup=()=>{if(stopped)return;stopped=true;cancelAnimationFrame(raf);facs.forEach(q=>q.st.dispose());if(route){route.geo.dispose();route.stx.dispose();}R.dispose();bg.dispose();og.dispose();tex.dispose();cv.remove();};
@@ -549,7 +555,7 @@ function city3d(wrap){
     let k=0;
     if(t<CITY_A){const e=ease(t/CITY_A); cam.position.copy(c1.getPoint(e)); tgt.copy(ORG).lerp(FC,e);}
     else if(t<CITY_B){cam.position.copy(Q0).lerp(Q1,sm((t-CITY_A)/(CITY_B-CITY_A))); tgt.copy(FC);}
-    else{const e=ease((t-CITY_B)/(1-CITY_B)); cam.position.copy(c3.getPoint(e)); tgt.copy(FC).lerp(ORG,e); k=e;}
+    else{const e=ease((t-CITY_B)/(1-CITY_B)); cam.position.copy(c3.getPoint(e)); tgt.copy(FC).lerp(VC,e); k=e;}
     cam.up.copy(up0).lerp(up1,k*k).normalize();
     cam.lookAt(tgt);
     pinG.position.z=ptop[2]+4+Math.sin(now/260)*4; pinG.rotation.z=now/900;
