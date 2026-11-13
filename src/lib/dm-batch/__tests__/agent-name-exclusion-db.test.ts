@@ -87,6 +87,28 @@ describe.skipIf(!process.env.PUSH_DB_TEST_URL)("業者と同じ名前の所有�
     expect([...got.agentOwnerIds].sort()).toEqual([ids.abcCircle, ids.abcSpaced, ids.yamada, ids.takahashi].sort());
   });
 
+  it("郵送に使う住所(現住所があれば現住所・無ければ登記上の住所)に外字があっても外す(2026-11-13 案A)", async () => {
+    const mk = async (data: { address?: string | null; currentAddress?: string | null }) =>
+      (await prisma.owner.create({ data: { name: "住所 太郎", ...data }, select: { id: true } })).id;
+    const registryGaiji = await mk({ address: "東京都架空区町1" });
+    const currentGaiji = await mk({ address: "東京都架空区見本町1", currentAddress: "神奈川県架空市町2" });
+    const currentFull = await mk({ address: "東京都架空区町1", currentAddress: "神奈川県架空市見本町2" });
+    const blankCurrent = await mk({ address: "東京都架空区町1", currentAddress: "　  ﻿ " });
+    const plain = await mk({ address: "東京都架空区見本町1" });
+    const got = await findOwnerNameExclusions(prisma, [registryGaiji, currentGaiji, currentFull, blankCurrent, plain]);
+    // 現住所が入っている人は、登記上の住所に外字があっても刷らないので外さない。現住所が空白だけなら登記上の住所を刷る。
+    expect([...got.gaijiOwnerIds].sort()).toEqual([registryGaiji, currentGaiji, blankCurrent].sort());
+    expect(got.agentOwnerIds.size).toBe(0);
+    // 物件の住所に刷る CSV(物件住所宛)は所有者の住所を刷らない=住所の外字では外さない・名前の外字は外す(@codex P2)
+    const nameGaiji = await owner("見本");
+    const propertyAddr = await findOwnerNameExclusions(
+      prisma,
+      [registryGaiji, currentGaiji, blankCurrent, plain, nameGaiji],
+      { mailingAddress: false },
+    );
+    expect([...propertyAddr.gaijiOwnerIds]).toEqual([nameGaiji]);
+  });
+
   it("大文字の uuid でも同じ所有者として返す(返すのは小文字)", async () => {
     const got = await findAgentNameOwnerIds(prisma, [ids.yamada.toUpperCase()]);
     expect([...got]).toEqual([ids.yamada]);

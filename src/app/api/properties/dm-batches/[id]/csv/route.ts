@@ -302,7 +302,7 @@ export async function GET(
       if (elig.gaijiNameCount > 0) {
         throw new ApiError(
           409,
-          `所有者の名前に読めない字(外字)がある宛先が含まれています(${elig.gaijiNameCount}件)。この控えは使えません。再出力してください`,
+          `所有者の名前か住所に読めない字(外字)がある宛先が含まれています(${elig.gaijiNameCount}件)。この控えは使えません。再出力してください`,
           "GAIJI_NAME",
         );
       }

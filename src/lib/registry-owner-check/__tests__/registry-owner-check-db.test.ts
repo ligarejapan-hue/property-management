@@ -499,7 +499,7 @@ async function main() {
     const warn = await ruleIds("REGISTRY_OWNER_MISMATCH");
     check("10a DM 送付可はエラーの決まりだけ", JSON.stringify(err) === JSON.stringify([send]), err);
     check("10b 保留は警告の決まりだけ", JSON.stringify(warn) === JSON.stringify([hold]), warn);
-    const warnAll = (await prisma.property.findMany({ where: { isArchived: false, ...qualityWarningWhere() }, select: { id: true } })).map((p) => p.id);
+    const warnAll = (await prisma.property.findMany({ where: { isArchived: false, ...qualityWarningWhere({ gaijiOwnerIds: [] }) }, select: { id: true } })).map((p) => p.id);
     check("10c 警告ありのみにも入る(同じ定義)", warnAll.includes(send) && warnAll.includes(hold), warnAll);
     await prisma.property.update({ where: { id: hold }, data: { registryStatus: "unconfirmed" } });
     check("10d 登記が取得済でなければ出さない", (await ruleIds("REGISTRY_OWNER_MISMATCH")).length === 0);

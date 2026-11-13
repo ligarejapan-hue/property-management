@@ -7,6 +7,7 @@
  *
  * where はそれぞれ「その問題を持つ物件」の条件。アーカイブの除外・見える範囲は呼び出し側で足す。
  * ⚠所有者は relation の条件だけで使い、氏名などの列は読まない。
+ * ⚠呼び出し側は固定の表(QUALITY_RULES)を直接回さず、`qualityRules(ctx)` を使う(外字の決まりが抜けるため・2026-11-13)。
  */
 import type { Prisma } from "@/generated/prisma";
 
@@ -82,6 +83,38 @@ export const QUALITY_RULES: ReadonlyArray<QualityRule> = [
   },
 ];
 
+/** 所有者に読めない字(外字)がある(2026-11-13 発注者)。 */
+export const OWNER_GAIJI_CODE = "OWNER_GAIJI";
+
+/**
+ * 決まりのうち、毎回 DB から読む部分。
+ * 外字(私用領域の字)は Prisma の条件では書けない(正規表現が無い)ため、`loadQualityContext`
+ * (src/lib/quality-check-context.ts)が SQL で該当の所有者を探し、ここでは「その所有者がつながる物件」の条件にする。
+ * ⚠物件の id の条件にはしない: 品質チェックの一覧バッジ用(?propertyIds=)は各決まりに `id: { in: 表示中 }` を
+ *   上書きで足すので、id で書くと外字の条件が消えて表示中の物件が全部当たってしまう。
+ */
+export interface QualityContext {
+  /** 名前・登記上の住所・現住所のどれかに外字がある所有者(保管していない)の id */
+  gaijiOwnerIds: readonly string[];
+}
+
+/**
+ * その時点の決まりの全部(固定の表 + 外字)。品質チェックと一覧の「警告ありのみ」はこれだけを見る。
+ * 外字は警告: DM は名前か実際に刷る住所に外字がある宛先を自動で外す(src/lib/dm-batch/agent-name-exclusion.ts)ので、
+ * □ のまま送ってしまう恐れはない(現住所が入っていて登記上の住所だけに外字がある人は、刷らないので外さない)。
+ */
+export function qualityRules(ctx: QualityContext): QualityRule[] {
+  return [
+    ...QUALITY_RULES,
+    {
+      code: OWNER_GAIJI_CODE,
+      severity: "warning",
+      message: "所有者の名前か住所に読めない字（外字）があります",
+      where: { propertyOwners: { some: { ownerId: { in: [...ctx.gaijiOwnerIds] } } } },
+    },
+  ];
+}
+
 /** 謄本の名義の確認の画面。 */
 export const REGISTRY_OWNER_REVIEW_HREF = "/properties/registry-owner-review";
 
@@ -95,6 +128,6 @@ export const REGISTRY_OWNER_MISMATCH_CODES: ReadonlySet<string> = new Set([
  * 「警告あり」= エラーか警告の決まりのどれかに当たる(情報は数えない)。
  * 品質チェックのバッジ・件数と、一覧の「警告ありのみ」で同じ条件を使う。
  */
-export function qualityWarningWhere(): Prisma.PropertyWhereInput {
-  return { OR: QUALITY_RULES.filter((r) => r.severity !== "info").map((r) => r.where) };
+export function qualityWarningWhere(ctx: QualityContext): Prisma.PropertyWhereInput {
+  return { OR: qualityRules(ctx).filter((r) => r.severity !== "info").map((r) => r.where) };
 }

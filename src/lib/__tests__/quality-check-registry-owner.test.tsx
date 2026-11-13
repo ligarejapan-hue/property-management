@@ -13,7 +13,7 @@ import { renderToStaticMarkup } from "react-dom/server";
 vi.mock("@/lib/prisma", () => ({ default: {} }));
 vi.mock("@/lib/api-helpers", () => ({ ApiError: class extends Error {} }));
 
-import { QUALITY_RULES, qualityWarningWhere, REGISTRY_OWNER_MISMATCH_CODES } from "@/lib/quality-check-rules";
+import { OWNER_GAIJI_CODE, QUALITY_RULES, qualityRules, qualityWarningWhere, REGISTRY_OWNER_MISMATCH_CODES } from "@/lib/quality-check-rules";
 import { nightlyWindowStart } from "@/lib/registry-owner-check/service";
 import RegistryOwnerPendingNote from "@/components/registry-owner-review/pending-note";
 
@@ -46,19 +46,45 @@ describe("謄本の名義と違う の決まり", () => {
 });
 
 describe("警告ありのみ=1か所の定義", () => {
-  it("エラーと警告の決まりの OR(情報は入らない)", () => {
-    const or = qualityWarningWhere().OR as unknown[];
-    expect(or).toHaveLength(QUALITY_RULES.filter((r) => r.severity !== "info").length);
+  const ctx = { gaijiOwnerIds: ["00000000-0000-4000-8000-000000000001"] };
+
+  it("エラーと警告の決まりの OR(情報は入らない・外字の決まりも入る)", () => {
+    const or = qualityWarningWhere(ctx).OR as unknown[];
+    expect(or).toHaveLength(qualityRules(ctx).filter((r) => r.severity !== "info").length);
+    expect(or).toHaveLength(QUALITY_RULES.filter((r) => r.severity !== "info").length + 1);
     expect(or).toContainEqual(QUALITY_RULES.find((r) => r.code === "REGISTRY_OWNER_MISMATCH")!.where);
+    expect(or).toContainEqual({ propertyOwners: { some: { ownerId: { in: ctx.gaijiOwnerIds } } } });
   });
 
-  it("一覧と品質チェックは同じ関数を使い、条件を書き写していない", () => {
+  it("一覧と品質チェックは同じ関数を使い、条件を書き写していない(外字の物件も毎回 DB から読む)", () => {
     const list = read("src/lib/property-list-query.ts");
     const route = read("src/app/api/properties/quality-check/route.ts");
-    expect(list).toContain("qualityWarningWhere()");
-    expect(route).toContain("qualityWarningWhere()");
+    expect(list).toContain("qualityWarningWhere(await loadQualityContext(client))");
+    expect(route).toContain("qualityWarningWhere(qualityCtx)");
+    expect(route).toContain("qualityRules(qualityCtx)");
+    // 固定の表だけを回すと外字の決まりが抜ける
+    expect(route).not.toMatch(/QUALITY_RULES/);
     expect(list).not.toMatch(/\/\/ REGISTRY_DM_MISMATCH/);
-    expect(route).not.toMatch(/const QUALITY_RULES/);
+  });
+});
+
+describe("所有者に読めない字（外字）(2026-11-13 発注者)", () => {
+  it("警告・外字の所有者がつながる物件だけ(物件の id の条件は使わない=一覧バッジ用の id の上書きで消えない)", () => {
+    const ids = ["00000000-0000-4000-8000-000000000002"];
+    const rule = qualityRules({ gaijiOwnerIds: ids }).find((r) => r.code === OWNER_GAIJI_CODE)!;
+    expect(rule.severity).toBe("warning");
+    expect(rule.where).toEqual({ propertyOwners: { some: { ownerId: { in: ids } } } });
+    expect(rule.where).not.toHaveProperty("id");
+    // 一覧バッジ用は { ...rule.where, id: { in: 表示中 } } の形で足す=外字の条件が残る
+    expect({ ...rule.where, id: { in: ["x"] } }).toHaveProperty("propertyOwners");
+    expect(rule.message).toContain("読めない字（外字）");
+    // 固定の表には入れない(id は毎回 DB から読む)
+    expect(QUALITY_RULES.some((r) => r.code === OWNER_GAIJI_CODE)).toBe(false);
+  });
+
+  it("エラー確認の画面に日本語の名前がある", () => {
+    const qc = read("src/app/(dashboard)/properties/quality-check/page.tsx");
+    expect(qc).toContain(`${OWNER_GAIJI_CODE}: "所有者に読めない字（外字）"`);
   });
 });
 

@@ -166,7 +166,7 @@ export async function GET(
       if (printableDrafts.length === 0 && visibleDrafts.length > 0) {
         throw new ApiError(
           409,
-          "確定済みの宛先はすべて、拒否・宛先不明が記録されたか、所有者が業者と同じ名前か、所有者の名前に読めない字(外字)があるため印刷できません。宛先を作り直してください",
+          "確定済みの宛先はすべて、拒否・宛先不明が記録されたか、所有者が業者と同じ名前か、所有者の名前か住所に読めない字(外字)があるため印刷できません。宛先を作り直してください",
           "ALL_EXCLUDED_TERMINAL",
         );
       }
@@ -228,7 +228,7 @@ export async function GET(
       const parts = [
         ...(excludedTerminalCount > 0 ? [`拒否・宛先不明が記録された ${excludedTerminalCount} 件`] : []),
         ...(excludedAgentNameCount > 0 ? [`所有者が業者と同じ名前の ${excludedAgentNameCount} 件`] : []),
-        ...(excludedGaijiNameCount > 0 ? [`所有者の名前に読めない字(外字)がある ${excludedGaijiNameCount} 件`] : []),
+        ...(excludedGaijiNameCount > 0 ? [`所有者の名前か住所に読めない字(外字)がある ${excludedGaijiNameCount} 件`] : []),
       ];
       // 黙って減らさない: 何通除外したかを**画面にだけ**示す(@codex #384 R2 P2)。
       // この文書は印刷用に開かれるため、素の div だと1通目の手紙の直前に

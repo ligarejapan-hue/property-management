@@ -56,6 +56,12 @@ describe("業者と同じ名前の除外の配線", () => {
     expect(src).toContain("await findOwnerNameExclusions(");
     expect(src).toContain("gaijiOwnerIds");
   });
+  it("物件住所宛 CSV は物件の住所に刷るので、所有者の住所の外字では外さない(名前の外字だけ・@codex P2)", () => {
+    const src = read("src/app/api/properties/property-dm-export/route.ts");
+    expect(src).toMatch(/findOwnerNameExclusions\(\s*prisma,[\s\S]*?\{ mailingAddress: false \},?\s*\)/);
+    // 宛名 CSV は所有者の住所に刷る=既定(住所も見る)のまま
+    expect(read("src/app/api/properties/dm-batches/[id]/csv/route.ts")).toContain("await findOwnerNameExclusions(tx, allOwnerIds);");
+  });
   it.each(["src/app/api/properties/dm-batches/route.ts", "src/app/api/properties/sale-dm/campaigns/route.ts", "src/app/api/properties/sale-dm/campaigns/[id]/print/route.ts"])(
     "%s は外字の名前で外した件数を数える",
     (p) => {
@@ -89,8 +95,8 @@ describe("件数は理由ごとに残す", () => {
     expect(dmExclusionCountsText(2, 0)).toBe("拒否・宛先不明の反響が付いた 2 件");
     expect(dmExclusionCountsText(0, 1)).toBe("所有者が業者と同じ名前の 1 件");
     expect(dmExclusionCountsText(2, 1)).toBe("拒否・宛先不明の反響が付いた 2 件と、所有者が業者と同じ名前の 1 件");
-    expect(dmExclusionCountsText(0, 0, 1)).toBe("所有者の名前に読めない字(外字)がある 1 件");
-    expect(dmExclusionCountsText(1, 0, 2)).toBe("拒否・宛先不明の反響が付いた 1 件と、所有者の名前に読めない字(外字)がある 2 件");
+    expect(dmExclusionCountsText(0, 0, 1)).toBe("所有者の名前か住所に読めない字(外字)がある 1 件");
+    expect(dmExclusionCountsText(1, 0, 2)).toBe("拒否・宛先不明の反響が付いた 1 件と、所有者の名前か住所に読めない字(外字)がある 2 件");
     expect(dmExclusionCountsText(0, 0, 0)).toBeNull();
   });
 });
