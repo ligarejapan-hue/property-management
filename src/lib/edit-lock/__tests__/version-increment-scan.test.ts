@@ -96,7 +96,7 @@ const VERSIONED: Record<string, string> = {
     "property の編集画面フィールド一式(編集画面の本体保存窓口)+version increment",
   "src/app/api/properties/bulk-update/route.ts:90":
     "property.caseStatus/registryStatus/dmStatus/assignedTo(一括更新)+version increment",
-  "src/lib/dm-reaction/clear-undeliverable.ts:159":
+  "src/lib/dm-reaction/clear-undeliverable.ts:179":
     "宛先不明の解除(2026-11-13): DM可否を no_send→send に戻すときだけ property.dmStatus+version increment" +
     "(dmUndeliverableAt だけ外すときは進めない=ALLOWED の3件と同じ理由)",
   "src/lib/building-link/rename.ts:126":

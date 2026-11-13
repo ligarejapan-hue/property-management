@@ -4,6 +4,7 @@ import { readFileSync } from "node:fs";
 import { join } from "node:path";
 import {
   UndeliverableClearNotice,
+  mailingAddressChanges,
   undeliverableClearResultMessage,
 } from "@/components/properties/undeliverable-clear-notice";
 
@@ -16,7 +17,7 @@ const noop = () => {};
 describe("UndeliverableClearNotice", () => {
   it("解除できる記録があれば、件数つきのチェックを出す", () => {
     const html = renderToStaticMarkup(
-      <UndeliverableClearNotice summary={{ clearable: 2, shared: 0, other: 0 }} checked onChange={noop} />,
+      <UndeliverableClearNotice summary={{ clearable: 2, shared: 0, other: 0 }} checked onChange={noop} mailingChanges />,
     );
     expect(html).toContain("古い住所あての「宛先不明」（2件）を解除して、この方をDMに戻す");
     expect(html).toContain('type="checkbox"');
@@ -26,7 +27,7 @@ describe("UndeliverableClearNotice", () => {
 
   it("⚠共有でまとめて送った記録は、解除しないことと件数を出す(発注者決定)", () => {
     const html = renderToStaticMarkup(
-      <UndeliverableClearNotice summary={{ clearable: 1, shared: 3, other: 0 }} checked={false} onChange={noop} />,
+      <UndeliverableClearNotice summary={{ clearable: 1, shared: 3, other: 0 }} checked={false} onChange={noop} mailingChanges />,
     );
     expect(html).toContain("共有の方とまとめて送った「宛先不明」が 3 件あります");
     expect(html).toContain("自動では解除しません");
@@ -34,20 +35,59 @@ describe("UndeliverableClearNotice", () => {
 
   it("解除できる記録が無ければ、チェックは出さず「戻りません」と知らせる", () => {
     const html = renderToStaticMarkup(
-      <UndeliverableClearNotice summary={{ clearable: 0, shared: 1, other: 2 }} checked={false} onChange={noop} />,
+      <UndeliverableClearNotice summary={{ clearable: 0, shared: 1, other: 2 }} checked={false} onChange={noop} mailingChanges />,
     );
     expect(html).not.toContain('type="checkbox"');
     expect(html).toContain("解除しない「宛先不明」が 2 件あります");
     expect(html).toContain("この方はDMの対象に戻りません");
   });
 
+  it("⚠保存しても宛先が変わらないとき(現住所がある方)は、チェックを出さず、解除しないと知らせる(@codex P2)", () => {
+    const html = renderToStaticMarkup(
+      <UndeliverableClearNotice
+        summary={{ clearable: 2, shared: 0, other: 0 }}
+        checked
+        onChange={noop}
+        mailingChanges={false}
+      />,
+    );
+    expect(html).not.toContain('type="checkbox"');
+    expect(html).toContain("DMの宛先は変わりません");
+    expect(html).toContain("「宛先不明」は解除しません");
+  });
+
   it("宛先不明が無い所有者・件数を渡されていないときは何も出さない", () => {
     expect(
       renderToStaticMarkup(
-        <UndeliverableClearNotice summary={{ clearable: 0, shared: 0, other: 0 }} checked={false} onChange={noop} />,
+        <UndeliverableClearNotice summary={{ clearable: 0, shared: 0, other: 0 }} checked={false} onChange={noop} mailingChanges />,
       ),
     ).toBe("");
-    expect(renderToStaticMarkup(<UndeliverableClearNotice summary={null} checked={false} onChange={noop} />)).toBe("");
+    expect(renderToStaticMarkup(<UndeliverableClearNotice summary={null} checked={false} onChange={noop} mailingChanges />)).toBe("");
+  });
+});
+
+describe("mailingAddressChanges(保存で実際の宛先が変わるか・@codex P2)", () => {
+  const before = { zip: "1000001", address: "東京都見本区1-1-1", currentZip: "", currentAddress: "" };
+
+  it("現住所が無い方: 登記上の住所を替えれば、宛先が変わる", () => {
+    expect(mailingAddressChanges(before, { ...before, address: "大阪府見本市2-2-2", zip: "" })).toBe(true);
+  });
+
+  it("⚠現住所がある方: 登記上の住所を替えても、宛先は現住所のまま=変わらない", () => {
+    const withCurrent = { ...before, currentAddress: "神奈川県見本市3-3-3" };
+    expect(mailingAddressChanges(withCurrent, { ...withCurrent, address: "大阪府見本市2-2-2" })).toBe(false);
+  });
+
+  it("現住所を消して登記上の別の住所にすれば、宛先が変わる", () => {
+    const withCurrent = { ...before, currentAddress: "神奈川県見本市3-3-3" };
+    expect(
+      mailingAddressChanges(withCurrent, { ...before, address: "大阪府見本市2-2-2", currentAddress: "" }),
+    ).toBe(true);
+  });
+
+  it("同じ住所(全角と半角・空白の違いだけ)は変わっていない・宛先が空になるのも変わったと扱わない", () => {
+    expect(mailingAddressChanges(before, { ...before, address: "東京都見本区１-１-１ " })).toBe(false);
+    expect(mailingAddressChanges(before, { ...before, address: "" })).toBe(false);
   });
 });
 
@@ -95,6 +135,9 @@ describe("物件の所有者カードへの組み込み(ソース)", () => {
     expect(iUpdate).toBeGreaterThan(0);
     expect(iClear).toBeGreaterThan(iUpdate);
     // チェックを入れたときだけ
-    expect(save).toContain("if (viaRegistryAddress && clearUndeliverable) {");
+    // チェックを入れ、かつ実際の宛先が変わるときだけ(@codex P2)
+    expect(save).toContain(
+      "if (viaRegistryAddress && clearUndeliverable && mailingAddressChanges(po.owner, form)) {",
+    );
   });
 });

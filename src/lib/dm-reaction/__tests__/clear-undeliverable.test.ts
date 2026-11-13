@@ -95,7 +95,15 @@ const row = (over: Partial<Row> = {}): Row => ({
   ...over,
 });
 
-function makeTx(rows: Row[], opts: { remaining?: Record<string, number>; properties?: Record<string, { dmUndeliverableAt: Date | null; dmStatus: string }> } = {}) {
+function makeTx(
+  rows: Row[],
+  opts: {
+    remaining?: Record<string, number>;
+    properties?: Record<string, { dmUndeliverableAt: Date | null; dmStatus: string }>;
+    /** 物件の行を押さえたあとに読み直した担当(押さえる前と替わっている場合) */
+    freshScope?: Record<string, { createdBy: string; assignedTo: string | null }>;
+  } = {},
+) {
   const order: string[] = [];
   const tx = {
     propertyDmLog: {
@@ -115,6 +123,15 @@ function makeTx(rows: Row[], opts: { remaining?: Record<string, number>; propert
     },
     dmRecipientDraft: { count: vi.fn(async () => 0) },
     property: {
+      // 押さえたあとの読み直し(担当できるかの見直し)
+      findMany: vi.fn(async (args: { where: { id: { in: string[] } } }) => {
+        order.push("recheck-scope");
+        return args.where.id.in.map((id) => ({
+          id,
+          ...(opts.freshScope?.[id] ??
+            rows.find((r) => r.propertyId === id)?.property ?? { createdBy: "u-office", assignedTo: null }),
+        }));
+      }),
       findUnique: vi.fn(async (args: { where: { id: string } }) =>
         opts.properties?.[args.where.id] ?? { dmUndeliverableAt: new Date("2026-10-01T00:00:00Z"), dmStatus: "no_send" },
       ),
@@ -159,7 +176,14 @@ describe("clearOwnerUndeliverable", () => {
   it("⚠ロックの順序=所有者 → 物件(id 順)→ 記録(拒否・宛先不明の書き手と同じ順)", async () => {
     const { tx, order } = makeTx([row({ id: "b", propertyId: "p2" }), row({ id: "a", propertyId: "p1" })]);
     await run(tx);
-    expect(order).toEqual(["lock-owner", "read-logs", "lock-property:p1", "lock-property:p2", "mark-cleared"]);
+    expect(order).toEqual([
+      "lock-owner",
+      "read-logs",
+      "lock-property:p1",
+      "lock-property:p2",
+      "recheck-scope",
+      "mark-cleared",
+    ]);
   });
 
   it("その物件にまだ宛先不明が残っていれば、印も DM 可否もそのまま", async () => {
@@ -203,6 +227,32 @@ describe("clearOwnerUndeliverable", () => {
     expect(r).toMatchObject({ cleared: 1, otherSkipped: 1 });
     expect(tx.propertyDmLog.updateMany.mock.calls[0][0].where.id).toEqual({ in: ["mine"] });
     expect(lockPropertyRow).toHaveBeenCalledTimes(1);
+  });
+
+  it("⚠物件を押さえるまでの間に担当が替わったら、その物件の記録は解除しない(@codex P2)", async () => {
+    const { tx } = makeTx(
+      [
+        row({ id: "kept", propertyId: "p1", property: { createdBy: "u-field", assignedTo: null } }),
+        row({ id: "moved", propertyId: "p2", property: { createdBy: "u-field", assignedTo: null } }),
+      ],
+      { freshScope: { p2: { createdBy: "u-office", assignedTo: "u-other" } } },
+    );
+    const r = await run(tx, { id: "u-field", role: "field_staff" });
+    expect(r).toMatchObject({ cleared: 1, otherSkipped: 1, propertyIds: ["p1"] });
+    expect(tx.propertyDmLog.updateMany.mock.calls[0][0].where.id).toEqual({ in: ["kept"] });
+    // 担当が替わった物件の DM 可否・印には触らない
+    expect(tx.property.update).toHaveBeenCalledTimes(1);
+    expect(tx.property.update).toHaveBeenCalledWith(expect.objectContaining({ where: { id: "p1" } }));
+  });
+
+  it("⚠担当が全部替わっていたら、何も書かない", async () => {
+    const { tx } = makeTx([row({ property: { createdBy: "u-field", assignedTo: null } })], {
+      freshScope: { p1: { createdBy: "u-office", assignedTo: "u-other" } },
+    });
+    const r = await run(tx, { id: "u-field", role: "field_staff" });
+    expect(r).toMatchObject({ cleared: 0, otherSkipped: 1, flagsCleared: 0 });
+    expect(tx.propertyDmLog.updateMany).not.toHaveBeenCalled();
+    expect(tx.property.update).not.toHaveBeenCalled();
   });
 
   it("物件が消えている記録(propertyId なし)は、印だけ付ける", async () => {

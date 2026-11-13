@@ -135,6 +135,26 @@ export async function clearOwnerUndeliverable(
   ].sort();
   for (const propertyId of propertyIds) await lockPropertyRow(tx, propertyId);
 
+  // ③' ⚠押さえたあとに「担当できるか」を見直す(@codex P2)。②の判定は押さえる前に読んだ値なので、
+  //   その間に担当が替わった物件を、前の担当者が解除できてしまう。押さえた後の値だけを信じる。
+  const fresh = await tx.property.findMany({
+    where: { id: { in: propertyIds } },
+    select: { id: true, createdBy: true, assignedTo: true },
+  });
+  const allowed = new Set(
+    fresh.filter((p) => canAccessPropertyRecord(session, p)).map((p) => p.id),
+  );
+  const lostAccess = classified.clearable.filter((l) => l.propertyId && !allowed.has(l.propertyId));
+  if (lostAccess.length > 0) {
+    const lost = new Set(lostAccess.map((l) => l.id));
+    classified.clearable = classified.clearable.filter((l) => !lost.has(l.id));
+    base.otherSkipped += lostAccess.length;
+    if (classified.clearable.length === 0) {
+      return { cleared: 0, ...base, flagsCleared: 0, dmStatusRestored: 0, propertyIds: [] };
+    }
+  }
+  const targetPropertyIds = propertyIds.filter((id) => allowed.has(id));
+
   // ④ 印を付ける。⚠押さえている間に別の反響へ書き換えられた記録には付けない(条件つき)
   const updated = await tx.propertyDmLog.updateMany({
     where: {
@@ -147,7 +167,7 @@ export async function clearOwnerUndeliverable(
   // ⑤ 物件ごとに、残っている宛先不明を数え直す。0 なら印を外し、DM 可否を戻す
   let flagsCleared = 0;
   let dmStatusRestored = 0;
-  for (const propertyId of propertyIds) {
+  for (const propertyId of targetPropertyIds) {
     if ((await countActiveUndeliverable(tx, propertyId)) > 0) continue;
     const property = await tx.property.findUnique({
       where: { id: propertyId },
@@ -180,7 +200,7 @@ export async function clearOwnerUndeliverable(
       });
     }
   }
-  return { cleared: updated.count, ...base, flagsCleared, dmStatusRestored, propertyIds };
+  return { cleared: updated.count, ...base, flagsCleared, dmStatusRestored, propertyIds: targetPropertyIds };
 }
 
 export interface UndeliverableSummary {

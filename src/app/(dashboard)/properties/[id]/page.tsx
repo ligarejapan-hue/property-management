@@ -45,6 +45,7 @@ import {
 } from "@/components/properties/registry-entries-panel";
 import {
   UndeliverableClearNotice,
+  mailingAddressChanges,
   undeliverableClearResultMessage,
   type UndeliverableSummaryProps,
 } from "@/components/properties/undeliverable-clear-notice";
@@ -2052,7 +2053,9 @@ function OwnerCard({
       setLockUnavailable(false);
       // 宛先不明の解除(2026-11-13): 住所の保存が**できたあと**にだけ呼ぶ。解除に失敗しても
       // 住所の保存は済んでいるので、知らせだけ出す(保存の失敗として扱わない)。
-      if (viaRegistryAddress && clearUndeliverable) {
+      // ⚠実際の宛先(現住所があれば現住所)が変わったときだけ解除する(@codex P2)。変わらないのに
+      //   解除すると、届かなかった同じ住所へまた送ることになる。
+      if (viaRegistryAddress && clearUndeliverable && mailingAddressChanges(po.owner, form)) {
         try {
           const r = await clearOwnerDmUndeliverable(propertyId, po.ownerId);
           setUndeliverableNotice(undeliverableClearResultMessage(r));
@@ -2602,6 +2605,7 @@ function OwnerCard({
               summary={po.dmUndeliverable}
               checked={clearUndeliverable}
               onChange={setClearUndeliverable}
+              mailingChanges={mailingAddressChanges(po.owner, form)}
             />
           )}
 

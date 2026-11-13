@@ -7,6 +7,35 @@
  *   (自動では解除しない=発注者決定)。
  * ⚠件数だけを出す(氏名・住所は持たない)。解除は、住所を保存できたあとにだけ行う。
  */
+import {
+  normalizeAddressForGroup,
+  resolveMailingAddress,
+  type OwnerAddressFields,
+} from "@/lib/owner-mailing-address";
+
+type AddressLike = { [K in keyof OwnerAddressFields]?: string | null };
+
+/**
+ * 保存の前後で「実際に郵送する宛先」が変わるか(@codex P2・2026-11-13)。
+ * DM の宛先は、現住所があれば現住所・無ければ登記上の住所(resolveMailingAddress)。
+ * ⚠現住所が登録されている方は、登記上の住所を替えても宛先は変わらない=宛先不明を解除すると、
+ *   届かなかった同じ住所へまた送ることになる。変わらないときは解除しない。
+ * 宛先が無くなる(空になる)ときも「変わった」とは扱わない。
+ */
+export function mailingAddressChanges(before: AddressLike, after: AddressLike): boolean {
+  const pick = (o: AddressLike) =>
+    normalizeAddressForGroup(
+      resolveMailingAddress({
+        zip: o.zip ?? null,
+        address: o.address ?? null,
+        currentZip: o.currentZip ?? null,
+        currentAddress: o.currentAddress ?? null,
+      }).address,
+    );
+  const next = pick(after);
+  return next !== "" && next !== pick(before);
+}
+
 export interface UndeliverableSummaryProps {
   /** 住所を替えたときに解除できる宛先不明の記録の数 */
   clearable: number;
@@ -20,16 +49,25 @@ export function UndeliverableClearNotice({
   summary,
   checked,
   onChange,
+  mailingChanges,
 }: {
   summary: UndeliverableSummaryProps | null | undefined;
   checked: boolean;
   onChange: (next: boolean) => void;
+  /** いまの入力で保存すると、実際の宛先が変わるか(mailingAddressChanges)。変わらなければ解除しない。 */
+  mailingChanges: boolean;
 }) {
   if (!summary || summary.clearable + summary.shared + summary.other === 0) return null;
   return (
     <div className="rounded-lg border border-amber-300 bg-amber-50 p-3 text-xs text-amber-900 dark:border-amber-800 dark:bg-amber-950/40 dark:text-amber-100">
       <p className="mb-1 font-semibold">この方には、DMの記録に「宛先不明」があります</p>
-      {summary.clearable > 0 && (
+      {summary.clearable > 0 && !mailingChanges && (
+        <p>
+          このまま保存しても、DMの宛先は変わりません（現住所が登録されている方は、DMは現住所あてです）。
+          宛先が変わらないあいだは、「宛先不明」は解除しません。
+        </p>
+      )}
+      {summary.clearable > 0 && mailingChanges && (
         <label className="flex cursor-pointer items-start gap-2">
           <input
             type="checkbox"
