@@ -52,6 +52,11 @@ vi.mock("@/lib/api-helpers", () => {
   };
 });
 
+// 外字の所有者(毎回 DB から読む部分・2026-11-13)は、このテストでは0人にする。
+vi.mock("@/lib/quality-check-context", () => ({
+  loadQualityContext: async () => ({ gaijiOwnerIds: [] }),
+}));
+
 vi.mock("@/lib/prisma", () => ({
   default: { property: { findMany: vi.fn(), count: vi.fn() } },
 }));
@@ -80,14 +85,16 @@ type RuleCode =
   | "NO_LOT_NUMBER"
   | "NO_REAL_ESTATE_NUMBER"
   | "INVESTIGATION_NOT_CONFIRMED"
-  | "NO_ASSIGNEE";
+  | "NO_ASSIGNEE"
+  | "OWNER_GAIJI";
 // TOTAL を rule code の index と分離する。
 // 旧定義 `Partial<Record<string, RuleScenario>>` は string index が "TOTAL" キーまで
 // RuleScenario に巻き込み、`TOTAL?: number` と矛盾して never 化していた（型を緩めず正す）。
 type Scenario = { TOTAL?: number } & Partial<Record<RuleCode, RuleScenario>>;
 
 function whereCode(where: Where): RuleCode | "TOTAL" {
-  if (where.propertyOwners) return "NO_OWNER";
+  // 外字(2026-11-13)は「外字の所有者がつながる」= propertyOwners.some。NO_OWNER は propertyOwners.none。
+  if (where.propertyOwners) return (where.propertyOwners as { some?: unknown }).some ? "OWNER_GAIJI" : "NO_OWNER";
   // 謄本の名義と違う(2026-11-08)は registryStatus も持つので先に見分ける
   if (where.registryOwnerCheck) {
     return where.dmStatus === "send" ? "REGISTRY_OWNER_MISMATCH_DM_SEND" : "REGISTRY_OWNER_MISMATCH";
@@ -181,7 +188,7 @@ describe("GET /api/properties/quality-check", () => {
       nextOffset: 1000,
     });
     // 全 5 ルール分のメタが返る
-    expect(body.rules).toHaveLength(7);
+    expect(body.rules).toHaveLength(8);
   });
 
   it("03. ?rule=CODE&offset で当該ルールの続きを取得できる", async () => {

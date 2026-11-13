@@ -8,7 +8,8 @@ import {
 } from "@/lib/api-helpers";
 import { hasPermission } from "@/lib/permissions";
 import { propertyVisibilityScopeWhere } from "@/lib/property-list-query";
-import { QUALITY_RULES, qualityWarningWhere, type QualityRule } from "@/lib/quality-check-rules";
+import { qualityRules, qualityWarningWhere, type QualityRule } from "@/lib/quality-check-rules";
+import { loadQualityContext } from "@/lib/quality-check-context";
 import { findMissingRegistryOwnerReviewPerm } from "@/lib/registry-owner-check/permissions";
 import { z } from "zod";
 import type { Prisma } from "@/generated/prisma";
@@ -68,8 +69,8 @@ const NOT_ARCHIVED: Prisma.PropertyWhereInput = { isArchived: false };
 // 各品質ルール。where は NOT_ARCHIVED と AND して「その問題を持つ物件」を抽出する。
 // ⚠決まりの表は 1か所(`@/lib/quality-check-rules`)。一覧の「警告ありのみ」も同じ表を見る。
 
-function findRule(code: string): QualityRule | undefined {
-  return QUALITY_RULES.find((r) => r.code === code);
+function findRule(rules: readonly QualityRule[], code: string): QualityRule | undefined {
+  return rules.find((r) => r.code === code);
 }
 
 function buildIssue(
@@ -120,10 +121,13 @@ export async function GET(request: Request) {
     const scopeAnd: Pick<Prisma.PropertyWhereInput, "AND"> = visibilityScope
       ? { AND: [visibilityScope] }
       : {};
+    // 決まりの全部(固定の表 + 外字の所有者がいる物件=毎回 DB から読む・2026-11-13)。
+    const qualityCtx = await loadQualityContext();
+    const allRules = qualityRules(qualityCtx);
 
     // ---- (2) ページングモード: 指定ルールのみ skip/take で1ページ取得 ----
     if (ruleParam !== null) {
-      const rule = findRule(ruleParam);
+      const rule = findRule(allRules, ruleParam);
       if (!rule) {
         throw new ApiError(400, "不明な品質チェックルールです", "INVALID_RULE");
       }
@@ -197,7 +201,7 @@ export async function GET(request: Request) {
       // (1か所の定義 qualityWarningWhere)。info ルールはバッジ・チップの対象外なので含めない。
       const warningWhere: Prisma.PropertyWhereInput = {
         ...NOT_ARCHIVED,
-        ...qualityWarningWhere(),
+        ...qualityWarningWhere(qualityCtx),
         ...scopeAnd,
       };
 
@@ -211,7 +215,7 @@ export async function GET(request: Request) {
               }>,
             )
           : Promise.all(
-              QUALITY_RULES.map(async (rule) => ({
+              allRules.map(async (rule) => ({
                 rule,
                 sample: await prisma.property.findMany({
                   where: {
@@ -304,7 +308,7 @@ export async function GET(request: Request) {
         },
       }),
       Promise.all(
-        QUALITY_RULES.map(async (rule) => {
+        allRules.map(async (rule) => {
           const where: Prisma.PropertyWhereInput = {
             ...NOT_ARCHIVED,
             ...rule.where,

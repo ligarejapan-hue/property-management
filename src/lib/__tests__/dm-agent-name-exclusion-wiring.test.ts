@@ -89,8 +89,8 @@ describe("件数は理由ごとに残す", () => {
     expect(dmExclusionCountsText(2, 0)).toBe("拒否・宛先不明の反響が付いた 2 件");
     expect(dmExclusionCountsText(0, 1)).toBe("所有者が業者と同じ名前の 1 件");
     expect(dmExclusionCountsText(2, 1)).toBe("拒否・宛先不明の反響が付いた 2 件と、所有者が業者と同じ名前の 1 件");
-    expect(dmExclusionCountsText(0, 0, 1)).toBe("所有者の名前に読めない字(外字)がある 1 件");
-    expect(dmExclusionCountsText(1, 0, 2)).toBe("拒否・宛先不明の反響が付いた 1 件と、所有者の名前に読めない字(外字)がある 2 件");
+    expect(dmExclusionCountsText(0, 0, 1)).toBe("所有者の名前か住所に読めない字(外字)がある 1 件");
+    expect(dmExclusionCountsText(1, 0, 2)).toBe("拒否・宛先不明の反響が付いた 1 件と、所有者の名前か住所に読めない字(外字)がある 2 件");
     expect(dmExclusionCountsText(0, 0, 0)).toBeNull();
   });
 });

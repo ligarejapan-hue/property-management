@@ -16,6 +16,7 @@
  *
  * 2026-11-11: 名前に謄本の外字(私用領域の字)がある所有者も、同じ SQL で見つけて外す(宛名が □ になる・
  * 外字のまま自動で登録された同じ方に2通届く)。件数は理由ごとに分けて見せる。
+ * 2026-11-13(発注者 案A): 実際に刷る住所(現住所があれば現住所・無ければ登記上の住所)に外字がある所有者も外す。
  */
 
 import { Prisma } from "@/generated/prisma";
@@ -48,7 +49,7 @@ export async function findAgentNameOwnerIds(
 export interface OwnerNameExclusions {
   /** 業者と同じ名前 */
   agentOwnerIds: Set<string>;
-  /** 名前に謄本の外字(私用領域の字)がある=宛名が □ になる(2026-11-11 実機確認) */
+  /** 名前か実際に刷る住所に謄本の外字(私用領域の字)がある=宛名が □ になる(2026-11-11 実機確認・住所は 11-13) */
   gaijiOwnerIds: Set<string>;
 }
 
@@ -78,6 +79,17 @@ const OWNER_CHUNK = 10_000;
 /** 私用領域(U+E000〜U+F8FF)の字の範囲(正規表現の文字クラス・値として SQL に渡す)。 */
 export const PRIVATE_USE_CLASS = `[${String.fromCharCode(0xe000)}-${String.fromCharCode(0xf8ff)}]`;
 
+/**
+ * 実際に刷る住所(resolveMailingAddress と同じ決め方): 現住所が空白だけでなければ現住所、そうでなければ登記上の住所。
+ * 空白 = JS の trim と同じ範囲(半角・全角の空白・タブ・改行・NBSP・BOM・U+2000〜U+200A・行区切りなど)。
+ */
+function mailingAddressSql(): Prisma.Sql {
+  return Prisma.sql`(CASE WHEN regexp_replace(coalesce(o.current_address, ''), ${BLANK_CLASS}, '', 'g') <> '' THEN o.current_address ELSE coalesce(o.address, '') END)`;
+}
+
+// \s に入らない空白(全角空白・NBSP・BOM・U+2000〜U+200A・行/段落区切り・U+202F・U+205F)も足す(内部レビュー P3)。
+const BLANK_CLASS = `[\\s${String.fromCharCode(0x3000, 0x00a0, 0xfeff, 0x2028, 0x2029, 0x202f, 0x205f)}${String.fromCharCode(0x2000)}-${String.fromCharCode(0x200a)}]`;
+
 async function findChunk(
   tx: AgentNameExclusionTx,
   ids: string[],
@@ -87,7 +99,8 @@ async function findChunk(
   const mlitKey = agentNameKeySql(Prisma.sql`m.company_name`);
   return tx.$queryRaw<{ id: string; agent: boolean; gaiji: boolean }[]>(Prisma.sql`
     WITH k AS (
-      SELECT o.id::text AS id, ${ownerKey} AS key, coalesce(o.name, '') ~ ${PRIVATE_USE_CLASS} AS gaiji
+      SELECT o.id::text AS id, ${ownerKey} AS key,
+        (coalesce(o.name, '') ~ ${PRIVATE_USE_CLASS} OR ${mailingAddressSql()} ~ ${PRIVATE_USE_CLASS}) AS gaiji
       FROM owners o
       WHERE o.id IN (${Prisma.join(ids.map((id) => Prisma.sql`${id}::uuid`))})
     ), r AS (

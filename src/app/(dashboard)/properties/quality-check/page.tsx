@@ -45,6 +45,7 @@ const CODE_LABELS: Record<string, string> = {
   NO_REAL_ESTATE_NUMBER: "不動産番号未入力",
   INVESTIGATION_NOT_CONFIRMED: "調査未確認",
   NO_ASSIGNEE: "担当者未設定",
+  OWNER_GAIJI: "所有者に読めない字（外字）",
 };
 
 const severityConfig = {

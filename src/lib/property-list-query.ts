@@ -19,6 +19,7 @@ import { resolveMgmtIdMatches } from "@/lib/property-mgmt-id-search";
 import { buildLeadExclusionWhere, jstTodayDateOnly } from "@/lib/lead-exclusion";
 import { businessTypeWhere } from "@/lib/property-business-type";
 import { qualityWarningWhere } from "@/lib/quality-check-rules";
+import { loadQualityContext } from "@/lib/quality-check-context";
 import { propertyListQuerySchema } from "@/lib/validators";
 import type { z } from "zod";
 
@@ -181,7 +182,7 @@ export async function buildPropertyListWhere(
   // 既存 where と AND する。"info" (NO_LOT_NUMBER 等) は粒度が細かいため除外。
   // ⚠条件は品質チェックと**1か所の定義**(qualityWarningWhere)。ここに書き写さない(2026-11-08)。
   if (hasWarning === true) {
-    where.AND = [...(where.AND ?? []), qualityWarningWhere()];
+    where.AND = [...(where.AND ?? []), qualityWarningWhere(await loadQualityContext(client))];
   }
 
   // DM送信回数フィルタは「未送信(0回)」のみ。dmLogs none でネイティブに絞れる(大規模でも高速・ID materialize 無し)。

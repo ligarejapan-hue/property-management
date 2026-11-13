@@ -63,7 +63,7 @@ export function buildSaleDmPartialNotice(res: {
   }
   if ((res.excludedGaijiName ?? 0) > 0) {
     lines.push(
-      `所有者の名前に読めない字(外字)がある ${res.excludedGaijiName} 件の宛先は自動で除外しました(宛名が正しく出せないため。所有者の名前を直すと送れます)。`,
+      `所有者の名前か住所に読めない字(外字)がある ${res.excludedGaijiName} 件の宛先は自動で除外しました(宛名が正しく出せないため。所有者の名前か住所を直すと送れます)。`,
     );
   }
   if ((res.excluded ?? 0) > 0) {

@@ -6,7 +6,7 @@ export function dmExclusionCountsText(terminal = 0, agentName = 0, gaijiName = 0
   const parts = [
     ...(terminal > 0 ? [`拒否・宛先不明の反響が付いた ${terminal} 件`] : []),
     ...(agentName > 0 ? [`所有者が業者と同じ名前の ${agentName} 件`] : []),
-    ...(gaijiName > 0 ? [`所有者の名前に読めない字(外字)がある ${gaijiName} 件`] : []),
+    ...(gaijiName > 0 ? [`所有者の名前か住所に読めない字(外字)がある ${gaijiName} 件`] : []),
   ];
   return parts.length > 0 ? parts.join("と、") : null;
 }
