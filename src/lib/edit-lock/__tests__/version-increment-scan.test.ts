@@ -83,7 +83,7 @@ const VERSIONED: Record<string, string> = {
     "restoreDmStatus 指定時のみ property.dmStatus+version increment" +
     "(Task 9で修正: dmStatus書き戻し時に元は進めていなかった。" +
     "dmUndeliverableAtのみのクリアは対象外[ALLOWED]と同じ理由で進めない)",
-  "src/app/api/properties/[id]/dm-logs/[logId]/reaction/route.ts:276":
+  "src/app/api/properties/[id]/dm-logs/[logId]/reaction/route.ts:280":
     "property.dmStatus(undeliverable連動のno_send昇格)+version increment" +
     "(Task 9で修正: 元は進めていなかった)",
   "src/app/api/properties/[id]/parcel-change/route.ts:87":
@@ -92,10 +92,13 @@ const VERSIONED: Record<string, string> = {
   "src/app/api/properties/[id]/parcel-detach/route.ts:77":
     "property.extraParcels(この筆を別の物件にする・2026-11-06)+version increment" +
     "(物件の行ロック→編集中の鍵の確認→版の条件つき更新。新しい物件は同じトランザクションで作る)",
-  "src/app/api/properties/[id]/route.ts:606":
+  "src/app/api/properties/[id]/route.ts:617":
     "property の編集画面フィールド一式(編集画面の本体保存窓口)+version increment",
   "src/app/api/properties/bulk-update/route.ts:90":
     "property.caseStatus/registryStatus/dmStatus/assignedTo(一括更新)+version increment",
+  "src/lib/dm-reaction/clear-undeliverable.ts:159":
+    "宛先不明の解除(2026-11-13): DM可否を no_send→send に戻すときだけ property.dmStatus+version increment" +
+    "(dmUndeliverableAt だけ外すときは進めない=ALLOWED の3件と同じ理由)",
   "src/lib/building-link/rename.ts:126":
     "property.buildingName(棟の名前を直したとき、つながっている全部屋へ反映)+version increment" +
     "(段3 Task 14。部屋の行(id順 FOR UPDATE)→棟の行(FOR NO KEY UPDATE)の後・編集中の鍵が0件のときだけ同じトランザクションで書く。" +
@@ -107,7 +110,7 @@ const VERSIONED: Record<string, string> = {
   "src/app/api/properties/sale-dm/campaigns/[id]/properties/[propertyId]/scenario/route.ts:212":
     "property.dmScenarioId(売却DMの発送の画面から物件単位で「種類を変える」)+version increment" +
     "(DMの種類 PR-S2 Task 5。物件行 FOR UPDATE・編集中の鍵の確認の後、where に読んだ version を付けて書く)",
-  "src/app/api/properties/sale-dm/drafts/[id]/outcome/route.ts:244":
+  "src/app/api/properties/sale-dm/drafts/[id]/outcome/route.ts:245":
     "property.dmStatus(宛先不明連動のno_send昇格)+version increment" +
     "(Task 9で修正: 元は進めていなかった)",
   "src/lib/investigation/fetch-investigation.ts:646":
@@ -193,13 +196,13 @@ const ALLOWED_WITHOUT_VERSION: Record<string, AllowedEntry> = {
     reason: "owner.updatedAt のみ(メモ作成のための行ロックtouch。owner本体は書かない)",
     keys: ["updatedAt"],
   },
-  "src/app/api/properties/[id]/dm-logs/[logId]/reaction/route.ts:303": {
+  "src/app/api/properties/[id]/dm-logs/[logId]/reaction/route.ts:293": {
     reason:
       "property.dmUndeliverableAt=null のみ(残数ゼロでの自動解除。dmUndeliverableAtは" +
       "PropertyEditForm の FORM_FIELDS に無く編集画面から書けない)",
     keys: ["dmUndeliverableAt"],
   },
-  "src/app/api/properties/[id]/dm-logs/[logId]/route.ts:102": {
+  "src/app/api/properties/[id]/dm-logs/[logId]/route.ts:90": {
     reason:
       "property.dmUndeliverableAt=null のみ(送付記録削除に伴う自動解除。同上の理由で" +
       "編集画面から書けない)",
@@ -209,7 +212,7 @@ const ALLOWED_WITHOUT_VERSION: Record<string, AllowedEntry> = {
     reason: "owner.updatedAt のみ(所有者リンク時の行ロックtouch)",
     keys: ["updatedAt"],
   },
-  "src/app/api/properties/sale-dm/drafts/[id]/outcome/route.ts:267": {
+  "src/app/api/properties/sale-dm/drafts/[id]/outcome/route.ts:257": {
     reason:
       "property.dmUndeliverableAt=null のみ(訂正による自動解除。同上の理由で" +
       "編集画面から書けない)",

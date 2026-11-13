@@ -16,6 +16,7 @@ import { isRefusalProtected,
   REACTION_STATUSES,
   isTerminalReaction,
   applyManualReaction,
+  clearedFieldsOnReactionWrite,
 } from "@/lib/dm-reaction/core";
 import { lockOwnersForUpdate, type RawTx } from "@/lib/dm-batch/locks";
 
@@ -197,6 +198,8 @@ export async function PATCH(
         where: { id: logId, reactionStatus: fresh.reactionStatus },
         data: {
           reactionStatus: next.reactionStatus,
+          // 宛先不明の解除の印: 宛先不明のままなら触らない・それ以外の書き換えは消す(2026-11-13)
+          ...clearedFieldsOnReactionWrite(fresh.reactionStatus, next.reactionStatus),
           reactedAt: next.reactedAt,
           reactionNote: next.reactionNote,
           reactionSource: next.reactionSource,

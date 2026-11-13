@@ -1,6 +1,6 @@
 import { Prisma } from "@/generated/prisma";
 import { lockOwnersForUpdate, type RawTx } from "@/lib/dm-batch/locks";
-import { applySyncReaction, jstCalendarDay, type ReactionFields } from "./core";
+import { applySyncReaction, jstCalendarDay, type ReactionFields, clearedFieldsOnReactionWrite } from "./core";
 
 // 売却DMの draft 現在値からブリッジ行(draft_id 一致の全 PropertyDmLog)へ反響を同期する
 // (設計§3・PR-B)。導出: returned_undeliverable→undeliverable / outcome=inquiry(LP・電話)→replied /
@@ -191,6 +191,8 @@ export async function syncSaleDmReaction(
       where: { id: log.id },
       data: {
         reactionStatus: next.reactionStatus,
+        // 宛先不明の解除の印: 宛先不明のままなら触らない・それ以外の書き換えは消す(2026-11-13)
+        ...clearedFieldsOnReactionWrite(log.reactionStatus, next.reactionStatus),
         reactedAt: next.reactedAt,
         reactionNote: next.reactionNote,
         reactionSource: next.reactionSource,

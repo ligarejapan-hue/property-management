@@ -323,8 +323,14 @@ describe("GET /api/properties/dm-batches/[id]/csv", () => {
     expect(pm.dmExportBatch.update).not.toHaveBeenCalled();
     // 検出クエリ: terminal 2種のみ・代表(owner_id)/連関(log_owners)/所有者なし記録の物件単位の3経路
     const where = pm.propertyDmLog.findMany.mock.calls[0][0].where;
-    expect(where.reactionStatus).toEqual({ in: ["refused", "undeliverable"] });
-    expect(where.OR).toEqual([
+    // ⚠外す理由になる記録=拒否(印に関係なく) と 解除していない宛先不明(2026-11-13)
+    expect(where.AND[0]).toEqual({
+      OR: [
+        { reactionStatus: "refused" },
+        { reactionStatus: "undeliverable", undeliverableClearedAt: null },
+      ],
+    });
+    expect(where.AND[1].OR).toEqual([
       { ownerId: { in: ["o1"] } },
       { logOwners: { some: { ownerId: { in: ["o1"] } } } },
       { propertyId: { in: ["p1"] }, ownerId: null, logOwners: { none: {} } },
@@ -532,59 +538,89 @@ describe("GET /api/properties/dm-batches/[id]/csv: 再送候補の再評価(検�
     resend_filter_applied: true,
   };
 
-  type LogRow = { propertyId: string; reactionStatus: string; sentAt: Date };
+  type LogRow = {
+    propertyId: string;
+    reactionStatus: string;
+    sentAt: Date;
+    /** 宛先不明の解除の印(2026-11-13)。省略=印なし。 */
+    undeliverableClearedAt?: Date | null;
+  };
   type WhereArg = {
     propertyId?: { in: string[] };
-    reactionStatus?: { in: string[] };
+    reactionStatus?: string | { in: string[] };
+    undeliverableClearedAt?: null;
     sentAt?: { gt: Date };
-    OR?: Array<{ sentAt?: { gt: Date }; reactionStatus?: { in: string[] } }>;
+    ownerId?: null | { in: string[] };
+    logOwners?: { some?: unknown; none?: unknown };
+    OR?: WhereArg[];
+    AND?: WhereArg[];
   };
+
+  /**
+   * where を1行に当てる(実DBと同じ意味で)。この作り物の行は、所有者の紐づけが無い行
+   * (ownerId=null・logOwners=空)として扱う。
+   * ⚠知らない条件が来たら落とす(素通りさせると、実装が条件を変えてもテストが通る)。
+   */
+  function matches(r: LogRow, w: WhereArg): boolean {
+    for (const [key, cond] of Object.entries(w)) {
+      if (cond === undefined) continue;
+      switch (key) {
+        case "propertyId":
+          if (!(cond as { in: string[] }).in.includes(r.propertyId)) return false;
+          break;
+        case "reactionStatus":
+          if (typeof cond === "string" ? cond !== r.reactionStatus : !(cond as { in: string[] }).in.includes(r.reactionStatus)) {
+            return false;
+          }
+          break;
+        case "undeliverableClearedAt":
+          // 条件は「印が無い(null)」だけ
+          if (cond !== null) throw new Error("unexpected undeliverableClearedAt condition");
+          if ((r.undeliverableClearedAt ?? null) !== null) return false;
+          break;
+        case "sentAt":
+          if (!(r.sentAt.getTime() > (cond as { gt: Date }).gt.getTime())) return false;
+          break;
+        case "ownerId":
+          // 行は ownerId=null。null の条件だけ合う。
+          if (cond !== null) return false;
+          break;
+        case "logOwners":
+          // 行の logOwners は空。some は合わない・none は合う。
+          if ((cond as { some?: unknown }).some !== undefined) return false;
+          break;
+        case "OR":
+          if (!(cond as WhereArg[]).some((c) => matches(r, c))) return false;
+          break;
+        case "AND":
+          if (!(cond as WhereArg[]).every((c) => matches(r, c))) return false;
+          break;
+        default:
+          throw new Error(`unexpected where key: ${key}`);
+      }
+    }
+    return true;
+  }
 
   /**
    * propertyDmLog.findMany を**実DBのように絞り込んで**返す。
    * ⚠「クエリ内容で固定値を返す」だけだと、実装がクエリから条件を落としても
    * テストが通ってしまう(空振り)。行を条件で実際に絞ることで、条件が欠けたら
    * 行が返らず 409 にならない=落ちる。
-   * 検査(2)は where.reactionStatus をトップレベルに持ち、検査(5)は where.OR のみ。
+   * 検査(2)は AND[外す理由になる記録か, 3経路の OR]、検査(5)は propertyId + OR[期間, 候補から外す反響]。
    * ⚠呼び出し順(mockResolvedValueOnce)で組むと、検査(5)が走らないケースで
    * 2つ目の once が消費されずに次のテストへ漏れる(実際に踏んだ)。
    */
   function armDmLogRows(rows: LogRow[]) {
     pm.propertyDmLog.findMany.mockImplementation(
-      async (args: { where?: WhereArg }) => {
-        const w = args?.where ?? {};
-        return rows
-          .filter((r) => {
-            if (w.propertyId?.in && !w.propertyId.in.includes(r.propertyId)) {
-              return false;
-            }
-            // 検査(2): terminal 反響の検出(reactionStatus はトップレベル)
-            if (w.reactionStatus?.in) {
-              return w.reactionStatus.in.includes(r.reactionStatus);
-            }
-            // 期間だけを見る形(=修正前の検査(5))もそのまま再現する。
-            // これが無いと素通り(return true)して、条件を落とした実装でもテストが通る。
-            if (w.sentAt?.gt) {
-              return r.sentAt.getTime() > w.sentAt.gt.getTime();
-            }
-            // 検査(5): 期間 or 候補から外す反響
-            if (w.OR) {
-              return w.OR.some((c) =>
-                c.sentAt?.gt
-                  ? r.sentAt.getTime() > c.sentAt.gt.getTime()
-                  : c.reactionStatus?.in
-                    ? c.reactionStatus.in.includes(r.reactionStatus)
-                    : false,
-              );
-            }
-            return true;
-          })
+      async (args: { where?: WhereArg }) =>
+        rows
+          .filter((r) => matches(r, args?.where ?? {}))
           .map((r) => ({
             ownerId: null,
             propertyId: r.propertyId,
             logOwners: [],
-          }));
-      },
+          })),
     );
   }
 
@@ -595,20 +631,46 @@ describe("GET /api/properties/dm-batches/[id]/csv: 再送候補の再評価(検�
     armQueryRaw(RESEND_BATCH);
     armDmLogRows([]);
     await GET(makeRequest(), ctx);
-    // ⚠検査(2)のクエリも where.OR を持つ(代表/連関/物件単位の3経路)。
-    // OR だけで拾うとそちらを掴むので、トップレベルの reactionStatus が
-    // **無い**方(=検査(5))を選ぶ。
+    // ⚠検査(2)のクエリは where.AND(外す理由になる記録か+3経路)で、トップレベルの OR は持たない。
+    // トップレベルに OR を持つ方(=検査(5))を選ぶ。
     const call = pm.propertyDmLog.findMany.mock.calls.find((c) => {
       const w = (c[0] as { where?: WhereArg })?.where;
-      return !!w?.OR && !w?.reactionStatus;
+      return !!w?.OR && !w?.AND;
     });
     expect(call).toBeDefined();
     const where = (call![0] as { where: WhereArg }).where;
     expect(where.propertyId).toEqual({ in: ["p1"] });
+    // 期間 または 候補から外す反響(拒否・連絡あり・**解除していない**宛先不明=2026-11-13)
     expect(where.OR).toEqual([
       { sentAt: { gt: expect.any(Date) } },
-      { reactionStatus: { in: ["refused", "undeliverable", "replied"] } },
+      {
+        OR: [
+          { reactionStatus: { in: ["refused", "replied"] } },
+          { reactionStatus: "undeliverable", undeliverableClearedAt: null },
+        ],
+      },
     ]);
+  });
+
+  it("⚠作成後に宛先不明が付いた宛先は 409。住所を替えて解除した宛先不明なら止めない(2026-11-13)", async () => {
+    armQueryRaw(RESEND_BATCH);
+    armDmLogRows([{ propertyId: "p1", reactionStatus: "undeliverable", sentAt: OLD_SENT }]);
+    expect((await GET(makeRequest(), ctx)).status).toBe(409);
+
+    vi.clearAllMocks();
+    armQueryRaw(RESEND_BATCH);
+    armDmLogRows([
+      { propertyId: "p1", reactionStatus: "undeliverable", sentAt: OLD_SENT, undeliverableClearedAt: new Date() },
+    ]);
+    expect((await GET(makeRequest(), ctx)).status).not.toBe(409);
+  });
+
+  it("⚠拒否は、解除の印が付いていても必ず 409(印で拒否を解かない)", async () => {
+    armQueryRaw(RESEND_BATCH);
+    armDmLogRows([
+      { propertyId: "p1", reactionStatus: "refused", sentAt: OLD_SENT, undeliverableClearedAt: new Date() },
+    ]);
+    expect((await GET(makeRequest(), ctx)).status).toBe(409);
   });
 
   it("作成後に送付が入った宛先があれば 409・凍結しない", async () => {

@@ -7,6 +7,7 @@ import {
   applyManualReaction,
   isRefusalProtected,
   jstCalendarDay,
+  clearedFieldsOnReactionWrite,
 } from "@/lib/dm-reaction/core";
 import { decideBatchUnsubscribeTarget } from "@/lib/dm-batch/qr-unsubscribe-target";
 
@@ -170,6 +171,8 @@ export async function recordBatchItemUnsubscribe(
         where: { id: row.id },
         data: {
           reactionStatus: next.reactionStatus,
+          // 宛先不明の解除の印: 宛先不明のままなら触らない・それ以外の書き換えは消す(2026-11-13)
+          ...clearedFieldsOnReactionWrite(row.reactionStatus, next.reactionStatus),
           reactedAt: next.reactedAt,
           reactionNote: next.reactionNote,
           reactionSource: next.reactionSource,

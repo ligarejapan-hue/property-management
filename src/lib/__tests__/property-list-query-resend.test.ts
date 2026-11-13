@@ -14,7 +14,7 @@ describe("buildPropertyListWhere resendOnly filter", () => {
     expect(and).toContainEqual({ dmStatus: "send" });
     expect(and).toContainEqual({ dmLogs: { some: {} } });
     expect(and.some((f) => f.dmLogs?.none?.sentAt?.gt instanceof Date)).toBe(true);
-    expect(and.some((f) => f.dmLogs?.none?.reactionStatus?.in)).toBe(true);
+    expect(and.some((f) => f.dmLogs?.none?.OR)).toBe(true);
     expect(and.some((f) => f.propertyOwners?.none?.owner?.OR)).toBe(true);
   });
 

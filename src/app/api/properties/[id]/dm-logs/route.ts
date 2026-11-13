@@ -91,6 +91,8 @@ export async function GET(
           reactionNote: true,
           reactionSource: true,
         manualReactionShadow: true,
+          // 宛先不明の解除の印(2026-11-13)。画面に「解除済み」と出すためだけに使う(真偽だけ返す)
+          undeliverableClearedAt: true,
           sender: { select: { id: true, name: true } },
         },
         orderBy: [{ sentAt: "desc" }, { createdAt: "desc" }],
@@ -139,6 +141,8 @@ export async function GET(
       reactedAt: log.reactedAt ? jstCalendarDay(log.reactedAt) : null,
       reactionNote: maskValue(log.reactionNote, ownerDisplayConfig.note),
       reactionSource: log.reactionSource,
+      // 住所を替えて解除した宛先不明か(=この記録は、DMの対象から外す理由になっていない)
+      undeliverableCleared: log.reactionStatus === "undeliverable" && log.undeliverableClearedAt !== null,
       sentBy: { id: log.sender.id, name: log.sender.name },
       createdAt: log.createdAt,
     }));

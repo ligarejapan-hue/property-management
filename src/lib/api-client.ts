@@ -3724,6 +3724,35 @@ export async function unlinkPropertyOwner(propertyId: string, ownerId: string) {
   );
 }
 
+/** 宛先不明の解除の結果(件数だけ・氏名や住所は含まない)。 */
+export interface ClearOwnerDmUndeliverableResult {
+  /** 解除した記録の数 */
+  cleared: number;
+  /** 共有でまとめて送った記録(解除していない)の数 */
+  sharedSkipped: number;
+  /** 物件の住所あて・担当できない物件などの記録(解除していない)の数 */
+  otherSkipped: number;
+  /** 「宛先不明」の印を外した物件の数 */
+  flagsCleared: number;
+  /** DM 可否を「送付可」に戻した物件の数 */
+  dmStatusRestored: number;
+}
+
+/**
+ * 宛先不明の解除(2026-11-13)。所有者の登記上の住所を別の住所に替えて保存したあとに呼ぶ。
+ * 古い住所あての「宛先不明」を、送付対象から外す理由に数えなくする(記録は残る)。
+ */
+export async function clearOwnerDmUndeliverable(propertyId: string, ownerId: string) {
+  if (USE_MOCK) {
+    await mockDelay();
+    return { cleared: 0, sharedSkipped: 0, otherSkipped: 0, flagsCleared: 0, dmStatusRestored: 0 };
+  }
+  return apiFetch<ClearOwnerDmUndeliverableResult>(
+    `/api/properties/${propertyId}/owners/${ownerId}/clear-dm-undeliverable`,
+    { method: "POST" },
+  );
+}
+
 export async function searchOwners(query: string) {
   if (USE_MOCK) {
     await mockDelay();

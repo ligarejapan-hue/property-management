@@ -85,6 +85,8 @@ vi.mock("@/lib/prisma", () => {
       findUnique: vi.fn(),
       update: vi.fn(),
       count: vi.fn(),
+      // 物件の宛先不明の印の数え直し(解除済みの記録につながる売却DMの宛先。既定=なし)
+      findMany: vi.fn(async () => []),
     },
     dmRecipientDraft: { count: vi.fn() },
     property: { update: vi.fn() },
@@ -108,7 +110,7 @@ import { sanitizeAuditDetail } from "@/lib/audit-log-detail-safety";
 import { PATCH } from "../../app/api/properties/[id]/dm-logs/[logId]/reaction/route";
 
 const pm = prisma as unknown as {
-  propertyDmLog: { findFirst: Mock; findUnique: Mock; update: Mock; count: Mock };
+  propertyDmLog: { findFirst: Mock; findUnique: Mock; update: Mock; count: Mock; findMany: Mock };
   dmRecipientDraft: { count: Mock };
   property: { update: Mock };
   $transaction: Mock;

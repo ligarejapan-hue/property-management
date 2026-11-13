@@ -1,3 +1,4 @@
+import { countActiveUndeliverable } from "@/lib/dm-reaction/undeliverable-flag";
 import { NextRequest, NextResponse } from "next/server";
 import { z } from "zod";
 import prisma from "@/lib/prisma";
@@ -250,20 +251,9 @@ export async function PATCH(
         // 直列化し、互いの未コミット変更を見落として「宛先不明」フラグを取り残す/誤って消すのを防ぐ。
         // 同一物件に「宛先不明」のまま残る他の送付済み宛先(別の所有者住所グループや別キャンペーン)や、
         // 汎用送付記録側の宛先不明反響(手動記録=PR-B)がなければ物件フラグを解除する。
-        const [stillUndeliverable, undeliverableLogs] = await Promise.all([
-          tx.dmRecipientDraft.count({
-            where: {
-              propertyId: draft.propertyId,
-              status: "sent",
-              deliveryStatus: "returned_undeliverable",
-              id: { not: id },
-            },
-          }),
-          tx.propertyDmLog.count({
-            where: { propertyId: draft.propertyId, reactionStatus: "undeliverable" },
-          }),
-        ]);
-        if (stillUndeliverable + undeliverableLogs === 0) {
+        // 数え方は dm-reaction/undeliverable-flag.ts(解除した宛先不明は数えない・2026-11-13)。
+        const remaining = await countActiveUndeliverable(tx, draft.propertyId, { draftId: id });
+        if (remaining === 0) {
           await tx.property.update({
             where: { id: draft.propertyId },
             data: { dmUndeliverableAt: null },

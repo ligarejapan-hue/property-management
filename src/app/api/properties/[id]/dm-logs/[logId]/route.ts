@@ -1,3 +1,4 @@
+import { countActiveUndeliverable } from "@/lib/dm-reaction/undeliverable-flag";
 import { NextRequest } from "next/server";
 import prisma from "@/lib/prisma";
 import {
@@ -82,23 +83,10 @@ export async function DELETE(
       // 残数=自分以外の宛先不明ログ+returned_undeliverable の sent ドラフト。ゼロなら
       // dmUndeliverableAt のみ解除(dmStatus は人の判断で戻す)。親行ロックは保持中。
       if (log.reactionStatus === "undeliverable") {
-        const [logCount, draftCount] = await Promise.all([
-          tx.propertyDmLog.count({
-            where: {
-              propertyId,
-              reactionStatus: "undeliverable",
-              id: { not: logId },
-            },
-          }),
-          tx.dmRecipientDraft.count({
-            where: {
-              propertyId,
-              status: "sent",
-              deliveryStatus: "returned_undeliverable",
-            },
-          }),
-        ]);
-        if (logCount + draftCount === 0) {
+        // 数え方は dm-reaction/undeliverable-flag.ts(解除した宛先不明は数えない・2026-11-13)。
+        // ⚠行はもう消してあるが、同じ id を数えない指定も付けておく(順番を入れ替えても同じ結果)。
+        const remaining = await countActiveUndeliverable(tx, propertyId, { logId });
+        if (remaining === 0) {
           await tx.property.update({
             where: { id: propertyId },
             data: { dmUndeliverableAt: null },
