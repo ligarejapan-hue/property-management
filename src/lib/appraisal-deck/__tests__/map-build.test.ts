@@ -332,6 +332,19 @@ describe("地図の範囲(2026-11-12 駅・周辺施設が入る大きさ)", () 
     // 査定書の施設と、北へ 760m の駅(本番の資料と同じ並び)
     expect(mapExtentFor([[-407, 40], [534, -307], [-357, 382], [-169, -376], [254, 764]])).toEqual({ ex: 1350, ey: 950 });
   });
+  it("東西に広く散らばるときは、横長の平面の地図の東西の幅が出せるよう南北も広げる(@codex #718)", () => {
+    // deck.js の映す幅は min(ex, ey×1080/620) で頭打ちになる。東西 ±1200 の施設が入る幅(1200×1.35)を出せる南北が要る。
+    const e = mapExtentFor([[-1200, 0], [1200, 0]]);
+    expect(e).toEqual({ ex: 1600, ey: 950 });
+    expect(Math.min(e.ex, (e.ey * 1080) / 620)).toBeGreaterThanOrEqual(1200);
+    // 上限の中で、要る東西の幅(上限で頭打ち)をいつも映せる。
+    for (const pts of [[[-1500, 10], [1500, -10]], [[-900, 0], [900, 0]], [[0, 0], [1400, 50]]] as Array<Array<[number, number]>>) {
+      const x = mapExtentFor(pts);
+      const xs = pts.map((p) => p[0]).concat(0);
+      const need = Math.min(MAP_EX_MAX, ((Math.max(...xs) - Math.min(...xs)) / 2) * 1.35);
+      expect(Math.min(x.ex, (x.ey * 1080) / 620)).toBeGreaterThanOrEqual(need);
+    }
+  });
   it("範囲の中かどうか(端の近くは外とみなす)", () => {
     expect(insideExtent({ x: 254, y: 764 }, { ex: 1000, ey: 650 })).toBe(false);
     expect(insideExtent({ x: 254, y: 764 }, { ex: 1000, ey: 950 })).toBe(true);

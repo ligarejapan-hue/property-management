@@ -69,8 +69,11 @@ export function mapExtentFor(points: ReadonlyArray<readonly [number, number]>): 
     y0 = Math.min(y0, y);
     y1 = Math.max(y1, y);
   }
-  const ex = Math.max(MAP_EX, up(mx + EXTENT_MARGIN), up(((x1 - x0) / 2) * VIEW_PAD), up(((y1 - y0) / 2) * VIEW_PAD * VIEW_ASPECT));
-  const ey = Math.max(MAP_EY, up(my + EXTENT_MARGIN));
+  // 平面の地図に映す東西の幅(片側)。deck.js の VX と同じ求め方。
+  const view = Math.max(((x1 - x0) / 2) * VIEW_PAD, ((y1 - y0) / 2) * VIEW_PAD * VIEW_ASPECT);
+  const ex = Math.max(MAP_EX, up(mx + EXTENT_MARGIN), up(view));
+  // deck.js は映す幅を min(ex, ey×縦横比) で頭打ちにするので、東西に広い並びでは南北も広げる(@codex #718)。
+  const ey = Math.max(MAP_EY, up(my + EXTENT_MARGIN), up(Math.min(MAP_EX_MAX, view) / VIEW_ASPECT));
   return { ex: Math.min(MAP_EX_MAX, ex), ey: Math.min(MAP_EY_MAX, ey) };
 }
 
