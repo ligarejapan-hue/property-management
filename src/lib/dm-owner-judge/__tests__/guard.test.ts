@@ -71,3 +71,19 @@ describe("新しく作った物件は所有者待ちの印ありで始まる(@co
     expect(read("prisma/schema.prisma")).toMatch(/dmOwnerPending\s+Boolean\s+@default\(true\)/);
   });
 });
+
+describe("謄本の名義の確認で DM を選んだら所有者待ちの印を下ろす(@codex #728 R2 P2)", () => {
+  const svc = read("src/lib/registry-owner-check/service.ts");
+  it("印を下ろす関数がある(DM判断は変えない・印だけ)", () => {
+    expect(svc).toMatch(
+      /export async function settleDmOwnerPending\(tx: Tx, propertyId: string\)[\s\S]{0,200}data: \{ dmOwnerPending: false \}/,
+    );
+  });
+  it("「このままでよい」は送付可に戻すかどうかにかかわらず印を下ろす", () => {
+    expect(svc).toMatch(/decision: "keep"[\s\S]{0,300}await settleDmOwnerPending\(tx, propertyId\);/);
+  });
+  it("「謄本の名義に直す」も送付可に戻すかどうかにかかわらず印を下ろす", () => {
+    const replace = read("src/app/api/registry-owner-checks/[propertyId]/replace/route.ts");
+    expect(replace).toMatch(/if \(body\.restoreDm\) dmRestored = [^\n]+\n\s*await settleDmOwnerPending\(tx, propertyId\);/);
+  });
+});

@@ -162,6 +162,10 @@ interface AllowedEntry {
 }
 
 const ALLOWED_WITHOUT_VERSION: Record<string, AllowedEntry> = {
+  "src/lib/registry-owner-check/service.ts:502": {
+    reason: "property.dmOwnerPending のみ(名義の確認で人が DM を選んだので所有者待ちの印を下ろす・2026-11-14)",
+    keys: ["dmOwnerPending"],
+  },
   "src/lib/dm-owner-judge/service.ts:72": {
     reason: "property.dmOwnerPending のみ(所有者待ちの印。編集画面の送信項目に無い・2026-11-14)",
     keys: ["dmOwnerPending"],
