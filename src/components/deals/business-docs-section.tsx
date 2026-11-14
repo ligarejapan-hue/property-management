@@ -35,6 +35,12 @@ const keyRowsOf = (v: unknown): KeyRow[] => (Array.isArray(v) ? (v as KeyRow[]) 
 const keyRowOk = (k: KeyRow) => k.label.trim() !== "" && /^\d+$/.test(k.count) && Number(k.count) >= 1 && Number(k.count) <= 99;
 type CostRow = { label: string; amount: string };
 const costRowsOf = (v: unknown): CostRow[] => (Array.isArray(v) ? (v as CostRow[]) : []);
+/** 金額の欄の文字(数で来た初期値・控えも文字にそろえる)。 */
+const yenText = (v: unknown) => (typeof v === "number" ? String(v) : str(v));
+/** 空か、0 以上の整数(桁区切りのカンマは可)。 */
+export const optionalYenOk = (v: unknown) => { const t = yenText(v).replace(/,/g, "").trim(); return t === "" || (/^\d{1,13}$/.test(t) && Number(t) <= 1_000_000_000_000); };
+/** 送るときの金額(空は null)。 */
+export const optionalYenToSend = (v: unknown) => { const t = yenText(v).replace(/,/g, "").trim(); return t === "" ? null : Number(t); };
 /** 諸費用の行が出せる形か(項目名があり、金額が 0 以上の整数)。 */
 const costRowOk = (r: CostRow) => r.label.trim() !== "" && /^\d{1,13}$/.test(r.amount.replace(/,/g, ""));
 
@@ -201,11 +207,15 @@ function IssueDialog({ dealId, doc, version, onCancel, onDone }: {
   const needsDecision = receipt && issuer?.individual === true && values.exempt == null;
   const matters = Array.isArray(values.matters) ? (values.matters as string[]) : [];
   const keyRows = keyRowsOf(values.keys);
+  // 前の版の下書きには登記費用・抹消のご案内の項目が無い=そのときは初期値を使う。
+  const registrationFee = values.registrationFee === undefined ? doc.defaults.registrationFee : values.registrationFee;
+  const cancellationNotice = (values.cancellationNotice === undefined ? doc.defaults.cancellationNotice : values.cancellationNotice) === true;
   const costRows = costRowsOf(values.costs);
   // 委任状は委任する事項が1つ以上・鍵受領書は鍵の行がすべて埋まっているまで発行できない(サーバーも 422)。
   const incomplete = (doc.docType === "power_of_attorney" && !matters.length && !str(values.otherMatter).trim())
     || (doc.docType === "key_receipt" && (!keyRows.length || !keyRows.every(keyRowOk)))
     || (doc.docType === "settlement_guide_seller" && !costRows.every(costRowOk))
+    || (doc.docType === "settlement_guide" && !optionalYenOk(registrationFee))
     || (doc.docType === "prep_checklist" && !str(values.kind));
   const setCost = (i: number, patch: Partial<CostRow>) => set("costs", costRows.map((r, j) => (j === i ? { ...r, ...patch } : r)));
   const setKey = (i: number, patch: Partial<KeyRow>) => set("keys", keyRows.map((k, j) => (j === i ? { ...k, ...patch } : k)));
@@ -238,7 +248,9 @@ function IssueDialog({ dealId, doc, version, onCancel, onDone }: {
             : doc.docType === "landlord_change_notice"
               ? { ...values, changeOn: str(values.changeOn) || null }
               : doc.docType === "settlement_guide_seller"
-                ? { ...values, costs: costRows.map((r) => ({ label: r.label.trim(), amount: Number(r.amount.replace(/,/g, "")) })) }
+                ? { ...values, costs: costRows.map((r) => ({ label: r.label.trim(), amount: Number(r.amount.replace(/,/g, "")) })), cancellationNotice }
+                : doc.docType === "settlement_guide"
+                  ? { ...values, registrationFee: optionalYenToSend(registrationFee) }
                 : CHECKLISTS.has(doc.docType)
                   ? { ...values, pay: Object.fromEntries(Object.entries(pay).map(([k, v]) => [k, payEntriesToSend(payEntriesOf(v))])) }
                   : values;
@@ -360,6 +372,13 @@ function IssueDialog({ dealId, doc, version, onCancel, onDone }: {
         )}
         {doc.docType === "settlement_guide" && (
           <>
+            <Field label="登記費用(司法書士へのお支払い・初めは取引の費用・空なら「司法書士よりご案内」)">
+              <div className="flex items-center gap-2">
+                <input value={yenText(registrationFee)} onChange={(e) => set("registrationFee", e.target.value)} inputMode="numeric" aria-label="登記費用" className={`${inputCls} w-40`} />
+                <span className="text-sm">円</span>
+              </div>
+            </Field>
+            <p className="text-xs text-gray-500">登記費用は「決済時のお支払額」には入れず、別の表で出します。金額があれば、合わせた「当日ご用意いただく金額の合計」も出します。</p>
             <Field label="お振込先">
               <textarea value={str(values.payee)} onChange={(e) => set("payee", e.target.value || null)} maxLength={300} rows={2} aria-label="お振込先" className={inputCls} />
             </Field>
@@ -389,6 +408,13 @@ function IssueDialog({ dealId, doc, version, onCancel, onDone }: {
                 </Button>
               )}
             </div>
+            <label className="flex items-start gap-2 text-sm">
+              <input type="checkbox" checked={cancellationNotice} onChange={(e) => set("cancellationNotice", e.target.checked)} className="mt-1" />
+              <span>
+                抵当権などの抹消のご案内を入れる
+                <span className="block text-xs text-gray-500">謄本に抵当権などが残っているか、取引の費用に抹消費用があると、初めからチェックが入ります。金額は、諸費用に「抹消」を含む行があればその金額、無ければ「司法書士よりご案内」と出します。</span>
+              </span>
+            </label>
             <Field label="お受け取りの口座(空なら「当日までにお知らせください」)">
               <textarea value={str(values.receiveTo)} onChange={(e) => set("receiveTo", e.target.value || null)} maxLength={300} rows={2} aria-label="お受け取りの口座" className={inputCls} />
             </Field>

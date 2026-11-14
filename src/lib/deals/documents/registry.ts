@@ -3,7 +3,7 @@ import type { BusinessDocContext, ValueRow } from "./business/common";
 import { partiesOf, type Choice } from "./business/common";
 import { buildSettlementStatement } from "./business/settlement-statement";
 import {
-  DEFAULT_BELONGINGS, DEFAULT_SELLER_BELONGINGS, buildSellerSettlementGuide, buildSettlementGuide, defaultPayee, defaultSellerCosts,
+  DEFAULT_BELONGINGS, buildSellerSettlementGuide, buildSettlementGuide, defaultCancellationNotice, defaultPayee, defaultSellerBelongings, defaultSellerCosts,
   sellerGuideOptionsSchema, settlementGuideOptionsSchema,
 } from "./business/settlement-guide";
 import {
@@ -218,7 +218,7 @@ export const BUSINESS_DOCS: BusinessDocDef[] = [
     ]),
     blocking: () => [],
     options: settlementGuideOptionsSchema as z.ZodType<Record<string, unknown>>,
-    defaults: (c) => ({ values: { payee: defaultPayee(c), belongings: DEFAULT_BELONGINGS } }),
+    defaults: (c) => ({ values: { payee: defaultPayee(c), belongings: DEFAULT_BELONGINGS, registrationFee: c.deal.costs.registrationFee ?? null } }),
     build: (c, o) => buildSettlementGuide(c, settlementGuideOptionsSchema.parse(o)),
   },
   {
@@ -231,7 +231,9 @@ export const BUSINESS_DOCS: BusinessDocDef[] = [
     ]),
     blocking: () => [],
     options: sellerGuideOptionsSchema as z.ZodType<Record<string, unknown>>,
-    defaults: (c) => ({ values: { costs: defaultSellerCosts(c), receiveTo: null, belongings: DEFAULT_SELLER_BELONGINGS } }),
+    defaults: (c) => ({
+      values: { costs: defaultSellerCosts(c), receiveTo: null, belongings: defaultSellerBelongings(c), cancellationNotice: defaultCancellationNotice(c) },
+    }),
     build: (c, o) => buildSellerSettlementGuide(c, sellerGuideOptionsSchema.parse(o)),
   },
   receiptDef("deposit_receipt"),
