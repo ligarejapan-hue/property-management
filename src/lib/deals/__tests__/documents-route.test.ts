@@ -473,11 +473,9 @@ describe("業務書類の発行(段5b)", () => {
     expect((renderHtmlToPdfDocument as Fn).mock.calls[0][0]).toContain("残代金の受領");
     expect(JSON.stringify((writeAuditLog as Fn).mock.calls[0][0])).not.toContain("架空");
   });
-  it("委任内容が無い委任状・鍵の行が無い鍵受領書は 422 で何も作らない", async () => {
+  it("委任内容が無い委任状は 422 で何も作らない(鍵の行が無い鍵受領書は手書きの欄で出せる)", async () => {
     const r1 = await POST(json("POST", { docType: "power_of_attorney", version: 3, options: { principal: SELLER.id, agent: "self", matters: [], otherMatter: null, signedOn: null } }), ctx);
     expect((await r1.json()).error.code).toBe("NO_MATTER");
-    const r2 = await POST(json("POST", { docType: "key_receipt", version: 3, options: { receiver: BUYER.id, keys: [], receivedOn: null } }), ctx);
-    expect((await r2.json()).error.code).toBe("NO_KEYS");
     expect(files.size).toBe(0);
     expect(pm.dealDocument.create).not.toHaveBeenCalled();
   });

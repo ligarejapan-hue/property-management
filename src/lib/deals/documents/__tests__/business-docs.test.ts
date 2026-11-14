@@ -127,6 +127,25 @@ describe("残金決済のご案内", () => {
     expect(() => doc("settlement_guide").options.parse({ payee: null, belongings: null, registrationFee: -1 })).toThrow();
     expect(() => doc("settlement_guide").options.parse({ payee: null, belongings: null, registrationFee: 1.5 })).toThrow();
   });
+  it("初めに売買価格・お支払い済みの手付金・残代金を出す(買主様・売主様・2026-11-14 発注者)", () => {
+    const c = ctx();
+    const buyer = doc("settlement_guide").build(c, { payee: null, belongings: null });
+    const seller = doc("settlement_guide_seller").build(c, { costs: [], receiveTo: null, belongings: null });
+    for (const [out, paidLabel] of [[buyer, "手付金(お支払い済み)"], [seller, "手付金(お受け取り済み)"]] as const) {
+      const h = out.html;
+      expect(h).toContain("<h2>売買代金</h2>");
+      expect(h.indexOf("<h2>売買代金</h2>")).toBeLessThan(h.indexOf("<h2>当日お"));
+      expect(h).toContain("30,000,000円");
+      expect(h).toContain(`<th>${paidLabel}</th><td class="num">1,500,000円</td>`);
+      expect(h).toContain("28,500,000円");
+      expect(out.rows.slice(4, 6)).toEqual([{ label: "売買価格", value: 30_000_000 }, { label: paidLabel, value: 1_500_000 }]);
+    }
+    // 手付金が無い取引は 0 円(残代金=売買価格)・売買価格が無ければ —
+    const none = doc("settlement_guide").build(ctx({ ...deal, deposit: null }), { payee: null, belongings: null });
+    expect(none.html).toContain('<th>手付金(お支払い済み)</th><td class="num">0円</td>');
+    const noPrice = doc("settlement_guide").build(ctx({ ...deal, price: null }), { payee: null, belongings: null });
+    expect(noPrice.html).toContain('<th style="width:60%">売買価格</th><td class="num">—</td>');
+  });
   it("振込先の初期値: 売主が自社なら取引の設定の口座・ほかは空", () => {
     const settings = { ...resolveDealSettings(null), bankAccount: { ...EMPTY_BANK_ACCOUNT, bankName: "架空銀行", branchName: "本店", accountType: "ordinary" as const, accountNumber: "1234567", accountHolder: "カクウフドウサン" } };
     expect(doc("settlement_guide").defaults(ctx(deal, { settings })).values.payee).toBeNull();

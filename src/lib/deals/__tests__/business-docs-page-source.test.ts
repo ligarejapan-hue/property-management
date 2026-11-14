@@ -45,10 +45,13 @@ describe("書類タブの業務書類(段5a・5b・5c)", () => {
     expect(src).toContain('value={payEntriesOf(pay[it.value])} onChange={(v) => set("pay", { ...pay, [it.value]: v })}');
     expect(src).toContain("pay: Object.fromEntries(Object.entries(pay).map(([k, v]) => [k, payEntriesToSend(payEntriesOf(v))]))");
   });
-  it("委任状は委任する事項・鍵受領書は鍵の行がそろうまで発行ボタンを押せない(段5b)", () => {
+  it("委任状は委任する事項がそろうまで・鍵受領書は書きかけの行があるうちは発行ボタンを押せない(段5b)", () => {
     const src = read(SECTION);
     expect(src).toContain('(doc.docType === "power_of_attorney" && !matters.length && !str(values.otherMatter).trim())');
-    expect(src).toContain('(doc.docType === "key_receipt" && (!keyRows.length || !keyRows.every(keyRowOk)))');
+    expect(src).toContain('(doc.docType === "key_receipt" && !keyRows.every(keyRowOk))');
+    // 鍵の行は、番号も本数も空の行を送らない(全部空なら手書きの欄5行で出る・2026-11-14 発注者)。初めの行の本数は空。
+    expect(src).toContain("keys: keyRows.filter((k) => !keyRowBlank(k)).map((k) => ({ label: k.label.trim(), count: Number(k.count) }))");
+    expect(src).toContain('keys: [{ label: "", count: "" }]');
     expect(src).toMatch(/disabled=\{busy \|\| needsDecision \|\| incomplete \|\| doc\.blocking\.length > 0\}/);
     // 選べる値はサーバーの一覧表のもの
     for (const k of ["choices.principal", "choices.agent", "choices.matters", "choices.receiver"]) expect(src).toContain(k);
