@@ -183,7 +183,7 @@ describe("B-5: 品質チェックのコードバッジを日本語ラベル表�
 
   it("6コードの日本語ラベルマップを持つ", () => {
     expect(src).toMatch(/NO_OWNER:\s*"所有者未紐づけ"/);
-    expect(src).toMatch(/REGISTRY_DM_MISMATCH:\s*"登記とDMの不整合"/);
+    expect(src).toMatch(/NO_OWNER_DM_SEND:\s*"所有者なしでDM送付可"/);
     expect(src).toMatch(/NO_LOT_NUMBER:\s*"地番未入力"/);
     expect(src).toMatch(/NO_REAL_ESTATE_NUMBER:\s*"不動産番号未入力"/);
     expect(src).toMatch(/INVESTIGATION_NOT_CONFIRMED:\s*"調査未確認"/);

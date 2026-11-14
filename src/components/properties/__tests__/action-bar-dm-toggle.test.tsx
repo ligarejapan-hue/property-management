@@ -23,11 +23,13 @@ const base: {
   dmStatus: string;
   investigationConfirmedAt: string | null;
   assignedToMe: boolean;
+  hasOwners: boolean;
   action: typeof idleAction;
 } = {
   dmStatus: "send",
   investigationConfirmedAt: null,
   assignedToMe: false,
+  hasOwners: true,
   action: idleAction,
 };
 
@@ -110,5 +112,18 @@ describe("画面すっきり化 第3回(発注者決定 2026-10-16)", () => {
     expect(html).toContain("登記取得済みに設定しました");
     const err = render({ action: { ...idleAction, error: "失敗しました" } as never });
     expect(err).toContain("失敗しました");
+  });
+});
+
+describe("所有者が入っていない物件は「送付可」を押せない(2026-11-14 発注者)", () => {
+  it("所有者がいなければ送付可が押せず、理由を出す", () => {
+    const html = render({ dmStatus: "hold", hasOwners: false });
+    expect(html).toContain("所有者が入っていないので送付可にできません。所有者が入ると自動で仕分けます。");
+    expect(html).toMatch(/<button[^>]*disabled=""[^>]*title="所有者が入っていない物件は送付可にできません"/);
+  });
+  it("所有者がいれば押せて、理由も出ない", () => {
+    const html = render({ dmStatus: "hold", hasOwners: true });
+    expect(html).not.toContain("所有者が入っていないので");
+    expect(html).not.toContain('title="所有者が入っていない物件は送付可にできません"');
   });
 });

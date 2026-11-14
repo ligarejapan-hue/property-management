@@ -1,3 +1,4 @@
+import { assertOwnersForDmSend } from "@/lib/dm-owner-judge/guard";
 import { NextRequest } from "next/server";
 import { z } from "zod";
 import prisma from "@/lib/prisma";
@@ -60,7 +61,7 @@ const ACTIONS: Record<string, ActionDef> = {
   set_dm_send: {
     requiredPermission: { resource: "property", action: "write" },
     execute: async () => ({
-      updatedFields: { dmStatus: "send" },
+      updatedFields: { dmStatus: "send", dmOwnerPending: false },
       message: "DM送付可に設定しました",
     }),
   },
@@ -68,7 +69,7 @@ const ACTIONS: Record<string, ActionDef> = {
   set_dm_no_send: {
     requiredPermission: { resource: "property", action: "write" },
     execute: async () => ({
-      updatedFields: { dmStatus: "no_send" },
+      updatedFields: { dmStatus: "no_send", dmOwnerPending: false },
       message: "DM送付不可に設定しました",
     }),
   },
@@ -76,7 +77,7 @@ const ACTIONS: Record<string, ActionDef> = {
   set_dm_hold: {
     requiredPermission: { resource: "property", action: "write" },
     execute: async () => ({
-      updatedFields: { dmStatus: "hold" },
+      updatedFields: { dmStatus: "hold", dmOwnerPending: false },
       message: "DM未判断に設定しました",
     }),
   },
@@ -146,6 +147,11 @@ export async function POST(
         "この物件を操作する権限がありません",
         "FORBIDDEN",
       );
+    }
+
+    // 所有者が入っていない物件は送付可にできない(2026-11-14 発注者)。
+    if (action === "set_dm_send") {
+      await assertOwnersForDmSend(prisma, [propertyId]);
     }
 
     // Execute action

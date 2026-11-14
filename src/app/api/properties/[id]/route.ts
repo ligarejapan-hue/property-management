@@ -1,3 +1,4 @@
+import { assertOwnersForDmSend } from "@/lib/dm-owner-judge/guard";
 import { savedTextValue } from "@/lib/notation";
 import { NextRequest } from "next/server";
 import prisma from "@/lib/prisma";
@@ -411,6 +412,11 @@ export async function PATCH(
       );
     }
 
+    // 所有者が入っていない物件は送付可にできない(2026-11-14 発注者)。
+    if (updateFields.dmStatus === "send" && current.dmStatus !== "send") {
+      await assertOwnersForDmSend(prisma, [id]);
+    }
+
     // ⚠**謄本の自動取得(scheduled)中は、取得の鍵になる項目を変えさせない**
     //   (@codex #394 R28/R29 P1)。取得は所在・地番を鍵にサイトから書類を選ぶ。
     //   取得中にここが変わると、選んだ書類が**別の対象になった物件**へ添付され、
@@ -624,6 +630,10 @@ export async function PATCH(
         },
         data: {
           ...persistedFields,
+          // 人が DM判断を変えたら所有者待ちの印を下ろす(自動の仕分けで上書きしない・@codex #728)
+          ...(persistedFields.dmStatus !== undefined && persistedFields.dmStatus !== current.dmStatus
+            ? { dmOwnerPending: false }
+            : {}),
           version: { increment: 1 },
         },
       });

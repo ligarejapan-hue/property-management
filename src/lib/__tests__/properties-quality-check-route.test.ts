@@ -79,7 +79,7 @@ type Row = { id: string; address: string };
 type RuleScenario = { count: number; sample: Row[] };
 type RuleCode =
   | "NO_OWNER"
-  | "REGISTRY_DM_MISMATCH"
+  | "NO_OWNER_DM_SEND"
   | "REGISTRY_OWNER_MISMATCH_DM_SEND"
   | "REGISTRY_OWNER_MISMATCH"
   | "NO_LOT_NUMBER"
@@ -94,12 +94,14 @@ type Scenario = { TOTAL?: number } & Partial<Record<RuleCode, RuleScenario>>;
 
 function whereCode(where: Where): RuleCode | "TOTAL" {
   // 外字(2026-11-13)は「外字の所有者がつながる」= propertyOwners.some。NO_OWNER は propertyOwners.none。
-  if (where.propertyOwners) return (where.propertyOwners as { some?: unknown }).some ? "OWNER_GAIJI" : "NO_OWNER";
+  if (where.propertyOwners) {
+    if ((where.propertyOwners as { some?: unknown }).some) return "OWNER_GAIJI";
+    return where.dmStatus === "send" ? "NO_OWNER_DM_SEND" : "NO_OWNER";
+  }
   // 謄本の名義と違う(2026-11-08)は registryStatus も持つので先に見分ける
   if (where.registryOwnerCheck) {
     return where.dmStatus === "send" ? "REGISTRY_OWNER_MISMATCH_DM_SEND" : "REGISTRY_OWNER_MISMATCH";
   }
-  if (where.registryStatus) return "REGISTRY_DM_MISMATCH";
   if (Array.isArray(where.OR)) {
     const firstKey = Object.keys(where.OR[0] as object)[0];
     if (firstKey === "lotNumber") return "NO_LOT_NUMBER";
@@ -271,7 +273,7 @@ describe("GET /api/properties/quality-check", () => {
   it("08. errors/warnings/info/total が count(全体件数) から計算される", async () => {
     setup({
       TOTAL: 9000,
-      REGISTRY_DM_MISMATCH: { count: 3, sample: sampleRows(3, "e") }, // error
+      NO_OWNER_DM_SEND: { count: 3, sample: sampleRows(3, "e") }, // error
       NO_OWNER: { count: 7, sample: sampleRows(7, "w") }, // warning
       NO_LOT_NUMBER: { count: 1500, sample: sampleRows(1000, "i") }, // info, 上限超
     });

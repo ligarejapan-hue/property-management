@@ -1,3 +1,4 @@
+import { assertOwnersForDmSend } from "@/lib/dm-owner-judge/guard";
 import { NextRequest } from "next/server";
 import { z } from "zod";
 import prisma from "@/lib/prisma";
@@ -87,10 +88,16 @@ export async function POST(request: NextRequest) {
 
     // Perform bulk update (only on accessible properties)
     const accessibleIds = currentProperties.map((p) => p.id);
+    // 所有者が入っていない物件は送付可にできない(2026-11-14 発注者)。1件でもあれば全体を断る。
+    if (updateFields.dmStatus === "send") {
+      await assertOwnersForDmSend(prisma, accessibleIds);
+    }
     const result = await prisma.property.updateMany({
       where: { id: { in: accessibleIds } },
       data: {
         ...updateFields,
+        // 人が DM判断を選んだら所有者待ちの印を下ろす(自動の仕分けで上書きしない・@codex #728)
+        ...(updateFields.dmStatus !== undefined ? { dmOwnerPending: false } : {}),
         version: { increment: 1 },
       },
     });

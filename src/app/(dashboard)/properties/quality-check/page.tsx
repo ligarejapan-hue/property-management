@@ -35,7 +35,7 @@ interface Summary {
 // 未知コードは従来どおり生表示にフォールバックする。
 const CODE_LABELS: Record<string, string> = {
   NO_OWNER: "所有者未紐づけ",
-  REGISTRY_DM_MISMATCH: "登記とDMの不整合",
+  NO_OWNER_DM_SEND: "所有者なしでDM送付可",
   REGISTRY_OWNER_MISMATCH_DM_SEND: "謄本の名義と違う（DM送付可）",
   REGISTRY_OWNER_MISMATCH: "謄本の名義と違う",
   NO_LOT_NUMBER: "地番未入力",

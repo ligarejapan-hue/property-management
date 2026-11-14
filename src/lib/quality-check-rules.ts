@@ -38,11 +38,15 @@ export const QUALITY_RULES: ReadonlyArray<QualityRule> = [
     message: "所有者が紐付けられていません",
     where: { propertyOwners: { none: {} } },
   },
+  // ⚠「登記未取得なのにDM送付可」(REGISTRY_DM_MISMATCH)は廃止(2026-11-14 発注者「登記未取得ではなく
+  //   所有者情報が入っていないからエラーにするのが正しい」)。所有者は謄本の取得・添付で自動で入るので、
+  //   見るべきは所有者の有無。所有者が無い物件は見回り(src/lib/dm-owner-judge)が未判断に戻し、
+  //   手で送付可にもできない(このエラーは見回りが戻すまでの間だけ出る)。
   {
-    code: "REGISTRY_DM_MISMATCH",
+    code: "NO_OWNER_DM_SEND",
     severity: "error",
-    message: "登記未取得なのにDM送付可になっています",
-    where: { registryStatus: "unconfirmed", dmStatus: "send" },
+    message: "所有者が入っていないのにDM送付可になっています",
+    where: { propertyOwners: { none: {} }, dmStatus: "send" },
   },
   // 謄本の名義と違う(2026-11-08 発注者決定): DM が送付可ならエラー、それ以外(未判断・送付不可)は警告。
   {

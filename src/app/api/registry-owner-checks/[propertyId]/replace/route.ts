@@ -17,7 +17,7 @@ import {
 import { writeAuditLog } from "@/lib/audit";
 import { findMissingRegistryOwnerReviewPerm } from "@/lib/registry-owner-check/permissions";
 import { replaceRegistryOwnersOnProperty } from "@/lib/registry-owner-apply/apply";
-import { recordCheckAfterReplace, restoreDmSendIfHold } from "@/lib/registry-owner-check/service";
+import { recordCheckAfterReplace, restoreDmSendIfHold, settleDmOwnerPending } from "@/lib/registry-owner-check/service";
 
 /**
  * 送られてくる所有者の ID の数の上限。所有者が何百人もつながった物件(共有の私道・一棟など)でも
@@ -65,6 +65,7 @@ export async function POST(
           registryRows,
         );
         if (body.restoreDm) dmRestored = await restoreDmSendIfHold(tx, propertyId, session.id);
+        await settleDmOwnerPending(tx, propertyId);
       },
     });
 

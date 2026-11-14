@@ -493,6 +493,15 @@ export async function restoreDmSendIfHold(tx: Tx, propertyId: string, userId: st
   return true;
 }
 
+/**
+ * 名義の確認で人が DM を選んだ(送付可に戻す/戻さない)ので、DM判断の所有者待ちの印を下ろす
+ * (2026-11-14・@codex #728)。戻さなかった=未判断のままにすると決めた、なので自動の仕分けで送付可にしない。
+ * DM判断の値は変えない(編集画面が送らない項目だけなので版も上げない)。
+ */
+export async function settleDmOwnerPending(tx: Tx, propertyId: string): Promise<void> {
+  await tx.property.updateMany({ where: { id: propertyId }, data: { dmOwnerPending: false } });
+}
+
 /** 置き換え(謄本の名義に直す)のあと、同じトランザクションで比べ直して結果を残す。 */
 export async function recordCheckAfterReplace(
   tx: Tx,
@@ -697,6 +706,7 @@ export async function keepRegistryOwners(args: {
       data: { decision: "keep", decidedBy: session.id, decidedAt: new Date() },
     });
     const dmRestored = args.restoreDm ? await restoreDmSendIfHold(tx, propertyId, session.id) : false;
+    await settleDmOwnerPending(tx, propertyId);
     return { dmRestored };
   });
 }

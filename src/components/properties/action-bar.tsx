@@ -46,6 +46,11 @@ export type PropertyActionState = ReturnType<typeof usePropertyAction>;
 
 interface ActionBarProps {
   dmStatus: string;
+  /**
+   * つながっている所有者がいるか。いなければ「送付可」を押せない(2026-11-14 発注者・
+   * 所有者が入ると DM判断は自動で仕分ける)。
+   */
+  hasOwners: boolean;
   /** いまの担当者が自分か。自分ならすでに担当なので「自分を担当にする」を出さない。 */
   assignedToMe: boolean;
   action: PropertyActionState;
@@ -91,6 +96,7 @@ export default function ActionBar(props: ActionBarProps) {
           {DM_CHOICES.map((choice) => {
             const selected = props.dmStatus === choice.value;
             const isLoading = loading === choice.key;
+            const blockedNoOwner = choice.value === "send" && !props.hasOwners && !selected;
             const Icon = DM_ICONS[choice.value];
             return (
               <button
@@ -98,7 +104,8 @@ export default function ActionBar(props: ActionBarProps) {
                 type="button"
                 aria-pressed={selected}
                 // ⚠選択中は押せない(同じ状態への変更は何も起こさないため)。
-                disabled={selected || loading !== null}
+                disabled={selected || loading !== null || blockedNoOwner}
+                title={blockedNoOwner ? "所有者が入っていない物件は送付可にできません" : undefined}
                 onClick={() => handleAction(choice.key)}
                 className={
                   "flex items-center gap-1.5 px-3 py-1.5 text-xs font-medium " +
@@ -120,6 +127,11 @@ export default function ActionBar(props: ActionBarProps) {
             );
           })}
         </div>
+        {!props.hasOwners && (
+          <span className="text-xs text-gray-500 dark:text-gray-400">
+            所有者が入っていないので送付可にできません。所有者が入ると自動で仕分けます。
+          </span>
+        )}
       </div>
 
       {/* ⚠状態を変える操作は**動詞で書く**(「登記取得済」だと現在の状態に見えるため)。
