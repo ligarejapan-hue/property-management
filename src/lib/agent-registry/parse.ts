@@ -6,6 +6,8 @@
  *   (先方の画面が変わったら止めて記録する=計画 G3)。
  */
 
+import { replaceMlitGaiji } from "./mlit-gaiji-map";
+
 export interface ListRow {
   /** 行政庁2桁+番号6桁("13000001")。免許の回次を含まない=更新しても変わらない */
   licenseKey: string;
@@ -46,9 +48,9 @@ export const PAGE_SIZE = 50;
 
 const ENTITIES: Record<string, string> = { amp: "&", lt: "<", gt: ">", quot: '"', apos: "'", nbsp: " " };
 
-/** タグを外し、文字参照を戻し、全角空白を含む空白を1つの半角空白にまとめる。 */
+/** タグを外し、文字参照を戻し、全角空白を含む空白を1つの半角空白にまとめ、国交省の外字を普通の字にする(2026-11-14)。 */
 export function cleanText(html: string): string {
-  return html
+  const text = html
     .replace(/<[^>]*>/g, " ")
     .replace(/&(#x[0-9a-f]+|#\d+|[a-z]+);/gi, (m, e: string) => {
       if (e[0] === "#") {
@@ -59,6 +61,7 @@ export function cleanText(html: string): string {
     })
     .replace(/[\s　]+/g, " ")
     .trim();
+  return replaceMlitGaiji(text);
 }
 
 /** 詳細の「免許証番号」の欄に出る免許行政庁の名前(対象の5つ)。 */
