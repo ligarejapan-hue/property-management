@@ -102,6 +102,31 @@ describe("残金決済のご案内", () => {
     expect(html).toContain("BIZ UDMincho");
     expect(html).toContain("司法書士");
   });
+  it("登記費用: 初期値は取引の費用・金額を出し、決済時のお支払額と合わせた合計も出す", () => {
+    const withFee = { ...deal, costs: { ...deal.costs, registrationFee: 180_000 } };
+    const c = ctx(withFee);
+    expect(doc("settlement_guide").defaults(c).values.registrationFee).toBe(180_000);
+    expect(doc("settlement_guide").defaults(ctx()).values.registrationFee).toBeNull();
+    const out = doc("settlement_guide").build(c, { payee: null, belongings: null, registrationFee: 180_000 });
+    const pay = c.calc.settlement.paymentAtSettlement!;
+    expect(out.html).toContain("司法書士へお支払いいただく費用");
+    expect(out.html).toContain("180,000円");
+    expect(out.html).toContain(`${(pay + 180_000).toLocaleString("ja-JP")}円`);
+    expect(out.rows).toContainEqual({ label: "登記費用(司法書士へ)", value: 180_000 });
+    expect(out.rows).toContainEqual({ label: "当日ご用意いただく金額の合計", value: pay + 180_000 });
+  });
+  it("登記費用: 金額が無いときは「司法書士よりご案内」と出し、合計は出さない(前の版の控えも発行できる)", () => {
+    const c = ctx();
+    for (const o of [{ payee: null, belongings: null, registrationFee: null }, { payee: null, belongings: null }]) {
+      const out = doc("settlement_guide").build(c, o);
+      expect(out.html).toContain("司法書士へお支払いいただく費用");
+      expect(out.html).toContain("司法書士よりご案内いたします");
+      expect(out.html).not.toContain("当日ご用意いただく金額の合計");
+      expect(out.rows).toContainEqual({ label: "登記費用(司法書士へ)", value: null });
+    }
+    expect(() => doc("settlement_guide").options.parse({ payee: null, belongings: null, registrationFee: -1 })).toThrow();
+    expect(() => doc("settlement_guide").options.parse({ payee: null, belongings: null, registrationFee: 1.5 })).toThrow();
+  });
   it("振込先の初期値: 売主が自社なら取引の設定の口座・ほかは空", () => {
     const settings = { ...resolveDealSettings(null), bankAccount: { ...EMPTY_BANK_ACCOUNT, bankName: "架空銀行", branchName: "本店", accountType: "ordinary" as const, accountNumber: "1234567", accountHolder: "カクウフドウサン" } };
     expect(doc("settlement_guide").defaults(ctx(deal, { settings })).values.payee).toBeNull();

@@ -81,6 +81,35 @@ describe("残金決済のご案内(売主様)", () => {
     expect(out.rows).toContainEqual({ label: "諸費用の合計", value: 350_000 });
   });
 
+  it("抹消のご案内の初期値: 謄本に担保が残っているか、取引に抹消費用があれば入れる", () => {
+    const reg = (n: number): BusinessDocContext => ({ ...ctx(), registry: { activeRights: n, caution: null } });
+    expect(doc(KEY).defaults(reg(2)).values.cancellationNotice).toBe(true);
+    expect(doc(KEY).defaults(reg(0)).values.cancellationNotice).toBe(false);
+    expect(doc(KEY).defaults(ctx()).values.cancellationNotice).toBe(false);
+    expect(doc(KEY).defaults(ctx(brokerDeal)).values.cancellationNotice).toBe(true);
+    // 抹消があるときは、お持ちいただくものにも抹消の書類を足す
+    expect(doc(KEY).defaults(reg(2)).values.belongings).toContain("抹消");
+    expect(doc(KEY).defaults(reg(0)).values.belongings).not.toContain("抹消");
+  });
+
+  it("抹消のご案内: 金額の行があれば「内訳のとおり」・無ければ「司法書士よりご案内」・外せば出さない", () => {
+    const c = ctx(brokerDeal);
+    const withRow = doc(KEY).build(c, { costs: [{ label: "抵当権などの抹消費用", amount: 50_000 }], receiveTo: null, belongings: null, cancellationNotice: true });
+    expect(withRow.html).toContain("抵当権などの抹消について");
+    expect(withRow.html).toContain("諸費用の内訳");
+    expect(withRow.html).not.toContain("司法書士よりご案内いたします");
+    expect(withRow.rows).toContainEqual({ label: "抵当権などの抹消のご案内", value: "あり(金額は諸費用の内訳)" });
+    const noRow = doc(KEY).build(c, { costs: [{ label: "測量費", amount: 300_000 }], receiveTo: null, belongings: null, cancellationNotice: true });
+    expect(noRow.html).toContain("抵当権などの抹消について");
+    expect(noRow.html).toContain("司法書士よりご案内いたします");
+    expect(noRow.rows).toContainEqual({ label: "抵当権などの抹消のご案内", value: "あり(金額は司法書士よりご案内)" });
+    for (const o of [{ costs: [], receiveTo: null, belongings: null, cancellationNotice: false }, { costs: [], receiveTo: null, belongings: null }]) {
+      const off = doc(KEY).build(c, o);
+      expect(off.html).not.toContain("抵当権などの抹消について");
+      expect(off.rows.map((r) => r.label)).not.toContain("抵当権などの抹消のご案内");
+    }
+  });
+
   it("出す前の確認と、選ぶものの形(諸費用の行は30行まで・金額は0以上の整数)", () => {
     expect(doc(KEY).missing(ctx({ ...deal, settlementPlace: null, parties: [] }))).toEqual(["決済場所", "売主"]);
     const o = doc(KEY).options;
