@@ -64,6 +64,8 @@ vi.mock("@/lib/prisma", () => ({
       findMany: vi.fn(),
       findUnique: vi.fn(),
       updateMany: vi.fn(),
+      // 所有者が無い物件の数(送付可にするときだけ数える・2026-11-14)。既定=0件=全部に所有者がいる
+      count: vi.fn(async () => 0),
     },
     deal: { findMany: vi.fn(async () => []), updateMany: vi.fn() },
     changeLog: { create: vi.fn() },
@@ -78,7 +80,7 @@ import { recordChanges, PROPERTY_TRACKED_FIELDS } from "@/lib/change-log";
 import { POST } from "../../app/api/properties/bulk-update/route";
 
 const pm = prisma as unknown as {
-  property: { findMany: Mock; findUnique: Mock; updateMany: Mock };
+  property: { findMany: Mock; findUnique: Mock; updateMany: Mock; count: Mock };
   deal: { findMany: Mock; updateMany: Mock };
   changeLog: { create: Mock };
   $transaction: Mock;
@@ -275,5 +277,28 @@ describe("POST /api/properties/bulk-update — 既存仕様不変", () => {
     const res = await POST(makeRequest({ propertyIds: [VALID_IDS[0]], updates: {} }));
     expect(res.status).toBe(422);
     expect(pm.property.findMany).not.toHaveBeenCalled();
+  });
+});
+
+describe("POST /api/properties/bulk-update — 所有者が入っていない物件は送付可にできない(2026-11-14)", () => {
+  it("所有者の無い物件が含まれていれば 422 で断り、何も書かない", async () => {
+    pm.property.findMany.mockResolvedValue([
+      { id: VALID_IDS[0], caseStatus: "new_case", registryStatus: "unconfirmed", dmStatus: "hold", assignedTo: null },
+    ]);
+    pm.property.count.mockResolvedValueOnce(1);
+    pm.property.updateMany.mockClear();
+    const res = await POST(makeRequest({ propertyIds: [VALID_IDS[0]], updates: { dmStatus: "send" } }));
+    expect(res.status).toBe(422);
+    expect(pm.property.updateMany).not.toHaveBeenCalled();
+  });
+
+  it("送付可以外へのまとめて変更では数えない", async () => {
+    pm.property.findMany.mockResolvedValue([
+      { id: VALID_IDS[0], caseStatus: "new_case", registryStatus: "unconfirmed", dmStatus: "send", assignedTo: null },
+    ]);
+    pm.property.updateMany.mockResolvedValue({ count: 1 });
+    pm.property.count.mockClear();
+    await POST(makeRequest({ propertyIds: [VALID_IDS[0]], updates: { dmStatus: "hold" } }));
+    expect(pm.property.count).not.toHaveBeenCalled();
   });
 });

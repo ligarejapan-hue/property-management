@@ -19,4 +19,8 @@ export async function register(): Promise<void> {
     "@/lib/investigation/auto-fetch"
   );
   if (shouldStartAutoFetch(process.env)) startInvestigationAutoFetch();
+
+  // DM判断の自動仕分け(所有者が入っていない物件は未判断・所有者が入ったら送付可/送付不可に・2026-11-14)。
+  const { shouldStartDmOwnerSweep, startDmOwnerSweep } = await import("@/lib/dm-owner-judge/sweeper");
+  if (shouldStartDmOwnerSweep(process.env)) startDmOwnerSweep();
 }

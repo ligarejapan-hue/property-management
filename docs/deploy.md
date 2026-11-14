@@ -511,6 +511,17 @@ npm run storage:migrate
 - timer・合言葉・migration は不要(反映すると動く)。止める: app.env に `INVESTIGATION_AUTO_FETCH=off` を足して flock 付き restart。
 - 進み具合: `journalctl -u property-management | grep investigation-auto`(失敗と休みだけを出す)／残りの件数は `property_investigations` に行の無い物件(保管を除く)を数える。
 
+### DM判断の自動仕分け（2026-11-14〜）
+
+- migration `20261114000000_property_dm_owner_pending`(列 `properties.dm_owner_pending` を足すだけ+「所有者あり・未判断・保管していない」物件に印を立てる UPDATE)。戻すとき=この列を DROP(DM判断の値は残る)。
+- サーバーの中の見回り(`src/lib/dm-owner-judge/sweeper.ts`・起動の90秒後から・仕事があれば5秒・無ければ1分おき):
+  1. 所有者が入っていない物件(保管を除く): 送付可→未判断に戻して印を立てる/未判断→印だけ/印のある送付不可→印を下ろす
+  2. 印があって所有者が入った物件: 業者と同じ名前・同じ所有者がほかの物件で送付可・同じくほかの物件で送付不可・DMを断った/宛先不明(解除していないもの)のどれかに当たれば送付不可、どれにも当たらなければ送付可。印を下ろす
+  - 誰かが物件を編集中なら書かずに次へ。謄本の名義の確認が済んでいない物件は仕分けない。変更履歴は「自動」。
+- 所有者が入っていない物件は、ワンタッチ・まとめて変更・物件の編集のどれでも「送付可」にできない(422 `NO_OWNER_DM_SEND`)。
+- 品質チェックの「登記未取得なのにDM送付可」は廃止し、「所有者が入っていないのにDM送付可」(エラー)に置き換えた。
+- 止める: app.env に `DM_OWNER_AUTO=off` を足して flock 付き restart。進み具合: `journalctl -u property-management | grep dm-owner-auto`(書いた回だけ件数を出す)。
+
 ### 管理機能
 
 - [ ] Admin → ユーザー管理で一覧・詳細が表示されること

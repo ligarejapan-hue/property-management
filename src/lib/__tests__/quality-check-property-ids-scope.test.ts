@@ -98,9 +98,11 @@ type Where = Record<string, unknown>;
 // 各ルール where の識別（properties-quality-check-route.test.ts と同方式）。
 function ruleCode(where: Where): string {
   // 外字(2026-11-13)は「外字の所有者がつながる」= propertyOwners.some。NO_OWNER は propertyOwners.none。
-  if (where.propertyOwners) return (where.propertyOwners as { some?: unknown }).some ? "OWNER_GAIJI" : "NO_OWNER";
+  if (where.propertyOwners) {
+    if ((where.propertyOwners as { some?: unknown }).some) return "OWNER_GAIJI";
+    return where.dmStatus === "send" ? "NO_OWNER_DM_SEND" : "NO_OWNER";
+  }
   if (where.registryOwnerCheck) return where.dmStatus === "send" ? "REGISTRY_OWNER_MISMATCH_DM_SEND" : "REGISTRY_OWNER_MISMATCH";
-  if (where.registryStatus) return "REGISTRY_DM_MISMATCH";
   if (Array.isArray(where.OR) && !("propertyOwners" in (where.OR[0] as object))) {
     const firstKey = Object.keys(where.OR[0] as object)[0];
     if (firstKey === "lotNumber") return "NO_LOT_NUMBER";
@@ -138,7 +140,7 @@ describe("quality-check scoped モード（?propertyIds=）", () => {
       const code = ruleCode(where);
       if (code === "NO_OWNER") return [{ id: UUID1, address: "A1" }];
       if (code === "NO_ASSIGNEE") return [{ id: UUID1, address: "A1" }];
-      if (code === "REGISTRY_DM_MISMATCH") return [{ id: UUID2, address: "A2" }];
+      if (code === "NO_OWNER_DM_SEND") return [{ id: UUID2, address: "A2" }];
       return [];
     });
 
@@ -166,7 +168,7 @@ describe("quality-check scoped モード（?propertyIds=）", () => {
     expect(orCodes).toEqual(
       expect.arrayContaining([
         "NO_OWNER",
-        "REGISTRY_DM_MISMATCH",
+        "NO_OWNER_DM_SEND",
         "REGISTRY_OWNER_MISMATCH_DM_SEND",
         "REGISTRY_OWNER_MISMATCH",
         "NO_ASSIGNEE",

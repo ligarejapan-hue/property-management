@@ -16,6 +16,12 @@ import { join, relative } from "node:path";
 
 /** 版番号を進める書き込み(人が編集できる項目を書く)。値は「何を書くか」の説明。 */
 const VERSIONED: Record<string, string> = {
+  "src/lib/dm-owner-judge/service.ts:64":
+    "property.dmStatus=hold+dmOwnerPending(所有者が入っていない送付可を未判断に戻す・2026-11-14)+version increment" +
+    "(物件行ロック後・編集の鍵があれば書かない)",
+  "src/lib/dm-owner-judge/service.ts:133":
+    "property.dmStatus=send/no_send+dmOwnerPending=false(所有者が入ったときの自動仕分け・2026-11-14)+version increment" +
+    "(物件行ロック後・編集の鍵があれば書かない)",
   "src/app/api/admin/owners/[id]/correction/address-fill/route.ts:275":
     "owner.address(空欄補完)+version increment",
   "src/app/api/admin/owners/[id]/correction/archive/route.ts:247":
@@ -77,7 +83,7 @@ const VERSIONED: Record<string, string> = {
     "owner.name/address/note/corporateNumber(クリーンアップ適用)+version increment",
   "src/app/api/owners/[id]/route.ts:213":
     "owner の編集画面フィールド一式(編集画面の本体保存窓口)+version increment",
-  "src/app/api/properties/[id]/actions/route.ts:159":
+  "src/app/api/properties/[id]/actions/route.ts:165":
     "property のアクション実行結果フィールド(assign_to_me等)+version increment",
   "src/app/api/properties/[id]/clear-dm-undeliverable/route.ts:64":
     "restoreDmStatus 指定時のみ property.dmStatus+version increment" +
@@ -92,9 +98,9 @@ const VERSIONED: Record<string, string> = {
   "src/app/api/properties/[id]/parcel-detach/route.ts:77":
     "property.extraParcels(この筆を別の物件にする・2026-11-06)+version increment" +
     "(物件の行ロック→編集中の鍵の確認→版の条件つき更新。新しい物件は同じトランザクションで作る)",
-  "src/app/api/properties/[id]/route.ts:617":
+  "src/app/api/properties/[id]/route.ts:623":
     "property の編集画面フィールド一式(編集画面の本体保存窓口)+version increment",
-  "src/app/api/properties/bulk-update/route.ts:90":
+  "src/app/api/properties/bulk-update/route.ts:95":
     "property.caseStatus/registryStatus/dmStatus/assignedTo(一括更新)+version increment",
   "src/lib/dm-reaction/clear-undeliverable.ts:179":
     "宛先不明の解除(2026-11-13): DM可否を no_send→send に戻すときだけ property.dmStatus+version increment" +
@@ -156,6 +162,14 @@ interface AllowedEntry {
 }
 
 const ALLOWED_WITHOUT_VERSION: Record<string, AllowedEntry> = {
+  "src/lib/dm-owner-judge/service.ts:72": {
+    reason: "property.dmOwnerPending のみ(所有者待ちの印。編集画面の送信項目に無い・2026-11-14)",
+    keys: ["dmOwnerPending"],
+  },
+  "src/lib/dm-owner-judge/service.ts:100": {
+    reason: "property.dmOwnerPending のみ(人が先に DM判断を決めた物件の印を下ろす・2026-11-14)",
+    keys: ["dmOwnerPending"],
+  },
   "src/app/api/admin/owners/correction/merge/route.ts:438": {
     reason: "owner.updatedAt のみ(行ロック獲得のための touch。updatedAt は編集画面の送信項目に無い)",
     keys: ["updatedAt"],
