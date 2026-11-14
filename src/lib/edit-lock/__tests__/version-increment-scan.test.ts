@@ -113,7 +113,10 @@ const VERSIONED: Record<string, string> = {
   "src/app/api/properties/sale-dm/drafts/[id]/outcome/route.ts:245":
     "property.dmStatus(宛先不明連動のno_send昇格)+version increment" +
     "(Task 9で修正: 元は進めていなかった)",
-  "src/lib/investigation/fetch-investigation.ts:822":
+  "src/lib/investigation/fetch-investigation.ts:371":
+    "property.zoningDistrict/buildingCoverageRatio/floorAreaRatio(取得したとき空欄だけ写す・2026-11-14)+version increment" +
+    "(呼び出し側が物件行をロック済み・写すものが無ければ書かない)",
+  "src/lib/investigation/fetch-investigation.ts:878":
     "property.zoningDistrict/buildingCoverageRatio/floorAreaRatio(調査確定の書き戻し)+version increment",
   "src/lib/registry-fetch/auto-fetch.ts:255":
     "property.registryStatus(scheduled解除=previousStatusへ戻す)+version increment" +

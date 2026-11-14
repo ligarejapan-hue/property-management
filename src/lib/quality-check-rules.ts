@@ -69,12 +69,9 @@ export const QUALITY_RULES: ReadonlyArray<QualityRule> = [
   //   対象外になり、番号での取得は実サイトへ未配線 = **謄本が取れない行き止まり**
   //   になる。**システムが自ら詰む操作を勧めていた**ため、ルールごと外す。
   //   再開する場合は「番号での取得」を実サイトへ配線してからにすること。
-  {
-    code: "INVESTIGATION_NOT_CONFIRMED",
-    severity: "warning",
-    message: "調査情報が未確認です",
-    where: { investigationConfirmedAt: null },
-  },
+  // ⚠`INVESTIGATION_NOT_CONFIRMED`(調査情報が未確認です)は**廃止**(2026-11-14 発注者
+  //   「調査情報は自動取得をするので確認済みボタンは不要」)。確認の操作が無くなったので、
+  //   残すと全物件に消せない警告が出続ける。
   {
     code: "NO_ASSIGNEE",
     severity: "warning",

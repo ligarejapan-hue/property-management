@@ -188,7 +188,7 @@ describe("GET /api/properties/quality-check", () => {
       nextOffset: 1000,
     });
     // 全 5 ルール分のメタが返る
-    expect(body.rules).toHaveLength(8);
+    expect(body.rules).toHaveLength(7);
   });
 
   it("03. ?rule=CODE&offset で当該ルールの続きを取得できる", async () => {

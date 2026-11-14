@@ -66,9 +66,9 @@ describe("物件の画面: タブの上のボタン", () => {
     expect(DETAIL).toContain("assignedToMe={myUserId !== null && property.assignedTo === myUserId}");
   });
 
-  it("調査未確認の帯はページ側に2つ目を持たない(ActionBar の帯1つだけ)", () => {
+  it("調査未確認の帯はページにも ActionBar にも出さない(自動取得のため・2026-11-14 発注者)", () => {
     expect(DETAIL).not.toContain("調査情報が未確認です");
-    expect(read("src/components/properties/action-bar.tsx")).toContain("調査情報が未確認です");
+    expect(read("src/components/properties/action-bar.tsx")).not.toContain("調査情報が未確認です");
   });
 
   it("所在で謄本を検索は「その他 ▾」から開いたときだけ出し、開いた直後は確認から始める", () => {
