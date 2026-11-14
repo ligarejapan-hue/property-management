@@ -220,151 +220,16 @@ const WITH_RELATIONS = {
   },
 } as const;
 
-// ---------------------------------------------------------------------------
-// Public API
-// ---------------------------------------------------------------------------
-
-/** Get existing investigation record, or null if not yet created. */
-export async function getInvestigation(propertyId: string): Promise<InvestigationRecord | null> {
-  const raw = await prisma.propertyInvestigation.findUnique({
-    where: { propertyId },
-    include: WITH_RELATIONS,
-  });
-  return serializeRecord(raw);
-}
-
 /**
- * Run investigation providers, upsert record, write audit logs.
- *
- * Lifecycle:
- *   1. Upsert → status=fetching + audit: fetch_requested
- *   2. runInvestigation (providers, server-side)
- *   3a. Success → update → status=needs_review + audit: fetch_succeeded
- *   3b. Failure → update → status=failed   + audit: fetch_failed
- *
- * ⚠**取得の結果保存には担当者スコープを畳み込まない = 途中の担当変更でも
- * スコープで破棄しない**（@codex #338 R2 に対する設計判断）。
- * 呼び出し元 (investigation/fetch route) が**送信前に**担当者スコープで弾いており、
- * ここに来るのは認可された利用者が開始した取得だけ。外部呼び出しには数秒かかるため
- * その間の担当変更で結果を捨てると、課金した取得が無駄になり status が fetching の
- * まま残る（利用者の直接編集 = patchInvestigation / confirmInvestigationRecord は
- * 結果が編集として残るため、あちらは updateMany + 0件403 で原子化してある）。
+ * 取得結果から、調査情報の行に保存する列を組み立てる(手動の取得と自動取得で共通)。
+ * status / fetchVersion / version は呼び出し側で足す。
  */
-export async function runAndUpsertInvestigation(
-  propertyId: string,
-  userId: string,
-  context: {
-    address: string;
-    lotNumber: string | null;
-    gpsLat: number | null;
-    gpsLng: number | null;
-    targetYear?: number;
-  },
-  /**
-   * 担当者スコープの判定に使うセッション（@codex #338 R8）。
-   * **取得開始（Step 1）でだけ**認可に使う。結果保存（Step 3）では認可には使わず、
-   * ロック順序を揃えるための素のロックだけを取る。
-   */
-  scopeSession?: { id: string; role: string },
-  /** 監査ログの備考(自動取得の見回りが「自動取得」の印を付ける)。 */
-  options?: { auditNote?: string },
-): Promise<InvestigationRecord> {
-  const auditNote = options?.auditNote ?? undefined;
-  // ---- Step 1: set status=fetching ----------------------------------------
-  const { invId, beforeStatus } = await prisma.$transaction(async (tx) => {
-    // ⚠**取得の開始も担当者スコープで守る**（@codex #338 R8）。「課金済みの結果は
-    // 捨てない」例外は Step 3 の話で、**まだ何も課金していない開始時点**を守らない
-    // 理由にはならない。ここで弾けば status=fetching・監査・外部呼び出し（=課金）の
-    // すべてが担当外の物件に対して起きない。
-    // ⚠ロックは常に親（物件）→ 子（調査/監査）の順（下の Step 3 と同じ理由）。
-    if (scopeSession) await lockPropertyRecordForWrite(tx, propertyId, scopeSession);
-    else await lockPropertyRow(tx, propertyId);
-    const existing = await tx.propertyInvestigation.findUnique({
-      where: { propertyId },
-      select: { id: true, status: true },
-    });
-
-    const inv = await tx.propertyInvestigation.upsert({
-      where: { propertyId },
-      create: {
-        propertyId,
-        status: "fetching",
-        sourceAddress: context.address,
-        lastFetchError: null,
-      },
-      update: {
-        status: "fetching",
-        sourceAddress: context.address,
-        lastFetchError: null,
-        version: { increment: 1 },
-      },
-      select: { id: true },
-    });
-
-    await tx.propertyInvestigationAuditLog.create({
-      data: {
-        propertyId,
-        investigationId: inv.id,
-        action: "fetch_requested",
-        note: auditNote,
-        beforeJson: existing ? { status: existing.status } : undefined,
-        afterJson: { status: "fetching", address: context.address },
-        createdBy: userId,
-      },
-    });
-
-    return { invId: inv.id, beforeStatus: existing?.status ?? null };
-  });
-
-  // ---- Step 2: run providers (outside transaction) -------------------------
-  let result: Awaited<ReturnType<typeof runInvestigation>>;
-  try {
-    result = await runInvestigation({
-      propertyId,
-      address: context.address,
-      lotNumber: context.lotNumber,
-      gpsLat: context.gpsLat,
-      gpsLng: context.gpsLng,
-      targetYear: context.targetYear,
-    });
-  } catch (err) {
-    // ---- Step 3a: failure path --------------------------------------------
-    const errMsg = err instanceof Error ? err.message : String(err);
-    await prisma.$transaction(async (tx) => {
-      // ⚠**認可はしないがロックは取る**（自己レビューで検出したデッドロック回避）。
-      // 監査ログの INSERT は properties への FK 参照整合性トリガで親行に
-      // FOR KEY SHARE を取る = 何もしないと「子 → 親」順になる。編集経路は
-      // 親から FOR UPDATE を取るので、混ざると循環して 40P01（500）になり、
-      // しかもこの経路が犠牲になると課金済みの取得結果が rollback されて
-      // status が fetching のまま固着する。順序を「親 → 子」に揃えて防ぐ。
-      await lockPropertyRow(tx, propertyId);
-      await tx.propertyInvestigation.update({
-        where: { propertyId },
-        data: {
-          status: "failed",
-          lastFetchError: errMsg,
-          fetchedAt: new Date(),
-          version: { increment: 1 },
-        },
-      });
-      await tx.propertyInvestigationAuditLog.create({
-        data: {
-          propertyId,
-          investigationId: invId,
-          action: "fetch_failed",
-          note: auditNote,
-          beforeJson: { status: "fetching" },
-          afterJson: { status: "failed", error: errMsg },
-          createdBy: userId,
-        },
-      });
-    });
-    throw err;
-  }
-
-  // ---- Step 3b: success path -----------------------------------------------
+function buildFetchedFields(
+  result: Awaited<ReturnType<typeof runInvestigation>>,
+  context: { gpsLat: number | null; gpsLng: number | null },
+  now: Date,
+) {
   const data = result.data;
-  const now = new Date();
 
   const autoFetchSummary = result.providers
     .map((p) => `${p.name}: ${p.status}${p.error ? ` (${p.error})` : ""}`)
@@ -433,6 +298,171 @@ export async function runAndUpsertInvestigation(
   // eslint-disable-next-line @typescript-eslint/no-unsafe-assignment
   const rawPayloadJson = JSON.parse(JSON.stringify(result));
 
+  return {
+    latitude: context.gpsLat ?? geocodedLat ?? null,
+    longitude: context.gpsLng ?? geocodedLng ?? null,
+    normalizedAddress: geocodedAddress ?? undefined,
+    zoningDistrict: (data.zoningDistrict as string) ?? null,
+    buildingCoverageRatio: toDecimal(data.buildingCoverageRatio),
+    floorAreaRatio: toDecimal(data.floorAreaRatio),
+    firePreventionArea: (data.firePreventionZone as string) ?? null,
+    heightDistrict: (data.heightDistrict as string) ?? null,
+    floodRiskLevel: (data.floodRiskLevel as string) ?? null,
+    stormSurgeRiskLevel: (data.stormSurgeRiskLevel as string) ?? null,
+    tsunamiRiskLevel: (data.tsunamiRiskLevel as string) ?? null,
+    sedimentRiskCategory: (data.sedimentRiskCategory as string) ?? null,
+    hazardSummary,
+    roadSummary,
+    autoFetchSummary,
+    sourceSummary,
+    fieldSourcesJson,
+    // eslint-disable-next-line @typescript-eslint/no-unsafe-assignment
+    rawPayloadJson,
+    lastFetchError: null,
+    fetchedAt: now,
+  };
+}
+
+// ---------------------------------------------------------------------------
+// Public API
+// ---------------------------------------------------------------------------
+
+/** Get existing investigation record, or null if not yet created. */
+export async function getInvestigation(propertyId: string): Promise<InvestigationRecord | null> {
+  const raw = await prisma.propertyInvestigation.findUnique({
+    where: { propertyId },
+    include: WITH_RELATIONS,
+  });
+  return serializeRecord(raw);
+}
+
+/**
+ * Run investigation providers, upsert record, write audit logs.
+ *
+ * Lifecycle:
+ *   1. Upsert → status=fetching + audit: fetch_requested
+ *   2. runInvestigation (providers, server-side)
+ *   3a. Success → update → status=needs_review + audit: fetch_succeeded
+ *   3b. Failure → update → status=failed   + audit: fetch_failed
+ *
+ * ⚠**取得の結果保存には担当者スコープを畳み込まない = 途中の担当変更でも
+ * スコープで破棄しない**（@codex #338 R2 に対する設計判断）。
+ * 呼び出し元 (investigation/fetch route) が**送信前に**担当者スコープで弾いており、
+ * ここに来るのは認可された利用者が開始した取得だけ。外部呼び出しには数秒かかるため
+ * その間の担当変更で結果を捨てると、課金した取得が無駄になり status が fetching の
+ * まま残る（利用者の直接編集 = patchInvestigation / confirmInvestigationRecord は
+ * 結果が編集として残るため、あちらは updateMany + 0件403 で原子化してある）。
+ */
+export async function runAndUpsertInvestigation(
+  propertyId: string,
+  userId: string,
+  context: {
+    address: string;
+    lotNumber: string | null;
+    gpsLat: number | null;
+    gpsLng: number | null;
+    targetYear?: number;
+  },
+  /**
+   * 担当者スコープの判定に使うセッション（@codex #338 R8）。
+   * **取得開始（Step 1）でだけ**認可に使う。結果保存（Step 3）では認可には使わず、
+   * ロック順序を揃えるための素のロックだけを取る。
+   */
+  scopeSession?: { id: string; role: string },
+): Promise<InvestigationRecord> {
+  // ---- Step 1: set status=fetching ----------------------------------------
+  const { invId, beforeStatus } = await prisma.$transaction(async (tx) => {
+    // ⚠**取得の開始も担当者スコープで守る**（@codex #338 R8）。「課金済みの結果は
+    // 捨てない」例外は Step 3 の話で、**まだ何も課金していない開始時点**を守らない
+    // 理由にはならない。ここで弾けば status=fetching・監査・外部呼び出し（=課金）の
+    // すべてが担当外の物件に対して起きない。
+    // ⚠ロックは常に親（物件）→ 子（調査/監査）の順（下の Step 3 と同じ理由）。
+    if (scopeSession) await lockPropertyRecordForWrite(tx, propertyId, scopeSession);
+    else await lockPropertyRow(tx, propertyId);
+    const existing = await tx.propertyInvestigation.findUnique({
+      where: { propertyId },
+      select: { id: true, status: true },
+    });
+
+    const inv = await tx.propertyInvestigation.upsert({
+      where: { propertyId },
+      create: {
+        propertyId,
+        status: "fetching",
+        sourceAddress: context.address,
+        lastFetchError: null,
+      },
+      update: {
+        status: "fetching",
+        sourceAddress: context.address,
+        lastFetchError: null,
+        version: { increment: 1 },
+      },
+      select: { id: true },
+    });
+
+    await tx.propertyInvestigationAuditLog.create({
+      data: {
+        propertyId,
+        investigationId: inv.id,
+        action: "fetch_requested",
+        beforeJson: existing ? { status: existing.status } : undefined,
+        afterJson: { status: "fetching", address: context.address },
+        createdBy: userId,
+      },
+    });
+
+    return { invId: inv.id, beforeStatus: existing?.status ?? null };
+  });
+
+  // ---- Step 2: run providers (outside transaction) -------------------------
+  let result: Awaited<ReturnType<typeof runInvestigation>>;
+  try {
+    result = await runInvestigation({
+      propertyId,
+      address: context.address,
+      lotNumber: context.lotNumber,
+      gpsLat: context.gpsLat,
+      gpsLng: context.gpsLng,
+      targetYear: context.targetYear,
+    });
+  } catch (err) {
+    // ---- Step 3a: failure path --------------------------------------------
+    const errMsg = err instanceof Error ? err.message : String(err);
+    await prisma.$transaction(async (tx) => {
+      // ⚠**認可はしないがロックは取る**（自己レビューで検出したデッドロック回避）。
+      // 監査ログの INSERT は properties への FK 参照整合性トリガで親行に
+      // FOR KEY SHARE を取る = 何もしないと「子 → 親」順になる。編集経路は
+      // 親から FOR UPDATE を取るので、混ざると循環して 40P01（500）になり、
+      // しかもこの経路が犠牲になると課金済みの取得結果が rollback されて
+      // status が fetching のまま固着する。順序を「親 → 子」に揃えて防ぐ。
+      await lockPropertyRow(tx, propertyId);
+      await tx.propertyInvestigation.update({
+        where: { propertyId },
+        data: {
+          status: "failed",
+          lastFetchError: errMsg,
+          fetchedAt: new Date(),
+          version: { increment: 1 },
+        },
+      });
+      await tx.propertyInvestigationAuditLog.create({
+        data: {
+          propertyId,
+          investigationId: invId,
+          action: "fetch_failed",
+            beforeJson: { status: "fetching" },
+          afterJson: { status: "failed", error: errMsg },
+          createdBy: userId,
+        },
+      });
+    });
+    throw err;
+  }
+
+  // ---- Step 3b: success path -----------------------------------------------
+  const fields = buildFetchedFields(result, context, new Date());
+
   const inv = await prisma.$transaction(async (tx) => {
     // ⚠認可はしないがロックは取る（Step 3a と同じ理由。ロック順序を親 → 子に統一）。
     // この tx が 40P01 で落ちると**課金済みの取得結果を丸ごと失う**ので、
@@ -442,26 +472,7 @@ export async function runAndUpsertInvestigation(
       where: { propertyId },
       data: {
         status: "needs_review",
-        latitude: context.gpsLat ?? geocodedLat ?? null,
-        longitude: context.gpsLng ?? geocodedLng ?? null,
-        normalizedAddress: geocodedAddress ?? undefined,
-        zoningDistrict: (data.zoningDistrict as string) ?? null,
-        buildingCoverageRatio: toDecimal(data.buildingCoverageRatio),
-        floorAreaRatio: toDecimal(data.floorAreaRatio),
-        firePreventionArea: (data.firePreventionZone as string) ?? null,
-        heightDistrict: (data.heightDistrict as string) ?? null,
-        floodRiskLevel: (data.floodRiskLevel as string) ?? null,
-        stormSurgeRiskLevel: (data.stormSurgeRiskLevel as string) ?? null,
-        tsunamiRiskLevel: (data.tsunamiRiskLevel as string) ?? null,
-        sedimentRiskCategory: (data.sedimentRiskCategory as string) ?? null,
-        hazardSummary,
-        roadSummary,
-        autoFetchSummary,
-        sourceSummary,
-        fieldSourcesJson,
-        rawPayloadJson,
-        lastFetchError: null,
-        fetchedAt: now,
+        ...fields,
         fetchVersion: { increment: 1 },
         version: { increment: 1 },
       },
@@ -473,7 +484,6 @@ export async function runAndUpsertInvestigation(
         propertyId,
         investigationId: updated.id,
         action: "fetch_succeeded",
-        note: auditNote,
         beforeJson: { status: beforeStatus },
         afterJson: {
           status: "needs_review",
@@ -487,6 +497,165 @@ export async function runAndUpsertInvestigation(
   });
 
   return serializeRecord(inv)!;
+}
+
+/** 自動取得の1件分の結末(src/lib/investigation/auto-fetch.ts が使う)。 */
+export type AutoInvestigationOutcome = "done" | "skipped" | "superseded" | "outage";
+
+/**
+ * 自動取得の見回り用(2026-11-14・@codex #723)。手動の取得との違い:
+ * - **取得の開始時に、物件の行をロックしたまま「まだ一度も取っていない」かを確かめ直す**。
+ *   選んでから開始までの間に手動の取得が始まっていれば何もしない(skipped)=外部へ送らない。
+ * - 結果の保存も、ロックの中で版(version)が開始時のままかを確かめる。途中で手動の取得・編集・
+ *   確認が入っていれば捨てる(superseded)=人の結果を上書きしない。
+ * - `isOutage(result)` が真なら保存しない(outage)。この取得で作った行は消して、次の見回りで
+ *   また対象になるようにする(相手の障害で「何も取れていない要確認」を作らない)。
+ * 取得結果の列の組み立ては手動と同じ(buildFetchedFields)。
+ */
+export async function runAutoInvestigation(
+  propertyId: string,
+  userId: string,
+  context: {
+    address: string;
+    lotNumber: string | null;
+    gpsLat: number | null;
+    gpsLng: number | null;
+  },
+  opts: {
+    stuckBefore: Date;
+    auditNote: string;
+    isOutage: (result: Awaited<ReturnType<typeof runInvestigation>>) => boolean;
+  },
+): Promise<AutoInvestigationOutcome> {
+  // ---- 1. ロックの中で確かめ直して、取得中にする ----
+  const claim = await prisma.$transaction(async (tx) => {
+    await lockPropertyRow(tx, propertyId);
+    const existing = await tx.propertyInvestigation.findUnique({
+      where: { propertyId },
+      select: { id: true, status: true, fetchedAt: true, updatedAt: true },
+    });
+    const eligible =
+      !existing ||
+      (existing.status === "fetching" &&
+        existing.fetchedAt === null &&
+        existing.updatedAt < opts.stuckBefore);
+    if (!eligible) return null;
+    const inv = await tx.propertyInvestigation.upsert({
+      where: { propertyId },
+      create: { propertyId, status: "fetching", sourceAddress: context.address, lastFetchError: null },
+      update: {
+        status: "fetching",
+        sourceAddress: context.address,
+        lastFetchError: null,
+        version: { increment: 1 },
+      },
+      select: { id: true, version: true },
+    });
+    const log = await tx.propertyInvestigationAuditLog.create({
+      data: {
+        propertyId,
+        investigationId: inv.id,
+        action: "fetch_requested",
+        note: opts.auditNote,
+        beforeJson: existing ? { status: existing.status } : undefined,
+        afterJson: { status: "fetching", address: context.address },
+        createdBy: userId,
+      },
+      select: { id: true },
+    });
+    return {
+      invId: inv.id,
+      version: inv.version,
+      created: !existing,
+      logId: log.id,
+      beforeStatus: existing?.status ?? null,
+    };
+  });
+  if (!claim) return "skipped";
+
+  // ---- 2. 外部へ問い合わせる(トランザクションの外) ----
+  let result: Awaited<ReturnType<typeof runInvestigation>> | null = null;
+  let errMsg: string | null = null;
+  try {
+    result = await runInvestigation({
+      propertyId,
+      address: context.address,
+      lotNumber: context.lotNumber,
+      gpsLat: context.gpsLat,
+      gpsLng: context.gpsLng,
+    });
+  } catch (err) {
+    errMsg = err instanceof Error ? err.message : String(err);
+  }
+
+  // ---- 3. ロックの中で、版が開始時のままのときだけ保存する ----
+  return prisma.$transaction(async (tx) => {
+    await lockPropertyRow(tx, propertyId);
+    const cur = await tx.propertyInvestigation.findUnique({
+      where: { propertyId },
+      select: { id: true, version: true },
+    });
+    if (!cur || cur.id !== claim.invId || cur.version !== claim.version) return "superseded";
+
+    if (result && opts.isOutage(result)) {
+      if (claim.created) {
+        // この取得で作った行と開始の記録を消す=次の見回りでまた対象になる。
+        await tx.propertyInvestigationAuditLog.deleteMany({ where: { id: claim.logId } });
+        await tx.propertyInvestigation.delete({ where: { id: claim.invId } });
+      }
+      // 前から「取得中」で止まっていた行はそのまま(15分後にまた対象になる)。
+      return "outage";
+    }
+
+    if (!result) {
+      await tx.propertyInvestigation.update({
+        where: { id: claim.invId },
+        data: {
+          status: "failed",
+          lastFetchError: errMsg,
+          fetchedAt: new Date(),
+          version: { increment: 1 },
+        },
+      });
+      await tx.propertyInvestigationAuditLog.create({
+        data: {
+          propertyId,
+          investigationId: claim.invId,
+          action: "fetch_failed",
+          note: opts.auditNote,
+          beforeJson: { status: "fetching" },
+          afterJson: { status: "failed", error: errMsg },
+          createdBy: userId,
+        },
+      });
+      return "done";
+    }
+
+    await tx.propertyInvestigation.update({
+      where: { id: claim.invId },
+      data: {
+        status: "needs_review",
+        ...buildFetchedFields(result, context, new Date()),
+        fetchVersion: { increment: 1 },
+        version: { increment: 1 },
+      },
+    });
+    await tx.propertyInvestigationAuditLog.create({
+      data: {
+        propertyId,
+        investigationId: claim.invId,
+        action: "fetch_succeeded",
+        note: opts.auditNote,
+        beforeJson: { status: claim.beforeStatus },
+        afterJson: {
+          status: "needs_review",
+          providers: result.providers.map((p) => ({ name: p.name, status: p.status })),
+        },
+        createdBy: userId,
+      },
+    });
+    return "done";
+  });
 }
 
 /**

@@ -13,7 +13,7 @@
  */
 
 import prisma from "@/lib/prisma";
-import { runAndUpsertInvestigation } from "./fetch-investigation";
+import { runAutoInvestigation } from "./fetch-investigation";
 
 export const AUTO_FETCH_NOTE = "自動取得(未取得の物件の見回り)";
 
@@ -95,7 +95,7 @@ export function nextDelayMs(outcome: AutoFetchOutcome): number {
 
 export interface AutoFetchDeps {
   pick: (stuckBefore: Date) => Promise<AutoFetchTarget | null>;
-  run: (...args: Parameters<typeof runAndUpsertInvestigation>) => Promise<{ rawPayloadJson: unknown }>;
+  run: typeof runAutoInvestigation;
   now: () => Date;
 }
 
@@ -109,7 +109,8 @@ export async function runAutoFetchOnce(deps: AutoFetchDeps): Promise<AutoFetchOu
   }
   if (!target) return "idle";
   try {
-    const rec = await deps.run(
+    const stuckBefore = new Date(deps.now().getTime() - STUCK_FETCHING_MS);
+    const outcome = await deps.run(
       target.id,
       target.createdBy,
       {
@@ -118,10 +119,11 @@ export async function runAutoFetchOnce(deps: AutoFetchDeps): Promise<AutoFetchOu
         gpsLat: target.gpsLat,
         gpsLng: target.gpsLng,
       },
-      undefined,
-      { auditNote: AUTO_FETCH_NOTE },
+      { stuckBefore, auditNote: AUTO_FETCH_NOTE, isOutage: isProviderOutage },
     );
-    return isProviderOutage(rec.rawPayloadJson) ? "outage" : "done";
+    if (outcome === "outage") return "outage";
+    // skipped / superseded = 選んだあとに手動の取得が入った。すぐ次へ進んでよい。
+    return "done";
   } catch (err) {
     // ⚠住所などの個人情報はログに出さない(物件の id だけ)。
     console.error(
@@ -155,7 +157,7 @@ export function startInvestigationAutoFetch(): void {
   const g = globalThis as Record<symbol, unknown>;
   if (g[STARTED]) return;
   g[STARTED] = true;
-  const deps: AutoFetchDeps = { pick: pickFromDb, run: runAndUpsertInvestigation, now: () => new Date() };
+  const deps: AutoFetchDeps = { pick: pickFromDb, run: runAutoInvestigation, now: () => new Date() };
   const tick = async () => {
     const outcome = await runAutoFetchOnce(deps);
     if (outcome === "outage") {

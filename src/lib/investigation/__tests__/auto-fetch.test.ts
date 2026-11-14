@@ -1,7 +1,7 @@
 import { describe, it, expect, vi } from "vitest";
 
 vi.mock("@/lib/prisma", () => ({ default: {} }));
-vi.mock("../fetch-investigation", () => ({ runAndUpsertInvestigation: vi.fn() }));
+vi.mock("../fetch-investigation", () => ({ runAutoInvestigation: vi.fn() }));
 
 import {
   autoFetchWhere,
@@ -136,21 +136,28 @@ describe("runAutoFetchOnce", () => {
     expect(run).not.toHaveBeenCalled();
   });
 
-  it("物件を作った人の名前で、自動取得の印を付けて取る", async () => {
-    const run = vi.fn(async () => ({ rawPayloadJson: reinfolibOk }));
-    const out = await runAutoFetchOnce({ pick: async () => target, run, now: () => new Date() });
+  it("物件を作った人の名前で、自動取得の印・15分前の区切り・障害の判定を付けて取る", async () => {
+    const run = vi.fn(async () => "done" as const);
+    const out = await runAutoFetchOnce({
+      pick: async () => target,
+      run,
+      now: () => new Date("2026-11-14T01:00:00Z"),
+    });
     expect(out).toBe("done");
     expect(run).toHaveBeenCalledWith(
       "p1",
       "u1",
       { address: target.address, lotNumber: null, gpsLat: null, gpsLng: null },
-      undefined,
-      { auditNote: AUTO_FETCH_NOTE },
+      {
+        stuckBefore: new Date("2026-11-14T00:45:00Z"),
+        auditNote: AUTO_FETCH_NOTE,
+        isOutage: isProviderOutage,
+      },
     );
   });
 
   it("座標がある物件は座標も渡す", async () => {
-    const run = vi.fn(async () => ({ rawPayloadJson: reinfolibOk }));
+    const run = vi.fn(async () => "done" as const);
     await runAutoFetchOnce({
       pick: async () => ({ ...target, gpsLat: 35.6, gpsLng: 139.7 }),
       run,
@@ -159,15 +166,20 @@ describe("runAutoFetchOnce", () => {
     expect((run.mock.calls[0] as unknown[])[2]).toMatchObject({ gpsLat: 35.6, gpsLng: 139.7 });
   });
 
-  it("相手が落ちていたら outage を返す", async () => {
-    const run = vi.fn(async () => ({
-      rawPayloadJson: { providers: [{ name: "reinfolib", status: "failed", error: "fetch failed" }] },
-    }));
+  it("相手が落ちていたら outage を返す(30分休む)", async () => {
+    const run = vi.fn(async () => "outage" as const);
     expect(await runAutoFetchOnce({ pick: async () => target, run, now: () => new Date() })).toBe("outage");
   });
 
+  it("選んだあとに手動の取得が入った(skipped / superseded)ときは、そのまま次へ進む", async () => {
+    for (const r of ["skipped", "superseded"] as const) {
+      const run = vi.fn(async () => r);
+      expect(await runAutoFetchOnce({ pick: async () => target, run, now: () => new Date() })).toBe("done");
+    }
+  });
+
   it("取得で例外が出ても止まらず error を返す", async () => {
-    const run = vi.fn(async () => {
+    const run = vi.fn(async (): Promise<"done"> => {
       throw new Error("boom");
     });
     expect(await runAutoFetchOnce({ pick: async () => target, run, now: () => new Date() })).toBe("error");
