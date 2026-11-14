@@ -19,7 +19,18 @@ const db: {
 };
 let seq = 0;
 // 物件の欄(販売図面に出る用途地域・建蔽率・容積率)
-const prop: { zoningDistrict: string | null; buildingCoverageRatio: number | null; floorAreaRatio: number | null; version: number } = {
+const prop: {
+  zoningDistrict: string | null;
+  buildingCoverageRatio: number | null;
+  floorAreaRatio: number | null;
+  version: number;
+  address: string;
+  gpsLat: number | null;
+  gpsLng: number | null;
+} = {
+  address: "東京都千代田区霞が関1-1",
+  gpsLat: null,
+  gpsLng: null,
   zoningDistrict: null,
   buildingCoverageRatio: null,
   floorAreaRatio: null,
@@ -98,6 +109,8 @@ vi.mock("@/lib/prisma", () => ({
   default: { $transaction: async (fn: (t: typeof tx) => unknown) => fn(tx) },
 }));
 vi.mock("@/lib/api-helpers", () => ({ ApiError: class extends Error {} }));
+const editLocked = { value: false };
+vi.mock("@/lib/edit-lock/service", () => ({ isResourceEditLocked: vi.fn(async () => editLocked.value) }));
 vi.mock("@/lib/property-record-guard", () => ({
   lockPropertyRow: vi.fn(async () => {}),
   lockPropertyRecordForWrite: vi.fn(async () => {}),
@@ -119,7 +132,16 @@ const stuckBefore = new Date(Date.now() - 15 * 60_000);
 const opts = (isOutage = false) => ({ stuckBefore, auditNote: "自動取得", isOutage: () => isOutage });
 
 beforeEach(() => {
-  Object.assign(prop, { zoningDistrict: null, buildingCoverageRatio: null, floorAreaRatio: null, version: 1 });
+  Object.assign(prop, {
+    zoningDistrict: null,
+    buildingCoverageRatio: null,
+    floorAreaRatio: null,
+    version: 1,
+    address: "東京都千代田区霞が関1-1",
+    gpsLat: null,
+    gpsLng: null,
+  });
+  editLocked.value = false;
   tx.property.update.mockClear();
   db.row = null;
   db.logs = [];
@@ -219,6 +241,43 @@ describe("runAutoInvestigation", () => {
     });
     await runAutoInvestigation("p1", "u1", ctx, opts());
     expect(prop.zoningDistrict).toBeNull();
+  });
+
+  it("問い合わせ中に物件の住所が直されたら、古い場所の値を物件の欄に写さない(@codex #725)", async () => {
+    runInvestigation.mockImplementation(async () => {
+      prop.address = "東京都千代田区霞が関2-2";
+      return okResult;
+    });
+    await runAutoInvestigation("p1", "u1", ctx, opts());
+    expect(prop.zoningDistrict).toBeNull();
+    expect(tx.property.update).not.toHaveBeenCalled();
+  });
+
+  it("問い合わせ中に座標が直されたときも写さない", async () => {
+    runInvestigation.mockImplementation(async () => {
+      prop.gpsLat = 35.1;
+      prop.gpsLng = 139.1;
+      return okResult;
+    });
+    await runAutoInvestigation("p1", "u1", ctx, opts());
+    expect(prop.zoningDistrict).toBeNull();
+  });
+
+  it("座標が同じ値(Decimal の文字の違いだけ)なら写す", async () => {
+    prop.gpsLat = 35.6;
+    prop.gpsLng = 139.7;
+    runInvestigation.mockResolvedValue(okResult);
+    await runAutoInvestigation("p1", "u1", { ...ctx, gpsLat: 35.6, gpsLng: 139.7 }, opts());
+    expect(prop.zoningDistrict).toBe("第一種住居地域");
+  });
+
+  it("誰かが物件を編集中(編集の鍵がある)なら物件の欄に写さない(保存を 409 にしない)", async () => {
+    editLocked.value = true;
+    runInvestigation.mockResolvedValue(okResult);
+    expect(await runAutoInvestigation("p1", "u1", ctx, opts())).toBe("done");
+    expect(prop.zoningDistrict).toBeNull();
+    expect(tx.property.update).not.toHaveBeenCalled();
+    expect(db.row?.status).toBe("needs_review");
   });
 
   it("取得の処理が例外を出したら、失敗として記録する", async () => {

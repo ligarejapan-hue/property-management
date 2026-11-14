@@ -24,3 +24,14 @@ describe("調査情報の確認済みボタンを無くす(2026-11-14 発注者�
     expect(QUALITY_RULES.map((r) => r.code)).not.toContain("INVESTIGATION_NOT_CONFIRMED");
   });
 });
+
+describe("取得のあと物件の画面を読み直す(@codex #725・物件の欄に写すと版が上がるため)", () => {
+  const page = readFileSync(join(process.cwd(), "src/app/(dashboard)/properties/[id]/page.tsx"), "utf8");
+  it("調査情報タブは取得に成功したら onFetched を呼ぶ", () => {
+    expect(tab).toMatch(/onFetched\?: \(\) => unknown/);
+    expect(tab).toMatch(/setInvestigation\(data\);\s*\n\s*void onFetched\?\.\(\);/);
+  });
+  it("物件の画面は onFetched に静かな読み直しを渡す", () => {
+    expect(page).toContain("<InvestigationTab propertyId={property.id} onFetched={refreshPropertyQuietly} />");
+  });
+});

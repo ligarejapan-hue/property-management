@@ -22,6 +22,7 @@ import {
 } from "@/lib/property-record-guard";
 import { runInvestigation } from "./index";
 import { propertyFillFromInvestigation } from "./property-fill";
+import { isResourceEditLocked } from "@/lib/edit-lock/service";
 
 /**
  * 担当者スコープを**書き込み文自体に畳み込む**ための共通処理（@codex #338 P2）。
@@ -326,19 +327,47 @@ function buildFetchedFields(
  * 取得した用途地域・建蔽率・容積率を、物件の欄が空のときだけ写す(2026-11-14 発注者
  * 「確認済みボタンは不要」+「空欄のときだけ自動で写す」)。物件の行のロックは呼び出し側で取っておくこと。
  * 写すものが無ければ物件の行に書かない(版を上げない)。
+ * ⚠写さないとき(@codex #725):
+ *   - 問い合わせの間に物件の住所・座標が直された=取った値は古い場所のもの
+ *   - 誰かが物件を編集中(編集の鍵がある)=版を上げるとその人の保存が 409 になる
+ *   (調査情報の行には保存する。物件の欄は次の取得のときに埋まる)
  */
+function coord(v: unknown): number | null {
+  if (v === null || v === undefined) return null;
+  const n = Number(typeof v === "object" ? String(v) : v);
+  return Number.isFinite(n) ? n : null;
+}
+
+/** 取得を始めたときの住所・座標が、今の物件と同じか(座標は数として比べる)。 */
+function sameLocation(
+  cur: { address: string; gpsLat: unknown; gpsLng: unknown },
+  ctx: { address: string; gpsLat: number | null; gpsLng: number | null },
+): boolean {
+  return cur.address === ctx.address && coord(cur.gpsLat) === ctx.gpsLat && coord(cur.gpsLng) === ctx.gpsLng;
+}
+
 async function fillPropertyFromFetched(
   tx: Parameters<Parameters<typeof prisma.$transaction>[0]>[0],
   propertyId: string,
   fetched: { zoningDistrict: string | null; buildingCoverageRatio: number | null; floorAreaRatio: number | null },
+  context: { address: string; gpsLat: number | null; gpsLng: number | null },
 ): Promise<void> {
   const cur = await tx.property.findUnique({
     where: { id: propertyId },
-    select: { zoningDistrict: true, buildingCoverageRatio: true, floorAreaRatio: true },
+    select: {
+      zoningDistrict: true,
+      buildingCoverageRatio: true,
+      floorAreaRatio: true,
+      address: true,
+      gpsLat: true,
+      gpsLng: true,
+    },
   });
   if (!cur) return;
+  if (!sameLocation(cur, context)) return;
   const fill = propertyFillFromInvestigation(cur, fetched);
   if (!fill) return;
+  if (await isResourceEditLocked(tx, { resourceType: "property", resourceId: propertyId })) return;
   await tx.property.update({
     where: { id: propertyId },
     data: { ...fill, version: { increment: 1 } },
@@ -500,7 +529,7 @@ export async function runAndUpsertInvestigation(
       },
       include: WITH_RELATIONS,
     });
-    await fillPropertyFromFetched(tx, propertyId, fields);
+    await fillPropertyFromFetched(tx, propertyId, fields, context);
 
     await tx.propertyInvestigationAuditLog.create({
       data: {
@@ -667,7 +696,7 @@ export async function runAutoInvestigation(
         version: { increment: 1 },
       },
     });
-    await fillPropertyFromFetched(tx, propertyId, fields);
+    await fillPropertyFromFetched(tx, propertyId, fields, context);
     await tx.propertyInvestigationAuditLog.create({
       data: {
         propertyId,

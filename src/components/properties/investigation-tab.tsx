@@ -26,6 +26,11 @@ import {
 
 interface InvestigationTabProps {
   propertyId: string;
+  /**
+   * 取得に成功したあとに呼ぶ(@codex #725)。取得で物件の欄(用途地域など)を写すと物件の版が上がるので、
+   * 物件の画面は読み直さないと、そのあとの編集の保存が版の食い違いで弾かれる。
+   */
+  onFetched?: () => unknown;
 }
 
 // ---------- Status helpers ----------
@@ -212,7 +217,7 @@ const ACTION_LABELS: Record<string, string> = {
 
 // ---------- Component ----------
 
-export default function InvestigationTab({ propertyId }: InvestigationTabProps) {
+export default function InvestigationTab({ propertyId, onFetched }: InvestigationTabProps) {
   const [investigation, setInvestigation] = useState<PropertyInvestigationData | null>(null);
   const [loading, setLoading] = useState(true);
   const [fetching, setFetching] = useState(false);
@@ -249,6 +254,7 @@ export default function InvestigationTab({ propertyId }: InvestigationTabProps) 
     try {
       const data = await triggerPropertyInvestigation(propertyId);
       setInvestigation(data);
+      void onFetched?.();
       showMsg("調査情報を取得しました");
     } catch (err) {
       setError(err instanceof Error ? err.message : "取得に失敗しました");

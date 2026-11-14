@@ -1219,7 +1219,7 @@ export default function PropertyDetailPage({
           />
         )}
         {activeTab === "investigation" && (
-          <InvestigationTab propertyId={property.id} />
+          <InvestigationTab propertyId={property.id} onFetched={refreshPropertyQuietly} />
         )}
         {activeTab === "actions" && (
           <NextActionTab propertyId={property.id} />
