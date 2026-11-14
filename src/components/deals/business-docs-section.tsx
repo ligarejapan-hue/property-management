@@ -31,8 +31,10 @@ const GROUPS = [
 ] as const;
 type KeyRow = { label: string; count: string };
 const keyRowsOf = (v: unknown): KeyRow[] => (Array.isArray(v) ? (v as KeyRow[]) : []);
-/** 鍵の行が出せる形か(番号・種類があり、本数が 1〜99)。 */
-const keyRowOk = (k: KeyRow) => k.label.trim() !== "" && /^\d+$/.test(k.count) && Number(k.count) >= 1 && Number(k.count) <= 99;
+/** 番号も本数も空の行(送らない=全部空なら手書きの欄5行で出る・2026-11-14 発注者)。 */
+const keyRowBlank = (k: KeyRow) => k.label.trim() === "" && k.count.trim() === "";
+/** 鍵の行が出せる形か(空の行か、本数が 1〜99。番号・種類は空でもよい)。 */
+const keyRowOk = (k: KeyRow) => keyRowBlank(k) || (/^\d+$/.test(k.count.trim()) && Number(k.count) >= 1 && Number(k.count) <= 99);
 type CostRow = { label: string; amount: string };
 const costRowsOf = (v: unknown): CostRow[] => (Array.isArray(v) ? (v as CostRow[]) : []);
 /** 金額の欄の文字(数で来た初期値・控えも文字にそろえる)。 */
@@ -134,7 +136,7 @@ export default function BusinessDocsSection({ dealId, active, refresh, onIssued 
 
 /** 小窓の初めの値(前回の入力・初期値)。鍵の行の本数・諸費用の金額は入力しやすいよう文字で持ち、送るときに数にする。 */
 function initialValuesOf(doc: AvailableDocument): Record<string, unknown> {
-  if (doc.docType === "key_receipt") return { ...doc.defaults, keys: [{ label: "", count: "1" }] };
+  if (doc.docType === "key_receipt") return { ...doc.defaults, keys: [{ label: "", count: "" }] };
   if (doc.docType === "settlement_guide_seller") {
     return { ...doc.defaults, costs: (doc.defaults.costs as { label: string; amount: number }[] ?? []).map((r) => ({ label: r.label, amount: String(r.amount) })) };
   }
@@ -211,9 +213,9 @@ function IssueDialog({ dealId, doc, version, onCancel, onDone }: {
   const registrationFee = values.registrationFee === undefined ? doc.defaults.registrationFee : values.registrationFee;
   const cancellationNotice = (values.cancellationNotice === undefined ? doc.defaults.cancellationNotice : values.cancellationNotice) === true;
   const costRows = costRowsOf(values.costs);
-  // 委任状は委任する事項が1つ以上・鍵受領書は鍵の行がすべて埋まっているまで発行できない(サーバーも 422)。
+  // 委任状は委任する事項が1つ以上になるまで発行できない(サーバーも 422)。鍵受領書は書きかけの行(番号だけで本数が無いなど)があるうちは出せない。
   const incomplete = (doc.docType === "power_of_attorney" && !matters.length && !str(values.otherMatter).trim())
-    || (doc.docType === "key_receipt" && (!keyRows.length || !keyRows.every(keyRowOk)))
+    || (doc.docType === "key_receipt" && !keyRows.every(keyRowOk))
     || (doc.docType === "settlement_guide_seller" && !costRows.every(costRowOk))
     || (doc.docType === "settlement_guide" && !optionalYenOk(registrationFee))
     || (doc.docType === "prep_checklist" && !str(values.kind));
@@ -242,7 +244,7 @@ function IssueDialog({ dealId, doc, version, onCancel, onDone }: {
       const options = receipt
         ? { ...values, exempt: issuer?.individual ? values.exempt ?? null : null, receivedOn: str(values.receivedOn) || null }
         : doc.docType === "key_receipt"
-          ? { ...values, keys: keyRows.map((k) => ({ label: k.label.trim(), count: Number(k.count) })), receivedOn: str(values.receivedOn) || null }
+          ? { ...values, keys: keyRows.filter((k) => !keyRowBlank(k)).map((k) => ({ label: k.label.trim(), count: Number(k.count) })), receivedOn: str(values.receivedOn) || null }
           : doc.docType === "power_of_attorney"
             ? { ...values, otherMatter: str(values.otherMatter).trim() || null, signedOn: str(values.signedOn) || null }
             : doc.docType === "landlord_change_notice"
@@ -475,7 +477,7 @@ function IssueDialog({ dealId, doc, version, onCancel, onDone }: {
                 </div>
               ))}
               {keyRows.length < 30 && (
-                <Button variant="secondary" size="sm" onClick={() => set("keys", [...keyRows, { label: "", count: "1" }])}>
+                <Button variant="secondary" size="sm" onClick={() => set("keys", [...keyRows, { label: "", count: "" }])}>
                   <Plus className="h-4 w-4" />
                   行を足す
                 </Button>
@@ -484,6 +486,7 @@ function IssueDialog({ dealId, doc, version, onCancel, onDone }: {
             <Field label="受領日(空なら日付の欄を空けて出す)">
               <input type="date" value={str(values.receivedOn)} onChange={(e) => set("receivedOn", e.target.value)} aria-label="受領日" className={inputCls} />
             </Field>
+            <p className="text-xs text-gray-500">番号が分からないときは、番号の欄を空けて出せます。番号も本数も空のままなら、手で書く空の行を5つ入れて出します。</p>
             <p className="text-xs text-gray-500">受領者の署名・押印の欄は空けて出します(自社が受け取るときも角印は付けません)。</p>
           </>
         )}

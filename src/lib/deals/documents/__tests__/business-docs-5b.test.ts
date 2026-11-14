@@ -132,9 +132,21 @@ describe("鍵受領書", () => {
     expect(d.values.receiver).toBe("self");
     expect(doc("key_receipt").defaults(ctx()).values.receiver).toBe("p-buyer");
   });
-  it("自社の受領でも角印は付けない。売主・鍵の行が無い・選べない受領者は出せない", () => {
+  it("鍵の行が無いときは、手で書く空の行を5つ出す(番号が分からないことがある・2026-11-14 発注者)", () => {
+    const { html, rows } = doc("key_receipt").build(ctx(), { ...opts, keys: [] });
+    expect(html.split(`<tr class="blank"><td>　</td><td class="num">本</td></tr>`).length - 1).toBe(5);
+    expect(html).toContain("合計　　　本");
+    expect(rows).toContainEqual({ label: "鍵の番号・本数", value: "手書きの欄(5行)" });
+    expect(rows.find((r) => r.label === "合計本数")).toBeUndefined();
+  });
+  it("番号を空けて本数だけの行も出せる(番号の欄は空)", () => {
+    const { html } = doc("key_receipt").build(ctx(), { ...opts, keys: [{ label: "", count: 2 }] });
+    expect(html).toContain('<tr><td>　</td><td class="num">2本</td></tr>');
+    expect(html).toContain("合計 2本");
+    expect((doc("key_receipt").options.parse({ ...opts, keys: [{ label: "  ", count: 2 }] }) as { keys: { label: string }[] }).keys[0].label).toBe("");
+  });
+  it("自社の受領でも角印は付けない。売主・選べない受領者は出せない", () => {
     expect(doc("key_receipt").build(ctx(), { ...opts, receiver: "self" }).html).not.toContain(SEAL);
-    expect(() => doc("key_receipt").build(ctx(), { ...opts, keys: [] })).toThrow(DocOptionError);
     expect(() => doc("key_receipt").build(ctx(), { ...opts, receiver: "p-seller" })).toThrow(DocOptionError);
   });
 });

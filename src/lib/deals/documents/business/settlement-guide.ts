@@ -15,6 +15,22 @@ export type SettlementGuideOptions = z.output<typeof settlementGuideOptionsSchem
 /** 持ち物の初期値(どの会社でも使える一般的なもの)。 */
 export const DEFAULT_BELONGINGS = ["ご本人確認書類(運転免許証など)", "ご印鑑(登記にお使いのもの)", "住民票(登記に必要な場合)", "通帳・お届け印(お振込みの場合)"].join("\n");
 
+/**
+ * ご案内の初めの「売買代金」の表(2026-11-14 発注者「初めに売買価格と支払い済みの金額を出してほしい」)。
+ * 残代金は決済の計算と同じ値(手付金が無い取引は 0 円=残代金は売買価格)。
+ */
+function priceTable(c: BusinessDocContext, paidLabel: string) {
+  const d = c.deal;
+  return html`<h2>売買代金</h2>
+<table>
+<tr><th style="width:60%">売買価格</th><td class="num">${money(d.price)}</td></tr>
+<tr><th>${paidLabel}</th><td class="num">${money(d.deposit ?? 0)}</td></tr>
+<tr class="total"><th>残代金(売買価格−手付金)</th><td class="num">${money(c.calc.settlement.remaining)}</td></tr>
+</table>`;
+}
+const PAID_BY_BUYER = "手付金(お支払い済み)";
+const RECEIVED_BY_SELLER = "手付金(お受け取り済み)";
+
 /** 振込先の初期値: 売主が自社なら取引の設定の口座、それ以外は空(計画の読み替え 7)。 */
 export function defaultPayee(c: BusinessDocContext): string | null {
   return partiesOf(c.deal, "seller").some((p) => p.isSelf) ? bankAccountText(c) : null;
@@ -37,6 +53,7 @@ export function buildSettlementGuide(c: BusinessDocContext, o: SettlementGuideOp
 <div class="meta"><div class="customer">${buyer ?? ""} 様</div><div class="right">${dateJa(c.today)}</div></div>
 <p>このたびはお取引をいただき、ありがとうございます。残金のお支払い(決済)について、次のとおりご案内いたします。</p>
 ${headTable([["物件", propertyLabel(d)], ["決済日時", dateTimeJa(d.settlementAt)], ["決済場所", d.settlementPlace]])}
+${priceTable(c, PAID_BY_BUYER)}
 <h2>当日お支払いいただく金額</h2>
 <table>
 <tr><th style="width:60%">残代金(売買価格−手付金)</th><td class="num">${money(s.remaining)}</td></tr>
@@ -60,7 +77,7 @@ ${companyBlock(c.company, c.logo)}`;
     html: documentHtml({ title, font: "mincho", body }),
     rows: [
       { label: "宛先", value: buyer }, { label: "物件", value: propertyLabel(d) }, { label: "決済日時", value: dateTimeJa(d.settlementAt) },
-      { label: "決済場所", value: d.settlementPlace }, { label: "残代金", value: s.remaining }, { label: "精算金", value: netSigned },
+      { label: "決済場所", value: d.settlementPlace }, { label: "売買価格", value: d.price }, { label: PAID_BY_BUYER, value: d.deposit ?? 0 }, { label: "残代金", value: s.remaining }, { label: "精算金", value: netSigned },
       { label: "預り敷金の承継(相殺)", value: s.depositOffset ? -s.depositOffset : null }, { label: "決済時のお支払額", value: s.paymentAtSettlement },
       { label: "登記費用(司法書士へ)", value: fee }, ...(prepare === null ? [] : [{ label: "当日ご用意いただく金額の合計", value: prepare }]),
       { label: "お振込先", value: o.payee }, { label: "お持ちいただくもの", value: o.belongings },
@@ -138,6 +155,7 @@ export function buildSellerSettlementGuide(c: BusinessDocContext, o: SellerGuide
 <div class="meta"><div class="customer">${seller ?? ""} 様</div><div class="right">${dateJa(c.today)}</div></div>
 <p>このたびはお取引をいただき、ありがとうございます。残代金のお受け取り(決済)について、次のとおりご案内いたします。</p>
 ${headTable([["物件", propertyLabel(d)], ["決済日時", dateTimeJa(d.settlementAt)], ["決済場所", d.settlementPlace]])}
+${priceTable(c, RECEIVED_BY_SELLER)}
 <h2>当日お受け取りいただく金額</h2>
 <table>
 <tr><th style="width:60%">残代金(売買価格−手付金)</th><td class="num">${money(s.remaining)}</td></tr>
@@ -163,7 +181,7 @@ ${companyBlock(c.company, c.logo)}`;
     html: documentHtml({ title, font: "mincho", body }),
     rows: [
       { label: "宛先", value: seller }, { label: "物件", value: propertyLabel(d) }, { label: "決済日時", value: dateTimeJa(d.settlementAt) },
-      { label: "決済場所", value: d.settlementPlace }, { label: "残代金", value: s.remaining }, { label: "精算金", value: netSigned },
+      { label: "決済場所", value: d.settlementPlace }, { label: "売買価格", value: d.price }, { label: RECEIVED_BY_SELLER, value: d.deposit ?? 0 }, { label: "残代金", value: s.remaining }, { label: "精算金", value: netSigned },
       { label: "預り敷金の承継(相殺)", value: s.depositOffset ? -s.depositOffset : null },
       { label: "諸費用", heading: true }, ...o.costs.map((r) => ({ label: r.label, value: r.amount })),
       { label: "諸費用の合計", value: costTotal }, { label: "当日のお受取額", value: receive },
