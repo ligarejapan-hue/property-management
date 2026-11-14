@@ -266,7 +266,10 @@ export async function runAndUpsertInvestigation(
    * ロック順序を揃えるための素のロックだけを取る。
    */
   scopeSession?: { id: string; role: string },
+  /** 監査ログの備考(自動取得の見回りが「自動取得」の印を付ける)。 */
+  options?: { auditNote?: string },
 ): Promise<InvestigationRecord> {
+  const auditNote = options?.auditNote ?? undefined;
   // ---- Step 1: set status=fetching ----------------------------------------
   const { invId, beforeStatus } = await prisma.$transaction(async (tx) => {
     // ⚠**取得の開始も担当者スコープで守る**（@codex #338 R8）。「課金済みの結果は
@@ -303,6 +306,7 @@ export async function runAndUpsertInvestigation(
         propertyId,
         investigationId: inv.id,
         action: "fetch_requested",
+        note: auditNote,
         beforeJson: existing ? { status: existing.status } : undefined,
         afterJson: { status: "fetching", address: context.address },
         createdBy: userId,
@@ -348,6 +352,7 @@ export async function runAndUpsertInvestigation(
           propertyId,
           investigationId: invId,
           action: "fetch_failed",
+          note: auditNote,
           beforeJson: { status: "fetching" },
           afterJson: { status: "failed", error: errMsg },
           createdBy: userId,
@@ -468,6 +473,7 @@ export async function runAndUpsertInvestigation(
         propertyId,
         investigationId: updated.id,
         action: "fetch_succeeded",
+        note: auditNote,
         beforeJson: { status: beforeStatus },
         afterJson: {
           status: "needs_review",
