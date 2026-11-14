@@ -881,11 +881,17 @@ export class ReinfilibProvider implements InvestigationProvider {
 
   async fetch(query: InvestigationQuery): Promise<ProviderResponse> {
     // 1. 住所 → 緯度経度（物件DBにGPS値があればそちらを優先）
-    const geo = await this.geocode(query.address);
+    const geoRes = await this.geocode(query.address);
+    const geo = geoRes === "unavailable" ? null : geoRes;
     const lat = query.gpsLat ?? geo?.lat ?? null;
     const lng = query.gpsLng ?? geo?.lng ?? null;
 
     if (lat === null || lng === null) {
+      // ⚠サービスの障害(つながらない・HTTP エラー)は「見つからない住所」と別の文にする
+      //   (@codex #723 P1)。自動取得の見回りは前者で休み、後者はその物件の問題として進む。
+      if (geoRes === "unavailable") {
+        throw new Error("住所検索サービス(国土地理院)に接続できませんでした");
+      }
       throw new Error(`住所のジオコーディングに失敗しました: "${query.address}"`);
     }
 
@@ -1031,21 +1037,27 @@ export class ReinfilibProvider implements InvestigationProvider {
     return { "Ocp-Apim-Subscription-Key": this.apiKey };
   }
 
-  /** 国土地理院 住所検索 API。失敗時は null を返す（例外を投げない）。 */
+  /**
+   * 国土地理院 住所検索 API（例外を投げない）。
+   * 見つからない=null／サービスの障害(つながらない・時間切れ・HTTP エラー・壊れた応答)="unavailable"。
+   */
   private async geocode(
     address: string,
-  ): Promise<{ lat: number; lng: number; title: string } | null> {
+  ): Promise<{ lat: number; lng: number; title: string } | null | "unavailable"> {
+    let results: GsiFeature[];
     try {
       const url = `${GSI_GEOCODE_URL}?q=${encodeURIComponent(address)}`;
       const res = await fetch(url, { signal: AbortSignal.timeout(8_000) });
-      if (!res.ok) return null;
-      const results: GsiFeature[] = await res.json();
-      if (!Array.isArray(results) || results.length === 0) return null;
-      const [lng, lat] = results[0].geometry.coordinates; // GeoJSON: [lng, lat]
-      return { lat, lng, title: results[0].properties.title };
+      if (!res.ok) return "unavailable";
+      results = await res.json();
     } catch {
-      return null;
+      return "unavailable";
     }
+    if (!Array.isArray(results) || results.length === 0) return null;
+    const coords = results[0]?.geometry?.coordinates;
+    if (!Array.isArray(coords) || typeof coords[0] !== "number" || typeof coords[1] !== "number") return null;
+    const [lng, lat] = coords; // GeoJSON: [lng, lat]
+    return { lat, lng, title: results[0].properties?.title ?? "" };
   }
 
   /**

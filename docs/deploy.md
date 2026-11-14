@@ -503,6 +503,13 @@ npm run storage:migrate
 - [ ] `providers` に `ksj-zoning: success` が返ること
 - [ ] confirm で DB に反映されること（`zoningDistrict` 等のフィールド）
 
+### 調査情報の自動取得（2026-11-14〜）
+
+- 本番で `REINFOLIB_API_KEY` があると、サーバーの中の見回り(`src/lib/investigation/auto-fetch.ts`・起動の1分後から)が**調査情報を一度も取っていない物件**を1件ずつ順に取る。作成の新しい順なので、新しく作った物件はすぐ入る。取得済み・確認済み・失敗した物件には触らない(取得中のまま15分以上止まった物件だけ取り直す)。
+- 間隔: 1件取ったら3秒・対象が無ければ1分・不動産情報ライブラリが応答しなければ30分休む。結果は手動の「取得」と同じ「要確認」で、調査情報の記録に「自動取得」の印が付く(実行者=物件を作った人)。
+- timer・合言葉・migration は不要(反映すると動く)。止める: app.env に `INVESTIGATION_AUTO_FETCH=off` を足して flock 付き restart。
+- 進み具合: `journalctl -u property-management | grep investigation-auto`(失敗と休みだけを出す)／残りの件数は `property_investigations` に行の無い物件(保管を除く)を数える。
+
 ### 管理機能
 
 - [ ] Admin → ユーザー管理で一覧・詳細が表示されること

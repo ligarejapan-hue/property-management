@@ -12,4 +12,11 @@ export async function register(): Promise<void> {
     "@/lib/storage/local-paths"
   );
   assertUploadRootSafeAtStartup();
+
+  // 調査情報の自動取得(未取得の物件を1件ずつ順に取る見回り・2026-11-14)。
+  // 本番で不動産情報ライブラリの鍵があるときだけ動く(判定は shouldStartAutoFetch)。
+  const { shouldStartAutoFetch, startInvestigationAutoFetch } = await import(
+    "@/lib/investigation/auto-fetch"
+  );
+  if (shouldStartAutoFetch(process.env)) startInvestigationAutoFetch();
 }
