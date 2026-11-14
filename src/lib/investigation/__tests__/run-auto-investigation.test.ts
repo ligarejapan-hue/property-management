@@ -10,7 +10,10 @@ type Row = {
   version: number;
   [k: string]: unknown;
 };
-const db: { row: Row | null; logs: Array<{ id: string; action: string; note?: string }> } = {
+const db: {
+  row: Row | null;
+  logs: Array<{ id: string; action: string; note?: string; beforeJson?: unknown; afterJson?: unknown }>;
+} = {
   row: null,
   logs: [],
 };
@@ -56,8 +59,15 @@ const tx = {
     }),
   },
   propertyInvestigationAuditLog: {
-    create: vi.fn(async ({ data }: { data: { action: string; note?: string } }) => {
-      const log = { id: `log${++seq}`, action: data.action, note: data.note };
+    create: vi.fn(
+      async ({ data }: { data: { action: string; note?: string; beforeJson?: unknown; afterJson?: unknown } }) => {
+      const log = {
+        id: `log${++seq}`,
+        action: data.action,
+        note: data.note,
+        beforeJson: data.beforeJson,
+        afterJson: data.afterJson,
+      };
       db.logs.push(log);
       return { id: log.id };
     }),
@@ -155,6 +165,14 @@ describe("runAutoInvestigation", () => {
     expect(await runAutoInvestigation("p1", "u1", ctx, opts(true))).toBe("outage");
     expect(db.row?.status).toBe("fetching");
     expect(tx.propertyInvestigation.delete).not.toHaveBeenCalledWith(expect.objectContaining({ where: { id: "inv0" } }));
+  });
+
+  it("監査ログに住所の原文を残さない(@codex #723・住所は調査情報の sourceAddress にだけ)", async () => {
+    runInvestigation.mockResolvedValue(okResult);
+    await runAutoInvestigation("p1", "u1", ctx, opts());
+    expect(db.logs.length).toBeGreaterThan(0);
+    expect(JSON.stringify(db.logs)).not.toContain(ctx.address);
+    expect(db.row?.sourceAddress).toBe(ctx.address);
   });
 
   it("取得の処理が例外を出したら、失敗として記録する", async () => {

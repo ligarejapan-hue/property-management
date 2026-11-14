@@ -295,7 +295,6 @@ function buildFetchedFields(
     }
   }
 
-  // eslint-disable-next-line @typescript-eslint/no-unsafe-assignment
   const rawPayloadJson = JSON.parse(JSON.stringify(result));
 
   return {
@@ -316,7 +315,6 @@ function buildFetchedFields(
     autoFetchSummary,
     sourceSummary,
     fieldSourcesJson,
-    // eslint-disable-next-line @typescript-eslint/no-unsafe-assignment
     rawPayloadJson,
     lastFetchError: null,
     fetchedAt: now,
@@ -558,7 +556,9 @@ export async function runAutoInvestigation(
         action: "fetch_requested",
         note: opts.auditNote,
         beforeJson: existing ? { status: existing.status } : undefined,
-        afterJson: { status: "fetching", address: context.address },
+        // ⚠住所の原文は監査ログに残さない(@codex #723・AuditLog に生の個人情報を記録しない)。
+        //   住所は調査情報の行の sourceAddress にだけ保存する。
+        afterJson: { status: "fetching" },
         createdBy: userId,
       },
       select: { id: true },
@@ -624,7 +624,8 @@ export async function runAutoInvestigation(
           action: "fetch_failed",
           note: opts.auditNote,
           beforeJson: { status: "fetching" },
-          afterJson: { status: "failed", error: errMsg },
+          // エラー文は行の lastFetchError にだけ(文に住所が混ざりうるため監査ログには出さない)。
+          afterJson: { status: "failed" },
           createdBy: userId,
         },
       });
