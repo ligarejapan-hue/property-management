@@ -21,6 +21,7 @@ import {
   propertyRecordScopeFilter,
 } from "@/lib/property-record-guard";
 import { runInvestigation } from "./index";
+import { propertyFillFromInvestigation } from "./property-fill";
 
 /**
  * 担当者スコープを**書き込み文自体に畳み込む**ための共通処理（@codex #338 P2）。
@@ -321,6 +322,29 @@ function buildFetchedFields(
   };
 }
 
+/**
+ * 取得した用途地域・建蔽率・容積率を、物件の欄が空のときだけ写す(2026-11-14 発注者
+ * 「確認済みボタンは不要」+「空欄のときだけ自動で写す」)。物件の行のロックは呼び出し側で取っておくこと。
+ * 写すものが無ければ物件の行に書かない(版を上げない)。
+ */
+async function fillPropertyFromFetched(
+  tx: Parameters<Parameters<typeof prisma.$transaction>[0]>[0],
+  propertyId: string,
+  fetched: { zoningDistrict: string | null; buildingCoverageRatio: number | null; floorAreaRatio: number | null },
+): Promise<void> {
+  const cur = await tx.property.findUnique({
+    where: { id: propertyId },
+    select: { zoningDistrict: true, buildingCoverageRatio: true, floorAreaRatio: true },
+  });
+  if (!cur) return;
+  const fill = propertyFillFromInvestigation(cur, fetched);
+  if (!fill) return;
+  await tx.property.update({
+    where: { id: propertyId },
+    data: { ...fill, version: { increment: 1 } },
+  });
+}
+
 // ---------------------------------------------------------------------------
 // Public API
 // ---------------------------------------------------------------------------
@@ -476,6 +500,7 @@ export async function runAndUpsertInvestigation(
       },
       include: WITH_RELATIONS,
     });
+    await fillPropertyFromFetched(tx, propertyId, fields);
 
     await tx.propertyInvestigationAuditLog.create({
       data: {
@@ -632,15 +657,17 @@ export async function runAutoInvestigation(
       return "done";
     }
 
+    const fields = buildFetchedFields(result, context, new Date());
     await tx.propertyInvestigation.update({
       where: { id: claim.invId },
       data: {
         status: "needs_review",
-        ...buildFetchedFields(result, context, new Date()),
+        ...fields,
         fetchVersion: { increment: 1 },
         version: { increment: 1 },
       },
     });
+    await fillPropertyFromFetched(tx, propertyId, fields);
     await tx.propertyInvestigationAuditLog.create({
       data: {
         propertyId,

@@ -18,6 +18,13 @@ const db: {
   logs: [],
 };
 let seq = 0;
+// 物件の欄(販売図面に出る用途地域・建蔽率・容積率)
+const prop: { zoningDistrict: string | null; buildingCoverageRatio: number | null; floorAreaRatio: number | null; version: number } = {
+  zoningDistrict: null,
+  buildingCoverageRatio: null,
+  floorAreaRatio: null,
+  version: 1,
+};
 
 function applyData(row: Row, data: Record<string, unknown>) {
   for (const [k, v] of Object.entries(data)) {
@@ -31,6 +38,16 @@ function applyData(row: Row, data: Record<string, unknown>) {
 }
 
 const tx = {
+  property: {
+    findUnique: vi.fn(async () => ({ ...prop })),
+    update: vi.fn(async ({ data }: { data: Record<string, unknown> }) => {
+      for (const [k, v] of Object.entries(data)) {
+        if (k === "version") prop.version += 1;
+        else (prop as Record<string, unknown>)[k] = v;
+      }
+      return { ...prop };
+    }),
+  },
   propertyInvestigation: {
     findUnique: vi.fn(async () => (db.row ? { ...db.row } : null)),
     upsert: vi.fn(async ({ create, update }: { create: Record<string, unknown>; update: Record<string, unknown> }) => {
@@ -102,6 +119,8 @@ const stuckBefore = new Date(Date.now() - 15 * 60_000);
 const opts = (isOutage = false) => ({ stuckBefore, auditNote: "自動取得", isOutage: () => isOutage });
 
 beforeEach(() => {
+  Object.assign(prop, { zoningDistrict: null, buildingCoverageRatio: null, floorAreaRatio: null, version: 1 });
+  tx.property.update.mockClear();
   db.row = null;
   db.logs = [];
   runInvestigation.mockReset();
@@ -173,6 +192,33 @@ describe("runAutoInvestigation", () => {
     expect(db.logs.length).toBeGreaterThan(0);
     expect(JSON.stringify(db.logs)).not.toContain(ctx.address);
     expect(db.row?.sourceAddress).toBe(ctx.address);
+  });
+
+  it("取れた用途地域を、物件の欄が空なら写す(確認済みボタンを無くしたため・2026-11-14)", async () => {
+    runInvestigation.mockResolvedValue(okResult);
+    await runAutoInvestigation("p1", "u1", ctx, opts());
+    expect(prop.zoningDistrict).toBe("第一種住居地域");
+    expect(prop.version).toBe(2);
+  });
+
+  it("物件の欄に人が入れた値があれば上書きせず、物件の行に書き込まない", async () => {
+    prop.zoningDistrict = "商業地域";
+    runInvestigation.mockResolvedValue(okResult);
+    await runAutoInvestigation("p1", "u1", ctx, opts());
+    expect(prop.zoningDistrict).toBe("商業地域");
+    expect(tx.property.update).not.toHaveBeenCalled();
+  });
+
+  it("相手が落ちていたとき・途中で手動が入ったときは物件の欄に写さない", async () => {
+    runInvestigation.mockResolvedValue(okResult);
+    await runAutoInvestigation("p1", "u1", ctx, opts(true));
+    expect(prop.zoningDistrict).toBeNull();
+    runInvestigation.mockImplementation(async () => {
+      applyData(db.row!, { version: { increment: 1 } });
+      return okResult;
+    });
+    await runAutoInvestigation("p1", "u1", ctx, opts());
+    expect(prop.zoningDistrict).toBeNull();
   });
 
   it("取得の処理が例外を出したら、失敗として記録する", async () => {

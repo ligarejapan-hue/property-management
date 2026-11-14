@@ -19,7 +19,6 @@ import {
   fetchPropertyInvestigation,
   triggerPropertyInvestigation,
   patchPropertyInvestigation,
-  confirmPropertyInvestigation,
   type PropertyInvestigationData,
 } from "@/lib/api-client";
 
@@ -46,7 +45,7 @@ const STATUS_CONFIG: Record<
     icon: Loader2,
   },
   needs_review: {
-    label: "要確認",
+    label: "取得済み",
     badge: "bg-amber-100 text-amber-800 dark:bg-amber-500/20 dark:text-amber-300",
     icon: AlertTriangle,
   },
@@ -220,7 +219,6 @@ export default function InvestigationTab({ propertyId }: InvestigationTabProps) 
   const [editMode, setEditMode] = useState(false);
   const [editValues, setEditValues] = useState<Record<string, string>>({});
   const [saving, setSaving] = useState(false);
-  const [confirming, setConfirming] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [message, setMessage] = useState<{ text: string; type: "success" | "error" } | null>(null);
   const [showAuditLog, setShowAuditLog] = useState(false);
@@ -292,20 +290,6 @@ export default function InvestigationTab({ propertyId }: InvestigationTabProps) 
     }
   };
 
-  const handleConfirm = async () => {
-    setConfirming(true);
-    try {
-      const data = await confirmPropertyInvestigation(propertyId);
-      setInvestigation(data);
-      showMsg("調査情報を確認済みにしました");
-      setEditMode(false);
-    } catch (err) {
-      showMsg(err instanceof Error ? err.message : "確認に失敗しました", "error");
-    } finally {
-      setConfirming(false);
-    }
-  };
-
   if (loading) {
     return (
       <div className="flex items-center justify-center py-10">
@@ -317,7 +301,6 @@ export default function InvestigationTab({ propertyId }: InvestigationTabProps) 
   const status = investigation?.status ?? "draft";
   const statusCfg = STATUS_CONFIG[status] ?? STATUS_CONFIG["draft"]!;
   const StatusIcon = statusCfg.icon;
-  const isConfirmed = status === "confirmed";
 
   // reinfolib エンドポイント別 meta（selectionReason ベースの表示分岐に使用）
   const reinfolibMeta = getReinfolibProviderMeta(investigation?.rawPayloadJson ?? null);
@@ -358,7 +341,7 @@ export default function InvestigationTab({ propertyId }: InvestigationTabProps) 
             調査情報を取得
           </Button>
 
-          {!isConfirmed && !editMode && investigation && (
+          {!editMode && investigation && (
             <Button variant="secondary" size="sm" onClick={handleStartEdit}>
               <Edit className="h-3.5 w-3.5" />
               編集
@@ -549,34 +532,8 @@ export default function InvestigationTab({ propertyId }: InvestigationTabProps) 
             <Save className="h-4 w-4" />
             保存
           </Button>
-          <Button
-            variant="success"
-            onClick={handleConfirm}
-            disabled={confirming || saving}
-            loading={confirming}
-            loadingLabel="確認済みにする"
-          >
-            <CheckCircle2 className="h-4 w-4" />
-            確認済みにする
-          </Button>
           <Button variant="secondary" onClick={() => setEditMode(false)}>
             キャンセル
-          </Button>
-        </div>
-      )}
-
-      {/* --- Confirm button (display mode, not yet confirmed) --- */}
-      {!editMode && !isConfirmed && investigation && (
-        <div className="flex justify-end pt-1">
-          <Button
-            variant="success"
-            onClick={handleConfirm}
-            disabled={confirming}
-            loading={confirming}
-            loadingLabel="確認済みにする"
-          >
-            <CheckCircle2 className="h-4 w-4" />
-            確認済みにする
           </Button>
         </div>
       )}

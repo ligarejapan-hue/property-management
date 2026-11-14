@@ -2,8 +2,6 @@
 
 import { useState } from "react";
 import {
-  AlertTriangle,
-  CheckCircle2,
   Send,
   Ban,
   Pause,
@@ -48,7 +46,6 @@ export type PropertyActionState = ReturnType<typeof usePropertyAction>;
 
 interface ActionBarProps {
   dmStatus: string;
-  investigationConfirmedAt: string | null;
   /** いまの担当者が自分か。自分ならすでに担当なので「自分を担当にする」を出さない。 */
   assignedToMe: boolean;
   action: PropertyActionState;
@@ -139,30 +136,6 @@ export default function ActionBar(props: ActionBarProps) {
           >
             <UserCheck className="h-3.5 w-3.5" />
             自分を担当にする
-          </Button>
-        </div>
-      )}
-
-      {/* 調査が未確認の帯。確かめたら帯の中の「確認した」で消す(画面すっきり化 第3回で
-          別にあった「調査を確認する」ボタンをこの帯へまとめた)。 */}
-      {!props.investigationConfirmedAt && (
-        <div className="mt-3 flex flex-wrap items-center gap-2 rounded-md border border-amber-200 bg-amber-50 px-4 py-2 dark:border-amber-800 dark:bg-amber-950/40">
-          <AlertTriangle className="h-4 w-4 text-amber-600 dark:text-amber-400" />
-          <span className="text-sm text-amber-800 dark:text-amber-300">
-            調査情報が未確認です。最新の情報を取得してください。
-          </span>
-          <Button
-            variant="success"
-            size="sm"
-            onClick={() => handleAction("confirm_investigation")}
-            disabled={loading !== null}
-            loading={loading === "confirm_investigation"}
-            loadingLabel="確認した"
-            aria-label="調査を確認する"
-            className="ml-auto"
-          >
-            <CheckCircle2 className="h-3.5 w-3.5" />
-            確認した
           </Button>
         </div>
       )}

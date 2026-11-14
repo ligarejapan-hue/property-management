@@ -92,20 +92,11 @@ describe("画面すっきり化 第3回(発注者決定 2026-10-16)", () => {
     expect(render({ assignedToMe: false })).toContain("自分を担当にする");
   });
 
-  it("調査の確認は、未確認の帯の中の「確認した」1つだけ(別のボタンは並べない)", () => {
-    const html = render({ investigationConfirmedAt: null });
-    expect(html).toContain("調査情報が未確認です。最新の情報を取得してください。");
-    expect(html).toContain("確認した");
-    expect(html).toContain('aria-label="調査を確認する"');
-    // 帯とボタンが同じ枠の中にある(ボタンが帯より前の別の行に出ない)。
-    const band = html.indexOf("調査情報が未確認です");
-    expect(html.indexOf("確認した")).toBeGreaterThan(band);
-  });
-
-  it("確認済みなら帯もボタンも出ない", () => {
-    const html = render({ investigationConfirmedAt: "2026-08-01T00:00:00.000Z" });
+  it("調査情報の未確認の帯と「確認した」は出さない(自動取得のため・2026-11-14 発注者)", () => {
+    const html = render({});
     expect(html).not.toContain("調査情報が未確認です");
     expect(html).not.toContain("確認した");
+    expect(html).not.toContain('aria-label="調査を確認する"');
     // DMの切替は残る。
     expect(html).toContain("送付可");
   });

@@ -1051,7 +1051,6 @@ export default function PropertyDetailPage({
       {/* Action bar */}
       <ActionBar
         dmStatus={property.dmStatus}
-        investigationConfirmedAt={property.investigationConfirmedAt}
         // ⚠自分が誰か分からないうち(セッション読み込み中)は「担当にする」を出しておく。
         assignedToMe={myUserId !== null && property.assignedTo === myUserId}
         action={propertyAction}

@@ -80,9 +80,9 @@ describe("properties/[id]/page.tsx 品質警告セクション (§8-6 C2)", () =
     expect(src).toContain("issue.severity");
   });
 
-  // --- 既存の「調査未確認」バッジとの共存 ---
-  it("既存の investigationConfirmedAt チェックは残っている", () => {
-    expect(src).toContain("investigationConfirmedAt");
+  // --- 「調査未確認」の帯は無くした(自動取得のため・2026-11-14 発注者) ---
+  it("ActionBar に調査の確認の有無を渡さない", () => {
+    expect(src).not.toContain("investigationConfirmedAt={");
   });
 
   // --- useState で qualityIssues を管理している ---
