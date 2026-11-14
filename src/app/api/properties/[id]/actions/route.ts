@@ -61,7 +61,7 @@ const ACTIONS: Record<string, ActionDef> = {
   set_dm_send: {
     requiredPermission: { resource: "property", action: "write" },
     execute: async () => ({
-      updatedFields: { dmStatus: "send" },
+      updatedFields: { dmStatus: "send", dmOwnerPending: false },
       message: "DM送付可に設定しました",
     }),
   },
@@ -69,7 +69,7 @@ const ACTIONS: Record<string, ActionDef> = {
   set_dm_no_send: {
     requiredPermission: { resource: "property", action: "write" },
     execute: async () => ({
-      updatedFields: { dmStatus: "no_send" },
+      updatedFields: { dmStatus: "no_send", dmOwnerPending: false },
       message: "DM送付不可に設定しました",
     }),
   },
@@ -77,7 +77,7 @@ const ACTIONS: Record<string, ActionDef> = {
   set_dm_hold: {
     requiredPermission: { resource: "property", action: "write" },
     execute: async () => ({
-      updatedFields: { dmStatus: "hold" },
+      updatedFields: { dmStatus: "hold", dmOwnerPending: false },
       message: "DM未判断に設定しました",
     }),
   },

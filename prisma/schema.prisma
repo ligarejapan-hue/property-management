@@ -492,7 +492,8 @@ model Property {
   dmUndeliverableAt  DateTime?                  @map("dm_undeliverable_at")
   /// 所有者待ちの印(2026-11-14 発注者決定)。所有者が入っていないので DM判断を「未判断」にしている物件に立てる。
   /// 所有者が入ったら見回り(src/lib/dm-owner-judge)が送付可/送付不可に仕分けて下ろす。人が自分で「未判断」にした物件と分けるための印。
-  dmOwnerPending     Boolean                    @default(false) @map("dm_owner_pending")
+  /// 新しく作った物件は印ありで始まる(既定 true・作ってすぐ所有者が入っても仕分けられるように)。人が DM判断を選ぶと下ろす。
+  dmOwnerPending     Boolean                    @default(true) @map("dm_owner_pending")
 
   // Relations
   creator            User                       @relation("PropertyCreatedBy", fields: [createdBy], references: [id])

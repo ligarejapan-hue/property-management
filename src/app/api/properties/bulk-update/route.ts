@@ -96,6 +96,8 @@ export async function POST(request: NextRequest) {
       where: { id: { in: accessibleIds } },
       data: {
         ...updateFields,
+        // 人が DM判断を選んだら所有者待ちの印を下ろす(自動の仕分けで上書きしない・@codex #728)
+        ...(updateFields.dmStatus !== undefined ? { dmOwnerPending: false } : {}),
         version: { increment: 1 },
       },
     });

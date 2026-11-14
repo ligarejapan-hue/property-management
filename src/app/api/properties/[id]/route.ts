@@ -630,6 +630,10 @@ export async function PATCH(
         },
         data: {
           ...persistedFields,
+          // 人が DM判断を変えたら所有者待ちの印を下ろす(自動の仕分けで上書きしない・@codex #728)
+          ...(persistedFields.dmStatus !== undefined && persistedFields.dmStatus !== current.dmStatus
+            ? { dmOwnerPending: false }
+            : {}),
           version: { increment: 1 },
         },
       });

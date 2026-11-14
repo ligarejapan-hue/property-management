@@ -41,3 +41,33 @@ describe("所有者が入っていない物件は手で「送付可」にでき�
     expect(patch).toMatch(/updateFields\.dmStatus === "send" && current\.dmStatus !== "send"[\s\S]{0,120}assertOwnersForDmSend\(prisma, \[id\]\)/);
   });
 });
+
+describe("人が DM判断を選んだら所有者待ちの印を下ろす(@codex #728 P2)", () => {
+  it("ワンタッチの DM判断3つは印を下ろす", () => {
+    const actions = read("src/app/api/properties/[id]/actions/route.ts");
+    for (const v of ["send", "no_send", "hold"]) {
+      expect(actions).toContain(`updatedFields: { dmStatus: "${v}", dmOwnerPending: false }`);
+    }
+  });
+  it("まとめて変更で DM判断を変えたら印を下ろす", () => {
+    const bulk = read("src/app/api/properties/bulk-update/route.ts");
+    expect(bulk).toMatch(/\.\.\.\(updateFields\.dmStatus !== undefined \? \{ dmOwnerPending: false \} : \{\}\)/);
+  });
+  it("物件の編集で DM判断を変えたら印を下ろす(変えていなければそのまま)", () => {
+    const patch = read("src/app/api/properties/[id]/route.ts");
+    expect(patch).toMatch(
+      /\.\.\.\(persistedFields\.dmStatus !== undefined && persistedFields\.dmStatus !== current\.dmStatus\s*\?\s*\{ dmOwnerPending: false \}\s*:\s*\{\}\)/,
+    );
+  });
+});
+
+describe("新しく作った物件は所有者待ちの印ありで始まる(@codex #728 P1)", () => {
+  it("列の既定は true。ただし今ある行は false で足してから既定を変える", () => {
+    const sql = read("prisma/migrations/20261114000000_property_dm_owner_pending/migration.sql");
+    const add = sql.indexOf('ADD COLUMN "dm_owner_pending" BOOLEAN NOT NULL DEFAULT false');
+    const setDefault = sql.indexOf('ALTER COLUMN "dm_owner_pending" SET DEFAULT true');
+    expect(add).toBeGreaterThan(-1);
+    expect(setDefault).toBeGreaterThan(add);
+    expect(read("prisma/schema.prisma")).toMatch(/dmOwnerPending\s+Boolean\s+@default\(true\)/);
+  });
+});
