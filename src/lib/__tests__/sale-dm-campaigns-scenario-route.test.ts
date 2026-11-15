@@ -20,6 +20,18 @@ vi.mock("@/lib/api-helpers", () => {
   };
 });
 vi.mock("@/lib/audit", () => ({ writeAuditLog: vi.fn() }));
+// 同じ所有者あての2通目(second-letter.ts・2026-11-16)。既定=2通目なし。どれが2通目かの決まりは second-letter.test.ts が見る(ここは受け取った結果の使い方)。
+const sl = vi.hoisted(() => ({
+  // 既定=どの宛先も2通目でない。テストは「2通目にする物件の id」を secondProps に入れる。
+  secondProps: new Set<string>(),
+  resolve: vi.fn(async (_tx: unknown, letters: ReadonlyArray<{ propertyId: string; ownerIds: readonly string[]; eligible: boolean }>) => letters.map(() => false)),
+  demote: vi.fn(async (ids: readonly string[], _by?: string) => ids.length),
+}));
+vi.mock("@/lib/dm-batch/second-letter", async (orig) => ({
+  ...(await orig<typeof import("@/lib/dm-batch/second-letter")>()),
+  resolveSecondLetters: sl.resolve,
+  demoteSecondLetterProperties: sl.demote,
+}));
 
 const m = vi.hoisted(() => {
   const calls: string[] = [];

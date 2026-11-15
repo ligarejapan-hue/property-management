@@ -143,6 +143,9 @@ const VERSIONED: Record<string, string> = {
     "(行ロック後に読み直し・編集中の鍵の間は見送り・where に version)",
   "src/lib/registry-owner-check/service.ts:516":
     "property.dmStatus hold→send(謄本の名義の確認で「送付可に戻す」・2026-11-08)+version increment",
+  "src/lib/dm-batch/second-letter.ts:345":
+    "property.dmStatus send→no_send(同じ所有者あての2通目で宛先が残らなかった物件・2026-11-16)+version increment" +
+    "(物件行ロック後・編集の鍵があれば書かない)",
 };
 
 /**

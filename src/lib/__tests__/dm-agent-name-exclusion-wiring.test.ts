@@ -4,7 +4,7 @@ import { join } from "node:path";
 import { describe, expect, it } from "vitest";
 
 import { sanitizeAuditDetail } from "@/lib/audit-log-detail-safety";
-import { dmExclusionCountsText } from "@/lib/dm-batch/exclusion-notice";
+import { dmExclusionCountsText, dmSecondLetterDemotedText } from "@/lib/dm-batch/exclusion-notice";
 
 /**
  * 業者(名簿・国交省の一覧)と同じ名前の所有者には DM を送らない(2026-11-09 発注者指示)。
@@ -92,6 +92,11 @@ describe("件数は理由ごとに残す", () => {
   });
   it("お知らせの文は理由ごと・0件の理由は書かない", () => {
     expect(dmExclusionCountsText(0, 0)).toBeNull();
+    // 同じ所有者あての2通目(2026-11-16)。
+    expect(dmExclusionCountsText(0, 0, 0, 3)).toBe("同じ所有者が登録の新しい別の物件をお持ちの 3 件");
+    expect(dmExclusionCountsText(2, 0, 0, 1)).toBe("拒否・宛先不明の反響が付いた 2 件と、同じ所有者が登録の新しい別の物件をお持ちの 1 件");
+    expect(dmSecondLetterDemotedText(0)).toBeNull();
+    expect(dmSecondLetterDemotedText(2)).toBe("宛先が残らなかった 2 件の物件は、DM判断を「送付不可」にしました(同じ所有者へ手紙が重ならないように)。");
     expect(dmExclusionCountsText(2, 0)).toBe("拒否・宛先不明の反響が付いた 2 件");
     expect(dmExclusionCountsText(0, 1)).toBe("所有者が業者と同じ名前の 1 件");
     expect(dmExclusionCountsText(2, 1)).toBe("拒否・宛先不明の反響が付いた 2 件と、所有者が業者と同じ名前の 1 件");

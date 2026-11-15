@@ -14,6 +14,18 @@ vi.mock("@/lib/api-helpers", () => {
   };
 });
 vi.mock("@/lib/audit", () => ({ writeAuditLog: vi.fn() }));
+// 同じ所有者あての2通目(second-letter.ts・2026-11-16)。既定=2通目なし。どれが2通目かの決まりは second-letter.test.ts が見る(ここは受け取った結果の使い方)。
+const sl = vi.hoisted(() => ({
+  // 既定=どの宛先も2通目でない。テストは「2通目にする物件の id」を secondProps に入れる。
+  secondProps: new Set<string>(),
+  resolve: vi.fn(async (_tx: unknown, letters: ReadonlyArray<{ propertyId: string; ownerIds: readonly string[]; eligible: boolean }>) => letters.map(() => false)),
+  demote: vi.fn(async (ids: readonly string[], _by?: string) => ids.length),
+}));
+vi.mock("@/lib/dm-batch/second-letter", async (orig) => ({
+  ...(await orig<typeof import("@/lib/dm-batch/second-letter")>()),
+  resolveSecondLetters: sl.resolve,
+  demoteSecondLetterProperties: sl.demote,
+}));
 // 下書き保存の引数(特に model)を検証するため tx 内の create を共有スパイにする。
 const { draftCreate, draftOwnerCreateMany, txPropertyOwnerFindMany, txDmLogFindMany, txCampaignUpdate, txQueryRaw } = vi.hoisted(() => ({
   draftCreate: vi.fn(),
@@ -631,6 +643,59 @@ describe("POST /campaigns — 拒否・宛先不明の宛先を保存しない",
     expect(upd.data.filterSnapshot.__result).not.toHaveProperty("lpMissingScenarios");
     expect(upd.data.filterSnapshot.__result).not.toHaveProperty("scenarioCounts");
     expect(json).toMatchObject({ blankBodyCount: 0, lpMissingScenarios: [], scenarioCounts: {} });
+  });
+
+  // 2通目にする宛先を所有者で指す(どれが2通目かの決まりは second-letter.test.ts)。
+  const secondFor = (...ownerIds: string[]) =>
+    sl.resolve.mockImplementationOnce(async (_tx, letters) =>
+      letters.map((l) => l.eligible && l.ownerIds.some((o) => ownerIds.includes(o))),
+    );
+  it("★同じ所有者あての2通目は保存せず excludedSecondLetter に数え、宛先が残らない物件は「送付不可」にする(2026-11-16)", async () => {
+    setup();
+    // o1 は、登録の新しい別の物件 pZ を送付可で持っている=pA の宛先は2通目。
+    secondFor("o1");
+    const res = await post();
+    expect(res.status).toBe(200);
+    const json = await res.json();
+    expect(json.excludedSecondLetter).toBe(1);
+    expect(json.demotedSecondLetter).toBe(1);
+    expect(json.saved).toBe(1);
+    expect(draftCreate).toHaveBeenCalledTimes(1);
+    expect(draftCreate.mock.calls[0][0].data.propertyId).toBe("pB");
+    expect(sl.demote).toHaveBeenCalledWith(["pA"], "u1");
+    const detail = (writeAuditLog as ReturnType<typeof vi.fn>).mock.calls[0][0].detail;
+    expect(detail.excludedSecond).toBe(1);
+    expect(detail.demotedSecond).toBe(1);
+    const upd = txCampaignUpdate.mock.calls[0][0] as { data: { filterSnapshot: { __result: Record<string, unknown> } } };
+    expect(upd.data.filterSnapshot.__result.excludedSecondLetter).toBe(1);
+  });
+
+  it("★宛先がすべて2通目なら発送は作らず(400)、その物件は「送付不可」にする", async () => {
+    setup();
+    secondFor("o1", "o2");
+    const res = await post();
+    expect(res.status).toBe(400);
+    const json = await res.json();
+    expect(json.error.code).toBe("ALL_EXCLUDED_SECOND_LETTER");
+    expect(json.error.message).toContain("登録の新しい別の物件");
+    expect(draftCreate).not.toHaveBeenCalled();
+    expect((prismaMock as never as { dmCampaign: { delete: ReturnType<typeof vi.fn> } }).dmCampaign.delete).toHaveBeenCalled();
+    expect(sl.demote).toHaveBeenCalledTimes(1);
+    expect(sl.demote).toHaveBeenCalledWith(["pA", "pB"], "u1");
+  });
+
+  it("★拒否にも当たる宛先は拒否で数える(2通目には数えない・その物件は変えない)", async () => {
+    setup();
+    txDmLogFindMany.mockResolvedValueOnce([{ ownerId: "o1", propertyId: null, logOwners: [] }]);
+    secondFor("o1");
+    const res = await post();
+    expect(res.status).toBe(200);
+    const json = await res.json();
+    expect(json.excludedTerminal).toBe(1);
+    expect(json.excludedSecondLetter).toBe(0);
+    expect(sl.demote).toHaveBeenCalledWith([], "u1");
+    // 拒否で外れた宛先は「外れている」と渡す(2通目にも、ほかの宛先を外す理由にもならない)。
+    expect(sl.resolve.mock.calls[0][1].map((l) => [l.propertyId, l.eligible])).toEqual([["pA", false], ["pB", true]]);
   });
 
   it("共有者連関(logOwners)経由の terminal でも外れる=所有者横断(別物件での拒否を含む)", async () => {
