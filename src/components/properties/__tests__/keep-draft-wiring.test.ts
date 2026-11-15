@@ -107,6 +107,14 @@ describe("物件の編集の小窓: 作業中の入力を消さない", () => {
     expect((src.match(/onClick=\{handleCloseKeepDraft\}/g) ?? []).length).toBe(1);
     expect(src).toMatch(/onClick=\{handleCloseKeepDraft\}[\s\S]{0,600}<X className/);
   });
+  it("★版が違う控えは、重ねたうえで帯で知らせる(2026-11-15)", () => {
+    expect(src).toMatch(/const showRebasedNotice = !draftDiscarded && isRebasedDraft\(restored\?\.data \?\? null, property\.id, property\.version\);/);
+    expect(src).toMatch(/\{showRebasedNotice && <DraftRebasedNotice onDiscard=\{handleDiscardDraft\} \/>\}/);
+  });
+  it("★版の行き違いで保存できなかったときは、入力が残っていることと戻り方を添える", () => {
+    expect(src).toMatch(/setError\(code === "VERSION_CONFLICT" \? `\$\{message\}\$\{VERSION_CONFLICT_HINT\}` : message\);/);
+    expect(src).toContain("入力は残っています。右上の×で閉じて「物件を編集」を開き直すと、最新の内容に入力を重ねて続けられます。");
+  });
   it("帯", () => {
     expect(src).toMatch(/<DraftRestoredNotice/);
     expect(src).toMatch(/\{editDraft\.tooLarge && <DraftTooLargeNotice kind="input" \/>\}/);
@@ -119,15 +127,22 @@ describe("物件詳細: 読み込み完了時に編集の小窓を開き直す",
     expect(src).toMatch(/if \(applied && editDraftCheckedRef\.current !== id\) \{/);
     expect(src).toMatch(/decideEditDraftOnLoad\(/);
     // 読み込みでは「開き直したい」と覚えるだけ。開くのは物件の書き込み権限を確かめてから(@codex P2)。
-    expect(src).toMatch(/if \(decision === "reopen"\) setEditDraftReopenPending\(true\);/);
+    // 版が違っても開き直す(控えは捨てない・小窓が「ほかで更新がありました」と知らせる・2026-11-15)。
+    expect(src).toMatch(/if \(decision === "reopen" \|\| decision === "stale"\) setEditDraftReopenPending\(true\);/);
     expect(src).not.toMatch(/if \(decision === "reopen"\) setShowEditForm\(true\);/);
     expect(src).toMatch(/if \(editDraftReopenPending && canWriteProperty\) \{\n\s*setEditDraftReopenPending\(false\);\n\s*setShowEditForm\(true\);\n\s*\}/);
-    expect(src).toMatch(/clearDraft\(editKey\);\n\s*setEditDraftStale\(true\);/);
+    // ⚠版が違うからといって控えを消さない(作成直後の自動取得でも版は変わる=人の入力が消えていた)。
+    expect(src).not.toMatch(/clearDraft\(editKey\)/);
   });
-  it("別の物件へ移ったら、前の物件の開き直し・版違いの帯を引き継がない(@codex P2)", () => {
-    expect(src).toMatch(/useEffect\(\(\) => \{[^}]*?setShowEditForm\(false\);\n\s*setEditDraftStale\(false\);\n\s*setEditDraftReopenPending\(false\);[^}]*?\}, \[id\]\);/);
+  it("別の物件へ移ったら、前の物件の開き直しを引き継がない(@codex P2)", () => {
+    expect(src).toMatch(/useEffect\(\(\) => \{[^}]*?setShowEditForm\(false\);\n\s*setEditDraftReopenPending\(false\);[^}]*?\}, \[id\]\);/);
   });
-  it("版違いの帯を出す", () => {
-    expect(src).toMatch(/\{editDraftStale && <DraftStaleNotice onDismiss=\{\(\) => setEditDraftStale\(false\)\} \/>\}/);
+  it("★「物件を編集」は、開く前に最新の内容を取り直す(古い版のまま開かない・2026-11-15)", () => {
+    expect(src).toMatch(/const openEditForm = useCallback\(async \(\) => \{[\s\S]*?await refreshPropertyQuietly\(\);[\s\S]*?setShowEditForm\(true\);[\s\S]*?\}, \[refreshPropertyQuietly\]\);/);
+    // 取り直しに失敗しても開く(finally で開く)。
+    expect(src).toMatch(/\} finally \{\n\s*openingEditRef\.current = false;\n\s*setShowEditForm\(true\);\n\s*\}/);
+    // 人が押して開く入口(ボタン・基本情報タブ)は、どちらも openEditForm を通る。
+    expect((src.match(/void openEditForm\(\)/g) ?? []).length).toBe(2);
+    expect(src).not.toMatch(/onClick=\{\(\) => setShowEditForm\(true\)\}/);
   });
 });

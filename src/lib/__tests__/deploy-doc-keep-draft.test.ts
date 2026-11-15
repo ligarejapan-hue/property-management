@@ -57,12 +57,15 @@ describe("入力の途中をとっておく(2026-10): 資料の文言が画面�
     }
   });
 
-  it("物件の編集は、ほかの方が保存すると続きを使えない", () => {
-    const stale = "ほかの方が保存したため、入力途中の内容は使えませんでした。";
-    expect(noticesSrc).toContain(stale);
-    expect(propertyPageSrc).toContain("<DraftStaleNotice");
-    expect(guideSrc).toContain(stale);
-    expect(manualSrc).toContain(stale);
+  it("物件の編集は、離れている間に物件が更新されていても続きが残る(2026-11-15)", () => {
+    // 前は「ほかの方が保存したため、入力途中の内容は使えませんでした。」と出て入力を捨てていた。
+    const kept = "ほかで更新がありました。入力は残しています";
+    expect(noticesSrc).toContain(kept);
+    expect(guideSrc).toContain(kept);
+    expect(manualSrc).toContain(kept);
+    for (const src of [noticesSrc, propertyPageSrc, guideSrc, manualSrc]) {
+      expect(src).not.toContain("入力途中の内容は使えませんでした");
+    }
   });
 
   it("Excelは全部登録し終えても結果の表が残る(登録の後に控えを消さない)", () => {

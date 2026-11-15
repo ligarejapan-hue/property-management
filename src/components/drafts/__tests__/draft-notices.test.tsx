@@ -3,7 +3,7 @@ import { renderToStaticMarkup } from "react-dom/server";
 import {
   DraftPendingNotice,
   DraftRestoredNotice,
-  DraftStaleNotice,
+  DraftRebasedNotice,
   DraftTooLargeNotice,
   formatDraftTime,
 } from "../draft-notices";
@@ -27,10 +27,11 @@ describe("帯", () => {
     expect(html).toContain("前回、登録の途中で画面を離れました。登録されたかどうかを物件一覧で確かめてください。");
     expect(html).toContain("確かめたので続ける");
   });
-  it("版違いの帯", () => {
-    const html = renderToStaticMarkup(<DraftStaleNotice onDismiss={() => {}} />);
-    expect(html).toContain("ほかの方が保存したため、入力途中の内容は使えませんでした。");
-    expect(html).toContain("閉じる");
+  it("★控えのあとに物件が更新されていたときの帯(入力は捨てない・2026-11-15)", () => {
+    const html = renderToStaticMarkup(<DraftRebasedNotice onDiscard={() => {}} />);
+    expect(html).toContain("ほかで更新がありました。入力は残しています（変えた欄だけ、最新の内容に重ねました）。内容を確かめてから保存してください。");
+    expect(html).toContain("最初からやり直す");
+    expect(html).toContain('data-testid="draft-rebased-notice"');
   });
   it("大きすぎの帯", () => {
     expect(renderToStaticMarkup(<DraftTooLargeNotice />)).toContain("このファイルは大きいため、別の画面へ移ると消えます。");
