@@ -119,7 +119,7 @@ describe("applyOwnerCorporate(法人番号の反映)のヘッダ", () => {
     //   直接渡している。「423の封筒 → toApiError → code/message → 組み立て」の
     //   実配線は登記ポップアップ側のテストにしか無かった(このパネルには無かった)。
     //   ここで実際に fetch → apiFetch(toApiError) → 例外 という経路を1本通す。
-    const since = new Date(2026, 8, 22, 14, 0).toISOString();
+    const since = "2026-09-22T05:00:00.000Z" /* 日本時間 14:00(実行する場所の時間帯に頼らない) */;
     stubFetchByUrl({
       "/api/owners/o1/corporate-apply": async () =>
         jsonResponse({ error: { code: "EDIT_LOCKED", message: "他の画面で編集中です" } }, 423),
@@ -191,7 +191,7 @@ describe("handleCorporateApplyEditLockedError(鍵を持たない入口として�
   });
 
   it("EDIT_LOCKED + 状態窓口が保持者行を返せば、氏名+時刻の文を組み立てて表示する(仕様6.5)", async () => {
-    const since = new Date(2026, 8, 22, 14, 0).toISOString();
+    const since = "2026-09-22T05:00:00.000Z" /* 日本時間 14:00(実行する場所の時間帯に頼らない) */;
     stubFetchByUrl({
       "/api/edit-locks/status": async () =>
         jsonResponse({
@@ -252,7 +252,7 @@ describe("handleCorporateApplyEditLockedError(鍵を持たない入口として�
             resourceType: "owner",
             resourceId: "o1",
             state: "held_by_other",
-            since: new Date(2026, 8, 22, 14, 0).toISOString(),
+            since: "2026-09-22T05:00:00.000Z" /* 日本時間 14:00(実行する場所の時間帯に頼らない) */,
             holderName: "太郎",
           },
         ],
@@ -263,7 +263,7 @@ describe("handleCorporateApplyEditLockedError(鍵を持たない入口として�
   });
 
   it("後着の同文言のrefusalは、先着の古い組み立てに上書きされない(caller-owned sequence number・review round3 K)", async () => {
-    const since = new Date(2026, 8, 22, 14, 0).toISOString();
+    const since = "2026-09-22T05:00:00.000Z" /* 日本時間 14:00(実行する場所の時間帯に頼らない) */;
     const holderRow = (name: string) => ({
       locks: [
         {
@@ -315,7 +315,7 @@ describe("handleCorporateApplyEditLockedError(鍵を持たない入口として�
     //   mutationで確認済み)。ここでは実際に2つの独立したパネルインスタンス
     //   (別々のownerId・別々のseqRef)を模して2回呼び、片方の世代が進んでも
     //   もう片方に影響しないことを検証する。
-    const since = new Date(2026, 8, 22, 14, 0).toISOString();
+    const since = "2026-09-22T05:00:00.000Z" /* 日本時間 14:00(実行する場所の時間帯に頼らない) */;
     const resolversA: Array<(res: Response) => void> = [];
     const resolversB: Array<(res: Response) => void> = [];
     let callA = 0;
