@@ -20,6 +20,7 @@ import {
   handleApiError,
   apiResponse,
 } from "@/lib/api-helpers";
+import { loadOwnerPropertyLinkInfo, withOwnerPropertyLink } from "@/lib/owner-property-link-data";
 import { hasPermission, maskValue } from "@/lib/permissions";
 import { writeAuditLog } from "@/lib/audit";
 import {
@@ -133,9 +134,15 @@ export async function GET(request: NextRequest) {
       detail: { type, resultCount: page.length, summary, hasNextPage, truncated },
     });
 
+    // その頁の所有者だけ、物件へ飛ぶリンクの材料を足す(2026-11-16・owner-property-link-data.ts)。
+    const pageWithLinks = withOwnerPropertyLink(
+      page,
+      await loadOwnerPropertyLinkInfo(prisma, page.map((r) => r.ownerId), session, perms),
+    );
+
     return apiResponse({
       type,
-      candidates: page,
+      candidates: pageWithLinks,
       summary,
       hasNextPage,
       nextCursor,

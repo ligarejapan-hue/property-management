@@ -4286,6 +4286,8 @@ export interface CorporateCandidateRowDTO {
   type: "missing" | "same" | "conflict" | "multi";
   version: number;
   detailUrl: string;
+  /** その所有者の物件へ飛ぶリンクの材料(2026-11-16)。古い応答には無い。 */
+  propertyLink?: { count: number; singlePropertyId: string | null; hasReachableProperty: boolean; available: boolean };
 }
 
 export interface CorporateCandidatesResponse {
@@ -4449,6 +4451,8 @@ export interface CorporateRestoreRowDTO {
   eligible: boolean;
   version: number;
   detailUrl: string;
+  /** その所有者の物件へ飛ぶリンクの材料(2026-11-16)。古い応答には無い。 */
+  propertyLink?: { count: number; singlePropertyId: string | null; hasReachableProperty: boolean; available: boolean };
 }
 
 export interface CorporateRestoreCandidatesResponse {

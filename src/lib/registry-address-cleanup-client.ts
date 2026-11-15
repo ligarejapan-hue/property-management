@@ -15,6 +15,8 @@ export interface RegistryAddressCandidateRow {
   manualReviewRequired: boolean;
   version: number;
   detailUrl: string;
+  /** その所有者の物件へ飛ぶリンクの材料(2026-11-16)。古い応答には無い。 */
+  propertyLink?: { count: number; singlePropertyId: string | null; hasReachableProperty: boolean; available: boolean };
 }
 
 export interface RegistryAddressCandidatesResponse {
