@@ -637,7 +637,21 @@ export async function POST(request: NextRequest) {
           }
         }
 
+        // 担当者は在籍中のユーザーだけ(いない人・無効にした人は断る=黙って空にしない)。
+        if (assignedToRequested !== null) {
+          const assignee = await tx.user.findFirst({
+            where: { id: assignedToRequested, isActive: true },
+            select: { id: true },
+          });
+          if (!assignee) {
+            throw new ApiError(400, "担当者が見つかりません（無効にした人かもしれません）。選び直してください", "BAD_REQUEST");
+          }
+        }
+
         // ---- 査定ナンバーの無い依頼: 同じ内容の物件があれば確認を挟む（2026-11-15 発注者決定） ----
+        // ⚠**この確認は、ほかの検査(担当者など)をすべて済ませたあと・物件を作る直前に置く**。
+        //   手前に置くと、わざと不正な担当者を付けて送るだけで「当たれば409・外れれば400」になり、
+        //   物件を作らずに、同じ内容の物件があるかを探れてしまう(自動のセキュリティ点検 2026-11-15)。
         // ⚠査定ナンバーが無いと、上の「登録済み」の確認は働かない。同じ依頼を2回貼ると
         //   物件・所有者がもう一式できていた。住所(+地番)・建物名・部屋番号・所有者の名前が
         //   **すべて**同じ物件がすでにあるときは、画面で確認のチェックを入れた登録だけを通す。
@@ -663,17 +677,6 @@ export async function POST(request: NextRequest) {
           // 取りきれなかったとき(同じ名前の人の物件が同じ町に上限以上)も、確かめてもらう側に倒す。
           if (same.matches.length > 0 || same.truncated) {
             throw new ApiError(409, SAME_CONTENT_MESSAGE, "SAME_CONTENT");
-          }
-        }
-
-        // 担当者は在籍中のユーザーだけ(いない人・無効にした人は断る=黙って空にしない)。
-        if (assignedToRequested !== null) {
-          const assignee = await tx.user.findFirst({
-            where: { id: assignedToRequested, isActive: true },
-            select: { id: true },
-          });
-          if (!assignee) {
-            throw new ApiError(400, "担当者が見つかりません（無効にした人かもしれません）。選び直してください", "BAD_REQUEST");
           }
         }
 

@@ -1784,6 +1784,15 @@ describe("査定ナンバーの無い依頼: 同じ内容の物件があれば�
     expect(sameContentCalls[0].input).toMatchObject({ ownerName: null });
   });
 
+  it("★ほかの検査(担当者)を済ませてから確かめる(不正な担当者を付けて、作らずに有無を探れない)", async () => {
+    sameContentResult = HIT;
+    const res = await POST(req({ ...unitBody, assignedTo: INACTIVE_USER }));
+    // 同じ内容の物件があっても、先に担当者の断り(400)になる=当たり外れで返事が変わらない。
+    expect(res.status).toBe(400);
+    expect(sameContentCalls).toHaveLength(0);
+    expect(created.property).toBeUndefined();
+  });
+
   it("★取りきれなかったときも確かめてもらう側に倒す", async () => {
     sameContentResult = { matches: [], truncated: true };
     const res = await POST(req(unitBody));
