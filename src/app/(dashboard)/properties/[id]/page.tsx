@@ -413,6 +413,11 @@ export default function PropertyDetailPage({
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [showEditForm, setShowEditForm] = useState(false);
+  // 「物件を編集」を押してから開くまで(最新の内容の取り直し待ち)の印と、物件が替わった回数。
+  // ⚠待っている間に別の物件へ移ったら、移った先の編集を開かない(@codex PR#740 1巡目)。頼まれていない物件の
+  //   小窓が開き、編集の鍵まで取ってしまう。物件が替わるたびに回数を進め、押したときの回数と違えば開かない。
+  const openingEditRef = useRef(false);
+  const editOpenGenRef = useRef(0);
   // 編集の途中で別のメニューへ移って戻ったら、編集の小窓を開き直す(設計書 2026-10-13 §3-3)。
   // ⚠物件ごとに最初の読み込みで1回だけ判定する(編集中の取り直しで控えを消さない)。
   const editDraftCheckedRef = useRef<string | null>(null);
@@ -605,15 +610,18 @@ export default function PropertyDetailPage({
   //   ほかの人の保存が入ると版が古くなり、何も重なっていなくても「他のユーザーが先に更新しています」で保存できなかった。
   // ⚠取り直しに失敗しても開く(今までと同じ状態で開くだけ。保存時にサーバーが版を確かめる)。
   // ⚠二重に押しても取り直しは1回(開くのを待っている間は何もしない)。
-  const openingEditRef = useRef(false);
+  // ⚠待っている間に別の物件へ移ったら開かない(押したときの物件のまま、のときだけ開く)。
   const openEditForm = useCallback(async () => {
     if (openingEditRef.current) return;
     openingEditRef.current = true;
+    const gen = editOpenGenRef.current;
     try {
       await refreshPropertyQuietly();
     } finally {
-      openingEditRef.current = false;
-      setShowEditForm(true);
+      if (gen === editOpenGenRef.current) {
+        openingEditRef.current = false;
+        setShowEditForm(true);
+      }
     }
   }, [refreshPropertyQuietly]);
 
@@ -635,6 +643,9 @@ export default function PropertyDetailPage({
     // 前の物件の編集の小窓も引き継がない(戻る/進むで同じ画面が使い回されたとき)。
     setShowEditForm(false);
     setEditDraftReopenPending(false);
+    // 前の物件で「物件を編集」を押して開くのを待っていたら、その開く動きも捨てる(openEditForm)。
+    editOpenGenRef.current += 1;
+    openingEditRef.current = false;
     // 分筆・合筆の小窓と結果の知らせも引き継がない。
     setParcelChangeOpen(false);
     setParcelChangeDone(null);

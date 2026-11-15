@@ -136,11 +136,14 @@ describe("物件詳細: 読み込み完了時に編集の小窓を開き直す",
   });
   it("別の物件へ移ったら、前の物件の開き直しを引き継がない(@codex P2)", () => {
     expect(src).toMatch(/useEffect\(\(\) => \{[^}]*?setShowEditForm\(false\);\n\s*setEditDraftReopenPending\(false\);[^}]*?\}, \[id\]\);/);
+    // 「物件を編集」を押して開くのを待っている間に物件が替わったら、その開く動きを捨てる(@codex PR#740 1巡目)。
+    expect(src).toMatch(/setEditDraftReopenPending\(false\);\n[^\n]*\n\s*editOpenGenRef\.current \+= 1;\n\s*openingEditRef\.current = false;/);
   });
   it("★「物件を編集」は、開く前に最新の内容を取り直す(古い版のまま開かない・2026-11-15)", () => {
     expect(src).toMatch(/const openEditForm = useCallback\(async \(\) => \{[\s\S]*?await refreshPropertyQuietly\(\);[\s\S]*?setShowEditForm\(true\);[\s\S]*?\}, \[refreshPropertyQuietly\]\);/);
-    // 取り直しに失敗しても開く(finally で開く)。
-    expect(src).toMatch(/\} finally \{\n\s*openingEditRef\.current = false;\n\s*setShowEditForm\(true\);\n\s*\}/);
+    // 取り直しに失敗しても開く(finally で開く)。ただし、押したときの物件のままのときだけ
+    // (待っている間に別の物件へ移ったら、移った先の編集を開かない・@codex PR#740 1巡目)。
+    expect(src).toMatch(/const gen = editOpenGenRef\.current;\n\s*try \{\n\s*await refreshPropertyQuietly\(\);\n\s*\} finally \{\n\s*if \(gen === editOpenGenRef\.current\) \{\n\s*openingEditRef\.current = false;\n\s*setShowEditForm\(true\);\n\s*\}\n\s*\}/);
     // 人が押して開く入口(ボタン・基本情報タブ)は、どちらも openEditForm を通る。
     expect((src.match(/void openEditForm\(\)/g) ?? []).length).toBe(2);
     expect(src).not.toMatch(/onClick=\{\(\) => setShowEditForm\(true\)\}/);
