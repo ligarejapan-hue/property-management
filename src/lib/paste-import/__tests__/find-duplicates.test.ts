@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest";
-import { judgeDuplicates, normalizeForCompare } from "../find-duplicates";
+import { judgeDuplicates, normalizeForCompare, findSameContentPropertyIds } from "../find-duplicates";
 
 const P = (
   id: string,
@@ -131,5 +131,66 @@ describe("住所の突き合わせは先頭の郵便番号を無視する（5巡
       [{ id: "p2", address: "東京都A区B1-2-3", lotNumber: "999-9999", externalLinkKey: null }],
     );
     expect(diff.similarPropertyIds).toEqual([]);
+  });
+});
+
+describe("findSameContentPropertyIds（査定ナンバーの無い依頼の二重登録・2026-11-15）", () => {
+  const E = (over: Partial<Parameters<typeof findSameContentPropertyIds>[1][number]> = {}) => ({
+    id: "p1",
+    address: "東京都Ａ区Ｂ１－２－３",
+    lotNumber: null,
+    buildingName: "テストマンション",
+    roomNo: "９０１",
+    ownerNames: ["調査　太郎"],
+    ...over,
+  });
+  const D = (over: Partial<Parameters<typeof findSameContentPropertyIds>[0]> = {}) => ({
+    address: "東京都A区B1-2-3",
+    lotNumber: null,
+    buildingName: "テストマンション",
+    roomNo: "901",
+    ownerName: "調査太郎",
+    ...over,
+  });
+
+  it("★住所・建物名・部屋番号・所有者の名前がすべて同じなら当たる(全角半角・空白のゆれは吸収)", () => {
+    expect(findSameContentPropertyIds(D(), [E()])).toEqual(["p1"]);
+  });
+
+  it("★同じ建物の別の部屋は当てない", () => {
+    expect(findSameContentPropertyIds(D({ roomNo: "902" }), [E()])).toEqual([]);
+  });
+
+  it("★片方だけ部屋番号が無いときも当てない", () => {
+    expect(findSameContentPropertyIds(D({ roomNo: null }), [E()])).toEqual([]);
+    expect(findSameContentPropertyIds(D(), [E({ roomNo: null })])).toEqual([]);
+  });
+
+  it("★同じ住所・同じ部屋でも、名前が違えば当てない(別の依頼)", () => {
+    expect(findSameContentPropertyIds(D({ ownerName: "別人花子" }), [E()])).toEqual([]);
+  });
+
+  it("★所有者の名前が無い登録は見ない", () => {
+    expect(findSameContentPropertyIds(D({ ownerName: null }), [E()])).toEqual([]);
+    expect(findSameContentPropertyIds(D({ ownerName: "　" }), [E({ ownerNames: [""] })])).toEqual([]);
+  });
+
+  it("建物名が違えば当てない・住所が違えば当てない", () => {
+    expect(findSameContentPropertyIds(D({ buildingName: "べつのマンション" }), [E()])).toEqual([]);
+    expect(findSameContentPropertyIds(D({ address: "東京都A区B9-9-9" }), [E()])).toEqual([]);
+  });
+
+  it("地番の決まりは「似た物件」と同じ(片方だけ地番があれば当てない)", () => {
+    expect(findSameContentPropertyIds(D({ lotNumber: "552-2" }), [E()])).toEqual([]);
+    expect(findSameContentPropertyIds(D({ lotNumber: "552-2" }), [E({ lotNumber: "５５２－２" })])).toEqual(["p1"]);
+  });
+
+  it("戸建・土地(建物名も部屋番号も無い)でも、住所と名前が同じなら当たる", () => {
+    const land = { buildingName: null, roomNo: null };
+    expect(findSameContentPropertyIds(D(land), [E(land)])).toEqual(["p1"]);
+  });
+
+  it("「901号室」と「901」は同じ部屋と見る・共有名義のどちらかの名前が同じなら当たる", () => {
+    expect(findSameContentPropertyIds(D({ roomNo: "901号室" }), [E({ ownerNames: ["別人花子", "調査太郎"] })])).toEqual(["p1"]);
   });
 });

@@ -441,7 +441,8 @@ describe("査定ナンバー(外部キー)を確認・修正できる（6巡目 
     );
     const block = extractFieldBlock(out, "externalLinkKey");
     expect(block).toContain('value=""');
-    expect(block).toContain("空にすると住所で判断します");
+    // 空のときは止めずに「確認を挟む」(2026-11-15)。「住所で判断します」は止めてくれるように読めた。
+    expect(block).toContain("空のときは、住所・建物名・部屋番号・所有者の名前が同じ物件があると確認を挟みます");
   });
 
   it("査定ナンバーが元資料に無ければ空欄で出る（推測で埋めない）", () => {
@@ -480,7 +481,8 @@ describe("重複の見直しは、直したあとに起こる（6巡目 ②③�
 
   it("★どの欄を直したら見直すかが、実際の集合として決まっている", () => {
     // 住所の重複は登録APIが意図的にブロックしない＝画面の警告が唯一の防御線。
-    expect([...DUPLICATE_INPUT_FIELDS].sort()).toEqual(["address", "lotNumber"]);
+    // 建物名・部屋番号は「同じ内容の物件」の確認に使う(2026-11-15)。
+    expect([...DUPLICATE_INPUT_FIELDS].sort()).toEqual(["address", "buildingName", "lotNumber", "roomNo"]);
     expect([...DUPLICATE_OWNER_FIELDS].sort()).toEqual(["currentAddress", "name"]);
   });
 
@@ -1163,5 +1165,86 @@ describe("登録の送信に自動の所有者の備考を載せる(ソース)",
   const src = readFileSync(join(dirname(fileURLToPath(import.meta.url)), "../../../app/(dashboard)/import/paste/page.tsx"), "utf8");
   it("★新しい所有者の送信に importNote: composePasteOwnerNote(draft) がある", () => {
     expect(src).toContain("importNote: composePasteOwnerNote(draft)");
+  });
+});
+
+describe("同じ内容の物件があるときの確認（査定ナンバーの無い依頼の二重登録・2026-11-15）", () => {
+  const d = buildPasteDraft("■物件所在地： 東京都A区B1-2-3\n■お名前： 調査太郎");
+  const render = (props: Record<string, unknown>) =>
+    renderToStaticMarkup(createElement(PasteImportReview, { draft: d, rawText: "", ownerMode: "new", ...props }));
+  const section = (out: string) => {
+    const at = out.indexOf('data-section="same-content"');
+    return at === -1 ? "" : out.slice(at, out.indexOf("</label>", at));
+  };
+
+  it("★同じ内容の物件があれば、帯・物件へのリンク・チェックが出て、登録ボタンが止まる", () => {
+    const out = render({ sameContent: [{ id: "p-old" }] });
+    const box = section(out);
+    expect(box).toContain("住所・建物名・部屋番号・所有者の名前が同じ物件が、すでにあります");
+    expect(box).toContain('href="/properties/p-old"');
+    expect(box).toContain('id="paste-same-content-confirm"');
+    expect(box).toContain("別の依頼として登録する");
+    expect(box).not.toMatch(/id="paste-same-content-confirm"[^>]*\schecked/);
+    expect(registerButtonTag(out)).toMatch(/\sdisabled(=""|\s|>)/);
+    // 止めた理由は文字でも出す(スマホでは title が出ない)。
+    expect(out).toContain("チェックを入れると登録できます");
+  });
+
+  it("★チェックを入れたら登録できる", () => {
+    const out = render({ sameContent: [{ id: "p-old" }], sameContentConfirmed: true });
+    expect(section(out)).toMatch(/id="paste-same-content-confirm"[^>]*\schecked/);
+    expect(registerButtonTag(out)).not.toMatch(/\sdisabled(=""|\s|>)/);
+  });
+
+  it("★登録APIに断られたとき(開けない物件が相手)も、リンクなしでチェックを出す", () => {
+    const out = render({ sameContentUnseen: true });
+    const box = section(out);
+    expect(box).toContain("ここからは開けません");
+    expect(box).not.toContain('href="/properties/');
+    expect(box).toContain('id="paste-same-content-confirm"');
+    expect(registerButtonTag(out)).toMatch(/\sdisabled(=""|\s|>)/);
+  });
+
+  it("★同じ内容の物件が無ければ何も出さず、ボタンも止めない", () => {
+    const out = render({});
+    expect(out).not.toContain('data-section="same-content"');
+    expect(registerButtonTag(out)).not.toMatch(/\sdisabled(=""|\s|>)/);
+  });
+
+  it("★査定ナンバーが同じ(登録済み)のときは赤い帯が先で、チェックは出さない", () => {
+    const out = render({
+      sameContent: [{ id: "p-old" }],
+      sameContentConfirmed: true,
+      duplicates: { blocked: true, blockedByPropertyId: null, similarPropertyIds: [] },
+    });
+    expect(out).toContain("この案件は登録済みです");
+    expect(out).not.toContain('data-section="same-content"');
+    expect(registerButtonTag(out)).toMatch(/\sdisabled(=""|\s|>)/);
+  });
+
+  it("同じ物件を「似た物件」の一覧に重ねて並べない(別の部屋は今までどおり並ぶ)", () => {
+    const out = render({
+      sameContent: [{ id: "p-old" }],
+      similar: [
+        { id: "p-old", address: "東京都A区B1-2-3", lotNumber: null },
+        { id: "p-other", address: "東京都A区B1-2-3", lotNumber: null },
+      ],
+    });
+    expect(out.split('href="/properties/p-old"').length - 1).toBe(1);
+    expect(out).toContain('href="/properties/p-other"');
+    expect(out).toContain("似た物件が見つかりました");
+  });
+});
+
+describe("同じ内容の物件の確認を登録の送信につなぐ(ソース)", () => {
+  const src = readFileSync(join(dirname(fileURLToPath(import.meta.url)), "../../../app/(dashboard)/import/paste/page.tsx"), "utf8");
+  it("★見直しに建物名・部屋番号を送り、チェックを入れたときだけ confirmSameContent を送る", () => {
+    expect(src).toContain("buildingName: propertyValues.buildingName,");
+    expect(src).toContain("roomNo: propertyValues.roomNo,");
+    expect(src).toContain("confirmSameContent: sameContentShown && sameContentConfirmed ? true : undefined,");
+  });
+  it("★登録APIの断り(SAME_CONTENT)を受けたら、チェックを出して外す", () => {
+    expect(src).toContain('if (err.code === "SAME_CONTENT") {');
+    expect(src).toContain("setSameContentUnseen(true);");
   });
 });

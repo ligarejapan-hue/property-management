@@ -142,6 +142,7 @@ export async function POST(request: NextRequest) {
     const {
       duplicates: scopedDuplicates,
       similar,
+      sameContent,
       ownerCandidates,
       ownerCandidatesTruncated,
     } = await lookupPasteDuplicates(session, perms, {
@@ -150,6 +151,10 @@ export async function POST(request: NextRequest) {
         externalLinkKey: draft.externalLinkKey,
         ownerName: draft.owner?.name.value ?? null,
         ownerCurrentAddress: draft.owner?.currentAddress.value ?? null,
+        sameContent: {
+          buildingName: draft.property.buildingName.value,
+          roomNo: draft.property.roomNo.value,
+        },
       });
 
     // ⚠貼った原文は返さない（画面側が手元に持っている。往復させるとログや
@@ -159,6 +164,8 @@ export async function POST(request: NextRequest) {
       draft,
       duplicates: scopedDuplicates,
       similar,
+      // 査定ナンバーの無い依頼で、住所・建物名・部屋番号・所有者の名前がすべて同じ物件(id だけ)。
+      sameContent,
       ownerCandidates,
       // ⚠所有者候補が取得上限に達して確認しきれなかったことを伝える(21巡目 ②)。
       //   「候補なし」と同じ顔をさせない。

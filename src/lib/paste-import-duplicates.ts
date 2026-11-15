@@ -20,6 +20,7 @@ import {
   judgeDuplicates,
   type DuplicateVerdict,
   type ExistingProperty,
+  findSameContentPropertyIds,
 } from "@/lib/paste-import/find-duplicates";
 import { buildOwnerDedupKey } from "@/lib/owner-dedup";
 import { addressSearchPrefix, toFullWidth } from "@/lib/paste-import/normalize";
@@ -334,11 +335,21 @@ export interface PasteDuplicateLookupInput {
   ownerName: string | null;
   /** 貼り付け元が持つのは「現住所」だけ（登記上住所ではない）。 */
   ownerCurrentAddress: string | null;
+  /**
+   * 「同じ内容の物件」も見るときに渡す(貼り付け画面の下書き・見直し)。建物名と部屋番号。
+   * 渡さない呼び出し(Excel まとめ取込)は見ない=今までどおり。
+   */
+  sameContent?: { buildingName: string | null; roomNo: string | null };
 }
 
 export interface PasteDuplicateLookupResult {
   duplicates: DuplicateVerdict;
   similar: { id: string; address: string | null; lotNumber: string | null }[];
+  /**
+   * 査定ナンバーの無い依頼で、住所(+地番)・建物名・部屋番号・所有者の名前がすべて同じ物件
+   * (この人が開ける物件だけ)。あれば画面が確認を挟む(2026-11-15)。
+   */
+  sameContent: { id: string }[];
   ownerCandidates: OwnerCandidate[];
   /**
    * 所有者候補が**取得上限に達して確認しきれなかった**。
@@ -535,6 +546,28 @@ export async function lookupPasteDuplicates(
   const ownerDisplayConfig = await ownerSearchDisplayConfig(session, perms);
   const ownerSearchAllowed = ownerDisplayConfig !== null;
 
+  // ---- 同じ内容の物件(査定ナンバーの無い依頼の二重登録・2026-11-15) ----
+  // ⚠所有者の名前で物件を引く口なので、**物件を読む権限と所有者検索の門の両方**を通す。
+  //   返すのはこの人が開ける物件だけ。見えない相手は登録APIが絞らずに確かめて止める。
+  let sameContent: { id: string }[] = [];
+  if (
+    input.sameContent !== undefined &&
+    !input.externalLinkKey &&
+    canReadProperty &&
+    ownerSearchAllowed
+  ) {
+    const found = await findSameContentProperties(prisma, {
+      address: input.address,
+      lotNumber: input.lotNumber,
+      buildingName: input.sameContent.buildingName,
+      roomNo: input.sameContent.roomNo,
+      ownerName: ownerNameRaw,
+    });
+    sameContent = found.matches
+      .filter((m) => canAccessPropertyRecord(session, m))
+      .map((m) => ({ id: m.id }));
+  }
+
   if (ownerSearchAllowed && normalizedOwnerName !== "") {
     const ownerRows = await prisma.owner.findMany({
       // ⚠氏名の**すべての文字**で引く(ownerNameSearchWhere のコメント・2026-10-15)。
@@ -556,6 +589,7 @@ export async function lookupPasteDuplicates(
       return {
         duplicates: scopedDuplicates,
         similar,
+        sameContent,
         ownerCandidates: [],
         ownerCandidatesTruncated: true,
       };
@@ -631,8 +665,76 @@ export async function lookupPasteDuplicates(
   return {
     duplicates: scopedDuplicates,
     similar,
+    sameContent,
     ownerCandidates,
     ownerCandidatesTruncated: false,
+  };
+}
+
+// ---------------------------------------------------------------------------
+// 同じ内容の物件を探す(査定ナンバーの無い依頼の二重登録・2026-11-15 発注者決定)
+//
+// ⚠**絞らずに引く**(見る人の権限・担当では絞らない)。登録APIは結果があるかどうかだけを使い、
+//   画面向けの lookupPasteDuplicates は、門を通したうえで開ける物件だけに絞って返す。
+// ⚠渡されたクライアントだけで引く(登録のトランザクションの中から別の接続を取りに行かない)。
+// ⚠同じ住所で、**同じ名前の所有者がつながっている物件だけ**を DB から取る。住所だけで取ると、
+//   町名までしか漢字が続かない住所では上限(300)で切られ、肝心の1件を取りこぼす。
+// ---------------------------------------------------------------------------
+
+type SameContentDb = { property: Pick<typeof prisma.property, "findMany"> };
+
+export async function findSameContentProperties(
+  db: SameContentDb,
+  input: {
+    address: string | null;
+    lotNumber: string | null;
+    buildingName: string | null;
+    roomNo: string | null;
+    ownerName: string | null;
+  },
+): Promise<{ matches: { id: string; createdBy: string; assignedTo: string | null }[]; truncated: boolean }> {
+  const rawName = input.ownerName?.trim() ?? "";
+  const normalized = normalizeName(rawName);
+  const address = input.address?.trim() ?? "";
+  if (normalized === "" || address === "") return { matches: [], truncated: false };
+
+  const prefix = addressSearchPrefix(address);
+  const rows = await db.property.findMany({
+    where: {
+      address: prefix === null ? { contains: address.slice(0, 20) } : { contains: prefix },
+      isArchived: false,
+      propertyOwners: { some: { owner: ownerNameSearchWhere(rawName, normalized) } },
+    },
+    select: {
+      id: true,
+      address: true,
+      lotNumber: true,
+      buildingName: true,
+      roomNo: true,
+      createdBy: true,
+      assignedTo: true,
+      propertyOwners: { select: { owner: { select: { name: true, isArchived: true } } } },
+    },
+    take: ADDRESS_CANDIDATE_FETCH_LIMIT,
+  });
+  const ids = new Set(
+    findSameContentPropertyIds(
+      { address, lotNumber: input.lotNumber, buildingName: input.buildingName, roomNo: input.roomNo, ownerName: rawName },
+      rows.map((r) => ({
+        id: r.id,
+        address: r.address,
+        lotNumber: r.lotNumber,
+        buildingName: r.buildingName,
+        roomNo: r.roomNo,
+        ownerNames: (r.propertyOwners ?? []).filter((l) => !l.owner.isArchived).map((l) => l.owner.name),
+      })),
+    ),
+  );
+  return {
+    matches: rows
+      .filter((r) => ids.has(r.id))
+      .map((r) => ({ id: r.id, createdBy: r.createdBy, assignedTo: r.assignedTo })),
+    truncated: rows.length >= ADDRESS_CANDIDATE_FETCH_LIMIT,
   };
 }
 

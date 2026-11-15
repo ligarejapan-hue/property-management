@@ -37,6 +37,67 @@ export function normalizeAddressForCompare(s: string | null): string {
   return normalizeForCompare(stripLeadingPostalCode(s));
 }
 
+/** 「同じ内容」の判定に使う既存の物件1件。所有者の名前は、その物件につながっている人ぶん。 */
+export interface SameContentCandidate {
+  id: string;
+  address: string | null;
+  lotNumber: string | null;
+  buildingName: string | null;
+  roomNo: string | null;
+  ownerNames: readonly string[];
+}
+
+/** 建物名・氏名の比較用(全角半角・空白・ハイフン類のゆれを均す)。 */
+function normalizeTextForCompare(s: string | null): string {
+  return normalizeForCompare((s ?? "").normalize("NFKC"));
+}
+
+/** 部屋番号の比較用。「901」「９０１号室」「901号」を同じに見る。 */
+export function normalizeRoomForCompare(s: string | null): string {
+  return normalizeTextForCompare(s).replace(/号室?$/, "");
+}
+
+/**
+ * **査定ナンバーの無い依頼**が、すでにある物件と「同じ内容」かを見る(2026-11-15 発注者決定)。
+ * 住所(+地番)・建物名・部屋番号・所有者の名前が**すべて**同じ物件の id を返す。
+ *
+ * ⚠これは「止める」ではなく「確認を挟む」ための判定。同じ方から後日あらためて届いた依頼を
+ *   登録する道は残す(呼び出し側が確認のチェックを受け取ったら通す)。
+ * ⚠誤って引っかけないための決まり:
+ *   - 部屋番号が違えば別(同じ建物の別の部屋)。片方だけ空も別。
+ *   - 建物名が違えば別。片方だけ空も別。
+ *   - 所有者の名前が無い登録は見ない(名前が無いと別の依頼と見分けられない)。
+ *   - 名前が違えば別(同じ住所の別の依頼)。
+ */
+export function findSameContentPropertyIds(
+  draft: {
+    address: string | null;
+    lotNumber: string | null;
+    buildingName: string | null;
+    roomNo: string | null;
+    ownerName: string | null;
+  },
+  existing: readonly SameContentCandidate[],
+): string[] {
+  const owner = normalizeTextForCompare(draft.ownerName);
+  if (owner === "") return [];
+  const building = normalizeTextForCompare(draft.buildingName);
+  const room = normalizeRoomForCompare(draft.roomNo);
+  // 住所(+地番)の一致は、琥珀色の警告と**同じ判定**を通す(規則を2つ持たない)。
+  const sameAddress = new Set(
+    judgeDuplicates(
+      { address: draft.address, lotNumber: draft.lotNumber, externalLinkKey: null },
+      existing.map((e) => ({ id: e.id, address: e.address, lotNumber: e.lotNumber, externalLinkKey: null })),
+    ).similarPropertyIds,
+  );
+  return existing
+    .filter((e) => sameAddress.has(e.id))
+    .filter((e) => normalizeTextForCompare(e.buildingName) === building)
+    .filter((e) => normalizeRoomForCompare(e.roomNo) === room)
+    .filter((e) => e.ownerNames.some((n) => normalizeTextForCompare(n) === owner))
+    .map((e) => e.id);
+}
+
 export function judgeDuplicates(
   draft: {
     address: string | null;

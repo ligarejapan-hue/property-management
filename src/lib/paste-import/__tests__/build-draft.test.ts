@@ -504,3 +504,25 @@ describe("メール欄の「持っていない」等はメールアドレスと�
     expect(buildPasteDraft("お名前：山田\nE-mail：a@example.com").owner?.email.value).toBe("a@example.com");
   });
 });
+
+describe("buildPasteDraft — 決まった形の無いメール(共通の読み取り)の部屋番号と全角の面積（2026-11-15）", () => {
+  const draft = buildPasteDraft(
+    [
+      "■物件所在地：東京都A区B1-2-3",
+      "■建物名：テストマンション",
+      "■部屋番号：９０１",
+      "■専有面積：６５．５㎡",
+      "■お名前：調査　太郎",
+    ].join("\n"),
+  );
+
+  it("★「部屋番号」が部屋番号の欄に入る", () => {
+    // 値は貼られたとおりに残す(全角のまま)。比べるときにだけ半角へそろえる。
+    expect(draft.property.roomNo.value).toBe("９０１");
+    expect(draft.property.roomNo.sourceLabel).toBe("部屋番号");
+  });
+
+  it("★全角の面積が読める", () => {
+    expect(draft.property.exclusiveArea.value).toBe("65.5");
+  });
+});

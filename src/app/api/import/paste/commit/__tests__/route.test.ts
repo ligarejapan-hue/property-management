@@ -74,7 +74,16 @@ vi.mock("@/lib/api-helpers", async () => {
 /** まとめ取込の「書き込みを止める」確認(countPasteDuplicatesUnscoped)の結果と呼び出し記録。 */
 let dupCount = { similarCount: 0, ownerCount: 0, truncated: false };
 const dupCountCalls: { db: unknown; input: unknown }[] = [];
+/** 同じ内容の物件を探す確認(findSameContentProperties)の結果と呼び出し記録。 */
+let sameContentResult: { matches: { id: string; createdBy: string; assignedTo: string | null }[]; truncated: boolean } =
+  { matches: [], truncated: false };
+const sameContentCalls: { db: unknown; input: unknown }[] = [];
 vi.mock("@/lib/paste-import-duplicates", () => ({
+  findSameContentProperties: vi.fn(async (db: unknown, input: unknown) => {
+    callOrder.push("sameContent");
+    sameContentCalls.push({ db, input });
+    return sameContentResult;
+  }),
   countPasteDuplicatesUnscoped: vi.fn(async (db: unknown, input: unknown) => {
     callOrder.push("dupCount");
     dupCountCalls.push({ db, input });
@@ -306,6 +315,8 @@ beforeEach(() => {
   findFirstArgs.length = 0;
   userFindFirstArgs.length = 0;
   dupCountCalls.length = 0;
+  sameContentCalls.length = 0;
+  sameContentResult = { matches: [], truncated: false };
   dupCount = { similarCount: 0, ownerCount: 0, truncated: false };
 });
 
@@ -1676,5 +1687,107 @@ describe("担当者(Excel まとめ取込で行ごとに決めた人・従業員
     }
     expect(userFindFirstArgs).toHaveLength(0);
     expect(created.property).toBeUndefined();
+  });
+});
+
+describe("査定ナンバーの無い依頼: 同じ内容の物件があれば確認を挟む（2026-11-15 発注者決定）", () => {
+  const unitBody = {
+    ...baseBody,
+    property: {
+      ...baseBody.property,
+      lotNumber: null,
+      propertyType: "apartment_unit",
+      buildingName: "テストマンション",
+      roomNo: "901",
+    },
+    owner: { name: "調査　太郎", nameKana: null, phone: null, email: null, currentAddress: null },
+  };
+  const HIT = { matches: [{ id: "p-old", createdBy: "someone-else", assignedTo: null }], truncated: false };
+
+  it("★同じ内容の物件があれば 409(SAME_CONTENT)で、何も作らない", async () => {
+    sameContentResult = HIT;
+    const res = await POST(req(unitBody));
+    expect(res.status).toBe(409);
+    const json = await res.json();
+    expect(json.error.code).toBe("SAME_CONTENT");
+    // 見つかった物件のことは返さない(担当外の物件・所有者の有無を言い当てさせない)。
+    expect(JSON.stringify(json)).not.toContain("p-old");
+    expect(created.property).toBeUndefined();
+    expect(created.owner).toBeUndefined();
+  });
+
+  it("★「別の依頼として登録する」のチェックがあれば通す(確かめに行かない)", async () => {
+    sameContentResult = HIT;
+    const res = await POST(req({ ...unitBody, confirmSameContent: true }));
+    expect(res.status).toBe(200);
+    expect(sameContentCalls).toHaveLength(0);
+    expect(created.property).toHaveLength(1);
+  });
+
+  it("★チェックは true のときだけ効く(文字列などでは通さない)", async () => {
+    sameContentResult = HIT;
+    const res = await POST(req({ ...unitBody, confirmSameContent: "true" }));
+    expect(res.status).toBe(409);
+  });
+
+  it("★同じ内容の物件が無ければ今までどおり作る", async () => {
+    const res = await POST(req(unitBody));
+    expect(res.status).toBe(200);
+    expect(sameContentCalls).toHaveLength(1);
+    expect(sameContentCalls[0].input).toEqual({
+      address: "東京都A区B1-2-3",
+      lotNumber: null,
+      buildingName: "テストマンション",
+      roomNo: "901",
+      ownerName: "調査　太郎",
+    });
+  });
+
+  it("★共通のロックを取ってから確かめ、そのあとに作る(同時に貼っても2件目が止まる)", async () => {
+    await POST(req(unitBody));
+    const lockAt = callOrder.indexOf("bulkLock");
+    expect(lockAt).toBeGreaterThan(-1);
+    expect(lockAt).toBeLessThan(callOrder.indexOf("sameContent"));
+    expect(callOrder.indexOf("sameContent")).toBeLessThan(callOrder.indexOf("property.create"));
+  });
+
+  it("★登録のトランザクションのクライアントで確かめる(別の接続を取りに行かない)", async () => {
+    const { prisma } = await import("@/lib/prisma");
+    await POST(req(unitBody));
+    const txArg = sameContentCalls[0].db as { property: unknown };
+    expect(txArg).not.toBe(prisma);
+    expect(txArg.property).toBe((prisma as unknown as { property: unknown }).property);
+  });
+
+  it("★査定ナンバーがある依頼では確かめない(今までどおり番号だけで判断)", async () => {
+    sameContentResult = HIT;
+    const res = await POST(req({ ...unitBody, externalLinkKey: "SA2608-7654321" }));
+    expect(res.status).toBe(200);
+    expect(sameContentCalls).toHaveLength(0);
+  });
+
+  it("★まとめ取込(requireNoDuplicates)は今までどおり(この確認は通らない)", async () => {
+    sameContentResult = HIT;
+    const res = await POST(req({ ...unitBody, requireNoDuplicates: true }));
+    expect(res.status).toBe(200);
+    expect(sameContentCalls).toHaveLength(0);
+    expect(dupCountCalls).toHaveLength(1);
+  });
+
+  it("★比べるのは保存する値(戸建では建物名・部屋番号を落としてから)", async () => {
+    await POST(req({ ...unitBody, property: { ...unitBody.property, propertyType: "house" } }));
+    expect(sameContentCalls[0].input).toMatchObject({ roomNo: null });
+  });
+
+  it("所有者なしの登録は名前なしで確かめる(=当たらない)", async () => {
+    await POST(req({ ...unitBody, owner: null }));
+    expect(sameContentCalls[0].input).toMatchObject({ ownerName: null });
+  });
+
+  it("★取りきれなかったときも確かめてもらう側に倒す", async () => {
+    sameContentResult = { matches: [], truncated: true };
+    const res = await POST(req(unitBody));
+    expect(res.status).toBe(409);
+    expect((await res.json()).error.code).toBe("SAME_CONTENT");
   });
 });

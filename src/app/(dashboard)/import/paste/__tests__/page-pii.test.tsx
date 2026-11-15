@@ -124,7 +124,8 @@ describe("査定ナンバーと重複の見直しが画面に配線されてい�
 
   it("★査定ナンバーの欄を確認画面へ渡している", () => {
     expect(source).toContain("externalLinkKey={externalLinkKey}");
-    expect(source).toContain("onExternalLinkKeyChange={setExternalLinkKey}");
+    // 直したら「同じ内容の物件」の確かめたチェックも外す(2026-11-15)。
+    expect(source).toMatch(/onExternalLinkKeyChange=\{\(v\) => \{\s*setExternalLinkKey\(v\);\s*resetSameContentConfirm\(\);/);
   });
 
   it("★直したあとの見直しを、専用の口へ投げている", () => {

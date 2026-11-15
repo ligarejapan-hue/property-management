@@ -31,7 +31,8 @@ export const LABEL_DICTIONARY: Record<DraftFieldKey, readonly string[]> = {
   lotNumber: ["地番"],
   // 「物件建物名」「物件号室」「専有延べ床面積」= HOME4U 査定依頼の表の形(2026-10-26)。
   buildingName: ["物件名称", "建物名", "マンション名", "物件名", "物件建物名"],
-  roomNo: ["物件号室"],
+  // 「部屋番号」「号室」= 決まった形の無いメール(共通の読み取り)でよく使われる見出し(2026-11-15 実機確認)。
+  roomNo: ["物件号室", "部屋番号", "号室"],
   propertyTypeRaw: ["物件種別", "種別", "物件の種類"],
   exclusiveArea: ["建物（専有）面積", "専有面積", "建物面積", "建物(専有)面積", "専有延べ床面積"],
   landArea: ["土地面積", "敷地面積"],

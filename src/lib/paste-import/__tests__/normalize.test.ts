@@ -223,3 +223,19 @@ describe("warekiToSeireki: 上限は引数で受け取る（6巡目 ④）", () 
     expect(warekiToSeireki("2099年", { maxYear: 3000 })).toBe(2099);
   });
 });
+
+describe("parseAreaSqm: 全角の小数点（2026-11-15 実機確認）", () => {
+  it("★「６５．５㎡」を 65.5 と読む(「65 と 5 の2つ」に見えて読めなかった)", () => {
+    expect(parseAreaSqm("６５．５㎡")).toBe(65.5);
+    expect(parseAreaSqm("６５．５")).toBe(65.5);
+    expect(parseAreaSqm("65．5 平米")).toBe(65.5);
+  });
+  it("半角の小数・全角の整数は今までどおり", () => {
+    expect(parseAreaSqm("65.5㎡")).toBe(65.5);
+    expect(parseAreaSqm("６５㎡")).toBe(65);
+  });
+  it("★数が2つある書き方は、全角でも今までどおり読まない", () => {
+    expect(parseAreaSqm("２０坪（６６．１㎡）")).toBeNull();
+    expect(parseAreaSqm("６５．５㎡．")).toBeNull();
+  });
+});
