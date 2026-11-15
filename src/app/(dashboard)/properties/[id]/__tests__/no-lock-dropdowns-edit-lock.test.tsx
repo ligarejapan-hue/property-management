@@ -81,7 +81,7 @@ describe("runNoLockPropertyPatch(鍵を持たない入口の保存)", () => {
   });
 
   it("EDIT_LOCKED + 状態窓口が保持者行を返せば、氏名+時刻の文を組み立てて表示する(仕様6.5・fix round1・round3 Important Gの「まだ封筒のまま」の分岐)", async () => {
-    const since = new Date(2026, 8, 22, 14, 0).toISOString();
+    const since = "2026-09-22T05:00:00.000Z" /* 日本時間 14:00(実行する場所の時間帯に頼らない) */;
     stubFetchByUrl({
       "/api/properties/p1": async () =>
         jsonResponse({ error: { code: "EDIT_LOCKED", message: "他の画面で編集中です" } }, 423),
@@ -113,7 +113,7 @@ describe("runNoLockPropertyPatch(鍵を持たない入口の保存)", () => {
   });
 
   it("後着の同文言のrefusalは、先着の古い組み立てに上書きされない(caller-owned sequence number・review round3 K)", async () => {
-    const since = new Date(2026, 8, 22, 14, 0).toISOString();
+    const since = "2026-09-22T05:00:00.000Z" /* 日本時間 14:00(実行する場所の時間帯に頼らない) */;
     const holderRow = (name: string) => ({
       locks: [
         {
@@ -217,7 +217,7 @@ describe("runNoLockPropertyPatch(鍵を持たない入口の保存)", () => {
             resourceType: "property",
             resourceId: "p1",
             state: "held_by_other",
-            since: new Date(2026, 8, 22, 14, 0).toISOString(),
+            since: "2026-09-22T05:00:00.000Z" /* 日本時間 14:00(実行する場所の時間帯に頼らない) */,
             holderName: "太郎",
           },
         ],
@@ -243,7 +243,7 @@ describe("runNoLockPropertyPatch(鍵を持たない入口の保存)", () => {
           },
         ],
       });
-      const since = new Date(2026, 8, 22, 14, 0).toISOString();
+      const since = "2026-09-22T05:00:00.000Z" /* 日本時間 14:00(実行する場所の時間帯に頼らない) */;
 
       // 遅い方: 上限(10秒)ちょうどで既に諦めているので、後から届いても捨てる。
       // ⚠`let` ではなくミュータブルなオブジェクトに逃がす(上のテストと同じ理由=
@@ -293,7 +293,7 @@ describe("runNoLockPropertyPatch(鍵を持たない入口の保存)", () => {
     //   届く時点で渡された行がheld_by_otherであることは構造的にあり得ない
     //   (使えるときは呼ばれず、呼ばれるときは使えない死んだ最適化)。
     //   review round2 N2でcomposeEditLockedMessageからpreFetchedRowsを撤去した。
-    const since = new Date(2026, 8, 22, 14, 0).toISOString();
+    const since = "2026-09-22T05:00:00.000Z" /* 日本時間 14:00(実行する場所の時間帯に頼らない) */;
     const fetchMock = stubFetchByUrl({
       "/api/properties/p1": async () =>
         jsonResponse({ error: { code: "EDIT_LOCKED", message: "他の画面で編集中です" } }, 423),

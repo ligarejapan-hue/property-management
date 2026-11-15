@@ -102,8 +102,18 @@ export function shouldWarnIdle(state: EditLockUiState, nowMs: number): boolean {
   return nowMs - new Date(state.idleSince).getTime() >= EDIT_LOCK_IDLE_WARN_MS;
 }
 
+// 開始時刻は**日本時間に固定**して出す(日本国内だけで使う社内システム)。
+// 動かしている環境の時間帯に任せると、サーバー(UTC)で描いた帯とブラウザで描いた帯で表示が変わる。
+// `hourCycle: "h23"` = 0時台を「24:05」ではなく「00:05」にする。
+const SINCE_FORMAT = new Intl.DateTimeFormat("ja-JP", {
+  timeZone: "Asia/Tokyo",
+  hour: "2-digit",
+  minute: "2-digit",
+  hourCycle: "h23",
+});
+
 /**
- * 開始時刻は現地時間の HH:mm(仕様の見本と同じ)。解釈できない値は空文字(review Minor #1)。
+ * 開始時刻は日本時間の HH:mm(仕様の見本と同じ)。解釈できない値は空文字(review Minor #1)。
  *
  * ⚠**このファイル(純関数だけ・`"use client"` を持たない)に置く**(review round2
  *   Important B)。元は `edit-lock-banner.tsx`("use client"・`ui/button`・
@@ -119,5 +129,9 @@ export function formatSince(since?: string): string {
   if (!since) return "";
   const d = new Date(since);
   if (Number.isNaN(d.getTime())) return "";
-  return `${String(d.getHours()).padStart(2, "0")}:${String(d.getMinutes()).padStart(2, "0")}`;
+  // 区切り文字や0埋めを実行環境の書式に任せず、時・分の部品だけ取り出して組み立てる。
+  const parts = SINCE_FORMAT.formatToParts(d);
+  const pick = (type: "hour" | "minute") =>
+    (parts.find((p) => p.type === type)?.value ?? "").padStart(2, "0");
+  return `${pick("hour")}:${pick("minute")}`;
 }

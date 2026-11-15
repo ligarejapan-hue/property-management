@@ -26,6 +26,11 @@ export type Db = {
   $queryRaw: <T>(q: TemplateStringsArray, ...v: unknown[]) => Promise<T>;
 };
 
+// ⚠`acquired_at`(画面に出す開始時刻)は、読む SQL で必ず `"acquired_at"::timestamptz AS "acquired_at"` にする。
+//   この表の時刻列は時間帯なしで、`clock_timestamp()` を書いた時点の DB 接続の時間帯(本番は日本時間)の
+//   壁時計が入っている。素のまま返すとドライバが UTC とみなし、帯の「(HH:mm〜)」が9時間先にずれた。
+//   キャストは DB 接続の時間帯で解釈するので、接続が日本時間でも UTC でも正しい瞬間になる。
+//   ⚠`heartbeat_at` / `activity_at` は今回は素のまま(発注者判断=まず表示の時刻だけ直す)。
 type RawRow = {
   id: string;
   user_id: string;
@@ -63,7 +68,7 @@ export type Holder = { userId: string; screenTokenHash: string };
 
 async function readOne(db: Db, t: Target): Promise<EditLockRow | null> {
   const rows = await db.$queryRaw<RawRow[]>`
-    SELECT "id", "user_id", "screen_token_hash", "acquired_at", "heartbeat_at", "activity_at", "force_released_at"
+    SELECT "id", "user_id", "screen_token_hash", "acquired_at"::timestamptz AS "acquired_at", "heartbeat_at", "activity_at", "force_released_at"
     FROM "edit_locks"
     WHERE "resource_type" = ${t.resourceType}::"EditLockResource" AND "resource_id" = ${t.resourceId}::uuid
   `;
@@ -163,7 +168,7 @@ export async function acquireEditLock(
        OR "edit_locks"."heartbeat_at" < ${dbNow}::timestamptz - make_interval(secs => ${GRACE_SEC}::double precision)
        OR "edit_locks"."activity_at" < ${dbNow}::timestamptz - make_interval(secs => ${IDLE_SEC}::double precision)
        OR ("edit_locks"."user_id" = EXCLUDED."user_id" AND "edit_locks"."screen_token_hash" = EXCLUDED."screen_token_hash")
-    RETURNING "id", "acquired_at"
+    RETURNING "id", "acquired_at"::timestamptz AS "acquired_at"
   `;
   if (got[0]) {
     // ⚠**同じ利用者の別タブでも横取りは横取り**(@codex R9 P2)。別タブは他人と同じ扱いにしているので、
@@ -357,7 +362,7 @@ async function readRawWithDbNow(
   >`
     SELECT clock_timestamp() AS db_now,
            "id", "resource_type", "resource_id", "user_id", "screen_token_hash",
-           "acquired_at", "heartbeat_at", "activity_at", "force_released_at"
+           "acquired_at"::timestamptz AS "acquired_at", "heartbeat_at", "activity_at", "force_released_at"
     FROM "edit_locks"
     -- ⚠列側を ::text へ落とさない(review Minor 7)。"resource_id" は uuid 列なので、
     --   unnest 側を "resource_type"/"resource_id" と同じ型(enum/uuid)にキャストして
