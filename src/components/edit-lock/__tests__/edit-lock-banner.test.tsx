@@ -61,9 +61,9 @@ vi.mock("@/lib/api-client", () => ({
   },
 }));
 
-// 2026-09-22 05:02 (現地時間として組み立てる。ISO 化 → 復元で往復するので、
-// テストを走らせる環境のタイムゾーンに関わらず "05:02" に戻る)。
-const SINCE = new Date(2026, 8, 22, 5, 2).toISOString();
+// 日本時間の 2026-09-22 05:02(= UTC では前日の 20:02)。表示は日本時間に固定なので、
+// 決まった瞬間を UTC で書く(テストを走らせる環境の時間帯に関わらず "05:02" になる)。
+const SINCE = "2026-09-21T20:02:00.000Z";
 
 const row = (over: Partial<EditLockStatusRow> = {}): EditLockStatusRow => ({
   resourceType: "property",
@@ -76,7 +76,7 @@ const row = (over: Partial<EditLockStatusRow> = {}): EditLockStatusRow => ({
 });
 
 describe("formatSince", () => {
-  it("現地時間の HH:mm(0埋め)にする", () => {
+  it("日本時間の HH:mm(0埋め)にする", () => {
     expect(formatSince(SINCE)).toBe("05:02");
   });
 

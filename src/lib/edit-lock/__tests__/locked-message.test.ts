@@ -36,7 +36,7 @@ const heldRow = (
 
 describe("showComposedEditLockedMessage(鍵を持つ入口の423の文言)", () => {
   it("封筒の message を同期的に出し、届いた組み立て(氏名+時刻)へ差し替える", async () => {
-    const since = new Date(2026, 8, 22, 14, 2).toISOString();
+    const since = "2026-09-22T05:02:00.000Z"; // 日本時間の 14:02(表示は日本時間に固定)
     stubFetch(async () => jsonResponse(heldRow(since)));
     const spy = createStateSpy<string | null>(null);
 
@@ -88,7 +88,7 @@ describe("showComposedEditLockedMessage(鍵を持つ入口の423の文言)", () 
 
   describe("引いた保持者を呼び出し側へ渡す(仕上げround2の裁定=帯にも実名を出すため)", () => {
     it("氏名と開始時刻をそのまま渡す(帯が『他の利用者さん』のままにならない)", async () => {
-      const since = new Date(2026, 8, 22, 14, 2).toISOString();
+      const since = "2026-09-22T05:02:00.000Z"; // 日本時間の 14:02(表示は日本時間に固定)
       stubFetch(async () => jsonResponse(heldRow(since)));
       const spy = createStateSpy<string | null>(null);
       const holders: EditLockHolder[] = [];
