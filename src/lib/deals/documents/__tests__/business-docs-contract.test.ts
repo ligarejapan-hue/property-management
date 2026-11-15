@@ -75,13 +75,31 @@ describe("契約のご案内", () => {
   });
 
   it("お持ちいただくものの初期値は、書類確認書(契約時)の「持参するもの」", () => {
-    expect(doc(G).defaults(ctx()).values.belongings).toBe(["手付金", "収入印紙", "印鑑(認印または実印)", "本人確認書類"].join("\n"));
+    // 買主様あては書類確認書の「持参するもの」のまま
+    expect(doc(G).defaultsFor!(ctx(), "buyer").belongings).toBe(["手付金", "収入印紙", "印鑑(認印または実印)", "本人確認書類"].join("\n"));
+    expect(doc(G).defaults(ctx({ ...deal, businessType: "brokerage", tradeSide: "buyer" })).values.belongings)
+      .toBe(["手付金", "収入印紙", "印鑑(認印または実印)", "本人確認書類"].join("\n"));
     expect(doc(G).defaults(ctx()).values.notes).toBeNull();
   });
 
+  it("売主様あてには手付金を入れない(売主は手付金を持参しない・2026-11-15)", () => {
+    const SELLER_BASE = ["収入印紙", "印鑑(認印または実印)", "本人確認書類"].join("\n");
+    expect(doc(G).defaults(ctx()).values.belongings).toBe(SELLER_BASE);
+    expect(doc(G).defaultsFor!(ctx(), "seller").belongings).toBe(SELLER_BASE);
+    // 名前ではなく「手付金の金額を出す項目」の印で外す(設定で名前を変えていても外れ、同じ名前でも印の無い項目は残る)
+    const c = ctx();
+    const items = c.settings.checklistItems.map((i) => (i.id === "c_bring_deposit" ? { ...i, label: "手付金(現金)" } : i));
+    const plain = { id: "c_bring_x", phase: "contract" as const, group: "bring" as const, label: "手付金", note: null, scope: "all" as const, amount: null };
+    const renamed = { ...c, settings: { ...c.settings, checklistItems: [...items, plain] } };
+    expect(String(doc(G).defaultsFor!(renamed, "seller").belongings).split("\n")).toEqual(["収入印紙", "印鑑(認印または実印)", "本人確認書類", "手付金"]);
+    expect(String(doc(G).defaultsFor!(renamed, "buyer").belongings).split("\n")).toEqual(["手付金(現金)", "収入印紙", "印鑑(認印または実印)", "本人確認書類", "手付金"]);
+  });
+
   describe("委任状と実印(2026-11-05 発注者: 代理人がいる個人の取引と法人取引)", () => {
-    const BASE = ["手付金", "収入印紙", "印鑑(認印または実印)", "本人確認書類"];
-    const WITH = [...BASE, "委任状", "実印"];
+    // 売主様あてには手付金が入らない(2026-11-15)
+    const BASE_SELLER = ["収入印紙", "印鑑(認印または実印)", "本人確認書類"];
+    const BASE_BUYER = ["手付金", ...BASE_SELLER];
+    const PROXY = ["委任状", "実印"];
     const AGENT = party({ id: "p-agent", role: "agent", name: "架空 代理" });
     const CORP_SELLER = { ...SELLER, partyType: "corporation" as const };
     const CORP_BUYER = { ...BUYER, partyType: "corporation" as const };
@@ -90,17 +108,17 @@ describe("契約のご案内", () => {
     ).split("\n");
 
     it("宛先が法人なら足す", () => {
-      expect(belongings({ ...deal, parties: [CORP_SELLER, BUYER] })).toEqual(WITH);
-      expect(belongings({ ...deal, parties: [SELLER, CORP_BUYER] }, "buyer")).toEqual(WITH);
+      expect(belongings({ ...deal, parties: [CORP_SELLER, BUYER] })).toEqual([...BASE_SELLER, ...PROXY]);
+      expect(belongings({ ...deal, parties: [SELLER, CORP_BUYER] }, "buyer")).toEqual([...BASE_BUYER, ...PROXY]);
     });
     it("個人でも、取引に代理人がいれば足す", () => {
-      expect(belongings({ ...deal, parties: [SELLER, BUYER, AGENT] })).toEqual(WITH);
-      expect(belongings({ ...deal, parties: [SELLER, BUYER, AGENT] }, "buyer")).toEqual(WITH);
+      expect(belongings({ ...deal, parties: [SELLER, BUYER, AGENT] })).toEqual([...BASE_SELLER, ...PROXY]);
+      expect(belongings({ ...deal, parties: [SELLER, BUYER, AGENT] }, "buyer")).toEqual([...BASE_BUYER, ...PROXY]);
     });
     it("個人で代理人がいなければ今のまま・相手方だけが法人でも足さない", () => {
-      expect(belongings(deal)).toEqual(BASE);
-      expect(belongings({ ...deal, parties: [SELLER, CORP_BUYER] }, "seller")).toEqual(BASE);
-      expect(belongings({ ...deal, parties: [CORP_SELLER, BUYER] }, "buyer")).toEqual(BASE);
+      expect(belongings(deal)).toEqual(BASE_SELLER);
+      expect(belongings({ ...deal, parties: [SELLER, CORP_BUYER] }, "seller")).toEqual(BASE_SELLER);
+      expect(belongings({ ...deal, parties: [CORP_SELLER, BUYER] }, "buyer")).toEqual(BASE_BUYER);
     });
     it("宛先ごとの初めの値は宛先だけを変える(お持ちいただくもの)", () => {
       expect(Object.keys(doc(G).defaultsFor!(ctx(), "buyer"))).toEqual(["belongings"]);

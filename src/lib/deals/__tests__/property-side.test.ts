@@ -27,6 +27,19 @@ describe("propertySideRows", () => {
     expect(rows).toEqual([{ label: "案件ステータス", value: "保留" }]);
   });
 
+  it("契約・決済の日付の見出しは、物件の画面と同じく案件ステータスで変わる(2026-11-15)", () => {
+    const dates = { contractPlannedOn: "2026-11-20", settlementPlannedOn: "2026-12-20" };
+    const labels = (caseStatus: string) => propertySideRows({ caseStatus, ...dates }).filter((r) => r.value.startsWith("2026-")).map((r) => r.label);
+    expect(labels("contract_planned")).toEqual(["契約予定日", "決済予定日"]);
+    expect(labels("contracted")).toEqual(["契約日", "決済予定日"]);
+    expect(labels("sold")).toEqual(["契約日", "決済日"]);
+    expect(labels("hold")).toEqual(["契約予定日", "決済予定日"]);
+    // 値と並びは変わらない(案件ステータスのすぐ下)
+    expect(propertySideRows({ caseStatus: "sold", ...dates }).slice(0, 3)).toEqual([
+      { label: "案件ステータス", value: "決済完了" }, { label: "契約日", value: "2026-11-20" }, { label: "決済日", value: "2026-12-20" },
+    ]);
+  });
+
   it("築年だけなら年だけ、0円や0階も出す", () => {
     const rows = map(propertySideRows({ caseStatus: "hold", builtYear: 1999, managementFee: 0, floorNo: 0 }));
     expect(rows["築年月"]).toBe("1999年");

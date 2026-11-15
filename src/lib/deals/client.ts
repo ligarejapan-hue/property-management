@@ -57,6 +57,8 @@ export interface AvailableDocument {
   rememberBy: string | null;
   /** その欄の値ごとの初めの値(切り替えたらこれに入れ替える・両手の取引の売主様用と買主様用・発注者決定 2026-10-29)。 */
   starts: Record<string, Record<string, unknown>> | null;
+  /** その欄の値ごとの、前回の入力を混ぜない今の初めの値(契約のご案内のお持ちいただくもの。足りない行の知らせに使う・2026-11-15)。無い書類は null。 */
+  freshDefaults?: Record<string, Record<string, unknown>> | null;
 }
 export interface DealDocumentView {
   id: string; docType: string; variant: string; version: number; title: string;
