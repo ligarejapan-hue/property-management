@@ -936,10 +936,11 @@ function googleTagScripts(google: { tagId: string; convLabel: string | null }, s
   // send_to まるごと(AW-…/…)なら、タグ ID が G- のままでも Google広告の ID を追加で config して送る(2026-11-15 発注者)。
   const target = googleConversionTarget(google);
   const conv = target ? `gtag('event','conversion',{send_to:'${target.sendTo}'});` : "";
-  const extraConfig = target?.extraConfigId ? `gtag('config','${target.extraConfigId}');` : "";
   // page_location は素の URL(document.location)を使わない: query の utm_* は訪問者が自由に書ける文字列(連絡先が紛れ得る)なので、
   // サーバーで許可リストを通した印だけを付け直した URL を渡す(@codex #535 R4 P1)。
+  // config の値はその宛先だけに効くので、追加の Google広告の config にも同じ値を渡す(@codex #731 P1)。
   const loc = `location.origin+location.pathname+${jsString(safeQuery)}`;
+  const extraConfig = target?.extraConfigId ? `gtag('config','${target.extraConfigId}',{page_location:${loc}});` : "";
   return `<script async src="https://www.googletagmanager.com/gtag/js?id=${google.tagId}"></script>` +
     `<script>window.dataLayer=window.dataLayer||[];function gtag(){dataLayer.push(arguments)}gtag('js',new Date());gtag('config','${google.tagId}',{page_location:${loc}});${extraConfig}` +
     `document.addEventListener("lp:inquiry-done",function(){try{${conv}gtag('event','generate_lead')}catch(_){}});</script>`;

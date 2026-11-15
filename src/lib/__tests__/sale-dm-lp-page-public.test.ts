@@ -104,7 +104,12 @@ describe("renderLpPage(public=広告用の公開ページ)", () => {
     const h = renderLpPage(publicInput({ public: { ...publicInput().public!, google: { tagId: "G-ABCD1234", convLabel: "AW-123456789/AbCd-12_x" } } }));
     expect(h).toContain('<script async src="https://www.googletagmanager.com/gtag/js?id=G-ABCD1234"></script>');
     expect(h).toContain("gtag('config','G-ABCD1234',{page_location:");
-    expect(h).toContain("gtag('config','AW-123456789');");
+    // 追加の Google広告の config にも、許可リストを通した page_location を渡す(config の値は宛先ごと・@codex #731 P1)
+    const safeLoc = '{page_location:location.origin+location.pathname+"?utm_source=google\\u0026utm_medium=cpc"}';
+    expect(h).toContain(`gtag('config','G-ABCD1234',${safeLoc});`);
+    expect(h).toContain(`gtag('config','AW-123456789',${safeLoc});`);
+    expect(h).not.toContain("gtag('config','AW-123456789');");
+    expect(h).not.toContain("document.location");
     expect(h).toContain("gtag('event','conversion',{send_to:'AW-123456789/AbCd-12_x'})");
     expect(h).toContain("gtag('event','generate_lead')");
     // 規則外の send_to は出さない(タグ自体を出さない)
