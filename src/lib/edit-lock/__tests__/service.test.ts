@@ -275,7 +275,8 @@ describe("heartbeatEditLock", () => {
     const res = await heartbeatEditLock(db, { ...BASE, active: false });
     expect(res).toEqual({ ok: true, idleSince: activityAt });
     const sql = sqlOf(queryRaw.mock.calls[0]);
-    expect(sql).toMatch(/RETURNING "id", "activity_at"/);
+    // ⚠時間帯つきにして返す(素のままだと9時間先の瞬間になり、「あと5分で終了」の予告の起点がずれる)。
+    expect(sql).toMatch(/RETURNING "id", "activity_at"::timestamptz AS "activity_at"/);
   });
 
   it("更新できなければ、DBが判定した現在の状態(dbNow付き)を返す(アプリの時計で判定し直さない)", async () => {
@@ -463,6 +464,67 @@ describe("表示する開始時刻(acquired_at)は timestamptz にして返す",
     const sql = sqlOf(queryRaw.mock.calls[1]);
     expect(sql).toMatch(CAST);
     expect(sql).not.toMatch(/(?<!AS )"acquired_at",/);
+  });
+});
+
+// 判定に使う時刻(heartbeat_at / activity_at / force_released_at)も同じ取り違えがあった(2026-11-16)。
+// `evaluateLock` は DB の今時刻(db_now=時間帯つき)と比べるので、素のまま返すと「9時間先に更新された鍵」に見え、
+//  ①切れた鍵が約9時間「編集中」と表示される ②自分の切れた鍵が「自分の鍵」と判定される ③「あと5分で終了」の予告が出ない。
+// JS へ返す SELECT はすべて `::timestamptz` で正しい瞬間にしてから返す。
+describe("判定に使う時刻(heartbeat_at / activity_at / force_released_at)は timestamptz にして返す", () => {
+  const COLS = ["heartbeat_at", "activity_at", "force_released_at"] as const;
+  const heldRaw = {
+    id: "l1",
+    resource_type: "property",
+    resource_id: BASE.resourceId,
+    user_id: "other",
+    screen_token_hash: "h-other",
+    acquired_at: new Date("2026-09-18T10:00:00Z"),
+    heartbeat_at: new Date("2026-09-18T10:00:00Z"),
+    activity_at: new Date("2026-09-18T10:00:00Z"),
+    force_released_at: null,
+    db_now: new Date("2026-09-18T10:01:00Z"),
+  };
+  const expectCasts = (sql: string) => {
+    // 行を返す SELECT の列の並びだけを見る(WHERE や SET の中の列は SQL の中で比べるので素のままでよい)。
+    const list = sql.slice(sql.indexOf("SELECT"), sql.indexOf('FROM "edit_locks"'));
+    for (const c of COLS) {
+      expect(list).toContain(`"${c}"::timestamptz AS "${c}"`);
+      // 素の列のまま返す書き方が残っていない。
+      expect(list).not.toMatch(new RegExp(`(?<!AS )"${c}"(?!::timestamptz)`));
+    }
+  };
+
+  it("状態の読み取り(readEditLocks)の SELECT", async () => {
+    const { db, queryRaw } = fakeDb([heldRaw]);
+    await readEditLocks(db, [{ resourceType: "property", resourceId: BASE.resourceId }]);
+    expectCasts(sqlOf(queryRaw.mock.calls[0]));
+  });
+
+  it("取得できなかったときに今の保持者を読む SELECT", async () => {
+    const { db, queryRaw } = fakeDb([]);
+    queryRaw.mockResolvedValueOnce([heldRaw]).mockResolvedValueOnce([]).mockResolvedValueOnce([heldRaw]);
+    await acquireEditLock(db, BASE);
+    expectCasts(sqlOf(queryRaw.mock.calls[2]));
+  });
+
+  it("合図が通らなかったときに今の状態を読む SELECT", async () => {
+    const { db, queryRaw } = fakeDb([]);
+    queryRaw.mockResolvedValueOnce([]).mockResolvedValueOnce([heldRaw]);
+    await heartbeatEditLock(db, { ...BASE, active: true });
+    expectCasts(sqlOf(queryRaw.mock.calls[1]));
+  });
+
+  it("★正しい瞬間で読めば、切れた鍵は「編集中」に見えない(9時間先の瞬間だと生きて見えた)", () => {
+    const dbNow = new Date("2026-11-15T05:00:00.000Z"); // 日本時間 14:00
+    // 最後の合図は日本時間 13:00(=04:00Z)。5分の猶予をとうに過ぎている。
+    const lockAt = (iso: string): EditLockRow => ({
+      id: "l1", userId: "u1", screenTokenHash: "h1",
+      acquiredAt: new Date(iso), heartbeatAt: new Date(iso), activityAt: new Date(iso), forceReleasedAt: null,
+    });
+    expect(expiryCause(lockAt("2026-11-15T04:00:00.000Z"), dbNow)).toBe("heartbeat");
+    // 素のまま読んだ値=壁時計 13:00 を UTC とみなした 13:00Z(=9時間先)。生きて見えていた。
+    expect(expiryCause(lockAt("2026-11-15T13:00:00.000Z"), dbNow)).toBeNull();
   });
 });
 
