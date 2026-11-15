@@ -9,6 +9,7 @@ import {
   decideEditDraftOnLoad,
   isPropertyEditDraftEmpty,
   mergeDraftIntoInitial,
+  isRebasedDraft,
   parsePropertyEditDraft,
 } from "../screens/property-edit";
 
@@ -77,13 +78,30 @@ describe("物件の編集の控え", () => {
     expect(changedValues({ salePrice: "32801500", saleTaxAmount: "" }, p)).toEqual({});
     expect(changedValues({ salePrice: "32801501", saleTaxAmount: "3000000" }, p)).toEqual({ salePrice: "32801501", saleTaxAmount: "3000000" });
   });
-  it("mergeDraftIntoInitial: 物件と版が同じなら重ねる・違えば重ねない", () => {
+  it("mergeDraftIntoInitial: 物件と版が同じなら重ねる・別の物件の控えは重ねない", () => {
     const initial = { address: "東京都A", note: "" };
     const d = { propertyId: "p1", baseVersion: 3, changed: { note: "x" }, buildingChoice: { kind: "auto" as const } };
-    expect(mergeDraftIntoInitial(initial, d, "p1", 3)).toEqual({ values: { address: "東京都A", note: "x" }, applied: true });
-    expect(mergeDraftIntoInitial(initial, d, "p1", 4)).toEqual({ values: initial, applied: false });
-    expect(mergeDraftIntoInitial(initial, d, "p2", 3)).toEqual({ values: initial, applied: false });
-    expect(mergeDraftIntoInitial(initial, null, "p1", 3)).toEqual({ values: initial, applied: false });
+    expect(mergeDraftIntoInitial(initial, d, "p1", 3)).toEqual({ values: { address: "東京都A", note: "x" }, applied: true, rebased: false });
+    expect(mergeDraftIntoInitial(initial, d, "p2", 3)).toEqual({ values: initial, applied: false, rebased: false });
+    expect(mergeDraftIntoInitial(initial, null, "p1", 3)).toEqual({ values: initial, applied: false, rebased: false });
+  });
+  it("★版が違っても入力を捨てない: 変えた欄だけを最新の内容に重ね、知らせる印(rebased)を立てる(2026-11-15)", () => {
+    // 作った直後の物件を編集中に、調査情報の自動取得が用途地域を埋めて版を 3→4 に進めた。
+    const d = { propertyId: "p1", baseVersion: 3, changed: { note: "入力した備考" }, buildingChoice: { kind: "auto" as const } };
+    const latest = { address: "東京都A", note: "", zoningDistrict: "第一種住居地域" };
+    expect(mergeDraftIntoInitial(latest, d, "p1", 4)).toEqual({
+      // 人が変えた欄(備考)は入力のまま・自動で埋まった欄(用途地域)は最新の値のまま。
+      values: { address: "東京都A", note: "入力した備考", zoningDistrict: "第一種住居地域" },
+      applied: true,
+      rebased: true,
+    });
+  });
+  it("isRebasedDraft: 同じ物件で版が違う控えだけ", () => {
+    const d = { propertyId: "p1", baseVersion: 3, changed: { note: "x" }, buildingChoice: { kind: "auto" as const } };
+    expect(isRebasedDraft(d, "p1", 4)).toBe(true);
+    expect(isRebasedDraft(d, "p1", 3)).toBe(false);
+    expect(isRebasedDraft(d, "p2", 4)).toBe(false);
+    expect(isRebasedDraft(null, "p1", 4)).toBe(false);
   });
   it("decideEditDraftOnLoad: 無し/開き直す/版違い", () => {
     const d = { propertyId: "p1", baseVersion: 3, changed: { note: "x" }, buildingChoice: { kind: "auto" as const } };

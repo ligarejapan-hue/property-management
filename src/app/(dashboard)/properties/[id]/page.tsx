@@ -5,9 +5,8 @@ import { supportsUnitFields } from "@/lib/property-building-name";
 import ParcelChangeDialog from "@/components/properties/parcel-change-dialog";
 import { landChoices } from "@/lib/property-parcel-changes";
 import { useState, useEffect, useCallback, useMemo, useRef, use, type Dispatch, type SetStateAction } from "react";
-import { clearDraft, draftKey, readDraft } from "@/lib/drafts/draft-store";
+import { draftKey, readDraft } from "@/lib/drafts/draft-store";
 import { decideEditDraftOnLoad, parsePropertyEditDraft } from "@/lib/drafts/screens/property-edit";
-import { DraftStaleNotice } from "@/components/drafts/draft-notices";
 import { BackLink } from "@/components/ui/back-link";
 import { Button } from "@/components/ui/button";
 import Link from "next/link";
@@ -414,10 +413,14 @@ export default function PropertyDetailPage({
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [showEditForm, setShowEditForm] = useState(false);
+  // 「物件を編集」を押してから開くまで(最新の内容の取り直し待ち)の印と、物件が替わった回数。
+  // ⚠待っている間に別の物件へ移ったら、移った先の編集を開かない(@codex PR#740 1巡目)。頼まれていない物件の
+  //   小窓が開き、編集の鍵まで取ってしまう。物件が替わるたびに回数を進め、押したときの回数と違えば開かない。
+  const openingEditRef = useRef(false);
+  const editOpenGenRef = useRef(0);
   // 編集の途中で別のメニューへ移って戻ったら、編集の小窓を開き直す(設計書 2026-10-13 §3-3)。
   // ⚠物件ごとに最初の読み込みで1回だけ判定する(編集中の取り直しで控えを消さない)。
   const editDraftCheckedRef = useRef<string | null>(null);
-  const [editDraftStale, setEditDraftStale] = useState(false);
   // 読み込みで「開き直したい」と分かった印。開くのは物件の書き込み権限を確かめてから(下の描画の頭)。
   const [editDraftReopenPending, setEditDraftReopenPending] = useState(false);
   const [deleting, setDeleting] = useState(false);
@@ -527,7 +530,8 @@ export default function PropertyDetailPage({
         const stashed = takeBuildingLinkNotice(id);
         if (stashed) setBuildingNotice(stashed);
       }
-      // 編集の途中の控えがあれば開き直す。版が違えば(ほかの方が保存した)使わずに知らせる。
+      // 編集の途中の控えがあれば開き直す。版が違っても控えは捨てない(2026-11-15)=開いた小窓が、
+      // 変えた欄だけ最新の内容に重ねて「ほかで更新がありました」と知らせる。
       if (applied && editDraftCheckedRef.current !== id) {
         editDraftCheckedRef.current = id;
         const editKey = draftKey("property-edit", id);
@@ -536,11 +540,7 @@ export default function PropertyDetailPage({
           id,
           (data as unknown as ApiProperty).version,
         );
-        if (decision === "reopen") setEditDraftReopenPending(true);
-        else if (decision === "stale") {
-          clearDraft(editKey);
-          setEditDraftStale(true);
-        }
+        if (decision === "reopen" || decision === "stale") setEditDraftReopenPending(true);
       }
     } catch (err) {
       applyRefreshOutcome(
@@ -605,6 +605,26 @@ export default function PropertyDetailPage({
   // ⚠**取り直しの約束(Promise)を返す**(@codex #398 R4 P2)。投げっぱなしにすると、
   //   回収の入口を押した直後に**古い版番号のまま**再挑戦できてしまい、また弾かれる。
   //   成功時の反映は従来どおり待たずに使ってよい(返り値を無視するだけ)。
+  // 「物件を編集」を開く。**開く前に最新の内容を取り直す**(2026-11-15 発注者決定=案1)。
+  // ⚠小窓が送る版は、この画面が持っている物件の版。画面を開いたあとに、調査情報の自動取得(空欄を埋めて版を進める)や
+  //   ほかの人の保存が入ると版が古くなり、何も重なっていなくても「他のユーザーが先に更新しています」で保存できなかった。
+  // ⚠取り直しに失敗しても開く(今までと同じ状態で開くだけ。保存時にサーバーが版を確かめる)。
+  // ⚠二重に押しても取り直しは1回(開くのを待っている間は何もしない)。
+  // ⚠待っている間に別の物件へ移ったら開かない(押したときの物件のまま、のときだけ開く)。
+  const openEditForm = useCallback(async () => {
+    if (openingEditRef.current) return;
+    openingEditRef.current = true;
+    const gen = editOpenGenRef.current;
+    try {
+      await refreshPropertyQuietly();
+    } finally {
+      if (gen === editOpenGenRef.current) {
+        openingEditRef.current = false;
+        setShowEditForm(true);
+      }
+    }
+  }, [refreshPropertyQuietly]);
+
   const handleRegistryResultApplied = useCallback(() => {
     setAttachmentsRefreshToken((n) => n + 1);
     return refreshPropertyQuietly();
@@ -620,10 +640,12 @@ export default function PropertyDetailPage({
     setQualityIssues([]);
     // 別の物件へ移ったら、前の物件の棟の知らせも消す。
     setBuildingNotice(null);
-    // 前の物件の編集の小窓・版違いの帯も引き継がない(戻る/進むで同じ画面が使い回されたとき)。
+    // 前の物件の編集の小窓も引き継がない(戻る/進むで同じ画面が使い回されたとき)。
     setShowEditForm(false);
-    setEditDraftStale(false);
     setEditDraftReopenPending(false);
+    // 前の物件で「物件を編集」を押して開くのを待っていたら、その開く動きも捨てる(openEditForm)。
+    editOpenGenRef.current += 1;
+    openingEditRef.current = false;
     // 分筆・合筆の小窓と結果の知らせも引き継がない。
     setParcelChangeOpen(false);
     setParcelChangeDone(null);
@@ -994,7 +1016,7 @@ export default function PropertyDetailPage({
             />
           )}
           <Button variant="secondary"
-            onClick={() => setShowEditForm(true)}
+            onClick={() => void openEditForm()}
             disabled={propertyEditLockHeld}
             aria-label="物件を編集"
             title={propertyEditLockHeld ? editLockUnavailableTitle(propertyEditLockRow) : "物件情報を編集"}
@@ -1143,8 +1165,6 @@ export default function PropertyDetailPage({
         </div>
       )}
 
-      {editDraftStale && <DraftStaleNotice onDismiss={() => setEditDraftStale(false)} />}
-
       {/* 棟へつないだ結果の知らせ(設計 §6.2)。閉じるまで出したまま。 */}
       <BuildingLinkNotice outcome={buildingNotice} onClose={() => setBuildingNotice(null)} />
 
@@ -1216,7 +1236,7 @@ export default function PropertyDetailPage({
                 : null
             }
             onEditProperty={
-              propertyEditLockHeld ? undefined : () => setShowEditForm(true)
+              propertyEditLockHeld ? undefined : () => void openEditForm()
             }
           />
         )}

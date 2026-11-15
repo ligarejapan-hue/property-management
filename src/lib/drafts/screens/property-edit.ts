@@ -1,6 +1,12 @@
 /**
  * 物件の編集の小窓の控え(設計書 §2 S5・§4.3)。変えた欄だけ+基にした版番号を持つ。
- * ⚠版が違えば重ねない(ほかの人の保存を古い入力で上書きしない)。
+ *
+ * ⚠版が違っても控えは捨てない(2026-11-15 発注者決定=案1)。**変えた欄だけ**を最新の内容に重ね、
+ *   「ほかで更新がありました。入力は残しています」と知らせる(rebased)。
+ *   前は版が違うと控えを捨てていた。物件を作った直後の調査情報の自動取得(空欄を埋めて版を進める)でも
+ *   版が変わるので、人が何もしていないのに入力が消えていた(実機確認 2026-11-15)。
+ *   重ねるのは人が変えた欄だけ=ほかの欄は最新の値のまま。同じ欄をほかの人も変えていた場合は、
+ *   知らせを見て人が確かめてから保存する。
  */
 import { z } from "zod/v4";
 import type { BuildingChoice } from "@/lib/building-link/resolve";
@@ -71,11 +77,17 @@ export function mergeDraftIntoInitial(
   draft: PropertyEditDraft | null,
   propertyId: string,
   version: number,
-): { values: Record<string, string>; applied: boolean } {
-  if (!draft || draft.propertyId !== propertyId || draft.baseVersion !== version) {
-    return { values: initial, applied: false };
+): { values: Record<string, string>; applied: boolean; rebased: boolean } {
+  if (!draft || draft.propertyId !== propertyId) {
+    return { values: initial, applied: false, rebased: false };
   }
-  return { values: { ...initial, ...draft.changed }, applied: true };
+  // 版が違う=控えを取ったあとに物件が更新された。変えた欄だけを最新の内容に重ねる(rebased=知らせを出す)。
+  return { values: { ...initial, ...draft.changed }, applied: true, rebased: draft.baseVersion !== version };
+}
+
+/** 控えが、いま開いている版より前の版に対する入力か(=重ねたうえで知らせる)。 */
+export function isRebasedDraft(draft: PropertyEditDraft | null, propertyId: string, version: number): boolean {
+  return draft != null && draft.propertyId === propertyId && draft.baseVersion !== version;
 }
 
 export function decideEditDraftOnLoad(
@@ -84,5 +96,6 @@ export function decideEditDraftOnLoad(
   version: number,
 ): "none" | "reopen" | "stale" {
   if (!draft || draft.propertyId !== propertyId) return "none";
+  // どちらも小窓を開き直す。"stale" は、開いた小窓が「ほかで更新がありました」と知らせる(控えは捨てない)。
   return draft.baseVersion === version ? "reopen" : "stale";
 }
