@@ -395,12 +395,39 @@ export const AUTO_ADD_DONE_TOKEN = "autoadd";
  */
 export const ENTRIES_DONE_TOKEN = "entries";
 
+/**
+ * 保存した種類に付ける印=「システムにだけいる人を自動で外すのを、この謄本で試し終えた」(2026-11-15)。
+ * 外せた物件は比べ直して「同じ」になるので印は残らない。外せなかった物件(添付した人に権限が無い・
+ * 外す人にメモがある等)にだけ残り、同じ謄本のあいだはもう試さない(人が一覧で判断する)。
+ */
+export const AUTO_REMOVE_DONE_TOKEN = "autorm";
+
+const PROCESS_TOKENS = new Set([AUTO_ADD_DONE_TOKEN, ENTRIES_DONE_TOKEN, AUTO_REMOVE_DONE_TOKEN]);
+
+/**
+ * 違いが「人数が違う(システムのほうが多い)」だけか(2026-11-15 発注者「外してよい」)。
+ * 謄本の人は全員システムにいて(書き方の違いも無い)、システムにだけ余分な人がいる形。
+ * 自動で外すのを試し終えた印があれば false。
+ */
+export function isSystemExtraOnly(stored: string | null | undefined): boolean {
+  if (!stored) return false;
+  const tokens = stored.split(",").filter((t) => t !== "");
+  if (tokens.includes(AUTO_REMOVE_DONE_TOKEN)) return false;
+  const kinds = tokens.filter((t) => !PROCESS_TOKENS.has(t));
+  if (kinds.length !== 1) return false;
+  const [code, a, b] = kinds[0].split(":");
+  if (code !== "count") return false;
+  const reg = Number(a);
+  const sys = Number(b);
+  return Number.isInteger(reg) && Number.isInteger(sys) && sys > reg;
+}
+
 /** 保存した形から、一覧に出す文言に戻す(字は保存していないので出さない)。 */
 export function ownerDiffLabelFromStored(stored: string | null | undefined): string | null {
   if (!stored) return null;
   const tokens = stored
     .split(",")
-    .filter((t) => t !== AUTO_ADD_DONE_TOKEN && t !== ENTRIES_DONE_TOKEN);
+    .filter((t) => !PROCESS_TOKENS.has(t));
   if (tokens.length === 0) return null;
   return tokens
     .map((token) => {

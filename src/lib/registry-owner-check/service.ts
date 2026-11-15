@@ -21,13 +21,25 @@ import {
   loadLatestRegistryText,
   ownersChangedError,
   REGISTRY_OWNER_REVIEW_ORDER,
+  replaceRegistryOwnersOnProperty,
   SUPPORTED_CERTIFICATE_TYPE,
   type ReplaceTx,
 } from "@/lib/registry-owner-apply/apply";
 import { processRegistryPdf } from "@/lib/registry-pdf/process";
-import { compareRegistryOwners, ownerNameKey, type RegistryOwnerCheckResult } from "@/lib/registry-owner-check/compare";
+import {
+  compareRegistryOwners,
+  ownerNameKey,
+  planOwnerReplacement,
+  type RegistryOwnerCheckResult,
+} from "@/lib/registry-owner-check/compare";
 import { hasPrivateUseChar } from "@/lib/private-use-char";
-import { AUTO_ADD_DONE_TOKEN, ENTRIES_DONE_TOKEN, ownerDiff } from "@/lib/registry-owner-check/diff";
+import {
+  AUTO_ADD_DONE_TOKEN,
+  AUTO_REMOVE_DONE_TOKEN,
+  ENTRIES_DONE_TOKEN,
+  isSystemExtraOnly,
+  ownerDiff,
+} from "@/lib/registry-owner-check/diff";
 import { assignRegistryRowsToOwners, replaceRegistryEntries } from "@/lib/registry-entries/write";
 import { registryOwnersToAutoAdd, uploaderMayAutoAdd } from "@/lib/registry-owner-check/auto-add";
 
@@ -177,10 +189,15 @@ function diffOf(
   registryNames: readonly string[],
   systemNames: readonly string[],
   autoAddDone: boolean,
+  /** 自動で外すのをこの謄本で済ませた(→ AUTO_REMOVE_DONE_TOKEN) */
+  autoRemoveDone = false,
 ): { kind: string; rank: number } | null {
   if (result !== "mismatch") return null;
   const d = ownerDiff(registryNames, systemNames);
-  return { kind: autoAddDone ? `${d.stored},${AUTO_ADD_DONE_TOKEN}` : d.stored, rank: d.rank };
+  const kind = [d.stored, autoAddDone ? AUTO_ADD_DONE_TOKEN : null, autoRemoveDone ? AUTO_REMOVE_DONE_TOKEN : null]
+    .filter(Boolean)
+    .join(",");
+  return { kind, rank: d.rank };
 }
 
 /**
@@ -270,6 +287,13 @@ export async function checkPropertyRegistryOwners(
     const kept = prev.decision === "keep" && prev.attachmentId === read.attachmentId;
     const autoAddDone =
       kept || autoAddAlreadyDone(prev, read.attachmentId) || !hasOwnersToAutoAdd(read.names ?? [], systemNames);
+    // 自動で外すのも謄本1件につき1回だけ(2026-11-15): 同じ謄本で一度「同じ」になった・試し終えた物件で、
+    // あとから人がつないだ人は外さない(人の判断を自動で戻さない)。新しい謄本で比べ直したらまた試す。
+    const autoRemoveDone =
+      prev.attachmentId === read.attachmentId &&
+      (prev.result === "same" ||
+        prev.result === "same_notation" ||
+        !!prev.diffKind?.split(",").includes(AUTO_REMOVE_DONE_TOKEN));
     // 登記上の記載(所有者事項の行ごとの住所と持分)を、つながっている所有者に当てて記録する
     // (2026-11-12 第2回)。添付済みの所有者事項の後追いと、足す人だけを渡す取り込み
     // (自動の登録・謄本の名義に直す)のあとの記録を、ここで受け持つ。
@@ -281,7 +305,7 @@ export async function checkPropertyRegistryOwners(
       read.attachmentId,
       result,
       prev,
-      diffOf(result, read.names ?? [], systemNames, autoAddDone),
+      diffOf(result, read.names ?? [], systemNames, autoAddDone, autoRemoveDone),
       true,
     );
     return result;
@@ -407,6 +431,12 @@ export async function runRegistryOwnerChecks(
           counts.auto_added = (counts.auto_added ?? 0) + 1;
           counts.auto_added_people = (counts.auto_added_people ?? 0) + added;
         }
+        // 謄本の人が全員いてシステムにだけ余分な人がいる → 余分な人を自動で外す(2026-11-15 発注者)
+        const removed = await autoRemoveSystemOnlyOwners(id);
+        if (removed > 0) {
+          counts.auto_removed = (counts.auto_removed ?? 0) + 1;
+          counts.auto_removed_people = (counts.auto_removed_people ?? 0) + removed;
+        }
       }
     } catch (e) {
       failed += 1;
@@ -415,6 +445,15 @@ export async function runRegistryOwnerChecks(
       console.error(`[registry-owner-check] 比べられませんでした kind=${kind}`);
       await markRetryAfterFailure(id);
     }
+  }
+  // 前に比べ終えて判断待ちの物件(反映前に比べたもの)も、時間が残っていれば少しずつ試す
+  if (opts.deadline === undefined || Date.now() < opts.deadline) {
+    const r = await autoRemovePendingCandidates(AUTO_REMOVE_PENDING_PER_RUN, opts.deadline);
+    if (r.properties > 0) {
+      counts.auto_removed = (counts.auto_removed ?? 0) + r.properties;
+      counts.auto_removed_people = (counts.auto_removed_people ?? 0) + r.people;
+    }
+    failed += r.failed;
   }
   return { processed, counts, failed, remaining: await countPendingRegistryOwnerChecks() };
 }
@@ -665,6 +704,134 @@ export async function autoAddRegistryOnlyOwners(propertyId: string): Promise<num
     },
   });
   return targets.length;
+}
+
+/** 自動で外したときの取込記録・監査の名前(生のファイル名は使わない)。 */
+export const REGISTRY_OWNER_AUTO_REMOVE_AUDIT_LABEL = "謄本にいない人を自動で外す";
+
+/** 1回の「比べる」(夜の自動・画面のボタン)のついでに試す、前に比べ終えた物件の上限。 */
+export const AUTO_REMOVE_PENDING_PER_RUN = 10;
+
+/** 自動で外すのを試し終えた(外さないと決まった)印。比べたあとに謄本・所有者が変わっていたら付けない。 */
+async function markAutoRemoveDone(propertyId: string, attachmentId: string): Promise<void> {
+  await prisma.$executeRaw`
+    UPDATE registry_owner_checks
+       SET diff_kind = diff_kind || ${`,${AUTO_REMOVE_DONE_TOKEN}`}
+     WHERE property_id = ${propertyId}::uuid AND attachment_id = ${attachmentId}::uuid
+       AND stale = false AND result = 'mismatch' AND decision IS NULL
+       AND diff_kind IS NOT NULL AND diff_kind NOT LIKE ${`%${AUTO_REMOVE_DONE_TOKEN}%`}
+  `;
+}
+
+/**
+ * 「違う」と比べた物件で、謄本の人が全員システムにいて、システムにだけ余分な人がいるとき、
+ * 余分な人を物件から自動で外す(2026-11-15 発注者「外してよい」=11-10 の「外さない」を変更)。
+ * 外した人数を返す(外さなければ 0)。
+ * - 外し方は「謄本の名義に直す」と同じ(replaceRegistryOwnersOnProperty)。所有者の情報そのものは消さず、
+ *   つながりだけを外して変更履歴(「自動」)に残す。外す人に物件のメモがあれば外さない(人が判断)。
+ * - 誰の操作として残すかは自動の登録と同じ=その謄本を添付した人(権限と担当範囲があるときだけ)。
+ * - 外せないと決まったら印を付け、同じ謄本のあいだはもう試さない。
+ * - 外したら同じトランザクションで比べ直す(「同じ」になれば DM判断の自動仕分けに回る)。
+ * ⚠氏名・住所はログに出さない。
+ */
+export async function autoRemoveSystemOnlyOwners(propertyId: string): Promise<number> {
+  const row = await prisma.registryOwnerCheck.findUnique({
+    where: { propertyId },
+    select: { attachmentId: true, result: true, decision: true, stale: true, diffKind: true },
+  });
+  if (!row || row.stale || row.result !== "mismatch" || row.decision !== null || !row.attachmentId) return 0;
+  if (!isSystemExtraOnly(row.diffKind)) return 0;
+  const registry = await loadLatestRegistryText(propertyId, row.attachmentId, {
+    timeoutMs: REGISTRY_OWNER_READ_TIMEOUT_MS,
+  });
+  const registryOwners = parseRegistryOwnerTable(registry.text) ?? [];
+  const linked = await prisma.propertyOwner.findMany({
+    where: { propertyId },
+    select: { ownerId: true, owner: { select: { name: true } } },
+    orderBy: REGISTRY_OWNER_REVIEW_ORDER,
+  });
+  const plan = planOwnerReplacement(
+    registryOwners,
+    linked.map((l) => ({ ownerId: l.ownerId, name: l.owner.name })),
+  );
+  // 外すだけで済む形(足す人がいない・外す人がいる)のときだけ。違えば人が判断する
+  if (registryOwners.length === 0 || plan.add.length > 0 || plan.removeOwnerIds.length === 0) {
+    await markAutoRemoveDone(propertyId, registry.attachmentId);
+    return 0;
+  }
+  const actor = await autoAddActor(propertyId, registry.attachmentId, []);
+  if (!actor) {
+    await markAutoRemoveDone(propertyId, registry.attachmentId);
+    return 0;
+  }
+  try {
+    await replaceRegistryOwnersOnProperty({
+      session: actor,
+      perms: await getUserPermissions(actor.id),
+      propertyId,
+      expectedAttachmentId: registry.attachmentId,
+      expectedLinkedOwnerIds: linked.map((l) => l.ownerId),
+      expectedRemoveOwnerIds: plan.removeOwnerIds,
+      auditLabel: REGISTRY_OWNER_AUTO_REMOVE_AUDIT_LABEL,
+      changeSource: "auto",
+      beforeCommit: async (tx, registryNames, registryRows) => {
+        // ロックの中で、比べた結果が今も「未判断の違う・同じ謄本」かを見直してから比べ直す。
+        // ⚠stale は見ない: この同じトランザクションで外したつながりに、トリガーが比べ直しの印を立てる
+        //   (所有者のほかの変更は、置き換えの中で「つながっている人が見せたときと同じか」を見ている)
+        const prev = await lockCheckRow(tx, propertyId);
+        if (prev.result !== "mismatch" || prev.decision !== null || prev.attachmentId !== registry.attachmentId) {
+          throw checkChangedError();
+        }
+        await recordCheckAfterReplace(tx, propertyId, registry.attachmentId, registryNames, registryRows);
+      },
+    });
+  } catch (e) {
+    // 外す人にメモがある・途中で所有者や謄本が変わった等=自動では外さない(人が一覧で判断)
+    if (e instanceof ApiError && e.status >= 400 && e.status < 500) {
+      await markAutoRemoveDone(propertyId, registry.attachmentId);
+      return 0;
+    }
+    throw e;
+  }
+  return plan.removeOwnerIds.length;
+}
+
+/**
+ * 前に比べ終えて判断待ちの「違う」のうち、自動で外す形の物件を少しずつ試す(反映前に比べた物件のため)。
+ * 外した物件の数・外した人数・失敗の数を返す。
+ */
+export async function autoRemovePendingCandidates(
+  limit: number,
+  deadline?: number,
+): Promise<{ properties: number; people: number; failed: number }> {
+  const rows = await prisma.$queryRaw<{ property_id: string; diff_kind: string | null }[]>`
+    SELECT c.property_id, c.diff_kind FROM registry_owner_checks c
+    JOIN properties p ON p.id = c.property_id
+    WHERE c.result = 'mismatch' AND c.decision IS NULL AND c.stale = false AND p.is_archived = false
+      AND c.diff_kind LIKE '%count:%' AND c.diff_kind NOT LIKE ${`%${AUTO_REMOVE_DONE_TOKEN}%`}
+    ORDER BY c.checked_at ASC
+    LIMIT ${Math.max(1, limit) * 5}
+  `;
+  const out = { properties: 0, people: 0, failed: 0 };
+  let tried = 0;
+  for (const r of rows) {
+    if (tried >= limit) break;
+    if (deadline !== undefined && Date.now() >= deadline) break;
+    if (!isSystemExtraOnly(r.diff_kind)) continue;
+    tried += 1;
+    try {
+      const n = await autoRemoveSystemOnlyOwners(r.property_id);
+      if (n > 0) {
+        out.properties += 1;
+        out.people += n;
+      }
+    } catch (e) {
+      out.failed += 1;
+      const kind = e instanceof Error ? e.name : typeof e;
+      console.error(`[registry-owner-check] 自動で外せませんでした kind=${kind}`);
+    }
+  }
+  return out;
 }
 
 export const checkChangedError = () =>
