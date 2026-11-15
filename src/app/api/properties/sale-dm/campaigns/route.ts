@@ -11,11 +11,10 @@ import {
   type TerminalExclusionTx,
 } from "@/lib/dm-batch/terminal-exclusion";
 import {
-  findSendPropertyLinks,
-  pickSecondLetters,
+  resolveSecondLetters,
   propertiesToDemote,
   demoteSecondLetterProperties,
-  type SecondLetterTx,
+  type ResolveSecondLetterTx,
 } from "@/lib/dm-batch/second-letter";
 import { hasPermission } from "@/lib/permissions";
 import { propertyListQuerySchema } from "@/lib/validators";
@@ -390,13 +389,10 @@ export async function POST(request: NextRequest) {
         }));
         // 同じ所有者あての2通目を外す(2026-11-16 発注者決定・second-letter.ts=A と共用)。上の理由に当たらない宛先だけ。
         // 比べる相手はシステム全体の送付可の物件(1回50通までなので、もう一方が今回の対象に無いことがある)。
-        // 新しい物件の手紙が実際に残るときだけ外す(pickSecondLetters)。所有者のつながりが変わっていた宛先
-        // (下で作らない)は、2通目にも、ほかの宛先を外す理由にもしない。
-        const sendLinks = await findSendPropertyLinks(
-          tx as unknown as SecondLetterTx,
-          pairs.filter(({ reason }) => reason === null).flatMap(({ m }) => m.groupOwnerIds),
-        );
-        const secondFlags = pickSecondLetters(
+        // 新しい物件の手紙が実際に届くときだけ外す(今回の対象に無い物件も、拒否などで出ないなら外す理由にしない)。
+        // 所有者のつながりが変わっていた宛先(下で作らない)は、2通目にも、ほかの宛先を外す理由にもしない。
+        const secondFlags = await resolveSecondLetters(
+          tx as unknown as ResolveSecondLetterTx,
           pairs.map(({ m, reason }) => ({
             propertyId: m.propertyId,
             ownerIds: [
@@ -408,7 +404,6 @@ export async function POST(request: NextRequest) {
             ],
             eligible: reason === null && isStillLinked(m),
           })),
-          sendLinks,
         );
         const surviving = pairs.filter((_, i) => pairs[i].reason === null && !secondFlags[i]);
         excludedSecondLetterCount = secondFlags.filter(Boolean).length;

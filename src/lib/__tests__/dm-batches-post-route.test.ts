@@ -67,14 +67,16 @@ vi.mock("@/lib/api-helpers", () => {
 });
 
 vi.mock("@/lib/audit", () => ({ writeAuditLog: vi.fn() }));
-// 同じ所有者あての2通目(second-letter.ts・2026-11-16)。既定=送付可の物件のつながりなし=2通目なし。決まりの中身は second-letter.test.ts が見る。
+// 同じ所有者あての2通目(second-letter.ts・2026-11-16)。既定=2通目なし。どれが2通目かの決まりは second-letter.test.ts が見る(ここは受け取った結果の使い方)。
 const sl = vi.hoisted(() => ({
-  findLinks: vi.fn(async (_tx?: unknown, _ownerIds?: readonly string[]) => [] as Array<{ ownerId: string; propertyId: string; createdAt: Date }>),
+  // 既定=どの宛先も2通目でない。テストは「2通目にする物件の id」を secondProps に入れる。
+  secondProps: new Set<string>(),
+  resolve: vi.fn(async (_tx: unknown, letters: ReadonlyArray<{ propertyId: string; ownerIds: readonly string[]; eligible: boolean }>) => letters.map(() => false)),
   demote: vi.fn(async (ids: readonly string[], _by?: string) => ids.length),
 }));
 vi.mock("@/lib/dm-batch/second-letter", async (orig) => ({
   ...(await orig<typeof import("@/lib/dm-batch/second-letter")>()),
-  findSendPropertyLinks: sl.findLinks,
+  resolveSecondLetters: sl.resolve,
   demoteSecondLetterProperties: sl.demote,
 }));
 // 配信停止URLの頭(追跡URL)の有無。既定は設定済み。
@@ -456,7 +458,11 @@ describe("POST /api/properties/dm-batches", () => {
         ...PERMS_FULL,
         { resource: "property", action: "write", granted: true },
       ] as never);
-    const lk = (ownerId: string, propertyId: string, day: string) => ({ ownerId, propertyId, createdAt: new Date(`2026-01-${day}T00:00:00Z`) });
+    // 2通目にする宛先を「所有者と物件」で指す(どれが2通目かの決まりは second-letter.test.ts)。
+    const secondAt = (propertyId: string, ownerId: string) =>
+      sl.resolve.mockImplementationOnce(async (_tx, letters) =>
+        letters.map((l) => l.eligible && l.propertyId === propertyId && l.ownerIds.includes(ownerId)),
+      );
     const twoProps = () => {
       // 同じ所有者 o1 が、送付可の物件を2つ持っている(p2 のほうが登録が新しい)。
       pm.property.findMany.mockResolvedValue([
@@ -467,7 +473,7 @@ describe("POST /api/properties/dm-batches", () => {
         { propertyId: "p1", ownerId: "o1" },
         { propertyId: "p2", ownerId: "o1" },
       ]);
-      sl.findLinks.mockResolvedValueOnce([lk("o1", "p1", "01"), lk("o1", "p2", "02")]);
+      secondAt("p1", "o1");
     };
 
     it("登録が新しい物件の宛先だけを控えに入れ、古い物件は「送付不可」にする(件数を応答と監査に)", async () => {
@@ -500,10 +506,13 @@ describe("POST /api/properties/dm-batches", () => {
       expect(sl.demote).not.toHaveBeenCalled();
     });
 
-    it("比べる所有者は、ほかの理由で外れていない宛先の人(代表と共有者)", async () => {
+    it("宛先を(物件・所有者・ほかの理由で外れていないか)で渡す", async () => {
       twoProps();
       await POST(makeRequest(BODY));
-      expect(sl.findLinks.mock.calls[0][1]).toEqual(["o1", "o1"]);
+      expect(sl.resolve.mock.calls[0][1]).toEqual([
+        { propertyId: "p1", ownerIds: ["o1"], eligible: true },
+        { propertyId: "p2", ownerIds: ["o1"], eligible: true },
+      ]);
     });
 
     it("住所の違う共有者の宛先が残る物件は「送付不可」にしない", async () => {
@@ -516,7 +525,7 @@ describe("POST /api/properties/dm-batches", () => {
           ],
         }),
       ]);
-      sl.findLinks.mockResolvedValueOnce([lk("o1", "p1", "01"), lk("o2", "p1", "01"), lk("o1", "pX", "09")]);
+      secondAt("p1", "o1");
       withWrite();
       const res = await POST(makeRequest(BODY));
       const body = (await res.json()) as Record<string, number>;

@@ -35,11 +35,10 @@ import {
   type TerminalExclusionTx,
 } from "@/lib/dm-batch/terminal-exclusion";
 import {
-  findSendPropertyLinks,
-  pickSecondLetters,
+  resolveSecondLetters,
   propertiesToDemote,
   demoteSecondLetterProperties,
-  type SecondLetterTx,
+  type ResolveSecondLetterTx,
 } from "@/lib/dm-batch/second-letter";
 import { loadSaleDmPublicPageConfig } from "@/lib/sale-dm-letter/config-store";
 
@@ -429,18 +428,14 @@ export async function POST(request: NextRequest) {
         );
         // 同じ所有者あての2通目を外す(2026-11-16 発注者決定・second-letter.ts)。上の理由に当たらない宛先だけを見る
         // (両方に当たるときは上の理由で数える)。比べる相手はシステム全体の送付可の物件。
-        // 新しい物件の手紙が実際に残るときだけ外す(pickSecondLetters)。
-        const sendLinks = await findSendPropertyLinks(
-          tx as unknown as SecondLetterTx,
-          items.filter((_, i) => reasons[i] === null).flatMap((it) => it.groupOwnerIds),
-        );
-        const second = pickSecondLetters(
+        // 新しい物件の手紙が実際に届くときだけ外す(今回の対象に無い物件も、拒否などで出ないなら外す理由にしない)。
+        const second = await resolveSecondLetters(
+          tx as unknown as ResolveSecondLetterTx,
           items.map((it, i) => ({
             propertyId: it.propertyId,
             ownerIds: [...new Set([it.ownerId, ...it.groupOwnerIds])],
             eligible: reasons[i] === null,
           })),
-          sendLinks,
         );
         const survivingItems = items.filter((_, i) => reasons[i] === null && !second[i]);
         excludedSecondLetterCount = second.filter(Boolean).length;
