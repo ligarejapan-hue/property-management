@@ -1368,6 +1368,8 @@ export async function fetchChangeLogs(
       pagination: { page, limit: 50, total: logs.length, totalPages: 1 },
       fieldNames: [] as string[],
       sources: [] as string[],
+      buildingNames: {} as Record<string, string>,
+      userNames: {} as Record<string, string>,
     };
   }
   const params = new URLSearchParams({ page: String(page) });
@@ -1380,6 +1382,9 @@ export async function fetchChangeLogs(
     pagination: unknown;
     fieldNames?: string[];
     sources?: string[];
+    /** このページの「棟」「担当者」の値(ID)の名前。無い ID は削除・統合された棟など(2026-11-15)。 */
+    buildingNames?: Record<string, string>;
+    userNames?: Record<string, string>;
   }>(`/api/properties/${propertyId}/change-logs?${params}`);
 }
 

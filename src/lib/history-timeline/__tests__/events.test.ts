@@ -4,7 +4,7 @@ import {
   buildTimelineSummary, categoryOf, changeEvents, commentEvent, dealCreatedEvent, dmReactionEvent, dmSentEvent, docFileEvent,
   docLinkIssuedEvent, docLinkRevokedEvent, docReviewEvent, documentEvent, inquiryEvent, investigationEvent, materialSendEvent, mergeTimeline,
   nextActionCompletedEvent, nextActionCreatedEvent, ownerMemoEvent, requestCopyEvent, scheduleEvent, sourcesForCategory,
-  viewingEvent, type ChangeContext, type TimelineEvent,
+  buildingIdsInChanges, viewingEvent, type ChangeContext, type TimelineEvent,
   actorOfAudit, scheduleUndoEvent,
 } from "../events";
 
@@ -14,7 +14,7 @@ const at = (s: string) => new Date(s);
 const author = { name: "担当A" };
 
 const ctx = (over: Partial<ChangeContext> = {}): ChangeContext => ({
-  propertyId: PID, dealsById: new Map([[DEAL.id, DEAL]]), userNames: new Map(), inquirerLevel: "full", ownerNote: "visible",
+  propertyId: PID, dealsById: new Map([[DEAL.id, DEAL]]), userNames: new Map(), buildingNames: new Map(), inquirerLevel: "full", ownerNote: "visible",
   ownerLevels: { name: "full", nameKana: "full", phone: "full", zip: "full", address: "full", note: "full", email: "full", corporateNumber: "full" }, ...over,
 });
 const changeRow = (over: Record<string, unknown> = {}) => ({
@@ -189,6 +189,32 @@ describe("変更履歴の変換", () => {
     expect(named.detail).not.toContain(uid);
     const other = changeEvents([changeRow({ fieldName: "dmScenarioId", oldValue: null, newValue: uid })], ctx()).events[0];
     expect(other.detail ?? "").not.toContain(uid);
+  });
+
+  it("★現況・除外申請は画面の名前で出す(rented・requested と英字で出さない・2026-11-15)", () => {
+    const occ = changeEvents([changeRow({ fieldName: "occupancyStatus", oldValue: null, newValue: "rented" })], ctx()).events[0];
+    expect(occ).toMatchObject({ title: "現況を変更", detail: "(空) → 賃貸中" });
+    const ex = changeEvents([changeRow({ fieldName: "leadExclusionStatus", oldValue: "requested", newValue: "rejected" })], ctx()).events[0];
+    expect(ex).toMatchObject({ title: "除外申請を変更", detail: "申請中 → 認められなかった" });
+  });
+
+  it("★棟は今の名前で出す。見つからない棟は「(削除・統合された棟)」で、ID は出さない(2026-11-15)", () => {
+    const b1 = "d5d6aae8-1111-4111-8111-111111111111";
+    const b2 = "d5d6aae8-2222-4222-8222-222222222222";
+    const rows = [changeRow({ fieldName: "buildingId", oldValue: b2, newValue: b1 })];
+    expect(buildingIdsInChanges(rows).sort()).toEqual([b1, b2]);
+    const e = changeEvents(rows, ctx({ buildingNames: new Map([[b1, "サンプルマンション"]]) })).events[0];
+    expect(e).toMatchObject({ title: "棟を変更", detail: "(削除・統合された棟) → サンプルマンション" });
+    const first = changeEvents([changeRow({ fieldName: "buildingId", oldValue: null, newValue: b1 })], ctx({ buildingNames: new Map([[b1, "サンプルマンション"]]) })).events[0];
+    expect(first.detail).toBe("(空) → サンプルマンション");
+    expect(JSON.stringify([e, first])).not.toContain("d5d6aae8");
+    // 棟の ID を集めるのは物件の「棟」の行だけ。
+    expect(buildingIdsInChanges([changeRow({ fieldName: "dmScenarioId", oldValue: null, newValue: b1 })])).toEqual([]);
+  });
+
+  it("棟の情報の「name」は氏名ではなくマンション名で出す", () => {
+    const row = changeRow({ targetTable: "buildings", targetId: "b1", fieldName: "name", oldValue: "旧名", newValue: "新名" });
+    expect(changeEvents([row], ctx()).events[0].title).toBe("マンション名を変更");
   });
 
   it("取引の状態は取引の行として、画面の名前で出す", () => {

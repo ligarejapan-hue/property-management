@@ -7,7 +7,7 @@ import { REACTION_LABELS } from "@/lib/dm-reaction/core";
 import { redactPropertyChangeValue } from "@/lib/inquirer-name";
 import type { OwnerMemoBodyVisibility } from "@/lib/owner-memo";
 import { isMaskFreeLevel, maskValue, type OwnerDisplayConfigShape } from "@/lib/permissions";
-import { CHANGE_FIELD_LABELS, propertyHistoryValue } from "@/lib/property-change-labels";
+import { buildingHistoryLabel, changeFieldLabel, historyNameIds, propertyHistoryValue } from "@/lib/property-change-labels";
 import { businessTypeLabel } from "@/lib/property-business-type";
 import { propertyDetailHref } from "@/lib/property-detail-tab";
 import { CASE_STATUS_LABELS } from "@/lib/property-types";
@@ -260,6 +260,8 @@ export interface ChangeContext {
   propertyId: string | null;
   dealsById: ReadonlyMap<string, DealRef>;
   userNames: ReadonlyMap<string, string>;
+  /** 棟の ID → 今の名前(見るときに引く。無い ID は削除・統合された棟・2026-11-15)。 */
+  buildingNames: ReadonlyMap<string, string>;
   inquirerLevel: string | null;
   ownerNote: OwnerMemoBodyVisibility;
   ownerLevels: OwnerDisplayConfigShape;
@@ -271,14 +273,21 @@ export function userIdsInChanges(rows: readonly ChangeRow[]): string[] {
   return [...new Set(ids)];
 }
 
+/** 名前に直す棟の ID(物件の「棟」の行の変更前後・2026-11-15)。 */
+export function buildingIdsInChanges(rows: readonly ChangeRow[]): string[] {
+  return historyNameIds(rows).buildingIds;
+}
+
 function fieldLabel(row: ChangeRow): string {
   if (row.targetTable === "deals") return DEAL_FIELD_LABELS[row.fieldName] ?? row.fieldName;
   if (row.targetTable === "owners") return OWNER_CHANGE_FIELDS[row.fieldName]?.label ?? row.fieldName;
-  return CHANGE_FIELD_LABELS[row.fieldName] ?? row.fieldName;
+  return changeFieldLabel(row.targetTable, row.fieldName);
 }
 
 function displayValue(row: ChangeRow, value: string | null, ctx: ChangeContext): string {
   if (value === null || value === "") return "(空)";
+  // 棟は ID ではなく今の名前で出す(「(表示なし)」では何につないだか分からない・2026-11-15)。
+  if (row.targetTable === "properties" && row.fieldName === "buildingId") return buildingHistoryLabel(value, ctx.buildingNames) ?? "(空)";
   if (UUID.test(value)) return (USER_VALUE_FIELDS.has(row.fieldName) && ctx.userNames.get(value)) || "(表示なし)";
   if (row.targetTable === "properties" && row.fieldName === "caseStatus") return CASE_STATUS_LABELS[value] ?? value;
   if (row.targetTable === "properties") {

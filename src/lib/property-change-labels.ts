@@ -1,6 +1,9 @@
 import { formatYenText, manToYen } from "@/lib/yen-man";
 import { businessTypeLabel } from "@/lib/property-business-type";
-import { DM_STATUS_LABELS, REGISTRY_STATUS_LABELS } from "@/lib/property-types";
+import { LEAD_EXCLUSION_STATUS_LABELS } from "@/lib/lead-exclusion";
+import {
+  DM_STATUS_LABELS, INTRODUCTION_ROUTE_LABELS, OCCUPANCY_STATUS_LABELS, PROPERTY_TYPE_LABELS, REGISTRY_STATUS_LABELS,
+} from "@/lib/property-types";
 
 /** 変更履歴に出す項目の画面の名前(変更履歴タブと経緯タブで共通)。 */
 export const CHANGE_FIELD_LABELS: Record<string, string> = {
@@ -73,7 +76,40 @@ export const CHANGE_FIELD_LABELS: Record<string, string> = {
   ownershipShareNote: "持分メモ",
   roomNo: "部屋番号",
   occupancyStatus: "現況",
+  // 英字の内部名のまま出ていた項目(2026-11-15)。言葉は物件の編集画面・棟の画面・経緯の所有者の項目と同じ(単位は付けない)。
+  postalCode: "郵便番号",
+  introductionRoute: "導入ルート",
+  buildingCoverageRatio: "建蔽率",
+  floorAreaRatio: "容積率",
+  heightDistrict: "高度地区",
+  firePreventionZone: "防火地域",
+  // 景観の規制は編集画面に欄が無い(調査情報の取得だけが書く)。調査情報の項目の説明と同じ言葉にする。
+  scenicRestriction: "景観規制",
+  roadWidth: "道路幅員",
+  frontageWidth: "間口幅",
+  frontageDirection: "間口方角",
+  rosenkaYear: "路線価年度",
+  architectureNote: "建築備考",
+  email: "メール",
+  currentZip: "現住所の郵便番号",
+  currentAddress: "現住所",
+  corporateNumber: "法人番号",
+  companyRegistryNumber: "会社法人等番号",
 };
+
+/** 棟の変更履歴だけ言葉が違う項目(棟の画面と同じ)。「name」は所有者では氏名・棟ではマンション名(2026-11-15)。 */
+export const BUILDING_CHANGE_FIELD_LABELS: Record<string, string> = {
+  name: "マンション名",
+};
+
+/** 表の持ち主の値だけを読む(toString などを拾わない)。 */
+const own = (table: Record<string, string>, key: string): string | null =>
+  Object.prototype.hasOwnProperty.call(table, key) ? table[key] : null;
+
+/** 変更履歴の項目名(棟の行は棟の言葉を先に見る)。表に無い項目は内部名のまま返す。 */
+export function changeFieldLabel(targetTable: string, fieldName: string): string {
+  return (targetTable === "buildings" ? own(BUILDING_CHANGE_FIELD_LABELS, fieldName) : null) ?? own(CHANGE_FIELD_LABELS, fieldName) ?? fieldName;
+}
 
 /** 価格・うち消費税の履歴の値(万円で残る)を円で出す(「3,280万1,500円」・2026-11-03)。それ以外の欄は null。 */
 export function saleYenHistoryValue(fieldName: string, value: string | null): string | null {
@@ -92,5 +128,64 @@ export function propertyHistoryValue(fieldName: string, value: string | null): s
   if (fieldName === "registryStatus") return (value && Object.prototype.hasOwnProperty.call(REGISTRY_STATUS_LABELS, value) ? REGISTRY_STATUS_LABELS[value] : null);
   // DM判断も画面と同じ言葉で(「send → hold」と英字で出ていた・2026-11-08)。
   if (fieldName === "dmStatus") return (value && Object.prototype.hasOwnProperty.call(DM_STATUS_LABELS, value) ? DM_STATUS_LABELS[value] : null);
+  // 現況・除外申請・種別・導入ルートも画面と同じ言葉で(「- → rented」「requested」と英字で出ていた・2026-11-15)。
+  // 画面の表に無い値(古い取込の値など)は手を付けない=そのまま出す。
+  if (Object.prototype.hasOwnProperty.call(CODE_VALUE_LABELS, fieldName)) return value ? own(CODE_VALUE_LABELS[fieldName], value) : null;
   return saleYenHistoryValue(fieldName, value);
+}
+
+/**
+ * 値が内部の英字で残る項目と、その画面の名前の表(表は画面と同じものを使う=ここに写しを作らない)。
+ * ⚠セットバック・再建築許可(yes / no など)は画面に名前の表が無いので、ここでは直さない。
+ */
+const CODE_VALUE_LABELS: Record<string, Record<string, string>> = {
+  occupancyStatus: OCCUPANCY_STATUS_LABELS,
+  leadExclusionStatus: LEAD_EXCLUSION_STATUS_LABELS,
+  propertyType: PROPERTY_TYPE_LABELS,
+  introductionRoute: INTRODUCTION_ROUTE_LABELS,
+};
+
+/** 値が true / false で残る項目(主所有者・保管・OC)。備考などの自由記述の「true」は直さない。 */
+const BOOLEAN_CHANGE_FIELDS: ReadonlySet<string> = new Set(["isPrimary", "isArchived", "hasOc"]);
+
+/** はい・いいえの欄の値(変更履歴タブ。経緯タブと同じ言葉・2026-11-15)。当てはまらなければ null。 */
+export function historyBooleanLabel(fieldName: string, value: string | null): string | null {
+  if (!BOOLEAN_CHANGE_FIELDS.has(fieldName)) return null;
+  return value === "true" ? "はい" : value === "false" ? "いいえ" : null;
+}
+
+// ---------- ID で残る値(棟・担当者)を名前に直す ----------
+
+const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+
+export const DELETED_BUILDING_LABEL = "(削除・統合された棟)";
+export const UNKNOWN_USER_LABEL = "(表示なし)";
+
+/**
+ * 名前を引く ID(物件の「棟」「担当者」の行の変更前後)。重複なし・ID の形の値だけ。
+ * ⚠名前は履歴に書かず、見るときに引く(棟は後から名前が変わる・統合されるため・2026-11-15)。
+ */
+export function historyNameIds(
+  rows: readonly { targetTable: string; fieldName: string; oldValue: string | null; newValue: string | null }[],
+): { buildingIds: string[]; userIds: string[] } {
+  const pick = (fieldName: string) => [
+    ...new Set(
+      rows
+        .flatMap((r) => (r.targetTable === "properties" && r.fieldName === fieldName ? [r.oldValue, r.newValue] : []))
+        .filter((v): v is string => !!v && UUID.test(v)),
+    ),
+  ];
+  return { buildingIds: pick("buildingId"), userIds: pick("assignedTo") };
+}
+
+/** 「棟」の値(棟の ID)を今の名前で。見つからない棟は ID を出さず「(削除・統合された棟)」。空は null。 */
+export function buildingHistoryLabel(value: string | null, names: ReadonlyMap<string, string>): string | null {
+  if (value === null || value === "") return null;
+  return names.get(value) ?? DELETED_BUILDING_LABEL;
+}
+
+/** 「担当者」の値(人の ID)を名前で。見つからなければ ID を出さず「(表示なし)」(経緯タブと同じ)。空は null。 */
+export function userHistoryLabel(value: string | null, names: ReadonlyMap<string, string>): string | null {
+  if (value === null || value === "") return null;
+  return names.get(value) ?? UNKNOWN_USER_LABEL;
 }
