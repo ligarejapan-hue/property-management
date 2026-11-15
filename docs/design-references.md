@@ -24,6 +24,7 @@
 - スタックは Next.js 16 / React 19 / Tailwind CSS v4 / lucide-react / next-themes（ダークモード `.dark`）。Tailwind v3 前提や framer-motion 前提のコードは、そのまま動かない可能性がある
 - 取り込むコードに `dangerouslySetInnerHTML` や生 HTML 文字列がある場合は JSX に書き換える（CLAUDE.md §7）
 - アニメーションを入れる場合は `prefers-reduced-motion` を尊重し、業務操作（一覧・フォーム・保存）を遅くしない
+- 「AI っぽくなくして」と言葉だけで頼まない。参考 URL かスクリーンショット（見本）を渡し、どの要素の何を参考にするかを指定する（言葉だけでは逆に AI っぽい装飾が増えることがある）。細部は最後に人の目で確認する
 
 ## 2. リソース一覧（本システムでの使いどころ順）
 
@@ -42,6 +43,7 @@
 | 地図のマーカー・ポップアップ | mapcn（見た目のみ） | — |
 | 配色・文字組み | Refero Styles | Minimal Gallery |
 | 小さな動き（ホバー・トグル） | MicroKit UI | Motion Primitives（見た目のみ） |
+| ボタン・カード・入力の見本をそのまま指示に使う | DesignBookmark | Component Gallery |
 
 ### A. 業務画面で参照しやすい（インスピレーション・パターン集）
 
@@ -58,6 +60,7 @@
 | 8 | Footer Design | https://footer.design | フッター |
 | 9 | CTA Gallery | https://cta.gallery | フォーム・ボタン・ポップアップ |
 | 10 | 404s | https://404s.design | エラーページ |
+| 30 | DesignBookmark | https://designbookmark.com | ボタン・カード・入力フォーム・ナビ等の見本と、AI に渡すプロンプトが取れる。プロンプトはそのまま使わず、既存部品とトーンで再現するよう書き換えて渡す |
 | 21 | mapcn | https://mapcn.dev | 地図のマーカー・ポップアップ表現の参考。本システムは `@vis.gl/react-google-maps` を使用中のため、見た目の参考に留める。位置情報の扱いは CLAUDE.md §7・§8 |
 
 ### B. コンポーネント・アニメーション集（取り込む場合はライセンス確認＋依存確認）
@@ -75,6 +78,7 @@
 | 24 | CSS Text Effects | https://text-effects.colorion.co | 同上 |
 | 25 | Circle Loaders | https://circleloaders.dominikakissi.com | ローディング表示の参考 |
 | 26 | Gradient Buttons | https://gradientbuttons.colorion.co | 既存トーンと合わない場合が多い |
+| 31 | Astryx（Meta） | https://github.com/meta/astryx | MIT のデザインシステム（部品150種以上、MCP 対応、AI エージェント前提）。アクセシビリティ・部品構成のお手本として参照する。**導入は依存追加のため事前承認**。既存 `src/components/ui/` と混在させない |
 | 29 | Anime.js | https://animejs.com | JS アニメーションライブラリ。**導入は依存追加のため事前承認**（元メモは URL 途中で切れていたため要確認） |
 
 ### C. 素材
@@ -120,4 +124,5 @@
 
 - 各サイトの料金体系・ライセンス・商用利用可否
 - 21st.dev MCP の認証方式・課金条件
+- #30 DesignBookmark・#31 Astryx は X の紹介投稿（2026-11）から追加。サイト・リポジトリの中身・ライセンスは未確認
 - #29 Anime.js は元メモが途中で切れており、意図したリソースか未確認
