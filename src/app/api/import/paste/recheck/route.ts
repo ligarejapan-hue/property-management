@@ -41,6 +41,8 @@ interface RecheckBody {
   /** 建物名・部屋番号。「同じ内容の物件」の確認に使う(2026-11-15)。 */
   buildingName?: string | null;
   roomNo?: string | null;
+  /** 物件種別。種別に合わない建物名・部屋番号は保存されないので、比べる前に落とす。 */
+  propertyType?: string | null;
 }
 
 /** 空文字は「無い」と同じに畳む(下書き側の値と同じ扱いにする)。 */
@@ -76,7 +78,11 @@ export async function POST(request: NextRequest) {
       externalLinkKey: normalizeExternalLinkKey(orNull(body.externalLinkKey)),
       ownerName: orNull(body.ownerName),
       ownerCurrentAddress: orNull(body.ownerCurrentAddress),
-      sameContent: { buildingName: orNull(body.buildingName), roomNo: orNull(body.roomNo) },
+      sameContent: {
+        propertyType: orNull(body.propertyType),
+        buildingName: orNull(body.buildingName),
+        roomNo: orNull(body.roomNo),
+      },
     });
 
     return apiResponse(result);

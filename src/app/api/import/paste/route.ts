@@ -152,6 +152,7 @@ export async function POST(request: NextRequest) {
         ownerName: draft.owner?.name.value ?? null,
         ownerCurrentAddress: draft.owner?.currentAddress.value ?? null,
         sameContent: {
+          propertyType: draft.property.propertyType.value,
           buildingName: draft.property.buildingName.value,
           roomNo: draft.property.roomNo.value,
         },

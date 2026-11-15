@@ -329,6 +329,8 @@ function PasteImportScreen({ draftEnabled }: { draftEnabled: boolean }) {
           // 「同じ内容の物件」の確認に使う(査定ナンバーの無い依頼だけ)。
           buildingName: propertyValues.buildingName,
           roomNo: propertyValues.roomNo,
+          // 種別に合わない建物名・部屋番号は保存されない=サーバーが落としてから比べる。
+          propertyType: propertyValues.propertyType,
         }),
       });
       if (!res.ok) throw new Error(await readApiErrorMessage(res));

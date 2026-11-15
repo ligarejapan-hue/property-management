@@ -25,6 +25,7 @@ import {
 import { buildOwnerDedupKey } from "@/lib/owner-dedup";
 import { addressSearchPrefix, toFullWidth } from "@/lib/paste-import/normalize";
 import { normalizeName } from "@/lib/normalize";
+import { normalizeBuildingName, normalizeUnitOnlyFields } from "@/lib/property-building-name";
 import { EXCEL_IMPORT_NOTE_PREFIX, sameRequestDateLine } from "@/lib/paste-import/lead-sheet";
 
 /**
@@ -336,10 +337,12 @@ export interface PasteDuplicateLookupInput {
   /** 貼り付け元が持つのは「現住所」だけ（登記上住所ではない）。 */
   ownerCurrentAddress: string | null;
   /**
-   * 「同じ内容の物件」も見るときに渡す(貼り付け画面の下書き・見直し)。建物名と部屋番号。
+   * 「同じ内容の物件」も見るときに渡す(貼り付け画面の下書き・見直し)。種別・建物名・部屋番号。
    * 渡さない呼び出し(Excel まとめ取込)は見ない=今までどおり。
+   * ⚠建物名・部屋番号は**画面の欄の値のまま**渡す。種別に合わない欄を落とすのはこの関数がやる
+   *   (登録APIと同じ「保存する値」で比べるため)。
    */
-  sameContent?: { buildingName: string | null; roomNo: string | null };
+  sameContent?: { propertyType: string | null; buildingName: string | null; roomNo: string | null };
 }
 
 export interface PasteDuplicateLookupResult {
@@ -556,11 +559,19 @@ export async function lookupPasteDuplicates(
     canReadProperty &&
     ownerSearchAllowed
   ) {
+    // ⚠**登録APIが保存する値**で比べる(@codex PR#732 1巡目)。種別を区分マンションから一棟などへ
+    //   直すと、画面から消えた部屋番号の欄に値が残る。そのまま比べると、登録APIが比べる相手
+    //   (部屋番号なしの物件)とは別の物件を見せ、そのチェックで登録APIの確認を素通りさせてしまう。
+    const stored = sameContentStoredFields(
+      input.sameContent.propertyType,
+      input.sameContent.buildingName,
+      input.sameContent.roomNo,
+    );
     const found = await findSameContentProperties(prisma, {
       address: input.address,
       lotNumber: input.lotNumber,
-      buildingName: input.sameContent.buildingName,
-      roomNo: input.sameContent.roomNo,
+      buildingName: stored.buildingName,
+      roomNo: stored.roomNo,
       ownerName: ownerNameRaw,
     });
     sameContent = found.matches
@@ -682,6 +693,23 @@ export async function lookupPasteDuplicates(
 // ---------------------------------------------------------------------------
 
 type SameContentDb = { property: Pick<typeof prisma.property, "findMany"> };
+
+/**
+ * 建物名・部屋番号を、**登録APIが保存する値**にする(種別に合わない欄は null)。
+ * 判定は登録APIと同じ純関数(normalizeBuildingName / normalizeUnitOnlyFields)。自前の規則を書かない。
+ * 種別が空のときは、登録APIと同じく「不明」として扱う。
+ */
+export function sameContentStoredFields(
+  propertyType: string | null | undefined,
+  buildingName: string | null | undefined,
+  roomNo: string | null | undefined,
+): { buildingName: string | null; roomNo: string | null } {
+  const type = (propertyType ?? "").trim() || "unknown";
+  return {
+    buildingName: normalizeBuildingName(type, buildingName),
+    roomNo: normalizeUnitOnlyFields(type, { roomNo: roomNo?.trim() || null }).roomNo,
+  };
+}
 
 export async function findSameContentProperties(
   db: SameContentDb,
