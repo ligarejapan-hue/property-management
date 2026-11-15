@@ -9,7 +9,12 @@ export interface FakeBuilding {
   catalogId?: string | null;
   [k: string]: unknown;
 }
-export interface FakeProperty { id: string; buildingId: string | null; buildingName: string | null }
+export interface FakeProperty {
+  id: string; buildingId: string | null; buildingName: string | null;
+  /** 部屋に入っている棟の項目(新しい棟へ写す・unit-facts.ts)。無ければ空として扱う。 */
+  structureType?: string | null; aboveFloors?: number | null; basementFloors?: number | null;
+  totalUnits?: number | null; builtYear?: number | null; builtMonth?: number | null;
+}
 export interface FakeAuditLog {
   userId: string | null; action: string; targetTable: string | null; targetId: string | null; detail: unknown;
 }
@@ -99,6 +104,7 @@ function buildFake(db: FakeDb, lock?: (key: string) => Promise<void>) {
         (db.catalog ?? []).filter((c) => c.areaKey === where.areaKey && c.nameKey === where.nameKey).slice(0, take ?? Infinity)),
     },
     property: {
+      findUnique: vi.fn(async ({ where }: { where: { id: string } }) => db.properties.find((x) => x.id === where.id) ?? null),
       update: vi.fn(async ({ where, data }: { where: { id: string }; data: Partial<FakeProperty> }) => {
         const p = db.properties.find((x) => x.id === where.id);
         if (!p) throw new Error("property not found");

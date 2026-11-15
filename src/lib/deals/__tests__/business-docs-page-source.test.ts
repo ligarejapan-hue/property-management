@@ -110,6 +110,15 @@ describe("書類タブの業務書類(段5a・5b・5c)", () => {
     // 種類はこの小窓で選ぶので、選んだら出す前の確認から「物件の種別」を外す(最終レビュー)
     expect(src).toContain('doc.missing.filter((m) => m !== "物件の種別" || !str(values.kind))');
   });
+  it("契約のご案内: 今の当事者での初めの値に、欄に無い行があれば知らせて「足す」(勝手には足さない・2026-11-15)", () => {
+    const src = read(SECTION);
+    // 選んでいる宛先の分だけを見る(売主様あての値を買主様あてに持ち込まない)
+    expect(src).toContain("missingLines(str(values.belongings), str(doc.freshDefaults?.[str(values.addressee)]?.belongings))");
+    expect(src).toContain('<BelongingsAddNotice lines={addable} onAdd={() => set("belongings", appendLines(str(values.belongings), addable))} />');
+    expect(src.indexOf('aria-label="お持ちいただくもの"')).toBeLessThan(src.indexOf("<BelongingsAddNotice lines"));
+    expect(src.indexOf("<BelongingsAddNotice lines")).toBeLessThan(src.indexOf('aria-label="ご連絡事項"'));
+    expect(read("src/lib/deals/client.ts")).toContain("freshDefaults?: Record<string, Record<string, unknown>> | null;");
+  });
   it("契約のご案内・取引完了確認書の入力欄(第2段階 段A)", () => {
     const src = read(SECTION);
     expect(src.indexOf('{ key: "contract", label: "契約・媒介の書類" }')).toBeLessThan(src.indexOf('{ key: "settlement", label: "決済の書類" }'));

@@ -134,12 +134,14 @@ describe("property-edit-form: 棟の項目は編集不可(F3 Task7 fix)", () => 
       );
       expect(readOnlyBlockMatch).toBeTruthy();
       const readOnlyBlock = readOnlyBlockMatch?.[1] ?? "";
-      expect(readOnlyBlock).toContain("property.building.structureType");
-      expect(readOnlyBlock).toContain("property.building.totalFloors");
-      expect(readOnlyBlock).toContain("property.building.basementFloors");
-      expect(readOnlyBlock).toContain("property.building.totalUnits");
-      expect(readOnlyBlock).toContain("property.building.builtYear");
-      expect(readOnlyBlock).toContain("property.building.builtMonth");
+      // 読む場所の判断は unitBuildingFacts に任せる(棟の値が正・棟の欄が空ならこの物件の欄・2026-11-15)。
+      expect(readOnlyBlock).toContain("const facts = unitBuildingFacts(property, property.building);");
+      expect(readOnlyBlock).toContain("facts.structureType");
+      expect(readOnlyBlock).toContain("facts.totalFloors");
+      expect(readOnlyBlock).toContain("facts.basementFloors");
+      expect(readOnlyBlock).toContain("facts.totalUnits");
+      expect(readOnlyBlock).toContain("facts.builtYear");
+      expect(readOnlyBlock).toContain("facts.builtMonth");
     });
   });
 

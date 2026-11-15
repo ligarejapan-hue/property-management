@@ -6,7 +6,7 @@ import prisma from "@/lib/prisma";
 import { CASE_STATUS_LABELS } from "@/lib/property-types";
 import type { TimelineAccess } from "./access";
 import {
-  INVESTIGATION_ACTIONS, OWNER_INFO_SOURCES, TIMELINE_CATEGORIES, actorOfAudit, buildTimelineSummary, changeEvents, commentEvent, dealCreatedEvent,
+  INVESTIGATION_ACTIONS, OWNER_INFO_SOURCES, TIMELINE_CATEGORIES, actorOfAudit, buildTimelineSummary, buildingIdsInChanges, changeEvents, commentEvent, dealCreatedEvent,
   dmReactionEvent, dmSentEvent, docFileEvent, docLinkIssuedEvent, docLinkRevokedEvent, docReviewEvent, documentEvent, inquiryEvent, investigationEvent,
   materialSendEvent, mergeTimeline, nextActionCompletedEvent, nextActionCreatedEvent, ownerMemoEvent, requestCopyEvent, scheduleEvent, scheduleUndoEvent,
   sourcesForCategory, userIdsInChanges, viewingEvent,
@@ -268,11 +268,17 @@ async function loadChangeEvents(scope: TimelineScope, deals: TimelineDeal[], acc
     },
   }));
   const userIds = userIdsInChanges(rows);
-  const users = userIds.length > 0 ? await prisma.user.findMany({ where: { id: { in: userIds } }, select: { id: true, name: true } }) : [];
+  // 棟の名前は見るときに引く(履歴には ID だけ。後から名前が変わる・統合されるため・2026-11-15)。
+  const buildingIds = buildingIdsInChanges(rows);
+  const [users, buildings] = await Promise.all([
+    userIds.length > 0 ? prisma.user.findMany({ where: { id: { in: userIds } }, select: { id: true, name: true } }) : [],
+    buildingIds.length > 0 ? prisma.building.findMany({ where: { id: { in: buildingIds } }, select: { id: true, name: true } }) : [],
+  ]);
   const { events } = changeEvents(rows, {
     propertyId: scope.propertyId,
     dealsById: new Map(deals.map((d) => [d.id, dealRef(d)])),
     userNames: new Map(users.map((u) => [u.id, u.name])),
+    buildingNames: new Map(buildings.map((b) => [b.id, b.name])),
     inquirerLevel: access.inquirerLevel,
     ownerNote: access.ownerNote,
     ownerLevels: access.ownerLevels,
