@@ -38,7 +38,15 @@ export type NewBuildingFacts = {
   builtMonth?: number;
 };
 
-export function newBuildingFactsFromUnit(unit: UnitFactRow | null | undefined): NewBuildingFacts {
+/**
+ * @param opts.skipBuilt 築年月を写さない。マンション名簿に築年か築月があるときに呼び出し側が立てる。
+ *   ⚠築年月は**年と月でひと組**(@codex PR#738 1巡目)。名簿に年だけあるとき、名簿の年の上に部屋の月が残ると
+ *   「名簿の年+部屋の月」という、どこにも無い年月が棟に入る。名簿に片方でもあれば、年月は名簿だけにする。
+ */
+export function newBuildingFactsFromUnit(
+  unit: UnitFactRow | null | undefined,
+  opts: { skipBuilt?: boolean } = {},
+): NewBuildingFacts {
   if (!unit) return {};
   const out: NewBuildingFacts = {};
   const structure = unit.structureType?.trim();
@@ -46,7 +54,9 @@ export function newBuildingFactsFromUnit(unit: UnitFactRow | null | undefined): 
   if (unit.aboveFloors != null) out.totalFloors = unit.aboveFloors;
   if (unit.basementFloors != null) out.basementFloors = unit.basementFloors;
   if (unit.totalUnits != null) out.totalUnits = unit.totalUnits;
-  if (unit.builtYear != null) out.builtYear = unit.builtYear;
-  if (unit.builtMonth != null) out.builtMonth = unit.builtMonth;
+  if (!opts.skipBuilt) {
+    if (unit.builtYear != null) out.builtYear = unit.builtYear;
+    if (unit.builtMonth != null) out.builtMonth = unit.builtMonth;
+  }
   return out;
 }

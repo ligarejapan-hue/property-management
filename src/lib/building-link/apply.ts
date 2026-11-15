@@ -177,6 +177,8 @@ export async function applyBuildingLink(
     // ⚠呼び出し側が同じ tx で物件を保存した**あと**なので、ここで読むのは保存したばかりの値。
     // ⚠名簿に当たったときは名簿の値が上(下で重ねる)。すでにある棟へつなぐ道はここを通らない。
     const unitRow = await tx.property.findUnique({ where: { id: input.propertyId }, select: UNIT_FACT_SELECT });
+    // 築年月は年と月でひと組。名簿に片方でもあれば、部屋の年月は写さない(混ぜない・@codex PR#738 1巡目)。
+    const catalogHasBuilt = fromCatalog !== null && (fromCatalog.builtYear !== null || fromCatalog.builtMonth !== null);
     building = await tx.building.create({
       data: {
         name: input.buildingName as string,
@@ -184,7 +186,7 @@ export async function applyBuildingLink(
         nameKey,
         areaKey: area,
         createdBy: input.userId,
-        ...newBuildingFactsFromUnit(unitRow),
+        ...newBuildingFactsFromUnit(unitRow, { skipBuilt: catalogHasBuilt }),
         ...(fromCatalog ? { catalogId: fromCatalog.id, ...catalogFillValues(fromCatalog) } : {}),
       },
       select: { id: true, name: true },

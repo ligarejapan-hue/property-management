@@ -86,6 +86,31 @@ describe("applyBuildingLink × 部屋に入っている棟の項目", () => {
     });
   });
 
+  it("★名簿に築年だけあるとき、部屋の築月を継ぎ足さない(どこにも無い年月を作らない・@codex PR#738 1巡目)", async () => {
+    const entry: CatalogEntry = {
+      id: "c1", name: NAME, address: "東京都葛飾区青戸4丁目2番14号", builtYear: 1995, builtMonth: null, totalFloors: null,
+      basementFloors: null, totalUnits: null, structureType: null, managementCompany: null,
+      nameKey: buildingNameKey(NAME), areaKey: areaKey(ADDR),
+    };
+    db.catalog = [entry];
+    await applyBuildingLink(createFakeBuildingTx(db), input);
+    expect(db.buildings[0]).toMatchObject({ builtYear: 1995, totalFloors: 10 });
+    // 部屋は 2001年3月。名簿の 1995年 に 3月 が付いて「1995年3月」になってはいけない。
+    expect(db.buildings[0]).not.toHaveProperty("builtMonth");
+  });
+
+  it("名簿に築月だけあるときも、部屋の築年を継ぎ足さない", async () => {
+    const entry: CatalogEntry = {
+      id: "c1", name: NAME, address: "東京都葛飾区青戸4丁目2番14号", builtYear: null, builtMonth: 9, totalFloors: null,
+      basementFloors: null, totalUnits: null, structureType: null, managementCompany: null,
+      nameKey: buildingNameKey(NAME), areaKey: areaKey(ADDR),
+    };
+    db.catalog = [entry];
+    await applyBuildingLink(createFakeBuildingTx(db), input);
+    expect(db.buildings[0]).toMatchObject({ builtMonth: 9 });
+    expect(db.buildings[0]).not.toHaveProperty("builtYear");
+  });
+
   it("部屋の値は消さない(棟から外したときに戻る・変更履歴と食い違わせない)", async () => {
     await applyBuildingLink(createFakeBuildingTx(db), input);
     expect(db.properties[0]).toMatchObject(UNIT);
