@@ -51,8 +51,8 @@ Task 7 が直した「謄本取込が所有者の法人番号を版番号を進�
 | `src/app/api/properties/[id]/owners/route.ts:58` | `owner.updatedAt` のみ | 所有者リンク時の行ロックtouch |
 | `src/app/api/properties/sale-dm/drafts/[id]/outcome/route.ts:257` | `property.dmUndeliverableAt = null` のみ | 訂正による自動解除。理由は上記2件と同じ |
 | `src/lib/registry-pdf/process.ts:424` | `owner.updatedAt` のみ | 既存所有者再利用時の行ロックtouch |
-| `src/lib/building-link/apply.ts:135` | `property.buildingId = null` のみ | (2026-10-05 棟の自動づけで追加)**編集画面で書けない項目ではない**が、`applyBuildingLink` は必ず物件の保存と同じトランザクションで、物件を作った直後(新しい行)か version を進める更新の直後に呼ばれる。版番号はその保存で1回だけ進む |
-| `src/lib/building-link/apply.ts:225` | `property.buildingId`/`buildingName` | 同上(棟へつなぎ、物件名を棟の正式な表記にそろえる) |
+| `src/lib/building-link/apply.ts:136` | `property.buildingId = null` のみ | (2026-10-05 棟の自動づけで追加)**編集画面で書けない項目ではない**が、`applyBuildingLink` は必ず物件の保存と同じトランザクションで、物件を作った直後(新しい行)か version を進める更新の直後に呼ばれる。版番号はその保存で1回だけ進む |
+| `src/lib/building-link/apply.ts:231` | `property.buildingId`/`buildingName` | 同上(棟へつなぎ、物件名を棟の正式な表記にそろえる) |
 | `src/lib/case-status-auto.ts:77` | `property.caseStatus` のみ | (2026-10-20 案件ステータスの自動の切り替えで追加)`caseStatus` は `property-edit-form.tsx` の FORM_FIELDS に無く、鍵を持つ人の保存が上書きしない。版を進めると、所有者の申込(公開の経路)や査定報告書の添付で、編集中の人の保存が409で負ける(D9 と同じ理由)ため進めない。物件詳細のプルダウンは版を送るが、自動は前に進めるだけなので人の選択が後勝ちでよい |
 | `src/lib/registry-status-auto.ts:77` | `property.registryStatus` のみ | (2026-11-06 謄本の添付で登記状況を未取得→取得済にする自動で追加)`registryStatus` は編集画面にあるが、編集画面は変えた欄だけ送るので、登記状況を触っていない人の保存は自動の値を上書きしない。版を進めると、謄本を添付しただけで編集中の人の保存が409で負ける(D9 と同じ理由)ため進めない。その人が登記状況を自分で変えて保存したら人の選択が後勝ちでよい。取得中(謄本の取得の鍵)からは上げない |
 

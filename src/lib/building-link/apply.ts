@@ -23,10 +23,11 @@ import {
   type LinkCandidate,
 } from "./resolve";
 import { LEGACY_PAGE_SIZE, readAllLegacyBuildings } from "./suggest";
+import { UNIT_FACT_SELECT, newBuildingFactsFromUnit } from "./unit-facts";
 
 export type BuildingLinkTx = Pick<Prisma.TransactionClient, "$executeRaw"> & {
   building: Pick<Prisma.TransactionClient["building"], "findUnique" | "findFirst" | "findMany" | "create">;
-  property: Pick<Prisma.TransactionClient["property"], "update">;
+  property: Pick<Prisma.TransactionClient["property"], "update" | "findUnique">;
   auditLog: Pick<Prisma.TransactionClient["auditLog"], "create">;
   mansionCatalog: Pick<Prisma.TransactionClient["mansionCatalog"], "findMany">;
 };
@@ -172,6 +173,10 @@ export async function applyBuildingLink(
       await tx.$executeRaw`SELECT pg_advisory_xact_lock(hashtext(${buildingLinkLockKey(area, nameKey)})::bigint)`;
     }
     const fromCatalog = await catalogForNewBuilding(tx, area, nameKey);
+    // 部屋に入っている棟の項目(構造・階数・総戸数・築年月)を、新しい棟へ写す(unit-facts.ts・2026-11-15)。
+    // ⚠呼び出し側が同じ tx で物件を保存した**あと**なので、ここで読むのは保存したばかりの値。
+    // ⚠名簿に当たったときは名簿の値が上(下で重ねる)。すでにある棟へつなぐ道はここを通らない。
+    const unitRow = await tx.property.findUnique({ where: { id: input.propertyId }, select: UNIT_FACT_SELECT });
     building = await tx.building.create({
       data: {
         name: input.buildingName as string,
@@ -179,6 +184,7 @@ export async function applyBuildingLink(
         nameKey,
         areaKey: area,
         createdBy: input.userId,
+        ...newBuildingFactsFromUnit(unitRow),
         ...(fromCatalog ? { catalogId: fromCatalog.id, ...catalogFillValues(fromCatalog) } : {}),
       },
       select: { id: true, name: true },

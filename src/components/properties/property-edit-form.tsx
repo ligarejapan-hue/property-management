@@ -18,6 +18,7 @@ import { areaChanged } from "@/lib/building-link/combobox-model";
 // ⚠apply.ts は prisma を読むサーバー側のファイル。型だけを読む(画面の束に prisma を入れない)。
 import type { BuildingLinkOutcome } from "@/lib/building-link/apply";
 import { formatBuiltYearMonth } from "@/lib/built-year-month";
+import { unitBuildingFacts } from "@/lib/sales-sheet/unit-building-facts";
 import { draftKey } from "@/lib/drafts/draft-store";
 import { TAX as SALE_TAX_TYPES } from "@/lib/sales-sheet/option-master";
 import {
@@ -1034,19 +1035,20 @@ export default function PropertyEditForm({
               {section === "販売" && isMansion && property.building && (
                 <div className="mt-3 rounded border border-neutral-200 p-2 text-sm dark:border-neutral-700">
                   <p className="mb-1 font-semibold">棟の項目(この画面では変更できません)</p>
-                  <p>
-                    構造 {property.building.structureType ?? "—"} / 地上階{" "}
-                    {property.building.totalFloors ?? "—"} / 地下階{" "}
-                    {property.building.basementFloors ?? "—"} / 総戸数{" "}
-                    {property.building.totalUnits ?? "—"} / 築年月{" "}
-                    {/* @codex P2: 築年と築月は片方だけでも保存できる。両方に年・月を
-                        付けると「2020年—月」のような読めない表示になるため、共通の
-                        表示関数に任せる。 */}
-                    {formatBuiltYearMonth(
-                      property.building.builtYear,
-                      property.building.builtMonth,
-                    ) || "—"}
-                  </p>
+                  {/* 棟の欄が空のときは、この物件の欄の値を出す(詳細・販売図面と同じ読み方・2026-11-15)。 */}
+                  {(() => {
+                    const facts = unitBuildingFacts(property, property.building);
+                    return (
+                      <p>
+                        構造 {facts.structureType ?? "—"} / 地上階 {facts.totalFloors ?? "—"} / 地下階{" "}
+                        {facts.basementFloors ?? "—"} / 総戸数 {facts.totalUnits ?? "—"} / 築年月{" "}
+                        {/* @codex P2: 築年と築月は片方だけでも保存できる。両方に年・月を
+                            付けると「2020年—月」のような読めない表示になるため、共通の
+                            表示関数に任せる。 */}
+                        {formatBuiltYearMonth(facts.builtYear, facts.builtMonth) || "—"}
+                      </p>
+                    );
+                  })()}
                   <a
                     href={`/buildings/${property.building.id}`}
                     className="text-blue-600 underline dark:text-blue-400"

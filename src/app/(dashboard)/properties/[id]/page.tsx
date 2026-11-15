@@ -14,6 +14,7 @@ import Link from "next/link";
 import { useRouter } from "next/navigation";
 import ParcelDetachDialog from "@/components/properties/parcel-detach-dialog";
 import { formatBuiltYearMonth } from "@/lib/built-year-month";
+import { unitBuildingFacts } from "@/lib/sales-sheet/unit-building-facts";
 import { initialPropertyTab } from "@/lib/property-detail-tab";
 import {
   ArrowLeft,
@@ -1465,20 +1466,20 @@ function BasicTab({
             value={property.occupancyStatus ? OCCUPANCY_LABELS[property.occupancyStatus] ?? property.occupancyStatus : null}
           />
           <Field label="持分メモ" value={property.ownershipShareNote} />
-          {/* 棟に紐づいていない区分は、棟の項目を物件そのものの欄から出す
-              (unit-building-facts.ts・棟があれば棟の画面が正)。 */}
-          {!property.building && (
-            <>
-              <Field label="構造" value={property.structureType} />
-              <Field label="地上階" value={property.aboveFloors != null ? `${property.aboveFloors}階` : null} />
-              <Field label="地下階" value={property.basementFloors != null ? `${property.basementFloors}階` : null} />
-              <Field label="総戸数" value={property.totalUnits != null ? `${property.totalUnits}戸` : null} />
-              <Field
-                label="築年月"
-                value={formatBuiltYearMonth(property.builtYear, property.builtMonth) || null}
-              />
-            </>
-          )}
+          {/* 棟の項目(構造・階数・総戸数・築年月)。棟につながっていれば棟の値、棟の欄が空ならこの物件の欄の値
+              (unit-building-facts.ts・2026-11-15)。前は棟につながった区分では出していなかった。 */}
+          {(() => {
+            const facts = unitBuildingFacts(property, property.building);
+            return (
+              <>
+                <Field label="構造" value={facts.structureType} />
+                <Field label="地上階" value={facts.totalFloors != null ? `${facts.totalFloors}階` : null} />
+                <Field label="地下階" value={facts.basementFloors != null ? `${facts.basementFloors}階` : null} />
+                <Field label="総戸数" value={facts.totalUnits != null ? `${facts.totalUnits}戸` : null} />
+                <Field label="築年月" value={formatBuiltYearMonth(facts.builtYear, facts.builtMonth) || null} />
+              </>
+            );
+          })()}
         </>
       )}
 
