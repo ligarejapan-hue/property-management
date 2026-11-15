@@ -45,7 +45,7 @@ import { InquirerOrOwnerNames, LeadExclusionListBadge } from "@/components/prope
 import { ownerColumnDisplay } from "@/lib/inquirer-name";
 import { LEAD_EXCLUSION_FILTER_OPTIONS, jstTodayDateOnly } from "@/lib/lead-exclusion";
 import { displayHalfWidth } from "@/lib/notation";
-import { dmExclusionCountsText } from "@/lib/dm-batch/exclusion-notice";
+import { dmExclusionCountsText, dmSecondLetterDemotedText } from "@/lib/dm-batch/exclusion-notice";
 
 // v2: バッジ色は共通レシピ(status-badge.tsx)の intent に集約。
 // scheduled は yellow → amber(warning)に統一。
@@ -499,6 +499,9 @@ function PropertiesPageInner() {
         excludedAgentName: res.excludedAgentName,
         // 所有者の名前に謄本の外字がある自動除外(宛名が □ になる・2026-11-11)。
         excludedGaijiName: res.excludedGaijiName,
+        // 同じ所有者あての2通目の自動除外と、そのために「送付不可」にした物件数(2026-11-16)。
+        excludedSecondLetter: res.excludedSecondLetter,
+        demotedSecondLetter: res.demotedSecondLetter,
         // 種類つきの発送: 本文を差し込めなかった宛先・LPが未登録の種類。
         blankBodyCount: res.blankBodyCount,
         lpMissingScenarios: res.lpMissingScenarios,
@@ -619,18 +622,24 @@ function PropertiesPageInner() {
         res.excludedTerminalCount,
         res.excludedAgentNameCount,
         res.excludedGaijiNameCount,
+        // 同じ所有者あての2通目(登録の新しい物件から送る・2026-11-16)。
+        res.excludedSecondLetterCount,
       );
+      // 2通目として宛先が残らなかった物件は、DM判断を「送付不可」にしている。黙って変えない。
+      const demoted = dmSecondLetterDemotedText(res.demotedSecondLetterCount);
       if (res.rowCount === 0) {
         setError(
           excluded
-            ? `出力対象がありません(${excluded}は自動で除外されました)`
+            ? `出力対象がありません(${excluded}は自動で除外されました)${demoted ? ` ${demoted}` : ""}`
             : "出力対象がありません。検索条件を確認してください",
         );
+        // 「送付不可」にした物件があれば、一覧の表示も合わせる。
+        if (demoted) fetchProperties();
         return;
       }
       if (excluded) {
         // 除外は黙って行わない。CSV は同一ページで DL されるため alert が見える(売却DMの部分成功通知と同型)。
-        window.alert(`${excluded}の宛先は自動で除外しました`);
+        window.alert(`${excluded}の宛先は自動で除外しました${demoted ? `\n${demoted}` : ""}`);
       }
       if (res.unsubscribeUrlAvailable === false) {
         // 配信停止URLの頭(追跡URL)が無いと、列を空のまま配ることになる。初回ダウンロードで

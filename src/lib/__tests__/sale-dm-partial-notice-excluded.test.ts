@@ -33,3 +33,14 @@ describe("拒否・宛先不明の除外通知(2026-08-17)", () => {
     expect(buildSaleDmPartialNotice({ generated: 3, failed: 0, truncated: false, excludedTerminal: 0 })).toBeNull();
   });
 });
+
+describe("同じ所有者あての2通目の通知(2026-11-16)", () => {
+  it("外した件数と、「送付不可」にした物件数を出す(黙って変えない)", () => {
+    const msg = buildSaleDmPartialNotice({ generated: 3, failed: 0, truncated: false, excludedSecondLetter: 2, demotedSecondLetter: 1 }) ?? "";
+    expect(msg).toContain("同じ所有者が登録の新しい別の物件を「送付可」でお持ちの 2 件の宛先は自動で除外しました");
+    expect(msg).toContain("宛先が残らなかった 1 件の物件は、DM判断を「送付不可」にしました");
+  });
+  it("どちらも 0 なら何も足さない", () => {
+    expect(buildSaleDmPartialNotice({ generated: 3, failed: 0, truncated: false, excludedSecondLetter: 0, demotedSecondLetter: 0 })).toBeNull();
+  });
+});

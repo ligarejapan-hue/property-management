@@ -10,6 +10,13 @@ import {
   dmExclusionReason,
   type TerminalExclusionTx,
 } from "@/lib/dm-batch/terminal-exclusion";
+import {
+  findSendPropertyLinks,
+  pickSecondLetters,
+  propertiesToDemote,
+  demoteSecondLetterProperties,
+  type SecondLetterTx,
+} from "@/lib/dm-batch/second-letter";
 import { hasPermission } from "@/lib/permissions";
 import { propertyListQuerySchema } from "@/lib/validators";
 import { buildPropertyListWhere, buildPropertyListOrderBy, propertyVisibilityScopeWhere } from "@/lib/property-list-query";
@@ -36,6 +43,9 @@ import { listOwnCampaigns, parseCampaignCursor, type CampaignListDb } from "@/li
 // 通知が消える(@codex #384 R1 P2)。schema に列を増やさず(migration は別承認のため)、
 // filterSnapshot(Json・アプリ内に他の読者が無いことを実測済み)へ同居させる。
 const RESULT_META_KEY = "__result";
+/** 選んだ宛先がすべて自動で外れ、その中に「同じ所有者あての2通目」があったときの文言(拒否などが混ざることもある)。 */
+const ALL_SECOND_LETTER_MESSAGE =
+  "選択した宛先はすべて自動で除外されました。同じ所有者が、登録の新しい別の物件を「送付可」でお持ちの宛先があります(手紙は新しい物件から送ります。宛先が残らなかった物件のDM判断は「送付不可」にしました)。ほかに「拒否・宛先不明」などの記録で外れた宛先が含まれることがあります";
 const idempotentPayload = (id: string, snapshot: unknown): Record<string, unknown> => {
   const meta =
     snapshot && typeof snapshot === "object" && !Array.isArray(snapshot)
@@ -315,6 +325,10 @@ export async function POST(request: NextRequest) {
     let excludedAgentNameCount = 0;
     // 名前に謄本の外字(私用領域の字)がある所有者で外した宛先数(2026-11-11)
     let excludedGaijiNameCount = 0;
+    // 同じ所有者あての2通目として外した宛先数(2026-11-16)と、そのために DM判断を「送付不可」にする物件
+    let excludedSecondLetterCount = 0;
+    let demotedSecondLetterCount = 0;
+    let demoteIds: string[] = [];
     // 種類つきの発送の結果(設計 §3.3.0)。種類なしの作成では 0/[]/{} のまま。
     let blankBodyCount = 0;
     let lpMissingScenarios: string[] = [];
@@ -374,7 +388,37 @@ export async function POST(request: NextRequest) {
             ),
           }),
         }));
-        const surviving = pairs.filter(({ reason }) => reason === null);
+        // 同じ所有者あての2通目を外す(2026-11-16 発注者決定・second-letter.ts=A と共用)。上の理由に当たらない宛先だけ。
+        // 比べる相手はシステム全体の送付可の物件(1回50通までなので、もう一方が今回の対象に無いことがある)。
+        // 新しい物件の手紙が実際に残るときだけ外す(pickSecondLetters)。所有者のつながりが変わっていた宛先
+        // (下で作らない)は、2通目にも、ほかの宛先を外す理由にもしない。
+        const sendLinks = await findSendPropertyLinks(
+          tx as unknown as SecondLetterTx,
+          pairs.filter(({ reason }) => reason === null).flatMap(({ m }) => m.groupOwnerIds),
+        );
+        const secondFlags = pickSecondLetters(
+          pairs.map(({ m, reason }) => ({
+            propertyId: m.propertyId,
+            ownerIds: [
+              ...new Set(
+                [m.representativeOwnerId, ...m.groupOwnerIds].filter(
+                  (v): v is string => typeof v === "string" && v.length > 0,
+                ),
+              ),
+            ],
+            eligible: reason === null && isStillLinked(m),
+          })),
+          sendLinks,
+        );
+        const surviving = pairs.filter((_, i) => pairs[i].reason === null && !secondFlags[i]);
+        excludedSecondLetterCount = secondFlags.filter(Boolean).length;
+        demoteIds = propertiesToDemote(
+          pairs.map(({ m, reason }, i) => ({
+            propertyId: m.propertyId,
+            // 所有者のつながりが変わっていた宛先は "unknown"=その物件は「送付不可」にしない。
+            outcome: reason !== null ? "other" : secondFlags[i] ? "second" : isStillLinked(m) ? "kept" : "unknown",
+          })),
+        );
         excludedTerminalCount = pairs.filter(({ reason }) => reason === "terminal").length;
         excludedAgentNameCount = pairs.filter(({ reason }) => reason === "agent_name").length;
         excludedGaijiNameCount = pairs.filter(({ reason }) => reason === "gaiji_name").length;
@@ -383,10 +427,12 @@ export async function POST(request: NextRequest) {
         if (surviving.length === 0 && pairs.length > 0) {
           throw new ApiError(
             400,
-            excludedAgentNameCount === 0 && excludedGaijiNameCount === 0
+            excludedSecondLetterCount > 0
+              ? ALL_SECOND_LETTER_MESSAGE
+              : excludedAgentNameCount === 0 && excludedGaijiNameCount === 0
               ? "選択した宛先はすべて「拒否・宛先不明」の記録があるため除外されました(その方の別物件での記録も含みます)。物件のDM送付履歴をご確認ください"
               : "選択した宛先はすべて、「拒否・宛先不明」の記録があるか、所有者が業者(業者の名簿・国交省の業者一覧)と同じ名前か、所有者の名前か住所に読めない字(外字)があるため除外されました",
-            "ALL_EXCLUDED_TERMINAL",
+            excludedSecondLetterCount > 0 ? "ALL_EXCLUDED_SECOND_LETTER" : "ALL_EXCLUDED_TERMINAL",
           );
         }
         // ── 種類つきの発送(設計 §3.3・§3.3.0・§3.3.1)。種類なしはこの分岐に入らない=台帳を読まない。
@@ -538,6 +584,7 @@ export async function POST(request: NextRequest) {
                 excludedTerminal: excludedTerminalCount,
                 excludedAgentName: excludedAgentNameCount,
                 excludedGaijiName: excludedGaijiNameCount,
+                excludedSecondLetter: excludedSecondLetterCount,
                 failed: drafts.filter((d) => d.error).length,
                 truncated,
                 // 種類つきの発送だけが持つ件数(種類なしには書かない=再返却は idempotentPayload の既定値で埋まる)。
@@ -551,19 +598,26 @@ export async function POST(request: NextRequest) {
     } catch (e) {
       // 生成 or 保存の失敗 → クレームを削除(孤児の空 campaign を残さない。再試行で再クレームできる)。
       await prisma.dmCampaign.delete({ where: { id: claimed.id } }).catch(() => {});
+      // 宛先がすべて「同じ所有者あての2通目」だった=発送は作らないが、その物件の DM判断は「送付不可」にする
+      // (保存の tx は巻き戻っている=物件のロックは放してある)。
+      if (e instanceof ApiError && e.code === "ALL_EXCLUDED_SECOND_LETTER") {
+        await demoteSecondLetterProperties(demoteIds, session.id);
+      }
       throw e;
     }
+    // 2通目として宛先がすべて外れた物件の DM判断を「送付不可」にする(発送の保存が済んだあと・1件ずつ)。
+    demotedSecondLetterCount = await demoteSecondLetterProperties(demoteIds, session.id);
 
     // AuditLog は非PIIメタのみ(本文・宛名・住所は残さない)。
     await writeAuditLog({
       userId: session.id, action: "sale_dm_campaign_create", targetTable: "dm_campaigns",
-      detail: { campaignId: claimed.id, requested: recipients.length, generated: drafts.length, saved: persistedCount, skippedByUnlink: skippedByUnlinkCount, excludedTerminal: excludedTerminalCount, excludedAgent: excludedAgentNameCount, excludedGaiji: excludedGaijiNameCount, failed: drafts.filter((d) => d.error).length, truncated, ...(isScenarioCampaign({ defaultScenarioId }) ? { scenarioCount, blankBodyCount } : {}), createdAt: new Date().toISOString() },
+      detail: { campaignId: claimed.id, requested: recipients.length, generated: drafts.length, saved: persistedCount, skippedByUnlink: skippedByUnlinkCount, excludedTerminal: excludedTerminalCount, excludedAgent: excludedAgentNameCount, excludedGaiji: excludedGaijiNameCount, excludedSecond: excludedSecondLetterCount, demotedSecond: demotedSecondLetterCount, failed: drafts.filter((d) => d.error).length, truncated, ...(isScenarioCampaign({ defaultScenarioId }) ? { scenarioCount, blankBodyCount } : {}), createdAt: new Date().toISOString() },
     });
 
     return NextResponse.json(
       // requested=生成する手紙数(共有者ぶんで物件数より多くなり得る)。matchedProperties=対象になった物件数
       // (=選択のうち住所ありで生成対象になった物件)。UI の「対象外」通知は物件単位で出すため両方返す。
-      { campaignId: claimed.id, requested: recipients.length, matchedProperties, generated: drafts.length, saved: persistedCount, skippedByUnlink: skippedByUnlinkCount, excludedTerminal: excludedTerminalCount, excludedAgentName: excludedAgentNameCount, excludedGaijiName: excludedGaijiNameCount, failed: drafts.filter((d) => d.error).length, truncated, blankBodyCount, lpMissingScenarios, scenarioCounts },
+      { campaignId: claimed.id, requested: recipients.length, matchedProperties, generated: drafts.length, saved: persistedCount, skippedByUnlink: skippedByUnlinkCount, excludedTerminal: excludedTerminalCount, excludedAgentName: excludedAgentNameCount, excludedGaijiName: excludedGaijiNameCount, excludedSecondLetter: excludedSecondLetterCount, demotedSecondLetter: demotedSecondLetterCount, failed: drafts.filter((d) => d.error).length, truncated, blankBodyCount, lpMissingScenarios, scenarioCounts },
       { headers: { "Cache-Control": "no-store" } },
     );
   } catch (error) {

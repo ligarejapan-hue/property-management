@@ -1,3 +1,5 @@
+import { dmSecondLetterDemotedText } from "@/lib/dm-batch/exclusion-notice";
+
 export const dmUndeliverableBadgeLabel = "宛先不明";
 
 export function isDmUndeliverable(
@@ -41,6 +43,10 @@ export function buildSaleDmPartialNotice(res: {
   excludedAgentName?: number;
   // 所有者の名前に謄本の外字(私用領域の字)があり自動で除外した宛先数(宛名が □ になる・2026-11-11)。
   excludedGaijiName?: number;
+  // 同じ所有者あての2通目として自動で除外した宛先数(登録の新しい物件から送る・2026-11-16)と、
+  // そのために DM判断を「送付不可」にした物件数。
+  excludedSecondLetter?: number;
+  demotedSecondLetter?: number;
   // 種類つきの発送: 本文を差し込めなかった宛先数(住所・種別が読めない物件)と、LPが未登録の種類名。
   blankBodyCount?: number;
   lpMissingScenarios?: string[];
@@ -66,6 +72,13 @@ export function buildSaleDmPartialNotice(res: {
       `所有者の名前か住所に読めない字(外字)がある ${res.excludedGaijiName} 件の宛先は自動で除外しました(宛名が正しく出せないため。所有者の名前か住所を直すと送れます)。`,
     );
   }
+  if ((res.excludedSecondLetter ?? 0) > 0) {
+    lines.push(
+      `同じ所有者が登録の新しい別の物件を「送付可」でお持ちの ${res.excludedSecondLetter} 件の宛先は自動で除外しました(手紙は新しい物件から送ります)。`,
+    );
+  }
+  const demoted = dmSecondLetterDemotedText(res.demotedSecondLetter);
+  if (demoted) lines.push(demoted);
   if ((res.excluded ?? 0) > 0) {
     lines.push(
       `${res.excluded} 件は送付可でない(未判断/送付不可)・住所が無い等のため対象外で、DMは作成されませんでした。`,

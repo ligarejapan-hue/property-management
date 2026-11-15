@@ -67,6 +67,16 @@ vi.mock("@/lib/api-helpers", () => {
 });
 
 vi.mock("@/lib/audit", () => ({ writeAuditLog: vi.fn() }));
+// 同じ所有者あての2通目(second-letter.ts・2026-11-16)。既定=送付可の物件のつながりなし=2通目なし。決まりの中身は second-letter.test.ts が見る。
+const sl = vi.hoisted(() => ({
+  findLinks: vi.fn(async (_tx?: unknown, _ownerIds?: readonly string[]) => [] as Array<{ ownerId: string; propertyId: string; createdAt: Date }>),
+  demote: vi.fn(async (ids: readonly string[], _by?: string) => ids.length),
+}));
+vi.mock("@/lib/dm-batch/second-letter", async (orig) => ({
+  ...(await orig<typeof import("@/lib/dm-batch/second-letter")>()),
+  findSendPropertyLinks: sl.findLinks,
+  demoteSecondLetterProperties: sl.demote,
+}));
 // 配信停止URLの頭(追跡URL)の有無。既定は設定済み。
 vi.mock("@/lib/sale-dm-letter/config-store", () => ({
   loadSaleDmPublicPageConfig: vi.fn(async () => ({
@@ -438,6 +448,107 @@ describe("POST /api/properties/dm-batches", () => {
     const audit = lastAudit();
     expect(audit?.detail?.excludedGaiji).toBe(1);
     expect(audit?.detail?.excludedAgent).toBe(0);
+  });
+
+  describe("同じ所有者あての2通目を外す(2026-11-16)", () => {
+    const withWrite = () =>
+      vi.mocked(getUserPermissions).mockResolvedValue([
+        ...PERMS_FULL,
+        { resource: "property", action: "write", granted: true },
+      ] as never);
+    const lk = (ownerId: string, propertyId: string, day: string) => ({ ownerId, propertyId, createdAt: new Date(`2026-01-${day}T00:00:00Z`) });
+    const twoProps = () => {
+      // 同じ所有者 o1 が、送付可の物件を2つ持っている(p2 のほうが登録が新しい)。
+      pm.property.findMany.mockResolvedValue([
+        makeProp({ id: "p1" }),
+        makeProp({ id: "p2", address: "東京都千代田区9-9" }),
+      ]);
+      pm.propertyOwner.findMany.mockResolvedValue([
+        { propertyId: "p1", ownerId: "o1" },
+        { propertyId: "p2", ownerId: "o1" },
+      ]);
+      sl.findLinks.mockResolvedValueOnce([lk("o1", "p1", "01"), lk("o1", "p2", "02")]);
+    };
+
+    it("登録が新しい物件の宛先だけを控えに入れ、古い物件は「送付不可」にする(件数を応答と監査に)", async () => {
+      twoProps();
+      withWrite();
+      const res = await POST(makeRequest(BODY));
+      expect(res.status).toBe(200);
+      const body = (await res.json()) as Record<string, number>;
+      expect(body.rowCount).toBe(1);
+      expect(body.excludedSecondLetterCount).toBe(1);
+      expect(body.demotedSecondLetterCount).toBe(1);
+      const itemsData = pm.dmExportBatchItem.createMany.mock.calls[0][0].data;
+      expect(itemsData.map((it: { propertyId: string }) => it.propertyId)).toEqual(["p2"]);
+      // 「送付不可」にするのは控えの保存が済んだあと(保存の tx の外)。記録上の人=作った人。
+      expect(sl.demote).toHaveBeenCalledWith(["p1"], "user-admin");
+      const audit = lastAudit();
+      expect(audit?.detail?.excludedSecond).toBe(1);
+      expect(audit?.detail?.demotedSecond).toBe(1);
+      expect(audit?.detail?.count).toBe(1);
+    });
+
+    it("物件の編集権限が無い人は、宛先を外すだけ(DM判断は書き換えない)", async () => {
+      twoProps();
+      // 既定の権限には property:write が無い(宛名CSVは read と CSV の権限で出せる)。
+      const res = await POST(makeRequest(BODY));
+      const body = (await res.json()) as Record<string, number>;
+      expect(body.rowCount).toBe(1);
+      expect(body.excludedSecondLetterCount).toBe(1);
+      expect(body.demotedSecondLetterCount).toBe(0);
+      expect(sl.demote).not.toHaveBeenCalled();
+    });
+
+    it("比べる所有者は、ほかの理由で外れていない宛先の人(代表と共有者)", async () => {
+      twoProps();
+      await POST(makeRequest(BODY));
+      expect(sl.findLinks.mock.calls[0][1]).toEqual(["o1", "o1"]);
+    });
+
+    it("住所の違う共有者の宛先が残る物件は「送付不可」にしない", async () => {
+      // p1 の o1(東京)は新しい物件 pX を持つ=外す。o2(神奈川・別の住所)には送る=p1 は送付可のまま。
+      pm.property.findMany.mockResolvedValue([
+        makeProp({
+          propertyOwners: [
+            makePropertyOwner({ owner: { id: "o1", address: "東京都A" } }),
+            makePropertyOwner({ owner: { id: "o2", address: "神奈川県B" }, isPrimary: false }),
+          ],
+        }),
+      ]);
+      sl.findLinks.mockResolvedValueOnce([lk("o1", "p1", "01"), lk("o2", "p1", "01"), lk("o1", "pX", "09")]);
+      withWrite();
+      const res = await POST(makeRequest(BODY));
+      const body = (await res.json()) as Record<string, number>;
+      expect(body.rowCount).toBe(1);
+      expect(body.excludedSecondLetterCount).toBe(1);
+      expect(body.demotedSecondLetterCount).toBe(0);
+      expect(sl.demote).toHaveBeenCalledWith([], "user-admin");
+      const itemsData = pm.dmExportBatchItem.createMany.mock.calls[0][0].data;
+      expect(itemsData.map((it: { ownerId: string }) => it.ownerId)).toEqual(["o2"]);
+    });
+
+    it("拒否・宛先不明にも当たる宛先は、そちらの理由で数える(2通目には数えず、物件も変えない)", async () => {
+      twoProps();
+      // o1 に拒否の記録=p1・p2 の宛先はどちらも拒否で外れる。
+      pm.propertyDmLog.findMany.mockResolvedValue([{ ownerId: "o1", propertyId: null, logOwners: [] }]);
+      withWrite();
+      const res = await POST(makeRequest(BODY));
+      const body = (await res.json()) as Record<string, number>;
+      expect(body.rowCount).toBe(0);
+      expect(body.excludedTerminalCount).toBe(2);
+      expect(body.excludedSecondLetterCount).toBe(0);
+      expect(sl.demote).toHaveBeenCalledWith([], "user-admin");
+    });
+
+    it("2通目が無ければ今までどおり(件数 0・物件は変えない)", async () => {
+      pm.property.findMany.mockResolvedValue([makeProp()]);
+      const res = await POST(makeRequest(BODY));
+      const body = (await res.json()) as Record<string, number>;
+      expect(body.rowCount).toBe(1);
+      expect(body.excludedSecondLetterCount).toBe(0);
+      expect(body.demotedSecondLetterCount).toBe(0);
+    });
   });
 
   it("個別記録(所有者紐づけなし)の拒否は物件単位で除外する(#366 R6)", async () => {

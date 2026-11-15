@@ -20,6 +20,16 @@ vi.mock("@/lib/api-helpers", () => {
   };
 });
 vi.mock("@/lib/audit", () => ({ writeAuditLog: vi.fn() }));
+// 同じ所有者あての2通目(second-letter.ts・2026-11-16)。既定=送付可の物件のつながりなし=2通目なし。決まりの中身は second-letter.test.ts が見る。
+const sl = vi.hoisted(() => ({
+  findLinks: vi.fn(async (_tx?: unknown, _ownerIds?: readonly string[]) => [] as Array<{ ownerId: string; propertyId: string; createdAt: Date }>),
+  demote: vi.fn(async (ids: readonly string[], _by?: string) => ids.length),
+}));
+vi.mock("@/lib/dm-batch/second-letter", async (orig) => ({
+  ...(await orig<typeof import("@/lib/dm-batch/second-letter")>()),
+  findSendPropertyLinks: sl.findLinks,
+  demoteSecondLetterProperties: sl.demote,
+}));
 
 const m = vi.hoisted(() => {
   const calls: string[] = [];

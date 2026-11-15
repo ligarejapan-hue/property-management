@@ -34,6 +34,13 @@ import {
   dmExclusionReason,
   type TerminalExclusionTx,
 } from "@/lib/dm-batch/terminal-exclusion";
+import {
+  findSendPropertyLinks,
+  pickSecondLetters,
+  propertiesToDemote,
+  demoteSecondLetterProperties,
+  type SecondLetterTx,
+} from "@/lib/dm-batch/second-letter";
 import { loadSaleDmPublicPageConfig } from "@/lib/sale-dm-letter/config-store";
 
 /**
@@ -353,6 +360,9 @@ export async function POST(request: NextRequest) {
     let excludedAgentNameCount = 0;
     // 名前に謄本の外字(私用領域の字)がある所有者で外した宛先数(2026-11-11)
     let excludedGaijiNameCount = 0;
+    // 同じ所有者あての2通目として外した宛先数(2026-11-16)と、そのために DM判断を「送付不可」にする物件
+    let excludedSecondLetterCount = 0;
+    let demoteIds: string[] = [];
     let savedRowCount = items.length;
     try {
       await prisma.$transaction(async (tx) => {
@@ -417,7 +427,29 @@ export async function POST(request: NextRequest) {
             ownerIds: [it.ownerId, ...it.groupOwnerIds],
           }),
         );
-        const survivingItems = items.filter((_, i) => reasons[i] === null);
+        // 同じ所有者あての2通目を外す(2026-11-16 発注者決定・second-letter.ts)。上の理由に当たらない宛先だけを見る
+        // (両方に当たるときは上の理由で数える)。比べる相手はシステム全体の送付可の物件。
+        // 新しい物件の手紙が実際に残るときだけ外す(pickSecondLetters)。
+        const sendLinks = await findSendPropertyLinks(
+          tx as unknown as SecondLetterTx,
+          items.filter((_, i) => reasons[i] === null).flatMap((it) => it.groupOwnerIds),
+        );
+        const second = pickSecondLetters(
+          items.map((it, i) => ({
+            propertyId: it.propertyId,
+            ownerIds: [...new Set([it.ownerId, ...it.groupOwnerIds])],
+            eligible: reasons[i] === null,
+          })),
+          sendLinks,
+        );
+        const survivingItems = items.filter((_, i) => reasons[i] === null && !second[i]);
+        excludedSecondLetterCount = second.filter(Boolean).length;
+        demoteIds = propertiesToDemote(
+          items.map((it, i) => ({
+            propertyId: it.propertyId,
+            outcome: second[i] ? "second" : reasons[i] === null ? "kept" : "other",
+          })),
+        );
         excludedTerminalCount = reasons.filter((r) => r === "terminal").length;
         excludedAgentNameCount = reasons.filter((r) => r === "agent_name").length;
         excludedGaijiNameCount = reasons.filter((r) => r === "gaiji_name").length;
@@ -484,6 +516,14 @@ export async function POST(request: NextRequest) {
       throw e;
     }
 
+    // 2通目として宛先がすべて外れた物件の DM判断を「送付不可」にする(控えの保存が済んだあと・1件ずつ)。
+    // ⚠宛名CSVは物件の編集権限(property:write)が無くても出せる。DM判断は物件の編集で変える項目なので、
+    //   編集権限のある人のときだけ書く(無い人のときは宛先を外すだけ=次に出すときもまた外れる)。
+    //   売却DMの作成は、もともと編集権限が要る(requireSaleDmWriteAccess と同じ門)。
+    const demotedSecondLetterCount = hasPermission(permissions, "property", "write")
+      ? await demoteSecondLetterProperties(demoteIds, session.id)
+      : 0;
+
     // 監査用カウント(旧 export と同じ意味・成功確定後のみ実行)。
     let skippedAddressMissingCount = 0;
     if (!mgmtShortCircuitEmpty) {
@@ -525,6 +565,9 @@ export async function POST(request: NextRequest) {
         // ⚠監査の鍵に "Name" を含めると個人情報として伏せられる → excludedAgent
         excludedAgent: excludedAgentNameCount,
         excludedGaiji: excludedGaijiNameCount,
+        // 同じ所有者あての2通目で外した宛先数・そのために「送付不可」にした物件数(件数のみ)
+        excludedSecond: excludedSecondLetterCount,
+        demotedSecond: demotedSecondLetterCount,
         reused: false,
         createdAt: new Date().toISOString(),
       },
@@ -541,6 +584,9 @@ export async function POST(request: NextRequest) {
       excludedAgentNameCount,
       // 名前に外字がある所有者で自動除外した宛先数
       excludedGaijiNameCount,
+      // 同じ所有者あての2通目として自動除外した宛先数と、DM判断を「送付不可」にした物件数
+      excludedSecondLetterCount,
+      demotedSecondLetterCount,
       reused: false,
       mailablePropertyCount,
       unsubscribeUrlAvailable: await isUnsubscribeUrlAvailable(),
