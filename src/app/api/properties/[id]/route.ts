@@ -1,4 +1,4 @@
-import { assertOwnersForDmSend } from "@/lib/dm-owner-judge/guard";
+import { assertNoAgentNameOwnersForDmSend, assertOwnersForDmSend } from "@/lib/dm-owner-judge/guard";
 import { savedTextValue } from "@/lib/notation";
 import { NextRequest } from "next/server";
 import prisma from "@/lib/prisma";
@@ -415,6 +415,8 @@ export async function PATCH(
     // 所有者が入っていない物件は送付可にできない(2026-11-14 発注者)。
     if (updateFields.dmStatus === "send" && current.dmStatus !== "send") {
       await assertOwnersForDmSend(prisma, [id]);
+      // 業者の名簿と同じ名前の所有者がいる物件も送付可にできない(2026-11-16 発注者)。
+      await assertNoAgentNameOwnersForDmSend(prisma, [id]);
     }
 
     // ⚠**謄本の自動取得(scheduled)中は、取得の鍵になる項目を変えさせない**

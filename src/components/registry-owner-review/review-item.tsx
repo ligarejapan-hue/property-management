@@ -23,6 +23,9 @@ import {
 } from "@/lib/api-client";
 import { DM_STATUS_LABELS } from "@/lib/property-types";
 
+/** 「送付可に戻す」を選んだが、業者の名簿と同じ名前の所有者がいたので送付不可にした(2026-11-16 発注者) */
+export const AGENT_NAME_NO_SEND_NOTE = "業者の名簿と同じ名前の所有者がいるため、DM は送付不可にしました。";
+
 export interface ReviewItemProps {
   propertyId: string;
   address: string;
@@ -76,7 +79,10 @@ export default function ReviewItem({ propertyId, address, dmStatus, diffKind, ca
         attachmentId: detail.attachment.id,
         restoreDm: isHold && keepRestoreDm,
       });
-      onDone(r.dmRestored ? "「このままでよい」にしました。DM は送付可に戻しました。" : "「このままでよい」にしました。");
+      onDone(
+        "「このままでよい」にしました。" +
+          (r.dmRestored ? "DM は送付可に戻しました。" : r.dmAgentNoSend ? AGENT_NAME_NO_SEND_NOTE : ""),
+      );
     } catch (e) {
       setErrorMsg(e instanceof Error ? e.message : "保存できませんでした");
       setBusy(false);
@@ -97,7 +103,7 @@ export default function ReviewItem({ propertyId, address, dmStatus, diffKind, ca
       setConfirming(false);
       onDone(
         `謄本の名義に直しました(外した人 ${r.removed}名・足した人 ${r.added}名)。` +
-          (r.dmRestored ? "DM は送付可に戻しました。" : ""),
+          (r.dmRestored ? "DM は送付可に戻しました。" : r.dmAgentNoSend ? AGENT_NAME_NO_SEND_NOTE : ""),
       );
     } catch (e) {
       setErrorMsg(e instanceof Error ? e.message : "直せませんでした");

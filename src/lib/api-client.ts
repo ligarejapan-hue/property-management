@@ -5816,7 +5816,7 @@ export function fetchRegistryOwnerReviewDetail(propertyId: string): Promise<Regi
 export function keepRegistryOwnerCheck(
   propertyId: string,
   body: { attachmentId: string; restoreDm: boolean },
-): Promise<{ dmRestored: boolean }> {
+): Promise<{ dmRestored: boolean; dmAgentNoSend?: boolean }> {
   return apiFetch(`/api/registry-owner-checks/${encodeURIComponent(propertyId)}/keep`, {
     method: "POST",
     headers: { "Content-Type": "application/json" },
@@ -5827,7 +5827,7 @@ export function keepRegistryOwnerCheck(
 export function replaceRegistryOwnerCheck(
   propertyId: string,
   body: { attachmentId: string; linkedOwnerIds: string[]; removeOwnerIds: string[]; restoreDm: boolean },
-): Promise<{ removed: number; added: number; dmRestored: boolean; resultAfter: string | null }> {
+): Promise<{ removed: number; added: number; dmRestored: boolean; dmAgentNoSend?: boolean; resultAfter: string | null }> {
   return apiFetch(`/api/registry-owner-checks/${encodeURIComponent(propertyId)}/replace`, {
     method: "POST",
     headers: { "Content-Type": "application/json" },

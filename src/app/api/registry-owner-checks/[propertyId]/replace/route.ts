@@ -46,7 +46,7 @@ export async function POST(
     if (missing) throw new ApiError(403, missing, "FORBIDDEN");
 
     const body = bodySchema.parse(await request.json().catch(() => null));
-    let dmRestored = false;
+    let dmResult: "send" | "no_send" | null = null;
     let resultAfter: string | null = null;
     const outcome = await replaceRegistryOwnersOnProperty({
       session,
@@ -64,19 +64,22 @@ export async function POST(
           registryNames,
           registryRows,
         );
-        if (body.restoreDm) dmRestored = await restoreDmSendIfHold(tx, propertyId, session.id);
+        if (body.restoreDm) dmResult = await restoreDmSendIfHold(tx, propertyId, session.id);
         await settleDmOwnerPending(tx, propertyId);
       },
     });
 
+    // 戻すを選んだが、業者の名簿と同じ名前の所有者がいたので送付不可にした(2026-11-16)
+    const dmRestored = dmResult === "send";
+    const dmAgentNoSend = dmResult === "no_send";
     await writeAuditLog({
       userId: session.id,
       action: "registry_owner_replace",
       targetTable: "properties",
       targetId: propertyId,
-      detail: { removed: outcome.removed, added: outcome.added, dmRestored, resultAfter },
+      detail: { removed: outcome.removed, added: outcome.added, dmRestored, dmAgentNoSend, resultAfter },
     });
-    return apiResponse({ removed: outcome.removed, added: outcome.added, dmRestored, resultAfter });
+    return apiResponse({ removed: outcome.removed, added: outcome.added, dmRestored, dmAgentNoSend, resultAfter });
   } catch (error) {
     return handleApiError(error);
   }

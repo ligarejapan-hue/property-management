@@ -51,6 +51,7 @@ import {
 } from "@/lib/import-body-size";
 import { resolveAddressPairBackfill } from "@/lib/owner-address-backfill";
 import { isResourceEditLocked } from "@/lib/edit-lock/service";
+import { findPropertiesWithAgentNameOwners, type AgentNameExclusionTx } from "@/lib/dm-batch/agent-name-exclusion";
 import {
   pickSamePropertyOwner,
   planSamePropertyAddressReplace,
@@ -410,9 +411,13 @@ export async function POST(request: NextRequest) {
           //   「DM判断」で変えられる項目のため、進めないと編集画面を開いていた人の
           //   保存がこの昇格を黙って上書きする(Task 7 が謄本取込の法人番号で
           //   直したのと同じ穴)。
+          // ⚠業者の名簿と同じ名前の所有者がいれば送付可にせず「送付不可」にする(2026-11-16 発注者)
+          const dmTo = (await findPropertiesWithAgentNameOwners(prisma, [propertyId])).has(propertyId)
+            ? "no_send"
+            : "send";
           const dmUpdate = await prisma.property.updateMany({
             where: { id: propertyId, dmStatus: "hold" },
-            data: { dmStatus: "send", version: { increment: 1 } },
+            data: { dmStatus: dmTo, version: { increment: 1 } },
           });
           if (dmUpdate.count === 1) {
             await recordChanges({
@@ -420,7 +425,7 @@ export async function POST(request: NextRequest) {
               targetId: propertyId,
               changedBy: session.id,
               oldValues: { dmStatus: "hold" },
-              newValues: { dmStatus: "send" },
+              newValues: { dmStatus: dmTo },
               trackedFields: PROPERTY_TRACKED_FIELDS,
               source: "csv_import",
             });

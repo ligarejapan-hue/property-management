@@ -69,6 +69,11 @@ vi.mock("@/lib/permissions", () => ({
 }));
 
 vi.mock("@/lib/audit", () => ({ writeAuditLog: vi.fn() }));
+// 業者の名簿と同じ名前の所有者がいる物件(2026-11-16)。既定=いない。
+const agentNameProps = vi.hoisted(() => ({ value: new Set<string>() }));
+vi.mock("@/lib/dm-batch/agent-name-exclusion", () => ({
+  findPropertiesWithAgentNameOwners: vi.fn(async (_db: unknown, ids: string[]) => new Set(ids.filter((id) => agentNameProps.value.has(id)))),
+}));
 
 vi.mock("@/lib/change-log", () => ({
   recordChanges: vi.fn(),
@@ -474,6 +479,53 @@ describe("POST /api/import/reception-owner: version を進める(Task 9)", () =>
     );
     expect(dmCall).toBeDefined();
     expect(dmCall![0].data).toEqual({ dmStatus: "send", version: { increment: 1 } });
+  });
+
+  it("業者の名簿と同じ名前の所有者がいれば、DM○でも送付可にせず送付不可にする(2026-11-16 発注者)", async () => {
+    agentNameProps.value = new Set([PROPERTY_ID]);
+    pm.owner.findMany.mockResolvedValue([]);
+    pm.owner.findFirst.mockResolvedValue(null);
+    pm.property.updateMany.mockResolvedValue({ count: 1 });
+    vi.mocked(buildCombinedMatches).mockReturnValue([
+      {
+        reception: {
+          rowNumber: 1,
+          matchKey: "k",
+          fColumn: "",
+          kColumn: "",
+          lotNumber: "",
+          buildingNumber: "",
+          coOwnersNote: "",
+          shinkiValue: "",
+          dlMarked: false,
+        },
+        propertyMatch: {
+          status: "matched",
+          property: { id: PROPERTY_ID },
+        },
+        owners: [
+          {
+            name: OWNER_NAME,
+            address: OWNER_ADDRESS,
+            zip: null,
+            dm: "○",
+            propertyAddress: "",
+            roomNo: null,
+          },
+        ],
+        // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      } as any,
+    ]);
+
+    const res = await POST(makeRequest());
+    expect([200, 201]).toContain(res.status);
+
+    const dmCall = pm.property.updateMany.mock.calls.find(
+      (c) => c[0]?.where?.dmStatus === "hold",
+    );
+    expect(dmCall).toBeDefined();
+    expect(dmCall![0].data).toEqual({ dmStatus: "no_send", version: { increment: 1 } });
+    agentNameProps.value = new Set();
   });
 });
 

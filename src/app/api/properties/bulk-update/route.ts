@@ -1,4 +1,4 @@
-import { assertOwnersForDmSend } from "@/lib/dm-owner-judge/guard";
+import { assertNoAgentNameOwnersForDmSend, assertOwnersForDmSend } from "@/lib/dm-owner-judge/guard";
 import { NextRequest } from "next/server";
 import { z } from "zod";
 import prisma from "@/lib/prisma";
@@ -91,6 +91,8 @@ export async function POST(request: NextRequest) {
     // 所有者が入っていない物件は送付可にできない(2026-11-14 発注者)。1件でもあれば全体を断る。
     if (updateFields.dmStatus === "send") {
       await assertOwnersForDmSend(prisma, accessibleIds);
+      // 業者の名簿と同じ名前の所有者がいる物件も送付可にできない(2026-11-16 発注者)。
+      await assertNoAgentNameOwnersForDmSend(prisma, accessibleIds);
     }
     const result = await prisma.property.updateMany({
       where: { id: { in: accessibleIds } },

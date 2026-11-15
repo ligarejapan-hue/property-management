@@ -24,6 +24,7 @@ import { countActiveUndeliverable } from "@/lib/dm-reaction/undeliverable-flag";
 import { lockOwnersForUpdate, type RawTx } from "@/lib/dm-batch/locks";
 import { canAccessPropertyRecord } from "@/lib/property-access";
 import { lockPropertyRow } from "@/lib/property-record-guard";
+import { findPropertiesWithAgentNameOwners, type AgentNameExclusionTx } from "@/lib/dm-batch/agent-name-exclusion";
 
 export interface ClearUndeliverableResult {
   /** 解除した記録の数 */
@@ -167,6 +168,8 @@ export async function clearOwnerUndeliverable(
   // ⑤ 物件ごとに、残っている宛先不明を数え直す。0 なら印を外し、DM 可否を戻す
   let flagsCleared = 0;
   let dmStatusRestored = 0;
+  // 業者の名簿と同じ名前の所有者がいる物件は送付可に戻さない(2026-11-16 発注者)。照会は重いので1回にまとめる。
+  const agentNameProps = await findPropertiesWithAgentNameOwners(tx as unknown as AgentNameExclusionTx, targetPropertyIds);
   for (const propertyId of targetPropertyIds) {
     if ((await countActiveUndeliverable(tx, propertyId)) > 0) continue;
     const property = await tx.property.findUnique({
@@ -175,7 +178,8 @@ export async function clearOwnerUndeliverable(
     });
     // ⚠印の無い物件の「送らない」は人の判断=触らない
     if (!property || property.dmUndeliverableAt === null) continue;
-    const restore = property.dmStatus === "no_send";
+    // ⚠業者の名簿と同じ名前の所有者がいれば送付可に戻さない(送付不可のまま)
+    const restore = property.dmStatus === "no_send" && !agentNameProps.has(propertyId);
     await tx.property.update({
       where: { id: propertyId },
       data: {

@@ -3,6 +3,7 @@
  *
  * - 所有者が入っていない物件: 送付可なら未判断に戻し、所有者待ちの印(dm_owner_pending)を立てる(processOwnerless)
  * - 所有者待ちの印があって所有者が入った物件: 送付可/送付不可に仕分けて印を下ろす(judgeWithOwners)
+ * - 送付可なのに業者の名簿と同じ名前の所有者がいる物件: 送付不可にする(demoteAgentNameSend・2026-11-16)
  * 見回り(sweeper.ts)が1件ずつ呼ぶ。どちらも物件の行をロックしてから今の状態を読み直す。
  *
  * ⚠DM判断は物件の編集画面が送る項目なので、変えるときは版(version)を上げる。そのかわり、誰かが物件を
@@ -15,6 +16,7 @@ import prisma from "@/lib/prisma";
 import { lockPropertyRow } from "@/lib/property-record-guard";
 import { isResourceEditLocked } from "@/lib/edit-lock/service";
 import { findTerminalExclusions, type TerminalExclusionTx } from "@/lib/dm-batch/terminal-exclusion";
+import { findPropertiesWithAgentNameOwners, type AgentNameExclusionTx } from "@/lib/dm-batch/agent-name-exclusion";
 import { decideDmByOwners, ownerlessDmStep, type DmStatusValue, type NoSendReason } from "./decide";
 
 export type OwnerlessOutcome = "changed" | "marked" | "unmarked" | "skipped" | "locked";
@@ -137,4 +139,32 @@ export async function judgeWithOwners(
     await logDmChange(tx, propertyId, "hold", decision.dmStatus, p.createdBy);
     return { outcome: decision.dmStatus, reasons: decision.reasons };
   });
+}
+
+export type AgentSendOutcome = "no_send" | "locked" | "skipped";
+
+/**
+ * 「送付可」なのに業者の名簿と同じ名前の所有者がいる物件を「送付不可」にする(2026-11-16 発注者
+ * 「業者の名簿と同一名は DM 送付不可」)。11-14 の自動仕分けより前の送付可・あとから所有者が足された・
+ * あとから業者が名簿に載った物件を拾う。物件の行をロックしてから今の状態を読み直す。
+ * ⚠編集中(編集の鍵がある)なら書かずに次の見回りへ(その人の保存を 409 にしない)。
+ */
+export async function demoteAgentNameSend(propertyId: string): Promise<AgentSendOutcome> {
+  return prisma.$transaction(async (tx) => {
+    await lockPropertyRow(tx, propertyId);
+    const p = await tx.property.findUnique({
+      where: { id: propertyId },
+      select: { dmStatus: true, isArchived: true, createdBy: true },
+    });
+    if (!p || p.isArchived || p.dmStatus !== "send") return "skipped";
+    const hit = await findPropertiesWithAgentNameOwners(tx as unknown as AgentNameExclusionTx, [propertyId]);
+    if (!hit.has(propertyId)) return "skipped";
+    if (await isResourceEditLocked(tx, { resourceType: "property", resourceId: propertyId })) return "locked";
+    await tx.property.update({
+      where: { id: propertyId },
+      data: { dmStatus: "no_send", dmOwnerPending: false, version: { increment: 1 } },
+    });
+    await logDmChange(tx, propertyId, "send", "no_send", p.createdBy);
+    return "no_send";
+  }, { timeout: 15_000 });
 }

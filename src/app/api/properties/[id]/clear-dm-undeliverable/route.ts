@@ -4,6 +4,7 @@ import prisma from "@/lib/prisma";
 import { handleApiError, ApiError, parseJsonBody, getApiSession, getUserPermissions } from "@/lib/api-helpers";
 import { hasPermission } from "@/lib/permissions";
 import { writeAuditLog } from "@/lib/audit";
+import { assertNoAgentNameOwnersForDmSend, assertOwnersForDmSend } from "@/lib/dm-owner-judge/guard";
 
 // 宛先不明フラグ(dmUndeliverableAt)の手動解除。dmStatus は人の判断で戻すため、
 // restoreDmStatus が指定された時のみ send/hold に戻す(no_send のまま据え置きも可)。
@@ -42,6 +43,13 @@ export async function POST(
       property.assignedTo !== session.id
     ) {
       throw new ApiError(403, "この物件を操作する権限がありません", "FORBIDDEN");
+    }
+
+    // 送付可に戻すのは、ほかの入口と同じ確かめを通してから(2026-11-16 内部レビュー P2)。
+    if (restoreDmStatus === "send") {
+      await assertOwnersForDmSend(prisma, [id]);
+      // 業者の名簿と同じ名前の所有者がいる物件も送付可にできない(2026-11-16 発注者)。
+      await assertNoAgentNameOwnersForDmSend(prisma, [id]);
     }
 
     const data: {

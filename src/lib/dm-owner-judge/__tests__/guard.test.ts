@@ -10,7 +10,17 @@ vi.mock("@/lib/api-helpers", () => ({
   },
 }));
 
-import { assertOwnersForDmSend, NO_OWNER_DM_SEND_MESSAGE } from "../guard";
+const agentHit = { value: new Set<string>() };
+vi.mock("@/lib/dm-batch/agent-name-exclusion", () => ({
+  findPropertiesWithAgentNameOwners: vi.fn(async (_db: unknown, ids: string[]) => new Set(ids.filter((id) => agentHit.value.has(id)))),
+}));
+
+import {
+  assertOwnersForDmSend,
+  assertNoAgentNameOwnersForDmSend,
+  NO_OWNER_DM_SEND_MESSAGE,
+  AGENT_NAME_DM_SEND_MESSAGE,
+} from "../guard";
 
 const read = (p: string) => readFileSync(join(process.cwd(), p), "utf8").replace(/\r\n/g, "\n");
 
@@ -84,6 +94,39 @@ describe("謄本の名義の確認で DM を選んだら所有者待ちの印を
   });
   it("「謄本の名義に直す」も送付可に戻すかどうかにかかわらず印を下ろす", () => {
     const replace = read("src/app/api/registry-owner-checks/[propertyId]/replace/route.ts");
-    expect(replace).toMatch(/if \(body\.restoreDm\) dmRestored = [^\n]+\n\s*await settleDmOwnerPending\(tx, propertyId\);/);
+    expect(replace).toMatch(/if \(body\.restoreDm\) dmResult = [^\n]+\n\s*await settleDmOwnerPending\(tx, propertyId\);/);
+  });
+});
+
+describe("業者の名簿と同じ名前の所有者がいる物件は手で「送付可」にできない(2026-11-16 発注者)", () => {
+  const db = { $queryRaw: vi.fn() };
+
+  it("1件でも当たれば 422 で断る", async () => {
+    agentHit.value = new Set(["p2"]);
+    await expect(assertNoAgentNameOwnersForDmSend(db, ["p1", "p2"])).rejects.toMatchObject({
+      status: 422,
+      code: "AGENT_NAME_DM_SEND",
+      message: AGENT_NAME_DM_SEND_MESSAGE,
+    });
+  });
+
+  it("当たらなければ通す・空なら引かない", async () => {
+    agentHit.value = new Set();
+    await expect(assertNoAgentNameOwnersForDmSend(db, ["p1"])).resolves.toBeUndefined();
+    await expect(assertNoAgentNameOwnersForDmSend(db, [])).resolves.toBeUndefined();
+  });
+
+  it("送付可にする入口(ワンタッチ・まとめて変更・物件の編集・宛先不明の解除)すべてで、所有者の確かめのすぐあとに確かめる", () => {
+    const actions = read("src/app/api/properties/[id]/actions/route.ts");
+    expect(actions).toMatch(/assertOwnersForDmSend\(prisma, \[propertyId\]\);[\s\S]{0,120}assertNoAgentNameOwnersForDmSend\(prisma, \[propertyId\]\)/);
+    const bulk = read("src/app/api/properties/bulk-update/route.ts");
+    expect(bulk).toMatch(/assertOwnersForDmSend\(prisma, accessibleIds\);[\s\S]{0,120}assertNoAgentNameOwnersForDmSend\(prisma, accessibleIds\)/);
+    const patch = read("src/app/api/properties/[id]/route.ts");
+    expect(patch).toMatch(/assertOwnersForDmSend\(prisma, \[id\]\);[\s\S]{0,120}assertNoAgentNameOwnersForDmSend\(prisma, \[id\]\)/);
+    // 宛先不明の解除で「送付可に戻す」(内部レビュー P2)
+    const clearRoute = read("src/app/api/properties/[id]/clear-dm-undeliverable/route.ts");
+    expect(clearRoute).toMatch(
+      /restoreDmStatus === "send"\) \{\s*await assertOwnersForDmSend\(prisma, \[id\]\);[\s\S]{0,120}assertNoAgentNameOwnersForDmSend\(prisma, \[id\]\)/,
+    );
   });
 });
