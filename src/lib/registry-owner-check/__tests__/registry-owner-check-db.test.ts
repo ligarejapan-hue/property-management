@@ -281,7 +281,8 @@ async function main() {
     await prisma.mlitAgent.create({
       data: { licenseKey: "99999901", authority: "13", licenseLabel: "東京都知事(1)第999901号", companyName: "(株)見本不動産" },
     });
-    const restored3 = await prisma.$transaction((tx) => restoreDmSendIfHold(tx, p3, u));
+    // 大文字の物件 ID(URL のまま)でも当てる(@codex #747 P2)
+    const restored3 = await prisma.$transaction((tx) => restoreDmSendIfHold(tx, p3.toUpperCase(), u));
     await prisma.mlitAgent.deleteMany({ where: { licenseKey: "99999901" } });
     const after3 = await prisma.property.findUniqueOrThrow({ where: { id: p3 } });
     check("3f 業者と同じ名前の所有者がいれば送付可にせず送付不可", restored3 === "no_send" && after3.dmStatus === "no_send");

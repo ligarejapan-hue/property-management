@@ -139,6 +139,8 @@ describe.skipIf(!process.env.PUSH_DB_TEST_URL)("業者と同じ名前の所有�
     const got = await findPropertiesWithAgentNameOwners(prisma, [mixed, plainOnly, none]);
     expect([...got]).toEqual([mixed]);
     expect((await findPropertiesWithAgentNameOwners(prisma, [])).size).toBe(0);
+    // 大文字の id を渡しても見つかる(返す id は小文字・@codex #747 P2)
+    expect([...(await findPropertiesWithAgentNameOwners(prisma, [mixed.toUpperCase()]))]).toEqual([mixed]);
   });
 
   it("見回りの照会: 送付可で業者と同じ名前の所有者がいる物件だけ(送付不可・未判断・アーカイブは返さない)", async () => {

@@ -135,6 +135,7 @@ async function findChunk(
  * 業者と同じ名前の所有者がいる物件(2026-11-16 発注者「業者の名簿と同じ名前は DM 送付不可」)。
  * propertyIds のうち、つながっている所有者に1人でも業者と同じ名前の人がいる物件の id を返す。
  * 判定は上の findOwnerNameExclusions と同じ式(agentNameKeySql)。空なら DB を引かない。
+ * ⚠返す id は小文字(property_id::text)。大文字の id を渡した呼び出し元は `.has(id)` で比べない(@codex #747 P2)。
  */
 export async function findPropertiesWithAgentNameOwners(
   tx: AgentNameExclusionTx,

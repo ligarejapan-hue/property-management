@@ -179,7 +179,8 @@ export async function clearOwnerUndeliverable(
     // ⚠印の無い物件の「送らない」は人の判断=触らない
     if (!property || property.dmUndeliverableAt === null) continue;
     // ⚠業者の名簿と同じ名前の所有者がいれば送付可に戻さない(送付不可のまま)
-    const restore = property.dmStatus === "no_send" && !agentNameProps.has(propertyId);
+    // ⚠返る id は小文字(property_id::text)=小文字にそろえて比べる(@codex #747 P2)
+    const restore = property.dmStatus === "no_send" && !agentNameProps.has(propertyId.toLowerCase());
     await tx.property.update({
       where: { id: propertyId },
       data: {

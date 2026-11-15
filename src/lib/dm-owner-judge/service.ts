@@ -158,7 +158,8 @@ export async function demoteAgentNameSend(propertyId: string): Promise<AgentSend
     });
     if (!p || p.isArchived || p.dmStatus !== "send") return "skipped";
     const hit = await findPropertiesWithAgentNameOwners(tx as unknown as AgentNameExclusionTx, [propertyId]);
-    if (!hit.has(propertyId)) return "skipped";
+    // ⚠1物件だけ聞いたので「見つかったか」で決める(返る id は小文字=大文字の id と比べない・@codex #747 P2)
+    if (hit.size === 0) return "skipped";
     if (await isResourceEditLocked(tx, { resourceType: "property", resourceId: propertyId })) return "locked";
     await tx.property.update({
       where: { id: propertyId },

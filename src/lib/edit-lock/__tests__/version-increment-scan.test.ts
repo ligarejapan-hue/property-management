@@ -22,7 +22,7 @@ const VERSIONED: Record<string, string> = {
   "src/lib/dm-owner-judge/service.ts:135":
     "property.dmStatus=send/no_send+dmOwnerPending=false(所有者が入ったときの自動仕分け・2026-11-14)+version increment" +
     "(物件行ロック後・編集の鍵があれば書かない)",
-  "src/lib/dm-owner-judge/service.ts:163":
+  "src/lib/dm-owner-judge/service.ts:164":
     "property.dmStatus=no_send+dmOwnerPending=false(送付可なのに業者の名簿と同じ名前の所有者・2026-11-16)+version increment" +
     "(物件行ロック後・編集の鍵があれば書かない)",
   "src/app/api/admin/owners/[id]/correction/address-fill/route.ts:275":
@@ -105,7 +105,7 @@ const VERSIONED: Record<string, string> = {
     "property の編集画面フィールド一式(編集画面の本体保存窓口)+version increment",
   "src/app/api/properties/bulk-update/route.ts:97":
     "property.caseStatus/registryStatus/dmStatus/assignedTo(一括更新)+version increment",
-  "src/lib/dm-reaction/clear-undeliverable.ts:183":
+  "src/lib/dm-reaction/clear-undeliverable.ts:184":
     "宛先不明の解除(2026-11-13): DM可否を no_send→send に戻すときだけ property.dmStatus+version increment" +
     "(dmUndeliverableAt だけ外すときは進めない=ALLOWED の3件と同じ理由)",
   "src/lib/building-link/rename.ts:126":

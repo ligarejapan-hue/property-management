@@ -412,7 +412,7 @@ export async function POST(request: NextRequest) {
           //   保存がこの昇格を黙って上書きする(Task 7 が謄本取込の法人番号で
           //   直したのと同じ穴)。
           // ⚠業者の名簿と同じ名前の所有者がいれば送付可にせず「送付不可」にする(2026-11-16 発注者)
-          const dmTo = (await findPropertiesWithAgentNameOwners(prisma, [propertyId])).has(propertyId)
+          const dmTo = (await findPropertiesWithAgentNameOwners(prisma, [propertyId])).size > 0
             ? "no_send"
             : "send";
           const dmUpdate = await prisma.property.updateMany({

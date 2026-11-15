@@ -521,9 +521,9 @@ export async function restoreDmSendIfHold(
   propertyId: string,
   userId: string,
 ): Promise<"send" | "no_send" | null> {
-  const agentName = (await findPropertiesWithAgentNameOwners(tx as unknown as AgentNameExclusionTx, [propertyId])).has(
-    propertyId,
-  );
+  // ⚠1物件だけ聞いたので「見つかったか」で決める(返る id は小文字=URL の大文字の id と比べない・@codex #747 P2)
+  const agentName =
+    (await findPropertiesWithAgentNameOwners(tx as unknown as AgentNameExclusionTx, [propertyId])).size > 0;
   const to = agentName ? "no_send" : "send";
   const updated = await tx.property.updateMany({
     where: { id: propertyId, dmStatus: "hold" },
