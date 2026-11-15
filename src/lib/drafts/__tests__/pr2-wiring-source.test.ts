@@ -19,7 +19,8 @@ describe("貼り付けて物件化の配線", () => {
     expect(src).toMatch(/draftSaver\.markSubmitting\(\);[\s\S]{0,400}fetch\("\/api\/import\/paste\/commit"/);
     expect(src).toMatch(/draftSaver\.close\(\);\s*router\.push\(`\/properties\/\$\{result\.propertyId\}`\)/);
     expect(src).toMatch(/if \(isDefiniteSubmitFailure\(e\)\) draftSaver\.unmarkSubmitting\(\);\s*else setPendingBlocked\(true\);/);
-    expect(src).toContain("throw httpError(await readApiErrorMessage(res), res.status)");
+    // 断りの種類(SAME_CONTENT)も読むので、文と種類を一度に取り出してから投げる(2026-11-15)。
+    expect(src).toContain("throw httpError(err.message, res.status)");
   });
   it("やり直しは discard・選び直しまで登録を止める", () => {
     expect(src).toMatch(/draftSaver\.discard\(\)/);

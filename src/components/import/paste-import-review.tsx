@@ -158,7 +158,18 @@ const OWNER_FIELD_LABELS: { key: OwnerFieldKey; label: string }[] = [
  * ⚠住所の重複は登録APIが意図的にブロックしない(人が判断すべきなので)＝
  *   画面の警告が唯一の防御線。直したあとに効かないままでは防御にならない。
  */
-export const DUPLICATE_INPUT_FIELDS: ReadonlySet<string> = new Set(["address", "lotNumber"]);
+export const DUPLICATE_INPUT_FIELDS: ReadonlySet<string> = new Set(["address", "lotNumber", "buildingName", "roomNo"]);
+/**
+ * 「同じ内容の物件」の判定に使う物件の欄(2026-11-15)。直したら、確かめたチェックを外す。
+ * ⚠種別も入れる(種別に合わない建物名・部屋番号は保存されない=登録APIの判定が変わる)。
+ */
+export const SAME_CONTENT_PROPERTY_FIELDS: ReadonlySet<string> = new Set([
+  "address", "lotNumber", "buildingName", "roomNo", "propertyType",
+]);
+/** 同じ内容の物件(住所・建物名・部屋番号・所有者の名前がすべて同じ)。開ける物件の id だけ。 */
+export interface SameContentSummary {
+  id: string;
+}
 export const DUPLICATE_OWNER_FIELDS: ReadonlySet<string> = new Set(["name", "currentAddress"]);
 
 /** 欄ごとに紐づく警告コード(要確認状態を出す欄のみ)。 */
@@ -422,6 +433,16 @@ export interface PasteImportReviewProps {
   duplicates?: PasteDuplicatesResult;
   similar?: SimilarPropertySummary[];
 
+  /**
+   * 査定ナンバーの無い依頼で、住所・建物名・部屋番号・所有者の名前がすべて同じ物件。
+   * あれば確認の帯とチェックを出し、チェックが入るまで登録を止める(2026-11-15 発注者決定)。
+   */
+  sameContent?: SameContentSummary[];
+  /** 登録APIが「同じ内容の物件がある」と断った(この人には開けない物件が相手など)。 */
+  sameContentUnseen?: boolean;
+  sameContentConfirmed?: boolean;
+  onSameContentConfirmedChange?: (checked: boolean) => void;
+
   ownerCandidates?: OwnerCandidateSummary[];
   /**
    * 所有者候補が取得上限に達して確認しきれなかった。
@@ -467,6 +488,10 @@ export function PasteImportReview({
   recheckError,
   duplicates,
   similar,
+  sameContent,
+  sameContentUnseen,
+  sameContentConfirmed,
+  onSameContentConfirmedChange,
   ownerCandidates,
   ownerCandidatesTruncated,
   ownerMode,
@@ -486,7 +511,15 @@ export function PasteImportReview({
   const noteValue = note ?? draft.noteFromUnmapped;
   const externalKeyValue = externalLinkKey ?? draft.externalLinkKey ?? "";
   const dup = duplicates ?? { blocked: false, blockedByPropertyId: null, similarPropertyIds: [] };
-  const similarList = similar ?? [];
+  const sameContentList = sameContent ?? [];
+  // 同じ内容の物件は専用の帯で見せるので、「似た物件」の一覧からは外す(同じ物件を2回並べない)。
+  const similarList = (similar ?? []).filter((x) => !sameContentList.some((c) => c.id === x.id));
+  /**
+   * 同じ内容の物件があり、まだ確かめていない。
+   * ⚠査定ナンバーが同じ(登録済み)のときは赤い帯が先。そちらは確かめても登録できない。
+   */
+  const sameContentShown = !dup.blocked && (sameContentList.length > 0 || Boolean(sameContentUnseen));
+  const sameContentUnconfirmed = sameContentShown && !sameContentConfirmed;
   const candidates = ownerCandidates ?? [];
   const mode = ownerMode ?? defaultOwnerMode(draft);
   // 備考へ入れなかった項目のうち、所有者を新しく登録するときに所有者の備考へ入るもの(自由記述)と、それ以外。
@@ -521,7 +554,9 @@ export function PasteImportReview({
       ? "所有者の氏名を入力してください（所有者を作らない場合は「所有者なしで登録する」を選んでください）"
       : linkTargetMissing
         ? "紐付ける所有者が選ばれていません"
-        : (registerBlockedReason ?? null);
+        : sameContentUnconfirmed
+          ? "同じ内容の物件がすでにあります。確かめてからチェックを入れてください"
+          : (registerBlockedReason ?? null);
 
   return (
     <div className="grid gap-4 lg:grid-cols-[minmax(0,1fr)_minmax(0,1.15fr)]">
@@ -597,6 +632,46 @@ export function PasteImportReview({
           </div>
         )}
 
+        {/*
+          査定ナンバーの無い依頼の二重登録(2026-11-15)。住所・建物名・部屋番号・所有者の名前が
+          すべて同じ物件があるとき。⚠止めきりにしない(同じ方から後日届いた依頼は登録できる)。
+        */}
+        {sameContentShown && (
+          <div
+            role="alert"
+            data-section="same-content"
+            className="mb-3 rounded-md border border-red-400 bg-red-50 px-3 py-2 text-sm text-red-800 dark:border-red-500 dark:bg-red-950/40 dark:text-red-300"
+          >
+            <p>
+              住所・建物名・部屋番号・所有者の名前が同じ物件が、すでにあります。同じ依頼をもう一度登録しようとしていないか確かめてください。
+            </p>
+            {sameContentList.length > 0 ? (
+              <ul className="mt-1 list-disc pl-5">
+                {sameContentList.map((c) => (
+                  <li key={c.id}>
+                    <Link href={`/properties/${c.id}`} target="_blank" rel="noreferrer" className="underline">
+                      登録済みの物件を見る
+                    </Link>
+                  </li>
+                ))}
+              </ul>
+            ) : (
+              <p className="mt-1">（登録済みの物件は、担当外などのため、ここからは開けません。担当者にご確認ください）</p>
+            )}
+            <label className="mt-2 flex items-start gap-2 font-medium">
+              <input
+                id="paste-same-content-confirm"
+                type="checkbox"
+                className="mt-1"
+                checked={Boolean(sameContentConfirmed)}
+                onChange={(e) => onSameContentConfirmedChange?.(e.target.checked)}
+                disabled={busy}
+              />
+              <span>確かめました。別の依頼として登録する</span>
+            </label>
+          </div>
+        )}
+
         {similarList.length > 0 && (
           <div
             role="alert"
@@ -630,7 +705,7 @@ export function PasteImportReview({
           label="査定ナンバー"
           value={externalKeyValue}
           sourceLabel={null}
-          noColumnHint="※同じ番号の物件は登録できません。空にすると住所で判断します"
+          noColumnHint="※同じ番号の物件は登録できません。空のときは、住所・建物名・部屋番号・所有者の名前が同じ物件があると確認を挟みます"
           onChange={(v) => onExternalLinkKeyChange?.(v)}
           onBlur={onDuplicateInputBlur}
           disabled={busy}
@@ -847,6 +922,11 @@ export function PasteImportReview({
         {linkTargetMissing && !dup.blocked && (
           <p role="alert" className="mt-2 text-sm text-amber-700 dark:text-amber-400">
             紐付ける所有者が選ばれていません。候補から選ぶか、「新しい所有者として登録する」「所有者なしで登録する」を選んでください。
+          </p>
+        )}
+        {sameContentUnconfirmed && !linkTargetMissing && !ownerNameMissing && (
+          <p role="alert" className="mt-2 text-sm text-amber-700 dark:text-amber-400">
+            同じ内容の物件がすでにあります。上の赤い帯で確かめて、「別の依頼として登録する」にチェックを入れると登録できます。
           </p>
         )}
         {ownerNameMissing && !dup.blocked && (

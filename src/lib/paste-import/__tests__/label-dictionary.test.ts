@@ -48,3 +48,11 @@ describe("fieldKeyForLabel（見出し名からアプリの欄を引く）", () 
     expect(seen.size).toBeGreaterThan(20); // 空振り防止
   });
 });
+
+describe("部屋番号の見出し（2026-11-15 実機確認）", () => {
+  it("★「部屋番号」「号室」を部屋番号の欄に引ける(「物件号室」は今までどおり)", () => {
+    expect(fieldKeyForLabel("部屋番号")).toBe("roomNo");
+    expect(fieldKeyForLabel("号室")).toBe("roomNo");
+    expect(fieldKeyForLabel("物件号室")).toBe("roomNo");
+  });
+});

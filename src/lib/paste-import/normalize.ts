@@ -144,7 +144,11 @@ const AREA_SQM_UNITS: ReadonlySet<string> = new Set([
 export function parseAreaSqm(raw: string): number | null {
   // ⚠`m2` の「2」を面積の数値と数え違えないよう、先に `㎡` へ畳んでから数える
   //   (`70m2` が「70 と 2 の2つ」に見えて null になっていた)。
+  // ⚠全角の小数点「．」は toHalfWidth が半角にしない(英数字とハイフン類だけ)。
+  //   そのままだと `６５．５㎡` が「65 と 5 の2つ」に見えて null になる(2026-11-15 実機確認)。
+  //   **数字に挟まれた「．」だけ**を小数点にする(文の区切りの「．」は触らない)。
   const s = toHalfWidth(raw)
+    .replace(/(?<=\d)．(?=\d)/g, ".")
     .replace(/,/g, "")
     .replace(/[mM][\s　]*2(?![0-9.])/g, "㎡");
   const numbers = s.match(/\d+(?:\.\d+)?/g) ?? [];

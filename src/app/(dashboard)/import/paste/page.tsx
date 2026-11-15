@@ -31,6 +31,8 @@ import {
   type OwnerMatchKind,
   type PasteDuplicatesResult,
   type SimilarPropertySummary,
+  type SameContentSummary,
+  SAME_CONTENT_PROPERTY_FIELDS,
   type OwnerCandidateSummary,
   type OwnerMode,
   type PropertyFieldKey,
@@ -66,6 +68,8 @@ interface PasteApiResponse {
   draft: PasteDraft;
   duplicates: PasteDuplicatesResult;
   similar: SimilarPropertySummary[];
+  /** 住所・建物名・部屋番号・所有者の名前がすべて同じ物件(査定ナンバーの無い依頼だけ)。 */
+  sameContent?: SameContentSummary[];
   ownerCandidates: OwnerCandidateSummary[];
   /** 所有者候補が取得上限に達して確認しきれなかった（21巡目 ②）。 */
   ownerCandidatesTruncated: boolean;
@@ -81,6 +85,7 @@ interface PasteApiResponse {
 interface PasteRecheckResponse {
   duplicates: PasteDuplicatesResult;
   similar: SimilarPropertySummary[];
+  sameContent?: SameContentSummary[];
   ownerCandidates: OwnerCandidateSummary[];
   ownerCandidatesTruncated: boolean;
 }
@@ -92,11 +97,21 @@ interface CommitApiResponse {
   buildingLink?: BuildingLinkOutcome | null;
 }
 
-/** 非2xx応答からエラーメッセージを取り出す（api-client.ts の toApiError と同じ姿勢）。 */
-async function readApiErrorMessage(res: Response): Promise<string> {
+/** 非2xx応答からエラーの文と種類を取り出す（api-client.ts の toApiError と同じ姿勢）。 */
+async function readApiError(res: Response): Promise<{ message: string; code: string | null }> {
   const body = await res.json().catch(() => null);
-  return body?.error?.message ?? `処理に失敗しました（${res.status}）`;
+  return {
+    message: body?.error?.message ?? `処理に失敗しました（${res.status}）`,
+    code: typeof body?.error?.code === "string" ? body.error.code : null,
+  };
 }
+
+async function readApiErrorMessage(res: Response): Promise<string> {
+  const { message } = await readApiError(res);
+  return message;
+}
+
+const sameContentKey = (list: readonly SameContentSummary[]) => list.map((x) => x.id).sort().join(",");
 
 function PasteImportScreen({ draftEnabled }: { draftEnabled: boolean }) {
   const router = useRouter();
@@ -138,6 +153,27 @@ function PasteImportScreen({ draftEnabled }: { draftEnabled: boolean }) {
   const [externalLinkKey, setExternalLinkKey] = useState(r0?.externalLinkKey ?? "");
   const [recheckError, setRecheckError] = useState<string | null>(null);
   const [ownerMode, setOwnerMode] = useState<OwnerMode>(r0?.ownerMode ?? "none");
+  /**
+   * 同じ内容の物件(査定ナンバーの無い依頼で、住所・建物名・部屋番号・所有者の名前がすべて同じ)。
+   * あれば「別の依頼として登録する」のチェックを入れるまで登録させない(2026-11-15 発注者決定)。
+   * ⚠控えには残さない。戻した画面では、登録を押したときの見直しで出し直す。
+   */
+  const [sameContent, setSameContent] = useState<SameContentSummary[]>([]);
+  /** 登録APIが「同じ内容の物件がある」と断った(この人には見えない物件が相手・同時に貼られた)。 */
+  const [sameContentUnseen, setSameContentUnseen] = useState(false);
+  const [sameContentConfirmed, setSameContentConfirmed] = useState(false);
+  /** 確かめた相手が入れ替わったら、チェックは外す(見ていない相手を確かめたことにしない)。 */
+  const applySameContent = useCallback((next: SameContentSummary[]) => {
+    setSameContent((prev) => {
+      if (sameContentKey(prev) !== sameContentKey(next)) setSameContentConfirmed(false);
+      return next;
+    });
+  }, []);
+  /** 判定に使う欄を直したら、確かめ直してもらう。 */
+  const resetSameContentConfirm = useCallback(() => {
+    setSameContentUnseen(false);
+    setSameContentConfirmed(false);
+  }, []);
   /**
    * 選んだ所有者と、**選んだ瞬間の一致の種類**。
    *
@@ -224,6 +260,9 @@ function PasteImportScreen({ draftEnabled }: { draftEnabled: boolean }) {
       setDraft(data.draft);
       setDuplicates(data.duplicates);
       setSimilar(data.similar);
+      setSameContent(data.sameContent ?? []);
+      setSameContentUnseen(false);
+      setSameContentConfirmed(false);
       setOwnerCandidates(data.ownerCandidates);
       setOwnerCandidatesTruncated(data.ownerCandidatesTruncated);
       setExtractedText(data.extractedText);
@@ -246,6 +285,7 @@ function PasteImportScreen({ draftEnabled }: { draftEnabled: boolean }) {
 
   const handlePropertyFieldChange = useCallback((key: PropertyFieldKey, value: string) => {
     setPropertyValues((prev) => (prev ? { ...prev, [key]: value } : prev));
+    if (SAME_CONTENT_PROPERTY_FIELDS.has(key)) resetSameContentConfirm();
     // 棟の選び方は種別ごとの話なので、種別を変えたら自動に戻す(新規登録と同じ)。
     if (key === "propertyType") setBuildingChoice(AUTO_CHOICE);
     // ⚠住所の町丁目が変わったら、選んだ棟(前の丁目での判断)を外して auto に戻す(@codex R4)。
@@ -253,11 +293,12 @@ function PasteImportScreen({ draftEnabled }: { draftEnabled: boolean }) {
     if (key === "address" && propertyValues && areaChanged(propertyValues.address, value)) {
       setBuildingChoice(AUTO_CHOICE);
     }
-  }, [propertyValues]);
+  }, [propertyValues, resetSameContentConfirm]);
 
   const handleOwnerFieldChange = useCallback((key: OwnerFieldKey, value: string) => {
     setOwnerValues((prev) => (prev ? { ...prev, [key]: value } : prev));
-  }, []);
+    if (key === "name") resetSameContentConfirm();
+  }, [resetSameContentConfirm]);
 
   /**
    * 人が直したあとの値で、重複の見立てをやり直す。
@@ -285,12 +326,18 @@ function PasteImportScreen({ draftEnabled }: { draftEnabled: boolean }) {
           ownerName: ownerMode === "none" ? "" : (ownerValues?.name ?? ""),
           ownerCurrentAddress:
             ownerMode === "none" ? "" : (ownerValues?.currentAddress ?? ""),
+          // 「同じ内容の物件」の確認に使う(査定ナンバーの無い依頼だけ)。
+          buildingName: propertyValues.buildingName,
+          roomNo: propertyValues.roomNo,
+          // 種別に合わない建物名・部屋番号は保存されない=サーバーが落としてから比べる。
+          propertyType: propertyValues.propertyType,
         }),
       });
       if (!res.ok) throw new Error(await readApiErrorMessage(res));
       const data = (await res.json()) as PasteRecheckResponse;
       setDuplicates(data.duplicates);
       setSimilar(data.similar);
+      applySameContent(data.sameContent ?? []);
       setOwnerCandidates(data.ownerCandidates);
       setOwnerCandidatesTruncated(data.ownerCandidatesTruncated);
 
@@ -333,7 +380,7 @@ function PasteImportScreen({ draftEnabled }: { draftEnabled: boolean }) {
       );
       return null;
     }
-  }, [propertyValues, ownerValues, ownerMode, externalLinkKey, linkedOwner]);
+  }, [propertyValues, ownerValues, ownerMode, applySameContent, externalLinkKey, linkedOwner]);
 
   const handleRegister = useCallback(async () => {
     if (!draft || !propertyValues || !ownerValues) return;
@@ -373,6 +420,7 @@ function PasteImportScreen({ draftEnabled }: { draftEnabled: boolean }) {
       //   知らせないまま登録が通る。
       const ownerKey = (c: OwnerCandidateSummary) => `${c.id}:${c.matchKind}`;
       const beforeOwners = ownerCandidates.map(ownerKey).sort().join(",");
+      const beforeSame = sameContentKey(sameContent);
       const latest = await recheckDuplicates();
       if (!mountedRef.current) return;
 
@@ -428,9 +476,24 @@ function PasteImportScreen({ draftEnabled }: { draftEnabled: boolean }) {
       // 画面は recheckDuplicates が既に更新済み。もう一度押せば登録できる。
       const afterSimilar = latest.similar.map((x) => x.id).sort().join(",");
       const afterOwners = latest.ownerCandidates.map(ownerKey).sort().join(",");
+      const latestSame = latest.sameContent ?? [];
+      if (sameContentKey(latestSame) !== beforeSame) {
+        setRegisterError(
+          "入力の変更により、同じ内容の物件の候補が変わりました。ご確認のうえ、もう一度「この内容で登録」を押してください。",
+        );
+        return;
+      }
       if (afterSimilar !== beforeSimilar || afterOwners !== beforeOwners) {
         setRegisterError(
           "入力の変更により、似ている物件／所有者の候補が変わりました。ご確認のうえ、もう一度「この内容で登録」を押してください。",
+        );
+        return;
+      }
+      // 同じ内容の物件があるのに、確かめたチェックが無ければ送らない(ボタンも止めてあるが、ここでも見る)。
+      const sameContentShown = latestSame.length > 0 || sameContentUnseen;
+      if (sameContentShown && !sameContentConfirmed) {
+        setRegisterError(
+          "同じ内容の物件がすでにあります。確かめてから、「別の依頼として登録する」にチェックを入れてください。",
         );
         return;
       }
@@ -481,6 +544,8 @@ function PasteImportScreen({ draftEnabled }: { draftEnabled: boolean }) {
         //   (＝住所での重複判定に委ねられる)。
         externalLinkKey: externalLinkKey.trim() || null,
         linkExistingOwnerId: ownerMode === "link" ? linkedOwnerId : null,
+        // 確認を出して、チェックを入れてもらったときだけ送る。
+        confirmSameContent: sameContentShown && sameContentConfirmed ? true : undefined,
         buildingChoice: propertyValues.propertyType === "apartment_unit" ? buildingChoice : undefined,
         // 読み取った書式(HOME4U・タカウル・イエイなら導入ルートが「一括査定」になる)。
         leadSource: draft.sourceProfile,
@@ -502,7 +567,16 @@ function PasteImportScreen({ draftEnabled }: { draftEnabled: boolean }) {
           body: JSON.stringify(body),
         });
       }
-      if (!res.ok) throw httpError(await readApiErrorMessage(res), res.status);
+      if (!res.ok) {
+        const err = await readApiError(res);
+        // 登録APIが絞らずに確かめて見つけた(この人には見えない物件・同時に貼られた依頼)。
+        // 画面に確認のチェックを出して、確かめてから押し直してもらう。
+        if (err.code === "SAME_CONTENT") {
+          setSameContentUnseen(true);
+          setSameContentConfirmed(false);
+        }
+        throw httpError(err.message, res.status);
+      }
       // ⚠成功なのに物件の番号が無い返事は、登録されたか分からない(印を消さずに止める)。
       //   status を付けない Error=4xx ではない扱いで、下の catch が確認待ちにする。
       const result = (await res.json()) as CommitApiResponse;
@@ -523,7 +597,7 @@ function PasteImportScreen({ draftEnabled }: { draftEnabled: boolean }) {
   }, [
     draft, propertyValues, ownerValues, note, ownerMode, linkedOwnerId, pdfFile, router,
     externalLinkKey, recheckDuplicates, similar, ownerCandidates, linkedOwner, buildingChoice,
-    reselectReason, pendingBlocked, draftSaver,
+    reselectReason, pendingBlocked, draftSaver, sameContent, sameContentUnseen, sameContentConfirmed,
   ]);
 
   const handleDiscardDraft = () => {
@@ -692,19 +766,30 @@ function PasteImportScreen({ draftEnabled }: { draftEnabled: boolean }) {
             note={note}
             onNoteChange={setNote}
             externalLinkKey={externalLinkKey}
-            onExternalLinkKeyChange={setExternalLinkKey}
+            onExternalLinkKeyChange={(v) => {
+              setExternalLinkKey(v);
+              resetSameContentConfirm();
+            }}
             onDuplicateInputBlur={() => { void recheckDuplicates(); }}
             recheckError={recheckError}
             duplicates={duplicates ?? undefined}
             similar={similar}
+            sameContent={sameContent}
+            sameContentUnseen={sameContentUnseen}
+            sameContentConfirmed={sameContentConfirmed}
+            onSameContentConfirmedChange={setSameContentConfirmed}
             ownerCandidates={ownerCandidates}
             ownerCandidatesTruncated={ownerCandidatesTruncated}
             ownerMode={ownerMode}
-            onOwnerModeChange={setOwnerMode}
+            onOwnerModeChange={(m) => {
+              setOwnerMode(m);
+              resetSameContentConfirm();
+            }}
             linkedOwnerId={linkedOwnerId}
-            onLinkedOwnerChange={(id, matchKindAtSelection) =>
-              setLinkedOwner({ id, matchKindAtSelection })
-            }
+            onLinkedOwnerChange={(id, matchKindAtSelection) => {
+              setLinkedOwner({ id, matchKindAtSelection });
+              resetSameContentConfirm();
+            }}
             onRegister={handleRegister}
             registering={registering}
             registerError={registerError}

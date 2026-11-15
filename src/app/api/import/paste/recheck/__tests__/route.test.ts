@@ -457,3 +457,111 @@ describe("外部キーは下書き・確定と同じ正規化を通る（16巡�
     expect((await res.json()).duplicates.blocked).toBe(true);
   });
 });
+
+describe("同じ内容の物件（査定ナンバーの無い依頼の二重登録・2026-11-15）", () => {
+  const sameRow = (over: Record<string, unknown> = {}) => ({
+    id: "p-same",
+    address: "東京都Ａ区Ｂ１－２－３",
+    lotNumber: null,
+    externalLinkKey: null,
+    buildingName: "テストマンション",
+    roomNo: "９０１",
+    createdBy: "user-1",
+    assignedTo: null,
+    propertyOwners: [{ owner: { name: "調査太郎", isArchived: false } }],
+    ...over,
+  });
+  const body = {
+    propertyType: "apartment_unit",
+    address: "東京都A区B1-2-3",
+    buildingName: "テストマンション",
+    roomNo: "901",
+    ownerName: "調査　太郎",
+  };
+  /** 所有者の名前で絞る問い合わせ(同じ内容の物件を探す方)だけを数える。 */
+  const sameContentQueries = () =>
+    mockFindMany.mock.calls.filter(
+      (c) => (c[0] as { where?: { propertyOwners?: unknown } })?.where?.propertyOwners !== undefined,
+    );
+
+  it("★住所・建物名・部屋番号・所有者の名前がすべて同じ物件を返す(id だけ)", async () => {
+    mockFindMany.mockResolvedValue([sameRow()]);
+    const res = await POST(req(body));
+    const json = await res.json();
+    expect(json.sameContent).toEqual([{ id: "p-same" }]);
+  });
+
+  it("★同じ建物の別の部屋・別の名前は返さない", async () => {
+    mockFindMany.mockResolvedValue([sameRow()]);
+    expect((await (await POST(req({ ...body, roomNo: "902" }))).json()).sameContent).toEqual([]);
+    expect((await (await POST(req({ ...body, ownerName: "別人花子" }))).json()).sameContent).toEqual([]);
+  });
+
+  it("★査定ナンバーがある依頼では見ない(今までどおり番号で判断)", async () => {
+    mockFindMany.mockResolvedValue([sameRow()]);
+    const json = await (await POST(req({ ...body, externalLinkKey: "SA-1" }))).json();
+    expect(json.sameContent).toEqual([]);
+    expect(sameContentQueries()).toHaveLength(0);
+  });
+
+  it("★担当外の物件は返さない(見えない相手は登録APIが止める)", async () => {
+    mockSession = { id: "user-1", role: "field_staff" };
+    mockFindMany.mockResolvedValue([sameRow({ createdBy: "someone-else", assignedTo: "someone-else" })]);
+    const json = await (await POST(req(body))).json();
+    expect(json.sameContent).toEqual([]);
+  });
+
+  it("★所有者を検索できない人・物件を読めない人では、名前で物件を引かない(検索オラクルを開かない)", async () => {
+    mockFindMany.mockResolvedValue([sameRow()]);
+    for (const drop of ["owner", "property"]) {
+      mockPerms = FULL_PERMS.filter((p) => !(p.resource === drop && p.action === "read"));
+      mockFindMany.mockClear();
+      const json = await (await POST(req(body))).json();
+      expect(json.sameContent).toEqual([]);
+      expect(sameContentQueries()).toHaveLength(0);
+    }
+    mockPerms = FULL_PERMS.map((p) => (p.resource === "owner_address" ? { ...p, action: "partial" } : p));
+    mockFindMany.mockClear();
+    expect((await (await POST(req(body))).json()).sameContent).toEqual([]);
+    expect(sameContentQueries()).toHaveLength(0);
+  });
+});
+
+describe("同じ内容の物件は、登録APIが保存する値で比べる（@codex PR#732 1巡目）", () => {
+  const wholeBuilding = {
+    id: "p-whole",
+    address: "東京都Ａ区Ｂ１－２－３",
+    lotNumber: null,
+    externalLinkKey: null,
+    buildingName: "テストマンション",
+    roomNo: null,
+    createdBy: "user-1",
+    assignedTo: null,
+    propertyOwners: [{ owner: { name: "調査太郎", isArchived: false } }],
+  };
+  const body = {
+    address: "東京都A区B1-2-3",
+    buildingName: "テストマンション",
+    roomNo: "901",
+    ownerName: "調査太郎",
+  };
+
+  it("★区分マンションのままなら、部屋番号なしの物件は当てない", async () => {
+    mockFindMany.mockResolvedValue([wholeBuilding]);
+    const json = await (await POST(req({ ...body, propertyType: "apartment_unit" }))).json();
+    expect(json.sameContent).toEqual([]);
+  });
+
+  it("★種別を戸建に直したら、欄に残った部屋番号・建物名は落として比べる(登録APIと同じ相手を見せる)", async () => {
+    mockFindMany.mockResolvedValue([{ ...wholeBuilding, id: "p-house", buildingName: null }]);
+    const json = await (await POST(req({ ...body, propertyType: "house" }))).json();
+    expect(json.sameContent).toEqual([{ id: "p-house" }]);
+  });
+
+  it("種別が空のときは「不明」として扱う(登録APIと同じ)", async () => {
+    mockFindMany.mockResolvedValue([{ ...wholeBuilding, id: "p-unknown", buildingName: null }]);
+    const withType = await (await POST(req({ ...body, propertyType: "unknown" }))).json();
+    const without = await (await POST(req(body))).json();
+    expect(without.sameContent).toEqual(withType.sameContent);
+  });
+});

@@ -39,7 +39,7 @@ import {
 import { customerAreaNoteLines } from "@/lib/paste-import/customer-area";
 import { structuredFieldsFor } from "@/lib/paste-import/structured-fields";
 import { introductionRouteForLeadSource } from "@/lib/paste-import/lead-source-route";
-import { countPasteDuplicatesUnscoped } from "@/lib/paste-import-duplicates";
+import { countPasteDuplicatesUnscoped, findSameContentProperties } from "@/lib/paste-import-duplicates";
 import type { PropertyType, OccupancyStatus } from "@/generated/prisma";
 import { phoneForStore } from "@/lib/phone-format-jp";
 import { buildingChoiceSchema } from "@/lib/validators";
@@ -185,6 +185,12 @@ interface CommitBody {
    */
   requireNoDuplicates?: boolean;
   /**
+   * 貼り付け画面で「別の依頼として登録する」にチェックを入れたときだけ true。
+   * 査定ナンバーの無い依頼で、住所・建物名・部屋番号・所有者の名前がすべて同じ物件が
+   * すでにあるとき、これが無ければ 409(SAME_CONTENT)で作らない(2026-11-15 発注者決定)。
+   */
+  confirmSameContent?: boolean;
+  /**
    * どこから来た反響か(貼り付け=読み取った書式・Excel まとめ取込="excel_lead")。
    * 導入ルートだけに使う(査定サイト=一括査定・それ以外/省略=Web問い合わせ)。
    */
@@ -203,6 +209,10 @@ const ASSIGNED_TO_FORMAT = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-
  * (外部キーの鍵と混ざらない固定文字列)。
  */
 const COMMIT_LOCK_KEY = "paste-excel-bulk-commit";
+
+/** 同じ内容の物件がすでにあるときの断り(確認のチェックで通せる)。 */
+const SAME_CONTENT_MESSAGE =
+  "住所・建物名・部屋番号・所有者の名前が同じ物件が、すでに登録されている可能性があります。同じ依頼をもう一度登録しようとしていないか確かめてください。別の依頼として登録するときは、チェックを入れてからもう一度押してください";
 
 /**
  * JSON body の上限（この口専用）。
@@ -635,6 +645,38 @@ export async function POST(request: NextRequest) {
           });
           if (!assignee) {
             throw new ApiError(400, "担当者が見つかりません（無効にした人かもしれません）。選び直してください", "BAD_REQUEST");
+          }
+        }
+
+        // ---- 査定ナンバーの無い依頼: 同じ内容の物件があれば確認を挟む（2026-11-15 発注者決定） ----
+        // ⚠**この確認は、ほかの検査(担当者など)をすべて済ませたあと・物件を作る直前に置く**。
+        //   手前に置くと、わざと不正な担当者を付けて送るだけで「当たれば409・外れれば400」になり、
+        //   物件を作らずに、同じ内容の物件があるかを探れてしまう(自動のセキュリティ点検 2026-11-15)。
+        // ⚠査定ナンバーが無いと、上の「登録済み」の確認は働かない。同じ依頼を2回貼ると
+        //   物件・所有者がもう一式できていた。住所(+地番)・建物名・部屋番号・所有者の名前が
+        //   **すべて**同じ物件がすでにあるときは、画面で確認のチェックを入れた登録だけを通す。
+        // ⚠止めきりにはしない。同じ方から後日あらためて届いた依頼を登録する道を残す。
+        // ⚠**共通のロックの内側・このトランザクションのクライアントで・絞らずに**確かめる
+        //   (2人が同時に貼っても2件目はここで止まる。担当外の物件が相手でも止まる)。
+        // ⚠比べるのは**保存する値**(種別に合わない建物名・部屋番号は null に落としたあと)。
+        // ⚠まとめ取込(requireNoDuplicates)は、同じ住所というだけで上で止めているので見ない。
+        // ⚠文言は見つかった物件のことを言わない(担当外の物件・所有者の有無を言い当てさせない)。
+        //   中身は、画面が見る人の権限の範囲で見せる。
+        if (externalLinkKey === null && body.requireNoDuplicates !== true && body.confirmSameContent !== true) {
+          const sameContentOwnerName =
+            linkOwnerId !== null
+              ? ((await tx.owner.findFirst({ where: { id: linkOwnerId }, select: { name: true } }))?.name ?? null)
+              : (body.owner?.name?.trim() || null);
+          const same = await findSameContentProperties(tx, {
+            address: p.address.trim(),
+            lotNumber: p.lotNumber?.trim() || null,
+            buildingName,
+            roomNo: unitOnly.roomNo,
+            ownerName: sameContentOwnerName,
+          });
+          // 取りきれなかったとき(同じ名前の人の物件が同じ町に上限以上)も、確かめてもらう側に倒す。
+          if (same.matches.length > 0 || same.truncated) {
+            throw new ApiError(409, SAME_CONTENT_MESSAGE, "SAME_CONTENT");
           }
         }
 
