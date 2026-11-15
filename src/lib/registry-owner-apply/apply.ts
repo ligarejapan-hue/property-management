@@ -295,6 +295,16 @@ export interface ReplaceRegistryOwnersArgs {
   expectedLinkedOwnerIds: string[];
   /** 確認画面で「外れる」と見せた所有者 */
   expectedRemoveOwnerIds: string[];
+  /** 取込記録・監査に残す名前(既定=「謄本の名義に直す」。自動で外すときは別の固定の名前) */
+  auditLabel?: string;
+  /** 外した記録(変更履歴)の出どころ(既定=manual。自動で外すときは auto=画面で「自動」) */
+  changeSource?: "manual" | "auto";
+  /**
+   * 外す・足すの**前**に同じトランザクションで呼ぶ(物件の行はロック済み)。投げれば何も変えない。
+   * 自動で外すときに、比べた結果の行をロックして「比べたあと誰も変えていない(stale でない)」かを見る
+   * (外したあとはトリガーが自分で stale を立てるので、確定の直前では見分けられない・@codex #734 R2)。
+   */
+  beforeChange?: (tx: ReplaceTx) => Promise<void>;
   /**
    * 外す・足すと同じトランザクションの確定直前に呼ぶ(比べた結果の記録・DM を戻すなど)。
    * 投げれば外した分も足した分も巻き戻る。registryNames=謄本の名義(比べ直しに使う)。
@@ -391,7 +401,7 @@ export async function replaceRegistryOwnersOnProperty(
     text: registry.text,
     propertyId,
     // ⚠生ファイル名ではなく固定ラベル(ImportJob と AuditLog に残るため)
-    fileName: REGISTRY_OWNER_REPLACE_AUDIT_LABEL,
+    fileName: args.auditLabel ?? REGISTRY_OWNER_REPLACE_AUDIT_LABEL,
     // ⚠足すのは「システムにいない謄本の人」だけ(確認画面で見せた人)
     edited: { owners: plan.add.map((o) => ({ name: o.name, address: o.address, share: o.share })) },
     // ⚠足す人だけ=書類の行の全部ではない。登記上の記載は記録しない。
@@ -441,6 +451,7 @@ export async function replaceRegistryOwnersOnProperty(
       }
       const removeSet = new Set(fresh.removeOwnerIds);
       const toRemove = links.filter((l) => removeSet.has(l.ownerId));
+      if (args.beforeChange) await args.beforeChange(tx);
       if (toRemove.some((l) => l.note && l.note.trim())) {
         throw new ApiError(
           409,
@@ -460,7 +471,7 @@ export async function replaceRegistryOwnersOnProperty(
               targetTable: "property_owners",
               targetId: link.id,
               newValue: null,
-              source: "manual" as const,
+              source: args.changeSource ?? ("manual" as const),
               changedBy: session.id,
               propertyId,
             };

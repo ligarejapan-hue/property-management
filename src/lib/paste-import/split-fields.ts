@@ -18,7 +18,21 @@ export interface MergedLines {
   labeled: LabeledLine[];
   /** つないで作った行の欄(辞書を引かずにこの欄へ入れる)。 */
   keys: Map<LabeledLine, DraftFieldKey>;
+  /**
+   * 何行かに分かれた物件の住所で、**見当たらなかった部品**の呼び名(「町名」など)。住所をつないでいなければ空。
+   * ⚠部品が欠けても、ある部品だけで住所ができてしまう(「東京都世田谷区」+「4-36-15」)。黙って通すと
+   *   町名の抜けた住所で登録されるので、確認画面で知らせる(2026-11-15 実機確認)。
+   */
+  missingAddressParts: string[];
 }
+
+/** 住所の部品の、画面に出す呼び名。 */
+const ADDRESS_PART_NAMES: Record<string, string> = {
+  物件都道府県: "都道府県",
+  物件市区町村: "市区町村",
+  物件町字: "町名",
+  物件丁目番地号: "番地",
+};
 
 const ADDRESS_PARTS = ["物件都道府県", "物件市区町村", "物件町字", "物件丁目番地号"] as const;
 const ADDRESS_HEADS = ["物件都道府県", "物件市区町村"];
@@ -73,9 +87,13 @@ export function mergeSplitFields(labeled: readonly LabeledLine[]): MergedLines {
   }
   let lines = [...labeled];
   const keys = new Map<LabeledLine, DraftFieldKey>();
+  let missingAddressParts: string[] = [];
   for (const g of GROUPS) {
     if (!g.heads.some((h) => byLabel.has(h))) continue;
     const present = g.parts.filter((p) => byLabel.has(p));
+    if (g.key === "address") {
+      missingAddressParts = ADDRESS_PARTS.filter((p) => !byLabel.has(p)).map((p) => ADDRESS_PART_NAMES[p]);
+    }
     const values = present.map((p) => byLabel.get(p)!);
     const first = lines.find((l) => (g.parts as readonly string[]).includes(l.label));
     const merged: LabeledLine = {
@@ -92,5 +110,5 @@ export function mergeSplitFields(labeled: readonly LabeledLine[]): MergedLines {
     ];
     keys.set(merged, g.key);
   }
-  return { labeled: lines, keys };
+  return { labeled: lines, keys, missingAddressParts };
 }

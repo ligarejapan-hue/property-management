@@ -110,7 +110,8 @@ describe("仕様6.3の表: 物件が他の人の鍵のとき止まる4つ", () =
   });
 
   it("② 編集ボタン(物件を編集)を無効化する。titleは帯と矛盾しない文言をeditLockUnavailableTitleに委ねる(review round1 Important 5)", () => {
-    const idx = PROPERTY_DETAIL_PAGE_SRC.indexOf("onClick={() => setShowEditForm(true)}");
+    // 開く前に最新を取り直す入口(openEditForm)に変わった(2026-11-15)。無効化の条件は同じ。
+    const idx = PROPERTY_DETAIL_PAGE_SRC.indexOf("onClick={() => void openEditForm()}");
     expect(idx).toBeGreaterThan(-1);
     const block = PROPERTY_DETAIL_PAGE_SRC.slice(idx, idx + 300);
     expect(block).toMatch(/disabled=\{propertyEditLockHeld\}/);

@@ -411,6 +411,61 @@ describe("通知 段階4c: 取り直されないまま期限が過ぎた鍵の�
   });
 });
 
+// 帯の「(HH:mm〜)」が9時間先にずれた不具合の再発防止。
+// `acquired_at` は時間帯なしの列で、DB の接続の時間帯(本番は日本時間)の壁時計が入っている。
+// そのまま返すとドライバが UTC とみなして9時間ずれるので、画面に出る開始時刻を返す
+// SELECT / RETURNING はすべて `::timestamptz` で正しい瞬間にしてから返す。
+describe("表示する開始時刻(acquired_at)は timestamptz にして返す", () => {
+  const CAST = /"acquired_at"::timestamptz AS "acquired_at"/;
+  const heldRaw = {
+    id: "l1",
+    resource_type: "property",
+    resource_id: BASE.resourceId,
+    user_id: "other",
+    screen_token_hash: "h-other",
+    acquired_at: new Date("2026-09-18T10:00:00Z"),
+    heartbeat_at: new Date("2026-09-18T10:00:00Z"),
+    activity_at: new Date("2026-09-18T10:00:00Z"),
+    force_released_at: null,
+    db_now: new Date("2026-09-18T10:01:00Z"),
+  };
+
+  it("取得(upsert)の RETURNING", async () => {
+    const { db, queryRaw } = fakeDb([]);
+    queryRaw.mockResolvedValueOnce(noPrevLockRow()).mockResolvedValueOnce([{ id: "x", acquired_at: new Date() }]);
+    await acquireEditLock(db, BASE);
+    const sql = sqlOf(queryRaw.mock.calls[1]);
+    expect(sql).toMatch(/RETURNING "id", "acquired_at"::timestamptz AS "acquired_at"/);
+  });
+
+  it("取得できなかったときに今の保持者を読む SELECT", async () => {
+    const { db, queryRaw } = fakeDb([]);
+    queryRaw.mockResolvedValueOnce([heldRaw]).mockResolvedValueOnce([]).mockResolvedValueOnce([heldRaw]);
+    await acquireEditLock(db, BASE);
+    const sql = sqlOf(queryRaw.mock.calls[2]);
+    expect(sql).toMatch(CAST);
+    // 素の列のまま返す書き方が残っていない。
+    expect(sql).not.toMatch(/(?<!AS )"acquired_at",/);
+  });
+
+  it("状態の読み取り(readEditLocks)の SELECT", async () => {
+    const { db, queryRaw } = fakeDb([heldRaw]);
+    await readEditLocks(db, [{ resourceType: "property", resourceId: BASE.resourceId }]);
+    const sql = sqlOf(queryRaw.mock.calls[0]);
+    expect(sql).toMatch(CAST);
+    expect(sql).not.toMatch(/(?<!AS )"acquired_at",/);
+  });
+
+  it("合図が通らなかったときに今の保持者を読む SELECT(合図の taken の開始時刻)", async () => {
+    const { db, queryRaw } = fakeDb([]);
+    queryRaw.mockResolvedValueOnce([]).mockResolvedValueOnce([heldRaw]);
+    await heartbeatEditLock(db, { ...BASE, active: true });
+    const sql = sqlOf(queryRaw.mock.calls[1]);
+    expect(sql).toMatch(CAST);
+    expect(sql).not.toMatch(/(?<!AS )"acquired_at",/);
+  });
+});
+
 describe("readEditLocks", () => {
   it("DB の今時刻(dbNow)と生の行を返す。分類は呼び出し側の evaluateLock に任せる", async () => {
     const dbNow = new Date("2026-09-18T12:00:00Z");

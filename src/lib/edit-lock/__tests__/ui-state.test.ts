@@ -5,9 +5,32 @@ import {
   uiStateFromSaveError,
   shouldReacquireOnInput,
   shouldWarnIdle,
+  formatSince,
   type EditLockUiState,
 } from "../ui-state";
 import { EDIT_LOCK_IDLE_WARN_MS } from "../rules";
+
+// 開始時刻は**日本時間に固定**して出す。サーバー(UTC で動く)で描いても、ブラウザで描いても
+// 同じ表示になること=テストを走らせる環境の時間帯(TZ)に左右されないことを、決まった瞬間で確かめる。
+describe("formatSince(開始時刻の表示は日本時間に固定)", () => {
+  it("UTC の 18:20 は 日本時間の 03:20(翌日)", () => {
+    expect(formatSince("2026-11-14T18:20:00.000Z")).toBe("03:20");
+  });
+
+  it("日本時間の 0 時台は 24:xx ではなく 00:xx", () => {
+    expect(formatSince("2026-11-14T15:05:00.000Z")).toBe("00:05");
+  });
+
+  it("午後は 24 時間表記", () => {
+    expect(formatSince("2026-11-14T05:02:00.000Z")).toBe("14:02");
+  });
+
+  it("時刻が無い・解釈できないときは空文字", () => {
+    expect(formatSince(undefined)).toBe("");
+    expect(formatSince("")).toBe("");
+    expect(formatSince("garbage")).toBe("");
+  });
+});
 
 describe("鍵の表示状態(純関数)", () => {
   it("取得できたら mine(保存できる・帯なし)", () => {

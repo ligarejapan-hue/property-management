@@ -49,7 +49,7 @@ import ScanResultNotice, { type ScanNotice } from "@/components/properties/doc-s
 import { hasLittleText } from "@/lib/doc-scan/upload";
 import { DOC_KINDS, DOC_STAGES, docKindByCode } from "@/lib/doc-classify/classify";
 import { defaultOpenStage } from "@/lib/doc-classify/stage";
-import { displayTitle, groupAttachmentsByStage, needsKindCheck, visibleFolders } from "@/lib/attachments/doc-folders";
+import { displayTitle, groupAttachmentsByStage, needsKindCheck, visibleFolders, showsEmptyAttachmentState } from "@/lib/attachments/doc-folders";
 import { normalizeFileUrl } from "@/lib/url-normalize";
 import { sendsDownloadIntent } from "@/lib/attachments/download-intent";
 import {
@@ -774,7 +774,12 @@ export default function AttachmentTab({
           </div>
         )}
 
-        {generalAttachments.length === 0 ? (
+        {/* 0件のときは空の表示。ただし賃貸中の物件は、0件でも ⑤賃貸関係 を含むフォルダを並べる
+            (doc-folders.ts showsEmptyAttachmentState・2026-11-15)。 */}
+        {showsEmptyAttachmentState(generalAttachments.length, {
+          occupancyStatus,
+          scoped: scopeEnabled && scopeFilter !== "all",
+        }) ? (
           <div className="flex flex-col items-center py-6 text-gray-400 dark:text-gray-500">
             <Paperclip className="mb-2 h-8 w-8" />
             <p className="text-sm">{scopeEnabled && scopeFilter !== "all" ? "この取引の添付はありません" : "添付ファイルはまだありません"}</p>

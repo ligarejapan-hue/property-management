@@ -27,12 +27,13 @@ import {
   YEN_EDIT_KEYS,
   isPropertyEditDraftEmpty,
   mergeDraftIntoInitial,
+  isRebasedDraft,
   parsePropertyEditDraft,
   type PropertyEditDraft,
 } from "@/lib/drafts/screens/property-edit";
 import { useDraftAutosave, useRestoredDraft } from "@/hooks/use-draft";
 import { formatYenText, parseYenText, yenToMan } from "@/lib/yen-man";
-import { DraftRestoredNotice, DraftTooLargeNotice } from "@/components/drafts/draft-notices";
+import { DraftRebasedNotice, DraftRestoredNotice, DraftTooLargeNotice } from "@/components/drafts/draft-notices";
 // 編集中の鍵(仕様 6.1・6.2)。この画面が最初に配線する画面(Task 5)。
 import { useEditLock } from "@/hooks/use-edit-lock";
 import { ensureUniqueScreenToken, editLockHeaders } from "@/lib/edit-lock/screen-token-client";
@@ -464,6 +465,10 @@ const FORM_FIELDS: FormField[] = [
   { key: "architectureNote", label: "建築備考", type: "textarea", section: "調査" },
 ];
 
+/** 版の行き違いで保存できなかったときに添える一言(入力は消えない・開き直せば最新の内容に重なる)。 */
+export const VERSION_CONFLICT_HINT =
+  " 入力は残っています。右上の×で閉じて「物件を編集」を開き直すと、最新の内容に入力を重ねて続けられます。";
+
 export default function PropertyEditForm({
   property,
   canEditInquirer = false,
@@ -479,7 +484,7 @@ export default function PropertyEditForm({
     el?.scrollIntoView({ block: "center" });
   }, [focusField]);
   // 作業中の入力の控え(設計書 2026-10-13 §2 S5)。変えた欄だけ+基にした版番号。
-  // ⚠版が違えば重ねない(mergeDraftIntoInitial)=ほかの人の保存を古い入力で上書きしない。
+  // ⚠版が違っても控えは捨てない(mergeDraftIntoInitial)。変えた欄だけ最新の内容に重ね、帯で知らせる(2026-11-15)。
   const editDraftKey = draftKey("property-edit", property.id);
   const restored = useRestoredDraft(editDraftKey, parsePropertyEditDraft);
   const [draftDiscarded, setDraftDiscarded] = useState(false);
@@ -551,7 +556,7 @@ export default function PropertyEditForm({
       const val = (property as unknown as Record<string, unknown>)[f.key];
       initial[f.key] = editFieldValue(f.key, val);
     }
-    // 控えがあれば、開いた時点の値の上に重ねる(版が同じときだけ)。
+    // 控えがあれば、開いた時点の値の上に重ねる(版が違うときも重ねる=下の帯で知らせる)。
     // ⚠消すだけの欄(下の clearableKeys)は initial のまま=開いた時点の値で決める約束を守る。
     const merged = mergeDraftIntoInitial(
       initial,
@@ -602,6 +607,8 @@ export default function PropertyEditForm({
     restored != null &&
     restored.data.propertyId === property.id &&
     restored.data.baseVersion === property.version;
+  // 控えを取ったあとに物件が更新されていた(作成直後の調査情報の自動取得など)。入力は重ねてあるので知らせる。
+  const showRebasedNotice = !draftDiscarded && isRebasedDraft(restored?.data ?? null, property.id, property.version);
 
   /** 「最初からやり直す」: 控えを消して開いた時点の値に戻す(小窓は開いたまま)。 */
   const handleDiscardDraft = () => {
@@ -785,7 +792,8 @@ export default function PropertyEditForm({
         );
         return;
       }
-      setError(message);
+      // 版の行き違い(ほかの保存・自動取得が先に入った)。入力は控えに残っているので、戻り方を添える(2026-11-15)。
+      setError(code === "VERSION_CONFLICT" ? `${message}${VERSION_CONFLICT_HINT}` : message);
     } finally {
       setSaving(false);
     }
@@ -851,6 +859,7 @@ export default function PropertyEditForm({
           {showRestoredNotice && restored && (
             <DraftRestoredNotice savedAt={restored.savedAt} onDiscard={handleDiscardDraft} />
           )}
+          {showRebasedNotice && <DraftRebasedNotice onDiscard={handleDiscardDraft} />}
           {editDraft.tooLarge && <DraftTooLargeNotice kind="input" />}
           {/* 通知 段階1(N1・N2): 別の画面を見ているときだけベル・OS の通知に出す。帯はそのまま */}
           <EditLockNotices

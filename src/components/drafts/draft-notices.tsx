@@ -35,6 +35,23 @@ export function DraftRestoredNotice({ savedAt, onDiscard }: { savedAt: number; o
   );
 }
 
+/**
+ * 控えを取ったあとに物件が更新されていたとき(2026-11-15)。入力は捨てず、変えた欄だけ最新の内容に重ねてある。
+ */
+export const DRAFT_REBASED_TEXT = "ほかで更新がありました。入力は残しています（変えた欄だけ、最新の内容に重ねました）。内容を確かめてから保存してください。";
+
+export function DraftRebasedNotice({ onDiscard }: { onDiscard: () => void }) {
+  return (
+    <div role="status" data-testid="draft-rebased-notice" className={WARN}>
+      <AlertTriangle className="h-4 w-4 shrink-0" />
+      <span>{DRAFT_REBASED_TEXT}</span>
+      <Button variant="secondary" size="sm" onClick={onDiscard} className={BTN}>
+        最初からやり直す
+      </Button>
+    </div>
+  );
+}
+
 export function DraftPendingNotice({ onConfirm }: { onConfirm: () => void }) {
   return (
     <div role="alert" data-testid="draft-pending-notice" className={WARN}>
@@ -42,18 +59,6 @@ export function DraftPendingNotice({ onConfirm }: { onConfirm: () => void }) {
       <span>前回、登録の途中で画面を離れました。登録されたかどうかを物件一覧で確かめてください。</span>
       <Button variant="secondary" size="sm" onClick={onConfirm} className={BTN}>
         確かめたので続ける
-      </Button>
-    </div>
-  );
-}
-
-export function DraftStaleNotice({ onDismiss }: { onDismiss: () => void }) {
-  return (
-    <div role="status" data-testid="draft-stale-notice" className={WARN}>
-      <AlertTriangle className="h-4 w-4 shrink-0" />
-      <span>ほかの方が保存したため、入力途中の内容は使えませんでした。</span>
-      <Button variant="secondary" size="sm" onClick={onDismiss} className={BTN}>
-        閉じる
       </Button>
     </div>
   );

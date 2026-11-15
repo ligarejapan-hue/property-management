@@ -5,6 +5,8 @@ export type DraftWarningCode =
   | "lot_number_missing"
   | "property_type_unknown"
   | "address_missing"
+  /** 何行かに分かれた住所で、部品(町名など)が見当たらなかった。住所は入るが、欠けているかもしれない(2026-11-15)。 */
+  | "address_part_missing"
   /**
    * 見出しは辞書にあったのに、**値を解釈できなかった**。
    * ⚠捨てて黙る（＝確認画面に「元の資料に記載がありません」と出る）のは

@@ -52,7 +52,8 @@ function hash(s: string): string {
 const read = (rel: string) => readFileSync(path.join(ROOT, rel), "utf8");
 
 const LOCKED_FILES: Array<{ file: string; rev: string; hash: string }> = [
-  { file: "src/lib/paste-import/types.ts", rev: "paste rev 1 / excel rev 1", hash: "1bcc50c50ee6179f" },
+  // 2026-11-15: 注意の種類に "address_part_missing" を足した(値を増やしただけ=前の控えの値はそのまま読める=rev は上げない)。
+  { file: "src/lib/paste-import/types.ts", rev: "paste rev 1 / excel rev 1", hash: "98331bc29f0452b9" },
   { file: "src/lib/paste-import/review-types.ts", rev: "paste rev 1", hash: "8c209d8a4708f652" },
   // 2026-10-25: 行に assigneeLabel・assignedTo を**省略可で**足した(前の控えの行は「担当者なし」で読める=rev は上げない)。
   { file: "src/lib/paste-import/excel-lead-types.ts", rev: "excel rev 1", hash: "53229ea1f7783058" },
