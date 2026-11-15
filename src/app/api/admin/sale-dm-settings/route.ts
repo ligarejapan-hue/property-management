@@ -65,9 +65,9 @@ const putSchema = z.object({
   googleConvLabel: z
     .string()
     .trim()
-    .max(80)
+    .max(100)
     .optional()
-    .refine((v) => v === undefined || normalizeGoogleConvLabel(v).kind !== "invalid", { message: "コンバージョン ラベルは英数字・ハイフン・アンダースコアで 4〜64 文字にしてください" }),
+    .refine((v) => v === undefined || normalizeGoogleConvLabel(v).kind !== "invalid", { message: "コンバージョン ラベルは、ラベルだけ(英数字・ハイフン・アンダースコアで 4〜64 文字)か、send_to の値まるごと(例: AW-123456789/AbCdEfGhIjK)で入力してください" }),
   // APIキー: 指定時は暗号化して保存・空文字は「クリア」・未指定(undefined)は現状維持(=画面では値を返さない)。
   anthropicApiKey: z.string().trim().max(500).optional(),
   openaiApiKey: z.string().trim().max(500).optional(),

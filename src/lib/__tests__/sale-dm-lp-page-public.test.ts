@@ -100,6 +100,17 @@ describe("renderLpPage(public=広告用の公開ページ)", () => {
     expect(g3).not.toContain("'event','conversion'");
     expect(g3).toContain("gtag('config','G-ABCD1234',{page_location:");
   });
+  it("アナリティクス(G-)の ID のまま、ラベルの欄の send_to(AW-…/…)で Google広告にも成果を送る(2026-11-15 発注者)", () => {
+    const h = renderLpPage(publicInput({ public: { ...publicInput().public!, google: { tagId: "G-ABCD1234", convLabel: "AW-123456789/AbCd-12_x" } } }));
+    expect(h).toContain('<script async src="https://www.googletagmanager.com/gtag/js?id=G-ABCD1234"></script>');
+    expect(h).toContain("gtag('config','G-ABCD1234',{page_location:");
+    expect(h).toContain("gtag('config','AW-123456789');");
+    expect(h).toContain("gtag('event','conversion',{send_to:'AW-123456789/AbCd-12_x'})");
+    expect(h).toContain("gtag('event','generate_lead')");
+    // 規則外の send_to は出さない(タグ自体を出さない)
+    const bad = renderLpPage(publicInput({ public: { ...publicInput().public!, google: { tagId: "G-ABCD1234", convLabel: "AW-1');alert(1);//" } } }));
+    expect(bad).not.toContain("googletagmanager");
+  });
   it("送信スクリプトは申込完了(done)のときに document へ lp:inquiry-done を出す(値は含めない)。サーバーが silent(機械送信)と返したときは出さない", () => {
     expect(html).toContain('new CustomEvent("lp:inquiry-done")');
     const i = html.indexOf("function done(silent){");
