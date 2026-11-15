@@ -151,8 +151,8 @@ export default function SaleDmSettingsPage() {
           <span className="mt-1 block text-xs text-gray-500">Google広告(AW-…)またはGoogleアナリティクス(G-…)の管理画面にある ID です。入れると、DMの種類に公開名を付けた広告用ページ(/lp/…)だけで Google の計測タグを読み込みます。手紙のQRから開くご案内ページには入りません。空欄なら何も読み込みません。</span>
         </Field>
         <Field label="申込完了のコンバージョン ラベル(Google広告・任意)">
-          <input value={googleConvLabel} onChange={(e) => setGoogleConvLabel(e.target.value)} placeholder="例: AbCdEfGhIjK-1234567" maxLength={80} spellCheck={false} data-testid="sale-dm-google-conv-label" className="w-full rounded-md border border-gray-300 px-2 py-1.5 text-sm dark:border-gray-700 dark:bg-gray-900 dark:text-gray-100" />
-          <span className="mt-1 block text-xs text-gray-500">Google広告の「コンバージョン」で作ったタグの「send_to」のスラッシュの後ろの部分です。入れると、広告用ページで申込が完了したときに Google広告へ成果を送ります(タグ ID が AW-… のとき)。</span>
+          <input value={googleConvLabel} onChange={(e) => setGoogleConvLabel(e.target.value)} placeholder="例: AW-123456789/AbCdEfGhIjK" maxLength={100} spellCheck={false} data-testid="sale-dm-google-conv-label" className="w-full rounded-md border border-gray-300 px-2 py-1.5 text-sm dark:border-gray-700 dark:bg-gray-900 dark:text-gray-100" />
+          <span className="mt-1 block text-xs text-gray-500">Google広告の「コンバージョン」で作ったタグの「send_to」の値(AW-…/…)をまるごと入れてください。上のタグ ID がアナリティクス(G-…)のままでも、広告用ページで申込が完了したときに Google広告へ成果を送ります。スラッシュの後ろの部分だけを入れたときは、上のタグ ID が AW-… のときだけ送ります。</span>
         </Field>
       </div>
 

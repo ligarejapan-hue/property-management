@@ -7,6 +7,7 @@ import {
   AD_PARAM_MAX,
   normalizeGoogleTagId,
   normalizeGoogleConvLabel,
+  googleConversionTarget,
   buildPublicLpHeaders,
   publicLpPath,
 } from "@/lib/sale-dm-letter/lp-public";
@@ -92,6 +93,23 @@ describe("Google のタグの設定値", () => {
       expect(normalizeGoogleConvLabel(bad), bad).toEqual({ kind: "invalid" });
     }
   });
+  it("send_to をまるごと(AW-数字/ラベル)入れてもよい=AW- の部分は大文字にそろえる(GA4 の ID と並べて使う・2026-11-15 発注者)", () => {
+    expect(normalizeGoogleConvLabel(" aw-123456789/AbCd-12_x ")).toEqual({ kind: "ok", value: "AW-123456789/AbCd-12_x" });
+    for (const bad of ["G-ABCD1234/AbCd-12_x", "GT-ABCD1234/AbCd-12_x", "AW-123/AbCd", "AW-123456789/", "AW-123456789/ab", "AW-123456789/AbCd/x", "/AbCd-12_x", "AW-1234 5678/AbCd-12_x"]) {
+      expect(normalizeGoogleConvLabel(bad), bad).toEqual({ kind: "invalid" });
+    }
+  });
+  it("googleConversionTarget: 成果の送り先(send_to)と、追加で読み込む Google広告の ID", () => {
+    // ラベルが send_to まるごと → タグ ID が G- でも送る・AW- を追加で config
+    expect(googleConversionTarget({ tagId: "G-ABCD1234", convLabel: "AW-123456789/AbCd-12_x" })).toEqual({ sendTo: "AW-123456789/AbCd-12_x", extraConfigId: "AW-123456789" });
+    // タグ ID と同じ AW- なら追加の config は要らない
+    expect(googleConversionTarget({ tagId: "AW-123456789", convLabel: "AW-123456789/AbCd-12_x" })).toEqual({ sendTo: "AW-123456789/AbCd-12_x", extraConfigId: null });
+    // 今までどおり: AW- のタグ ID+ラベルだけ
+    expect(googleConversionTarget({ tagId: "AW-12345ABC", convLabel: "AbCd-12_x" })).toEqual({ sendTo: "AW-12345ABC/AbCd-12_x", extraConfigId: null });
+    // G-/GT- にラベルだけ・ラベルなし=送らない
+    expect(googleConversionTarget({ tagId: "G-ABCD1234", convLabel: "AbCd-12_x" })).toBeNull();
+    expect(googleConversionTarget({ tagId: "AW-12345ABC", convLabel: null })).toBeNull();
+  });
 });
 
 describe("buildPublicLpHeaders(広告ページの応答ヘッダ)", () => {
@@ -108,6 +126,8 @@ describe("buildPublicLpHeaders(広告ページの応答ヘッダ)", () => {
     expect(csp).toMatch(/connect-src [^;]*https:\/\/\*\.google-analytics\.com/);
     expect(csp).toMatch(/connect-src [^;]*https:\/\/googleads\.g\.doubleclick\.net/);
     expect(csp).toMatch(/img-src [^;]*https:\/\/www\.google\.com/);
+    // Google広告の成果は画像で送られることもある(ビーコンが使えないとき)
+    expect(csp).toMatch(/img-src [^;]*https:\/\/\*\.googleadservices\.com/);
     expect(csp).toMatch(/frame-src https:\/\/td\.doubleclick\.net https:\/\/www\.googletagmanager\.com/);
     // 守りの基本は変えない
     expect(csp).toContain("default-src 'none'");

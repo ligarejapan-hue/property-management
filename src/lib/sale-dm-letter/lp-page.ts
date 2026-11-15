@@ -7,6 +7,7 @@
  *  - <script> は電話タップ送信の固定文字列(live のみ)・申込フォーム・チェック札(live のみ)。token は jsString(JSON.stringify を
  *    </script>-safe にしたもの)で埋める。
  */
+import { GOOGLE_ADS_SEND_TO_RE, googleConversionTarget } from "./google-conversion";
 import { escapeHtml } from "./templates/index";
 import { renderFigureHtml, type FigureOptions } from "./lp-figures";
 import { jaHeadingHtml, jaWrapHtml } from "./ja-line-break";
@@ -929,14 +930,18 @@ function ogMetaTags(input: LpRenderInput, pub: LpPublicInput): string {
  *  - 申込完了は送信スクリプトが出す lp:inquiry-done の合図で送る(Google広告のコンバージョン=ラベルがあるとき・GA4 の generate_lead=常に)。
  */
 function googleTagScripts(google: { tagId: string; convLabel: string | null }, safeQuery: string): string {
-  // 許可リスト([A-Z0-9-] / [A-Za-z0-9_-])を通った値だけを受け取る前提。念のためここでも合わなければ出さない。
-  if (!/^[A-Z0-9-]+$/.test(google.tagId) || (google.convLabel !== null && !/^[A-Za-z0-9_-]+$/.test(google.convLabel))) return "";
-  // コンバージョン(send_to: AW-xxx/ラベル)は Google広告の ID(AW-)のときだけ。G-/GT- にラベルが残っていても送らない(@codex #535 R2 P2)。
-  const conv = google.convLabel && google.tagId.startsWith("AW-") ? `gtag('event','conversion',{send_to:'${google.tagId}/${google.convLabel}'});` : "";
+  // 許可リスト([A-Z0-9-] / ラベル [A-Za-z0-9_-] か send_to AW-…/ラベル)を通った値だけを受け取る前提。念のためここでも合わなければ出さない。
+  if (!/^[A-Z0-9-]+$/.test(google.tagId) || (google.convLabel !== null && !/^[A-Za-z0-9_-]+$/.test(google.convLabel) && !GOOGLE_ADS_SEND_TO_RE.test(google.convLabel))) return "";
+  // コンバージョンの送り先: ラベルだけなら AW- のタグ ID のときだけ(G-/GT- にラベルが残っていても送らない・@codex #535 R2 P2)。
+  // send_to まるごと(AW-…/…)なら、タグ ID が G- のままでも Google広告の ID を追加で config して送る(2026-11-15 発注者)。
+  const target = googleConversionTarget(google);
+  const conv = target ? `gtag('event','conversion',{send_to:'${target.sendTo}'});` : "";
   // page_location は素の URL(document.location)を使わない: query の utm_* は訪問者が自由に書ける文字列(連絡先が紛れ得る)なので、
   // サーバーで許可リストを通した印だけを付け直した URL を渡す(@codex #535 R4 P1)。
+  // config の値はその宛先だけに効くので、追加の Google広告の config にも同じ値を渡す(@codex #731 P1)。
   const loc = `location.origin+location.pathname+${jsString(safeQuery)}`;
+  const extraConfig = target?.extraConfigId ? `gtag('config','${target.extraConfigId}',{page_location:${loc}});` : "";
   return `<script async src="https://www.googletagmanager.com/gtag/js?id=${google.tagId}"></script>` +
-    `<script>window.dataLayer=window.dataLayer||[];function gtag(){dataLayer.push(arguments)}gtag('js',new Date());gtag('config','${google.tagId}',{page_location:${loc}});` +
+    `<script>window.dataLayer=window.dataLayer||[];function gtag(){dataLayer.push(arguments)}gtag('js',new Date());gtag('config','${google.tagId}',{page_location:${loc}});${extraConfig}` +
     `document.addEventListener("lp:inquiry-done",function(){try{${conv}gtag('event','generate_lead')}catch(_){}});</script>`;
 }

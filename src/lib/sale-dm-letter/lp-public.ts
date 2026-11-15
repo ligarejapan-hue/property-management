@@ -7,6 +7,9 @@
  * ⚠外部由来の文字は許可リストで組み立てる(伏せ字ではなく、合わないものは捨てる)。
  */
 import { LP_PAGE_HEADERS } from "./lp-page";
+import { GOOGLE_ADS_SEND_TO_RE, GOOGLE_CONV_LABEL_RE, type GoogleTagConfig } from "./google-conversion";
+
+export { GOOGLE_ADS_SEND_TO_RE, GOOGLE_CONV_LABEL_RE, googleConversionTarget, type GoogleTagConfig } from "./google-conversion";
 
 /** 公開名: 半角小文字英数字とハイフン 2〜40 字。 */
 export const PUBLIC_SLUG_RE = /^[a-z0-9-]{2,40}$/;
@@ -91,15 +94,23 @@ export function normalizeGoogleTagId(raw: string | null | undefined): Normalized
   return GOOGLE_TAG_ID_RE.test(s) ? { kind: "ok", value: s } : INVALID;
 }
 
-/** 申込完了のコンバージョン ラベル(Google広告の「send_to」の後半)。 */
-export const GOOGLE_CONV_LABEL_RE = /^[A-Za-z0-9_-]{4,64}$/;
+/**
+ * 申込完了のコンバージョン ラベル。次のどちらか:
+ *  - ラベルだけ(Google広告の「send_to」の後半)=タグ ID が AW- のときだけ使う(今までの形)
+ *  - send_to まるごと(AW-数字/ラベル)=タグ ID が GA4(G-)のままでも、Google広告のタグを追加で読み込んで成果を送る
+ *    (2026-11-15 発注者「アナリティクスと Google広告の両方」)。AW- の部分は大文字にそろえる。
+ */
 export function normalizeGoogleConvLabel(raw: string | null | undefined): Normalized {
   const s = (raw ?? "").trim();
   if (s === "") return EMPTY;
-  return GOOGLE_CONV_LABEL_RE.test(s) ? { kind: "ok", value: s } : INVALID;
+  if (GOOGLE_CONV_LABEL_RE.test(s)) return { kind: "ok", value: s };
+  const slash = s.indexOf("/");
+  if (slash === -1) return INVALID;
+  const sendTo = `${s.slice(0, slash).toUpperCase()}${s.slice(slash)}`;
+  return GOOGLE_ADS_SEND_TO_RE.test(sendTo) ? { kind: "ok", value: sendTo } : INVALID;
 }
 
-export interface GoogleTagConfig { tagId: string; convLabel: string | null }
+
 
 /**
  * Google のタグを動かすのに要る通信先(gtag.js の配信・GA4・Google広告のコンバージョン)。
@@ -117,6 +128,8 @@ const GOOGLE_CONNECT_SRC = [
   "https://pagead2.googlesyndication.com",
 ];
 const GOOGLE_IMG_SRC = [
+  // Google広告の成果の送信は、ビーコンが使えないと画像で送る(googleadservices の /pagead/conversion)。
+  "https://*.googleadservices.com",
   "https://www.google.com",
   "https://www.google.co.jp",
   "https://www.googletagmanager.com",
