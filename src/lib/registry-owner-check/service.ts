@@ -42,6 +42,7 @@ import {
 } from "@/lib/registry-owner-check/diff";
 import { assignRegistryRowsToOwners, replaceRegistryEntries } from "@/lib/registry-entries/write";
 import { registryOwnersToAutoAdd, uploaderMayAutoAdd } from "@/lib/registry-owner-check/auto-add";
+import { pickAutoRemoveCandidates } from "@/lib/registry-owner-check/auto-remove-pick";
 
 type Tx = ReplaceTx;
 
@@ -712,6 +713,12 @@ export const REGISTRY_OWNER_AUTO_REMOVE_AUDIT_LABEL = "謄本にいない人を�
 /** 1回の「比べる」(夜の自動・画面のボタン)のついでに試す、前に比べ終えた物件の上限。 */
 export const AUTO_REMOVE_PENDING_PER_RUN = 10;
 
+/**
+ * 判断待ちから候補を読む上限(当たらない行を除く前の行数)。判断待ちの「違う」は今150件ほどで、
+ * 当たらない行で埋まって先へ進めなくならない大きさにする(@codex #734 P2)。
+ */
+export const AUTO_REMOVE_SCAN_MAX = 5000;
+
 /** 自動で外すのを試し終えた(外さないと決まった)印。比べたあとに謄本・所有者が変わっていたら付けない。 */
 async function markAutoRemoveDone(propertyId: string, attachmentId: string): Promise<void> {
   await prisma.$executeRaw`
@@ -810,17 +817,13 @@ export async function autoRemovePendingCandidates(
     WHERE c.result = 'mismatch' AND c.decision IS NULL AND c.stale = false AND p.is_archived = false
       AND c.diff_kind LIKE '%count:%' AND c.diff_kind NOT LIKE ${`%${AUTO_REMOVE_DONE_TOKEN}%`}
     ORDER BY c.checked_at ASC
-    LIMIT ${Math.max(1, limit) * 5}
+    LIMIT ${AUTO_REMOVE_SCAN_MAX}
   `;
   const out = { properties: 0, people: 0, failed: 0 };
-  let tried = 0;
-  for (const r of rows) {
-    if (tried >= limit) break;
+  for (const propertyId of pickAutoRemoveCandidates(rows, limit)) {
     if (deadline !== undefined && Date.now() >= deadline) break;
-    if (!isSystemExtraOnly(r.diff_kind)) continue;
-    tried += 1;
     try {
-      const n = await autoRemoveSystemOnlyOwners(r.property_id);
+      const n = await autoRemoveSystemOnlyOwners(propertyId);
       if (n > 0) {
         out.properties += 1;
         out.people += n;

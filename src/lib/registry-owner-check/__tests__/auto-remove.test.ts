@@ -7,6 +7,7 @@ import {
   ownerDiffLabelFromStored,
 } from "../diff";
 import { planOwnerReplacement } from "../compare";
+import { pickAutoRemoveCandidates } from "../auto-remove-pick";
 
 describe("isSystemExtraOnly(システムにだけ余分な人がいるだけの違い・2026-11-15 発注者「外してよい」)", () => {
   it("人数が違う(システムが多い)だけなら当たる(処理済みの印は見ない)", () => {
@@ -60,5 +61,22 @@ describe("配線", () => {
   });
   it("外す処理は「謄本の名義に直す」と同じ関数で、記録は「自動」・固定の名前で残す", () => {
     expect(svc).toMatch(/replaceRegistryOwnersOnProperty\(\{[\s\S]{0,600}auditLabel: REGISTRY_OWNER_AUTO_REMOVE_AUDIT_LABEL[\s\S]{0,80}changeSource: "auto"/);
+  });
+});
+
+describe("判断待ちから試す物件の選び方(@codex #734 P2)", () => {
+  it("当たらない行を先に除いてから上限で切る(古い当たらない行が先頭に居座っても先へ進む)", () => {
+    const rows = [
+      ...Array.from({ length: 60 }, (_, i) => ({ property_id: `bad${i}`, diff_kind: i % 2 ? "count:2:1" : "kanji,count:1:2" })),
+      { property_id: "ok1", diff_kind: "count:1:2,autoadd" },
+      { property_id: "ok2", diff_kind: "count:1:3" },
+      { property_id: "ok3", diff_kind: "count:2:3" },
+    ];
+    expect(pickAutoRemoveCandidates(rows, 2)).toEqual(["ok1", "ok2"]);
+  });
+  it("SQL の上限は試す数に結びつけない(当たらない行で埋まらない大きさ)", () => {
+    const svc = readFileSync(join(process.cwd(), "src/lib/registry-owner-check/service.ts"), "utf8");
+    expect(svc).not.toMatch(/LIMIT \$\{Math\.max\(1, limit\) \* 5\}/);
+    expect(svc).toMatch(/LIMIT \$\{AUTO_REMOVE_SCAN_MAX\}/);
   });
 });
