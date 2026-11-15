@@ -37,9 +37,12 @@ const PROXY_BELONGINGS = ["委任状", "実印"];
 /**
  * お持ちいただくものの初期値: 書類確認書(契約時)の「持参するもの」(この取引に当てはまる項目・1行に1つ)。
  * 宛先の当事者が法人、または個人で取引に代理人がいれば、委任状と実印も足す(すでにあれば重ねない)。
+ * 売主様あてには手付金を入れない(売主は手付金を持参しない・2026-11-15)。項目の名前は設定で変えられるので、
+ * 名前ではなく「手付金の金額を出す項目」の印(amount)で見分ける。
  */
 export function defaultContractBelongings(c: BusinessDocContext, addressee: "seller" | "buyer" = defaultAddressee(c)): string | null {
-  const labels = checklistItemsOf("contract", c).filter((i) => i.group === "bring").map((i) => i.label);
+  const labels = checklistItemsOf("contract", c)
+    .filter((i) => i.group === "bring" && !(addressee === "seller" && i.amount === "deposit")).map((i) => i.label);
   const hasAgent = c.deal.parties.some((p) => p.role === "agent");
   if (partiesOf(c.deal, addressee).some((p) => p.partyType === "corporation" || hasAgent)) {
     for (const x of PROXY_BELONGINGS) if (!labels.includes(x)) labels.push(x);

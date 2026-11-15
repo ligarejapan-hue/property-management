@@ -8,6 +8,7 @@ import { Field, inputCls } from "./form-parts";
 import { DocFormFields } from "./doc-form-fields";
 import { clearFormValues, fitFormValues } from "@/lib/deals/documents/forms/values";
 import type { FormValues } from "@/lib/deals/documents/forms/types";
+import { appendLines, missingLines } from "@/lib/deals/documents/missing-lines";
 import { NEEDS_SELLER_PARTY, NEEDS_SELLER_PARTY_MESSAGE } from "@/lib/deals/documents/business/receipt-issuer";
 import { useDraftAutosave, useDraftExists, useRestoredDraft } from "@/hooks/use-draft";
 import { DraftRestoredNotice, DraftTooLargeNotice } from "@/components/drafts/draft-notices";
@@ -67,6 +68,26 @@ export function BlockingNotice({ blocking }: { blocking: string[] }) {
       {blocking.includes(NEEDS_SELLER_PARTY) && <p>{NEEDS_SELLER_PARTY_MESSAGE}</p>}
     </div>
   );
+}
+
+/**
+ * 契約のご案内: 今の当事者で作った初めの値にあって、お持ちいただくものの欄に無い行の知らせ(2026-11-15 発注者)。
+ * 小窓は前回の入力から始まるので、あとから当事者が変わって増えた行(委任状・実印 など)に気づけるようにする。
+ * 勝手には足さない(「足す」を押したときだけ欄の末尾に入れる)。
+ */
+export function BelongingsAddNotice({ lines, onAdd }: { lines: string[]; onAdd: () => void }) {
+  if (!lines.length) return null;
+  return (
+    <div className="flex flex-wrap items-center gap-2 rounded-md border border-amber-200 bg-amber-50 px-3 py-2 text-sm text-amber-900 dark:border-amber-900 dark:bg-amber-950 dark:text-amber-200" role="status">
+      <p>今の当事者では{lines.map((l) => `「${l}」`).join("")}も初めの値に入ります。</p>
+      <Button variant="secondary" size="sm" onClick={onAdd}>足す</Button>
+    </div>
+  );
+}
+
+/** 空欄が無いときの一言。準備チェックリストは種類を選ぶまで発行できないので、「そろっています」とは言わない(2026-11-15)。 */
+export function ReadyNotice({ needsKind }: { needsKind: boolean }) {
+  return <p className="text-sm text-gray-600 dark:text-gray-400">{needsKind ? "種類を選んでください。" : "必要な項目はそろっています。"}</p>;
 }
 
 /**
@@ -222,6 +243,11 @@ function IssueDialog({ dealId, doc, version, onCancel, onDone }: {
   const setCost = (i: number, patch: Partial<CostRow>) => set("costs", costRows.map((r, j) => (j === i ? { ...r, ...patch } : r)));
   const setKey = (i: number, patch: Partial<KeyRow>) => set("keys", keyRows.map((k, j) => (j === i ? { ...k, ...patch } : k)));
   const choices = doc.choices ?? {};
+  // 契約のご案内: 選んでいる宛先の、今の当事者での初めの値にあって欄に無い行(前回の入力のあとで当事者が変わった分)。
+  // 宛先ごとに見るので、売主様あての値を買主様あてに持ち込まない。出したことの無い宛先は欄が初めの値なので空(2026-11-15 発注者)。
+  const addable = doc.docType === "contract_guide"
+    ? missingLines(str(values.belongings), str(doc.freshDefaults?.[str(values.addressee)]?.belongings))
+    : [];
   const pay = payOf(values.pay);
   // 契約のご案内は、選んでいる宛先の当事者が空欄かどうかで出す前の確認を作り直す(サーバーは初めの値の宛先で見る)。
   // 準備チェックリストの種類はこの小窓で選ぶので、選んだら「物件の種別」を外す。
@@ -297,7 +323,7 @@ function IssueDialog({ dealId, doc, version, onCancel, onDone }: {
             <ul className="mt-1 list-disc pl-5">{missing.map((m) => <li key={m}>{m}</li>)}</ul>
           </div>
         ) : (
-          <p className="text-sm text-gray-600 dark:text-gray-400">必要な項目はそろっています。</p>
+          <ReadyNotice needsKind={doc.docType === "prep_checklist" && !str(values.kind)} />
         )}
         {receipt && doc.issuers && (
           <>
@@ -358,6 +384,7 @@ function IssueDialog({ dealId, doc, version, onCancel, onDone }: {
             <Field label="お持ちいただくもの(1行に1つ)">
               <textarea value={str(values.belongings)} onChange={(e) => set("belongings", e.target.value || null)} maxLength={CHECKLIST_TEXT_MAX} rows={4} aria-label="お持ちいただくもの" className={inputCls} />
             </Field>
+            <BelongingsAddNotice lines={addable} onAdd={() => set("belongings", appendLines(str(values.belongings), addable))} />
             <Field label="ご連絡事項(空なら載せない)">
               <textarea value={str(values.notes)} onChange={(e) => set("notes", e.target.value || null)} maxLength={500} rows={3} aria-label="ご連絡事項" className={inputCls} />
             </Field>

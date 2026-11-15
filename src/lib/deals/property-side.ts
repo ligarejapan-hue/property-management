@@ -1,3 +1,4 @@
+import { caseDateLabels } from "@/lib/case-dates";
 import { joinedParcelNumbers } from "@/lib/property-parcels";
 import {
   CASE_STATUS_LABELS, INTRODUCTION_ROUTE_LABELS, OCCUPANCY_STATUS_LABELS, PROPERTY_TYPE_LABELS,
@@ -85,10 +86,12 @@ function built(year: number | null | undefined, month: number | null | undefined
 
 /** 表示する行。値が無い行は出さない(案件ステータスだけは必ず出す)。 */
 export function propertySideRows(p: PropertySideSource): { label: string; value: string }[] {
+  // 見出しは物件の画面と同じ決まりで進める(契約完了なら「契約日」、決済完了なら「決済日」・2026-11-15)。
+  const dateLabels = caseDateLabels(p.caseStatus ?? "");
   const rows: [string, string | null][] = [
     ["案件ステータス", label(CASE_STATUS_LABELS, p.caseStatus)],
-    ["契約予定日", p.contractPlannedOn ?? null],
-    ["決済予定日", p.settlementPlannedOn ?? null],
+    [dateLabels.contract, p.contractPlannedOn ?? null],
+    [dateLabels.settlement, p.settlementPlannedOn ?? null],
     ["種別", label(PROPERTY_TYPE_LABELS, p.propertyType)],
     ["物件名", p.buildingName || null],
     ["号室", p.roomNo || null],

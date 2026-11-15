@@ -2,7 +2,7 @@ import { describe, expect, it } from "vitest";
 import { readFileSync } from "node:fs";
 import { join } from "node:path";
 import { renderToStaticMarkup } from "react-dom/server";
-import { BlockingNotice, PartyReceiptNotes, restoredValuesOf } from "../business-docs-section";
+import { BelongingsAddNotice, BlockingNotice, PartyReceiptNotes, ReadyNotice, restoredValuesOf } from "../business-docs-section";
 import { NEEDS_SELLER_PARTY } from "@/lib/deals/documents/business/receipt-issuer";
 
 describe("領収書の小窓の知らせ(2026-11-05 発注者)", () => {
@@ -36,6 +36,36 @@ describe("発行できない理由の表示(2026-11-06 発注者)", () => {
   });
   it("何も無ければ出さない", () => {
     expect(renderToStaticMarkup(<BlockingNotice blocking={[]} />)).toBe("");
+  });
+});
+
+describe("契約のご案内: 今の当事者での初めの値に足りない行の知らせ(2026-11-15 発注者)", () => {
+  it("足りない行を並べて「足す」ボタンを出す(止めない・role=status)", () => {
+    const html = renderToStaticMarkup(<BelongingsAddNotice lines={["委任状", "実印"]} onAdd={() => {}} />);
+    expect(html).toContain("今の当事者では「委任状」「実印」も初めの値に入ります。");
+    expect(html).toContain("足す</button>");
+    expect(html).toContain('type="button"');
+    expect(html).toContain('role="status"');
+  });
+  it("足りない行が無ければ何も出さない", () => {
+    expect(renderToStaticMarkup(<BelongingsAddNotice lines={[]} onAdd={() => {}} />)).toBe("");
+  });
+});
+
+describe("出す前の確認の一言(2026-11-15)", () => {
+  it("準備チェックリストで種類を選んでいない間は「種類を選んでください。」(そろっています とは言わない)", () => {
+    const html = renderToStaticMarkup(<ReadyNotice needsKind />);
+    expect(html).toContain("種類を選んでください。");
+    expect(html).not.toContain("必要な項目はそろっています。");
+  });
+  it("それ以外は今までどおり「必要な項目はそろっています。」", () => {
+    const html = renderToStaticMarkup(<ReadyNotice needsKind={false} />);
+    expect(html).toContain("必要な項目はそろっています。");
+    expect(html).not.toContain("種類を選んでください。");
+  });
+  it("種類を選ぶまで押せない条件と同じ条件で切り替える", () => {
+    const src = readFileSync(join(process.cwd(), "src/components/deals/business-docs-section.tsx"), "utf8");
+    expect(src).toContain('<ReadyNotice needsKind={doc.docType === "prep_checklist" && !str(values.kind)} />');
   });
 });
 

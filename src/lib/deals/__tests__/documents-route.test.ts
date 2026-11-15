@@ -633,6 +633,29 @@ describe("前回の入力を初めの値にする(第2段階 §3.2)", () => {
     expect(String(cg.defaults.belongings)).not.toContain("委任状");
     expect(String(cg.starts.seller.belongings)).not.toContain("委任状");
     expect(String(cg.starts.buyer.belongings).split("\n").slice(-2)).toEqual(["委任状", "実印"]);
+    // 手付金は買主様あてだけ(売主は持参しない・2026-11-15)
+    expect(String(cg.defaults.belongings).split("\n")).not.toContain("手付金");
+    expect(String(cg.starts.seller.belongings).split("\n")).not.toContain("手付金");
+    expect(String(cg.starts.buyer.belongings).split("\n")).toContain("手付金");
+  });
+  it("契約のご案内: 前回の入力を初めの値にしたまま、今の当事者で作った初めの値も宛先ごとに渡す(足りない行の知らせ用・2026-11-15)", async () => {
+    const BUYER_CORP = { ...SELLER, id: "33333333-3333-4333-8333-000000000012", role: "buyer", partyType: "corporation", name: "架空商事" };
+    pm.deal.findUnique.mockResolvedValue({ ...row, parties: [SELLER, BUYER_CORP] });
+    pm.dealDocument.findMany.mockResolvedValue([
+      { docType: "contract_guide", inputSnapshot: { options: { addressee: "buyer", belongings: "買主の持ち物", notes: null } } },
+    ]);
+    const body = await (await AVAILABLE(new Request("http://x"), ctx)).json();
+    type Fresh = { starts: Record<string, Record<string, unknown>>; freshDefaults: Record<string, Record<string, unknown>> | null };
+    const cg = docOf(body, "contract_guide") as unknown as Fresh;
+    // 前回の入力が先(今までどおり)
+    expect(cg.starts.buyer.belongings).toBe("買主の持ち物");
+    // 今の当事者での初めの値(前回の入力は混ざらない)
+    expect(String(cg.freshDefaults!.buyer.belongings).split("\n").slice(-2)).toEqual(["委任状", "実印"]);
+    expect(cg.freshDefaults!.seller.belongings).toBe(cg.starts.seller.belongings);
+    expect(Object.keys(cg.freshDefaults!).sort()).toEqual(["buyer", "seller"]);
+    // 宛先ごとの初めの値を持たない書類は null
+    expect((docOf(body, "mediation") as unknown as Fresh).freshDefaults).toBeNull();
+    expect((docOf(body, "seller_survey") as unknown as Fresh).freshDefaults).toBeNull();
   });
   it("前に発行した入力を初めの値にする・覚える書類だけを新しい版から読む・形の合わない写しは捨てる", async () => {
     pm.deal.findUnique.mockResolvedValue({ ...row, parties: [SELLER] });
