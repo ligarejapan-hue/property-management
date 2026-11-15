@@ -781,6 +781,19 @@ export async function autoRemoveSystemOnlyOwners(propertyId: string): Promise<nu
       expectedRemoveOwnerIds: plan.removeOwnerIds,
       auditLabel: REGISTRY_OWNER_AUTO_REMOVE_AUDIT_LABEL,
       changeSource: "auto",
+      // 外す前に、比べた結果の行をロックして「比べたあと誰も所有者・謄本を変えていない」かを見る。
+      // 謄本を読んでいる間に人が所有者をつないだら(トリガーが stale を立てる)外さない=比べ直しに回す
+      beforeChange: async (tx) => {
+        const prev = await lockCheckRow(tx, propertyId);
+        if (
+          prev.stale ||
+          prev.result !== "mismatch" ||
+          prev.decision !== null ||
+          prev.attachmentId !== registry.attachmentId
+        ) {
+          throw checkChangedError();
+        }
+      },
       beforeCommit: async (tx, registryNames, registryRows) => {
         // ロックの中で、比べた結果が今も「未判断の違う・同じ謄本」かを見直してから比べ直す。
         // ⚠stale は見ない: この同じトランザクションで外したつながりに、トリガーが比べ直しの印を立てる

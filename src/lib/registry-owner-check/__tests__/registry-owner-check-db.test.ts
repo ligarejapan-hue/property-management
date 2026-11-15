@@ -47,6 +47,9 @@ const NO_PERMS = new Set<string>();
 
 // 保存場所: fileUrl をそのままキーにして、登録したテキストを中身として返す
 const TEXTS = new Map<string, string>();
+// 読むときに一度だけ走らせる処理(読んでいる最中に別の人が所有者をつなぐ、の作り物・@codex #734 R2)
+const READ_HOOKS = new Map<string, () => Promise<void>>();
+(globalThis as { __READ_HOOKS__?: Map<string, () => Promise<void>> }).__READ_HOOKS__ = READ_HOOKS;
 vi.mock("@/lib/storage", async (importOriginal) => {
   const actual = await importOriginal<typeof import("@/lib/storage")>();
   return {
@@ -56,6 +59,12 @@ vi.mock("@/lib/storage", async (importOriginal) => {
       read: async (key: string) => {
         // 思わぬ失敗(保存場所の故障など)の作り物
         if (key.includes("/broken/")) throw new Error("storage down");
+        const hooks = (globalThis as { __READ_HOOKS__?: Map<string, () => Promise<void>> }).__READ_HOOKS__;
+        const hook = hooks?.get(key);
+        if (hook) {
+          hooks!.delete(key);
+          await hook();
+        }
         return TEXTS.has(key) ? { body: Buffer.from(key) } : null;
       },
     }),
@@ -1045,6 +1054,26 @@ async function main() {
     check(
       "17f このままでよいの物件は外さない",
       (await autoRemoveSystemOnlyOwners(pf)) === 0 && (await linkedNames(pf)).length === 2,
+    );
+
+    // 17i 謄本を読んでいる最中に別の人が所有者をつないだ → 外さない(比べ直し待ちにして後で比べる)
+    const pi = await property(u);
+    const keepI = await owner("中村六郎");
+    const extraI = await owner("前の持ち主");
+    await link(pi, keepI);
+    await link(pi, extraI);
+    const attI = await registry(pi, u, [{ name: "中村六郎" }]);
+    await checkPropertyRegistryOwners(pi);
+    const urlI = (await prisma.attachment.findUniqueOrThrow({ where: { id: attI }, select: { fileUrl: true } })).fileUrl;
+    const lateI = await owner("今つないだ人");
+    READ_HOOKS.set(urlI, async () => {
+      await link(pi, lateI);
+    });
+    const removedI = await autoRemoveSystemOnlyOwners(pi);
+    check(
+      "17i 読んでいる最中に所有者がつながれたら外さない(今つないだ人も前の持ち主も残る・比べ直し待ち)",
+      removedI === 0 && (await linkedNames(pi)).length === 3 && (await row(pi))?.stale === true,
+      { removedI, names: await linkedNames(pi), row: await row(pi) },
     );
 
     // 17g 自動で外したあと、人が同じ人をつなぎ直した → 同じ謄本のあいだはもう外さない
