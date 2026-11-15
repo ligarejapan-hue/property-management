@@ -50,11 +50,14 @@ export async function GET(_request: Request, ctx: Ctx) {
       const values = d.remember ? startOf(def.values) : def.values;
       // 小窓で依頼の内容・宛先を切り替えたときの初めの値(その値で出した前回の入力・無ければ初めの値。発注者決定 2026-10-29)
       const starts = d.remember && by ? Object.fromEntries(by.values.map((v) => [v, startOf({ ...def.values, ...d.defaultsFor?.(bctx, v), [by.key]: v })])) : null;
+      // 前回の入力を混ぜない、今の当事者で作った初めの値(宛先ごと)。前回の入力のあとで当事者が変わって増えた行
+      // (委任状・実印 など)を小窓で知らせるために渡す。小窓の初めの値は前回の入力のまま(2026-11-15 発注者)。
+      const freshDefaults = d.remember && by && d.defaultsFor ? Object.fromEntries(by.values.map((v) => [v, d.defaultsFor?.(bctx, v) ?? {}])) : null;
       return {
         docType: d.key, label: d.label, group: d.group, missing: d.missing(bctx, values), blocking: d.blocking(bctx),
         defaults: values, issuers: def.issuers ?? null, choices: def.choices ?? null,
         form: d.form ?? null,
-        rememberBy: d.rememberBy?.key ?? null, starts,
+        rememberBy: d.rememberBy?.key ?? null, starts, freshDefaults,
       };
     });
     return NextResponse.json({ documents, version: deal.version }, { headers: { "Cache-Control": "no-store" } });
