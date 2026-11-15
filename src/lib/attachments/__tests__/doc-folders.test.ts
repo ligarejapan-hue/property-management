@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest";
-import { displayTitle, groupAttachmentsByStage, needsKindCheck, visibleFolders } from "../doc-folders";
+import { displayTitle, groupAttachmentsByStage, needsKindCheck, visibleFolders, showsEmptyAttachmentState } from "../doc-folders";
 
 const a = (id: string, over: Record<string, unknown> = {}) => ({ id, fileName: `${id}.pdf`, mimeType: "application/pdf", ...over });
 
@@ -62,5 +62,35 @@ describe("needsKindCheck", () => {
   it("種類なしの文書は確認・画像は出さない", () => {
     expect(needsKindCheck({ mimeType: "application/pdf", docKind: null, docConfidence: null })).toBe(true);
     expect(needsKindCheck({ mimeType: "image/jpeg", docKind: null, docConfidence: null })).toBe(false);
+  });
+});
+
+describe("showsEmptyAttachmentState(添付が0件のときの出し方・2026-11-15)", () => {
+  it("★賃貸中の物件は、0件でもフォルダを並べる(⑤賃貸関係が空でも出る)", () => {
+    expect(showsEmptyAttachmentState(0, { occupancyStatus: "rented", scoped: false })).toBe(false);
+    // 並べたフォルダに ⑤賃貸関係 が入っていること(決まりは visibleFolders)。
+    expect(visibleFolders(groupAttachmentsByStage([]), { occupancyStatus: "rented" }).map((f) => f.code)).toContain("rental");
+  });
+  it("賃貸中でなければ、0件は今までどおり「まだありません」", () => {
+    for (const occupancyStatus of ["vacant", "occupied", "unknown", null, undefined]) {
+      expect(showsEmptyAttachmentState(0, { occupancyStatus, scoped: false })).toBe(true);
+    }
+  });
+  it("★取引で絞り込んでいるときは、賃貸中でも今までどおり「この取引の添付はありません」", () => {
+    expect(showsEmptyAttachmentState(0, { occupancyStatus: "rented", scoped: true })).toBe(true);
+  });
+  it("1件でもあれば、いつでもフォルダを並べる", () => {
+    expect(showsEmptyAttachmentState(1, { occupancyStatus: "vacant", scoped: true })).toBe(false);
+  });
+});
+
+describe("添付タブが、0件のときの判断を1か所(showsEmptyAttachmentState)に任せている", () => {
+  it("★件数だけで空の表示に落とさない(賃貸中の ⑤賃貸関係 が消える)", async () => {
+    const { readFileSync } = await import("node:fs");
+    const { join } = await import("node:path");
+    const src = readFileSync(join(process.cwd(), "src/components/properties/attachment-tab.tsx"), "utf8").replace(/\r\n/g, "\n");
+    expect(src).toContain("showsEmptyAttachmentState(generalAttachments.length, {");
+    expect(src).toContain('scoped: scopeEnabled && scopeFilter !== "all",');
+    expect(src).not.toContain("{generalAttachments.length === 0 ? (");
   });
 });

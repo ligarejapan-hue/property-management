@@ -177,3 +177,37 @@ describe("HOME4U 表の形 — 細かい場合", () => {
     expect(d.owner).toBeNull();
   });
 });
+
+describe("HOME4U の表の形: 住所の部品が見当たらないときの注意(2026-11-15 実機確認)", () => {
+  const partWarning = (text: string) =>
+    buildPasteDraft(text).warnings.find((w) => w.code === "address_part_missing");
+
+  it("★実物の見出し(物件町字)なら町名が住所に入り、注意は出ない", () => {
+    const draft = buildPasteDraft(lines());
+    expect(draft.property.address.value).toBe("東京都世田谷区三軒茶屋1-2-3");
+    expect(draft.warnings.some((w) => w.code === "address_part_missing")).toBe(false);
+  });
+
+  it("★町名の見出しが実物と違う(物件町名)と、町名は住所に入らない。そのことを注意で知らせる", () => {
+    const text = lines().replace("物件町字\t", "物件町名\t");
+    const draft = buildPasteDraft(text);
+    expect(draft.property.address.value).toBe("東京都世田谷区1-2-3");
+    const w = partWarning(text);
+    expect(w?.message).toContain("町名");
+    expect(w?.field).toBe("address");
+  });
+
+  it("★見出しが違った行は黙って捨てない(備考の側に残る)", () => {
+    const draft = buildPasteDraft(lines().replace("物件町字\t", "物件町名\t"));
+    const shown = [draft.noteFromUnmapped, ...draft.withheldFromNote.map((w) => `${w.label}:${w.value}`)].join("\n");
+    expect(shown).toContain("三軒茶屋");
+  });
+
+  it("町名の値が空のときも知らせる", () => {
+    expect(partWarning(lines({ 物件町字: "" }))?.message).toContain("町名");
+  });
+
+  it("住所が分かれていない書式(ふつうのメール)では出ない", () => {
+    expect(partWarning("■物件所在地：東京都A区B1-2-3\n■お名前：調査　太郎")).toBeUndefined();
+  });
+});

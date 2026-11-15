@@ -50,6 +50,21 @@ export function visibleFolders<T extends FolderItem>(
   );
 }
 
+/**
+ * 添付が0件のとき、フォルダを並べずに「添付ファイルはまだありません」だけを出すか。
+ *
+ * ⚠賃貸中の物件は、0件でもフォルダを並べる(2026-11-15 実機確認)。⑤賃貸関係は「賃貸中なら空でも出す」決まり
+ *   (visibleFolders)なのに、0件のときはその決まりを呼ぶ前に空の表示で終わっていて、出ていなかった。
+ * ⚠取引で絞り込んでいるとき(scoped)は今までどおり空の表示(「この取引の添付はありません」)。
+ */
+export function showsEmptyAttachmentState(
+  count: number,
+  opts: { occupancyStatus: string | null | undefined; scoped: boolean },
+): boolean {
+  if (count > 0) return false;
+  return opts.scoped || opts.occupancyStatus !== "rented";
+}
+
 /** 画面に出す名前: そろえた名前があればそれ、無ければ元の名前。 */
 export function displayTitle(it: Pick<FolderItem, "fileName" | "docTitle">): string {
   return it.docTitle && it.docTitle !== "" ? it.docTitle : it.fileName;
