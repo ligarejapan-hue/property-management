@@ -340,7 +340,7 @@ export function buildPasteDraft(text: string, options?: YearBoundOptions): Paste
     Object.keys(parseOptions).length === 0 ? firstPass : parseLabeledLines(text, parseOptions);
   const { unlabeled } = parsed;
   // 何行かに分かれた住所・氏名をつなぐ(HOME4U 表の形)。分かれていなければ何もしない。
-  const { labeled, keys: mergedKeys } = mergeSplitFields(parsed.labeled);
+  const { labeled, keys: mergedKeys, missingAddressParts } = mergeSplitFields(parsed.labeled);
   const warnings: DraftWarning[] = [];
 
   // 見出しごとの最初の値だけを採る（同じ見出しが2回出たら先勝ち）。
@@ -446,6 +446,15 @@ export function buildPasteDraft(text: string, options?: YearBoundOptions): Paste
     warnings.push({
       code: "address_missing",
       message: "住所を読み取れませんでした。手で入力してください。",
+    });
+  }
+  // 何行かに分かれた住所(HOME4U の表の形)で、部品が見当たらなかった。ある部品だけで住所ができてしまうので知らせる。
+  // 見出しの名前が違う行は、住所には使われず備考の側に回っている(黙って捨ててはいない)。
+  if (address !== null && missingAddressParts.length > 0) {
+    warnings.push({
+      code: "address_part_missing",
+      field: "address",
+      message: `住所の一部（${missingAddressParts.join("・")}）が見当たりません。貼り付けた文章と見比べて、住所を確かめてください。`,
     });
   }
   if (lotNumber === null && !noLabeledLines) {
