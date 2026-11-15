@@ -11,6 +11,7 @@ import { hasPermission } from "@/lib/permissions";
 import { canAccessPropertyRecord } from "@/lib/property-access";
 import { redactPropertyChangeValue } from "@/lib/inquirer-name";
 import { inquirerNameLevelFor } from "@/lib/inquirer-name-server";
+import { historyNameIds } from "@/lib/property-change-labels";
 
 // ---------- GET /api/properties/:id/change-logs ----------
 
@@ -148,8 +149,25 @@ export async function GET(
         : log,
     );
 
+    // 「棟」「担当者」の値は ID で残っているので、名前を一緒に返す(画面に ID がそのまま出ていた・2026-11-15)。
+    // ⚠名前は履歴に書かず、見るときに引く(棟は後から名前が変わる・統合される)。見つからない ID は表に入らない
+    //   =画面が「(削除・統合された棟)」と出す。返すのは、このページの行に出てくる ID の id と名前だけ。
+    const nameIds = historyNameIds(visibleLogs);
+    const [buildingRows, userRows] = await Promise.all([
+      nameIds.buildingIds.length > 0
+        ? prisma.building.findMany({ where: { id: { in: nameIds.buildingIds } }, select: { id: true, name: true } })
+        : [],
+      nameIds.userIds.length > 0
+        ? prisma.user.findMany({ where: { id: { in: nameIds.userIds } }, select: { id: true, name: true } })
+        : [],
+    ]);
+    const buildingNames = Object.fromEntries(buildingRows.map((b) => [b.id, b.name]));
+    const userNames = Object.fromEntries(userRows.map((u) => [u.id, u.name]));
+
     return apiResponse({
       data: visibleLogs,
+      buildingNames,
+      userNames,
       pagination: {
         page,
         limit,

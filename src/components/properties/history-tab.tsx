@@ -4,7 +4,10 @@ import { useState, useEffect, useCallback } from "react";
 import { Loader2, History, ChevronLeft, ChevronRight, Search } from "lucide-react";
 import { fetchChangeLogs as apiFetchChangeLogs, fetchSaleDmScenarioOptionsAll, type SaleDmScenarioOptionAll } from "@/lib/api-client";
 import { formatJaDateTime } from "@/lib/format-datetime";
-import { CHANGE_FIELD_LABELS, propertyHistoryValue } from "@/lib/property-change-labels";
+import {
+  BUILDING_CHANGE_FIELD_LABELS, CHANGE_FIELD_LABELS, buildingHistoryLabel, changeFieldLabel, historyBooleanLabel, propertyHistoryValue,
+  userHistoryLabel,
+} from "@/lib/property-change-labels";
 import { dmScenarioHistoryLabel } from "./dm-scenario-field-model";
 import { caseStatusHistoryLabel, historyChangerLabel } from "./history-tab-model";
 import { Button } from "@/components/ui/button";
@@ -28,7 +31,9 @@ interface Pagination {
   totalPages: number;
 }
 
-const FIELD_LABELS = CHANGE_FIELD_LABELS;
+// 絞り込みの選択肢は項目名だけで選ぶ(どの表の行かは持たない)。このタブに出るのは物件・所有者とのつながり・棟の行で、
+// 「name」を書くのは棟だけなので、棟の言葉(マンション名)を優先する(2026-11-15)。
+const FIELD_LABELS: Record<string, string> = { ...CHANGE_FIELD_LABELS, ...BUILDING_CHANGE_FIELD_LABELS };
 
 const SOURCE_LABELS: Record<string, string> = {
   manual: "手動",
@@ -61,6 +66,9 @@ export default function HistoryTab({
   const [dateTo, setDateTo] = useState("");
   const [fieldNames, setFieldNames] = useState<string[]>([]);
   const [sources, setSources] = useState<string[]>([]);
+  // 「棟」「担当者」の値(ID)の名前。履歴と一緒に届く(見るときに引いた今の名前・2026-11-15)。
+  const [buildingNames, setBuildingNames] = useState<ReadonlyMap<string, string>>(new Map());
+  const [userNames, setUserNames] = useState<ReadonlyMap<string, string>>(new Map());
 
   const fetchLogs = useCallback(async () => {
     setLoading(true);
@@ -72,6 +80,9 @@ export default function HistoryTab({
         from: dateFrom || undefined,
         to: dateTo || undefined,
       });
+      // 名前の表は行と同じ応答のものに入れ替える(前のページの表を残さない)。
+      setBuildingNames(new Map(Object.entries(json.buildingNames ?? {})));
+      setUserNames(new Map(Object.entries(json.userNames ?? {})));
       setLogs(json.data as ChangeLogData[]);
       setPagination(json.pagination as Pagination);
       if (json.fieldNames) setFieldNames(json.fieldNames);
@@ -102,9 +113,13 @@ export default function HistoryTab({
     return () => { alive = false; };
   }, [hasDmScenarioRow, scenarioAll]);
 
-  const displayValue = (fieldName: string, value: string | null): string | null => {
+  const displayValue = (targetTable: string, fieldName: string, value: string | null): string | null => {
     if (fieldName === "caseStatus") return caseStatusHistoryLabel(value);
-    const shown = propertyHistoryValue(fieldName, value);
+    // 物件の「棟」「担当者」は ID ではなく名前で出す(見つからない棟は「(削除・統合された棟)」・2026-11-15)。
+    if (targetTable === "properties" && fieldName === "buildingId") return buildingHistoryLabel(value, buildingNames);
+    if (targetTable === "properties" && fieldName === "assignedTo") return userHistoryLabel(value, userNames);
+    // 主所有者などの true / false は「はい」「いいえ」(経緯タブと同じ)。
+    const shown = propertyHistoryValue(fieldName, value) ?? historyBooleanLabel(fieldName, value);
     if (shown !== null) return shown;
     if (fieldName !== "dmScenarioId") return value;
     if (scenarioAll === "failed") return value ? "(名前を読み込めませんでした)" : "自動";
@@ -236,7 +251,7 @@ export default function HistoryTab({
               </thead>
               <tbody className="divide-y divide-gray-100 dark:divide-gray-800">
                 {logs.map((raw) => {
-                  const log = { ...raw, oldValue: displayValue(raw.fieldName, raw.oldValue), newValue: displayValue(raw.fieldName, raw.newValue) };
+                  const log = { ...raw, oldValue: displayValue(raw.targetTable, raw.fieldName, raw.oldValue), newValue: displayValue(raw.targetTable, raw.fieldName, raw.newValue) };
                   return (
                   <tr key={log.id} className="hover:bg-gray-50 dark:hover:bg-gray-800">
                     <td className="whitespace-nowrap px-3 py-2 text-gray-500 text-xs dark:text-gray-400">
@@ -251,7 +266,7 @@ export default function HistoryTab({
                       </span>
                     </td>
                     <td className="whitespace-nowrap px-3 py-2">
-                      {FIELD_LABELS[log.fieldName] ?? log.fieldName}
+                      {changeFieldLabel(log.targetTable, log.fieldName)}
                     </td>
                     <td className="px-3 py-2 max-w-[200px] truncate">
                       {log.oldValue != null ? (
