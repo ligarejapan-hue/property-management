@@ -61,13 +61,13 @@ export function paymentRows(d: DealView, calc: DealCalc | null): PaymentRow[] {
     if (d.tradeSide === "seller" || d.tradeSide === "both") rows.push(fixed("brokerageSeller", "仲介手数料(売主)", seller.name, SELF, true, fee));
     if (d.tradeSide === "buyer" || d.tradeSide === "both") rows.push(fixed("brokerageBuyer", "仲介手数料(買主)", buyer.name, SELF, true, fee));
   }
-  const seen = new Set<string>();
-  for (const o of d.costs.others) {
-    if (seen.has(o.label)) continue;
-    seen.add(o.label);
+  // 同じ名前の行は1行にまとめて金額を足す(払い方は名前ごとに持つ・@codex #751 P2)。
+  const others = new Map<string, number>();
+  for (const o of d.costs.others) others.set(o.label, (others.get(o.label) ?? 0) + o.amount);
+  for (const [label, amount] of others) {
     rows.push({
-      key: otherKeyOf(o.label), label: o.label, from: seller.name, to: "支払先", toSelf: false, amount: o.amount, allowWithBalance: false,
-      entry: p.others?.[o.label] ?? EMPTY_PAYMENT_ENTRY,
+      key: otherKeyOf(label), label, from: seller.name, to: "支払先", toSelf: false, amount, allowWithBalance: false,
+      entry: p.others?.[label] ?? EMPTY_PAYMENT_ENTRY,
     });
   }
   return rows;
@@ -101,6 +101,8 @@ export function effectiveAccount(row: PaymentRow, rows: PaymentRow[], selfAccoun
   return row.toSelf && hasAccount(selfAccount) ? selfAccount : null;
 }
 
+type PayEntry = { method: "cash" | "transfer"; amount: number | null; other: null };
+const asPay = (m: PaymentEntry["method"]): PayEntry["method"] | null => (m === "cash" || m === "transfer" ? m : null);
 const yen = (n: number) => `${n.toLocaleString("ja-JP")}円`;
 const balanceRowOf = (d: DealView, calc: DealCalc) => {
   const rows = paymentRows(d, calc);
@@ -116,7 +118,13 @@ export function balancePayeeText(d: DealView, calc: DealCalc, selfAccount: BankA
   if (!text) return null;
   const pay = calc.settlement.paymentAtSettlement;
   const net = calc.settlement.net;
-  if (settlement.entry.method !== "with_balance" || net.amount <= 0 || pay === null) return text;
+  if (net.amount <= 0 || pay === null) return text;
+  // 売主から買主への精算金を別に払う: 振り込むのは差し引く前の額(「決済時のお支払額」は差し引いた額のまま・@codex #751 P2)。
+  if (net.direction === "sellerToBuyer" && asPay(settlement.entry.method)) {
+    return `${text}
+(精算金 ${yen(net.amount)}は売主から別にお支払いします。お振込みいただく額は ${yen(pay + net.amount)}です)`;
+  }
+  if (settlement.entry.method !== "with_balance") return text;
   return net.direction === "sellerToBuyer"
     ? `${text}\n(残代金から精算金を差し引いた ${yen(pay)}をお振込みください)`
     : `${text}\n(残代金と精算金を合わせて ${yen(pay)}をお振込みください)`;
@@ -130,12 +138,11 @@ export function sellerReceiveText(d: DealView, calc: DealCalc, selfAccount: Bank
   return formatBankAccount(effectiveAccount(balance, rows, selfAccount) ?? balance.entry.account);
 }
 
-type PayEntry = { method: "cash" | "transfer"; amount: number | null; other: null };
-const asPay = (m: PaymentEntry["method"]): PayEntry["method"] | null => (m === "cash" || m === "transfer" ? m : null);
 
 /**
  * 準備チェックリストの持参する金額の払い方の初期値(振込・現金だけ写す・未定は空)。
  * 残代金・精算金(payment)は残金の払い方。精算金だけ別の払い方(買主→売主)なら、2つに分けて金額を入れる。
+ * 売主→買主の精算金を別に払う取引は、持参の額(差し引いた額)と払い方が合わないので空(紙に手で書く・@codex #751 P2)。
  */
 export function checklistPayDefault(amount: "deposit" | "payment" | "registration" | "cancellation" | "survey", d: DealView, calc: DealCalc): PayEntry[] {
   const p = d.payments ?? {};
@@ -149,6 +156,7 @@ export function checklistPayDefault(amount: "deposit" | "payment" | "registratio
   const sm = p.settlement ? asPay(p.settlement.method) : null;
   const net = calc.settlement.net;
   const pay = calc.settlement.paymentAtSettlement;
+  if (sm && net.direction === "sellerToBuyer" && net.amount > 0) return [];
   if (sm && sm !== bm && net.direction === "buyerToSeller" && net.amount > 0 && pay !== null) {
     return [{ method: bm, amount: pay - net.amount, other: null }, { method: sm, amount: net.amount, other: null }];
   }

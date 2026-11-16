@@ -137,6 +137,20 @@ describe("書類に入れる文", () => {
     expect(checklistPayDefault("cancellation", d, c)).toEqual([]);
     expect(checklistPayDefault("survey", d, c)).toEqual([]);
   });
+  it("売主→買主の精算金を別に払う: 振込先に差し引く前の額を添え、チェックリストの払い方は空(@codex #751)", () => {
+    const d = { ...base, settlementTerms: { ...DEFAULT_TERMS, others: [{ label: "返金", sellerToBuyer: 80_000, buyerToSeller: 0 }] },
+      payments: { balance: tr(), settlement: cash } };
+    const c = calcOf(d);
+    expect(balancePayeeText(d, c, SELF_ACC)).toContain(`(精算金 80,000円は売主から別にお支払いします。お振込みいただく額は ${(c.settlement.paymentAtSettlement! + 80_000).toLocaleString("ja-JP")}円です)`);
+    expect(checklistPayDefault("payment", d, c)).toEqual([]);
+    const undecided = { ...d, payments: { balance: tr() } };
+    expect(checklistPayDefault("payment", undecided, calcOf(undecided))).toEqual([{ method: "transfer", amount: null, other: null }]);
+  });
+  it("費用のその他で同じ名前の行は、1行にまとめて金額を足す(@codex #751)", () => {
+    const d = { ...base, costs: { ...base.costs, others: [{ label: "処分費", amount: 10_000 }, { label: "処分費", amount: 20_000 }] } };
+    const rows = paymentRows(d, calcOf(d)).filter((r) => r.key.startsWith("other:"));
+    expect(rows.map((r) => [r.label, r.amount])).toEqual([["処分費", 30_000]]);
+  });
   it("準備チェックリスト: 精算金だけ別の払い方なら、残代金と精算金を分けて金額を入れる", () => {
     const d = { ...base, payments: { balance: tr(), settlement: cash } };
     const c = calcOf(d);
