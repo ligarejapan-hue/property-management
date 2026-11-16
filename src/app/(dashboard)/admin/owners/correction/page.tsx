@@ -567,6 +567,18 @@ function OwnerCorrectionPageInner() {
                         {c.id.slice(0, 8)}…
                       </td>
                       <td className="px-3 py-2">
+                        {/* ほかの3つのタブと同じ「物件を開く」(2026-11-16)。件数の数字のリンクも残す。 */}
+                        <div className="mb-1 empty:hidden">
+                          <OwnerPropertyOpenLink
+                            ownerId={c.id}
+                            link={{
+                              count: c.propertyOwnerCount,
+                              singlePropertyId: c.singlePropertyId,
+                              hasReachableProperty: c.hasReachableProperty,
+                              available: data.summary.propertyLinkAvailable ?? false,
+                            }}
+                          />
+                        </div>
                         {c.types.includes("address_null") && (
                           <AddressFillButton
                             ownerId={c.id}
