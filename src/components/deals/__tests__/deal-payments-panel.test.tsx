@@ -65,3 +65,11 @@ describe("お金の受け渡しのタブ(2026-11-16)", () => {
     expect(render(d)).toContain("残金と同じ払い方・口座です(見本銀行 本店 普通 1234567 名義 ミホン タロウ)");
   });
 });
+
+describe("説明の文", () => {
+  it("払い方が入る書類は書類確認書(準備チェックリストではない)", () => {
+    const html = render(base);
+    expect(html).toContain("残金決済のご案内と書類確認書の払い方に最初から入ります");
+    expect(html).not.toContain("準備チェックリスト");
+  });
+});
