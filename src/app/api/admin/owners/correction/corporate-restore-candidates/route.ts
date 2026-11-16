@@ -26,6 +26,7 @@ import {
   handleApiError,
   apiResponse,
 } from "@/lib/api-helpers";
+import { loadOwnerPropertyLinkInfo, withOwnerPropertyLink } from "@/lib/owner-property-link-data";
 import { hasPermission, maskValue } from "@/lib/permissions";
 import { writeAuditLog } from "@/lib/audit";
 import { maskCorporateNumber } from "@/lib/display-level";
@@ -182,8 +183,14 @@ export async function GET(request: NextRequest) {
       },
     });
 
-    return apiResponse({
+    // 出す行の所有者だけ、物件へ飛ぶリンクの材料を足す(2026-11-16・owner-property-link-data.ts)。
+    const rowsWithLinks = withOwnerPropertyLink(
       rows,
+      await loadOwnerPropertyLinkInfo(prisma, rows.map((r) => r.ownerId), session, perms),
+    );
+
+    return apiResponse({
+      rows: rowsWithLinks,
       summary,
       truncated: truncatedScan || truncatedRows,
     });

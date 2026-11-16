@@ -42,6 +42,16 @@ vi.mock("@/lib/permissions", () => ({
   ),
 }));
 vi.mock("@/lib/audit", () => ({ writeAuditLog: vi.fn() }));
+// 物件へ飛ぶリンクの材料(owner-property-link-data.ts・2026-11-16)。既定=引けない(空)。中身の決まりは owner-property-link-data.test.ts。
+const linkInfo = vi.hoisted(() => ({
+  load: vi.fn(async (_db?: unknown, _ownerIds?: readonly string[], _session?: unknown, _perms?: unknown) =>
+    new Map<string, { count: number; singlePropertyId: string | null; hasReachableProperty: boolean; available: boolean }>(),
+  ),
+}));
+vi.mock("@/lib/owner-property-link-data", async (orig) => ({
+  ...(await orig<typeof import("@/lib/owner-property-link-data")>()),
+  loadOwnerPropertyLinkInfo: linkInfo.load,
+}));
 vi.mock("@/lib/prisma", () => ({
   default: { owner: { findMany: vi.fn() } },
 }));

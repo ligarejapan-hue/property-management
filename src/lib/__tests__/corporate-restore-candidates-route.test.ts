@@ -47,6 +47,16 @@ vi.mock("@/lib/api-helpers", () => {
 });
 
 vi.mock("@/lib/audit", () => ({ writeAuditLog: vi.fn() }));
+// 物件へ飛ぶリンクの材料(owner-property-link-data.ts・2026-11-16)。既定=引けない(空)。中身の決まりは owner-property-link-data.test.ts。
+const linkInfo = vi.hoisted(() => ({
+  load: vi.fn(async (_db?: unknown, _ownerIds?: readonly string[], _session?: unknown, _perms?: unknown) =>
+    new Map<string, { count: number; singlePropertyId: string | null; hasReachableProperty: boolean; available: boolean }>(),
+  ),
+}));
+vi.mock("@/lib/owner-property-link-data", async (orig) => ({
+  ...(await orig<typeof import("@/lib/owner-property-link-data")>()),
+  loadOwnerPropertyLinkInfo: linkInfo.load,
+}));
 vi.mock("@/lib/prisma", () => ({
   default: { owner: { findMany: vi.fn() } },
 }));
@@ -128,6 +138,25 @@ beforeEach(() => {
     NORMAL_OWNER,
     NAME_LOST_OWNER,
   ]);
+});
+
+describe("物件へ飛ぶリンクの材料(2026-11-16)", () => {
+  it("出す行の所有者の分だけ引き、行に propertyLink を足す", async () => {
+    linkInfo.load.mockResolvedValueOnce(
+      new Map([[SPLIT_OWNER.id, { count: 1, singlePropertyId: "p1", hasReachableProperty: true, available: true }]]),
+    );
+    const res = await GET(req());
+    const body = await res.json();
+    const ids = linkInfo.load.mock.calls[0][1] as string[];
+    expect(ids).toEqual(body.rows.map((r: { ownerId: string }) => r.ownerId));
+    // 候補にならない所有者(NORMAL_OWNER)の分は引かない。
+    expect(ids).not.toContain(NORMAL_OWNER.id);
+    const row = body.rows.find((r: { ownerId: string }) => r.ownerId === SPLIT_OWNER.id);
+    expect(row.propertyLink).toEqual({ count: 1, singlePropertyId: "p1", hasReachableProperty: true, available: true });
+    // 引けなかった所有者は「物件なし・リンクなし」。
+    const other = body.rows.find((r: { ownerId: string }) => r.ownerId !== SPLIT_OWNER.id);
+    expect(other.propertyLink).toEqual({ count: 0, singlePropertyId: null, hasReachableProperty: false, available: false });
+  });
 });
 
 describe("認可", () => {

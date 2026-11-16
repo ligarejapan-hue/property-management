@@ -24,6 +24,7 @@ import {
   handleApiError,
   apiResponse,
 } from "@/lib/api-helpers";
+import { loadOwnerPropertyLinkInfo, withOwnerPropertyLink } from "@/lib/owner-property-link-data";
 import { hasPermission } from "@/lib/permissions";
 import { writeAuditLog } from "@/lib/audit";
 import {
@@ -161,6 +162,12 @@ export async function GET(request: NextRequest) {
     const nextCursor =
       hasNextPage && page.length > 0 ? page[page.length - 1].ownerId : null;
 
+    // その頁の所有者だけ、物件へ飛ぶリンクの材料を足す(2026-11-16・owner-property-link-data.ts)。
+    const pageWithLinks = withOwnerPropertyLink(
+      page,
+      await loadOwnerPropertyLinkInfo(prisma, page.map((r) => r.ownerId), session, perms),
+    );
+
     // 4. AuditLog（PII を残さない / Owner.id 配列も入れない）
     await writeAuditLog({
       userId: session.id,
@@ -176,7 +183,7 @@ export async function GET(request: NextRequest) {
 
     return apiResponse({
       type,
-      candidates: page,
+      candidates: pageWithLinks,
       summary,
       hasNextPage,
       nextCursor,

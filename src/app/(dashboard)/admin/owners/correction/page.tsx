@@ -6,6 +6,7 @@ import { Button } from "@/components/ui/button";
 import { PageHeader } from "@/components/ui/page-header";
 import { OwnerPropertyCountCell } from "@/components/owners/owner-property-count-cell";
 import Link from "next/link";
+import { OwnerPropertyOpenLink } from "@/components/owners/owner-property-open-link";
 import { useRouter, useSearchParams } from "next/navigation";
 import {
   fetchOwnerCorrectionCandidates,
@@ -1435,12 +1436,15 @@ function CorporateNumberCandidatesPanel() {
                         </div>
                       </td>
                       <td className="px-3 py-2">
-                        <Link
-                          href={c.detailUrl}
-                          className="rounded-md border border-gray-300 dark:border-gray-700 px-2 py-1 text-xs text-gray-700 dark:text-gray-200 hover:bg-gray-50 dark:hover:bg-gray-800"
-                        >
-                          所有者詳細を開く
-                        </Link>
+                        <div className="flex flex-wrap items-center gap-1">
+                          <Link
+                            href={c.detailUrl}
+                            className="whitespace-nowrap rounded-md border border-gray-300 dark:border-gray-700 px-2 py-1 text-xs text-gray-700 dark:text-gray-200 hover:bg-gray-50 dark:hover:bg-gray-800"
+                          >
+                            所有者詳細を開く
+                          </Link>
+                          <OwnerPropertyOpenLink ownerId={c.ownerId} link={c.propertyLink} />
+                        </div>
                       </td>
                     </tr>
                   ))}
@@ -1728,6 +1732,7 @@ function RegistryAddressCandidatesPanel() {
                           >
                             所有者詳細
                           </Link>
+                          <OwnerPropertyOpenLink ownerId={c.ownerId} link={c.propertyLink} />
                           {rowMsg && rowMsg.id === c.ownerId && (
                             <span
                               className={`text-[10px] ${rowMsg.ok ? "text-emerald-600" : "text-red-600"}`}
@@ -2095,12 +2100,19 @@ function CorporateRestorePanel() {
                             )}
                           </td>
                           <td className="px-3 py-2 text-right">
-                            <Link
-                              href={row.detailUrl}
-                              className="text-xs text-indigo-600 dark:text-indigo-400 hover:underline whitespace-nowrap"
-                            >
-                              詳細
-                            </Link>
+                            <div className="flex flex-wrap items-center justify-end gap-2">
+                              <Link
+                                href={row.detailUrl}
+                                className="text-xs text-indigo-600 dark:text-indigo-400 hover:underline whitespace-nowrap"
+                              >
+                                詳細
+                              </Link>
+                              <OwnerPropertyOpenLink
+                                ownerId={row.ownerId}
+                                link={row.propertyLink}
+                                className="text-xs text-blue-700 dark:text-blue-300 hover:underline whitespace-nowrap"
+                              />
+                            </div>
                           </td>
                         </tr>
                       );
