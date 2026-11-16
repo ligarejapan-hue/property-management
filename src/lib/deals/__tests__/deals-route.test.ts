@@ -207,6 +207,17 @@ describe("GET /api/deals/options", () => {
     const body = await (await OPTIONS()).json();
     expect(body.propertyKinds.map((k: { key: string }) => k.key)).toEqual(["unit", "house", "land", "building"]);
     expect(body.selfParty).toEqual({ name: "試験不動産株式会社", representative: "代表取締役 試験 太郎", address: "東京都試験区1-1", phone: "03-0000-0000" });
+   });
+  it("自社の口座(お金の受け渡しの初期値)も返す", async () => {
+    const bank = { bankName: "見本銀行", branchName: "本店", accountType: "ordinary", accountNumber: "1234567", accountHolder: "ミホン" };
+    pm.dealSettings.findUnique.mockResolvedValue({ representativeTitle: null, representativeName: null, bankAccount: bank, propertyKinds: [], version: 1, updatedAt: new Date() });
+    pm.companyProfile.findUnique.mockResolvedValue({ nameJa: "試験不動産株式会社", license: null, tel: null, fax: null, email: null, hp: null, address: null });
+    const body = await (await OPTIONS()).json();
+    expect(body.selfBankAccount).toEqual(bank);
+    // 見るだけの人には空の口座(保存できないので要らない)。
+    (getUserPermissions as Fn).mockResolvedValue([{ resource: "deal", action: "read", granted: true }]);
+    const ro = await (await OPTIONS()).json();
+    expect(ro.selfBankAccount).toEqual({ bankName: null, branchName: null, accountType: null, accountNumber: null, accountHolder: null });
   });
 });
 

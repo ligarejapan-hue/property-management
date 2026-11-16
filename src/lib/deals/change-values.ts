@@ -10,7 +10,7 @@ export const DEAL_TRACKED_FIELDS = [
 const SIMPLE_KEYS = [
   "businessType", "status", "assigneeId", "licensedAgentId", "salesStaffId", "opsStaffId",
   "propertyKind", "hasOc", "contractPlace", "settlementPlace", "propertySnapshot", "counterpartyBroker",
-  "taxRateBp", "assessments", "costs", "settlementTerms", "leases", "overrides",
+  "taxRateBp", "assessments", "costs", "settlementTerms", "leases", "overrides", "payments",
 ] as const;
 const DATE_KEYS = ["contractAt", "settlementAt"] as const;
 const BIGINT_KEYS = ["price", "deposit"] as const;

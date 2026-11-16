@@ -5,6 +5,7 @@ import {
 } from "../../checklist";
 import type { BASE_PROPERTY_KINDS } from "../../constants";
 import { html } from "../html";
+import { checklistPayDefault } from "../../payments";
 import { documentHtml } from "../layout";
 import { DASH, dateJa, dateTimeJa, headTable, money, namesOf, partiesOf, propertyLabel, type BusinessDocContext, type Choice, type ValueRow } from "./common";
 
@@ -96,7 +97,8 @@ export function checklistMissing(phase: ChecklistPhase, c: BusinessDocContext): 
 export function checklistDefaults(phase: ChecklistPhase, c: BusinessDocContext): { values: ChecklistOptions; choices: Record<string, Choice[]> } {
   const items = amountItems(phase, c);
   return {
-    values: { pay: Object.fromEntries(items.map((i) => [i.id, [] as ChecklistPayEntry[]])) },
+    // 払い方の初期値=取引の「お金の受け渡し」(振込・現金だけ・未定は空=紙に手で書く・2026-11-16)。
+    values: { pay: Object.fromEntries(items.map((i) => [i.id, checklistPayDefault(i.amount, c.deal, c.calc) as ChecklistPayEntry[]])) },
     choices: {
       payItems: items.map((i) => ({ value: i.id, label: `${i.label}(${money(checklistAmount(i.amount, c))})` })),
       // 内訳の合計を画面で確かめるための金額(円・無ければ空)。

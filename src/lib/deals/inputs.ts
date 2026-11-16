@@ -1,6 +1,7 @@
 import {
   DEFAULT_ASSESSMENTS, DEFAULT_COSTS, DEFAULT_TERMS, OVERRIDE_KEYS, assessmentsSchema, costsSchema, leaseSchema,
-  settlementTermsSchema, yenInt, type Assessments, type Costs, type Lease, type Overrides, type SettlementTerms,
+  paymentEntrySchema, settlementTermsSchema, yenInt, PAYMENT_FIXED_KEYS,
+  type Assessments, type Costs, type Lease, type Overrides, type PaymentEntry, type Payments, type SettlementTerms,
 } from "./schemas";
 
 const obj = (json: unknown): Record<string, unknown> =>
@@ -36,6 +37,23 @@ export function readLeases(json: unknown): Lease[] {
     const r = leaseSchema.safeParse(row);
     return r.success ? [r.data] : [];
   });
+}
+/** お金の受け渡しは項目ごとに読み、壊れた項目だけ落とす(落ちた項目は「未定」)。 */
+export function readPayments(json: unknown): Payments {
+  const src = obj(json);
+  const out: Payments = {};
+  for (const k of PAYMENT_FIXED_KEYS) {
+    const r = paymentEntrySchema.safeParse(src[k]);
+    // 「残金と一緒に」は精算金だけ(ほかの鍵に入っていたら未定として読む)。
+    if (r.success) out[k] = k !== "settlement" && r.data.method === "with_balance" ? { ...r.data, method: "undecided" } : r.data;
+  }
+  const others: Record<string, PaymentEntry> = {};
+  for (const [label, v] of Object.entries(obj(src.others))) {
+    const r = paymentEntrySchema.safeParse(v);
+    if (r.success && label.trim() !== "" && label.length <= 50) others[label] = r.data.method === "with_balance" ? { ...r.data, method: "undecided" } : r.data;
+  }
+  if (Object.keys(others).length > 0) out.others = others;
+  return out;
 }
 export function readOverrides(json: unknown): Overrides {
   const src = obj(json);

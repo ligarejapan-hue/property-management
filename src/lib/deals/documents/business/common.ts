@@ -4,7 +4,7 @@ import type { RateTableRow } from "../../rate-tables";
 import type { DealSettingsView } from "../../settings";
 import type { DealPartyView, DealView } from "../../view";
 import { yen } from "../../calc/format";
-import { BANK_ACCOUNT_TYPE_LABELS } from "../../constants";
+import { formatBankAccount } from "../../payments";
 import { formatJstDateTime } from "../../datetime";
 import { html, type SafeHtml } from "../html";
 
@@ -66,8 +66,5 @@ export function signBox(label: string): SafeHtml {
 
 /** 取引の設定の振込先口座を1行に。銀行名が無ければ null。 */
 export function bankAccountText(c: { settings: Pick<DealSettingsView, "bankAccount"> }): string | null {
-  const b = c.settings.bankAccount;
-  if (!b.bankName) return null;
-  return [b.bankName, b.branchName, b.accountType ? BANK_ACCOUNT_TYPE_LABELS[b.accountType] : null, b.accountNumber, b.accountHolder && `名義 ${b.accountHolder}`]
-    .filter(Boolean).join(" ");
+  return formatBankAccount(c.settings.bankAccount);
 }

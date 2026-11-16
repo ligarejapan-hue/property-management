@@ -3,7 +3,7 @@ import type { BusinessDocContext, ValueRow } from "./business/common";
 import { partiesOf, type Choice } from "./business/common";
 import { buildSettlementStatement } from "./business/settlement-statement";
 import {
-  DEFAULT_BELONGINGS, buildSellerSettlementGuide, buildSettlementGuide, defaultCancellationNotice, defaultPayee, defaultSellerBelongings, defaultSellerCosts,
+  DEFAULT_BELONGINGS, buildSellerSettlementGuide, buildSettlementGuide, defaultCancellationNotice, defaultPayee, defaultReceiveTo, defaultSellerBelongings, defaultSellerCosts,
   sellerGuideOptionsSchema, settlementGuideOptionsSchema,
 } from "./business/settlement-guide";
 import {
@@ -232,7 +232,7 @@ export const BUSINESS_DOCS: BusinessDocDef[] = [
     blocking: () => [],
     options: sellerGuideOptionsSchema as z.ZodType<Record<string, unknown>>,
     defaults: (c) => ({
-      values: { costs: defaultSellerCosts(c), receiveTo: null, belongings: defaultSellerBelongings(c), cancellationNotice: defaultCancellationNotice(c) },
+      values: { costs: defaultSellerCosts(c), receiveTo: defaultReceiveTo(c), belongings: defaultSellerBelongings(c), cancellationNotice: defaultCancellationNotice(c) },
     }),
     build: (c, o) => buildSellerSettlementGuide(c, sellerGuideOptionsSchema.parse(o)),
   },

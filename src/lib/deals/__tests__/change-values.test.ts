@@ -16,6 +16,11 @@ describe("更新データ", () => {
       contractPlace: "売主宅", contractAt: new Date("2026-07-01T01:30:00.000Z"), settlementAt: null,
     });
   });
+  it("お金の受け渡しはそのまま書く(変更履歴には JSON を出さない=口座番号を残さない)", () => {
+    const payments = { balance: { method: "transfer" as const, account: { bankName: "見本銀行", branchName: null, accountType: null, accountNumber: "1234567", accountHolder: null } } };
+    expect(toDealUpdateData({ payments }, "brokerage")).toEqual({ payments });
+    expect(DEAL_TRACKED_FIELDS).not.toContain("payments");
+  });
   it("買取再販へ切り替えたら取引態様を空にする(態様を送っていなくても)", () => {
     expect(toDealUpdateData({ businessType: "resale" }, "brokerage")).toEqual({ businessType: "resale", tradeSide: null });
   });

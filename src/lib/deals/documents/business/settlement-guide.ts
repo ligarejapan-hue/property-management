@@ -2,6 +2,7 @@ import { z } from "zod";
 import { text, yenInt } from "../../schema-parts";
 import { html } from "../html";
 import { companyBlock, documentHtml } from "../layout";
+import { balancePayeeText, sellerReceiveText } from "../../payments";
 import { bankAccountText, dateJa, dateTimeJa, headTable, money, namesOf, partiesOf, propertyLabel, type BusinessDocContext, type ValueRow } from "./common";
 
 /** 発行のときに選ぶもの(計画の読み替え 2・7)。 */
@@ -31,9 +32,18 @@ function priceTable(c: BusinessDocContext, paidLabel: string) {
 const PAID_BY_BUYER = "手付金(お支払い済み)";
 const RECEIVED_BY_SELLER = "手付金(お受け取り済み)";
 
-/** 振込先の初期値: 売主が自社なら取引の設定の口座、それ以外は空(計画の読み替え 7)。 */
+/**
+ * 振込先の初期値: 取引の「お金の受け渡し」で残金の払い方が決まっていればそれ(src/lib/deals/payments.ts・2026-11-16)。
+ * 未定なら今までどおり、売主が自社なら取引の設定の口座、それ以外は空(計画の読み替え 7)。
+ */
 export function defaultPayee(c: BusinessDocContext): string | null {
-  return partiesOf(c.deal, "seller").some((p) => p.isSelf) ? bankAccountText(c) : null;
+  return balancePayeeText(c.deal, c.calc, c.settings.bankAccount)
+    ?? (partiesOf(c.deal, "seller").some((p) => p.isSelf) ? bankAccountText(c) : null);
+}
+
+/** お受け取りの口座の初期値(売主様): 取引の「お金の受け渡し」の残金の口座。未定なら空。 */
+export function defaultReceiveTo(c: BusinessDocContext): string | null {
+  return sellerReceiveText(c.deal, c.calc, c.settings.bankAccount);
 }
 
 /**
