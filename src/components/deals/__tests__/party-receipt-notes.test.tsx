@@ -2,7 +2,7 @@ import { describe, expect, it } from "vitest";
 import { readFileSync } from "node:fs";
 import { join } from "node:path";
 import { renderToStaticMarkup } from "react-dom/server";
-import { BelongingsAddNotice, BlockingNotice, PartyReceiptNotes, ReadyNotice, restoredValuesOf } from "../business-docs-section";
+import { BelongingsAddNotice, BlockingNotice, MissingNotice, PartyReceiptNotes, ReadyNotice, restoredValuesOf } from "../business-docs-section";
 import { NEEDS_SELLER_PARTY } from "@/lib/deals/documents/business/receipt-issuer";
 
 describe("領収書の小窓の知らせ(2026-11-05 発注者)", () => {
@@ -63,9 +63,28 @@ describe("出す前の確認の一言(2026-11-15)", () => {
     expect(html).toContain("必要な項目はそろっています。");
     expect(html).not.toContain("種類を選んでください。");
   });
-  it("種類を選ぶまで押せない条件と同じ条件で切り替える", () => {
+  it("種類を選ぶまで押せない条件と同じ条件で切り替える(空欄があってもなくても)", () => {
     const src = readFileSync(join(process.cwd(), "src/components/deals/business-docs-section.tsx"), "utf8");
-    expect(src).toContain('<ReadyNotice needsKind={doc.docType === "prep_checklist" && !str(values.kind)} />');
+    expect(src).toContain('const needsKind = doc.docType === "prep_checklist" && !str(values.kind);');
+    expect(src).toContain("|| needsKind;");
+    expect(src).toContain("<MissingNotice missing={missing} needsKind={needsKind} />");
+    expect(src).toContain("<ReadyNotice needsKind={needsKind} />");
+  });
+});
+
+describe("空欄があるときの確認(2026-11-16 実機確認314)", () => {
+  it("種類を選んでいない間は、空欄の一覧の前に「種類を選んでください。」を出す(押せない理由が分かるように)", () => {
+    const html = renderToStaticMarkup(<MissingNotice missing={["契約日", "決済日"]} needsKind />);
+    expect(html).toContain("種類を選んでください。");
+    expect(html.indexOf("種類を選んでください。")).toBeLessThan(html.indexOf("次の項目が空欄です。"));
+    expect(html).toContain("<li>契約日</li>");
+    expect(html).toContain("<li>決済日</li>");
+  });
+  it("種類を選んだあと・ほかの書類は、今までどおり空欄の一覧だけ", () => {
+    const html = renderToStaticMarkup(<MissingNotice missing={["契約日"]} needsKind={false} />);
+    expect(html).not.toContain("種類を選んでください。");
+    expect(html).toContain("次の項目が空欄です。取引の画面で入れるか、空欄のまま出してください。");
+    expect(html).toContain("<li>契約日</li>");
   });
 });
 

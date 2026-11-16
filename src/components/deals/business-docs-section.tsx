@@ -91,6 +91,20 @@ export function ReadyNotice({ needsKind }: { needsKind: boolean }) {
 }
 
 /**
+ * 空欄があるときの確認。準備チェックリストで種類を選んでいない間は「空欄のまま出す」も押せないので、
+ * 一覧の前に「種類を選んでください。」を出す(押せない理由が分かるように・2026-11-16 実機確認314)。
+ */
+export function MissingNotice({ missing, needsKind }: { missing: string[]; needsKind: boolean }) {
+  return (
+    <div className="rounded-md border border-amber-200 bg-amber-50 px-3 py-2 text-sm text-amber-900 dark:border-amber-900 dark:bg-amber-950 dark:text-amber-200" role="alert">
+      {needsKind && <p className="font-medium">種類を選んでください。</p>}
+      <p>次の項目が空欄です。取引の画面で入れるか、空欄のまま出してください。</p>
+      <ul className="mt-1 list-disc pl-5">{missing.map((m) => <li key={m}>{m}</li>)}</ul>
+    </div>
+  );
+}
+
+/**
  * 業務書類(段5)。その取引で出せる書類を並べ、「発行」→ 出す前の確認(空欄の項目・発行のときに選ぶもの)→ 発行。
  * 空欄があっても発行できる(「空欄のまま出す」)。判定はサーバーの一覧表の結果をそのまま出す(設計 §4.3)。
  */
@@ -235,11 +249,13 @@ function IssueDialog({ dealId, doc, version, onCancel, onDone }: {
   const cancellationNotice = (values.cancellationNotice === undefined ? doc.defaults.cancellationNotice : values.cancellationNotice) === true;
   const costRows = costRowsOf(values.costs);
   // 委任状は委任する事項が1つ以上になるまで発行できない(サーバーも 422)。鍵受領書は書きかけの行(番号だけで本数が無いなど)があるうちは出せない。
+  // 準備チェックリストは種類を選ぶまで出せない(押せない条件と、出す前の確認の一言で同じものを使う)。
+  const needsKind = doc.docType === "prep_checklist" && !str(values.kind);
   const incomplete = (doc.docType === "power_of_attorney" && !matters.length && !str(values.otherMatter).trim())
     || (doc.docType === "key_receipt" && !keyRows.every(keyRowOk))
     || (doc.docType === "settlement_guide_seller" && !costRows.every(costRowOk))
     || (doc.docType === "settlement_guide" && !optionalYenOk(registrationFee))
-    || (doc.docType === "prep_checklist" && !str(values.kind));
+    || needsKind;
   const setCost = (i: number, patch: Partial<CostRow>) => set("costs", costRows.map((r, j) => (j === i ? { ...r, ...patch } : r)));
   const setKey = (i: number, patch: Partial<KeyRow>) => set("keys", keyRows.map((k, j) => (j === i ? { ...k, ...patch } : k)));
   const choices = doc.choices ?? {};
@@ -318,12 +334,9 @@ function IssueDialog({ dealId, doc, version, onCancel, onDone }: {
         )}
         <BlockingNotice blocking={doc.blocking} />
         {missing.length > 0 ? (
-          <div className="rounded-md border border-amber-200 bg-amber-50 px-3 py-2 text-sm text-amber-900 dark:border-amber-900 dark:bg-amber-950 dark:text-amber-200" role="alert">
-            <p>次の項目が空欄です。取引の画面で入れるか、空欄のまま出してください。</p>
-            <ul className="mt-1 list-disc pl-5">{missing.map((m) => <li key={m}>{m}</li>)}</ul>
-          </div>
+          <MissingNotice missing={missing} needsKind={needsKind} />
         ) : (
-          <ReadyNotice needsKind={doc.docType === "prep_checklist" && !str(values.kind)} />
+          <ReadyNotice needsKind={needsKind} />
         )}
         {receipt && doc.issuers && (
           <>
