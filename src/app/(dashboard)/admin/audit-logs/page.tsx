@@ -361,6 +361,7 @@ const TARGET_TABLE_LABELS: Record<string, string> = {
   dm_scenarios: "DMの種類",
   edit_locks: "編集の鍵",
   mail_config: "メール送信設定",
+  lead_followups: "追客メール",
   push_subscriptions: "通知の登録",
   report_inbox_items: "書類の受け取り箱",
 };

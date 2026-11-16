@@ -317,15 +317,16 @@ function IconButton({
   children: React.ReactNode;
 }) {
   return (
-    <button
-      type="button"
+    <Button
+      variant="ghost"
+      size="sm"
       onClick={onClick}
       disabled={disabled}
       aria-label={label}
       title={label}
-      className="rounded p-1 text-gray-500 hover:bg-gray-200 disabled:opacity-30 dark:text-gray-400 dark:hover:bg-gray-700"
+      className="px-1.5"
     >
       {children}
-    </button>
+    </Button>
   );
 }
