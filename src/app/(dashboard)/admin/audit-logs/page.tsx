@@ -185,6 +185,8 @@ const ACTION_LABELS: Record<string, string> = {
   sale_dm_inquiry_view: "売却DM 申込一覧の閲覧",
   sale_dm_inquiry_status_update: "売却DM 申込の対応状況変更",
   mail_settings_update: "メール送信設定更新",
+  lead_followup_settings_update: "追客メールの設定更新",
+  lead_followup_unsubscribe: "追客メールの配信停止",
   mail_settings_test: "メール送信設定のテスト送信",
   inquiry_notify_sent: "査定申込の通知メール送信",
   inquiry_notify_failed: "査定申込の通知メール送信失敗",
