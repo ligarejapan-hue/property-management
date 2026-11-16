@@ -64,6 +64,12 @@ describe("お金の受け渡しのタブ(2026-11-16)", () => {
     const d = { ...base, payments: { balance: tr(), settlement: { method: "with_balance" as const, account: EMPTY_BANK_ACCOUNT } } };
     expect(render(d)).toContain("残金と同じ払い方・口座です(見本銀行 本店 普通 1234567 名義 ミホン タロウ)");
   });
+  it("見えない払い方の radio は、外側の label を位置の基準にする(押すとページ全体がずれて真っ白になった・11-17)", () => {
+    const html = render(base);
+    const labels = [...html.matchAll(/<label class="([^"]*)"><input type="radio" class="sr-only"/g)];
+    expect(labels.length).toBeGreaterThan(0);
+    for (const [, cls] of labels) expect(cls.split(" ")).toContain("relative");
+  });
 });
 
 describe("説明の文", () => {
