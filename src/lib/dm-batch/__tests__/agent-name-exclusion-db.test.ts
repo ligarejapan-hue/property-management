@@ -18,7 +18,12 @@ vi.hoisted(() => {
 });
 
 import prisma from "@/lib/prisma";
-import { findAgentNameOwnerIds, findOwnerNameExclusions } from "../agent-name-exclusion";
+import {
+  findAgentNameOwnerIds,
+  findOwnerNameExclusions,
+  findPropertiesWithAgentNameOwners,
+  findSendPropertiesWithAgentNameOwners,
+} from "../agent-name-exclusion";
 
 const USER = "11111111-1111-4111-8111-111111111111";
 
@@ -112,5 +117,41 @@ describe.skipIf(!process.env.PUSH_DB_TEST_URL)("業者と同じ名前の所有�
   it("大文字の uuid でも同じ所有者として返す(返すのは小文字)", async () => {
     const got = await findAgentNameOwnerIds(prisma, [ids.yamada.toUpperCase()]);
     expect([...got]).toEqual([ids.yamada]);
+  });
+  // 2026-11-16 発注者「業者の名簿と同じ名前は DM 送付不可」: 物件ごとの判定と、送付可の見回りの照会
+  async function property(dm: "send" | "hold" | "no_send", ownerIds: string[], archived = false): Promise<string> {
+    const r = await prisma.$queryRawUnsafe<{ id: string }[]>(
+      `INSERT INTO properties (id, property_type, address, registry_status, dm_status, is_archived, created_by, updated_at)
+       VALUES (gen_random_uuid(), 'land', 'x', 'unconfirmed', $1::"DmStatus", $2, $3::uuid, now()) RETURNING id::text AS id`,
+      dm,
+      archived,
+      USER,
+    );
+    const id = r[0].id;
+    for (const o of ownerIds) await prisma.propertyOwner.create({ data: { propertyId: id, ownerId: o } });
+    return id;
+  }
+
+  it("業者と同じ名前の所有者が1人でもいる物件を返す(所有者がいない・別の名前だけの物件は返さない)", async () => {
+    const mixed = await property("hold", [ids.other, ids.yamada]);
+    const plainOnly = await property("hold", [ids.other]);
+    const none = await property("hold", []);
+    const got = await findPropertiesWithAgentNameOwners(prisma, [mixed, plainOnly, none]);
+    expect([...got]).toEqual([mixed]);
+    expect((await findPropertiesWithAgentNameOwners(prisma, [])).size).toBe(0);
+    // 大文字の id を渡しても見つかる(返す id は小文字・@codex #747 P2)
+    expect([...(await findPropertiesWithAgentNameOwners(prisma, [mixed.toUpperCase()]))]).toEqual([mixed]);
+  });
+
+  it("見回りの照会: 送付可で業者と同じ名前の所有者がいる物件だけ(送付不可・未判断・アーカイブは返さない)", async () => {
+    await prisma.$executeRawUnsafe(`UPDATE properties SET dm_status = 'no_send'`);
+    const send = await property("send", [ids.abcCircle]);
+    const sendPlain = await property("send", [ids.other]);
+    await property("no_send", [ids.abcCircle]);
+    await property("hold", [ids.takahashi]);
+    await property("send", [ids.takahashi], true);
+    const got = await findSendPropertiesWithAgentNameOwners(prisma, 10);
+    expect(got).toEqual([send]);
+    expect(got).not.toContain(sendPlain);
   });
 });

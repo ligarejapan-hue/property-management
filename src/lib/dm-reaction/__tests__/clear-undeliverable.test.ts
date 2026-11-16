@@ -2,6 +2,11 @@ import { describe, it, expect, vi, beforeEach } from "vitest";
 
 vi.mock("@/lib/dm-batch/locks", () => ({ lockOwnersForUpdate: vi.fn(async () => undefined) }));
 vi.mock("@/lib/property-record-guard", () => ({ lockPropertyRow: vi.fn(async () => undefined) }));
+// 業者の名簿と同じ名前の所有者がいる物件(2026-11-16)。既定=いない。
+const agentNameProps = vi.hoisted(() => ({ value: new Set<string>() }));
+vi.mock("@/lib/dm-batch/agent-name-exclusion", () => ({
+  findPropertiesWithAgentNameOwners: vi.fn(async (_db: unknown, ids: string[]) => new Set(ids.filter((id) => agentNameProps.value.has(id)))),
+}));
 
 import { classifyUndeliverableLogs, clearOwnerUndeliverable } from "@/lib/dm-reaction/clear-undeliverable";
 import { lockOwnersForUpdate } from "@/lib/dm-batch/locks";
@@ -171,6 +176,16 @@ describe("clearOwnerUndeliverable", () => {
     expect(tx.changeLog.create).toHaveBeenCalledWith({
       data: expect.objectContaining({ targetTable: "properties", targetId: "p1", fieldName: "dmStatus", oldValue: "no_send", newValue: "send", changedBy: "u-office" }),
     });
+  });
+
+  it("業者の名簿と同じ名前の所有者がいれば、印だけ外して送付可には戻さない(2026-11-16 発注者)", async () => {
+    agentNameProps.value = new Set(["p1"]);
+    const { tx } = makeTx([row()]);
+    const r = await run(tx);
+    agentNameProps.value = new Set();
+    expect(r).toMatchObject({ cleared: 1, flagsCleared: 1, dmStatusRestored: 0 });
+    expect(tx.property.update).toHaveBeenCalledWith({ where: { id: "p1" }, data: { dmUndeliverableAt: null } });
+    expect(tx.changeLog.create).not.toHaveBeenCalled();
   });
 
   it("⚠ロックの順序=所有者 → 物件(id 順)→ 記録(拒否・宛先不明の書き手と同じ順)", async () => {

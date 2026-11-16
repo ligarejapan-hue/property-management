@@ -61,7 +61,7 @@ export async function POST(
       action: "registry_owner_check_keep",
       targetTable: "properties",
       targetId: propertyId,
-      detail: { dmRestored: outcome.dmRestored },
+      detail: { dmRestored: outcome.dmRestored, dmAgentNoSend: outcome.dmAgentNoSend },
     });
     return apiResponse(outcome);
   } catch (error) {

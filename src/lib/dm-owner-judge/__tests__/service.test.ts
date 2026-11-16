@@ -45,11 +45,15 @@ const tx = {
 vi.mock("@/lib/prisma", () => ({ default: { $transaction: async (fn: (t: typeof tx) => unknown) => fn(tx) } }));
 vi.mock("@/lib/property-record-guard", () => ({ lockPropertyRow: vi.fn(async () => {}) }));
 vi.mock("@/lib/edit-lock/service", () => ({ isResourceEditLocked: vi.fn(async () => editLocked.value) }));
+const agentProps = { value: new Set<string>() };
+vi.mock("@/lib/dm-batch/agent-name-exclusion", () => ({
+  findPropertiesWithAgentNameOwners: vi.fn(async (_tx: unknown, ids: string[]) => new Set(ids.filter((id) => agentProps.value.has(id)))),
+}));
 vi.mock("@/lib/dm-batch/terminal-exclusion", () => ({
   findTerminalExclusions: vi.fn(async () => ({ ...terminal, gaijiOwnerIds: new Set() })),
 }));
 
-import { processOwnerless, judgeWithOwners } from "../service";
+import { processOwnerless, judgeWithOwners, demoteAgentNameSend } from "../service";
 
 beforeEach(() => {
   prop = {
@@ -68,6 +72,7 @@ beforeEach(() => {
   terminal.ownerIds = new Set();
   terminal.propertyIds = new Set();
   terminal.agentOwnerIds = new Set();
+  agentProps.value = new Set();
   tx.property.update.mockClear();
 });
 
@@ -178,5 +183,45 @@ describe("judgeWithOwners(所有者が入った物件の仕分け)", () => {
     prop.dmOwnerPending = false;
     expect((await judgeWithOwners("p1")).outcome).toBe("skipped");
     expect(prop.dmStatus).toBe("hold");
+  });
+});
+
+describe("demoteAgentNameSend(送付可なのに業者と同じ名前の所有者がいる物件・2026-11-16 発注者)", () => {
+  beforeEach(() => {
+    prop.dmStatus = "send";
+    prop.dmOwnerPending = false;
+    agentProps.value = new Set(["p1"]);
+  });
+
+  it("送付不可にし、版を上げ、変更履歴に「自動」で残す", async () => {
+    expect(await demoteAgentNameSend("p1")).toBe("no_send");
+    expect(prop.dmStatus).toBe("no_send");
+    expect(prop.version).toBe(2);
+    expect(logs).toEqual([
+      expect.objectContaining({ fieldName: "dmStatus", oldValue: "send", newValue: "no_send", source: "auto", changedBy: "u1" }),
+    ]);
+  });
+
+  it("ロックのあとに読み直して、もう送付可でない・保管済み・業者の名前でなくなったら書かない", async () => {
+    for (const set of [
+      () => (prop.dmStatus = "hold"),
+      () => (prop.isArchived = true),
+      () => (agentProps.value = new Set()),
+    ]) {
+      prop.dmStatus = "send";
+      prop.isArchived = false;
+      agentProps.value = new Set(["p1"]);
+      set();
+      expect(await demoteAgentNameSend("p1")).toBe("skipped");
+    }
+    expect(tx.property.update).not.toHaveBeenCalled();
+    expect(logs).toEqual([]);
+  });
+
+  it("編集中なら書かずに次の見回りへ", async () => {
+    editLocked.value = true;
+    expect(await demoteAgentNameSend("p1")).toBe("locked");
+    expect(prop.dmStatus).toBe("send");
+    expect(tx.property.update).not.toHaveBeenCalled();
   });
 });

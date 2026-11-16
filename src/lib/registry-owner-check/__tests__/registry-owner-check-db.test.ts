@@ -275,6 +275,17 @@ async function main() {
     const p2 = await property(u, "no_send");
     const restored = await prisma.$transaction((tx) => restoreDmSendIfHold(tx, p2, u));
     check("3e DM が未判断でなければ触らない", !restored && (await prisma.property.findUniqueOrThrow({ where: { id: p2 } })).dmStatus === "no_send");
+    // 業者の名簿と同じ名前の所有者がいれば送付可に戻さず送付不可にする(2026-11-16 発注者)
+    const p3 = await property(u, "hold");
+    await link(p3, await owner("株式会社見本不動産"));
+    await prisma.mlitAgent.create({
+      data: { licenseKey: "99999901", authority: "13", licenseLabel: "東京都知事(1)第999901号", companyName: "(株)見本不動産" },
+    });
+    // 大文字の物件 ID(URL のまま)でも当てる(@codex #747 P2)
+    const restored3 = await prisma.$transaction((tx) => restoreDmSendIfHold(tx, p3.toUpperCase(), u));
+    await prisma.mlitAgent.deleteMany({ where: { licenseKey: "99999901" } });
+    const after3 = await prisma.property.findUniqueOrThrow({ where: { id: p3 } });
+    check("3f 業者と同じ名前の所有者がいれば送付可にせず送付不可", restored3 === "no_send" && after3.dmStatus === "no_send");
   }
 
   // ---- 4. 謄本の名義に直す: 外す・足す・履歴・結果・DM は保留のまま ----

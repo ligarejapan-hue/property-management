@@ -16,11 +16,14 @@ import { join, relative } from "node:path";
 
 /** 版番号を進める書き込み(人が編集できる項目を書く)。値は「何を書くか」の説明。 */
 const VERSIONED: Record<string, string> = {
-  "src/lib/dm-owner-judge/service.ts:64":
+  "src/lib/dm-owner-judge/service.ts:66":
     "property.dmStatus=hold+dmOwnerPending(所有者が入っていない送付可を未判断に戻す・2026-11-14)+version increment" +
     "(物件行ロック後・編集の鍵があれば書かない)",
-  "src/lib/dm-owner-judge/service.ts:133":
+  "src/lib/dm-owner-judge/service.ts:135":
     "property.dmStatus=send/no_send+dmOwnerPending=false(所有者が入ったときの自動仕分け・2026-11-14)+version increment" +
+    "(物件行ロック後・編集の鍵があれば書かない)",
+  "src/lib/dm-owner-judge/service.ts:164":
+    "property.dmStatus=no_send+dmOwnerPending=false(送付可なのに業者の名簿と同じ名前の所有者・2026-11-16)+version increment" +
     "(物件行ロック後・編集の鍵があれば書かない)",
   "src/app/api/admin/owners/[id]/correction/address-fill/route.ts:275":
     "owner.address(空欄補完)+version increment",
@@ -63,18 +66,18 @@ const VERSIONED: Record<string, string> = {
     "(Task 9で修正: 元は進めていなかった)",
   "src/app/api/import/jobs/[jobId]/rows/[rowId]/route.ts:243":
     "owner の住所ペア空欄補完(fieldPatch)+version increment",
-  "src/app/api/import/reception-owner/route.ts:361":
+  "src/app/api/import/reception-owner/route.ts:362":
     "property.lotNumber/buildingNumber/roomNo(空欄補完)+version increment" +
     "(Task 9で修正: 元は進めていなかった)",
-  "src/app/api/import/reception-owner/route.ts:413":
+  "src/app/api/import/reception-owner/route.ts:418":
     "property.dmStatus(hold→send昇格)+version increment" +
     "(Task 9で修正: 元は進めていなかった)",
-  "src/app/api/import/reception-owner/route.ts:690":
+  "src/app/api/import/reception-owner/route.ts:695":
     "owner の住所ペア空欄補完(fieldPatch)+version increment",
-  "src/app/api/import/reception-owner/route.ts:754":
+  "src/app/api/import/reception-owner/route.ts:759":
     "owner.corporateNumber(空欄埋め)+version increment" +
     "(Task 9で修正: 元は進めていなかった)",
-  "src/app/api/import/reception-owner/route.ts:766":
+  "src/app/api/import/reception-owner/route.ts:771":
     "owner.corporateNumber/companyRegistryNumber(分断型復元の空欄埋め)+version increment" +
     "(Task 9で修正: 元は進めていなかった)",
   "src/app/api/owners/[id]/corporate-apply/route.ts:368":
@@ -83,9 +86,9 @@ const VERSIONED: Record<string, string> = {
     "owner.name/address/note/corporateNumber(クリーンアップ適用)+version increment",
   "src/app/api/owners/[id]/route.ts:213":
     "owner の編集画面フィールド一式(編集画面の本体保存窓口)+version increment",
-  "src/app/api/properties/[id]/actions/route.ts:165":
+  "src/app/api/properties/[id]/actions/route.ts:167":
     "property のアクション実行結果フィールド(assign_to_me等)+version increment",
-  "src/app/api/properties/[id]/clear-dm-undeliverable/route.ts:64":
+  "src/app/api/properties/[id]/clear-dm-undeliverable/route.ts:72":
     "restoreDmStatus 指定時のみ property.dmStatus+version increment" +
     "(Task 9で修正: dmStatus書き戻し時に元は進めていなかった。" +
     "dmUndeliverableAtのみのクリアは対象外[ALLOWED]と同じ理由で進めない)",
@@ -98,11 +101,11 @@ const VERSIONED: Record<string, string> = {
   "src/app/api/properties/[id]/parcel-detach/route.ts:77":
     "property.extraParcels(この筆を別の物件にする・2026-11-06)+version increment" +
     "(物件の行ロック→編集中の鍵の確認→版の条件つき更新。新しい物件は同じトランザクションで作る)",
-  "src/app/api/properties/[id]/route.ts:623":
+  "src/app/api/properties/[id]/route.ts:625":
     "property の編集画面フィールド一式(編集画面の本体保存窓口)+version increment",
-  "src/app/api/properties/bulk-update/route.ts:95":
+  "src/app/api/properties/bulk-update/route.ts:97":
     "property.caseStatus/registryStatus/dmStatus/assignedTo(一括更新)+version increment",
-  "src/lib/dm-reaction/clear-undeliverable.ts:179":
+  "src/lib/dm-reaction/clear-undeliverable.ts:184":
     "宛先不明の解除(2026-11-13): DM可否を no_send→send に戻すときだけ property.dmStatus+version increment" +
     "(dmUndeliverableAt だけ外すときは進めない=ALLOWED の3件と同じ理由)",
   "src/lib/building-link/rename.ts:126":
@@ -141,7 +144,7 @@ const VERSIONED: Record<string, string> = {
   "src/lib/registry-pdf/fill-areas.ts:157":
     "property.exclusiveAreaRegistry/landArea/landAreaMethod/totalFloorArea/lotNumber/buildingNumber/structureType/builtYear/builtMonth(謄本から空欄補完・2026-10-25/11-01)+version increment" +
     "(行ロック後に読み直し・編集中の鍵の間は見送り・where に version)",
-  "src/lib/registry-owner-check/service.ts:516":
+  "src/lib/registry-owner-check/service.ts:528":
     "property.dmStatus hold→send(謄本の名義の確認で「送付可に戻す」・2026-11-08)+version increment",
   "src/lib/dm-batch/second-letter.ts:345":
     "property.dmStatus send→no_send(同じ所有者あての2通目で宛先が残らなかった物件・2026-11-16)+version increment" +
@@ -165,15 +168,15 @@ interface AllowedEntry {
 }
 
 const ALLOWED_WITHOUT_VERSION: Record<string, AllowedEntry> = {
-  "src/lib/registry-owner-check/service.ts:542": {
+  "src/lib/registry-owner-check/service.ts:554": {
     reason: "property.dmOwnerPending のみ(名義の確認で人が DM を選んだので所有者待ちの印を下ろす・2026-11-14)",
     keys: ["dmOwnerPending"],
   },
-  "src/lib/dm-owner-judge/service.ts:72": {
+  "src/lib/dm-owner-judge/service.ts:74": {
     reason: "property.dmOwnerPending のみ(所有者待ちの印。編集画面の送信項目に無い・2026-11-14)",
     keys: ["dmOwnerPending"],
   },
-  "src/lib/dm-owner-judge/service.ts:100": {
+  "src/lib/dm-owner-judge/service.ts:102": {
     reason: "property.dmOwnerPending のみ(人が先に DM判断を決めた物件の印を下ろす・2026-11-14)",
     keys: ["dmOwnerPending"],
   },
@@ -206,7 +209,7 @@ const ALLOWED_WITHOUT_VERSION: Record<string, AllowedEntry> = {
     reason: "owner.updatedAt のみ(既存所有者へのリンク可否確認のための touch)",
     keys: ["updatedAt"],
   },
-  "src/app/api/import/reception-owner/route.ts:624": {
+  "src/app/api/import/reception-owner/route.ts:629": {
     reason: "owner.updatedAt のみ(行ロック獲得のための touch)",
     keys: ["updatedAt"],
   },

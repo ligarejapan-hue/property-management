@@ -10,6 +10,7 @@
  *   所有者の行まで押さえると「所有者 → 物件」の順の窓口と逆順になり互いに待ち合うため、
  *   押さえない(初回の全件比べの最中に同じ物件の氏名を直す、という重なりだけで起きる)。
  */
+import { findPropertiesWithAgentNameOwners, type AgentNameExclusionTx } from "@/lib/dm-batch/agent-name-exclusion";
 import prisma from "@/lib/prisma";
 import { ApiError, getUserPermissions } from "@/lib/api-helpers";
 import { canAccessPropertyRecord } from "@/lib/property-access";
@@ -511,26 +512,37 @@ export async function runNightlyRegistryOwnerChecks(
   return { ...r, doneTonight: doneTonight + r.processed };
 }
 
-/** DM が「未判断」(hold)なら「送付可」(send)に戻す(ロックの中)。戻したら true。 */
-export async function restoreDmSendIfHold(tx: Tx, propertyId: string, userId: string): Promise<boolean> {
+/**
+ * DM が「未判断」(hold)なら「送付可」(send)に戻す(ロックの中)。書いた値を返す(未判断でなければ null)。
+ * ⚠業者の名簿と同じ名前の所有者がいれば、送付可にせず「送付不可」にする("no_send" を返す・2026-11-16 発注者)。
+ */
+export async function restoreDmSendIfHold(
+  tx: Tx,
+  propertyId: string,
+  userId: string,
+): Promise<"send" | "no_send" | null> {
+  // ⚠1物件だけ聞いたので「見つかったか」で決める(返る id は小文字=URL の大文字の id と比べない・@codex #747 P2)
+  const agentName =
+    (await findPropertiesWithAgentNameOwners(tx as unknown as AgentNameExclusionTx, [propertyId])).size > 0;
+  const to = agentName ? "no_send" : "send";
   const updated = await tx.property.updateMany({
     where: { id: propertyId, dmStatus: "hold" },
     // ⚠版を上げる(開いている編集画面の古い値で黙って戻されないように=一括更新と同じ)
-    data: { dmStatus: "send", version: { increment: 1 } },
+    data: { dmStatus: to, version: { increment: 1 } },
   });
-  if (updated.count === 0) return false;
+  if (updated.count === 0) return null;
   await tx.changeLog.create({
     data: {
       targetTable: "properties",
       targetId: propertyId,
       fieldName: "dmStatus",
       oldValue: "hold",
-      newValue: "send",
+      newValue: to,
       source: "manual",
       changedBy: userId,
     },
   });
-  return true;
+  return to;
 }
 
 /**
@@ -863,7 +875,7 @@ export async function keepRegistryOwners(args: {
   propertyId: string;
   expectedAttachmentId: string;
   restoreDm: boolean;
-}): Promise<{ dmRestored: boolean }> {
+}): Promise<{ dmRestored: boolean; dmAgentNoSend: boolean }> {
   const { session, propertyId } = args;
   return prisma.$transaction(async (tx) => {
     await lockPropertyRecordForWrite(tx, propertyId, session);
@@ -888,8 +900,9 @@ export async function keepRegistryOwners(args: {
       where: { propertyId },
       data: { decision: "keep", decidedBy: session.id, decidedAt: new Date() },
     });
-    const dmRestored = args.restoreDm ? await restoreDmSendIfHold(tx, propertyId, session.id) : false;
+    const dm = args.restoreDm ? await restoreDmSendIfHold(tx, propertyId, session.id) : null;
     await settleDmOwnerPending(tx, propertyId);
-    return { dmRestored };
+    // dmAgentNoSend=戻すを選んだが、業者の名簿と同じ名前の所有者がいたので送付不可にした(2026-11-16)
+    return { dmRestored: dm === "send", dmAgentNoSend: dm === "no_send" };
   });
 }

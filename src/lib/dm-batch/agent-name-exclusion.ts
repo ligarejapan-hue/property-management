@@ -130,3 +130,63 @@ async function findChunk(
     SELECT r.id, r.agent, r.gaiji FROM r WHERE r.agent OR r.gaiji
   `);
 }
+
+/**
+ * 業者と同じ名前の所有者がいる物件(2026-11-16 発注者「業者の名簿と同じ名前は DM 送付不可」)。
+ * propertyIds のうち、つながっている所有者に1人でも業者と同じ名前の人がいる物件の id を返す。
+ * 判定は上の findOwnerNameExclusions と同じ式(agentNameKeySql)。空なら DB を引かない。
+ * ⚠返す id は小文字(property_id::text)。大文字の id を渡した呼び出し元は `.has(id)` で比べない(@codex #747 P2)。
+ */
+export async function findPropertiesWithAgentNameOwners(
+  tx: AgentNameExclusionTx,
+  propertyIds: readonly string[],
+): Promise<Set<string>> {
+  const ids = [...new Set(propertyIds)].sort();
+  const found = new Set<string>();
+  for (let i = 0; i < ids.length; i += OWNER_CHUNK) {
+    const chunk = ids.slice(i, i + OWNER_CHUNK);
+    const rows = await tx.$queryRaw<{ id: string }[]>(Prisma.sql`
+      WITH k AS (
+        SELECT po.property_id::text AS id, ${agentNameKeySql(Prisma.sql`o.name`)} AS key
+        FROM property_owners po JOIN owners o ON o.id = po.owner_id
+        WHERE po.property_id IN (${Prisma.join(chunk.map((id) => Prisma.sql`${id}::uuid`))})
+      )
+      SELECT DISTINCT k.id FROM k
+      WHERE ${agentKeyMatchSql(Prisma.sql`k.key`)}
+    `);
+    for (const r of rows) found.add(r.id);
+  }
+  return found;
+}
+
+/**
+ * 「送付可」なのに業者と同じ名前の所有者がいる物件(アーカイブを除く)を最大 take 件。見回りが送付不可に直す。
+ */
+export async function findSendPropertiesWithAgentNameOwners(
+  tx: AgentNameExclusionTx,
+  take: number,
+): Promise<string[]> {
+  const rows = await tx.$queryRaw<{ id: string }[]>(Prisma.sql`
+    WITH k AS (
+      SELECT p.id::text AS id, ${agentNameKeySql(Prisma.sql`o.name`)} AS key
+      FROM properties p
+      JOIN property_owners po ON po.property_id = p.id
+      JOIN owners o ON o.id = po.owner_id
+      WHERE p.dm_status = 'send' AND p.is_archived = false
+    )
+    SELECT DISTINCT k.id FROM k
+    WHERE ${agentKeyMatchSql(Prisma.sql`k.key`)}
+    ORDER BY k.id
+    LIMIT ${Math.max(1, Math.floor(take))}
+  `);
+  return rows.map((r) => r.id);
+}
+
+/** そろえた名前が業者(使っている名簿・国交省の一覧)の会社名と同じか(空は一致にしない)。 */
+function agentKeyMatchSql(key: Prisma.Sql): Prisma.Sql {
+  return Prisma.sql`(${key} <> ''
+    AND (
+      ${key} IN (SELECT ${agentNameKeySql(Prisma.sql`a.company_name`)} FROM agents a WHERE a.is_archived = false)
+      OR ${key} IN (SELECT ${agentNameKeySql(Prisma.sql`m.company_name`)} FROM mlit_agents m)
+    ))`;
+}

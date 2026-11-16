@@ -47,6 +47,11 @@ vi.mock("@/lib/api-helpers", () => {
   };
 });
 vi.mock("@/lib/audit", () => ({ writeAuditLog: vi.fn() }));
+// 送付可に戻すときの確かめ(所有者がいる・業者の名簿と同じ名前の所有者がいない)。既定=通す。
+vi.mock("@/lib/dm-owner-judge/guard", () => ({
+  assertOwnersForDmSend: vi.fn(async () => undefined),
+  assertNoAgentNameOwnersForDmSend: vi.fn(async () => undefined),
+}));
 vi.mock("@/lib/prisma", () => ({
   default: {
     property: { findUnique: vi.fn(), update: vi.fn() },
@@ -56,6 +61,8 @@ vi.mock("@/lib/prisma", () => ({
 import prismaMock from "@/lib/prisma";
 import { getApiSession, getUserPermissions } from "@/lib/api-helpers";
 import { writeAuditLog } from "@/lib/audit";
+import { ApiError } from "@/lib/api-helpers";
+import { assertNoAgentNameOwnersForDmSend, assertOwnersForDmSend } from "@/lib/dm-owner-judge/guard";
 import { POST } from "../../app/api/properties/[id]/clear-dm-undeliverable/route";
 
 const pm = prismaMock as never as {
@@ -132,6 +139,27 @@ describe("POST clear-dm-undeliverable", () => {
     expect(res.status).toBe(200);
     const arg = pm.property.update.mock.calls[0][0];
     expect(arg.data.version).toEqual({ increment: 1 });
+  });
+
+  it("送付可に戻すときだけ、所有者と業者の名簿の名前を確かめる(2026-11-16)", async () => {
+    await POST(req({ restoreDmStatus: "send" }) as never, ctx());
+    expect(assertOwnersForDmSend).toHaveBeenCalledWith(expect.anything(), ["p1"]);
+    expect(assertNoAgentNameOwnersForDmSend).toHaveBeenCalledWith(expect.anything(), ["p1"]);
+    vi.mocked(assertOwnersForDmSend).mockClear();
+    vi.mocked(assertNoAgentNameOwnersForDmSend).mockClear();
+    await POST(req({ restoreDmStatus: "hold" }) as never, ctx());
+    await POST(req({}) as never, ctx());
+    expect(assertOwnersForDmSend).not.toHaveBeenCalled();
+    expect(assertNoAgentNameOwnersForDmSend).not.toHaveBeenCalled();
+  });
+
+  it("業者の名簿と同じ名前の所有者がいれば 422・更新しない(2026-11-16 発注者)", async () => {
+    vi.mocked(assertNoAgentNameOwnersForDmSend).mockRejectedValueOnce(
+      new (ApiError as unknown as new (s: number, m: string, c: string) => Error)(422, "x", "AGENT_NAME_DM_SEND"),
+    );
+    const res = await POST(req({ restoreDmStatus: "send" }) as never, ctx());
+    expect(res.status).toBe(422);
+    expect(pm.property.update).not.toHaveBeenCalled();
   });
 
   it("存在しない物件は 404", async () => {
