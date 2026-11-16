@@ -94,7 +94,9 @@ describe("補正候補画面の物件リンク", () => {
       const allowed =
         /propertyOwnerCount\??:\s*number;/.test(line) ||
         /[ab]\.propertyOwnerCount/.test(line) ||
-        /count=\{[cm]\.propertyOwnerCount\}/.test(line);
+        /count=\{[cm]\.propertyOwnerCount\}/.test(line) ||
+        // 「物件を開く」の部品への受け渡し(2026-11-16)。
+        /^\s*count: c\.propertyOwnerCount,$/.test(line);
       expect(allowed, `想定外の使い方: ${line.trim()}`).toBe(true);
     }
   });

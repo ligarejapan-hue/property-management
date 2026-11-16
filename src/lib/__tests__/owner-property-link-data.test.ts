@@ -114,7 +114,15 @@ describe("配線: 3つのタブの読み込み口と画面が、同じ部品を�
   it("画面は3つのタブとも「物件を開く」のリンクを出す", () => {
     const s = src("src/app/(dashboard)/admin/owners/correction/page.tsx");
     expect(s).toContain("<OwnerPropertyOpenLink ownerId={c.ownerId} link={c.propertyLink} />");
-    expect((s.match(/<OwnerPropertyOpenLink/g) ?? []).length).toBe(3);
+    expect((s.match(/<OwnerPropertyOpenLink/g) ?? []).length).toBe(4);
     expect(s).toContain("link={row.propertyLink}");
+  });
+  it("最初のタブ(全て・孤立・住所なし・重複候補)も同じ部品で出す。権限の有無は summary から渡す", () => {
+    const s = src("src/app/(dashboard)/admin/owners/correction/page.tsx");
+    const call = s.match(/<OwnerPropertyOpenLink\s+ownerId=\{c\.id\}[\s\S]*?\/>/)?.[0] ?? "";
+    expect(call).toContain("count: c.propertyOwnerCount");
+    expect(call).toContain("singlePropertyId: c.singlePropertyId");
+    expect(call).toContain("hasReachableProperty: c.hasReachableProperty");
+    expect(call).toContain("available: data.summary.propertyLinkAvailable ?? false");
   });
 });
