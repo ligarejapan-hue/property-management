@@ -69,7 +69,7 @@ describe("お金の受け渡し → 残金決済のご案内", () => {
   });
 });
 
-describe("お金の受け渡し → 準備チェックリスト", () => {
+describe("お金の受け渡し → 書類確認書", () => {
   it("持参する金額の払い方の初期値に、手付金・残金の払い方が入る(未定は空)", () => {
     const d = { ...deal, payments: { deposit: cash, balance: transfer } };
     const c = ctx(d);

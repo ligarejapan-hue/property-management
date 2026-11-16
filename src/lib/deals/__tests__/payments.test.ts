@@ -128,7 +128,7 @@ describe("書類に入れる文", () => {
     expect(sellerReceiveText({ ...base, payments: { balance: cash } }, calcOf(base), SELF_ACC)).toBe("現金でお受け取りいただきます");
     expect(sellerReceiveText(base, calcOf(base), SELF_ACC)).toBeNull();
   });
-  it("準備チェックリストの払い方: 振込・現金だけ写す(未定は空)。残代金・精算金は残金の払い方", () => {
+  it("書類確認書の払い方: 振込・現金だけ写す(未定は空)。残代金・精算金は残金の払い方", () => {
     const d = { ...base, payments: { deposit: cash, balance: tr(), registration: tr(), cancellation: { method: "undecided" as const, account: EMPTY_BANK_ACCOUNT } } };
     const c = calcOf(d);
     expect(checklistPayDefault("deposit", d, c)).toEqual([{ method: "cash", amount: null, other: null }]);
@@ -151,7 +151,7 @@ describe("書類に入れる文", () => {
     const rows = paymentRows(d, calcOf(d)).filter((r) => r.key.startsWith("other:"));
     expect(rows.map((r) => [r.label, r.amount])).toEqual([["処分費", 30_000]]);
   });
-  it("準備チェックリスト: 精算金だけ別の払い方なら、残代金と精算金を分けて金額を入れる", () => {
+  it("書類確認書: 精算金だけ別の払い方なら、残代金と精算金を分けて金額を入れる", () => {
     const d = { ...base, payments: { balance: tr(), settlement: cash } };
     const c = calcOf(d);
     const net = c.settlement.net.amount;

@@ -30,7 +30,7 @@ const conflictText = (e: unknown) =>
 /**
  * お金の受け渡し(2026-11-16 発注者)。お金ごとに払い方(振込・現金・未定・精算金だけ残金と一緒に)と振込先の口座を入れる。
  * 金額・払う人・受け取る人は取引の入力と決済の計算から出す(ここでは直さない)。決まりは src/lib/deals/payments.ts。
- * 入れた内容は、残金決済のご案内と準備チェックリストの初期値に入る(書類の画面で直せる)。
+ * 入れた内容は、残金決済のご案内と書類確認書(契約時・決済時)の払い方の初期値に入る(書類の画面で直せる)。
  */
 export default function DealPaymentsPanel({
   deal, calc, selfAccount, onSaved,
@@ -110,7 +110,7 @@ export default function DealPaymentsPanel({
     <div className="space-y-4">
       <p className="text-sm text-gray-600 dark:text-gray-400">
         お金ごとに、現金か振込かを選び、振込なら振込先の口座を入れます。金額は「金額・費用」「精算」タブの入力から自動で出します。
-        入れた内容は、残金決済のご案内と準備チェックリストに最初から入ります(書類を出すときに直せます)。
+        入れた内容は、残金決済のご案内と書類確認書の払い方に最初から入ります(書類を出すときに直せます)。
       </p>
       {error && <p className="text-sm text-red-600 dark:text-red-400" role="alert">{error}</p>}
       <ul className="divide-y divide-gray-200 rounded-md border border-gray-200 dark:divide-gray-800 dark:border-gray-800">
