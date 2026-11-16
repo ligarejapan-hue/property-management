@@ -26,16 +26,16 @@ export type Db = {
   $queryRaw: <T>(q: TemplateStringsArray, ...v: unknown[]) => Promise<T>;
 };
 
-// ⚠この表の時刻列(`acquired_at` / `heartbeat_at` / `activity_at` / `force_released_at`)を JS へ返す SQL は、
-//   必ず `"列"::timestamptz AS "列"` にする。
-//   列は時間帯なしで、`clock_timestamp()` を書いた時点の DB 接続の時間帯(本番は日本時間)の壁時計が入っている。
-//   素のまま返すとドライバが UTC とみなし、9時間先の瞬間として読まれる。
-//   キャストは DB 接続の時間帯で解釈するので、接続が日本時間でも UTC でも正しい瞬間になる。
-//   - `acquired_at`: 帯の「(HH:mm〜)」が9時間先にずれていた(2026-11-15 に直した)。
-//   - `heartbeat_at` / `activity_at` / `force_released_at`: `evaluateLock`(rules.ts)が DB の今時刻(`db_now`=時間帯つき)と
-//     比べる。素のままだと「9時間先に更新された鍵」に見え、①切れた鍵が約9時間「編集中」と表示される
-//     ②自分の切れた鍵が「自分の鍵」と判定され、次の保存で初めて断られる ③「あと5分で終了」の予告が出ない
-//     (2026-11-16 に直した)。SQL の中だけで比べている箇所(取得・延長・保存の門)は元から正しい=変えない。
+// ⚠この表の時刻を JS とやりとりする SQL は、**必ず UTC の時間帯なしの値**でやりとりする(2026-11-16 実機確認317)。
+//   - DB → JS: `("列"::timestamptz AT TIME ZONE 'UTC') AS "列"`(`db_now` も `(clock_timestamp() AT TIME ZONE 'UTC')`)
+//   - JS → DB: `(${date}::timestamp AT TIME ZONE 'UTC')`
+//   理由: 列は時間帯なしで、`clock_timestamp()` を書いた時点の DB 接続の時間帯(本番は日本時間)の壁時計が入っている。
+//   接続部品(@prisma/adapter-pg)は、時間帯つきの値を読むとき「+09」を**切り落として** UTC とみなし
+//   (normalize_timestamptz)、日時を渡すときは時間帯の印なしの UTC の壁時計で送る(formatDateTime)。
+//   そのため `"列"::timestamptz AS "列"` だけ(2026-11-15・16 の直し)では、本番では9時間先の瞬間のままだった
+//   (帯の「(12:33〜)」)。判定は db_now も同じだけずれていたので打ち消し合って動いていた=ずれは画面に出る時刻だけ。
+//   SQL の中だけで比べている箇所(取得・延長・保存の門)は時間帯が揃っているので正しい=変えない。
+//   本物の部品と DB で確かめるテスト=`__tests__/edit-lock-db-timezone.test.ts`(接続が日本時間・UTC の両方)。
 type RawRow = {
   id: string;
   user_id: string;
@@ -73,7 +73,7 @@ export type Holder = { userId: string; screenTokenHash: string };
 
 async function readOne(db: Db, t: Target): Promise<EditLockRow | null> {
   const rows = await db.$queryRaw<RawRow[]>`
-    SELECT "id", "user_id", "screen_token_hash", "acquired_at"::timestamptz AS "acquired_at", "heartbeat_at"::timestamptz AS "heartbeat_at", "activity_at"::timestamptz AS "activity_at", "force_released_at"::timestamptz AS "force_released_at"
+    SELECT "id", "user_id", "screen_token_hash", ("acquired_at"::timestamptz AT TIME ZONE 'UTC') AS "acquired_at", ("heartbeat_at"::timestamptz AT TIME ZONE 'UTC') AS "heartbeat_at", ("activity_at"::timestamptz AT TIME ZONE 'UTC') AS "activity_at", ("force_released_at"::timestamptz AT TIME ZONE 'UTC') AS "force_released_at"
     FROM "edit_locks"
     WHERE "resource_type" = ${t.resourceType}::"EditLockResource" AND "resource_id" = ${t.resourceId}::uuid
   `;
@@ -125,7 +125,7 @@ export async function acquireEditLock(
     }[]
   >`
     WITH now_ts AS (SELECT clock_timestamp() AS db_now)
-    SELECT now_ts.db_now, "edit_locks"."id" AS lock_id, "edit_locks"."user_id", "edit_locks"."screen_token_hash",
+    SELECT (now_ts.db_now AT TIME ZONE 'UTC') AS db_now, "edit_locks"."id" AS lock_id, "edit_locks"."user_id", "edit_locks"."screen_token_hash",
            CASE
              WHEN "edit_locks"."heartbeat_at" < now_ts.db_now - make_interval(secs => ${GRACE_SEC}::double precision) THEN 'heartbeat'
              WHEN "edit_locks"."activity_at" < now_ts.db_now - make_interval(secs => ${IDLE_SEC}::double precision) THEN 'idle'
@@ -170,10 +170,10 @@ export async function acquireEditLock(
         "force_released_at" = NULL,
         "force_released_by" = NULL
     WHERE "edit_locks"."force_released_at" IS NOT NULL
-       OR "edit_locks"."heartbeat_at" < ${dbNow}::timestamptz - make_interval(secs => ${GRACE_SEC}::double precision)
-       OR "edit_locks"."activity_at" < ${dbNow}::timestamptz - make_interval(secs => ${IDLE_SEC}::double precision)
+       OR "edit_locks"."heartbeat_at" < (${dbNow}::timestamp AT TIME ZONE 'UTC') - make_interval(secs => ${GRACE_SEC}::double precision)
+       OR "edit_locks"."activity_at" < (${dbNow}::timestamp AT TIME ZONE 'UTC') - make_interval(secs => ${IDLE_SEC}::double precision)
        OR ("edit_locks"."user_id" = EXCLUDED."user_id" AND "edit_locks"."screen_token_hash" = EXCLUDED."screen_token_hash")
-    RETURNING "id", "acquired_at"::timestamptz AS "acquired_at"
+    RETURNING "id", ("acquired_at"::timestamptz AT TIME ZONE 'UTC') AS "acquired_at"
   `;
   if (got[0]) {
     // ⚠**同じ利用者の別タブでも横取りは横取り**(@codex R9 P2)。別タブは他人と同じ扱いにしているので、
@@ -227,7 +227,7 @@ export async function heartbeatEditLock(
       AND "force_released_at" IS NULL
       AND "heartbeat_at" >= clock_timestamp() - make_interval(secs => ${GRACE_SEC}::double precision)
       AND "activity_at" >= clock_timestamp() - make_interval(secs => ${IDLE_SEC}::double precision)
-    RETURNING "id", "activity_at"::timestamptz AS "activity_at"
+    RETURNING "id", ("activity_at"::timestamptz AT TIME ZONE 'UTC') AS "activity_at"
   `;
   if (updated[0]) return { ok: true, idleSince: updated[0].activity_at };
   // ⚠状態の判定は DB に任せる(@codex R9 P2)。アプリの時計で期限を測り直すと、
@@ -365,9 +365,9 @@ async function readRawWithDbNow(
   const rows = await db.$queryRaw<
     (RawRow & { resource_type: EditLockResourceType; resource_id: string; db_now: Date })[]
   >`
-    SELECT clock_timestamp() AS db_now,
+    SELECT (clock_timestamp() AT TIME ZONE 'UTC') AS db_now,
            "id", "resource_type", "resource_id", "user_id", "screen_token_hash",
-           "acquired_at"::timestamptz AS "acquired_at", "heartbeat_at"::timestamptz AS "heartbeat_at", "activity_at"::timestamptz AS "activity_at", "force_released_at"::timestamptz AS "force_released_at"
+           ("acquired_at"::timestamptz AT TIME ZONE 'UTC') AS "acquired_at", ("heartbeat_at"::timestamptz AT TIME ZONE 'UTC') AS "heartbeat_at", ("activity_at"::timestamptz AT TIME ZONE 'UTC') AS "activity_at", ("force_released_at"::timestamptz AT TIME ZONE 'UTC') AS "force_released_at"
     FROM "edit_locks"
     -- ⚠列側を ::text へ落とさない(review Minor 7)。"resource_id" は uuid 列なので、
     --   unnest 側を "resource_type"/"resource_id" と同じ型(enum/uuid)にキャストして

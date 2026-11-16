@@ -119,10 +119,10 @@ describe("acquireEditLock", () => {
     const dbNowBindCount = upsertValues.filter((v) => v === dbNow).length;
     expect(dbNowBindCount).toBe(2); // heartbeat_at 用・activity_at 用の2箇所
     expect(whereClause).toMatch(
-      new RegExp(`"edit_locks"\\."heartbeat_at" < \\{[\\s\\S]*?\\}::timestamptz - make_interval\\(secs => \\{${GRACE_SEC}\\}::double precision\\)`),
+      new RegExp(`"edit_locks"\\."heartbeat_at" < \\(\\{[\\s\\S]*?\\}::timestamp AT TIME ZONE 'UTC'\\) - make_interval\\(secs => \\{${GRACE_SEC}\\}::double precision\\)`),
     );
     expect(whereClause).toMatch(
-      new RegExp(`"edit_locks"\\."activity_at" < \\{[\\s\\S]*?\\}::timestamptz - make_interval\\(secs => \\{${IDLE_SEC}\\}::double precision\\)`),
+      new RegExp(`"edit_locks"\\."activity_at" < \\(\\{[\\s\\S]*?\\}::timestamp AT TIME ZONE 'UTC'\\) - make_interval\\(secs => \\{${IDLE_SEC}\\}::double precision\\)`),
     );
   });
 
@@ -276,7 +276,7 @@ describe("heartbeatEditLock", () => {
     expect(res).toEqual({ ok: true, idleSince: activityAt });
     const sql = sqlOf(queryRaw.mock.calls[0]);
     // ⚠時間帯つきにして返す(素のままだと9時間先の瞬間になり、「あと5分で終了」の予告の起点がずれる)。
-    expect(sql).toMatch(/RETURNING "id", "activity_at"::timestamptz AS "activity_at"/);
+    expect(sql).toMatch(/RETURNING "id", \("activity_at"::timestamptz AT TIME ZONE 'UTC'\) AS "activity_at"/);
   });
 
   it("更新できなければ、DBが判定した現在の状態(dbNow付き)を返す(アプリの時計で判定し直さない)", async () => {
@@ -415,9 +415,9 @@ describe("通知 段階4c: 取り直されないまま期限が過ぎた鍵の�
 // 帯の「(HH:mm〜)」が9時間先にずれた不具合の再発防止。
 // `acquired_at` は時間帯なしの列で、DB の接続の時間帯(本番は日本時間)の壁時計が入っている。
 // そのまま返すとドライバが UTC とみなして9時間ずれるので、画面に出る開始時刻を返す
-// SELECT / RETURNING はすべて `::timestamptz` で正しい瞬間にしてから返す。
-describe("表示する開始時刻(acquired_at)は timestamptz にして返す", () => {
-  const CAST = /"acquired_at"::timestamptz AS "acquired_at"/;
+// SELECT / RETURNING はすべて `("列"::timestamptz AT TIME ZONE 'UTC')` で UTC の値にしてから返す(service.ts 冒頭の注意)。
+describe("表示する開始時刻(acquired_at)は UTC の値にして返す", () => {
+  const CAST = /\("acquired_at"::timestamptz AT TIME ZONE 'UTC'\) AS "acquired_at"/;
   const heldRaw = {
     id: "l1",
     resource_type: "property",
@@ -436,7 +436,7 @@ describe("表示する開始時刻(acquired_at)は timestamptz にして返す",
     queryRaw.mockResolvedValueOnce(noPrevLockRow()).mockResolvedValueOnce([{ id: "x", acquired_at: new Date() }]);
     await acquireEditLock(db, BASE);
     const sql = sqlOf(queryRaw.mock.calls[1]);
-    expect(sql).toMatch(/RETURNING "id", "acquired_at"::timestamptz AS "acquired_at"/);
+    expect(sql).toMatch(/RETURNING "id", \("acquired_at"::timestamptz AT TIME ZONE 'UTC'\) AS "acquired_at"/);
   });
 
   it("取得できなかったときに今の保持者を読む SELECT", async () => {
@@ -470,8 +470,8 @@ describe("表示する開始時刻(acquired_at)は timestamptz にして返す",
 // 判定に使う時刻(heartbeat_at / activity_at / force_released_at)も同じ取り違えがあった(2026-11-16)。
 // `evaluateLock` は DB の今時刻(db_now=時間帯つき)と比べるので、素のまま返すと「9時間先に更新された鍵」に見え、
 //  ①切れた鍵が約9時間「編集中」と表示される ②自分の切れた鍵が「自分の鍵」と判定される ③「あと5分で終了」の予告が出ない。
-// JS へ返す SELECT はすべて `::timestamptz` で正しい瞬間にしてから返す。
-describe("判定に使う時刻(heartbeat_at / activity_at / force_released_at)は timestamptz にして返す", () => {
+// JS へ返す SELECT はすべて UTC の値にしてから返す(本物の部品での確かめ=edit-lock-db-timezone.test.ts)。
+describe("判定に使う時刻(heartbeat_at / activity_at / force_released_at)は UTC の値にして返す", () => {
   const COLS = ["heartbeat_at", "activity_at", "force_released_at"] as const;
   const heldRaw = {
     id: "l1",
@@ -489,7 +489,7 @@ describe("判定に使う時刻(heartbeat_at / activity_at / force_released_at)�
     // 行を返す SELECT の列の並びだけを見る(WHERE や SET の中の列は SQL の中で比べるので素のままでよい)。
     const list = sql.slice(sql.indexOf("SELECT"), sql.indexOf('FROM "edit_locks"'));
     for (const c of COLS) {
-      expect(list).toContain(`"${c}"::timestamptz AS "${c}"`);
+      expect(list).toContain(`("${c}"::timestamptz AT TIME ZONE 'UTC') AS "${c}"`);
       // 素の列のまま返す書き方が残っていない。
       expect(list).not.toMatch(new RegExp(`(?<!AS )"${c}"(?!::timestamptz)`));
     }
@@ -563,7 +563,7 @@ describe("readEditLocks", () => {
     const sql = sqlOf(queryRaw.mock.calls[0]);
     expect(sql).not.toMatch(/AS active/);
     expect(sql).not.toMatch(/AS force_released/);
-    expect(sql).toMatch(/clock_timestamp\(\) AS db_now/);
+    expect(sql).toMatch(/\(clock_timestamp\(\) AT TIME ZONE 'UTC'\) AS db_now/);
   });
 
   it("空配列なら問い合わせずに空を返す", async () => {
