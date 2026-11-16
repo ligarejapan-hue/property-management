@@ -1,6 +1,7 @@
 import type { PropertyDealSummary } from "@/lib/property-business-type";
 import type { DealListItem, DealPartyView, DealView } from "./view";
 import type { DealSettingsView } from "./settings";
+import type { BankAccount } from "./schemas";
 import type { PropertyKindDef } from "./constants";
 import type { DealCalc } from "./calc/deal-calc";
 import type { FundingPlanCalc } from "./calc/funding-plan";
@@ -42,6 +43,8 @@ async function call<T>(url: string, init?: { method?: string; body?: unknown }):
 export interface DealOptions {
   propertyKinds: PropertyKindDef[];
   selfParty: { name: string; representative: string | null; address: string | null; phone: string | null };
+  /** 取引の設定の自社の口座(お金の受け渡しの初期値)。 */
+  selfBankAccount: BankAccount;
 }
 export interface UserOption { id: string; name: string; role: string }
 export interface RateTableView { id: string; kind: string; validFrom: string; validTo: string | null; content: unknown; updatedAt: string }

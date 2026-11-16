@@ -7,9 +7,9 @@ const PAGE = "src/app/(dashboard)/deals/[id]/page.tsx";
 const PANELS = ["deal-basic-panel", "deal-property-panel", "deal-parties-panel"].map((n) => `src/components/deals/${n}.tsx`);
 
 describe("取引の詳しい画面", () => {
-  it("タブは 基本・物件・当事者・金額・費用・精算・OC の順(OC はオーナーチェンジのときだけ)", () => {
+  it("タブは 基本・物件・当事者・金額・費用・精算・お金の受け渡し・OC の順(OC はオーナーチェンジのときだけ)", () => {
     const src = read(PAGE);
-    expect(src).toMatch(/\{ key: "basic", label: "基本" \},\s*\{ key: "property", label: "物件" \},\s*\{ key: "parties", label: "当事者" \},\s*\{ key: "money", label: "金額・費用" \},\s*\{ key: "settlement", label: "精算" \},\s*\{ key: "oc", label: "OC" \}/);
+    expect(src).toMatch(/\{ key: "basic", label: "基本" \},\s*\{ key: "property", label: "物件" \},\s*\{ key: "parties", label: "当事者" \},\s*\{ key: "money", label: "金額・費用" \},\s*\{ key: "settlement", label: "精算" \},\s*(\/\/[^\n]*\n\s*)?\{ key: "payments", label: "お金の受け渡し" \},\s*\{ key: "oc", label: "OC" \}/);
     expect(src).toMatch(/deal\.hasOc \|\| t\.key !== "oc"/);
     expect(src).toContain("<Tabs");
     expect(src).toContain("tabPanelProps(");

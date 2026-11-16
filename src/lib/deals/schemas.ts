@@ -52,6 +52,35 @@ export const bankAccountSchema = z.object({
 export type BankAccount = z.output<typeof bankAccountSchema>;
 export const EMPTY_BANK_ACCOUNT: BankAccount = { bankName: null, branchName: null, accountType: null, accountNumber: null, accountHolder: null };
 
+/**
+ * お金の受け渡し(2026-11-16 発注者「現金か振込かを確かめて送金先を入れる」)。お金ごとに払い方と振込先の口座。
+ * with_balance=残金と一緒に(精算金だけ・払い方と口座は残金と同じ)。口座が空で受け取る人が自社なら、取引の設定の口座を使う。
+ * 決まりと書類への入れ方は src/lib/deals/payments.ts。
+ */
+export const PAYMENT_METHODS = ["undecided", "transfer", "cash", "with_balance"] as const;
+export type PaymentMethod = (typeof PAYMENT_METHODS)[number];
+export const PAYMENT_FIXED_KEYS = [
+  "deposit", "balance", "settlement", "registration", "cancellation", "survey", "brokerageSeller", "brokerageBuyer",
+] as const;
+export type PaymentFixedKey = (typeof PAYMENT_FIXED_KEYS)[number];
+export const paymentEntrySchema = z.object({
+  method: z.enum(PAYMENT_METHODS),
+  account: bankAccountSchema,
+}).strict();
+export type PaymentEntry = z.output<typeof paymentEntrySchema>;
+export const EMPTY_PAYMENT_ENTRY: PaymentEntry = { method: "undecided", account: EMPTY_BANK_ACCOUNT };
+const entry = paymentEntrySchema.optional();
+export const paymentsSchema = z.object({
+  deposit: entry, balance: entry, settlement: entry, registration: entry, cancellation: entry, survey: entry,
+  brokerageSeller: entry, brokerageBuyer: entry,
+  /** 費用のその他の行(行の名前ごと)。 */
+  others: z.record(z.string().trim().min(1).max(50), paymentEntrySchema).optional(),
+}).strict()
+  // 「残金と一緒に」は精算金だけ(残金に入ると残金を探し続けてしまう・内部レビュー P3)。
+  .refine((p) => PAYMENT_FIXED_KEYS.every((k) => k === "settlement" || p[k]?.method !== "with_balance")
+    && Object.values(p.others ?? {}).every((e) => e.method !== "with_balance"), "「残金と一緒に」は精算金だけで選べます");
+export type Payments = z.output<typeof paymentsSchema>;
+
 const propertyKindSchema = z.object({
   key: z.string().regex(/^[a-z0-9_]{1,30}$/),
   label: z.string().trim().min(1).max(30),
@@ -183,6 +212,8 @@ export const dealUpdateSchema = z.object({
   settlementTerms: settlementTermsSchema.optional(),
   leases: leasesSchema.optional(),
   overrides: overridesSchema.optional(),
+  /** お金の受け渡し(払い方・振込先)。src/lib/deals/payments.ts。 */
+  payments: paymentsSchema.optional(),
   /** 資金計画表の入力(`plan_inputs.funding` だけを差し替える)。 */
   fundingPlan: fundingInputsSchema.optional(),
   /** 事業計画書の入力(`plan_inputs.business` だけを差し替える・買取再販だけ)。 */

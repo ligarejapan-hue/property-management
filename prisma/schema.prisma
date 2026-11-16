@@ -2429,6 +2429,8 @@ model Deal {
   costs              Json      @default("{}") @db.JsonB
   counterpartyBroker Json      @default("{}") @map("counterparty_broker") @db.JsonB
   settlementTerms    Json      @default("{}") @map("settlement_terms") @db.JsonB
+  /// お金の受け渡し(お金ごとの払い方・振込先・2026-11-16 発注者)。src/lib/deals/payments.ts。
+  payments           Json      @default("{}") @db.JsonB
   leases             Json      @default("[]") @db.JsonB
   planInputs         Json      @default("{}") @map("plan_inputs") @db.JsonB
   checklistState     Json      @default("{}") @map("checklist_state") @db.JsonB

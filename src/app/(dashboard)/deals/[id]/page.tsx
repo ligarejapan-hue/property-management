@@ -11,6 +11,8 @@ import DealPropertyPanel from "@/components/deals/deal-property-panel";
 import DealPartiesPanel from "@/components/deals/deal-parties-panel";
 import DealMoneyPanel from "@/components/deals/deal-money-panel";
 import DealSettlementPanel from "@/components/deals/deal-settlement-panel";
+import DealPaymentsPanel from "@/components/deals/deal-payments-panel";
+import { EMPTY_BANK_ACCOUNT } from "@/lib/deals/schemas";
 import DealOcPanel from "@/components/deals/deal-oc-panel";
 import DealDocumentsPanel from "@/components/deals/deal-documents-panel";
 import DealPropertySide from "@/components/deals/deal-property-side";
@@ -39,6 +41,8 @@ const DEAL_TABS = [
   { key: "parties", label: "当事者" },
   { key: "money", label: "金額・費用" },
   { key: "settlement", label: "精算" },
+  // お金ごとの払い方(現金・振込)と振込先(2026-11-16 発注者)。
+  { key: "payments", label: "お金の受け渡し" },
   { key: "oc", label: "OC" },
   { key: "documents", label: "書類" },
   // 物件の添付ファイル(この取引の分から出す・2026-11-04 案A)。物件を開ける人だけ。
@@ -196,6 +200,9 @@ export default function DealDetailPage({ params }: { params: Promise<{ id: strin
         </div>
         <div hidden={tab !== "settlement"}>
           <DealSettlementPanel key={k([{ ...deal.settlementTerms, depositMode: null }, pickOverrides(deal.overrides, SETTLEMENT_OVERRIDE_KEYS)])} deal={deal} calc={calc} onSaved={reload} />
+        </div>
+        <div hidden={tab !== "payments"}>
+          <DealPaymentsPanel key={k([deal.payments ?? {}])} deal={deal} calc={calc} selfAccount={options?.selfBankAccount ?? EMPTY_BANK_ACCOUNT} onSaved={reload} />
         </div>
         {deal.hasOc && (
           <div hidden={tab !== "oc"}>

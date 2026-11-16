@@ -5,7 +5,10 @@ import { requireDeal } from "@/lib/deals/guard";
 import { loadDealSettings } from "@/lib/deals/settings-store";
 import { resolveCompanyProfile } from "@/lib/sales-sheet/company-profile-store";
 
-/** 取引の画面で使う選択肢(物件種別)と、当事者に「自社を入れる」ための会社情報。 */
+/**
+ * 取引の画面で使う選択肢(物件種別)と、当事者に「自社を入れる」ための会社情報。
+ * selfBankAccount = 取引の設定の自社の口座(お金の受け渡しで、自社が受け取るお金の振込先の初期値・2026-11-16)。
+ */
 export async function GET() {
   try {
     await requireDeal("read");
@@ -19,6 +22,7 @@ export async function GET() {
       {
         propertyKinds: settings.propertyKinds,
         selfParty: { name: company.nameJa, representative, address: company.address || null, phone: company.tel || null },
+        selfBankAccount: settings.bankAccount,
       },
       { headers: { "Cache-Control": "no-store" } },
     );
