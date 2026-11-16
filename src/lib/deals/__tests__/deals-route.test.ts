@@ -214,6 +214,10 @@ describe("GET /api/deals/options", () => {
     pm.companyProfile.findUnique.mockResolvedValue({ nameJa: "試験不動産株式会社", license: null, tel: null, fax: null, email: null, hp: null, address: null });
     const body = await (await OPTIONS()).json();
     expect(body.selfBankAccount).toEqual(bank);
+    // 見るだけの人には空の口座(保存できないので要らない)。
+    (getUserPermissions as Fn).mockResolvedValue([{ resource: "deal", action: "read", granted: true }]);
+    const ro = await (await OPTIONS()).json();
+    expect(ro.selfBankAccount).toEqual({ bankName: null, branchName: null, accountType: null, accountNumber: null, accountHolder: null });
   });
 });
 
