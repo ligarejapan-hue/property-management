@@ -6,7 +6,7 @@ const db = vi.hoisted(() => {
   const self = {
     mailConfig: { findUnique: vi.fn() },
     leadFollowupStep: { findMany: vi.fn() },
-    leadFollowup: { updateMany: vi.fn(), findMany: vi.fn(), findFirst: vi.fn(), createMany: vi.fn() },
+    leadFollowup: { updateMany: vi.fn(), findMany: vi.fn(), findFirst: vi.fn(), findUnique: vi.fn(), createMany: vi.fn() },
     leadFollowupSend: { createMany: vi.fn(), count: vi.fn() },
     mailUnsubscribe: { findUnique: vi.fn(), findMany: vi.fn() },
     property: { findMany: vi.fn() },
@@ -78,6 +78,7 @@ beforeEach(() => {
   db.leadFollowup.updateMany.mockResolvedValue({ count: 1 });
   db.leadFollowup.findMany.mockResolvedValue([]);
   db.leadFollowup.findFirst.mockResolvedValue(null);
+  db.leadFollowup.findUnique.mockResolvedValue({ lastSentAt: null });
   db.leadFollowup.createMany.mockResolvedValue({ count: 1 });
   db.leadFollowupSend.createMany.mockResolvedValue({ count: 1 });
   db.leadFollowupSend.count.mockResolvedValue(0);
@@ -207,6 +208,8 @@ describe("送る", () => {
     // 取り合い(active→sending)は進み具合も条件にする
     const claim = db.leadFollowup.updateMany.mock.calls.find((c) => c[0].data.status === "sending")![0];
     expect(claim.where).toEqual({ id: ROW_ID, status: "active", newNextPosition: 1, holdNextPosition: 1 });
+    // 送った時刻は送り始める前に残す(届いたあと記録の前に落ちても20時間に1通が効く)
+    expect(claim.data).toEqual({ status: "sending", claimedAt: NOW, lastSentAt: NOW });
     // 書き戻しは sending のときだけ・次の通へ
     const fin = db.leadFollowup.updateMany.mock.calls.find((c) => c[0].where.status === "sending" && c[0].where.id)![0];
     expect(fin.data).toEqual({ status: "active", newNextPosition: 2, claimedAt: null });
@@ -321,7 +324,7 @@ describe("失敗・途中の OFF に強くする(内部レビュー)", () => {
     expect(s).toMatchObject({ sent: 0, failed: 0 });
     expect(sendMail).toHaveBeenCalledTimes(1);
     const back = db.leadFollowup.updateMany.mock.calls.find((c) => c[0].where.status === "sending" && c[0].data.status === "active")![0];
-    expect(back.data).toEqual({ status: "active", claimedAt: null });
+    expect(back.data).toEqual({ status: "active", claimedAt: null, lastSentAt: null });
     expect(db.leadFollowupSend.createMany).not.toHaveBeenCalled();
     expect(db.leadFollowup.updateMany.mock.calls.some((c) => c[0].data.stopReason === "send_failed")).toBe(false);
     expect(vi.mocked(writeAuditLog).mock.calls[0][0].detail).toEqual({ result: "deferred", series: "new", position: 1, code: "EAUTH" });
@@ -442,5 +445,17 @@ describe("@codex #757 3回目", () => {
       .mockResolvedValueOnce([property({ propertyOwners: [{ owner: { email: "other@example.test" } }] })]);
     expect((await run()).sent).toBe(0);
     expect(sendMail).not.toHaveBeenCalled();
+  });
+});
+
+describe("@codex #757 4回目", () => {
+  it("確実に送っていない失敗で戻すときは、前の送った時刻に戻す", async () => {
+    const prev = new Date("2026-11-20T01:00:00Z");
+    withActiveRows([activeRow({ newNextPosition: 1 })]);
+    db.leadFollowup.findUnique.mockResolvedValueOnce({ lastSentAt: prev });
+    sendMail.mockResolvedValueOnce({ ok: false, code: "EAUTH" });
+    await run();
+    const back = db.leadFollowup.updateMany.mock.calls.find((c) => c[0].where.status === "sending" && c[0].data.status === "active")![0];
+    expect(back.data.lastSentAt).toBe(prev);
   });
 });

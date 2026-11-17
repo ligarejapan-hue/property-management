@@ -343,6 +343,7 @@ async function sendOne(
   now: Date,
   summary: FollowupRunSummary,
 ): Promise<void> {
+  let prevLastSentAt: Date | null = null;
   const claim = await prisma.$transaction(async (tx) => {
     // 押さえる順番は 設定の行 → アドレスの鍵(行を作る startFollowup と同じ。逆だと重なった実行どうしで待ち合う・@codex #757 P2)。
     // 実行の途中で画面から OFF にされていたら送らない(OFF の保存は進行中を止めるが、この回が後から作った行もある)。
@@ -367,7 +368,13 @@ async function sendOne(
       select: { id: true },
     });
     if (recent) return "recent";
-    const c = await tx.leadFollowup.updateMany({ where: guardWhere(row), data: { status: "sending", claimedAt: now } });
+    const prev = await tx.leadFollowup.findUnique({ where: { id: row.id }, select: { lastSentAt: true } });
+    prevLastSentAt = prev?.lastSentAt ?? null;
+    // 送った時刻は送り始める前に残す(届いたあと記録の前に落ちても、同じアドレスへの「20時間に1通」が効く・@codex #757 P2)。
+    const c = await tx.leadFollowup.updateMany({
+      where: guardWhere(row),
+      data: { status: "sending", claimedAt: now, lastSentAt: now },
+    });
     return c.count > 0 ? "claimed" : "lost";
   });
   if (claim === "unsubscribed") {
@@ -398,7 +405,11 @@ async function sendOne(
   if (!ok) ctx.halted = true;
   if (!ok && code && NOT_SENT_CODES.has(code)) {
     // 確実に送っていない: 取り合いの印を外して進行中に戻す(送った記録は残さない・次の回にもう一度)。
-    await prisma.leadFollowup.updateMany({ where: { id: row.id, status: "sending" }, data: { status: "active", claimedAt: null } });
+    // 送り始める前に入れた送った時刻も元に戻す(本当に送っていないので、次の回にもう一度送れるように)。
+    await prisma.leadFollowup.updateMany({
+      where: { id: row.id, status: "sending" },
+      data: { status: "active", claimedAt: null, lastSentAt: prevLastSentAt },
+    });
     summary.deferred += 1;
     await writeAuditLog({
       action: "lead_followup_send",
