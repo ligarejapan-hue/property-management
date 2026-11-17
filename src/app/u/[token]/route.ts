@@ -37,6 +37,16 @@ import {
   verifyBatchItemUnsubscribeToken,
 } from "@/lib/dm-batch/unsubscribe-token";
 import { recordBatchItemUnsubscribe } from "@/lib/dm-batch/qr-unsubscribe";
+import {
+  isFollowupUnsubscribeToken,
+  verifyFollowupUnsubscribeToken,
+} from "@/lib/lead-followup/unsubscribe-token";
+import { recordFollowupUnsubscribe } from "@/lib/lead-followup/unsubscribe-record";
+import {
+  renderFollowupUnsubscribeConfirmPage,
+  renderFollowupUnsubscribeDonePage,
+  renderFollowupUnsubscribeInvalidPage,
+} from "@/lib/lead-followup/unsubscribe-page";
 
 /**
  * 認証不要の公開エンドポイント(proxy.ts の PUBLIC_PATHS に "/u/" を追加済み)。
@@ -53,6 +63,8 @@ import { recordBatchItemUnsubscribe } from "@/lib/dm-batch/qr-unsubscribe";
  *  8. すべての結果を監査ログへ(出所 result 付き) — 異常な停止の集中を後から追える。
  *  9. 宛名CSVの1通(c形式のトークン)は署名の用途ラベルを分けて同じ入口で受ける
  *     (記録は src/lib/dm-batch/qr-unsubscribe.ts・設計 2026-10-03)。
+ * 10. 追客メールの1通(f形式のトークン)も同じ入口で受ける。用途ラベルを分けた署名・
+ *     停止はアドレス単位(記録は src/lib/lead-followup/unsubscribe-record.ts・設計 2026-11-16)。
  */
 
 // 回数制限(プロセス内保持=単一インスタンス運用前提。詳細は public-rate-limit.ts)。
@@ -97,6 +109,10 @@ export async function GET(
     return html(renderUnsubscribeThrottledPage(), 429);
   }
   const { token } = await params;
+  // 追客メール(f形式)はメールの文言の確認画面。形だけ見る(署名も DB も見ない)。
+  if (isFollowupUnsubscribeToken(token)) {
+    return html(renderFollowupUnsubscribeConfirmPage(), 200);
+  }
   // 表示は形式チェックのみ(署名検証もDBもしない=GETに副作用と情報を持たせない)。
   if (!parseUnsubscribeToken(token)) {
     return html(renderUnsubscribeInvalidPage(), 404);
@@ -130,6 +146,35 @@ export async function POST(
   if (!key) return html(renderUnsubscribeInvalidPage(), 503);
 
   const { token } = await params;
+
+  // 追客メールの1通(`f<32桁16進>.<署名>`)。入口の守り(per-IP・Origin・鍵)は共通、
+  // 署名の検証・回数制限・記録・監査をこの分岐で行う(手紙の処理には入らない)。
+  if (isFollowupUnsubscribeToken(token)) {
+    const followupId = verifyFollowupUnsubscribeToken(token, key);
+    if (!followupId) return html(renderFollowupUnsubscribeInvalidPage(), 400);
+    if (!tokenLimiter.hit(`u-token:${followupId}`)) {
+      return html(renderUnsubscribeThrottledPage(), 429);
+    }
+    if (!postGlobalLimiter.hit("global")) {
+      if (throttleAuditLimiter.hit("audit")) {
+        await writeAuditLog({
+          action: "lead_followup_unsubscribe",
+          targetTable: "lead_followups",
+          detail: { result: "throttled" },
+        });
+      }
+      return html(renderUnsubscribeThrottledPage(), 429);
+    }
+    const r = await recordFollowupUnsubscribe(followupId);
+    // アドレス・トークンは残さない(行の id だけ)。
+    await writeAuditLog({
+      action: "lead_followup_unsubscribe",
+      targetTable: "lead_followups",
+      targetId: followupId,
+      detail: { result: r.kind, ...("stopped" in r ? { stopped: r.stopped } : {}) },
+    });
+    return html(renderFollowupUnsubscribeDonePage(), 200);
+  }
 
   // 宛名CSVの1通(`c<32桁16進>.<署名>`)。入口の守り(per-IP・Origin・鍵)は共通、
   // 署名検証・回数制限・記録・監査をこの分岐で行う(売却DMの処理には入らない)。

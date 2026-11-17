@@ -1219,6 +1219,52 @@ export async function updateMailSettings(body: {
   });
 }
 
+// 追客メール(ステップメール)の設定。設計 docs/superpowers/specs/2026-11-16-inquiry-followup-mail-design.md
+export type LeadFollowupStep = { delayDays: number; subject: string; body: string };
+export interface LeadFollowupSettings {
+  enabled: boolean;
+  enabledAt: string | null;
+  version: number;
+  steps: { new: LeadFollowupStep[]; hold: LeadFollowupStep[] };
+  usingDefaultSlots: boolean;
+  setupProblems: string[];
+  footerPreview: string;
+}
+
+export async function getLeadFollowupSettings(): Promise<{ data: LeadFollowupSettings }> {
+  if (USE_MOCK) {
+    await mockDelay();
+    return {
+      data: {
+        enabled: false,
+        enabledAt: null,
+        version: 0,
+        steps: { new: [], hold: [] },
+        usingDefaultSlots: true,
+        setupProblems: [],
+        footerPreview: "",
+      },
+    };
+  }
+  return apiFetch<{ data: LeadFollowupSettings }>("/api/admin/lead-followup");
+}
+
+export async function updateLeadFollowupSettings(body: {
+  version: number;
+  enabled: boolean;
+  steps: { new: LeadFollowupStep[]; hold: LeadFollowupStep[] };
+}): Promise<{ data: LeadFollowupSettings }> {
+  if (USE_MOCK) {
+    await mockDelay();
+    return getLeadFollowupSettings();
+  }
+  return apiFetch<{ data: LeadFollowupSettings }>("/api/admin/lead-followup", {
+    method: "PUT",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(body),
+  });
+}
+
 // テスト送信。保存済みの設定で送る(サーバー側は現在の DB 値を使う・未保存の変更は反映されない)。
 // 失敗(502)は toApiError が smtpCode を運ぶので、呼び出し元は apiErrorSmtpCode(e) で取り出す。
 // kind="auto_reply" は、申込者への受付メール(保存済みの文面)を自分あてに送る。

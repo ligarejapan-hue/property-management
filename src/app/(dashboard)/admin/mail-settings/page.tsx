@@ -12,6 +12,7 @@ import {
   type MailSettings,
 } from "@/lib/api-client";
 import { Button } from "@/components/ui/button";
+import { LeadFollowupSettingsSection } from "@/components/admin/lead-followup-settings";
 
 // メール送信設定(管理者のみ)。査定申込が届いたときの通知メールを送る
 // Xserver のメールボックス(サーバー名・ポート・ユーザー名・パスワード・送信元アドレス)と、
@@ -531,6 +532,9 @@ export default function MailSettingsPage() {
           )}
         </div>
       )}
+
+      {/* 追客メール(設計 2026-11-16)。上の保存とは別の保存ボタンを持つ(版番号つき)。 */}
+      <LeadFollowupSettingsSection />
     </div>
   );
 }

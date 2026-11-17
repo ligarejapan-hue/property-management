@@ -238,6 +238,7 @@ model User {
   dealsAssigned           Deal[]                  @relation("DealAssignee")
   dealsLicensed           Deal[]                  @relation("DealLicensedAgent")
   dealsSales              Deal[]                  @relation("DealSalesStaff")
+  leadFollowupsStopped    LeadFollowup[]          @relation("LeadFollowupStoppedBy")
   dealsOps                Deal[]                  @relation("DealOpsStaff")
   dealsCreated            Deal[]                  @relation("DealCreatedBy")
   dealScheduleItems       DealScheduleItem[]      @relation("DealScheduleItemAssignee")
@@ -523,6 +524,7 @@ model Property {
   deals              Deal[]
   driveFolder        PropertyDriveFolder?
   registryOwnerCheck RegistryOwnerCheck?
+  leadFollowup       LeadFollowup?
 
   @@index([caseStatus])
   @@index([introductionRoute])
@@ -1640,6 +1642,7 @@ model DmInquiry {
   draft     DmRecipientDraft? @relation(fields: [draftId], references: [id], onDelete: Restrict)
   scenario  DmScenario?       @relation(fields: [scenarioId], references: [id], onDelete: Restrict)
   handledBy User?             @relation("DmInquiryHandler", fields: [handledById], references: [id])
+  leadFollowup LeadFollowup?
 
   @@index([draftId])
   @@index([scenarioId])
@@ -1837,10 +1840,106 @@ model MailConfig {
   // 資料請求への資料送付メールのひな形(2026-10-18)。未入力(null)なら既定の文面。
   materialSendSubject     String? @map("material_send_subject")
   materialSendBody        String? @map("material_send_body")
+  // 追客メール(ステップメール・設計 2026-11-16)。ON にした時刻より前の登録・申込は対象にしない。
+  // followupVersion=追客の設定(ON/OFF・文面)を保存するたびに1増える版番号(同時に2人が直したら 409)。
+  followupEnabled         Boolean   @default(false) @map("followup_enabled")
+  followupEnabledAt       DateTime? @map("followup_enabled_at")
+  followupVersion         Int       @default(0) @map("followup_version")
   updatedAt         DateTime @updatedAt @map("updated_at")
   updatedById       String?  @map("updated_by_id") @db.Uuid
 
   @@map("mail_config")
+}
+
+/// 追客メールの文面(設計 docs/superpowers/specs/2026-11-16-inquiry-followup-mail-design.md §2・§4)。
+/// series=new(新規の流れ・起点=登録日/申込日)| hold(保留の流れ・起点=保留になった日)。
+/// 保存は「全部を置き換える」1回の transaction。文面に申込者の入力は差し込まない(差し込みの仕組みを持たない)。
+model LeadFollowupStep {
+  id          String   @id @default(uuid()) @db.Uuid
+  series      String
+  /// 何通目(1から)
+  position    Int
+  /// 起点から何日後(0〜365。0 は new の1通目=挨拶だけ)
+  delayDays   Int      @map("delay_days")
+  subject     String
+  body        String
+  updatedAt   DateTime @updatedAt @map("updated_at")
+  updatedById String?  @map("updated_by_id") @db.Uuid
+
+  @@unique([series, position])
+  @@map("lead_followup_steps")
+}
+
+/// 追客の対象1件(一括査定の物件 or 査定申込)ごとに1行。送信の状態・止まった理由を持つ。
+/// ⚠同じアドレスの進行中(active/sending)は1本まで=migration の部分 UNIQUE が守る(Prisma の型には出ない)。
+/// ⚠property_id と inquiry_id は target_type の側だけ(もう片方は NULL・migration の CHECK)。対象を消すと NULL になる。
+model LeadFollowup {
+  id               String    @id @default(uuid()) @db.Uuid
+  /// property | inquiry
+  targetType       String    @map("target_type")
+  propertyId       String?   @unique @map("property_id") @db.Uuid
+  inquiryId        String?   @unique @map("inquiry_id") @db.Uuid
+  /// 小文字・前後の空白を除いたアドレス。送る前に止めた行(アドレスがまだ無い)は NULL
+  emailNormalized  String?   @map("email_normalized")
+  /// active | sending | completed | stopped
+  status           String    @default("active")
+  /// unsubscribed | case_closed | handled_done | manual | send_failed | interrupted | disabled | no_address
+  stopReason       String?   @map("stop_reason")
+  newStartedAt     DateTime? @map("new_started_at")
+  newNextPosition  Int       @default(1) @map("new_next_position")
+  holdStartedAt    DateTime? @map("hold_started_at")
+  holdNextPosition Int       @default(1) @map("hold_next_position")
+  lastSentAt       DateTime? @map("last_sent_at")
+  claimedAt        DateTime? @map("claimed_at")
+  stoppedAt        DateTime? @map("stopped_at")
+  stoppedById      String?   @map("stopped_by_id") @db.Uuid
+  createdAt        DateTime  @default(now()) @map("created_at")
+  updatedAt        DateTime  @updatedAt @map("updated_at")
+
+  /// 物件・申込を消しても追客の行は残す(SetNull=物件の削除は止めない)。⚠消すと、送ったメールの配信停止
+  /// リンク(行の id だけを持つ)からアドレスが引けなくなり、停止が記録されない=法律上の穴になる(内部レビュー P2)。
+  /// 対象が消えた行は送る処理が止める(第3段)。
+  property     Property?          @relation(fields: [propertyId], references: [id], onDelete: SetNull)
+  inquiry      DmInquiry?         @relation(fields: [inquiryId], references: [id], onDelete: SetNull)
+  stoppedBy    User?              @relation("LeadFollowupStoppedBy", fields: [stoppedById], references: [id])
+  sends        LeadFollowupSend[]
+  unsubscribes MailUnsubscribe[]
+
+  @@index([status])
+  @@index([emailNormalized])
+  @@map("lead_followups")
+}
+
+/// 何通目をいつ送ったか(送った/飛ばした/失敗)。本文・宛先・SMTP の応答は残さない。件名は送った時点の控え。
+model LeadFollowupSend {
+  id         String   @id @default(uuid()) @db.Uuid
+  followupId String   @map("followup_id") @db.Uuid
+  series     String
+  position   Int
+  /// sent | skipped | failed
+  result     String
+  subject    String
+  at         DateTime @default(now())
+
+  followup LeadFollowup @relation(fields: [followupId], references: [id], onDelete: Cascade)
+
+  @@unique([followupId, series, position])
+  @@map("lead_followup_sends")
+}
+
+/// メールの配信停止(アドレス単位)。一度入ったら追客は二度と送らない。
+/// アドレスは平文(申込・所有者の表にすでに平文で有る。ハッシュにすると鍵の差し替えで停止が効かなくなる)。
+model MailUnsubscribe {
+  id              String   @id @default(uuid()) @db.Uuid
+  emailNormalized String   @unique @map("email_normalized")
+  /// link(お客様が配信停止のリンクから)
+  source          String
+  followupId      String?  @map("followup_id") @db.Uuid
+  createdAt       DateTime @default(now()) @map("created_at")
+
+  followup LeadFollowup? @relation(fields: [followupId], references: [id], onDelete: SetNull)
+
+  @@map("mail_unsubscribes")
 }
 
 // 登記情報提供サービスの資格情報(フェーズ2 設定画面)。
