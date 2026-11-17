@@ -6,9 +6,16 @@
 export type BankNameFields = { bankName: string; bankCode: string; branchName: string; branchCode: string };
 export type DirectoryChoice = { code: string; name: string };
 
-/** 銀行名を打った: 銀行と支店のコードを外す(支店名の文字は残す=自由入力のまま使える)。 */
+/**
+ * 銀行名を打った: 銀行のコードを外す。
+ * 候補から選んだ支店(コードあり=前の銀行の支店)は一緒に外す。打った時点でコードが消えるので、あとで別の銀行を
+ * 選んでも「替えた」と分からず、前の銀行の支店が新しい銀行に付いたまま残るため(@codex R1)。
+ * 打ち込んだ支店名(コードなし)は残す=自由入力のまま使える。
+ */
 export function typeBank<T extends BankNameFields>(v: T, text: string): T {
-  return { ...v, bankName: text, bankCode: "", branchCode: "" };
+  return v.branchCode !== ""
+    ? { ...v, bankName: text, bankCode: "", branchName: "", branchCode: "" }
+    : { ...v, bankName: text, bankCode: "" };
 }
 
 /**

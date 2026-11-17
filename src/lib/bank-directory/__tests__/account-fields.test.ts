@@ -20,8 +20,18 @@ describe("銀行名・支店名の入力の移り変わり", () => {
     const v = { bankName: "みずほ", bankCode: "", branchName: "神田支店", branchCode: "", accountNumber: "" };
     expect(pickBank(v, { code: "0001", name: "みずほ銀行" })).toEqual({ ...v, bankName: "みずほ銀行", bankCode: "0001" });
   });
-  it("銀行名を打ち直すと、銀行と支店のコードを外す(支店名の文字は残す)", () => {
-    expect(typeBank(chosen, "みずほ銀行 ")).toEqual({ ...chosen, bankName: "みずほ銀行 ", bankCode: "", branchCode: "" });
+  it("候補から選んだ支店があるときに銀行名を打ち直すと、その支店も外す(前の銀行の支店が残らない・@codex R1)", () => {
+    expect(typeBank(chosen, "三")).toEqual({ ...chosen, bankName: "三", bankCode: "", branchName: "", branchCode: "" });
+  });
+  it("選び直す流れ全体: みずほ銀行/神田支店 → 「三」と打つ → 三菱UFJ銀行を選ぶ と、神田支店は残らない", () => {
+    const typed = typeBank(chosen, "三");
+    expect(pickBank(typed, { code: "0005", name: "三菱UFJ銀行" })).toEqual({
+      ...chosen, bankName: "三菱UFJ銀行", bankCode: "0005", branchName: "", branchCode: "",
+    });
+  });
+  it("打ち込んだ支店名(コードなし)は、銀行名を打ち直しても残す", () => {
+    const v = { ...chosen, branchName: "神田", branchCode: "" };
+    expect(typeBank(v, "みずほ")).toEqual({ ...v, bankName: "みずほ", bankCode: "" });
   });
   it("支店を候補から選ぶと、名前とコードが入る/打ち直すとコードを外す", () => {
     const v = { ...chosen, branchName: "か", branchCode: "" };
