@@ -1,4 +1,5 @@
 import prisma from "@/lib/prisma";
+import type { Prisma } from "@/generated/prisma";
 import { writeAuditLog } from "@/lib/audit";
 import { MAIL_CONFIG_ID, loadMailSendConfig, type MailSendConfig } from "@/lib/mail/mail-config";
 import { sendPlainMail, safeErrorCode } from "@/lib/mail/transport";
@@ -261,18 +262,21 @@ type ActiveRow = DecideRow & {
 
 type TargetState = { cls: CaseClass; email: { raw: string; normalized: string } | null } | null;
 
-async function loadTargets(rows: ActiveRow[]): Promise<Map<string, TargetState>> {
+type TargetReader = Pick<Prisma.TransactionClient, "property" | "dmInquiry">;
+
+/** 行の対象(物件・申込)の今の状態とアドレス。client は送る直前の読み直しでは transaction を渡す。 */
+async function loadTargets(rows: ActiveRow[], client: TargetReader = prisma): Promise<Map<string, TargetState>> {
   const propIds = rows.flatMap((r) => (r.propertyId ? [r.propertyId] : []));
   const inqIds = rows.flatMap((r) => (r.inquiryId ? [r.inquiryId] : []));
   const [props, inqs] = await Promise.all([
     propIds.length
-      ? prisma.property.findMany({
+      ? client.property.findMany({
           where: { id: { in: propIds } },
           select: { id: true, caseStatus: true, propertyOwners: OWNER_EMAILS_SELECT },
         })
       : Promise.resolve([]),
     inqIds.length
-      ? prisma.dmInquiry.findMany({ where: { id: { in: inqIds } }, select: { id: true, handleStatus: true, email: true } })
+      ? client.dmInquiry.findMany({ where: { id: { in: inqIds } }, select: { id: true, handleStatus: true, email: true } })
       : Promise.resolve([]),
   ]);
   const byProp = new Map(props.map((p) => [p.id, p]));
@@ -344,6 +348,12 @@ async function sendOne(
     // 実行の途中で画面から OFF にされていたら送らない(OFF の保存は進行中を止めるが、この回が後から作った行もある)。
     if (!(await lockEnabledPeriod(tx, ctx.enabledAt))) return "disabled";
     await lockEmail(tx, to.normalized);
+    // 対象の今の状態とアドレスを読み直す(先に読んだ状態は数分前のことがある。その間に担当が「対応済み」・
+    // 商談中などにしていたら、ここで気づいて送らない=次の回の判断に任せる・@codex #757 P2)。
+    const fresh = (await loadTargets([row], tx)).get(row.id) ?? null;
+    if (!fresh || !fresh.email || fresh.email.normalized !== to.normalized) return "changed";
+    const again = decideFollowup(row, fresh.cls, ctx.steps, now);
+    if (again.kind !== "send" || again.series !== series || again.position !== position) return "changed";
     const unsub = await tx.mailUnsubscribe.findUnique({ where: { emailNormalized: to.normalized }, select: { id: true } });
     if (unsub) {
       const s = await tx.leadFollowup.updateMany({
@@ -368,7 +378,7 @@ async function sendOne(
     summary.deferred += 1;
     return;
   }
-  if (claim === "lost") return;
+  if (claim === "lost" || claim === "changed") return;
   if (claim === "disabled") {
     ctx.halted = true;
     summary.deferred += 1;

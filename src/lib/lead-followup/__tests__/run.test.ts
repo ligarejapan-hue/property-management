@@ -407,3 +407,40 @@ describe("@codex #757 2回目", () => {
     expect(db.$queryRaw.mock.invocationCallOrder[0]).toBeLessThan(db.$executeRaw.mock.invocationCallOrder[0]);
   });
 });
+
+describe("@codex #757 3回目", () => {
+  it("送る直前(鍵の下)に対象を読み直し、その間に状態が進んでいたら送らない", async () => {
+    // 評価のときは「コンタクト中」、送る直前の読み直しでは「商談中」
+    db.leadFollowup.findMany.mockResolvedValue([activeRow({ newNextPosition: 1 })]);
+    db.property.findMany
+      .mockResolvedValueOnce([])
+      .mockResolvedValueOnce([property()])
+      .mockResolvedValueOnce([property({ caseStatus: "negotiating" })]);
+    const s = await run();
+    expect(s.sent).toBe(0);
+    expect(sendMail).not.toHaveBeenCalled();
+    expect(db.leadFollowup.updateMany.mock.calls.some((c) => c[0].data.status === "sending")).toBe(false);
+  });
+
+  it("査定申込が送る直前に「対応済み」になっていたら送らない", async () => {
+    const q = activeRow({ targetType: "inquiry", propertyId: null, inquiryId: "q1", newNextPosition: 2 });
+    db.leadFollowup.findMany.mockResolvedValue([q]);
+    db.dmInquiry.findMany
+      .mockResolvedValueOnce([])
+      .mockResolvedValueOnce([{ id: "q1", handleStatus: "open", email: "owner@example.test" }])
+      .mockResolvedValueOnce([{ id: "q1", handleStatus: "done", email: "owner@example.test" }]);
+    const s = await run(new Date("2026-12-04T01:00:00Z"));
+    expect(s.sent).toBe(0);
+    expect(sendMail).not.toHaveBeenCalled();
+  });
+
+  it("送る直前にアドレスが変わっていたら送らない", async () => {
+    db.leadFollowup.findMany.mockResolvedValue([activeRow({ newNextPosition: 1 })]);
+    db.property.findMany
+      .mockResolvedValueOnce([])
+      .mockResolvedValueOnce([property()])
+      .mockResolvedValueOnce([property({ propertyOwners: [{ owner: { email: "other@example.test" } }] })]);
+    expect((await run()).sent).toBe(0);
+    expect(sendMail).not.toHaveBeenCalled();
+  });
+});
