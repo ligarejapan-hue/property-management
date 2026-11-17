@@ -1,5 +1,6 @@
 import { describe, it, expect } from "vitest";
 import { renderLpPage, LP_CTA_LABEL, LP_PAGE_HEADERS, INQUIRY_CLIENT_CHECK_SOURCE } from "../sale-dm-letter/lp-page";
+import { parseInquiryForm } from "../sale-dm-letter/inquiry-input";
 import type { LpRenderInput } from "../sale-dm-letter/lp-render-input";
 import { HONEYPOT_FIELD } from "../sale-dm-letter/inquiry-input";
 
@@ -245,6 +246,22 @@ describe("申込フォームの画面内の入力チェック(発注者指定 20
     expect(check({ ...OK, phone: "" })[0]).toEqual({ f: "phone", m: "電話番号をご入力ください。" });
     expect(check({ ...OK, phone: "090123456" })[0].f).toBe("phone");
     expect(check({ ...OK, phone: "090-abcd-5678" })[0].f).toBe("phone");
+  });
+
+  // 発注者決定(2026-11-17): 括弧・点などで区切った書き方も受け付ける。画面のチェックが古い規則のままだと
+  // サーバーが受け付ける番号を送信前に止めてしまう(サーバーだけ直しても取りこぼしが減らない)ので、両方の結論をそろえる。
+  it("電話: 括弧・点・中黒・スラッシュ・各種ハイフンの区切りも通る/区切りだけは未入力と同じ(サーバーと同じ結論)", () => {
+    const ACCEPT = ["(03)1234-5678", "03(1234)5678", "（０３）１２３４－５６７８", "090.1234.5678", "090・1234・5678", "090/1234/5678", "090\u20101234\u20115678", "090--1234--5678-"];
+    for (const phone of ACCEPT) expect(check({ ...OK, phone })).toEqual([]);
+    expect(check({ ...OK, phone: "---" })[0]).toEqual({ f: "phone", m: "電話番号をご入力ください。" });
+    expect(check({ ...OK, phone: "090.1234.56" })[0].f).toBe("phone");
+    for (const phone of [...ACCEPT, "---", "()", "090.1234.56", "(03)1234-567", "090-abcd-5678", "09012345678"]) {
+      const vals: Record<string, string> = { name: OK.name, phone, consent: "yes" };
+      const server = parseInquiryForm((k) => vals[k] ?? null);
+      const serverPhoneErr = server.kind === "invalid" ? server.errors.find((e) => e.startsWith("phone_")) ?? null : null;
+      const clientPhoneErr = check({ ...OK, phone }).find((e) => e.f === "phone")?.m ?? null;
+      expect({ phone, 画面で通る: clientPhoneErr === null }).toEqual({ phone, 画面で通る: serverPhoneErr === null });
+    }
   });
 
   it("メール: 形式違いは注意/連絡方法=メールなのに空なら注意", () => {

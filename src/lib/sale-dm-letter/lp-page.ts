@@ -579,7 +579,9 @@ export const INQUIRY_CLIENT_CHECK_SOURCE = [
   'var canN=typeof "".normalize==="function";',
   'function n(s){s=String(s==null?"":s);if(canN){try{s=s.normalize("NFKC")}catch(_){}}return s.replace(/[\\u0000-\\u001f\\u007f]/g,"").trim()}',
   'var nm=n(v.name);if(nm===""){E.push({f:"name",m:M.name_required})}else if(canN&&/[0-9@]/.test(nm)){E.push({f:"name",m:M.name_invalid})}',
-  'var ph=n(v.phone).replace(/[ー−–—―]/g,"-").replace(/\\s+/g,"");',
+  // 電話番号の区切り(括弧・点・中黒・スラッシュ・各種ハイフン)は inquiry-input.ts の normalizePhone と同じ規則で「-」1つにそろえる
+  // (発注者決定 2026-11-17。ここが古い規則のままだと、サーバーが受け付ける番号を送信前に止めてしまう)。
+  'var ph=n(v.phone).replace(/\\s+/g,"").replace(/[\\u30fc\\u2212\\u2013\\u2014\\u2015\\u2010\\u2011\\u2012().\\u30fb/]/g,"-").replace(/-{2,}/g,"-").replace(/^-+|-+$/g,"");',
   `if(ph===""){E.push({f:"phone",m:M.phone_required})}else if(canN&&(ph.length>${INQUIRY_LIMITS.phone}||!/^[0-9+\\-]+$/.test(ph)||ph.replace(/[^0-9]/g,"").length<10)){E.push({f:"phone",m:M.phone_invalid})}`,
   'var em=n(v.email);if(canN&&em!==""&&!/^[^\\s@]+@[^\\s@]+\\.[^\\s@]+$/.test(em)){E.push({f:"email",m:M.email_invalid})}',
   'if(n(v.pref)==="email"&&em===""){E.push({f:"email",m:M.email_required_for_pref})}',

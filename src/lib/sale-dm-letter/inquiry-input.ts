@@ -74,9 +74,15 @@ function multi(v: string | null): string {
 }
 
 function normalizePhone(v: string): string {
-  // NFKC 後に残る長音・マイナス類をハイフンへ(全角入力の「ー」「−」)。
+  // NFKC 後に残る長音・マイナス・ハイフン類をハイフンへ(全角入力の「ー」「−」・U+2010〜2012 のハイフン)。
+  // 括弧・点・中黒・スラッシュで区切った書き方(「03(1234)5678」「090.1234.5678」)も区切りとして受け付ける
+  // (発注者決定 2026-11-17: 書き方の違いで申込を弾かない)。区切りは「-」1つにそろえ、先頭・末尾の区切りは落とす。
   // 空白(全角スペースは NFKC で半角化済み)は除去し、保存値を数字/ハイフン/+ のみにする。
-  return v.replace(/[ー−–—―]/g, "-").replace(/\s+/g, "");
+  return v
+    .replace(/\s+/g, "")
+    .replace(/[\u30fc\u2212\u2013\u2014\u2015\u2010\u2011\u2012().\u30fb/]/g, "-")
+    .replace(/-{2,}/g, "-")
+    .replace(/^-+|-+$/g, "");
 }
 
 export function parseInquiryForm(get: (key: string) => string | null): InquiryParse {

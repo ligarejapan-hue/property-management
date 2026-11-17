@@ -29,9 +29,27 @@ describe("parseInquiryForm", () => {
     const r = parseInquiryForm(form({ ...OK, name: "あ".repeat(51), contactTime: "a".repeat(61), message: "b".repeat(1001) }));
     expect(r).toEqual({ kind: "invalid", errors: ["name_too_long", "contact_time_too_long", "message_too_long"] });
   });
-  it("電話番号: 数字/ハイフン/+/空白以外、20字超、数字10桁未満はいずれも不正", () => {
-    for (const phone of ["090-1234-567a", "0".repeat(21), "03-1234-567", "(03)1234-5678"]) {
+  it("電話番号: 数字/区切り/+/空白以外、20字超、数字10桁未満はいずれも不正", () => {
+    for (const phone of ["090-1234-567a", "0".repeat(21), "03-1234-567", "(03)1234-567", "090.1234.56"]) {
       expect(parseInquiryForm(form({ ...OK, phone }))).toEqual({ kind: "invalid", errors: ["phone_invalid"] });
+    }
+    // 区切りだけ(数字なし)は、未入力と同じ扱い。
+    for (const phone of ["---", "()", " . "]) {
+      expect(parseInquiryForm(form({ ...OK, phone }))).toEqual({ kind: "invalid", errors: ["phone_required"] });
+    }
+    // 発注者決定(2026-11-17): 括弧・点・中黒・スラッシュ・各種ハイフンで区切った書き方も受け付け、「-」にそろえる。
+    for (const [phone, saved] of [
+      ["(03)1234-5678", "03-1234-5678"],
+      ["03(1234)5678", "03-1234-5678"],
+      ["（０３）１２３４－５６７８", "03-1234-5678"],
+      ["090.1234.5678", "090-1234-5678"],
+      ["090・1234・5678", "090-1234-5678"],
+      ["090/1234/5678", "090-1234-5678"],
+      ["090\u20101234\u20115678", "090-1234-5678"],
+      ["090\u20121234\u30fc5678", "090-1234-5678"],
+      ["090--1234--5678-", "090-1234-5678"],
+    ] as const) {
+      expect(parseInquiryForm(form({ ...OK, phone }))).toMatchObject({ kind: "ok", value: { phone: saved } });
     }
     expect(parseInquiryForm(form({ ...OK, phone: "+81 90 1234 5678" }))).toMatchObject({ kind: "ok", value: { phone: "+819012345678" } });
     // 発注者決定(2026-09-26): 保存はハイフンありにそろえる(区切る位置は携帯/固定で違う=市外局番の表で判定)。
