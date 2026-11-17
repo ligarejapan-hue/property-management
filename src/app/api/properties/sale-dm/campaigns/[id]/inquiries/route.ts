@@ -11,6 +11,7 @@ import {
   encodeInquiryCursor,
   inquiryCursorWhere,
 } from "@/lib/sale-dm-letter/inquiry-list";
+import { FOLLOWUP_VIEW_SELECT, followupViewsForList } from "@/lib/lead-followup/view";
 
 const PAGE_SIZE = 100;
 
@@ -50,6 +51,8 @@ export async function GET(req: NextRequest, { params }: { params: Promise<{ id: 
           id: true, draftId: true, submittedAt: true, name: true, phone: true, email: true,
           contactPref: true, contactTime: true, message: true, handleStatus: true, handledAt: true, handleNote: true,
           notifyStatus: true, notifyLastError: true, autoReplyStatus: true,
+          // 追客メールの様子(何通目をいつ・止まった理由)。メールを見られる人にだけ返す(下)。
+          leadFollowup: { select: FOLLOWUP_VIEW_SELECT },
           draft: { select: { property: { select: { createdBy: true, assignedTo: true } } } },
         },
       }),
@@ -85,10 +88,11 @@ export async function GET(req: NextRequest, { params }: { params: Promise<{ id: 
       notifyLastError: r.notifyLastError,
       autoReplyStatus: r.autoReplyStatus,
     }));
+    const followups = followupViewsForList(page, isPlainOwnerLevel(ownerDisplayConfig.email));
     const inquiries = toInquiryListRows(visible, {
       contact: isPlainOwnerLevel(ownerDisplayConfig.phone),
       email: isPlainOwnerLevel(ownerDisplayConfig.email),
-    });
+    }).map((row) => ({ ...row, followup: followups.get(row.id) ?? null }));
     await writeAuditLog({
       userId: session.id,
       action: "sale_dm_inquiry_view",

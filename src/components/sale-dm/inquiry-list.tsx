@@ -5,6 +5,7 @@ import Link from "next/link";
 import { useSession } from "next-auth/react";
 import { Loader2, Inbox } from "lucide-react";
 import { Button } from "@/components/ui/button";
+import { InquiryFollowupLine } from "@/components/lead-followup/followup-status";
 import {
   USE_MOCK,
   fetchSaleDmInquiries,
@@ -364,6 +365,9 @@ export default function SaleDmInquiryList(props: SaleDmInquiryListProps) {
               )}
             </div>
           )}
+          {/* 追客メールの様子と「追客を止める」(メールを見られない人には followup=null=何も出さない)。
+              読み直しで様子(状態・送った数)が変わったら作り直す(key)。 */}
+          <InquiryFollowupLine key={`${i.id}:${i.followup?.state ?? "-"}:${i.followup?.sends.length ?? 0}`} inquiryId={i.id} initial={i.followup} />
           {i.contactHidden ? (
             <div className="mt-1 text-xs text-gray-700 dark:text-gray-300">
               <p className="text-gray-500">連絡先を表示する権限がありません</p>

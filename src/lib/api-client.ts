@@ -37,6 +37,7 @@ import type { BuildingChoice } from "./building-link/resolve";
 import type { BuildingLinkOutcome } from "./building-link/apply";
 import type { DropTarget } from "./import-drop/detect";
 import type { CatalogSearchItem } from "@/lib/mansion-catalog/search";
+import type { FollowupView } from "@/lib/lead-followup/view";
 
 export const USE_MOCK = process.env.NEXT_PUBLIC_USE_MOCK === "true";
 
@@ -459,6 +460,8 @@ export interface SaleDmInquiry {
   notifyLastError: string | null;
   /** 申込者への受付メールの状態(none/sending/sent/failed/skipped)。メールを見られない人には null。 */
   autoReplyStatus: string | null;
+  /** 追客メールの様子(何通目をいつ・止まった理由)。メールを見られない人には null(受付メールと同じ扱い)。 */
+  followup?: LeadFollowupView | null;
 }
 
 // 申込一覧は状態で絞らない1本のカーソルでたどる(振り分けは画面側)。counts は状態別の件数(範囲全体)。
@@ -522,6 +525,15 @@ export async function updateSaleDmInquiryStatus(
     `/api/properties/sale-dm/inquiries/${inquiryId}`,
     { method: "PATCH", headers: { "Content-Type": "application/json" }, body: JSON.stringify(body) },
   );
+}
+
+// 査定申込の「追客を止める」(止めたら終わり・再開なし)。
+export async function stopSaleDmInquiryFollowup(inquiryId: string) {
+  if (USE_MOCK) {
+    await mockDelay();
+    return { result: "created", followup: { state: "stopped", label: "止まっています(担当が止めた)", canStop: false, stopped: { reason: "担当が止めた", at: new Date().toISOString(), by: "モック" }, sends: [] } } as LeadFollowupStopResponse;
+  }
+  return apiFetch<LeadFollowupStopResponse>(`/api/properties/sale-dm/inquiries/${inquiryId}/followup-stop`, { method: "POST" });
 }
 
 // 通知メールの再送(notifyStatus が failed の申込のみ・Task 9 で作った POST .../notify)。
@@ -1229,6 +1241,28 @@ export interface LeadFollowupSettings {
   usingDefaultSlots: boolean;
   setupProblems: string[];
   footerPreview: string;
+}
+
+/** 追客メールの様子(画面に出す形・アドレスや本文は入らない)。 */
+export type LeadFollowupView = FollowupView;
+export type LeadFollowupStopResponse = { result: "stopped" | "created" | "already"; followup: LeadFollowupView };
+
+// 物件の追客メールの様子。所有者のメールを見られない人には visible=false(中身なし)。
+export async function getPropertyLeadFollowup(propertyId: string): Promise<{ visible: boolean; followup: LeadFollowupView | null }> {
+  if (USE_MOCK) {
+    await mockDelay();
+    return { visible: true, followup: { state: "none", label: "まだ始まっていません", canStop: true, stopped: null, sends: [] } };
+  }
+  return apiFetch(`/api/properties/${propertyId}/lead-followup`);
+}
+
+// 物件の「追客を止める」(止めたら終わり・再開なし)。
+export async function stopPropertyLeadFollowup(propertyId: string): Promise<LeadFollowupStopResponse> {
+  if (USE_MOCK) {
+    await mockDelay();
+    return { result: "created", followup: { state: "stopped", label: "止まっています(担当が止めた)", canStop: false, stopped: { reason: "担当が止めた", at: new Date().toISOString(), by: "モック" }, sends: [] } };
+  }
+  return apiFetch(`/api/properties/${propertyId}/lead-followup`, { method: "POST" });
 }
 
 export async function getLeadFollowupSettings(): Promise<{ data: LeadFollowupSettings }> {
