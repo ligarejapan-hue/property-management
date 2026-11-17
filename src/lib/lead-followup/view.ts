@@ -14,8 +14,10 @@ export const FOLLOWUP_STOP_REASON_LABELS: Record<string, string> = {
   send_failed: "送信に失敗",
   interrupted: "送信の途中で止まった",
   disabled: "追客メールを OFF にした",
-  no_address: "メールアドレスが無くなった",
+  no_address: "メールアドレスが無くなった・変わった",
   completed: "全部送り終えた",
+  duplicate_address: "同じアドレスの追客がほかにある",
+  target_deleted: "物件・申込が消された",
 };
 
 const SEND_RESULT_LABELS: Record<string, string> = { sent: "送信", skipped: "飛ばした", failed: "送れなかった" };

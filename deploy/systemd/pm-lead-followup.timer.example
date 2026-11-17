@@ -1,0 +1,16 @@
+# 一括査定・査定申込のお客様への追客メールの送信 — 15分ごと(追客メール 第3段)。
+# 送るのは日本時間 9:00〜20:00 の実行だけ(それ以外の時間は止める・飛ばすの判断だけ)。
+# ⚠有効にするのは反映の**最後**、戻すときは**最初に**止める(docs/deploy.md)。
+[Unit]
+Description=Run lead follow-up mails every 15 minutes
+
+[Timer]
+OnBootSec=5min
+# ⚠前回が**終わってから**15分(OnUnitInactiveSec)。OnUnitActiveSec(始まりから)だと、1回が長引いたとき
+#   次の起動が「実行中なので見送り」になり、その後 timer が二度と動かなくなる(@codex #472 P1 と同じ)。
+OnUnitInactiveSec=15min
+AccuracySec=30s
+Unit=pm-lead-followup.service
+
+[Install]
+WantedBy=timers.target

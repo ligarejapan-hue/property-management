@@ -1,0 +1,35 @@
+# =============================================================================
+# 一括査定・査定申込のお客様への追客メールの送信 — 実行ユニット(追客メール 第3段)
+# =============================================================================
+# 使い方(docs/deploy.md「追客メールの送信」の順番どおりに):
+#   1. app.env に LEAD_FOLLOWUP_RUN_SECRET を設定し、アプリを再起動する
+#   2. 手で1回だけ実行して、エラーなく終わることを確かめる:
+#        sudo systemctl start pm-lead-followup.service && journalctl -u pm-lead-followup -n 20
+#   3. 最後に timer を有効にする:
+#        sudo cp deploy/systemd/pm-lead-followup.service.example /etc/systemd/system/pm-lead-followup.service
+#        sudo cp deploy/systemd/pm-lead-followup.timer.example   /etc/systemd/system/pm-lead-followup.timer
+#        sudo systemctl daemon-reload
+#        sudo systemctl enable --now pm-lead-followup.timer
+#        # 確認: systemctl list-timers pm-lead-followup.timer
+# 戻すときは**最初に** timer を止める: sudo systemctl disable --now pm-lead-followup.timer
+#
+# ⚠合言葉が未設定なら route は 503(休眠=何も送らない)。curl --fail で失敗として残る(journalctl で気づける)。
+# ⚠お客様へ送るかどうかの本当のスイッチは、画面(メール設定 → 追客メール)の ON/OFF。OFF のあいだは何も送らない。
+# ⚠oneshot は実行中に次を起動しない(定期実行が重ならない)。
+# =============================================================================
+
+[Unit]
+Description=Send lead follow-up mails (property-management)
+After=network.target property-management.service
+
+[Service]
+Type=oneshot
+# app.env から合言葉だけを読む(root:600 のまま・値はログに出さない)。
+EnvironmentFile=/etc/property-management/app.env
+# ⚠合言葉を curl の引数に置かない(argv は ps や /proc で他プロセスに見える)。
+#   値はシェル変数のまま標準入力へ流し、curl には `-H @-` で読ませる。
+# ⚠`%` は必ず `%%` と書く(systemd が `%s` 等を先に置き換えるため)。
+# 応答は件数だけ(宛先・件名・本文は無い)なので、そのまま journal に残してよい。
+# ⚠curl の時間制限(240秒)は、サーバー側の持ち時間(新しい送信を始めるのは150秒まで・1通は最大およそ45秒)より長い。
+ExecStart=/bin/sh -c 'printf "%%s" "x-lead-followup-run-secret: $LEAD_FOLLOWUP_RUN_SECRET" | /usr/bin/curl --fail --silent --show-error --max-time 240 -X POST http://127.0.0.1:3000/api/lead-followup/run -H @-'
+# 失敗しても次回の tick で拾えるので再起動はしない(送れなかった通は送り直さない=止まる)。

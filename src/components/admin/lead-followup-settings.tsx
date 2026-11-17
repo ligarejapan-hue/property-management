@@ -159,7 +159,7 @@ export function LeadFollowupSettingsForm({
       </ul>
 
       <p className="rounded-md border border-amber-300 bg-amber-50 p-2 text-xs text-amber-800 dark:border-amber-700 dark:bg-amber-950/40 dark:text-amber-300">
-        今はまだ設定だけです。実際の送信は、次の更新(定期実行の登録)のあとで始まります。
+        ON にして保存すると、15分ごとの見回りで送り始めます。ON にする前に、査定サイトの規約に「参加会社から連絡が来る」旨があるかを確かめてください。
       </p>
 
       <label className="flex items-center gap-2 text-sm text-gray-800 dark:text-gray-100">

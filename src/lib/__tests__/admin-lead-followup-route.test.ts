@@ -23,6 +23,7 @@ vi.mock("@/lib/audit", () => ({ writeAuditLog: vi.fn() }));
 const tx = {
   mailConfig: { findUnique: vi.fn(), create: vi.fn(), updateMany: vi.fn() },
   leadFollowupStep: { deleteMany: vi.fn(), createMany: vi.fn() },
+  leadFollowup: { updateMany: vi.fn() },
 };
 vi.mock("@/lib/prisma", () => ({
   default: {
@@ -170,6 +171,25 @@ describe("PUT /api/admin/lead-followup", () => {
     tx.mailConfig.findUnique.mockResolvedValue({ followupEnabled: true, followupEnabledAt: at, followupVersion: 4 });
     await PUT(putReq({ version: 4, enabled: true, steps: fullSteps }));
     expect(tx.mailConfig.updateMany.mock.calls[0][0].data.followupEnabledAt).toBe(at);
+  });
+
+  it("ON→OFF の保存で、進行中(送っている途中も)の追客を全部 disabled で止める。OFF のまま・ON のままの保存では止めない", async () => {
+    const at = new Date("2026-11-17T01:00:00Z");
+    pm.mailConfig.findUnique.mockResolvedValue(mailRow({ followupEnabled: true, followupEnabledAt: at, followupVersion: 4 }));
+    tx.mailConfig.findUnique.mockResolvedValue({ followupEnabled: true, followupEnabledAt: at, followupVersion: 4 });
+    tx.leadFollowup.updateMany.mockResolvedValue({ count: 2 });
+    expect((await PUT(putReq({ version: 4, enabled: false, steps: fullSteps }))).status).toBe(200);
+    expect(tx.leadFollowup.updateMany).toHaveBeenCalledTimes(1);
+    const arg = tx.leadFollowup.updateMany.mock.calls[0][0];
+    expect(arg.where).toEqual({ status: { in: ["active", "sending"] } });
+    expect(arg.data).toMatchObject({ status: "stopped", stopReason: "disabled", claimedAt: null });
+
+    tx.leadFollowup.updateMany.mockClear();
+    await PUT(putReq({ version: 4, enabled: true, steps: fullSteps }));
+    pm.mailConfig.findUnique.mockResolvedValue(mailRow());
+    tx.mailConfig.findUnique.mockResolvedValue({ followupEnabled: false, followupEnabledAt: null, followupVersion: 0 });
+    await PUT(putReq({ version: 0, enabled: false, steps: fullSteps }));
+    expect(tx.leadFollowup.updateMany).not.toHaveBeenCalled();
   });
 
   it("版番号が違う(ほかの人が先に保存)なら 409・文面は書かない", async () => {
