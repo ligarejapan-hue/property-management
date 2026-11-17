@@ -20,7 +20,7 @@ const base: LeadFollowupSettings = {
 };
 
 describe("追客メールの区画(メール設定の画面)", () => {
-  it("2本の流れ・通ごとの日数と件名と本文・末尾の見本・まだ送らない旨を出す", () => {
+  it("2本の流れ・通ごとの日数と件名と本文・末尾の見本・ON で送り始める旨と規約の確認を出す", () => {
     const html = renderToStaticMarkup(<LeadFollowupSettingsForm initial={base} onSaved={vi.fn()} />);
     expect(html).toContain("新規の流れ");
     expect(html).toContain("保留の流れ");
@@ -30,7 +30,8 @@ describe("追客メールの区画(メール設定の画面)", () => {
     expect(html).toContain("登録から");
     expect(html).toContain("保留になった日から");
     expect(html).toContain("送信者: 見本不動産");
-    expect(html).toContain("今はまだ設定だけです");
+    expect(html).toContain("15分ごとの見回りで送り始めます");
+    expect(html).toContain("査定サイトの規約");
     expect(html).toContain("追客メールの設定を保存");
     expect(html).toContain("全員への追客がすぐ止まります");
   });

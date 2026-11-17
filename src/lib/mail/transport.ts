@@ -5,6 +5,11 @@ export interface PlainMail {
   to: string;
   subject: string;
   text: string;
+  /**
+   * 配信停止の URL(追客メール)。付けると List-Unsubscribe と One-Click(RFC 8058)のヘッダーが付き、
+   * Gmail などの「配信停止」ボタンから止められる。https で改行・空白・山かっこを含まないものだけ(それ以外は付けない)。
+   */
+  listUnsubscribeUrl?: string;
 }
 export interface MailAttachment {
   filename: string;
@@ -50,13 +55,28 @@ const realSender: Sender = async (config, mail) => {
     subject: mail.subject,
     text: mail.text,
     ...("attachments" in mail ? { attachments: mail.attachments } : {}),
+    ...listUnsubscribeHeaders(mail.listUnsubscribeUrl),
   });
 };
+
+/** 配信停止のヘッダー(付けられる URL のときだけ)。nodemailer の list.unsubscribe が `<URL>` の形にする。 */
+export function listUnsubscribeHeaders(url: string | undefined): Record<string, unknown> {
+  if (!url || !/^https:\/\/[^\s<>]+$/.test(url)) return {};
+  return {
+    list: { unsubscribe: { url, comment: "Unsubscribe" } },
+    headers: { "List-Unsubscribe-Post": "List-Unsubscribe=One-Click" },
+  };
+}
 
 // 1通送る。throw しない。件名の改行は除く(ヘッダ注入の多層防御)。
 // ⚠失敗の message は SMTP 応答・宛先を含み得るので出さない(name/code の許可リストだけ)。
 export async function sendPlainMail(config: MailSendConfig, mail: PlainMail): Promise<SendResult> {
-  return sendSafely(config, { to: mail.to, subject: mail.subject, text: mail.text });
+  return sendSafely(config, {
+    to: mail.to,
+    subject: mail.subject,
+    text: mail.text,
+    ...(mail.listUnsubscribeUrl ? { listUnsubscribeUrl: mail.listUnsubscribeUrl } : {}),
+  });
 }
 
 /** 添付つきで1通送る(資料送付)。守りは sendPlainMail と同じ。 */

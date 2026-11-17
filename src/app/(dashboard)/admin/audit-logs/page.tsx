@@ -188,6 +188,7 @@ const ACTION_LABELS: Record<string, string> = {
   lead_followup_settings_update: "追客メールの設定更新",
   lead_followup_unsubscribe: "追客メールの配信停止",
   lead_followup_manual_stop: "追客メールを止めた(担当)",
+  lead_followup_send: "追客メールの送信",
   mail_settings_test: "メール送信設定のテスト送信",
   inquiry_notify_sent: "査定申込の通知メール送信",
   inquiry_notify_failed: "査定申込の通知メール送信失敗",

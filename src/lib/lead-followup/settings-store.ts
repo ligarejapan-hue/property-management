@@ -49,7 +49,7 @@ export class FollowupEnableBlockedError extends Error {
   }
 }
 
-type SetupContext = { sender: FollowupSender; unsubscribeBaseUrl: string | null; problems: string[] };
+export type SetupContext = { sender: FollowupSender; unsubscribeBaseUrl: string | null; problems: string[] };
 
 async function loadSetupContext(mailRow: Parameters<typeof isMailConfigComplete>[0]): Promise<SetupContext> {
   const company = await prisma.companyProfile
@@ -72,6 +72,12 @@ async function loadSetupContext(mailRow: Parameters<typeof isMailConfigComplete>
     problems.push("配信停止のリンクに署名する鍵(NEXTAUTH_SECRET)がありません");
   }
   return { sender, unsubscribeBaseUrl, problems };
+}
+
+/** 送信の処理(run.ts)用: 送る直前の送信者・外向きの URL・足りないもの。 */
+export async function loadFollowupSetupContext(): Promise<SetupContext> {
+  const row = await prisma.mailConfig.findUnique({ where: { id: MAIL_CONFIG_ID }, select: MAIL_ROW_SELECT });
+  return loadSetupContext(row);
 }
 
 function previewFooter(ctx: SetupContext): string {
@@ -185,6 +191,14 @@ export async function saveFollowupSettings(input: {
         },
       });
       if (updated.count === 0) throw new FollowupVersionConflictError();
+    }
+    // ON→OFF: 全員への追客をすぐ止める(ON に戻しても再開しない・設計 §3.3 disabled)。
+    // 送っている途中(sending)の行も止める=送り終えた書き戻しは sending のときだけなので、進行中には戻らない。
+    if (!input.enabled && row?.followupEnabled) {
+      await tx.leadFollowup.updateMany({
+        where: { status: { in: ["active", "sending"] } },
+        data: { status: "stopped", stopReason: "disabled", stoppedAt: now, claimedAt: null },
+      });
     }
     await tx.leadFollowupStep.deleteMany({});
     const data = FOLLOWUP_SERIES.flatMap((series) =>

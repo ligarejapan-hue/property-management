@@ -1392,6 +1392,36 @@ GOOGLE_DRIVE_CLIENT_SECRET=<GOCSPX-...>
 
 ⚠送信の口（`/api/notifications/push-run`）は合言葉で守っている。さらに nginx で外からは 404 にする（`deploy/nginx/property-management.conf.example` の `location = /api/notifications/push-run`。timer は `127.0.0.1:3000` を直接呼ぶので影響しない）。本番の nginx に足すときは `nginx -t` → `systemctl reload nginx`。
 
+### 追客メールの送信(一括査定・査定申込のお客様・15分ごと)
+
+設計: `docs/superpowers/specs/2026-11-16-inquiry-followup-mail-design.md`。お客様へ送るかどうかの本当のスイッチは画面(メール設定 → 追客メール)の ON/OFF で、最初は OFF。timer を置いても、OFF のあいだは何も送らない(進行中を止めるだけ)。
+
+反映の順番(migration は無い。表は第1段の `20261117000000_lead_followup_mail` で入っている):
+
+1. `app.env` に `LEAD_FOLLOWUP_RUN_SECRET`(`openssl rand -base64 32`・値は画面やログに出さない)を追記する(追記前に `app.env.bak-<日付>` を退避・600 のまま)。1回の上限を変えたいときだけ `LEAD_FOLLOWUP_MAX_SENDS_PER_RUN`(0〜200・既定20)。
+2. 通常の更新手順で反映して再起動する。
+3. nginx に `location = /api/lead-followup/run { return 404; }` を足す(`deploy/nginx/property-management.conf.example`)。`nginx -t` → `systemctl reload nginx`。timer は `127.0.0.1:3000` を直接呼ぶので影響しない。
+4. 手で1回だけ動かし、エラーなく終わることを確かめる:
+   ```bash
+   sudo cp deploy/systemd/pm-lead-followup.service.example /etc/systemd/system/pm-lead-followup.service
+   sudo cp deploy/systemd/pm-lead-followup.timer.example   /etc/systemd/system/pm-lead-followup.timer
+   sudo systemctl daemon-reload
+   sudo systemctl start pm-lead-followup.service
+   journalctl -u pm-lead-followup -n 20 --no-pager   # 件数の JSON が1行出れば成功(OFF なら "enabled":false)
+   ```
+5. timer を有効にする: `sudo systemctl enable --now pm-lead-followup.timer`(確認: `systemctl list-timers pm-lead-followup.timer`)。
+6. 送り始めるのは、画面で文面を入れて ON にしたとき。⚠ON にする前に、査定サイトの規約に「参加会社から連絡が来る」旨があるかを確かめる(設計 §0.4)。
+
+1回の実行でやること: OFF なら進行中を止めて終わり → 送っている途中のまま30分を過ぎた行を止める → 足りない設定があれば何もしない → ON にした時刻より後の一括査定の物件・受付メールが届いた査定申込を見つけて始める → 送る/飛ばす/保留へ移る/止める。送るのは日本時間 9:00〜20:00 の実行だけ・1回20通まで・同じアドレスへは20時間に1通まで。失敗した通は送り直さない(その追客は止まる)。
+
+元に戻す順番:
+
+1. **画面で追客メールを OFF にする**(進行中がすぐ止まる。ON に戻しても再開しない)。
+2. **timer を止める**: `sudo systemctl disable --now pm-lead-followup.timer`。
+3. 必要ならアプリを前の版に戻す。表はそのまま残してよい(前の版は送らないだけ)。
+
+⚠応答・journal・監査ログには件数と定型コードだけが出る(宛先・件名・本文・SMTP の応答は出ない)。
+
 ## 10. 定期メンテナンス
 
 | タスク | 頻度 | コマンド |

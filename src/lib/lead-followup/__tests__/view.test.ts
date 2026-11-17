@@ -61,9 +61,9 @@ describe("toFollowupView(画面に出す追客の様子)", () => {
     expect(v).toMatchObject({ state: "stopped", canStop: false, label: "止まっています(その他)" });
   });
 
-  it("理由の言葉は設計の9種類すべてにある", () => {
+  it("理由の言葉は設計の9種類と、送信の処理で足した2種類(同じアドレス・対象の削除)にある", () => {
     expect(Object.keys(FOLLOWUP_STOP_REASON_LABELS).sort()).toEqual(
-      ["completed", "case_closed", "disabled", "handled_done", "interrupted", "manual", "no_address", "send_failed", "unsubscribed"].sort(),
+      ["completed", "case_closed", "disabled", "handled_done", "interrupted", "manual", "no_address", "send_failed", "unsubscribed", "duplicate_address", "target_deleted"].sort(),
     );
   });
 });
