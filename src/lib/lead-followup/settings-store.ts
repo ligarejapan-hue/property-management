@@ -19,7 +19,7 @@ import {
 
 /**
  * 追客メールの設定(ON/OFF・2本の流れの文面)の読み書き(設計 2026-11-16 §4・§6)。
- * - 文面がまだ1通も保存されていないときは、発注者のイメージの日数の枠(件名・本文は空)を返す(DB には入れない)。
+ * - 設定を一度も保存していない(版0)ときは、発注者のイメージの日数の枠(件名・本文は空)を返す(DB には入れない)。保存後の0件は空のまま。
  * - 保存は版番号(mail_config.followup_version)が合うときだけ・文面は全部を置き換える(1回の transaction)。
  * - ON にする保存は、送るために足りないもの(SMTP・会社の設定・外向きの URL・鍵・文面の空欄)が無いときだけ。
  */
@@ -29,7 +29,7 @@ export type FollowupSettingsView = {
   enabledAt: string | null;
   version: number;
   steps: FollowupStepsBySeries;
-  /** 文面が未保存で、画面には日数の枠だけを出している */
+  /** 設定が未保存(版0)で、画面には日数の枠だけを出している */
   usingDefaultSlots: boolean;
   /** ON にするために足りないもの(文面以外)。空=ON にできる(文面の空欄は保存時に別に確かめる) */
   setupProblems: string[];
@@ -79,12 +79,16 @@ function previewFooter(ctx: SetupContext): string {
   return buildFollowupFooter({ sender: ctx.sender, unsubscribeUrl: `${base}/u/f…(お客様ごとのリンク)`, first: true });
 }
 
-async function loadSteps(): Promise<{ steps: FollowupStepsBySeries; usingDefaultSlots: boolean }> {
+/**
+ * neverSaved=版番号が0(一度も保存していない)。そのときだけ日数の枠を出す。
+ * 一度でも保存したあとの0件は「全部消して保存した」結果なので、空のまま返す(枠を出し直さない)。
+ */
+async function loadSteps(neverSaved: boolean): Promise<{ steps: FollowupStepsBySeries; usingDefaultSlots: boolean }> {
   const rows = await prisma.leadFollowupStep.findMany({
     orderBy: [{ series: "asc" }, { position: "asc" }],
     select: { series: true, delayDays: true, subject: true, body: true },
   });
-  if (rows.length === 0) return { steps: defaultFollowupSlots(), usingDefaultSlots: true };
+  if (rows.length === 0 && neverSaved) return { steps: defaultFollowupSlots(), usingDefaultSlots: true };
   const steps: FollowupStepsBySeries = { new: [], hold: [] };
   for (const r of rows) {
     if ((FOLLOWUP_SERIES as readonly string[]).includes(r.series)) {
@@ -108,7 +112,7 @@ const MAIL_ROW_SELECT = {
 export async function loadFollowupSettings(): Promise<FollowupSettingsView> {
   const row = await prisma.mailConfig.findUnique({ where: { id: MAIL_CONFIG_ID }, select: MAIL_ROW_SELECT });
   const ctx = await loadSetupContext(row);
-  const { steps, usingDefaultSlots } = await loadSteps();
+  const { steps, usingDefaultSlots } = await loadSteps((row?.followupVersion ?? 0) === 0);
   return {
     enabled: row?.followupEnabled === true,
     enabledAt: row?.followupEnabledAt ? row.followupEnabledAt.toISOString() : null,

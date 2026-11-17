@@ -116,6 +116,14 @@ describe("GET /api/admin/lead-followup", () => {
     expect(data.footerPreview).toContain("https://public.example.test/u/");
   });
 
+  it("一度保存したあと(版1以上)に文面が0件なら、日数の枠を出し直さず空のまま返す", async () => {
+    pm.mailConfig.findUnique.mockResolvedValue(mailRow({ followupVersion: 2 }));
+    const { data } = await (await GET()).json();
+    expect(data.version).toBe(2);
+    expect(data.usingDefaultSlots).toBe(false);
+    expect(data.steps).toEqual({ new: [], hold: [] });
+  });
+
   it("足りない設定(SMTP・会社名・外向きの URL)を返す", async () => {
     pm.mailConfig.findUnique.mockResolvedValue(mailRow({ smtpPassEnc: null }));
     pm.companyProfile.findUnique.mockResolvedValue({ ...company, nameJa: null });
