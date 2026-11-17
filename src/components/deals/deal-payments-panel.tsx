@@ -129,7 +129,7 @@ export default function DealPaymentsPanel({
               </div>
               <div role="radiogroup" aria-label={`${r.label}の払い方`} className="flex flex-wrap gap-2">
                 {methods.map((m) => (
-                  <label key={m} className={`cursor-pointer rounded-full border px-3 py-1 text-sm ${d.method === m ? "border-blue-600 bg-blue-50 font-semibold text-blue-700 dark:border-blue-400 dark:bg-blue-950 dark:text-blue-200" : "border-gray-300 dark:border-gray-700"}`}>
+                  <label key={m} className={`relative cursor-pointer rounded-full border px-3 py-1 text-sm ${d.method === m ? "border-blue-600 bg-blue-50 font-semibold text-blue-700 dark:border-blue-400 dark:bg-blue-950 dark:text-blue-200" : "border-gray-300 dark:border-gray-700"}`}>
                     <input type="radio" className="sr-only" name={`pay-${r.key}`} checked={d.method === m} onChange={() => update(r.key, (x) => ({ ...x, method: m }))} />
                     {PAYMENT_METHOD_LABELS[m]}
                   </label>
