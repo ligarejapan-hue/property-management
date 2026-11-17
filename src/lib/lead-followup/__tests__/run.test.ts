@@ -12,6 +12,7 @@ const db = vi.hoisted(() => {
     property: { findMany: vi.fn() },
     dmInquiry: { findMany: vi.fn() },
     $executeRaw: vi.fn(),
+    $queryRaw: vi.fn(),
     $transaction: vi.fn(async (fn: (tx: unknown) => unknown) => fn(self)),
   };
   return self;
@@ -72,6 +73,7 @@ const sendMail = vi.fn();
 beforeEach(() => {
   vi.clearAllMocks();
   db.mailConfig.findUnique.mockResolvedValue({ followupEnabled: true, followupEnabledAt: ENABLED_AT });
+  db.$queryRaw.mockResolvedValue([{ "?column?": 1 }]);
   db.leadFollowupStep.findMany.mockResolvedValue(STEP_ROWS);
   db.leadFollowup.updateMany.mockResolvedValue({ count: 1 });
   db.leadFollowup.findMany.mockResolvedValue([]);
@@ -207,7 +209,9 @@ describe("送る", () => {
     expect(claim.where).toEqual({ id: ROW_ID, status: "active", newNextPosition: 1, holdNextPosition: 1 });
     // 書き戻しは sending のときだけ・次の通へ
     const fin = db.leadFollowup.updateMany.mock.calls.find((c) => c[0].where.status === "sending" && c[0].where.id)![0];
-    expect(fin.data).toMatchObject({ status: "active", newNextPosition: 2, lastSentAt: NOW, claimedAt: null });
+    expect(fin.data).toEqual({ status: "active", newNextPosition: 2, claimedAt: null });
+    // 送った時刻は状態の条件なしで残す(送信中に止められた行でも「20時間に1通」が効く・@codex #757 P2)
+    expect(db.leadFollowup.updateMany.mock.calls.some((c) => c[0].where.id === ROW_ID && c[0].where.status === undefined && c[0].data.lastSentAt === NOW)).toBe(true);
     expect(db.leadFollowupSend.createMany.mock.calls[0][0].data[0]).toMatchObject({ followupId: ROW_ID, series: "new", position: 1, result: "sent", subject: "ご挨拶" });
     // 監査は定型の項目だけ(アドレス・件名・本文なし)
     expect(writeAuditLog).toHaveBeenCalledWith({
@@ -335,7 +339,7 @@ describe("失敗・途中の OFF に強くする(内部レビュー)", () => {
     withActiveRows([activeRow({ newNextPosition: 1 })]);
     db.mailConfig.findUnique
       .mockResolvedValueOnce({ followupEnabled: true, followupEnabledAt: ENABLED_AT })
-      .mockResolvedValueOnce({ followupEnabled: false });
+      .mockResolvedValueOnce({ followupEnabled: false, followupEnabledAt: ENABLED_AT });
     const s = await run();
     expect(s.sent).toBe(0);
     expect(sendMail).not.toHaveBeenCalled();
@@ -351,5 +355,37 @@ describe("失敗・途中の OFF に強くする(内部レビュー)", () => {
     expect(s.sent).toBe(1);
     expect(JSON.stringify(err.mock.calls)).not.toContain("db down");
     err.mockRestore();
+  });
+});
+
+describe("ON の期間と送った時刻(@codex #757)", () => {
+  it("探している最中に OFF(または OFF→ON で別の期間)になっていたら、行を作らない", async () => {
+    db.property.findMany.mockResolvedValueOnce([{ id: PROP_ID, createdAt: CREATED, propertyOwners: [{ owner: { email: "o@example.test" } }] }]);
+    db.mailConfig.findUnique
+      .mockResolvedValueOnce({ followupEnabled: true, followupEnabledAt: ENABLED_AT })
+      .mockResolvedValueOnce({ followupEnabled: false, followupEnabledAt: ENABLED_AT });
+    expect((await run()).started).toBe(0);
+    db.property.findMany.mockResolvedValueOnce([{ id: PROP_ID, createdAt: CREATED, propertyOwners: [{ owner: { email: "o@example.test" } }] }]);
+    db.mailConfig.findUnique
+      .mockResolvedValueOnce({ followupEnabled: true, followupEnabledAt: ENABLED_AT })
+      .mockResolvedValueOnce({ followupEnabled: true, followupEnabledAt: new Date("2026-12-02T00:00:00Z") });
+    expect((await run()).started).toBe(0);
+    expect(db.leadFollowup.createMany).not.toHaveBeenCalled();
+  });
+
+  it("設定の行は FOR UPDATE で押さえる(画面の OFF の保存と順番をそろえる)", async () => {
+    db.property.findMany.mockResolvedValueOnce([{ id: PROP_ID, createdAt: CREATED, propertyOwners: [{ owner: { email: "o@example.test" } }] }]);
+    await run();
+    const sql = (db.$queryRaw.mock.calls[0][0] as TemplateStringsArray).join("?");
+    expect(sql).toMatch(/SELECT 1 FROM mail_config WHERE id = \? FOR UPDATE/);
+    expect(db.$queryRaw.mock.invocationCallOrder[0]).toBeLessThan(db.leadFollowup.createMany.mock.invocationCallOrder[0]);
+  });
+
+  it("送信中に担当が止めた行でも、送った時刻を残す", async () => {
+    withActiveRows([activeRow({ newNextPosition: 1 })]);
+    db.leadFollowup.updateMany.mockImplementation(async (a: { where: { status?: string } }) => ({ count: a.where.status === "sending" ? 0 : 1 }));
+    await run();
+    expect(sendMail).toHaveBeenCalledTimes(1);
+    expect(db.leadFollowup.updateMany.mock.calls.some((c) => c[0].where.status === undefined && c[0].data.lastSentAt === NOW)).toBe(true);
   });
 });

@@ -103,6 +103,27 @@ async function lockEmail(tx: { $executeRaw: typeof prisma.$executeRaw }, email: 
   await tx.$executeRaw`SELECT pg_advisory_xact_lock(hashtext(${followupLockKey(email)})::bigint)`;
 }
 
+type TxLike = {
+  $queryRaw: typeof prisma.$queryRaw;
+  mailConfig: { findUnique: typeof prisma.mailConfig.findUnique };
+};
+
+/**
+ * 設定の行を押さえて、今も ON で、この実行が見た「ON にした時刻」のままかを確かめる(@codex #757 P2)。
+ * 画面の保存(ON→OFF で進行中を止める)も同じ行を書き換えるので、ここで押さえると順番がそろう:
+ * - 保存が先 → こちらは OFF(か別の ON の期間)を読んで何もしない
+ * - こちらが先 → 保存はこの transaction の終わりを待ち、そのあとで進行中を止める=作った行も止まる
+ */
+async function lockEnabledPeriod(tx: TxLike, enabledAt: Date): Promise<boolean> {
+  // 生の SQL は押さえるだけ(時刻を生の SQL で読むと、DB の部品の癖で時差がずれることがある)。値は Prisma で読む。
+  await tx.$queryRaw`SELECT 1 FROM mail_config WHERE id = ${MAIL_CONFIG_ID} FOR UPDATE`;
+  const r = await tx.mailConfig.findUnique({
+    where: { id: MAIL_CONFIG_ID },
+    select: { followupEnabled: true, followupEnabledAt: true },
+  });
+  return !!r && r.followupEnabled === true && !!r.followupEnabledAt && r.followupEnabledAt.getTime() === enabledAt.getTime();
+}
+
 async function loadSteps(): Promise<FollowupStepsBySeries> {
   const rows = await prisma.leadFollowupStep.findMany({
     orderBy: [{ series: "asc" }, { position: "asc" }],
@@ -140,8 +161,11 @@ async function startFollowup(
   email: string | null,
   startedAt: Date,
   now: Date,
+  enabledAt: Date,
 ): Promise<"active" | "stopped" | "exists"> {
   return prisma.$transaction(async (tx) => {
+    // 探している最中に OFF(や OFF→ON)にされていたら作らない。
+    if (!(await lockEnabledPeriod(tx, enabledAt))) return "exists";
     let status = "active";
     let stopReason: string | null = null;
     if (!email) {
@@ -201,7 +225,7 @@ async function discover(enabledAt: Date, now: Date, deadline: number, summary: F
   for (const p of properties) {
     if (Date.now() > deadline) return;
     const email = firstOwnerEmail(p.propertyOwners);
-    const r = await startFollowup({ kind: "property", id: p.id }, email?.normalized ?? null, p.createdAt, now);
+    const r = await startFollowup({ kind: "property", id: p.id }, email?.normalized ?? null, p.createdAt, now, enabledAt);
     if (r === "active") summary.started += 1;
     else if (r === "stopped") summary.startedStopped += 1;
   }
@@ -220,7 +244,7 @@ async function discover(enabledAt: Date, now: Date, deadline: number, summary: F
   });
   for (const q of inquiries) {
     if (Date.now() > deadline) return;
-    const r = await startFollowup({ kind: "inquiry", id: q.id }, normalizeFollowupEmail(q.email), q.submittedAt, now);
+    const r = await startFollowup({ kind: "inquiry", id: q.id }, normalizeFollowupEmail(q.email), q.submittedAt, now, enabledAt);
     if (r === "active") summary.started += 1;
     else if (r === "stopped") summary.startedStopped += 1;
   }
@@ -299,6 +323,8 @@ type SendContext = {
   deadline: number;
   /** 送信に失敗したら、その回はもう送らない(メールサーバーの不調で大勢を一度に止めないため) */
   halted: boolean;
+  /** この実行が見た「ON にした時刻」(送る直前にまだこの期間かを確かめる) */
+  enabledAt: Date;
 };
 
 /** 1通を送る(鍵 → 配信停止の確かめ → 取り合い → 送る → 書き戻し)。 */
@@ -314,8 +340,7 @@ async function sendOne(
   const claim = await prisma.$transaction(async (tx) => {
     await lockEmail(tx, to.normalized);
     // 実行の途中で画面から OFF にされていたら送らない(OFF の保存は進行中を止めるが、この回が後から作った行もある)。
-    const cfg = await tx.mailConfig.findUnique({ where: { id: MAIL_CONFIG_ID }, select: { followupEnabled: true } });
-    if (!cfg?.followupEnabled) return "disabled";
+    if (!(await lockEnabledPeriod(tx, ctx.enabledAt))) return "disabled";
     const unsub = await tx.mailUnsubscribe.findUnique({ where: { emailNormalized: to.normalized }, select: { id: true } });
     if (unsub) {
       const s = await tx.leadFollowup.updateMany({
@@ -372,15 +397,18 @@ async function sendOne(
   }
 
   // 送った事実は必ず残す(行が途中で止められていても)。行の書き戻しは sending のときだけ。
+  // 送った時刻(lastSentAt)は状態に関わらず残す=同じアドレスへの「20時間に1通」が、送信中に止められた行でも効く
+  // (@codex #757 P2)。届いたか分からない失敗も、届いたかもしれないので同じに扱う。
   await prisma.$transaction(async (tx) => {
     await tx.leadFollowupSend.createMany({
       data: [{ followupId: row.id, series, position, result: ok ? "sent" : "failed", subject: step.subject, at: now }],
       skipDuplicates: true,
     });
+    await tx.leadFollowup.updateMany({ where: { id: row.id }, data: { lastSentAt: now } });
     await tx.leadFollowup.updateMany({
       where: { id: row.id, status: "sending" },
       data: ok
-        ? { status: "active", ...advanceData(series, position), lastSentAt: now, claimedAt: null }
+        ? { status: "active", ...advanceData(series, position), claimedAt: null }
         : { status: "stopped", stopReason: "send_failed", stoppedAt: now, claimedAt: null },
     });
   });
@@ -529,6 +557,7 @@ export async function runLeadFollowups(now: Date, opts: FollowupRunOptions = {})
     maxSends: opts.maxSends ?? maxSendsFromEnv(),
     deadline,
     halted: false,
+    enabledAt: cfg.followupEnabledAt,
   };
 
   const rows: ActiveRow[] = (
