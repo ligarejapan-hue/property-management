@@ -194,6 +194,27 @@ describe("GET /api/properties/sale-dm/inquiries(横断)", () => {
     });
   });
 
+  it("追客メールの様子(followup)はメールを見られる人にだけ返す・アドレスや件名は入らない(2026-11-17)", async () => {
+    const lf = {
+      status: "active", stopReason: null, stoppedAt: null, stoppedBy: null,
+      sends: [{ series: "new", position: 1, result: "sent", at: new Date("2026-11-20T01:00:00Z") }],
+    };
+    db.dmInquiry.findMany.mockResolvedValueOnce([{ ...INQ, email: "a@b.jp", leadFollowup: lf }]);
+    const body = await (await get()).json();
+    expect(body.inquiries[0].followup).toEqual({
+      state: "active", label: "進行中", canStop: true, stopped: null,
+      sends: [{ label: "新規の流れ 1通目", result: "送信", at: "2026-11-20T01:00:00.000Z" }],
+    });
+    expect(JSON.stringify(body.inquiries[0].followup)).not.toContain("a@b.jp");
+    // 一覧の読み取りは追客の行も一緒に取る(select に leadFollowup)
+    expect(db.dmInquiry.findMany.mock.calls[0][0].select.leadFollowup).toBeTruthy();
+
+    requireSaleDmAccess.mockResolvedValueOnce({ session, permissions: [], ownerDisplayConfig: { phone: "full", email: "masked" } });
+    db.dmInquiry.findMany.mockResolvedValueOnce([{ ...INQ, email: "a@b.jp", leadFollowup: lf }]);
+    const masked = await (await get()).json();
+    expect(masked.inquiries[0].followup).toBeNull();
+  });
+
   it("notifyRecipientCount を返す", async () => {
     countInquiryNotifyRecipients.mockResolvedValueOnce(0);
     db.dmInquiry.findMany.mockResolvedValueOnce([]);

@@ -13,6 +13,7 @@ import {
   encodeInquiryCursor,
   inquiryCursorWhere,
 } from "@/lib/sale-dm-letter/inquiry-list";
+import { FOLLOWUP_VIEW_SELECT, followupViewsForList } from "@/lib/lead-followup/view";
 
 const PAGE_SIZE = 100;
 
@@ -45,6 +46,8 @@ export async function GET(req: NextRequest) {
           // 広告用の公開ページからの申込(設計 2026-10-20): draft は null・scenario と所在地・広告の印を持つ。
           source: true, propertyAddress: true, utmSource: true, utmMedium: true, utmCampaign: true,
           scenario: { select: { id: true, name: true } },
+          // 追客メールの様子(何通目をいつ・止まった理由)。メールを見られる人にだけ返す(下)。
+          leadFollowup: { select: FOLLOWUP_VIEW_SELECT },
           draft: {
             select: {
               campaign: { select: { id: true, name: true } },
@@ -120,8 +123,10 @@ export async function GET(req: NextRequest) {
             },
       ]),
     );
+    const followups = followupViewsForList(page, isPlainOwnerLevel(ownerDisplayConfig.email));
     const inquiries = maskedRows.map((row) => ({
       ...row,
+      followup: followups.get(row.id) ?? null,
       ...(extraById.get(row.id) ?? { campaignId: null, campaignName: null, location: null, propertyTypeLabel: null, scenarioName: null, adRoute: null }),
     }));
     await writeAuditLog({

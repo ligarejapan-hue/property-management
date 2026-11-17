@@ -125,6 +125,7 @@ import { SalesSheetCreateButton } from "@/components/sales-sheet/SalesSheetCreat
 import CaseDatesField from "@/components/properties/case-dates-field";
 import InquirerNameField from "@/components/properties/inquirer-name-field";
 import LeadExclusionField from "@/components/properties/lead-exclusion-field";
+import { PropertyLeadFollowupField } from "@/components/lead-followup/followup-status";
 import BusinessTypeField from "@/components/properties/business-type-field";
 import { newDealHref, type PropertyDealSummary } from "@/lib/property-business-type";
 import { SalesSheetList } from "@/components/sales-sheet/SalesSheetList";
@@ -1580,6 +1581,8 @@ function BasicTab({
         canWrite={canWrite}
         editLockHeld={editLockHeld}
       />
+      {/* 追客メールの様子と「追客を止める」(一括査定の物件だけ・所有者のメールを見られる人だけ・2026-11-17)。 */}
+      <PropertyLeadFollowupField key={property.id} propertyId={property.id} introductionRoute={property.introductionRoute} canWrite={canWrite} />
       <DmScenarioField
         property={property}
         onRefresh={onRefresh}

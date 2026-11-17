@@ -200,6 +200,15 @@ migration 名は `20261117000000_lead_followup_mail`(PR1 で実装済み)。
   - 何通目をいつ送ったか・飛ばしたか・止まった理由
   - 「追客を止める」ボタン(物件=`property:write`、査定申込=`requireSaleDmWriteAccess`)
   - アドレスは、今の表示の決まり(`owner_email` の表示レベル)のとおりに出す
+  - **実装で決めたこと(11-17 PR2)**
+    - 追客の様子(何通目をいつ・止まった理由)は、メール(`owner_email` の表示レベル)を平文で見られる人にだけ返す。送った記録から「メールがある」と分かるため(受付メールの状態と同じ扱い)。見られない人には何も出さない
+    - 様子の画面にはアドレス・件名・本文を出さない(流れの名前と何通目・結果・日時だけ)
+    - 「追客を止める」を押せるのは、上の権限に加えてメールを平文で見られる人
+    - 物件の画面は一括査定の物件だけに出す。申込の一覧は、追客の行がまだ無く始まりようのない申込(メールが無い・対応済み)には何も出さない
+    - API: 物件=`GET/POST /api/properties/[id]/lead-followup`(POST=止める)、申込=`POST /api/properties/sale-dm/inquiries/[inquiryId]/followup-stop`。一覧の API は各行に `followup` を足す
+    - 止め方: 進行中なら stopped/manual → 行が無ければ止めた印の行を作る(アドレスは null・重複は無視)→ もう一度止める(作る直前に送信の処理が行を作っていた場合)。親の物件行をロックしてから(R50)
+    - 監査: `lead_followup_manual_stop`(detail は target=property/inquiry と result=stopped/created/already だけ)
+    - **PR3 への申し送り**: 送信の処理は、物件・申込に行が既にあれば(状態が何でも)新しく始めない。送り終えたあとの状態の書き戻しは `status='sending'` を条件にした updateMany にし、その間に止められた行を進行中に戻さない
 
 ## 7. 決めてほしい点(残り)
 
