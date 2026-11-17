@@ -24,12 +24,15 @@ import { requestTemplatesSaveSchema, type RequestTemplate } from "@/lib/deals/re
 import type { ScheduleTemplateItem } from "@/lib/deals/schedule";
 import type { ChecklistItem } from "@/lib/deals/checklist";
 import { BUSINESS_SECTIONS, SECTION_RULE_LABELS, type SectionMatrix, type SectionRow } from "@/lib/deals/business-sections";
+import { pickBank, pickBranch, typeBank, typeBranch } from "@/lib/bank-directory/account-fields";
+import DirectoryCombobox, { BRANCH_NEEDS_BANK_TEXT, bankSearchUrl, branchSearchUrl } from "@/components/deals/bank-directory-combobox";
 
 const ALL_ON = Object.fromEntries(BUSINESS_SECTIONS.map((s) => [s.key, true])) as SectionRow;
 
 type Bank = DealSettingsView["bankAccount"];
-const BANK_FIELDS: [Exclude<keyof Bank, "accountType">, string, number][] = [
-  ["bankName", "銀行名", 100], ["branchName", "支店名", 100], ["accountNumber", "口座番号(7桁まで)", 7], ["accountHolder", "名義", 100],
+// 銀行名・支店名は候補つきの欄(DirectoryCombobox)で別に出す。
+const BANK_FIELDS: [Exclude<keyof Bank, "accountType" | "bankName" | "branchName" | "bankCode" | "branchCode">, string, number][] = [
+  ["accountNumber", "口座番号(7桁まで)", 7], ["accountHolder", "名義", 100],
 ];
 
 /** 取引の設定(管理者だけ)。代表者・口座・物件種別・書類の文面・ロゴと角印と、税率・税額の表(期間つき)を直す。 */
@@ -38,7 +41,9 @@ export default function DealSettingsPage() {
   const [tables, setTables] = useState<RateTableView[]>([]);
   const [title, setTitle] = useState("");
   const [repName, setRepName] = useState("");
-  const [bank, setBank] = useState<Record<keyof Bank, string>>({ bankName: "", branchName: "", accountType: "", accountNumber: "", accountHolder: "" });
+  const [bank, setBank] = useState<Record<keyof Bank, string>>({
+    bankName: "", branchName: "", accountType: "", accountNumber: "", accountHolder: "", bankCode: "", branchCode: "",
+  });
   const [kinds, setKinds] = useState<PropertyKindDef[]>([]);
   const [greeting, setGreeting] = useState("");
   const [notes, setNotes] = useState("");
@@ -59,6 +64,7 @@ export default function DealSettingsPage() {
     setBank({
       bankName: s.bankAccount.bankName ?? "", branchName: s.bankAccount.branchName ?? "", accountType: s.bankAccount.accountType ?? "",
       accountNumber: s.bankAccount.accountNumber ?? "", accountHolder: s.bankAccount.accountHolder ?? "",
+      bankCode: s.bankAccount.bankCode ?? "", branchCode: s.bankAccount.branchCode ?? "",
     });
     setKinds(s.propertyKinds);
     setGreeting(s.texts.funding_plan?.greeting ?? "");
@@ -158,6 +164,16 @@ export default function DealSettingsPage() {
       <section className="space-y-3">
         <h2 className="text-sm font-semibold text-gray-700 dark:text-gray-300">振込先口座</h2>
         <div className="grid gap-4 sm:grid-cols-2">
+          <Field label="銀行名">
+            <DirectoryCombobox id="self-bank" ariaLabel="銀行名" maxLength={100} className={inputCls} showCode
+              value={bank.bankName} searchUrl={bankSearchUrl}
+              onType={(text) => setBank((b) => typeBank(b, text))} onPick={(c) => setBank((b) => pickBank(b, c))} />
+          </Field>
+          <Field label="支店名">
+            <DirectoryCombobox id="self-branch" ariaLabel="支店名" maxLength={100} className={inputCls}
+              value={bank.branchName} searchUrl={branchSearchUrl(bank.bankCode)} noUrlText={BRANCH_NEEDS_BANK_TEXT}
+              onType={(text) => setBank((b) => typeBranch(b, text))} onPick={(c) => setBank((b) => pickBranch(b, c))} />
+          </Field>
           {BANK_FIELDS.map(([k, label, max]) => (
             <Field key={k} label={label}>
               <input value={bank[k]} onChange={(e) => setBank((b) => ({ ...b, [k]: e.target.value }))} maxLength={max} aria-label={label} className={inputCls} />

@@ -1,7 +1,7 @@
 import { describe, it, expect } from "vitest";
 import {
   dealCreateSchema, dealUpdateSchema, partyInputSchema, partyUpdateSchema,
-  dealSettingsUpdateSchema, propertySnapshotSchema, EMPTY_SNAPSHOT,
+  dealSettingsUpdateSchema, propertySnapshotSchema, EMPTY_SNAPSHOT, bankAccountSchema,
 } from "../schemas";
 
 const UID = "66666666-6666-4666-8666-666666666666";
@@ -77,5 +77,20 @@ describe("取引の設定", () => {
   });
   it("口座番号は数字7桁まで", () => {
     expect(() => dealSettingsUpdateSchema.parse({ version: 1, bankAccount: { bankName: null, branchName: null, accountType: "ordinary", accountNumber: "12a4567", accountHolder: null } })).toThrow();
+  });
+});
+
+describe("口座の銀行コード・支店コード(金融機関の名簿から選んだとき・2026-11-17)", () => {
+  const base = { bankName: "みずほ銀行", branchName: "神田支店", accountType: "ordinary", accountNumber: "1234567", accountHolder: "テスト" };
+  it("無くても読める(今ある口座)", () => {
+    expect(bankAccountSchema.parse(base)).toMatchObject({ bankName: "みずほ銀行" });
+  });
+  it("4桁・3桁の数字なら残す。空・null は無しにそろえる", () => {
+    expect(bankAccountSchema.parse({ ...base, bankCode: "0001", branchCode: "108" })).toMatchObject({ bankCode: "0001", branchCode: "108" });
+    expect(bankAccountSchema.parse({ ...base, bankCode: null, branchCode: "" })).toMatchObject({ bankCode: null, branchCode: null });
+  });
+  it("形の違うコードは受け付けない", () => {
+    expect(bankAccountSchema.safeParse({ ...base, bankCode: "1" }).success).toBe(false);
+    expect(bankAccountSchema.safeParse({ ...base, branchCode: "abcd" }).success).toBe(false);
   });
 });

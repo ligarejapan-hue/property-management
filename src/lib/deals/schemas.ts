@@ -48,6 +48,10 @@ export const bankAccountSchema = z.object({
   accountType: z.enum(BANK_ACCOUNT_TYPES).nullable(),
   accountNumber: z.string().trim().regex(/^\d{0,7}$/).nullable().transform((v) => (v ? v : null)),
   accountHolder: text(100),
+  // 金融機関の名簿から選んだときの銀行コード・支店コード(2026-11-17)。支店の候補をその銀行の中から出すのに使う。
+  // ⚠任意(今ある口座には無い)。書類には出さない(名前の文字が正本)。名前を打ち直すと画面で外す。
+  bankCode: z.string().trim().regex(/^(\d{4})?$/).nullable().transform((v) => (v ? v : null)).optional(),
+  branchCode: z.string().trim().regex(/^(\d{3})?$/).nullable().transform((v) => (v ? v : null)).optional(),
 }).strict();
 export type BankAccount = z.output<typeof bankAccountSchema>;
 export const EMPTY_BANK_ACCOUNT: BankAccount = { bankName: null, branchName: null, accountType: null, accountNumber: null, accountHolder: null };

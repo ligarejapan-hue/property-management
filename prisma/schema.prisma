@@ -2838,3 +2838,33 @@ model DriveSyncFile {
   @@index([folderLinkId, createdAt])
   @@map("drive_sync_files")
 }
+
+// 金融機関・支店の名簿(2026-11-17 発注者「銀行名・支店名は金融機関のデータを保管して、一文字目で検索」)。
+// 元データ=zengin-code/source-data(MIT)。リポジトリの控え data/bank-directory/zengin.json から
+// scripts/import-bank-directory.ts で全件入れ替える(本番から外へは取りに行かない)。
+// name=書類に載せる正式な形(「みずほ銀行」「神田支店」)・short_name=全銀の略称・kana=検索のための読み(names.ts の toSearchKey)。
+// ⚠取引に入れた口座はこの表を参照しない(名前の文字で持つ)。表を入れ替えても取引の口座は変わらない。
+model BankInstitution {
+  code          String       @id @db.Char(4)
+  name          String
+  shortName     String       @map("short_name")
+  kana          String
+  roma          String
+  sourceVersion String       @map("source_version")
+  branches      BankBranch[]
+
+  @@map("bank_institutions")
+}
+
+model BankBranch {
+  bankCode  String          @map("bank_code") @db.Char(4)
+  code      String          @db.Char(3)
+  name      String
+  shortName String          @map("short_name")
+  kana      String
+  roma      String
+  bank      BankInstitution @relation(fields: [bankCode], references: [code], onDelete: Cascade)
+
+  @@id([bankCode, code])
+  @@map("bank_branches")
+}

@@ -13,14 +13,18 @@ import {
 import { EMPTY_BANK_ACCOUNT, type BankAccount, type PaymentEntry, type PaymentMethod } from "@/lib/deals/schemas";
 import type { DealView } from "@/lib/deals/view";
 import type { DealCalc } from "@/lib/deals/calc/deal-calc";
+import { pickBank, pickBranch, typeBank, typeBranch } from "@/lib/bank-directory/account-fields";
+import DirectoryCombobox, { BRANCH_NEEDS_BANK_TEXT, bankSearchUrl, branchSearchUrl } from "./bank-directory-combobox";
 
 type AccountText = Record<keyof BankAccount, string>;
 type Draft = { method: PaymentMethod; account: AccountText };
 const toText = (b: BankAccount): AccountText => ({
   bankName: b.bankName ?? "", branchName: b.branchName ?? "", accountType: b.accountType ?? "", accountNumber: b.accountNumber ?? "", accountHolder: b.accountHolder ?? "",
+  bankCode: b.bankCode ?? "", branchCode: b.branchCode ?? "",
 });
-const ACCOUNT_FIELDS: [Exclude<keyof BankAccount, "accountType">, string, number][] = [
-  ["bankName", "銀行名", 100], ["branchName", "支店名", 100], ["accountNumber", "口座番号(7桁まで)", 12], ["accountHolder", "名義", 100],
+// 銀行名・支店名は候補つきの欄(DirectoryCombobox)で別に出す。
+const ACCOUNT_FIELDS: [Exclude<keyof BankAccount, "accountType" | "bankName" | "branchName" | "bankCode" | "branchCode">, string, number][] = [
+  ["accountNumber", "口座番号(7桁まで)", 12], ["accountHolder", "名義", 100],
 ];
 const conflictText = (e: unknown) =>
   e instanceof DealApiError && e.code === "VERSION_CONFLICT"
@@ -73,6 +77,7 @@ export default function DealPaymentsPanel({
         account: d.method === "transfer"
           ? {
             bankName: t(d.account.bankName), branchName: t(d.account.branchName),
+            bankCode: t(d.account.bankCode), branchCode: t(d.account.branchCode),
             accountType: d.account.accountType === "ordinary" || d.account.accountType === "current" ? d.account.accountType : null,
             accountNumber: num ? num : null, accountHolder: t(d.account.accountHolder),
           }
@@ -144,16 +149,20 @@ export default function DealPaymentsPanel({
               {d.method === "transfer" && (
                 <div className="space-y-2">
                   <div className="grid gap-2 sm:grid-cols-[1fr_1fr_7rem_9rem_1fr]">
-                    {ACCOUNT_FIELDS.slice(0, 2).map(([k, label, max]) => (
-                      <input key={k} aria-label={`${r.label}の${label}`} placeholder={label} maxLength={max} value={d.account[k]}
-                        onChange={(e) => update(r.key, (x) => ({ ...x, account: { ...x.account, [k]: e.target.value } }))} className={inputCls} />
-                    ))}
+                    <DirectoryCombobox id={`pay-${r.key}-bank`} ariaLabel={`${r.label}の銀行名`} placeholder="銀行名" maxLength={100} className={inputCls} showCode
+                      value={d.account.bankName} searchUrl={bankSearchUrl}
+                      onType={(text) => update(r.key, (x) => ({ ...x, account: typeBank(x.account, text) }))}
+                      onPick={(c) => update(r.key, (x) => ({ ...x, account: pickBank(x.account, c) }))} />
+                    <DirectoryCombobox id={`pay-${r.key}-branch`} ariaLabel={`${r.label}の支店名`} placeholder="支店名" maxLength={100} className={inputCls}
+                      value={d.account.branchName} searchUrl={branchSearchUrl(d.account.bankCode)} noUrlText={BRANCH_NEEDS_BANK_TEXT}
+                      onType={(text) => update(r.key, (x) => ({ ...x, account: typeBranch(x.account, text) }))}
+                      onPick={(c) => update(r.key, (x) => ({ ...x, account: pickBranch(x.account, c) }))} />
                     <select aria-label={`${r.label}の口座の種別`} value={d.account.accountType}
                       onChange={(e) => update(r.key, (x) => ({ ...x, account: { ...x.account, accountType: e.target.value } }))} className={inputCls}>
                       <option value="">種別</option>
                       {Object.entries(BANK_ACCOUNT_TYPE_LABELS).map(([v, l]) => <option key={v} value={v}>{l}</option>)}
                     </select>
-                    {ACCOUNT_FIELDS.slice(2).map(([k, label, max]) => (
+                    {ACCOUNT_FIELDS.map(([k, label, max]) => (
                       <input key={k} aria-label={`${r.label}の${label}`} placeholder={label} maxLength={max} value={d.account[k]} inputMode={k === "accountNumber" ? "numeric" : undefined}
                         onChange={(e) => update(r.key, (x) => ({ ...x, account: { ...x.account, [k]: e.target.value } }))} className={inputCls} />
                     ))}
