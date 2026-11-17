@@ -316,7 +316,7 @@ describe("失敗・途中の OFF に強くする(内部レビュー)", () => {
 
   it("接続・認証の失敗(確実に送っていない)は止めずに進行中へ戻し、その回はもう送らない", async () => {
     withActiveRows([activeRow({ newNextPosition: 1 }), row2()], [property()]);
-    sendMail.mockResolvedValueOnce({ ok: false, code: "ECONNECTION" });
+    sendMail.mockResolvedValueOnce({ ok: false, code: "EAUTH" });
     const s = await run();
     expect(s).toMatchObject({ sent: 0, failed: 0 });
     expect(sendMail).toHaveBeenCalledTimes(1);
@@ -324,7 +324,7 @@ describe("失敗・途中の OFF に強くする(内部レビュー)", () => {
     expect(back.data).toEqual({ status: "active", claimedAt: null });
     expect(db.leadFollowupSend.createMany).not.toHaveBeenCalled();
     expect(db.leadFollowup.updateMany.mock.calls.some((c) => c[0].data.stopReason === "send_failed")).toBe(false);
-    expect(vi.mocked(writeAuditLog).mock.calls[0][0].detail).toEqual({ result: "deferred", series: "new", position: 1, code: "ECONNECTION" });
+    expect(vi.mocked(writeAuditLog).mock.calls[0][0].detail).toEqual({ result: "deferred", series: "new", position: 1, code: "EAUTH" });
   });
 
   it("それ以外の失敗はその追客を止め、その回はもう送らない(大勢を一度に止めない)", async () => {
@@ -387,5 +387,23 @@ describe("ON の期間と送った時刻(@codex #757)", () => {
     await run();
     expect(sendMail).toHaveBeenCalledTimes(1);
     expect(db.leadFollowup.updateMany.mock.calls.some((c) => c[0].where.status === undefined && c[0].data.lastSentAt === NOW)).toBe(true);
+  });
+});
+
+describe("@codex #757 2回目", () => {
+  it("ECONNECTION(本文を渡したあとに切れたかもしれない)は届いた扱い: 送り直さずに止め、送った時刻も残す", async () => {
+    withActiveRows([activeRow({ newNextPosition: 1 })]);
+    sendMail.mockResolvedValueOnce({ ok: false, code: "ECONNECTION" });
+    const s = await run();
+    expect(s).toMatchObject({ failed: 1 });
+    expect(db.leadFollowup.updateMany.mock.calls.some((c) => c[0].data.stopReason === "send_failed")).toBe(true);
+    expect(db.leadFollowup.updateMany.mock.calls.some((c) => c[0].where.status === undefined && c[0].data.lastSentAt === NOW)).toBe(true);
+    expect(db.leadFollowup.updateMany.mock.calls.some((c) => c[0].where.status === "sending" && c[0].data.status === "active")).toBe(false);
+  });
+
+  it("送る前の押さえる順番は、行を作るときと同じ(設定の行 → アドレスの鍵)", async () => {
+    withActiveRows([activeRow({ newNextPosition: 1 })]);
+    await run();
+    expect(db.$queryRaw.mock.invocationCallOrder[0]).toBeLessThan(db.$executeRaw.mock.invocationCallOrder[0]);
   });
 });

@@ -35,10 +35,12 @@ const EVALUATE_LIMIT = 2000;
 const CHUNK = 200;
 const MAX_STEPS_PER_ROW = 12;
 /**
- * 接続・認証の段階で失敗した(=確実に送っていない)ときのコード。この失敗では止めずに次の回へ回す。
- * それ以外の失敗(途中で切れた・相手に断られた)は届いたか分からないので、その追客を止める(送り直さない)。
+ * 本文を渡す前に失敗したことが確かなコード(名前が引けない・つながらない・ログインできない・暗号化できない)。
+ * この失敗では止めずに次の回へ回す。
+ * ⚠ECONNECTION は入れない: 相手が本文を受け取ったあとで接続が切れても ECONNECTION になる(届いているかもしれない)。
+ *   ほかの失敗と同じく、届いたか分からない=その追客を止める(送り直さない・@codex #757 P1)。
  */
-const NOT_SENT_CODES = new Set(["ECONNECTION", "ECONNREFUSED", "EDNS", "EAUTH", "ETLS", "ENOTFOUND", "EAI_AGAIN"]);
+const NOT_SENT_CODES = new Set(["ECONNREFUSED", "EDNS", "ENOTFOUND", "EAI_AGAIN", "EAUTH", "ETLS"]);
 
 const CLOSED_CASE_STATUSES = [
   "negotiating",
@@ -338,9 +340,10 @@ async function sendOne(
   summary: FollowupRunSummary,
 ): Promise<void> {
   const claim = await prisma.$transaction(async (tx) => {
-    await lockEmail(tx, to.normalized);
+    // 押さえる順番は 設定の行 → アドレスの鍵(行を作る startFollowup と同じ。逆だと重なった実行どうしで待ち合う・@codex #757 P2)。
     // 実行の途中で画面から OFF にされていたら送らない(OFF の保存は進行中を止めるが、この回が後から作った行もある)。
     if (!(await lockEnabledPeriod(tx, ctx.enabledAt))) return "disabled";
+    await lockEmail(tx, to.normalized);
     const unsub = await tx.mailUnsubscribe.findUnique({ where: { emailNormalized: to.normalized }, select: { id: true } });
     if (unsub) {
       const s = await tx.leadFollowup.updateMany({
