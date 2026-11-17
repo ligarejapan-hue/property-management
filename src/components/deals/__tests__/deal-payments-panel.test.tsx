@@ -64,6 +64,17 @@ describe("お金の受け渡しのタブ(2026-11-16)", () => {
     const d = { ...base, payments: { balance: tr(), settlement: { method: "with_balance" as const, account: EMPTY_BANK_ACCOUNT } } };
     expect(render(d)).toContain("残金と同じ払い方・口座です(見本銀行 本店 普通 1234567 名義 ミホン タロウ)");
   });
+  it("その他の費用の行だけ、払う人・受け取る人を選べる。「その他」なら名前の欄(11-18 発注者)", () => {
+    const html = render(base);
+    expect(html).toContain('aria-label="家財の処分の払う人"');
+    expect(html).toContain('aria-label="家財の処分の受け取る人"');
+    expect(html).toContain('aria-label="家財の処分の受け取る人の名前"');
+    expect(html).not.toContain('aria-label="家財の処分の払う人の名前"');
+    expect(html).not.toContain('aria-label="手付金の払う人"');
+    for (const l of ["売主", "買主", "当社", "司法書士", "測量の会社", "その他(名前を入れる)"]) expect(html).toContain(`>${l}</option>`);
+    const d = { ...base, payments: { others: { 家財の処分: { method: "cash" as const, account: EMPTY_BANK_ACCOUNT, to: { kind: "other" as const, name: "解体業者" } } } } };
+    expect(render(d)).toContain('value="解体業者"');
+  });
   it("見えない払い方の radio は、外側の label を位置の基準にする(押すとページ全体がずれて真っ白になった・11-17)", () => {
     const html = render(base);
     const labels = [...html.matchAll(/<label class="([^"]*)"><input type="radio" class="sr-only"/g)];

@@ -1,7 +1,7 @@
 import {
   DEFAULT_ASSESSMENTS, DEFAULT_COSTS, DEFAULT_TERMS, OVERRIDE_KEYS, assessmentsSchema, costsSchema, leaseSchema,
-  paymentEntrySchema, settlementTermsSchema, yenInt, PAYMENT_FIXED_KEYS,
-  type Assessments, type Costs, type Lease, type Overrides, type PaymentEntry, type Payments, type SettlementTerms,
+  otherPaymentEntrySchema, paymentEntrySchema, settlementTermsSchema, yenInt, PAYMENT_FIXED_KEYS,
+  type Assessments, type Costs, type Lease, type OtherPaymentEntry, type Overrides, type Payments, type SettlementTerms,
 } from "./schemas";
 
 const obj = (json: unknown): Record<string, unknown> =>
@@ -47,9 +47,9 @@ export function readPayments(json: unknown): Payments {
     // 「残金と一緒に」は精算金だけ(ほかの鍵に入っていたら未定として読む)。
     if (r.success) out[k] = k !== "settlement" && r.data.method === "with_balance" ? { ...r.data, method: "undecided" } : r.data;
   }
-  const others: Record<string, PaymentEntry> = {};
+  const others: Record<string, OtherPaymentEntry> = {};
   for (const [label, v] of Object.entries(obj(src.others))) {
-    const r = paymentEntrySchema.safeParse(v);
+    const r = otherPaymentEntrySchema.safeParse(v);
     if (r.success && label.trim() !== "" && label.length <= 50) others[label] = r.data.method === "with_balance" ? { ...r.data, method: "undecided" } : r.data;
   }
   if (Object.keys(others).length > 0) out.others = others;
