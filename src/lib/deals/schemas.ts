@@ -65,6 +65,8 @@ export const PAYMENT_METHODS = ["undecided", "transfer", "cash", "with_balance"]
 export type PaymentMethod = (typeof PAYMENT_METHODS)[number];
 export const PAYMENT_FIXED_KEYS = [
   "deposit", "balance", "settlement", "registration", "cancellation", "survey", "brokerageSeller", "brokerageBuyer",
+  // 買取再販で当社が相手方の仲介会社に払う仲介手数料(2026-11-18)。
+  "brokerageResale",
 ] as const;
 export type PaymentFixedKey = (typeof PAYMENT_FIXED_KEYS)[number];
 export const paymentEntrySchema = z.object({
@@ -94,7 +96,7 @@ export type OtherPaymentEntry = z.output<typeof otherPaymentEntrySchema>;
 const entry = paymentEntrySchema.optional();
 export const paymentsSchema = z.object({
   deposit: entry, balance: entry, settlement: entry, registration: entry, cancellation: entry, survey: entry,
-  brokerageSeller: entry, brokerageBuyer: entry,
+  brokerageSeller: entry, brokerageBuyer: entry, brokerageResale: entry,
   /** 費用のその他の行(行の名前ごと)。 */
   others: z.record(z.string().trim().min(1).max(50), otherPaymentEntrySchema).optional(),
 }).strict()
