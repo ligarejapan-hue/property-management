@@ -154,7 +154,7 @@ export function LeadFollowupSettingsForm({
       <ul className="list-disc space-y-1 pl-5 text-xs text-gray-600 dark:text-gray-300">
         <li>新規の流れ: 一括査定の物件を登録した日(査定申込は申し込んだ日)から数えます。日数が0の通は登録の直後に送る挨拶です(査定申込には送りません=受付メールが挨拶を兼ねます)。2通目からは、案件の状態が「未着手」「コンタクト中」のお客様だけに送ります。</li>
         <li>保留の流れ: 案件の状態が「保留」になった日から数え直して送ります。</li>
-        <li>受付メールが届いた査定申込だけが対象です。追客を ON にした時刻より前の登録・申込には送りません。</li>
+        <li>受付メールが届いた査定申込だけが対象です。ON にする前からいるお客様にも送ります(登録日・申込日から数えて、次に日が来る通から。日が過ぎた通は送りません)。</li>
         <li>1つのアドレスへは1日1通まで、朝9時〜夜8時に送ります。末尾には会社の情報と配信停止のリンクが自動で付きます。</li>
       </ul>
 
@@ -174,7 +174,7 @@ export function LeadFollowupSettingsForm({
       </label>
       {initial.enabled && initial.enabledAt && (
         <p className="text-xs text-gray-500 dark:text-gray-400">
-          ON にした時刻: {new Date(initial.enabledAt).toLocaleString("ja-JP", { timeZone: "Asia/Tokyo" })}(これより後の登録・申込が対象)
+          ON にした時刻: {new Date(initial.enabledAt).toLocaleString("ja-JP", { timeZone: "Asia/Tokyo" })}(これより後の登録・申込は1通目から)
         </p>
       )}
       {initial.setupProblems.length > 0 && (

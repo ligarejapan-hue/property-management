@@ -9,14 +9,15 @@ import { buildFollowupUnsubscribeUrl } from "./unsubscribe-token";
 import { followupLockKey } from "./unsubscribe-record";
 import { loadFollowupSetupContext } from "./settings-store";
 import { FOLLOWUP_SERIES, followupStepsEnableProblems, type FollowupSeries, type FollowupStepsBySeries } from "./steps";
-import { classifyInquiry, classifyProperty, decideFollowup, type CaseClass, type DecideRow } from "./decide";
+import { classifyInquiry, classifyProperty, decideFollowup, initialNewPosition, type CaseClass, type DecideRow } from "./decide";
 
 /**
  * 追客メールの1回分の実行(15分おきの timer から・設計 2026-11-16 §2・§3)。
  * 1. OFF なら進行中を全部止めて終わり(disabled)
  * 2. 送っている途中(sending)のまま30分を過ぎた行を止める(interrupted=届いたか分からないので送り直さない)
  * 3. 送るのに足りないもの(SMTP・会社の設定・外向きの URL・鍵・文面)があれば、行に触らず終わり
- * 4. 新しい対象を見つけて行を作る(ON にした時刻より後の一括査定の物件・受付メールが届いた査定申込)
+ * 4. 新しい対象を見つけて行を作る(一括査定の物件・受付メールが届いた査定申込。2026-11-19 発注者: ON にする前からいるお客様も対象。
+ *    その場合は登録日・申込日から数えて、次に日が来る通から=initialNewPosition)
  * 5. 進行中の行を1つずつ見て、送る/飛ばす/待つ/保留へ移る/止める/終わり を決めて書く
  *
  * 守り:
@@ -165,6 +166,7 @@ async function startFollowup(
   startedAt: Date,
   now: Date,
   enabledAt: Date,
+  newNextPosition: number,
 ): Promise<"active" | "stopped" | "exists"> {
   return prisma.$transaction(async (tx) => {
     // 探している最中に OFF(や OFF→ON)にされていたら作らない。
@@ -200,6 +202,7 @@ async function startFollowup(
           status,
           stopReason,
           newStartedAt: startedAt,
+          newNextPosition,
           ...(status === "stopped" ? { stoppedAt: now } : {}),
         },
       ],
@@ -211,11 +214,16 @@ async function startFollowup(
   });
 }
 
-async function discover(enabledAt: Date, now: Date, deadline: number, summary: FollowupRunSummary) {
+async function discover(
+  enabledAt: Date,
+  now: Date,
+  deadline: number,
+  steps: FollowupStepsBySeries,
+  summary: FollowupRunSummary,
+) {
   const properties = await prisma.property.findMany({
     where: {
       introductionRoute: "bulk_assessment",
-      createdAt: { gte: enabledAt },
       leadFollowup: { is: null },
       caseStatus: { notIn: [...CLOSED_CASE_STATUSES] },
       // メールのある所有者がいる物件だけ(メールの無い物件で毎回の上限を埋めない)。
@@ -228,7 +236,14 @@ async function discover(enabledAt: Date, now: Date, deadline: number, summary: F
   for (const p of properties) {
     if (Date.now() > deadline) return;
     const email = firstOwnerEmail(p.propertyOwners);
-    const r = await startFollowup({ kind: "property", id: p.id }, email?.normalized ?? null, p.createdAt, now, enabledAt);
+    const r = await startFollowup(
+      { kind: "property", id: p.id },
+      email?.normalized ?? null,
+      p.createdAt,
+      now,
+      enabledAt,
+      initialNewPosition(p.createdAt, enabledAt, now, steps),
+    );
     if (r === "active") summary.started += 1;
     else if (r === "stopped") summary.startedStopped += 1;
   }
@@ -236,7 +251,6 @@ async function discover(enabledAt: Date, now: Date, deadline: number, summary: F
   const inquiries = await prisma.dmInquiry.findMany({
     where: {
       autoReplyStatus: "sent",
-      submittedAt: { gte: enabledAt },
       handleStatus: { not: "done" },
       email: { not: null },
       leadFollowup: { is: null },
@@ -247,7 +261,14 @@ async function discover(enabledAt: Date, now: Date, deadline: number, summary: F
   });
   for (const q of inquiries) {
     if (Date.now() > deadline) return;
-    const r = await startFollowup({ kind: "inquiry", id: q.id }, normalizeFollowupEmail(q.email), q.submittedAt, now, enabledAt);
+    const r = await startFollowup(
+      { kind: "inquiry", id: q.id },
+      normalizeFollowupEmail(q.email),
+      q.submittedAt,
+      now,
+      enabledAt,
+      initialNewPosition(q.submittedAt, enabledAt, now, steps),
+    );
     if (r === "active") summary.started += 1;
     else if (r === "stopped") summary.startedStopped += 1;
   }
@@ -569,7 +590,7 @@ export async function runLeadFollowups(now: Date, opts: FollowupRunOptions = {})
   }
   summary.ready = true;
 
-  await discover(cfg.followupEnabledAt, now, deadline, summary);
+  await discover(cfg.followupEnabledAt, now, deadline, steps, summary);
 
   const ctx: SendContext = {
     steps,

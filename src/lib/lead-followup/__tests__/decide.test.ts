@@ -4,6 +4,7 @@ import {
   classifyInquiry,
   classifyProperty,
   decideFollowup,
+  initialNewPosition,
   type DecideRow,
 } from "@/lib/lead-followup/decide";
 import type { FollowupStepsBySeries } from "@/lib/lead-followup/steps";
@@ -129,5 +130,25 @@ describe("保留の流れ", () => {
       kind: "update",
       data: { newNextPosition: NEW_FLOW_ENDED_BY_HOLD, holdStartedAt: at(100) },
     });
+  });
+});
+
+describe("今いるお客様の最初に見る通(登録日を起点に、次に日が来る通から・2026-11-19 発注者)", () => {
+  const NOW = at(40);
+  it("ON にした時刻より後の登録は1通目から", () => {
+    expect(initialNewPosition(at(39), at(38), NOW, STEPS)).toBe(1);
+  });
+  it("前からいるお客様は、日が過ぎた通を数えず、次に日が来る通から(見本の流れ=0・3・7・30日)", () => {
+    // 見本の流れ = 0・3・7・30日。40日前の登録は全部過ぎている
+    expect(initialNewPosition(at(0), at(39), NOW, STEPS)).toBe(5);
+    // 5日前の登録 → 0日・3日は過ぎた → 7日目の通(3通目)から
+    expect(initialNewPosition(at(35), at(39), NOW, STEPS)).toBe(3);
+    // ちょうど日が来ている通も「過ぎた」に入れる(今日の分を慌てて送らない)
+    expect(initialNewPosition(at(37), at(39), NOW, STEPS)).toBe(3);
+  });
+  it("全部過ぎていれば新規の流れは終わり扱い(保留なら保留の流れへ・そうでなければ完了)", () => {
+    const pos = initialNewPosition(at(0), at(39), NOW, STEPS);
+    expect(decideFollowup(prop({ newNextPosition: pos }), "uncontacted", STEPS, NOW)).toEqual({ kind: "complete" });
+    expect(decideFollowup(prop({ newNextPosition: pos }), "hold", STEPS, NOW)).toMatchObject({ kind: "update" });
   });
 });

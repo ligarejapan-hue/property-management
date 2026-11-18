@@ -114,3 +114,16 @@ export function decideFollowup(row: DecideRow, cls: CaseClass, steps: FollowupSt
   }
   return stepDecision("hold", steps.hold, row.holdStartedAt, row.holdNextPosition, cls, now, false);
 }
+
+/**
+ * 行を作るときの「新規の流れで最初に見る通」(2026-11-19 発注者: 今いるお客様にも送る・登録日を起点に、次に日が来る通から)。
+ * - ON にした時刻より後の登録・申込は 1通目から(挨拶を含めて今までどおり)
+ * - それより前からいるお客様は、登録日から数えて日が過ぎた通(ちょうど今日の通も含む)を数えず、次に日が来る通から。
+ *   全部過ぎていれば「新規の流れは終わり」(保留なら保留の流れへ・そうでなければ完了)
+ * 過ぎた通は送らないので、「飛ばした」の記録も残さない。
+ */
+export function initialNewPosition(startedAt: Date, enabledAt: Date, now: Date, steps: FollowupStepsBySeries): number {
+  if (startedAt.getTime() >= enabledAt.getTime()) return 1;
+  const idx = steps.new.findIndex((s) => dueAt(startedAt, s.delayDays) > now.getTime());
+  return idx < 0 ? steps.new.length + 1 : idx + 1;
+}
