@@ -2,12 +2,17 @@
  * お金の受け渡し(2026-11-16 発注者「手付金・残金・精算金・その他のお金は、現金か振込かを確かめて送金先を入れる」)。
  * 計画: https://claude.ai/artifact/HmqrUfszuaBEXSccvwcdGg (発注者「進めて」)。
  * - 行=お金ごと。払う人・受け取る人・金額は取引の入力と決済の計算から出す(ここでは直さない)。
+ *   ただし費用のその他の行だけは、払う人・受け取る人を選べる(初期値は今までの 売主 → 支払先・2026-11-18 発注者)。
+ *   選んだ相手は画面の表示と「当社なら自社の口座を使う」にだけ使う(書類・計算には入れない)。
  * - 払い方=振込・現金・未定。精算金だけ「残金と一緒に」(払い方と口座は残金と同じ・向きが売主→買主なら残金から差し引く)。
  * - 口座が空で受け取る人が自社なら、取引の設定の口座を使う。
  * - 書類(残金決済のご案内2種類・書類確認書の払い方)の初期値に入れる。書類の画面で直した値はその書類だけに残る。
  */
 import { BANK_ACCOUNT_TYPE_LABELS } from "./constants";
-import { EMPTY_PAYMENT_ENTRY, type BankAccount, type PaymentEntry, type PaymentFixedKey, type Payments } from "./schemas";
+import {
+  EMPTY_PAYMENT_ENTRY, type BankAccount, type OtherPaymentEntry, type PaymentEntry, type PaymentFixedKey, type PaymentParty,
+  type PaymentPartyKind, type Payments,
+} from "./schemas";
 import type { DealCalc } from "./calc/deal-calc";
 import type { DealView } from "./view";
 
@@ -25,7 +30,17 @@ export interface PaymentRow {
   /** 「残金と一緒に」を選べる(精算金だけ)。 */
   allowWithBalance: boolean;
   entry: PaymentEntry;
+  /** 払う人・受け取る人を選べる行(費用のその他の行だけ)の今の相手。固定の行は null。 */
+  parties: { from: PaymentParty; to: PaymentParty } | null;
 }
+
+export const PAYMENT_PARTY_LABELS: Record<PaymentPartyKind, string> = {
+  seller: "売主", buyer: "買主", self: "当社", scrivener: "司法書士", surveyor: "測量の会社", other: "その他(名前を入れる)",
+};
+/** その他の行の初期値=今までの決め打ち(売主 → 支払先)。 */
+export const DEFAULT_OTHER_PARTIES: { from: PaymentParty; to: PaymentParty } = {
+  from: { kind: "seller", name: null }, to: { kind: "other", name: null },
+};
 
 const OTHER_PREFIX = "other:";
 export const otherKeyOf = (label: string) => `${OTHER_PREFIX}${label}` as const;
@@ -37,13 +52,34 @@ function sideOf(d: DealView, role: "seller" | "buyer"): { name: string; self: bo
   return { name: self ? SELF : role === "seller" ? "売主" : "買主", self };
 }
 
+/** 選んだ相手の出し方と、自社かどうか(売主・買主は自社の当事者なら「当社」)。 */
+function partyOf(d: DealView, p: PaymentParty): { name: string; self: boolean } {
+  switch (p.kind) {
+    case "seller": case "buyer": return sideOf(d, p.kind);
+    case "self": return { name: SELF, self: true };
+    case "other": return { name: p.name?.trim() || "支払先", self: false };
+    default: return { name: PAYMENT_PARTY_LABELS[p.kind], self: false };
+  }
+}
+
+/** 名前は「その他」のときだけ持つ(空なら null)。 */
+const cleanParty = (p: PaymentParty): PaymentParty => ({ kind: p.kind, name: p.kind === "other" ? p.name?.trim() || null : null });
+
+/** 選べる行を、選び直した相手で出し直す(固定の行はそのまま)。 */
+export function withParties(d: DealView, row: PaymentRow, from: PaymentParty, to: PaymentParty): PaymentRow {
+  if (!row.parties) return row;
+  const f = partyOf(d, from);
+  const t = partyOf(d, to);
+  return { ...row, from: f.name, to: t.name, toSelf: t.self, parties: { from: cleanParty(from), to: cleanParty(to) } };
+}
+
 /** 取引で出すお金の行。費用が入っていない登記・抹消・測量は出さない(手付金・残金・精算金はいつも出す)。 */
 export function paymentRows(d: DealView, calc: DealCalc | null): PaymentRow[] {
   const p: Payments = d.payments ?? {};
   const seller = sideOf(d, "seller");
   const buyer = sideOf(d, "buyer");
   const fixed = (key: PaymentFixedKey, label: string, from: string, to: string, toSelf: boolean, amount: number | null, allowWithBalance = false): PaymentRow =>
-    ({ key, label, from, to, toSelf, amount, allowWithBalance, entry: p[key] ?? EMPTY_PAYMENT_ENTRY });
+    ({ key, label, from, to, toSelf, amount, allowWithBalance, entry: p[key] ?? EMPTY_PAYMENT_ENTRY, parties: null });
   const s = calc?.settlement ?? null;
   const reverse = s?.net.direction === "sellerToBuyer";
   const rows: PaymentRow[] = [
@@ -65,10 +101,12 @@ export function paymentRows(d: DealView, calc: DealCalc | null): PaymentRow[] {
   const others = new Map<string, number>();
   for (const o of d.costs.others) others.set(o.label, (others.get(o.label) ?? 0) + o.amount);
   for (const [label, amount] of others) {
-    rows.push({
-      key: otherKeyOf(label), label, from: seller.name, to: "支払先", toSelf: false, amount, allowWithBalance: false,
-      entry: p.others?.[label] ?? EMPTY_PAYMENT_ENTRY,
-    });
+    const stored = p.others?.[label];
+    const entry: PaymentEntry = stored ? { method: stored.method, account: stored.account } : EMPTY_PAYMENT_ENTRY;
+    const row: PaymentRow = {
+      key: otherKeyOf(label), label, from: "", to: "", toSelf: false, amount, allowWithBalance: false, entry, parties: DEFAULT_OTHER_PARTIES,
+    };
+    rows.push(withParties(d, row, stored?.from ?? DEFAULT_OTHER_PARTIES.from, stored?.to ?? DEFAULT_OTHER_PARTIES.to));
   }
   return rows;
 }
@@ -173,13 +211,17 @@ export function normalizeAccountNumber(v: string): string | null {
  * 画面の下書き(行の鍵ごと)→ 保存する形。今の行に無い鍵(費用を消した登記・名前を変えたその他の行など)は保存済みの値を残す。
  * 精算金以外で「残金と一緒に」は送らない(未定にする)。
  */
-export function paymentsForSave(stored: Payments, rows: PaymentRow[], drafts: Record<string, PaymentEntry>): Payments {
+export function paymentsForSave(stored: Payments, rows: PaymentRow[], drafts: Record<string, OtherPaymentEntry>): Payments {
   const out: Payments = { ...stored, ...(stored.others ? { others: { ...stored.others } } : {}) };
   for (const r of rows) {
     const e = drafts[r.key] ?? r.entry;
-    const entry: PaymentEntry = e.method === "with_balance" && !r.allowWithBalance ? { ...e, method: "undecided" } : e;
-    if (isOtherKey(r.key)) out.others = { ...(out.others ?? {}), [r.key.slice(OTHER_PREFIX.length)]: entry };
-    else out[r.key] = entry;
+    // 払う人・受け取る人は選べる行(その他)だけ。固定の行には付けない(保存の形が断る)。
+    const entry: PaymentEntry = { method: e.method === "with_balance" && !r.allowWithBalance ? "undecided" : e.method, account: e.account };
+    if (isOtherKey(r.key)) {
+      const parties = r.parties ?? DEFAULT_OTHER_PARTIES;
+      const withP: OtherPaymentEntry = { ...entry, from: cleanParty(e.from ?? parties.from), to: cleanParty(e.to ?? parties.to) };
+      out.others = { ...(out.others ?? {}), [r.key.slice(OTHER_PREFIX.length)]: withP };
+    } else out[r.key] = entry;
   }
   return out;
 }

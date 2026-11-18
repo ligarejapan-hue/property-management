@@ -73,12 +73,30 @@ export const paymentEntrySchema = z.object({
 }).strict();
 export type PaymentEntry = z.output<typeof paymentEntrySchema>;
 export const EMPTY_PAYMENT_ENTRY: PaymentEntry = { method: "undecided", account: EMPTY_BANK_ACCOUNT };
+/**
+ * 費用のその他の行だけ、払う人・受け取る人を選べる(2026-11-18 発注者「業務委託費が売主→支払先に固定。選択式に」)。
+ * other=名前を手で入れる(空なら「支払先」と出す)。名前は other のときだけ使う。
+ */
+export const PAYMENT_PARTY_KINDS = ["seller", "buyer", "self", "scrivener", "surveyor", "other"] as const;
+export type PaymentPartyKind = (typeof PAYMENT_PARTY_KINDS)[number];
+export const paymentPartySchema = z.object({
+  kind: z.enum(PAYMENT_PARTY_KINDS),
+  name: z.string().trim().max(50).nullable(),
+}).strict();
+export type PaymentParty = z.output<typeof paymentPartySchema>;
+export const otherPaymentEntrySchema = z.object({
+  method: z.enum(PAYMENT_METHODS),
+  account: bankAccountSchema,
+  from: paymentPartySchema.optional(),
+  to: paymentPartySchema.optional(),
+}).strict();
+export type OtherPaymentEntry = z.output<typeof otherPaymentEntrySchema>;
 const entry = paymentEntrySchema.optional();
 export const paymentsSchema = z.object({
   deposit: entry, balance: entry, settlement: entry, registration: entry, cancellation: entry, survey: entry,
   brokerageSeller: entry, brokerageBuyer: entry,
   /** 費用のその他の行(行の名前ごと)。 */
-  others: z.record(z.string().trim().min(1).max(50), paymentEntrySchema).optional(),
+  others: z.record(z.string().trim().min(1).max(50), otherPaymentEntrySchema).optional(),
 }).strict()
   // 「残金と一緒に」は精算金だけ(残金に入ると残金を探し続けてしまう・内部レビュー P3)。
   .refine((p) => PAYMENT_FIXED_KEYS.every((k) => k === "settlement" || p[k]?.method !== "with_balance")

@@ -8,20 +8,28 @@ import { dealsApi, DealApiError, errorText } from "@/lib/deals/client";
 import { BANK_ACCOUNT_TYPE_LABELS } from "@/lib/deals/constants";
 import { yenText } from "@/lib/deals/money-forms";
 import {
-  PAYMENT_METHOD_LABELS, effectiveAccount, formatBankAccount, normalizeAccountNumber, paymentRows, paymentsForSave, type PaymentRow,
+  PAYMENT_METHOD_LABELS, PAYMENT_PARTY_LABELS, effectiveAccount, formatBankAccount, normalizeAccountNumber, paymentRows, paymentsForSave,
+  withParties, type PaymentRow,
 } from "@/lib/deals/payments";
-import { EMPTY_BANK_ACCOUNT, type BankAccount, type PaymentEntry, type PaymentMethod } from "@/lib/deals/schemas";
+import {
+  EMPTY_BANK_ACCOUNT, PAYMENT_PARTY_KINDS, type BankAccount, type OtherPaymentEntry, type PaymentMethod, type PaymentParty, type PaymentPartyKind,
+} from "@/lib/deals/schemas";
 import type { DealView } from "@/lib/deals/view";
 import type { DealCalc } from "@/lib/deals/calc/deal-calc";
 import { pickBank, pickBranch, typeBank, typeBranch } from "@/lib/bank-directory/account-fields";
 import DirectoryCombobox, { BRANCH_NEEDS_BANK_TEXT, bankSearchUrl, branchSearchUrl } from "./bank-directory-combobox";
 
 type AccountText = Record<keyof BankAccount, string>;
-type Draft = { method: PaymentMethod; account: AccountText };
+/** from/to は払う人・受け取る人を選べる行(費用のその他)だけ。 */
+type Draft = { method: PaymentMethod; account: AccountText; from?: PaymentParty; to?: PaymentParty };
 const toText = (b: BankAccount): AccountText => ({
   bankName: b.bankName ?? "", branchName: b.branchName ?? "", accountType: b.accountType ?? "", accountNumber: b.accountNumber ?? "", accountHolder: b.accountHolder ?? "",
   bankCode: b.bankCode ?? "", branchCode: b.branchCode ?? "",
 });
+const draftFromRow = (r: PaymentRow): Draft => ({
+  method: r.entry.method, account: toText(r.entry.account), ...(r.parties ? { from: r.parties.from, to: r.parties.to } : {}),
+});
+const PARTY_SIDES = [["from", "払う人"], ["to", "受け取る人"]] as const;
 // 銀行名・支店名は候補つきの欄(DirectoryCombobox)で別に出す。
 const ACCOUNT_FIELDS: [Exclude<keyof BankAccount, "accountType" | "bankName" | "branchName" | "bankCode" | "branchCode">, string, number][] = [
   ["accountNumber", "口座番号(7桁まで)", 12], ["accountHolder", "名義", 100],
@@ -33,7 +41,8 @@ const conflictText = (e: unknown) =>
 
 /**
  * お金の受け渡し(2026-11-16 発注者)。お金ごとに払い方(振込・現金・未定・精算金だけ残金と一緒に)と振込先の口座を入れる。
- * 金額・払う人・受け取る人は取引の入力と決済の計算から出す(ここでは直さない)。決まりは src/lib/deals/payments.ts。
+ * 金額は取引の入力と決済の計算から出す(ここでは直さない)。払う人・受け取る人も決まった形で出すが、
+ * 費用のその他の行だけは選べる(2026-11-18 発注者「業務委託費が売主→支払先に固定。選択式に」)。決まりは src/lib/deals/payments.ts。
  * 入れた内容は、残金決済のご案内と書類確認書(契約時・決済時)の払い方の初期値に入る(書類の画面で直せる)。
  */
 export default function DealPaymentsPanel({
@@ -47,24 +56,24 @@ export default function DealPaymentsPanel({
 }) {
   const rows = paymentRows(deal, calc);
   const [drafts, setDrafts] = useState<Record<string, Draft>>(() =>
-    Object.fromEntries(rows.map((r) => [r.key, { method: r.entry.method, account: toText(r.entry.account) }])));
+    Object.fromEntries(rows.map((r) => [r.key, draftFromRow(r)])));
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [saved, setSaved] = useState(false);
   const selfText = formatBankAccount(selfAccount);
 
-  const draftOf = (r: PaymentRow): Draft => drafts[r.key] ?? { method: r.entry.method, account: toText(r.entry.account) };
+  const draftOf = (r: PaymentRow): Draft => drafts[r.key] ?? draftFromRow(r);
   const update = (key: string, fn: (d: Draft) => Draft) => {
     setSaved(false);
     setDrafts((ds) => {
       const r = rows.find((x) => x.key === key)!;
-      return { ...ds, [key]: fn(ds[key] ?? { method: r.entry.method, account: toText(r.entry.account) }) };
+      return { ...ds, [key]: fn(ds[key] ?? draftFromRow(r)) };
     });
   };
 
   /** 下書き → 保存する形。口座番号が読めない行があれば、その行の名前を返す。 */
-  const build = (): { entries: Record<string, PaymentEntry>; bad: string[] } => {
-    const entries: Record<string, PaymentEntry> = {};
+  const build = (): { entries: Record<string, OtherPaymentEntry>; bad: string[] } => {
+    const entries: Record<string, OtherPaymentEntry> = {};
     const bad: string[] = [];
     for (const r of rows) {
       const d = draftOf(r);
@@ -82,6 +91,7 @@ export default function DealPaymentsPanel({
             accountNumber: num ? num : null, accountHolder: t(d.account.accountHolder),
           }
           : EMPTY_BANK_ACCOUNT,
+        ...(r.parties && d.from && d.to ? { from: d.from, to: d.to } : {}),
       };
     }
     return { entries, bad };
@@ -108,7 +118,12 @@ export default function DealPaymentsPanel({
 
   // 「残金と一緒に」の行に出す、残金の今の口座(下書きの値で)。
   const { entries: current } = build();
-  const liveRows = rows.map((r) => ({ ...r, entry: current[r.key] ?? r.entry }));
+  // 払う人・受け取る人を選べる行は、選び直した相手で出し直す(当社を選べば自社の口座の案内も出る)。
+  const liveRows = rows.map((r) => {
+    const e = current[r.key];
+    const live: PaymentRow = { ...r, entry: e ? { method: e.method, account: e.account } : r.entry };
+    return e?.from && e.to ? withParties(deal, live, e.from, e.to) : live;
+  });
   const copySources = (key: string) => liveRows.filter((r) => r.key !== key && r.entry.method === "transfer" && formatBankAccount(r.entry.account));
 
   return (
@@ -132,6 +147,27 @@ export default function DealPaymentsPanel({
                 <span className="text-xs text-gray-500">{r.from} → {r.to}</span>
                 <span className="ml-auto tabular-nums text-sm">{r.amount === null ? "—" : `${yenText(r.amount)}円`}</span>
               </div>
+              {r.parties && (
+                <div className="grid gap-2 sm:grid-cols-2">
+                  {PARTY_SIDES.map(([side, sideLabel]) => {
+                    const p = d[side] ?? r.parties![side];
+                    const setParty = (next: PaymentParty) => update(r.key, (x) => ({ ...x, [side]: next }));
+                    return (
+                      <div key={side} className="space-y-1">
+                        <span className="block text-xs text-gray-500">{sideLabel}</span>
+                        <select aria-label={`${r.label}の${sideLabel}`} value={p.kind} className={inputCls}
+                          onChange={(e) => setParty({ kind: e.target.value as PaymentPartyKind, name: p.name })}>
+                          {PAYMENT_PARTY_KINDS.map((k) => <option key={k} value={k}>{PAYMENT_PARTY_LABELS[k]}</option>)}
+                        </select>
+                        {p.kind === "other" && (
+                          <input aria-label={`${r.label}の${sideLabel}の名前`} placeholder="名前(空なら「支払先」)" maxLength={50} value={p.name ?? ""}
+                            onChange={(e) => setParty({ kind: "other", name: e.target.value })} className={inputCls} />
+                        )}
+                      </div>
+                    );
+                  })}
+                </div>
+              )}
               <div role="radiogroup" aria-label={`${r.label}の払い方`} className="flex flex-wrap gap-2">
                 {methods.map((m) => (
                   <label key={m} className={`relative cursor-pointer rounded-full border px-3 py-1 text-sm ${d.method === m ? "border-blue-600 bg-blue-50 font-semibold text-blue-700 dark:border-blue-400 dark:bg-blue-950 dark:text-blue-200" : "border-gray-300 dark:border-gray-700"}`}>

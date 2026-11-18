@@ -79,6 +79,46 @@ describe("お金の受け渡しの行", () => {
   });
 });
 
+describe("費用のその他の行の払う人・受け取る人(2026-11-18 発注者「選択式に」)", () => {
+  const other = (d: DealView) => paymentRows(d, calcOf(d)).find((r) => r.key === "other:家財の処分")!;
+  it("何も選んでいなければ今までどおり 売主 → 支払先。固定の行は選べない", () => {
+    const r = other(base);
+    expect([r.from, r.to, r.toSelf]).toEqual(["売主", "支払先", false]);
+    expect(r.parties).toEqual({ from: { kind: "seller", name: null }, to: { kind: "other", name: null } });
+    expect(paymentRows(base, calcOf(base)).find((x) => x.key === "deposit")!.parties).toBeNull();
+  });
+  it("保存した相手で出す: 名前を入れた「その他」はその名前・司法書士・測量の会社・買主", () => {
+    const d = { ...base, payments: { others: { 家財の処分: { ...cash, from: { kind: "buyer" as const, name: null }, to: { kind: "other" as const, name: "解体業者" } } } } };
+    expect([other(d).from, other(d).to]).toEqual(["買主", "解体業者"]);
+    const d2 = { ...base, payments: { others: { 家財の処分: { ...cash, from: { kind: "scrivener" as const, name: null }, to: { kind: "surveyor" as const, name: null } } } } };
+    expect([other(d2).from, other(d2).to]).toEqual(["司法書士", "測量の会社"]);
+  });
+  it("受け取る人が当社(または自社の当事者)なら、口座が空のとき自社の口座を使う", () => {
+    const d = { ...base, payments: { others: { 家財の処分: { ...tr(EMPTY_BANK_ACCOUNT), to: { kind: "self" as const, name: null } } } } };
+    const rows = paymentRows(d, calcOf(d));
+    const r = rows.find((x) => x.key === "other:家財の処分")!;
+    expect([r.to, r.toSelf]).toEqual(["当社", true]);
+    expect(effectiveAccount(r, rows, SELF_ACC)).toEqual(SELF_ACC);
+    const d2 = { ...base, parties: [SELF_SELLER, BUYER], payments: { others: { 家財の処分: { ...cash, from: { kind: "buyer" as const, name: null }, to: { kind: "seller" as const, name: null } } } } };
+    expect([other(d2).to, other(d2).toSelf]).toEqual(["当社", true]);
+  });
+  it("画面で選び直した相手で行を出し直す(withParties)", async () => {
+    const { withParties } = await import("../payments");
+    const r = withParties(base, other(base), { kind: "self", name: null }, { kind: "other", name: "" });
+    expect([r.from, r.to, r.toSelf]).toEqual(["当社", "支払先", false]);
+    const fixed = paymentRows(base, calcOf(base)).find((x) => x.key === "deposit")!;
+    expect(withParties(base, fixed, { kind: "self", name: null }, { kind: "self", name: null })).toBe(fixed);
+  });
+  it("保存の形: 相手は知っている種類だけ・名前は50文字まで。固定の行には付けられない。古い形(相手なし)も読める", () => {
+    expect(paymentsSchema.safeParse({ others: { x: { ...cash, to: { kind: "other", name: "解体業者" } } } }).success).toBe(true);
+    expect(paymentsSchema.safeParse({ others: { x: { ...cash, to: { kind: "bogus", name: null } } } }).success).toBe(false);
+    expect(paymentsSchema.safeParse({ others: { x: { ...cash, to: { kind: "other", name: "あ".repeat(51) } } } }).success).toBe(false);
+    expect(paymentsSchema.safeParse({ deposit: { ...cash, to: { kind: "self", name: null } } }).success).toBe(false);
+    const to = { kind: "self" as const, name: null };
+    expect(readPayments({ others: { x: { ...cash, to }, y: cash } })).toEqual({ others: { x: { ...cash, to }, y: cash } });
+  });
+});
+
 describe("振込先", () => {
   it("口座を1行に(銀行名が無ければ null)", () => {
     expect(formatBankAccount(ACC)).toBe("見本銀行 本店 普通 1234567 名義 ミホン タロウ");
@@ -193,10 +233,27 @@ describe("保存する形を組み立てる", () => {
     const out = paymentsForSave(d.payments, rows, { balance: tr(), "other:家財の処分": tr(), deposit: { method: "with_balance", account: EMPTY_BANK_ACCOUNT } });
     expect(out.balance).toEqual(tr());
     expect(out.survey).toEqual(cash);
-    expect(out.others).toEqual({ 古い行: cash, 家財の処分: tr() });
+    expect(out.others).toEqual({ 古い行: cash, 家財の処分: { ...tr(), from: { kind: "seller", name: null }, to: { kind: "other", name: null } } });
     expect(out.deposit!.method).toBe("undecided");
     expect(out.settlement!.method).toBe("undecided");
     expect(paymentsSchema.safeParse(out).success).toBe(true);
+  });
+  it("その他の行は払う人・受け取る人も保存する(名前は「その他」のときだけ)。固定の行には付けない", async () => {
+    const { paymentsForSave } = await import("../payments");
+    const rows = paymentRows(base, calcOf(base));
+    const out = paymentsForSave({}, rows, {
+      "other:家財の処分": { ...cash, from: { kind: "buyer", name: "消える" }, to: { kind: "other", name: " 解体業者 " } },
+      balance: { ...tr(), from: { kind: "self", name: null } },
+    });
+    expect(out.others!["家財の処分"]).toEqual({ ...cash, from: { kind: "buyer", name: null }, to: { kind: "other", name: "解体業者" } });
+    expect(out.balance).toEqual(tr());
+    expect(paymentsSchema.safeParse(out).success).toBe(true);
+  });
+  it("その他の行で下書きに払う人・受け取る人が無ければ、行の今の値(初期値)を保存する", async () => {
+    const { paymentsForSave } = await import("../payments");
+    const rows = paymentRows(base, calcOf(base));
+    const out = paymentsForSave({}, rows, { "other:家財の処分": cash });
+    expect(out.others!["家財の処分"]).toEqual({ ...cash, from: { kind: "seller", name: null }, to: { kind: "other", name: null } });
   });
   it("口座番号の欄: 全角・空白・ハイフンをそろえ、7桁を超える・数字でないものは読めない", async () => {
     const { normalizeAccountNumber } = await import("../payments");
