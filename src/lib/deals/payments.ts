@@ -96,6 +96,15 @@ export function paymentRows(d: DealView, calc: DealCalc | null): PaymentRow[] {
     const fee = calc?.brokerage?.incl ?? null;
     if (d.tradeSide === "seller" || d.tradeSide === "both") rows.push(fixed("brokerageSeller", "仲介手数料(売主)", seller.name, SELF, true, fee));
     if (d.tradeSide === "buyer" || d.tradeSide === "both") rows.push(fixed("brokerageBuyer", "仲介手数料(買主)", buyer.name, SELF, true, fee));
+  } else if (d.businessType === "resale") {
+    // 買取再販(当社が売主か買主)は、相手方の仲介会社に当社が払う(2026-11-18 発注者「仲介手数料が入っていない」)。
+    // 仲介会社を通さない直接の取引もあるので、仲介会社の名前か手で入れた手数料(0円以外)があるときだけ出す
+    // (手数料の欄が空でも上限額の計算は出るため、計算の有無では決めない)。
+    const company = d.counterpartyBroker.company?.trim() || null;
+    const typed = d.overrides.brokerageFee;
+    if (typed !== 0 && (company || typed !== undefined)) {
+      rows.push(fixed("brokerageResale", "仲介手数料", SELF, company ?? "仲介会社", false, calc?.brokerage?.incl ?? null));
+    }
   }
   // 同じ名前の行は1行にまとめて金額を足す(払い方は名前ごとに持つ・@codex #751 P2)。
   const others = new Map<string, number>();

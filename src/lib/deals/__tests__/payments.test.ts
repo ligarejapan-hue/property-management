@@ -42,11 +42,27 @@ describe("お金の受け渡しの行", () => {
   it("両手の仲介: 手付金・残金・精算金・登記・抹消・仲介手数料(売主・買主)・その他の行。測量費が無ければ出さない", () => {
     expect(keys(base)).toEqual(["deposit", "balance", "settlement", "registration", "cancellation", "brokerageSeller", "brokerageBuyer", "other:家財の処分"]);
   });
-  it("売主側の仲介は売主の仲介手数料だけ・買主側は買主の分だけ・買取再販は仲介手数料なし", () => {
+  it("売主側の仲介は売主の仲介手数料だけ・買主側は買主の分だけ", () => {
     expect(keys({ ...base, tradeSide: "seller" })).toContain("brokerageSeller");
     expect(keys({ ...base, tradeSide: "seller" })).not.toContain("brokerageBuyer");
     expect(keys({ ...base, tradeSide: "buyer" })).not.toContain("brokerageSeller");
-    expect(keys({ ...base, businessType: "resale", tradeSide: null }).some((k) => k.startsWith("brokerage"))).toBe(false);
+  });
+  it("買取再販: 相手方の仲介会社か手で入れた仲介手数料があれば「当社 → 仲介会社」の1行(11-18 発注者「仲介手数料が入っていない」)", () => {
+    const resale: DealView = { ...base, businessType: "resale", tradeSide: null, parties: [SELF_SELLER, BUYER] };
+    // 仲介会社も手入力も無い=直接の取引かもしれない → 出さない(上限額の計算だけで行を作らない)
+    expect(keys(resale).some((k) => k.startsWith("brokerage"))).toBe(false);
+    const withBroker = { ...resale, counterpartyBroker: { company: "見本不動産", staff: null, tel: null } };
+    const r = paymentRows(withBroker, calcOf(withBroker)).find((x) => x.key === "brokerageResale")!;
+    expect([r.label, r.from, r.to, r.toSelf]).toEqual(["仲介手数料", "当社", "見本不動産", false]);
+    expect(r.amount).toBe(calcOf(withBroker).brokerage!.incl);
+    const typed = { ...resale, overrides: { brokerageFee: 500_000 } };
+    const t = paymentRows(typed, calcOf(typed)).find((x) => x.key === "brokerageResale")!;
+    expect([t.to, t.amount]).toEqual(["仲介会社", 550_000]);
+    // 0円と手で入れたら手数料なし → 出さない(仲介会社が入っていても)
+    const zero = { ...withBroker, overrides: { brokerageFee: 0 } };
+    expect(keys(zero)).not.toContain("brokerageResale");
+    // 仲介の取引には出さない
+    expect(keys({ ...base, counterpartyBroker: { company: "見本不動産", staff: null, tel: null } })).not.toContain("brokerageResale");
   });
   it("費用が入っていない登記・抹消は出さない(手付金・残金・精算金はいつも出す)", () => {
     const d = { ...base, costs: DEFAULT_COSTS, deposit: null };
