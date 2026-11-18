@@ -466,9 +466,10 @@ describe("ON にする前からいるお客様(2026-11-19)", () => {
   it("登録日から数えて、次に日が来る通から始める(過ぎた通は送らない)", async () => {
     // 見本の流れ=0・3日。ON(11-30)より前の 11-29 登録 → NOW(12-03)時点で 0日・3日とも過ぎている → 新規の流れは終わり
     const old = new Date("2026-11-29T00:00:00Z");
-    db.property.findMany.mockResolvedValueOnce([{ id: PROP_ID, createdAt: old, propertyOwners: [{ owner: { email: "o@example.test" } }] }]);
+    db.property.findMany.mockResolvedValueOnce([{ id: PROP_ID, createdAt: old, caseStatus: "hold", propertyOwners: [{ owner: { email: "o@example.test" } }] }]);
     await run();
-    expect(db.leadFollowup.createMany.mock.calls[0][0].data[0]).toMatchObject({ newStartedAt: old, newNextPosition: 3 });
+    // 保留中なので、保留の流れのために進行中で作る
+    expect(db.leadFollowup.createMany.mock.calls[0][0].data[0]).toMatchObject({ newStartedAt: old, newNextPosition: 3, status: "active" });
   });
 
   it("まだ3日目が来ていない前からのお客様は、3日目の通(2通目)から", async () => {
@@ -482,5 +483,40 @@ describe("ON にする前からいるお客様(2026-11-19)", () => {
     db.property.findMany.mockResolvedValueOnce([{ id: PROP_ID, createdAt: CREATED, propertyOwners: [{ owner: { email: "o@example.test" } }] }]);
     await run();
     expect(db.leadFollowup.createMany.mock.calls[0][0].data[0].newNextPosition).toBe(1);
+  });
+});
+
+describe("@codex #762: 送るものが無い古いお客様は、同じアドレスの新しいお客様を塞がない", () => {
+  it("新規の流れが全部過ぎていて保留でもない物件は、完了として作る(進行中にしない)", async () => {
+    const old = new Date("2026-11-29T00:00:00Z");
+    db.property.findMany.mockResolvedValueOnce([{ id: PROP_ID, createdAt: old, caseStatus: "contact_attempting", propertyOwners: [{ owner: { email: "o@example.test" } }] }]);
+    const s = await run();
+    expect(s).toMatchObject({ started: 0, startedCompleted: 1 });
+    expect(db.leadFollowup.createMany.mock.calls[0][0].data[0]).toMatchObject({ status: "completed", stopReason: null });
+  });
+
+  it("同じアドレスで、古い物件(送るもの無し)と新しい申込が同じ回に見つかっても、新しい申込は進行中で始まる", async () => {
+    const old = new Date("2026-11-29T00:00:00Z");
+    db.property.findMany.mockResolvedValueOnce([{ id: PROP_ID, createdAt: old, caseStatus: "new_case", propertyOwners: [{ owner: { email: "same@example.test" } }] }]);
+    db.dmInquiry.findMany.mockResolvedValueOnce([{ id: "q1", submittedAt: CREATED, email: "same@example.test" }]);
+    // DB の中: 進行中の行を作ったときだけ、同じアドレスの進行中として見つかる
+    const activeEmails = new Set<string>();
+    db.leadFollowup.createMany.mockImplementation(async (a: { data: Array<{ status: string; emailNormalized: string }> }) => {
+      if (a.data[0].status === "active") activeEmails.add(a.data[0].emailNormalized);
+      return { count: 1 };
+    });
+    db.leadFollowup.findFirst.mockImplementation(async (a: { where: { emailNormalized?: string; status?: unknown } }) =>
+      a.where.status && a.where.emailNormalized && activeEmails.has(a.where.emailNormalized) ? { id: "x" } : null,
+    );
+    const s = await run();
+    expect(s).toMatchObject({ startedCompleted: 1, started: 1, startedStopped: 0 });
+    expect(db.leadFollowup.createMany.mock.calls[1][0].data[0]).toMatchObject({ inquiryId: "q1", status: "active" });
+  });
+
+  it("査定申込で新規の流れが全部過ぎていれば完了として作る", async () => {
+    db.dmInquiry.findMany.mockResolvedValueOnce([{ id: "q1", submittedAt: new Date("2026-11-20T00:00:00Z"), email: "a@example.test" }]);
+    const s = await run();
+    expect(s.startedCompleted).toBe(1);
+    expect(db.leadFollowup.createMany.mock.calls[0][0].data[0]).toMatchObject({ inquiryId: "q1", status: "completed" });
   });
 });

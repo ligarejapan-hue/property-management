@@ -65,6 +65,8 @@ export type FollowupRunSummary = {
   notReadyCount: number;
   started: number;
   startedStopped: number;
+  /** 前からいるお客様で、新規の流れが全部過ぎていた(保留でもない)ので、送らずに完了として作った数 */
+  startedCompleted: number;
   interrupted: number;
   disabledStopped: number;
   evaluated: number;
@@ -167,7 +169,9 @@ async function startFollowup(
   now: Date,
   enabledAt: Date,
   newNextPosition: number,
-): Promise<"active" | "stopped" | "exists"> {
+  /** 新規の流れが全部過ぎていて保留でもない=送るものが無い。進行中で作るとアドレスを塞ぐので完了で作る(@codex #762 P2) */
+  nothingToSend: boolean,
+): Promise<"active" | "stopped" | "completed" | "exists"> {
   return prisma.$transaction(async (tx) => {
     // 探している最中に OFF(や OFF→ON)にされていたら作らない。
     if (!(await lockEnabledPeriod(tx, enabledAt))) return "exists";
@@ -188,6 +192,8 @@ async function startFollowup(
       if (unsub) {
         status = "stopped";
         stopReason = "unsubscribed";
+      } else if (nothingToSend) {
+        status = "completed";
       } else if (active) {
         status = "stopped";
         stopReason = "duplicate_address";
@@ -210,8 +216,14 @@ async function startFollowup(
       skipDuplicates: true,
     });
     if (created.count === 0) return "exists";
-    return status === "active" ? "active" : "stopped";
+    return status === "active" ? "active" : status === "completed" ? "completed" : "stopped";
   });
+}
+
+function countStart(r: "active" | "stopped" | "completed" | "exists", summary: FollowupRunSummary) {
+  if (r === "active") summary.started += 1;
+  else if (r === "stopped") summary.startedStopped += 1;
+  else if (r === "completed") summary.startedCompleted += 1;
 }
 
 async function discover(
@@ -231,21 +243,22 @@ async function discover(
     },
     orderBy: { createdAt: "asc" },
     take: DISCOVER_LIMIT,
-    select: { id: true, createdAt: true, propertyOwners: OWNER_EMAILS_SELECT },
+    select: { id: true, createdAt: true, caseStatus: true, propertyOwners: OWNER_EMAILS_SELECT },
   });
   for (const p of properties) {
     if (Date.now() > deadline) return;
     const email = firstOwnerEmail(p.propertyOwners);
+    const pos = initialNewPosition(p.createdAt, enabledAt, now, steps);
     const r = await startFollowup(
       { kind: "property", id: p.id },
       email?.normalized ?? null,
       p.createdAt,
       now,
       enabledAt,
-      initialNewPosition(p.createdAt, enabledAt, now, steps),
+      pos,
+      pos > steps.new.length && classifyProperty(p.caseStatus) !== "hold",
     );
-    if (r === "active") summary.started += 1;
-    else if (r === "stopped") summary.startedStopped += 1;
+    countStart(r, summary);
   }
 
   const inquiries = await prisma.dmInquiry.findMany({
@@ -261,16 +274,18 @@ async function discover(
   });
   for (const q of inquiries) {
     if (Date.now() > deadline) return;
+    const pos = initialNewPosition(q.submittedAt, enabledAt, now, steps);
     const r = await startFollowup(
       { kind: "inquiry", id: q.id },
       normalizeFollowupEmail(q.email),
       q.submittedAt,
       now,
       enabledAt,
-      initialNewPosition(q.submittedAt, enabledAt, now, steps),
+      pos,
+      // 査定申込には保留の流れが無い
+      pos > steps.new.length,
     );
-    if (r === "active") summary.started += 1;
-    else if (r === "stopped") summary.startedStopped += 1;
+    countStart(r, summary);
   }
 }
 
@@ -542,6 +557,7 @@ export async function runLeadFollowups(now: Date, opts: FollowupRunOptions = {})
     notReadyCount: 0,
     started: 0,
     startedStopped: 0,
+    startedCompleted: 0,
     interrupted: 0,
     disabledStopped: 0,
     evaluated: 0,
