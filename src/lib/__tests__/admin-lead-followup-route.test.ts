@@ -125,9 +125,23 @@ describe("GET /api/admin/lead-followup", () => {
     expect(data.steps).toEqual({ new: [], hold: [] });
   });
 
-  it("足りない設定(SMTP・会社名・外向きの URL)を返す", async () => {
+  it("会社の設定の DB の欄が空でも、画面・帳票と同じ既定の会社情報で補う(足りないと言わない)", async () => {
+    const { resolveCompanyProfile } = await import("@/lib/sales-sheet/company-profile-store");
+    const fallback = resolveCompanyProfile(null);
+    pm.companyProfile.findUnique.mockResolvedValue({ nameJa: null, address: null, tel: null, email: null });
+    const { data } = await (await GET()).json();
+    expect(data.setupProblems).toEqual([]);
+    expect(data.footerPreview).toContain(`送信者: ${fallback.nameJa}`);
+    expect(data.footerPreview).toContain(`住所: ${fallback.address}`);
+    // DB に入っている欄はそちらを使う
+    pm.companyProfile.findUnique.mockResolvedValue({ ...company, address: null });
+    const second = (await (await GET()).json()).data;
+    expect(second.footerPreview).toContain("送信者: 見本不動産");
+    expect(second.footerPreview).toContain(`住所: ${fallback.address}`);
+  });
+
+  it("足りない設定(SMTP・外向きの URL)を返す", async () => {
     pm.mailConfig.findUnique.mockResolvedValue(mailRow({ smtpPassEnc: null }));
-    pm.companyProfile.findUnique.mockResolvedValue({ ...company, nameJa: null });
     pm.saleDmConfig.findUnique.mockResolvedValue({ trackingBaseUrl: null });
     const saved = process.env.SALE_DM_TRACKING_BASE_URL;
     delete process.env.SALE_DM_TRACKING_BASE_URL;
@@ -135,7 +149,6 @@ describe("GET /api/admin/lead-followup", () => {
       const { data } = await (await GET()).json();
       const all = data.setupProblems.join("/");
       expect(all).toContain("メールの送信設定");
-      expect(all).toContain("会社名");
       expect(all).toContain("外向きのURL");
     } finally {
       if (saved !== undefined) process.env.SALE_DM_TRACKING_BASE_URL = saved;
@@ -201,8 +214,7 @@ describe("PUT /api/admin/lead-followup", () => {
   });
 
   it("古い画面(版番号が違う)からの ON の保存は、足りない設定より先に 409(読み直しの案内)", async () => {
-    pm.mailConfig.findUnique.mockResolvedValue(mailRow({ followupVersion: 3 }));
-    pm.companyProfile.findUnique.mockResolvedValue({ ...company, address: null });
+    pm.mailConfig.findUnique.mockResolvedValue(mailRow({ followupVersion: 3, smtpPassEnc: null }));
     const res = await PUT(putReq({ version: 2, enabled: true, steps: fullSteps }));
     expect(res.status).toBe(409);
     expect(pm.$transaction).not.toHaveBeenCalled();
@@ -226,12 +238,12 @@ describe("PUT /api/admin/lead-followup", () => {
     expect(tx.leadFollowupStep.createMany).not.toHaveBeenCalled();
   });
 
-  it("文面が空の通・会社の設定の欠けがあると ON にできない(422)。OFF なら空のまま保存できる", async () => {
+  it("文面が空の通・送信設定の欠けがあると ON にできない(422)。OFF なら空のまま保存できる", async () => {
     const blank = { new: [{ delayDays: 0, subject: "", body: "" }], hold: [] };
     const r1 = await PUT(putReq({ version: 0, enabled: true, steps: blank }));
     expect(r1.status).toBe(422);
     expect((await r1.json()).error.code).toBe("FOLLOWUP_NOT_READY");
-    pm.companyProfile.findUnique.mockResolvedValue({ ...company, address: null });
+    pm.mailConfig.findUnique.mockResolvedValue(mailRow({ smtpPassEnc: null }));
     expect((await PUT(putReq({ version: 0, enabled: true, steps: fullSteps }))).status).toBe(422);
     expect(pm.$transaction).not.toHaveBeenCalled();
     expect((await PUT(putReq({ version: 0, enabled: false, steps: blank }))).status).toBe(200);

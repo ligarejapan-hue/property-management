@@ -3,6 +3,7 @@ import { Prisma } from "@/generated/prisma";
 import { MAIL_CONFIG_ID, isMailConfigComplete } from "@/lib/mail/mail-config";
 import { loadSaleDmPublicPageConfig } from "@/lib/sale-dm-letter/config-store";
 import { deriveUnsubscribeKey } from "@/lib/sale-dm-letter/unsubscribe-token";
+import { loadCompanyProfile } from "@/lib/sales-sheet/company-profile-store";
 import {
   FOLLOWUP_SERIES,
   defaultFollowupSlots,
@@ -52,9 +53,9 @@ export class FollowupEnableBlockedError extends Error {
 export type SetupContext = { sender: FollowupSender; unsubscribeBaseUrl: string | null; problems: string[] };
 
 async function loadSetupContext(mailRow: Parameters<typeof isMailConfigComplete>[0]): Promise<SetupContext> {
-  const company = await prisma.companyProfile
-    .findUnique({ where: { id: "singleton" }, select: { nameJa: true, address: true, tel: true, email: true } })
-    .catch(() => null);
+  // 会社の設定の画面・帳票と同じ実効値(DB に無い欄は既定の会社情報で補う)。DB の生の行だけを見ると、
+  // 画面には会社名が出ているのに「無い」と判断してしまう(2026-11-18 本番で実際に起きた)。
+  const company = await loadCompanyProfile();
   const sender = normalizeFollowupSender({
     companyName: company?.nameJa,
     address: company?.address,
