@@ -2,7 +2,7 @@ import { z } from "zod";
 import { text, yenInt } from "../../schema-parts";
 import { html } from "../html";
 import { companyBlock, documentHtml } from "../layout";
-import { balancePayeeText, sellerReceiveText } from "../../payments";
+import { balancePayeeText, isOtherKey, paymentRows, sellerReceiveText } from "../../payments";
 import { bankAccountText, dateJa, dateTimeJa, headTable, money, namesOf, partiesOf, propertyLabel, type BusinessDocContext, type ValueRow } from "./common";
 
 /** 発行のときに選ぶもの(計画の読み替え 2・7)。 */
@@ -133,8 +133,9 @@ export function defaultSellerBelongings(c: BusinessDocContext): string {
 }
 
 /**
- * 諸費用の初期値: 仲介手数料(売主側・両手の仲介だけ)と、取引の費用の抹消費用・測量費・その他の行。
- * 登記費用(移転など)は買主の費用なので入れない。
+ * 諸費用の初期値: 仲介手数料(売主側・両手の仲介だけ)と、取引の費用の抹消費用・測量費と、
+ * 費用のその他の行のうち「お金の受け渡し」で払う人を「売主」にした行(2026-11-19 発注者「業務委託費が売主の案内に入るのはおかしい」。
+ * 未定・当社などの行は入れない。同じ名前の行は1行にまとめた額)。登記費用(移転など)は買主の費用なので入れない。
  */
 export function defaultSellerCosts(c: BusinessDocContext): { label: string; amount: number }[] {
   const d = c.deal;
@@ -144,7 +145,9 @@ export function defaultSellerCosts(c: BusinessDocContext): { label: string; amou
   }
   if (d.costs.cancellationFee) rows.push({ label: "抵当権などの抹消費用", amount: d.costs.cancellationFee });
   if (d.costs.surveyFee) rows.push({ label: "測量費", amount: d.costs.surveyFee });
-  for (const o of d.costs.others) rows.push({ label: o.label, amount: o.amount });
+  for (const r of paymentRows(d, c.calc)) {
+    if (isOtherKey(r.key) && r.parties?.from.kind === "seller" && r.amount !== null) rows.push({ label: r.label, amount: r.amount });
+  }
   return rows;
 }
 

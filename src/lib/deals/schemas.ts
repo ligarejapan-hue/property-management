@@ -78,8 +78,9 @@ export const EMPTY_PAYMENT_ENTRY: PaymentEntry = { method: "undecided", account:
 /**
  * 費用のその他の行だけ、払う人・受け取る人を選べる(2026-11-18 発注者「業務委託費が売主→支払先に固定。選択式に」)。
  * other=名前を手で入れる(空なら「支払先」と出す)。名前は other のときだけ使う。
+ * broker=基本タブの相手方の仲介会社・undecided=未定(払う人の初期値)(2026-11-19 発注者)。
  */
-export const PAYMENT_PARTY_KINDS = ["seller", "buyer", "self", "scrivener", "surveyor", "other"] as const;
+export const PAYMENT_PARTY_KINDS = ["undecided", "seller", "buyer", "self", "broker", "scrivener", "surveyor", "other"] as const;
 export type PaymentPartyKind = (typeof PAYMENT_PARTY_KINDS)[number];
 export const paymentPartySchema = z.object({
   kind: z.enum(PAYMENT_PARTY_KINDS),
@@ -89,6 +90,12 @@ export type PaymentParty = z.output<typeof paymentPartySchema>;
 export const otherPaymentEntrySchema = z.object({
   method: z.enum(PAYMENT_METHODS),
   account: bankAccountSchema,
+  /**
+   * 払う人(2026-11-19〜)。前の形 from は初期値「売主」も一緒に保存していて、人が選んだ「売主」と見分けられない
+   * → from の「売主」は未定として読む(発注者「未定に戻す」)。新しく保存するのは payer だけ。
+   */
+  payer: paymentPartySchema.optional(),
+  /** 前の形の払う人(11-18〜11-19 に保存したもの・読むだけ)。 */
   from: paymentPartySchema.optional(),
   to: paymentPartySchema.optional(),
 }).strict();

@@ -35,12 +35,23 @@ export interface PaymentRow {
 }
 
 export const PAYMENT_PARTY_LABELS: Record<PaymentPartyKind, string> = {
-  seller: "売主", buyer: "買主", self: "当社", scrivener: "司法書士", surveyor: "測量の会社", other: "その他(名前を入れる)",
+  undecided: "未定", seller: "売主", buyer: "買主", self: "当社", broker: "仲介会社", scrivener: "司法書士", surveyor: "測量の会社",
+  other: "その他(名前を入れる)",
 };
-/** その他の行の初期値=今までの決め打ち(売主 → 支払先)。 */
+/**
+ * その他の行の初期値=未定 → 支払先(2026-11-19 発注者「初期値は未定」)。
+ * 売主様あての残金決済のご案内の諸費用には、払う人を「売主」にした行だけ入る(未定のままなら入らない)。
+ */
 export const DEFAULT_OTHER_PARTIES: { from: PaymentParty; to: PaymentParty } = {
-  from: { kind: "seller", name: null }, to: { kind: "other", name: null },
+  from: { kind: "undecided", name: null }, to: { kind: "other", name: null },
 };
+
+/** 保存済みの払う人。前の形(from)の「売主」は初期値のままか見分けられないので未定として読む(発注者「未定に戻す」)。 */
+function storedPayer(e: OtherPaymentEntry | undefined): PaymentParty {
+  if (e?.payer) return e.payer;
+  if (e?.from && e.from.kind !== "seller") return e.from;
+  return DEFAULT_OTHER_PARTIES.from;
+}
 
 const OTHER_PREFIX = "other:";
 export const otherKeyOf = (label: string) => `${OTHER_PREFIX}${label}` as const;
@@ -57,6 +68,7 @@ function partyOf(d: DealView, p: PaymentParty): { name: string; self: boolean } 
   switch (p.kind) {
     case "seller": case "buyer": return sideOf(d, p.kind);
     case "self": return { name: SELF, self: true };
+    case "broker": return { name: d.counterpartyBroker.company?.trim() || "仲介会社", self: false };
     case "other": return { name: p.name?.trim() || "支払先", self: false };
     default: return { name: PAYMENT_PARTY_LABELS[p.kind], self: false };
   }
@@ -115,7 +127,7 @@ export function paymentRows(d: DealView, calc: DealCalc | null): PaymentRow[] {
     const row: PaymentRow = {
       key: otherKeyOf(label), label, from: "", to: "", toSelf: false, amount, allowWithBalance: false, entry, parties: DEFAULT_OTHER_PARTIES,
     };
-    rows.push(withParties(d, row, stored?.from ?? DEFAULT_OTHER_PARTIES.from, stored?.to ?? DEFAULT_OTHER_PARTIES.to));
+    rows.push(withParties(d, row, storedPayer(stored), stored?.to ?? DEFAULT_OTHER_PARTIES.to));
   }
   return rows;
 }
@@ -228,7 +240,8 @@ export function paymentsForSave(stored: Payments, rows: PaymentRow[], drafts: Re
     const entry: PaymentEntry = { method: e.method === "with_balance" && !r.allowWithBalance ? "undecided" : e.method, account: e.account };
     if (isOtherKey(r.key)) {
       const parties = r.parties ?? DEFAULT_OTHER_PARTIES;
-      const withP: OtherPaymentEntry = { ...entry, from: cleanParty(e.from ?? parties.from), to: cleanParty(e.to ?? parties.to) };
+      // 払う人は新しい形(payer)だけで保存する(前の形 from は書かない=次に読むとき人が選んだ値として扱える)。
+      const withP: OtherPaymentEntry = { ...entry, payer: cleanParty(e.payer ?? parties.from), to: cleanParty(e.to ?? parties.to) };
       out.others = { ...(out.others ?? {}), [r.key.slice(OTHER_PREFIX.length)]: withP };
     } else out[r.key] = entry;
   }
