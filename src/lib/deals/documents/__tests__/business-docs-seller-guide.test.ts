@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { computeDealCalc } from "../../calc/deal-calc";
-import { DEFAULT_COSTS, DEFAULT_TERMS, EMPTY_BROKER, EMPTY_SNAPSHOT } from "../../schemas";
+import { DEFAULT_COSTS, DEFAULT_TERMS, EMPTY_BANK_ACCOUNT, EMPTY_BROKER, EMPTY_SNAPSHOT } from "../../schemas";
 import { DEFAULT_PROPERTY_KINDS } from "../../constants";
 import { INITIAL_RATE_TABLES, type RateTableRow } from "../../rate-tables";
 import { DEFAULT_FUNDING_INPUTS } from "../../funding-schema";
@@ -60,11 +60,24 @@ describe("残金決済のご案内(売主様)", () => {
     expect(fee).toBeGreaterThan(0);
     expect(doc(KEY).defaults(c).values.costs).toEqual([
       { label: "仲介手数料(税込)", amount: fee }, { label: "抵当権などの抹消費用", amount: 50_000 },
-      { label: "測量費", amount: 300_000 }, { label: "引越し費用", amount: 100_000 },
+      { label: "測量費", amount: 300_000 },
     ]);
     // 買主側の仲介・買取再販では仲介手数料を入れない
     expect((doc(KEY).defaults(ctx({ ...brokerDeal, tradeSide: "buyer" })).values.costs as { label: string }[]).map((r) => r.label)).not.toContain("仲介手数料(税込)");
     expect(doc(KEY).defaults(ctx()).values.costs).toEqual([]);
+  });
+
+  it("費用のその他の行は、お金の受け渡しで払う人を「売主」にした行だけ入れる(11-19 発注者「業務委託費が売主の案内に入るのはおかしい」)", () => {
+    const costsOf = (d: DealView) => (doc(KEY).defaults(ctx(d)).values.costs as { label: string }[]).map((r) => r.label);
+    const withPayer = (kind: "seller" | "self" | "undecided") =>
+      ({ ...brokerDeal, payments: { others: { 引越し費用: { method: "cash" as const, account: EMPTY_BANK_ACCOUNT, payer: { kind, name: null } } } } });
+    expect(costsOf(brokerDeal)).not.toContain("引越し費用");
+    expect(costsOf(withPayer("seller"))).toContain("引越し費用");
+    expect(costsOf(withPayer("self"))).not.toContain("引越し費用");
+    expect(costsOf(withPayer("undecided"))).not.toContain("引越し費用");
+    // 前の形(from)の「売主」は初期値のままか見分けられない → 入れない
+    const legacy = { ...brokerDeal, payments: { others: { 引越し費用: { method: "cash" as const, account: EMPTY_BANK_ACCOUNT, from: { kind: "seller" as const, name: null } } } } };
+    expect(costsOf(legacy)).not.toContain("引越し費用");
   });
 
   it("残代金+精算金−諸費用=当日のお受取額(決済時のお支払額から諸費用を引く)", () => {
@@ -117,7 +130,9 @@ describe("残金決済のご案内(売主様)", () => {
     expect(() => o.parse({ costs: [{ label: "x", amount: 1.5 }], receiveTo: null, belongings: null })).toThrow();
     expect(() => o.parse({ costs: Array.from({ length: 31 }, () => ({ label: "x", amount: 1 })), receiveTo: null, belongings: null })).toThrow();
     // 費用のその他が上限(20行)でも、初期値はそのまま発行できる(仲介手数料・抹消・測量を足して 23 行)
-    const full = ctx({ ...brokerDeal, costs: { ...brokerDeal.costs, others: Array.from({ length: 20 }, (_, i) => ({ label: `費用${i}`, amount: 1 })) } });
+    const others = Array.from({ length: 20 }, (_, i) => ({ label: `費用${i}`, amount: 1 }));
+    const sellerPays = Object.fromEntries(others.map((o) => [o.label, { method: "cash" as const, account: EMPTY_BANK_ACCOUNT, payer: { kind: "seller" as const, name: null } }]));
+    const full = ctx({ ...brokerDeal, costs: { ...brokerDeal.costs, others }, payments: { others: sellerPays } });
     const values = doc(KEY).defaults(full).values;
     expect((values.costs as unknown[]).length).toBe(23);
     expect(() => o.parse(values)).not.toThrow();

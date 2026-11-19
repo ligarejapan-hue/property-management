@@ -91,7 +91,8 @@ export default function DealPaymentsPanel({
             accountNumber: num ? num : null, accountHolder: t(d.account.accountHolder),
           }
           : EMPTY_BANK_ACCOUNT,
-        ...(r.parties && d.from && d.to ? { from: d.from, to: d.to } : {}),
+        // 払う人は保存の形では payer(前の形 from は読むだけ)。
+        ...(r.parties && d.from && d.to ? { payer: d.from, to: d.to } : {}),
       };
     }
     return { entries, bad };
@@ -122,7 +123,7 @@ export default function DealPaymentsPanel({
   const liveRows = rows.map((r) => {
     const e = current[r.key];
     const live: PaymentRow = { ...r, entry: e ? { method: e.method, account: e.account } : r.entry };
-    return e?.from && e.to ? withParties(deal, live, e.from, e.to) : live;
+    return e?.payer && e.to ? withParties(deal, live, e.payer, e.to) : live;
   });
   const copySources = (key: string) => liveRows.filter((r) => r.key !== key && r.entry.method === "transfer" && formatBankAccount(r.entry.account));
 

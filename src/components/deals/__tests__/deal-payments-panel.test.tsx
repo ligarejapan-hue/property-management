@@ -71,7 +71,7 @@ describe("お金の受け渡しのタブ(2026-11-16)", () => {
     expect(html).toContain('aria-label="家財の処分の受け取る人の名前"');
     expect(html).not.toContain('aria-label="家財の処分の払う人の名前"');
     expect(html).not.toContain('aria-label="手付金の払う人"');
-    for (const l of ["売主", "買主", "当社", "司法書士", "測量の会社", "その他(名前を入れる)"]) expect(html).toContain(`>${l}</option>`);
+    for (const l of ["未定", "売主", "買主", "当社", "仲介会社", "司法書士", "測量の会社", "その他(名前を入れる)"]) expect(html).toContain(`>${l}</option>`);
     const d = { ...base, payments: { others: { 家財の処分: { method: "cash" as const, account: EMPTY_BANK_ACCOUNT, to: { kind: "other" as const, name: "解体業者" } } } } };
     expect(render(d)).toContain('value="解体業者"');
   });
