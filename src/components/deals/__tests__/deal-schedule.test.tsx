@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { renderToStaticMarkup } from "react-dom/server";
-import { DealScheduleView } from "../deal-schedule";
+import { DealScheduleView, settleNoticeText } from "../deal-schedule";
 import { parseOffsetDays, ScheduleTemplateEditor } from "../schedule-template-editor";
 import { DEFAULT_SCHEDULE_TEMPLATE, MORTGAGE_UNKNOWN_NOTE, PRE_INTRODUCTION_NOTE } from "@/lib/deals/schedule";
 import type { ScheduleItemView } from "@/lib/deals/schedule-sync";
@@ -142,5 +142,13 @@ describe("ホームの自分の段取り", () => {
     expect(html).toContain("期限超過 10/30");
     expect(html).toContain('href="/deals/d1"');
     expect(html).toContain("第一ハイツ 101");
+  });
+});
+
+describe("「決済・引渡し」の完了のあとの知らせ(2026-11-20 発注者)", () => {
+  it("決済完了にした・変えられなかったときだけ出す", () => {
+    expect(settleNoticeText("settled")).toBe("取引の状態を「決済完了」にしました。");
+    expect(settleNoticeText("forbidden")).toContain("状態は変えていません");
+    for (const s of [undefined, "already", "cancelled", "not_found"]) expect(settleNoticeText(s)).toBeNull();
   });
 });

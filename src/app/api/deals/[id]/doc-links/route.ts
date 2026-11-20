@@ -48,7 +48,7 @@ export async function POST(request: Request, ctx: Ctx) {
       select: { status: true, propertyKind: true, hasOc: true, parties: { where: { id: body.partyId }, select: { id: true, role: true, isSelf: true } } },
     });
     if (!deal) throw new ApiError(404, "取引が見つかりません", "NOT_FOUND");
-    if (!isDealOpenForDocs(deal.status)) throw new ApiError(422, "中止・決済済の取引には発行できません", "DEAL_CLOSED");
+    if (!isDealOpenForDocs(deal.status)) throw new ApiError(422, "中止・決済完了の取引には発行できません", "DEAL_CLOSED");
     const party = deal.parties[0];
     if (!party || party.isSelf || !(DOC_LINK_ROLES as readonly string[]).includes(party.role)) {
       throw new ApiError(422, "売主か買主を選んでください", "INVALID_PARTY");
