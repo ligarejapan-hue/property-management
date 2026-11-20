@@ -3,11 +3,14 @@
 type RequestLike = { label: string; status: string; rejectReason: string | null };
 const dateJa = (ymd: string) => `${Number(ymd.slice(0, 4))}年${Number(ymd.slice(5, 7))}月${Number(ymd.slice(8, 10))}日`;
 
+/** 行頭の印(2026-11-20 発注者「・」→「〇」)。 */
+export const DOC_LIST_MARK = "〇";
+
 /** 足りない書類の一覧(未提出と差し戻し)。無ければ null。 */
 export function buildMissingDocsText(requests: readonly RequestLike[]): string | null {
   const lines = requests.flatMap((r) => {
-    if (r.status === "pending") return [`・${r.label}`];
-    if (r.status === "rejected") return [`・${r.label}(再提出:${r.rejectReason ?? "担当者よりご連絡します"})`];
+    if (r.status === "pending") return [`${DOC_LIST_MARK}${r.label}`];
+    if (r.status === "rejected") return [`${DOC_LIST_MARK}${r.label}(再提出:${r.rejectReason ?? "担当者よりご連絡します"})`];
     return [];
   });
   return lines.length ? lines.join("\n") : null;

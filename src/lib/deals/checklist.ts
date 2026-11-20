@@ -118,13 +118,17 @@ export function resolveChecklistItems(raw: unknown): ChecklistItem[] {
   return r.success ? r.data : DEFAULT_CHECKLIST_ITEMS;
 }
 
+export type ChecklistDealScope = { base: (typeof BASE_PROPERTY_KINDS)[number] | null; hasOc: boolean };
+
+/** その取引に当てはまる出し分けか(区分だけ・土地のある物件だけ・OC ありだけ)。提出書類の一覧でも同じ決まりを使う。 */
+export const scopeApplies = (s: ChecklistScope, deal: ChecklistDealScope): boolean =>
+  s === "all" || (s === "unit" && deal.base === "unit") || (s === "oc" && deal.hasOc)
+  || (s === "land" && (deal.base === "house" || deal.base === "land" || deal.base === "building"));
+
 /** その取引・時点・書類で出す項目(並びは保存の順のまま)。doc の初めは書類確認書。 */
 export function itemsFor(
-  items: ChecklistItem[], phase: ChecklistPhase, deal: { base: (typeof BASE_PROPERTY_KINDS)[number] | null; hasOc: boolean },
+  items: ChecklistItem[], phase: ChecklistPhase, deal: ChecklistDealScope,
   doc: ChecklistDoc = "checklist",
 ): ChecklistItem[] {
-  const ok = (s: ChecklistScope) =>
-    s === "all" || (s === "unit" && deal.base === "unit") || (s === "oc" && deal.hasOc)
-    || (s === "land" && (deal.base === "house" || deal.base === "land" || deal.base === "building"));
-  return items.filter((i) => i.phase === phase && ok(i.scope) && usedIn(i, doc));
+  return items.filter((i) => i.phase === phase && scopeApplies(i.scope, deal) && usedIn(i, doc));
 }

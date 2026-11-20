@@ -14,6 +14,7 @@ vi.mock("@/lib/prisma", () => {
     dealDocRequest: { findMany: vi.fn(async () => []), findFirst: vi.fn(), update: vi.fn(async () => ({})) },
     dealDocFile: { count: vi.fn(async () => 0), create: vi.fn(async () => ({})), aggregate: vi.fn(async () => ({ _sum: { fileSize: null } })) },
     companyProfile: { findUnique: vi.fn(async () => null) },
+    dealSettings: { findUnique: vi.fn(async () => null) },
     $queryRaw: vi.fn(async () => []),
   };
   db.$transaction = vi.fn(async (fn: (tx: unknown) => unknown) => fn(db));
@@ -85,7 +86,7 @@ describe("お客様のページ", () => {
     expect(res.status).toBe(200);
     const html = await res.text();
     expect(html).toContain("本人確認書類");
-    expect(html).toContain("届きました(確認中)(2点)");
+    expect(html).toContain("届きました(2点)・担当者が確認します");
     expect(html).not.toContain(TOKEN);
     expect(html).not.toContain(PUBLIC_ID);
   });
@@ -106,8 +107,27 @@ describe("お客様のページ", () => {
     expect(select.party).toEqual({ select: { role: true, isSelf: true } });
     expect(Object.keys(select).sort()).toEqual(["deal", "dealId", "expiresAt", "id", "party", "partyRole", "revokedAt"]);
     const reqSelect = pm.dealDocRequest.findMany.mock.calls[0][0].select;
-    expect(Object.keys(reqSelect).sort()).toEqual(["_count", "id", "label", "status"]);
+    // checklistItemId は書類の注意書き(写真付き身分証明書)を選ぶためだけに読む。
+    expect(Object.keys(reqSelect).sort()).toEqual(["_count", "checklistItemId", "id", "label", "status"]);
     expect(JSON.stringify(reqSelect)).not.toMatch(/storageKey|rejectReason|fileName/);
+  });
+  it("写真付き身分証明書には撮り方の注意を出す(書類の id で選ぶ・2026-11-20)", async () => {
+    pm.dealDocRequest.findMany.mockResolvedValue([
+      { id: REQUEST_ID, checklistItemId: "s_bring_id", label: "写真付き身分証明書", status: "pending", _count: { files: 0 } },
+      { id: "r2", checklistItemId: "s_bring_seal", label: "実印・印鑑証明書", status: "pending", _count: { files: 0 } },
+    ]);
+    const html = await (await page()).text();
+    expect(html).toContain("マイナンバーカードは表面だけ");
+    expect(html.match(/class="howto"/g)?.length).toBe(1);
+  });
+  it("いちばん下に会社名と電話。ロゴが読めなくてもページは出す", async () => {
+    storage.read.mockRejectedValueOnce(new Error("x"));
+    (prismaMock as never as { dealSettings: { findUnique: Fn } }).dealSettings.findUnique.mockResolvedValueOnce({ logoKey: "deal-settings/logo.png" });
+    const res = await page();
+    expect(res.status).toBe(200);
+    const html = await res.text();
+    expect(html).toContain("お問い合わせ");
+    expect(html).not.toMatch(/<img/);
   });
   it("値が DB に入っていても、余計な値が画面に出ない", async () => {
     pm.dealDocLink.findUnique.mockResolvedValue({ ...openLink, deal: { status: "contracted", price: 30_000_000, name: "東京都試験区1-1 試験 太郎" }, party: { role: "seller", isSelf: false, name: "試験 太郎", address: "東京都試験区1-1" } });
@@ -288,7 +308,7 @@ describe("提出", () => {
       compress.compressPdf.mockResolvedValueOnce({ ok: false, reason: "too_large", inBytes: 25 * MB, bestBytes: 21 * MB });
       const res = await send(bigPdf(25 * MB));
       expect(res.status).toBe(413);
-      expect((await res.json()).error).toBe("PDFを小さくできませんでした。ページを分けるか、写真で撮って送ってください。");
+      expect((await res.json()).error).toBe("PDFを圧縮できませんでした。ページを分けるか、写真で撮って送ってください。");
       expect(storage.upload).not.toHaveBeenCalled();
       expect(compress.release).toHaveBeenCalledTimes(1);
     });
@@ -296,7 +316,7 @@ describe("提出", () => {
       compress.compressPdf.mockResolvedValueOnce({ ok: false, reason: "encrypted", inBytes: 25 * MB, bestBytes: null });
       const res = await send(bigPdf(25 * MB));
       expect(res.status).toBe(422);
-      expect((await res.json()).error).toBe("パスワード付きのPDFは小さくできません。パスワードを外すか、写真で撮って送ってください。");
+      expect((await res.json()).error).toBe("パスワード付きのPDFは圧縮できません。パスワードを外すか、写真で撮って送ってください。");
     });
     it("圧縮の席が埋まっていれば、本文を読む前に 429", async () => {
       compress.reserve.mockReturnValueOnce(null);

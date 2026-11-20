@@ -14,7 +14,7 @@ const data = (over: Partial<DocLinksResponse> = {}): DocLinksResponse => ({
     ],
   }],
   parties: [{ id: "p1", role: "seller", name: "試験 太郎" }],
-  options: [{ id: "a", label: "本人確認書類" }],
+  options: { seller: [{ id: "a", label: "写真付き身分証明書" }, { id: "s_only", label: "固定資産税・都市計画税課税明細書" }], buyer: [{ id: "b_only", label: "納税証明書" }] },
   canManage: true, canReview: true, available: true, dealOpen: true,
   ...over,
 });
@@ -49,6 +49,12 @@ describe("お客様の書類提出の枠", () => {
     const html = render(data({ available: false }));
     expect(html).toContain("設定が済んでいないため");
     expect(html).not.toContain("提出用リンクを発行");
+  });
+  it("書類は相手を選んでから(売主・買主ごとの一覧・2026-11-20)。選ぶ前は書類を出さない", () => {
+    const html = render(data());
+    expect(html).toContain("相手を選ぶと、売主・買主それぞれの書類が出ます。");
+    expect(html).not.toContain("固定資産税・都市計画税課税明細書");
+    expect(html).not.toContain("納税証明書");
   });
   it("発行の初期値は14日", () => {
     expect(render(data({ links: [] }))).toMatch(/value="14"/);

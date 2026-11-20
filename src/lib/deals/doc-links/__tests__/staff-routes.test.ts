@@ -54,7 +54,7 @@ const REQUEST_ID = "44444444-4444-4444-8444-444444444444";
 const FILE_ID = "77777777-7777-4777-8777-777777777777";
 const dealCtx = { params: Promise.resolve({ id: DEAL_ID }) };
 const dealRow = (party: Record<string, unknown> = { id: PARTY_ID, role: "seller", isSelf: false }) => ({ status: "contracted", propertyKind: null, hasOc: false, parties: [party] });
-const issueBody = { partyId: PARTY_ID, itemIds: ["s_bring_id", "s_recv_title"] };
+const issueBody = { partyId: PARTY_ID, itemIds: ["s_bring_id", "doc_property_tax_notice"] };
 const READ_ONLY = DEAL_PERMS.filter((p) => p.action === "read");
 
 const ORIGINAL = process.env.DEAL_DOC_LINK_SECRET;
@@ -85,7 +85,7 @@ describe("発行", () => {
     expect(data.publicId).toMatch(/^[A-Za-z0-9_-]{22}$/);
     expect(data).not.toHaveProperty("token");
     expect(data.expiresAt).toEqual(docLinkExpiresAt(new Date(), 14));
-    expect(pm.dealDocRequest.createMany.mock.calls[0][0].data.map((d: { label: string }) => d.label)).toEqual(["本人確認書類", "登記識別情報(権利証)・登記に必要な書類"]);
+    expect(pm.dealDocRequest.createMany.mock.calls[0][0].data.map((d: { label: string }) => d.label)).toEqual(["写真付き身分証明書", "固定資産税・都市計画税課税明細書"]);
   });
   it("監査は事実・取引・件数だけ", async () => {
     await ISSUE(jsonRequest("POST", issueBody), dealCtx);
@@ -96,13 +96,21 @@ describe("発行", () => {
     expect(syncDealScheduleSafe).toHaveBeenCalledWith(DEAL_ID, expect.objectContaining({ event: { docLinkIssued: true } }));
     syncDealScheduleSafe.mockClear();
     pm.deal.findUnique.mockResolvedValue(dealRow({ id: PARTY_ID, role: "buyer", isSelf: false }));
-    await ISSUE(jsonRequest("POST", issueBody), dealCtx);
+    expect((await ISSUE(jsonRequest("POST", { partyId: PARTY_ID, itemIds: ["s_bring_id", "doc_tax_certificate"] }), dealCtx)).status).toBe(200);
     expect(syncDealScheduleSafe).not.toHaveBeenCalled();
   });
-  it("金額付き・謄本から足す項目・準備の項目は選べない", async () => {
-    for (const bad of ["s_bring_payment", "auto_cancel_docs", "s_scrivener", "c_bring_id"]) {
+  it("金額付き・謄本から足す項目・準備の項目・一覧から外した書類は選べない", async () => {
+    for (const bad of ["s_bring_payment", "auto_cancel_docs", "s_scrivener", "c_bring_id", "s_recv_keys", "s_recv_title", "s_recv_receipt", "s_recv_bylaws"]) {
       const res = await ISSUE(jsonRequest("POST", { partyId: PARTY_ID, itemIds: [bad] }), dealCtx);
       expect(res.status, bad).toBe(422);
+    }
+    expect(pm.dealDocLink.create).not.toHaveBeenCalled();
+  });
+  it("相手の役割に合わない書類は選べない(売主用を買主に・買主用を売主に・2026-11-20)", async () => {
+    expect((await ISSUE(jsonRequest("POST", { partyId: PARTY_ID, itemIds: ["doc_tax_certificate"] }), dealCtx)).status).toBe(422);
+    pm.deal.findUnique.mockResolvedValue(dealRow({ id: PARTY_ID, role: "buyer", isSelf: false }));
+    for (const sellerOnly of ["doc_purchase_brochure", "doc_property_tax_notice"]) {
+      expect((await ISSUE(jsonRequest("POST", { partyId: PARTY_ID, itemIds: [sellerOnly] }), dealCtx)).status, sellerOnly).toBe(422);
     }
     expect(pm.dealDocLink.create).not.toHaveBeenCalled();
   });
@@ -203,12 +211,15 @@ describe("提出状況の一覧", () => {
     expect(body.links[0].url).toBeNull();
     expect(body.links[0].guidance).toBeNull();
   });
-  it("発行できる項目は決済時の持参・受け取りだけ", async () => {
+  it("発行できる書類は売主・買主ごとの専用の一覧(書類確認書の項目からは作らない・2026-11-20)", async () => {
     const body = await (await GET(new Request("http://x"), dealCtx)).json();
-    const ids = body.options.map((o: { id: string }) => o.id);
-    expect(ids).toContain("s_bring_id");
-    expect(ids).toContain("s_recv_title");
-    for (const no of ["s_bring_payment", "s_scrivener", "c_bring_id", "auto_cancel_docs"]) expect(ids).not.toContain(no);
+    const seller = body.options.seller.map((o: { id: string }) => o.id);
+    const buyer = body.options.buyer.map((o: { id: string }) => o.id);
+    expect(seller).toEqual(["s_bring_seal", "s_bring_id", "s_bring_resident", "doc_purchase_brochure", "doc_property_tax_notice"]);
+    expect(buyer).toEqual(["s_bring_seal", "s_bring_id", "s_bring_resident", "doc_tax_certificate"]);
+    for (const no of ["s_bring_payment", "s_scrivener", "c_bring_id", "auto_cancel_docs", "s_recv_keys", "s_recv_title", "s_recv_receipt", "s_recv_bylaws"]) {
+      expect([...seller, ...buyer]).not.toContain(no);
+    }
   });
 });
 
