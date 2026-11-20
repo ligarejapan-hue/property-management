@@ -18,7 +18,7 @@ export const SETTLE_ITEM_KEY = "s_settle";
 
 export type SettleOutcome =
   | { result: "settled"; caseStatusNotChanged: boolean }
-  | { result: "forbidden" | "cancelled" | "already" | "not_found" | "conflict" };
+  | { result: "forbidden" | "cancelled" | "already" | "not_found" | "conflict" | "undone" };
 
 type Session = { id: string; role: string };
 
@@ -34,13 +34,18 @@ export function settleDecision(
 }
 
 export async function settleDealFromSchedule(
-  session: Session, perms: PermissionMap, dealId: string,
+  session: Session, perms: PermissionMap, dealId: string, itemId: string,
   db: { $transaction: <T>(fn: (tx: Prisma.TransactionClient) => Promise<T>) => Promise<T> } = prisma,
 ): Promise<SettleOutcome> {
   return db.$transaction(async (tx) => {
     const first = await tx.deal.findUnique({ where: { id: dealId }, select: { propertyId: true } });
     if (!first) return { result: "not_found" as const };
     if (first.propertyId) await lockPropertyRow(tx, first.propertyId);
+    // 取引の行も押さえてから(物件 → 取引の順)、「決済・引渡し」がまだ完了のままか見直す。
+    // 完了の保存のあとで誰かが取り消していたら、状態は変えない(@codex #766 P2)。段取りの変更も取引の行を押さえて書く。
+    await tx.$queryRaw`SELECT "id" FROM "deals" WHERE "id" = ${dealId}::uuid FOR UPDATE`;
+    const item = await tx.dealScheduleItem.findFirst({ where: { id: itemId, dealId, templateKey: SETTLE_ITEM_KEY }, select: { completedAt: true } });
+    if (!item?.completedAt) return { result: "undone" as const };
     const cur = await tx.deal.findUnique({ where: { id: dealId }, select: { status: true, assigneeId: true, propertyId: true, version: true } });
     if (!cur) return { result: "not_found" as const };
     const property = cur.propertyId

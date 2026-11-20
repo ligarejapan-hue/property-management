@@ -112,8 +112,9 @@ describe("段取りの API", () => {
     pm.dealScheduleItem.findFirst.mockResolvedValue({ templateKey: "s_settle", completedAt: null });
     const res = await PATCH(req({ completed: true }), itemCtx);
     expect(await res.json()).toEqual({ ok: true, dealStatus: "settled" });
-    expect(settleDealFromSchedule).toHaveBeenCalledWith(expect.objectContaining({ id: USER_ID }), DEAL_PERMS, DEAL_ID);
-    expect(syncDealScheduleSafe).toHaveBeenCalledWith(DEAL_ID, { userId: USER_ID, event: { settled: true } });
+    expect(settleDealFromSchedule).toHaveBeenCalledWith(expect.objectContaining({ id: USER_ID }), DEAL_PERMS, DEAL_ID, ITEM_ID);
+    // 出来事(settled)は送り直さない(後から取り消した完了を上書きしない)
+    expect(syncDealScheduleSafe).toHaveBeenCalledWith(DEAL_ID, { userId: USER_ID });
     expect(writeAuditLog.mock.calls.map((c) => c[0].detail)).toContainEqual({ op: "auto_settle", fields: ["status"], count: 1, itemId: ITEM_ID });
   });
 

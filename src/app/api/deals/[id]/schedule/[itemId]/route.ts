@@ -35,7 +35,7 @@ export async function PATCH(request: Request, ctx: Ctx) {
     let settle: SettleOutcome | null = null;
     if (body.completed === true && res.before?.templateKey === SETTLE_ITEM_KEY && !res.before.completedAt) {
       try {
-        settle = await settleDealFromSchedule(session, perms, id);
+        settle = await settleDealFromSchedule(session, perms, id, itemId);
       } catch (e) {
         console.error("[deal-schedule] 取引の状態を決済完了にできませんでした", { error: e instanceof Error ? e.name : "unknown" });
       }
@@ -44,7 +44,8 @@ export async function PATCH(request: Request, ctx: Ctx) {
           userId: session.id, action: "deal_schedule_update", targetTable: "deals", targetId: id,
           detail: { op: "auto_settle", fields: ["status"], count: 1, itemId },
         });
-        await syncDealScheduleSafe(id, { userId: session.id, event: { settled: true } });
+        // 「決済・引渡し」はもう完了。出来事(settled)は送り直さない(後から取り消した完了を上書きしない・@codex #766 P2)。
+        await syncDealScheduleSafe(id, { userId: session.id });
       }
     }
     return NextResponse.json({
