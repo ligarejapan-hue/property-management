@@ -7,7 +7,7 @@ import { DEFAULT_FUNDING_INPUTS } from "../funding-schema";
 import { DEFAULT_BUSINESS_INPUTS } from "../business-schema";
 import { readPayments } from "../inputs";
 import {
-  balancePayeeText, checklistPayDefault, effectiveAccount, formatBankAccount, paymentRows, sellerReceiveText,
+  balancePayeeText, checklistPayDefault, effectiveAccount, formatBankAccount, paymentRows, paymentTotals, sellerReceiveText,
 } from "../payments";
 import type { DealPartyView, DealView } from "../view";
 
@@ -150,6 +150,51 @@ describe("費用のその他の行の払う人・受け取る人(2026-11-18 発�
     expect(paymentsSchema.safeParse({ deposit: { ...cash, to: { kind: "self", name: null } } }).success).toBe(false);
     const to = { kind: "self" as const, name: null };
     expect(readPayments({ others: { x: { ...cash, to }, y: cash } })).toEqual({ others: { x: { ...cash, to }, y: cash } });
+  });
+});
+
+describe("払う人ごとの合計(2026-11-20 発注者「送金合計額・現金用意の金額が一目で分からない」)", () => {
+  const amt = (rows: ReturnType<typeof paymentRows>, k: string) => rows.find((r) => r.key === k)!.amount!;
+  it("払う人ごとに、振込・現金・未定の合計。行の順に払う人を並べる", () => {
+    const rows = paymentRows(base, calcOf(base));
+    const t = paymentTotals(rows);
+    expect(t.map((g) => g.payer)).toEqual(["買主", "売主", "未定"]);
+    const buyer = t[0];
+    expect(buyer.undecided).toBe(amt(rows, "deposit") + amt(rows, "balance") + amt(rows, "settlement") + amt(rows, "registration") + amt(rows, "brokerageBuyer"));
+    expect([buyer.transfer, buyer.cash, buyer.missing]).toEqual([0, 0, 0]);
+    expect(t[1].undecided).toBe(amt(rows, "cancellation") + amt(rows, "brokerageSeller"));
+    expect(t[2].undecided).toBe(50_000);
+  });
+  it("振込・現金に分ける。精算金の「残金と一緒に」は残金の払い方で、残金の払う人に足す", () => {
+    const d = { ...base, payments: { deposit: cash, balance: tr(), settlement: { method: "with_balance" as const, account: EMPTY_BANK_ACCOUNT }, registration: cash } };
+    const rows = paymentRows(d, calcOf(d));
+    const buyer = paymentTotals(rows)[0];
+    expect(buyer.cash).toBe(amt(rows, "deposit") + amt(rows, "registration"));
+    expect(buyer.transfer).toBe(amt(rows, "balance") + amt(rows, "settlement"));
+    expect(buyer.undecided).toBe(amt(rows, "brokerageBuyer"));
+  });
+  it("売主から買主への精算金を「残金と一緒に」なら、残金から差し引く(売主の合計には入れない)", () => {
+    const rows = paymentRows(base, calcOf(base)).map((r) => (r.key === "settlement"
+      ? { ...r, from: "売主", to: "買主", amount: 30_000, entry: { method: "with_balance" as const, account: EMPTY_BANK_ACCOUNT } }
+      : r.key === "balance" ? { ...r, entry: tr() } : r));
+    const t = paymentTotals(rows);
+    expect(t.find((g) => g.payer === "買主")!.transfer).toBe(amt(rows, "balance") - 30_000);
+    expect(t.find((g) => g.payer === "売主")!.transfer).toBe(0);
+  });
+  it("預り敷金を残代金と相殺するなら、残金の側から差し引く(決済時のお支払額と合わせる・@codex #764 P2)", () => {
+    const d = { ...base, payments: { balance: tr(), settlement: { method: "with_balance" as const, account: EMPTY_BANK_ACCOUNT } } };
+    const rows = paymentRows(d, calcOf(d));
+    const without = paymentTotals(rows)[0].transfer;
+    expect(paymentTotals(rows, 240_000)[0].transfer).toBe(without - 240_000);
+    // 残金が現金なら現金の側から
+    const c = { ...base, payments: { balance: cash } };
+    const crows = paymentRows(c, calcOf(c));
+    expect(paymentTotals(crows, 240_000)[0].cash).toBe(amt(crows, "balance") - 240_000);
+  });
+  it("金額が出ていない行は数に入れず、件数で知らせる", () => {
+    const d = { ...base, price: null };
+    const t = paymentTotals(paymentRows(d, calcOf(d)));
+    expect(t[0].missing).toBeGreaterThan(0);
   });
 });
 
