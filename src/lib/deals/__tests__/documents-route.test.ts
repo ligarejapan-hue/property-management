@@ -18,8 +18,8 @@ vi.mock("@/lib/storage", () => {
     }),
   };
 });
-vi.mock("@/lib/prisma", () => ({
-  default: {
+vi.mock("@/lib/prisma", () => {
+  const db: Record<string, unknown> = {
     deal: { findUnique: vi.fn() },
     dealDocument: { findFirst: vi.fn(), findMany: vi.fn(), create: vi.fn(), deleteMany: vi.fn(async () => ({ count: 0 })) },
     dealDocRequest: { findMany: vi.fn(async () => []) },
@@ -28,8 +28,12 @@ vi.mock("@/lib/prisma", () => ({
     companyProfile: { findUnique: vi.fn(async () => ({ nameJa: "架空不動産株式会社" })) },
     user: { findMany: vi.fn(async () => []) },
     property: { findUnique: vi.fn(async () => ({ createdBy: "66666666-6666-4666-8666-666666666666", assignedTo: null })) },
-  },
-}));
+    $queryRaw: vi.fn(async () => []),
+  };
+  // 発行は取引の行を押さえたトランザクションの中で版を決める(同じ物を tx として渡す)。
+  db.$transaction = vi.fn(async (fn: (tx: unknown) => unknown) => fn(db));
+  return { default: db };
+});
 
 const { loadDealRegistryRights } = vi.hoisted(() => ({ loadDealRegistryRights: vi.fn(async () => ({ status: "none" })) }));
 vi.mock("@/lib/deals/registry-rights-load", () => ({ loadDealRegistryRights }));
@@ -141,13 +145,19 @@ describe("POST /api/deals/[id]/documents(発行)", () => {
     expect(prune.detail).toEqual({ docType: "funding_plan", variant: "purchase", versions: [1], keptVersion: 2, fileErrors: 0 });
   });
 
-  it("古い版を消せなくても発行は成功のまま", async () => {
+  it("版を決める・書く・古い版の記録を消すは、取引の行を押さえた1つのトランザクションで(@codex #765 P2)", async () => {
+    const tx = pm as unknown as { $transaction: Fn; $queryRaw: Fn };
+    await POST(json("POST", { docType: "funding_plan", version: 3 }), ctx);
+    expect(tx.$transaction).toHaveBeenCalled();
+    expect(tx.$queryRaw.mock.invocationCallOrder[0]).toBeLessThan(pm.dealDocument.findFirst.mock.invocationCallOrder[0]);
+    expect(pm.dealDocument.create.mock.invocationCallOrder[0]).toBeLessThan(pm.dealDocument.findMany.mock.invocationCallOrder[0]);
+  });
+
+  it("古い版の記録を消すのに失敗したら発行も取り消し、置いたファイルを消す(500)", async () => {
     pm.dealDocument.findMany.mockRejectedValueOnce(new Error("db down"));
-    const err = vi.spyOn(console, "error").mockImplementation(() => undefined);
     const res = await POST(json("POST", { docType: "funding_plan", version: 3 }), ctx);
-    expect(res.status).toBe(201);
-    expect(pm.dealDocument.deleteMany).not.toHaveBeenCalled();
-    err.mockRestore();
+    expect(res.status).toBe(500);
+    expect(files.size).toBe(0);
   });
 
   it("版の番号は前の版の次・同時に発行してぶつかったらやり直す", async () => {

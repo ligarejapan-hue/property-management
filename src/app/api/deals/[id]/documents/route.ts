@@ -28,7 +28,7 @@ import { kindBaseOf } from "@/lib/deals/constants";
 import { loadRegistryDocInfo, registryPropertyFor } from "@/lib/deals/registry-doc-info";
 import { loadReceivedChecklistItemIds } from "@/lib/deals/doc-links/staff-store";
 import { CROSSCHECK_FACTS_KEY, buildCrosscheckFacts } from "@/lib/deals/crosscheck-facts";
-import { pruneOlderVersions } from "@/lib/deals/documents/prune-old-versions";
+import { deleteDocumentFiles, pruneOlderVersionRows } from "@/lib/deals/documents/prune-old-versions";
 import {
   DEAL_DOC_MIME, DEAL_DOC_TYPE_KEYS, dealDocumentBaseName, dealDocumentKey, dealDocumentTitle, type DealDocFormat,
 } from "@/lib/deals/documents/issue";
@@ -169,23 +169,34 @@ export async function POST(request: Request, ctx: Ctx) {
     };
 
     let created: { id: string; version: number };
+    let pruned: { versions: number[]; fileKeys: string[] } = { versions: [], fileKeys: [] };
     try {
       const pdfKey = await put(pdf, "pdf");
       const xlsxKey = await put(xlsx, "xlsx");
       for (let attempt = 1; ; attempt++) {
-        const latest = await prisma.dealDocument.findFirst({
-          where: { dealId: id, docType, variant }, orderBy: { version: "desc" }, select: { version: true },
-        });
         try {
-          created = await prisma.dealDocument.create({
-            data: {
-              dealId: id, docType, variant, version: (latest?.version ?? 0) + 1, issuedById: session.id,
-              inputSnapshot: inputs as object,
-              // 照合に使う値(価格・決済日・面積・担保の件数)を発行時のまま残す。名前・住所は入れない。
-              calcSnapshot: { ...calc, [CROSSCHECK_FACTS_KEY]: buildCrosscheckFacts(docType, deal, docRegistry) } as object, pdfKey, xlsxKey, fileBaseName,
-            },
-            select: { id: true, version: true },
+          // 版の番号を決める・新しい版を書く・古い版の記録を消す、を取引の行を押さえて1つずつ行う
+          // (消して空いた番号に、同時に発行していた別の版が入り込まない・@codex #765 P2)。
+          const out = await prisma.$transaction(async (tx) => {
+            await tx.$queryRaw`SELECT "id" FROM "deals" WHERE "id" = ${id}::uuid FOR UPDATE`;
+            const latest = await tx.dealDocument.findFirst({
+              where: { dealId: id, docType, variant }, orderBy: { version: "desc" }, select: { version: true },
+            });
+            const row = await tx.dealDocument.create({
+              data: {
+                dealId: id, docType, variant, version: (latest?.version ?? 0) + 1, issuedById: session.id,
+                inputSnapshot: inputs as object,
+                // 照合に使う値(価格・決済日・面積・担保の件数)を発行時のまま残す。名前・住所は入れない。
+                calcSnapshot: { ...calc, [CROSSCHECK_FACTS_KEY]: buildCrosscheckFacts(docType, deal, docRegistry) } as object, pdfKey, xlsxKey, fileBaseName,
+              },
+              select: { id: true, version: true },
+            });
+            // 同じ書類の古い版の記録を消す(最新版だけ残す・領収書は全部残す・2026-11-20 発注者)。
+            const p = await pruneOlderVersionRows(tx, { dealId: id, docType, variant, keepVersion: row.version });
+            return { row, p };
           });
+          created = out.row;
+          pruned = out.p;
           break;
         } catch (e) {
           if (isUniqueViolation(e) && attempt < VERSION_ATTEMPTS) continue;
@@ -208,18 +219,13 @@ export async function POST(request: Request, ctx: Ctx) {
       detail: { docType, variant, version: created.version, formats: ["pdf", "xlsx"] },
     });
 
-    // 同じ書類の古い版の記録とファイルを消す(最新版だけ残す・領収書は全部残す・2026-11-20 発注者)。
-    // 失敗しても発行は止めない(新しい版はもうできている。次の発行のときにまた消す)。
-    try {
-      const pruned = await pruneOlderVersions(prisma, storage, { dealId: id, docType, variant, keepVersion: created.version });
-      if (pruned.versions.length > 0) {
-        await writeAuditLog({
-          userId: session.id, action: "deal_document_prune", targetTable: "deals", targetId: id,
-          detail: { docType, variant, versions: pruned.versions, keptVersion: created.version, fileErrors: pruned.fileErrors },
-        });
-      }
-    } catch (e) {
-      console.error("[deal-documents] 古い版を消せませんでした", { docType, variant, error: e instanceof Error ? e.name : "unknown" });
+    // 記録を消した古い版のファイルを消す(確定のあと・消せなくても発行は止めない)。
+    if (pruned.versions.length > 0) {
+      const fileErrors = await deleteDocumentFiles(storage, pruned.fileKeys);
+      await writeAuditLog({
+        userId: session.id, action: "deal_document_prune", targetTable: "deals", targetId: id,
+        detail: { docType, variant, versions: pruned.versions, keptVersion: created.version, fileErrors },
+      });
     }
     return NextResponse.json(
       { id: created.id, version: created.version, title: dealDocumentTitle(docType, variant), fileBaseName },
