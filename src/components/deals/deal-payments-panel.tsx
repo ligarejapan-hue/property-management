@@ -9,7 +9,7 @@ import { BANK_ACCOUNT_TYPE_LABELS } from "@/lib/deals/constants";
 import { yenText } from "@/lib/deals/money-forms";
 import {
   PAYMENT_METHOD_LABELS, PAYMENT_PARTY_LABELS, effectiveAccount, formatBankAccount, normalizeAccountNumber, paymentRows, paymentsForSave,
-  withParties, type PaymentRow,
+  paymentTotals, withParties, type PaymentRow,
 } from "@/lib/deals/payments";
 import {
   EMPTY_BANK_ACCOUNT, PAYMENT_PARTY_KINDS, type BankAccount, type OtherPaymentEntry, type PaymentMethod, type PaymentParty, type PaymentPartyKind,
@@ -134,6 +134,7 @@ export default function DealPaymentsPanel({
         入れた内容は、残金決済のご案内と書類確認書の払い方に最初から入ります(書類を出すときに直せます)。
       </p>
       {error && <p className="text-sm text-red-600 dark:text-red-400" role="alert">{error}</p>}
+      <PaymentTotalsTable rows={liveRows} />
       <ul className="divide-y divide-gray-200 rounded-md border border-gray-200 dark:divide-gray-800 dark:border-gray-800">
         {liveRows.map((r) => {
           const d = draftOf(r);
@@ -233,5 +234,53 @@ export default function DealPaymentsPanel({
         {saved && <span className="text-sm text-green-700 dark:text-green-400">保存しました</span>}
       </div>
     </div>
+  );
+}
+
+/**
+ * 払う人ごとの合計(2026-11-20 発注者「送金合計額・現金用意の金額が一目で分からない」)。
+ * 画面の下書き(保存前)の払い方で出す。精算金の「残金と一緒に」は残金の側に入る(lib の paymentTotals)。
+ */
+function PaymentTotalsTable({ rows }: { rows: PaymentRow[] }) {
+  const totals = paymentTotals(rows);
+  const cell = (n: number) => (n === 0 ? "—" : `${yenText(n)}円`);
+  const sum = (k: "transfer" | "cash" | "undecided") => totals.reduce((a, g) => a + g[k], 0);
+  const missing = totals.reduce((a, g) => a + g.missing, 0);
+  return (
+    <section className="space-y-1">
+      <h3 className="text-sm font-semibold text-gray-700 dark:text-gray-300">払う人ごとの合計</h3>
+      <div className="overflow-x-auto">
+        <table className="w-full min-w-[28rem] text-sm">
+          <thead>
+            <tr className="border-b border-gray-200 text-left text-xs text-gray-500 dark:border-gray-800">
+              <th className="px-2 py-1 font-medium">払う人</th>
+              <th className="px-2 py-1 text-right font-medium">振込</th>
+              <th className="px-2 py-1 text-right font-medium">現金で用意</th>
+              <th className="px-2 py-1 text-right font-medium">払い方が未定</th>
+            </tr>
+          </thead>
+          <tbody>
+            {totals.map((g) => (
+              <tr key={g.payer} className="border-b border-gray-100 dark:border-gray-900">
+                <td className="px-2 py-1">{g.payer}</td>
+                <td className="px-2 py-1 text-right tabular-nums">{cell(g.transfer)}</td>
+                <td className="px-2 py-1 text-right font-semibold tabular-nums">{cell(g.cash)}</td>
+                <td className="px-2 py-1 text-right tabular-nums text-gray-500">{cell(g.undecided)}</td>
+              </tr>
+            ))}
+            <tr className="font-semibold">
+              <td className="px-2 py-1">合計</td>
+              <td className="px-2 py-1 text-right tabular-nums">{cell(sum("transfer"))}</td>
+              <td className="px-2 py-1 text-right tabular-nums">{cell(sum("cash"))}</td>
+              <td className="px-2 py-1 text-right tabular-nums text-gray-500">{cell(sum("undecided"))}</td>
+            </tr>
+          </tbody>
+        </table>
+      </div>
+      <p className="text-xs text-gray-500">
+        保存前の選び方で出します。精算金を残金とまとめて払うときは、残金の側に足します(売主から買主へのお金なら残金から差し引きます)。
+        {missing > 0 ? `金額がまだ出ていない行が${missing}件あり、合計に入っていません。` : ""}
+      </p>
+    </section>
   );
 }

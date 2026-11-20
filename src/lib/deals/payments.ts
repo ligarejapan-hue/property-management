@@ -160,6 +160,45 @@ export function effectiveAccount(row: PaymentRow, rows: PaymentRow[], selfAccoun
   return row.toSelf && hasAccount(selfAccount) ? selfAccount : null;
 }
 
+export interface PaymentTotal {
+  /** 払う人(行の表示のまま。売主・買主・当社・未定など)。 */
+  payer: string;
+  transfer: number;
+  cash: number;
+  undecided: number;
+  /** 金額がまだ出ていない行の数(合計に入っていない)。 */
+  missing: number;
+}
+
+/**
+ * 払う人ごとの、振込・現金・未定の合計(2026-11-20 発注者「送金合計額・現金用意の金額が一目で分からない」)。
+ * 精算金の「残金と一緒に」は残金の払い方で、残金の払う人に入れる。向きが逆(売主→買主)なら残金から差し引く。
+ * 払う人の並びは行の順(最初に出てきた順)。
+ */
+export function paymentTotals(rows: PaymentRow[]): PaymentTotal[] {
+  const groups = new Map<string, PaymentTotal>();
+  const groupOf = (payer: string) => {
+    let g = groups.get(payer);
+    if (!g) groups.set(payer, (g = { payer, transfer: 0, cash: 0, undecided: 0, missing: 0 }));
+    return g;
+  };
+  const balance = rows.find((r) => r.key === "balance");
+  for (const r of rows) {
+    const together = r.entry.method === "with_balance" && balance && balance !== r;
+    const g = groupOf(together ? balance.from : r.from);
+    if (r.amount === null) {
+      g.missing += 1;
+      continue;
+    }
+    const sign = together && r.from !== balance.from ? -1 : 1;
+    const m = effectiveMethod(r, rows);
+    if (m === "transfer") g.transfer += sign * r.amount;
+    else if (m === "cash") g.cash += sign * r.amount;
+    else g.undecided += sign * r.amount;
+  }
+  return [...groups.values()];
+}
+
 type PayEntry = { method: "cash" | "transfer"; amount: number | null; other: null };
 const asPay = (m: PaymentEntry["method"]): PayEntry["method"] | null => (m === "cash" || m === "transfer" ? m : null);
 const yen = (n: number) => `${n.toLocaleString("ja-JP")}円`;

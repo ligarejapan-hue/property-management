@@ -36,6 +36,15 @@ const render = (d: DealView, self: BankAccount = SELF_ACC) =>
   renderToStaticMarkup(<DealPaymentsPanel deal={d} calc={calcOf(d)} selfAccount={self} onSaved={async () => {}} />);
 
 describe("お金の受け渡しのタブ(2026-11-16)", () => {
+  it("いちばん上に払う人ごとの合計(振込・現金・未定)を出す(11-20 発注者)", () => {
+    const d = { ...base, payments: { deposit: { method: "cash" as const, account: EMPTY_BANK_ACCOUNT } } };
+    const html = render(d);
+    expect(html).toContain("払う人ごとの合計");
+    expect(html.indexOf("払う人ごとの合計")).toBeLessThan(html.indexOf('aria-label="手付金の払い方"'));
+    expect(html).toContain("現金で用意");
+    expect(html).toContain("振込");
+    expect(html).toContain("1,500,000円");
+  });
   it("お金ごとの行・払う人と受け取る人・金額を出す", () => {
     const html = render(base);
     for (const label of ["手付金", "残金", "精算金", "登記費用", "抹消費用", "仲介手数料(売主)", "仲介手数料(買主)", "家財の処分"]) expect(html).toContain(`aria-label="${label}の払い方"`);
