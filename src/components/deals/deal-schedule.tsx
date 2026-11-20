@@ -192,11 +192,24 @@ function AddItemForm({ today, users, defaultAssignee, busy, onAdd }: {
 }
 
 /** 読んで出す。取引の保存・書類の発行で読み直す。 */
-export function DealSchedule({ dealId, users, defaultAssignee, revision }: { dealId: string; users: UserOption[]; defaultAssignee: string | null; revision: string }) {
+/** 「決済・引渡し」を完了にしたときの、取引の状態の知らせ(2026-11-20 発注者「完了になったら状態を決済完了に自動変更」)。 */
+export function settleNoticeText(dealStatus: string | undefined): string | null {
+  if (dealStatus === "settled") return "取引の状態を「決済完了」にしました。";
+  if (dealStatus === "forbidden") return "取引の状態は変えていません(状態を変えられるのは管理者と担当者だけです)。";
+  if (dealStatus === "conflict") return "ほかの人が同時に取引を更新したため、取引の状態は変えていません。基本タブで「決済完了」にしてください。";
+  return null;
+}
+
+export function DealSchedule({ dealId, users, defaultAssignee, revision, onDealStatusChanged }: {
+  dealId: string; users: UserOption[]; defaultAssignee: string | null; revision: string;
+  /** 「決済・引渡し」の完了で取引の状態が決済完了になった(画面の取引を読み直す)。 */
+  onDealStatusChanged?: (r: { caseStatusNotChanged: boolean }) => void;
+}) {
   const [data, setData] = useState<{ items: ScheduleItemView[]; today: string; settlementDate: string | null; docProgress: DocProgress[]; requestDraftCopies: RequestDraftCopyView[] } | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
   const [draftItem, setDraftItem] = useState<ScheduleItemView | null>(null);
+  const [notice, setNotice] = useState<string | null>(null);
 
   const load = useCallback(async () => {
     const res = await dealsApi.schedule(dealId);
@@ -230,12 +243,18 @@ export function DealSchedule({ dealId, users, defaultAssignee, revision }: { dea
   return (
     <div className="space-y-1">
       {error && <p className="text-sm text-red-600 dark:text-red-400" role="alert">{error}</p>}
+      {notice && <p className="text-sm text-gray-700 dark:text-gray-300" role="status">{notice}</p>}
       <DealScheduleView
         items={data.items} today={data.today} settlementDate={data.settlementDate} users={users} docProgress={data.docProgress} requestDraftCopies={data.requestDraftCopies}
         actions={{
           busy,
           onOpenDraft: setDraftItem,
-          onUpdate: (itemId, body) => void run(() => dealsApi.updateScheduleItem(dealId, itemId, body)),
+          onUpdate: (itemId, body) => void run(async () => {
+            setNotice(null);
+            const r = await dealsApi.updateScheduleItem(dealId, itemId, body);
+            setNotice(settleNoticeText(r.dealStatus));
+            if (r.dealStatus === "settled") onDealStatusChanged?.({ caseStatusNotChanged: r.caseStatusNotChanged === true });
+          }),
           onCompletePre: () => void run(() => dealsApi.completePreScheduleItems(dealId)),
         }}
         addForm={

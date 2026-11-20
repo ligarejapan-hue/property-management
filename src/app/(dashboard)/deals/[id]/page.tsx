@@ -25,7 +25,6 @@ import { DealDocLinks } from "@/components/deals/deal-doc-links";
 import { DealResaleSide } from "@/components/deals/deal-resale-side";
 import { dealsApi, errorText, type DealDetailResponse, type DealOptions, type UserOption } from "@/lib/deals/client";
 import type { DealCalc } from "@/lib/deals/calc/deal-calc";
-import { basicFormFromDeal } from "@/lib/deals/forms";
 import { MONEY_OVERRIDE_KEYS, SETTLEMENT_OVERRIDE_KEYS, pickOverrides } from "@/lib/deals/money-forms";
 import { DEAL_BUSINESS_TYPE_LABELS, DEAL_STATUS_LABELS } from "@/lib/deals/constants";
 import { dealTitle } from "@/lib/deals/deal-title";
@@ -172,7 +171,8 @@ export default function DealDetailPage({ params }: { params: Promise<{ id: strin
       {/* 数値照合。取引の保存・当事者の変更・書類の発行で読み直す。 */}
       <DealCrosscheck onResult={setCrosscheckResult} dealId={deal.id} propertyId={deal.propertyId} canOpenProperty={data.canOpenProperty} revision={k([deal.version, deal.parties, issuedTick])} onOpenTab={setSelected} />
       {/* 決済までの段取り。取引の保存・書類の発行で読み直す。 */}
-      <DealSchedule dealId={deal.id} users={users} defaultAssignee={deal.assigneeId} revision={k([deal.version, issuedTick, docLinkTick])} />
+      <DealSchedule dealId={deal.id} users={users} defaultAssignee={deal.assigneeId} revision={k([deal.version, issuedTick, docLinkTick])}
+        onDealStatusChanged={(r) => { if (r.caseStatusNotChanged) setCaseStatusNotChanged(true); void reload(); }} />
       {/* お客様の書類提出。当事者の変更で読み直す。操作したら段取りも読み直す(完了候補・受領の進み具合)。 */}
       <DealDocLinks dealId={deal.id} revision={k([deal.version, deal.parties])} onChanged={() => setDocLinkTick((t) => t + 1)} />
       {/* 物件の謄本の登記の現況(段5c-2)。物件を差し替えたら読み直す。 */}
@@ -185,7 +185,7 @@ export default function DealDetailPage({ params }: { params: Promise<{ id: strin
               物件の編集権限がないため、案件ステータスは変更していません
             </p>
           )}
-          <DealBasicPanel key={k(basicFormFromDeal(deal))} deal={deal} canChangeStatus={data.canChangeStatus} canChangeAssignee={data.canChangeAssignee} canMoveCaseStatus={data.canMoveCaseStatus} users={users} kinds={options?.propertyKinds ?? []} onSaved={reload} onCaseStatusNotChanged={setCaseStatusNotChanged} />
+          <DealBasicPanel key={deal.id} deal={deal} canChangeStatus={data.canChangeStatus} canChangeAssignee={data.canChangeAssignee} canMoveCaseStatus={data.canMoveCaseStatus} users={users} kinds={options?.propertyKinds ?? []} onSaved={reload} onCaseStatusNotChanged={setCaseStatusNotChanged} />
         </div>
         <div hidden={tab !== "property"}>
           <DealPropertyPanel key={k([deal.propertySnapshot, deal.assessments, deal.targetParcels, data.parcelOptions])} deal={deal} canOpenProperty={data.canOpenProperty} parcelOptions={data.parcelOptions ?? []} onSaved={reload} />

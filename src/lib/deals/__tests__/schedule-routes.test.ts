@@ -1,9 +1,11 @@
 import { describe, it, expect, vi, beforeEach } from "vitest";
 vi.mock("next/server", async () => (await import("./route-mocks")).nextServerMock());
 vi.mock("@/lib/api-helpers", async () => (await import("./route-mocks")).apiHelpersMock());
-const { writeAuditLog, syncDealScheduleSafe, loadScheduleItems, lockCalls } = vi.hoisted(() => ({
+const { writeAuditLog, syncDealScheduleSafe, loadScheduleItems, lockCalls, settleDealFromSchedule } = vi.hoisted(() => ({
   writeAuditLog: vi.fn(), syncDealScheduleSafe: vi.fn(async () => undefined), loadScheduleItems: vi.fn(async () => []), lockCalls: [] as string[],
+  settleDealFromSchedule: vi.fn(async (): Promise<unknown> => ({ result: "settled", caseStatusNotChanged: false })),
 }));
+vi.mock("@/lib/deals/settle-from-schedule", () => ({ SETTLE_ITEM_KEY: "s_settle", settleDealFromSchedule }));
 vi.mock("@/lib/audit", () => ({ writeAuditLog }));
 vi.mock("@/lib/deals/schedule-sync", () => ({
   syncDealScheduleSafe, loadScheduleItems, scheduleDealTitle: (d: { name: string }) => d.name,
@@ -16,7 +18,7 @@ vi.mock("@/lib/agent-inquiry/user-check", () => ({ assertActiveUser: vi.fn(async
 vi.mock("@/lib/prisma", () => ({
   default: {
     deal: { findUnique: vi.fn() },
-    dealScheduleItem: { create: vi.fn(), updateMany: vi.fn(), findMany: vi.fn() },
+    dealScheduleItem: { create: vi.fn(), updateMany: vi.fn(), findMany: vi.fn(), findFirst: vi.fn() },
     dealDocLink: { findMany: vi.fn(async () => []) },
     dealSettings: { findUnique: vi.fn(async () => null) },
     auditLog: { findMany: vi.fn(async () => []) },
@@ -32,7 +34,7 @@ import { POST as COMPLETE_PRE } from "../../../app/api/deals/[id]/schedule/compl
 import { GET as MINE } from "../../../app/api/deals/schedule/mine/route";
 
 type Fn = ReturnType<typeof vi.fn>;
-const pm = prismaMock as never as { deal: { findUnique: Fn }; dealScheduleItem: { create: Fn; updateMany: Fn; findMany: Fn } };
+const pm = prismaMock as never as { deal: { findUnique: Fn }; dealScheduleItem: { create: Fn; updateMany: Fn; findMany: Fn; findFirst: Fn } };
 const ITEM_ID = "33333333-3333-4333-8333-333333333333";
 const ctx = { params: Promise.resolve({ id: DEAL_ID }) };
 const itemCtx = { params: Promise.resolve({ id: DEAL_ID, itemId: ITEM_ID }) };
@@ -46,6 +48,7 @@ beforeEach(() => {
   pm.deal.findUnique.mockResolvedValue({ id: DEAL_ID, settlementAt: new Date("2026-12-16T01:00:00Z") });
   pm.dealScheduleItem.updateMany.mockResolvedValue({ count: 1 });
   pm.dealScheduleItem.create.mockResolvedValue({ id: ITEM_ID });
+  pm.dealScheduleItem.findFirst.mockResolvedValue({ templateKey: "c_x", completedAt: null });
 });
 
 describe("段取りの API", () => {
@@ -103,6 +106,43 @@ describe("段取りの API", () => {
     expect(pm.dealScheduleItem.updateMany.mock.calls[0][0].data.completedAt).toBeInstanceOf(Date);
     await PATCH(req({ completed: false }), itemCtx);
     expect(pm.dealScheduleItem.updateMany.mock.calls[1][0].data).toMatchObject({ completedAt: null, autoCompleted: false });
+  });
+
+  it("「決済・引渡し」を完了にしたら取引を決済完了にし、段取りに伝えて監査に残す(11-20 発注者)", async () => {
+    pm.dealScheduleItem.findFirst.mockResolvedValue({ templateKey: "s_settle", completedAt: null });
+    const res = await PATCH(req({ completed: true }), itemCtx);
+    expect(await res.json()).toEqual({ ok: true, dealStatus: "settled" });
+    expect(settleDealFromSchedule).toHaveBeenCalledWith(expect.objectContaining({ id: USER_ID }), DEAL_PERMS, DEAL_ID, ITEM_ID);
+    // 出来事(settled)は送り直さない(後から取り消した完了を上書きしない)
+    expect(syncDealScheduleSafe).toHaveBeenCalledWith(DEAL_ID, { userId: USER_ID });
+    expect(writeAuditLog.mock.calls.map((c) => c[0].detail)).toContainEqual({ op: "auto_settle", fields: ["status"], count: 1, itemId: ITEM_ID });
+  });
+
+  it("状態を変えられない人なら、変えなかったことを返す・案件ステータスが動かなかったことも返す", async () => {
+    pm.dealScheduleItem.findFirst.mockResolvedValue({ templateKey: "s_settle", completedAt: null });
+    settleDealFromSchedule.mockResolvedValueOnce({ result: "forbidden" });
+    expect(await (await PATCH(req({ completed: true }), itemCtx)).json()).toEqual({ ok: true, dealStatus: "forbidden" });
+    expect(syncDealScheduleSafe).not.toHaveBeenCalled();
+    settleDealFromSchedule.mockResolvedValueOnce({ result: "settled", caseStatusNotChanged: true });
+    expect(await (await PATCH(req({ completed: true }), itemCtx)).json()).toEqual({ ok: true, dealStatus: "settled", caseStatusNotChanged: true });
+  });
+
+  it("ほかの項目・取り消し・もう完了していた「決済・引渡し」では状態に触らない", async () => {
+    await PATCH(req({ completed: true }), itemCtx);
+    pm.dealScheduleItem.findFirst.mockResolvedValue({ templateKey: "s_settle", completedAt: null });
+    await PATCH(req({ completed: false }), itemCtx);
+    await PATCH(req({ assigneeId: null }), itemCtx);
+    pm.dealScheduleItem.findFirst.mockResolvedValue({ templateKey: "s_settle", completedAt: new Date() });
+    expect(await (await PATCH(req({ completed: true }), itemCtx)).json()).toEqual({ ok: true });
+    expect(settleDealFromSchedule).not.toHaveBeenCalled();
+  });
+
+  it("状態を変えるのに失敗しても、完了の保存は成功のまま", async () => {
+    pm.dealScheduleItem.findFirst.mockResolvedValue({ templateKey: "s_settle", completedAt: null });
+    settleDealFromSchedule.mockRejectedValueOnce(new Error("db"));
+    const err = vi.spyOn(console, "error").mockImplementation(() => undefined);
+    expect((await PATCH(req({ completed: true }), itemCtx)).status).toBe(200);
+    err.mockRestore();
   });
 
   it("手で対象外にすると、条件が戻っても戻らない印が付く", async () => {

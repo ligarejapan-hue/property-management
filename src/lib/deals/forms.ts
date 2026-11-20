@@ -15,6 +15,19 @@ export interface BasicForm {
   brokerCompany: string; brokerStaff: string; brokerTel: string;
 }
 
+/**
+ * 取引が読み直されたときの基本タブの入力(@codex #766 P2)。人が触っていない欄(読み込んだときの値のまま)だけ新しい値にし、
+ * 触った欄は入力を残す(「決済・引渡し」の完了で状態だけ変わったときに、保存前の入力を消さない)。
+ */
+export function rebaseBasicForm(form: BasicForm, base: BasicForm, fresh: BasicForm): BasicForm {
+  const same = (a: unknown, b: unknown) => JSON.stringify(a) === JSON.stringify(b);
+  const out = { ...form } as Record<keyof BasicForm, unknown>;
+  for (const k of Object.keys(fresh) as (keyof BasicForm)[]) {
+    if (same(form[k], base[k])) out[k] = fresh[k];
+  }
+  return out as unknown as BasicForm;
+}
+
 export function basicFormFromDeal(d: DealView): BasicForm {
   return {
     businessType: d.businessType, tradeSide: d.tradeSide ?? "", status: d.status,

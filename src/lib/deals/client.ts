@@ -95,7 +95,8 @@ export const dealsApi = {
   },
   logRequestDraftCopy: (id: string, itemId: string, templateId: string) => call<{ ok: true }>(`/api/deals/${id}/schedule/${itemId}/request-draft`, { method: "POST", body: { templateId } }),
   addScheduleItem: (id: string, body: Record<string, unknown>) => call<{ id: string }>(`/api/deals/${id}/schedule`, { method: "POST", body }),
-  updateScheduleItem: (id: string, itemId: string, body: Record<string, unknown>) => call<{ ok: true }>(`/api/deals/${id}/schedule/${itemId}`, { method: "PATCH", body }),
+  updateScheduleItem: (id: string, itemId: string, body: Record<string, unknown>) =>
+    call<{ ok: true; dealStatus?: "settled" | "forbidden" | "cancelled" | "already" | "not_found" | "conflict" | "undone"; caseStatusNotChanged?: boolean }>(`/api/deals/${id}/schedule/${itemId}`, { method: "PATCH", body }),
   docLinks: (id: string) => call<DocLinksResponse>(`/api/deals/${id}/doc-links`),
   issueDocLink: (id: string, body: { partyId: string; itemIds: string[]; days: number; rotate: boolean }) => call<{ ok: true }>(`/api/deals/${id}/doc-links`, { method: "POST", body }),
   revokeDocLink: (id: string, linkId: string) => call<{ ok: true }>(`/api/deals/${id}/doc-links/${linkId}/revoke`, { method: "POST" }),

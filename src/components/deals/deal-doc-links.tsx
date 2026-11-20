@@ -111,7 +111,7 @@ function IssueForm({ data, actions }: { data: DocLinksResponse; actions: DocLink
     }
   };
   if (!data.available) return <p className="mt-3 text-xs text-amber-800 dark:text-amber-300">提出用リンクの設定が済んでいないため、発行できません。管理者に連絡してください。</p>;
-  if (!data.dealOpen) return <p className="mt-3 text-xs text-gray-600 dark:text-gray-400">中止・決済済の取引には発行できません。</p>;
+  if (!data.dealOpen) return <p className="mt-3 text-xs text-gray-600 dark:text-gray-400">中止・決済完了の取引には発行できません。</p>;
   if (data.parties.length === 0) return <p className="mt-3 text-xs text-gray-600 dark:text-gray-400">「当事者」タブに売主か買主を入れると発行できます。</p>;
   return (
     <div className="mt-3 space-y-2 border-t border-gray-100 pt-3 dark:border-gray-800">
