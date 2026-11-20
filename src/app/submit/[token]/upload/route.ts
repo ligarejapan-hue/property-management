@@ -60,8 +60,8 @@ const UNAVAILABLE = "このリンクは使えません。お手数ですが、�
 const THROTTLED = "送信が集中しています。しばらくしてからもう一度お試しください。";
 const BUSY = "いま混み合っています。1分ほど待ってから、もう一度お試しください。";
 const TOO_LARGE = "ファイルが大きすぎます。写真は8MBまで、PDFは30MBまでです。";
-const PDF_TOO_LARGE = "PDFを小さくできませんでした。ページを分けるか、写真で撮って送ってください。";
-const PDF_ENCRYPTED = "パスワード付きのPDFは小さくできません。パスワードを外すか、写真で撮って送ってください。";
+const PDF_TOO_LARGE = "PDFを圧縮できませんでした。ページを分けるか、写真で撮って送ってください。";
+const PDF_ENCRYPTED = "パスワード付きのPDFは圧縮できません。パスワードを外すか、写真で撮って送ってください。";
 const PDF_UNREADABLE = "このPDFは読み取れませんでした。写真で撮って送ってください。";
 const UNSUPPORTED = "写真(JPEG・PNG・WebP)かPDFを送ってください。";
 

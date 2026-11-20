@@ -5,7 +5,8 @@ import { isPublicPath } from "@/proxy";
 import { DOC_FILE_MAX_BYTES, DOC_PDF_UPLOAD_MAX_BYTES, docLinkExpiresAt, docLinkExpiresOn, docLinkStateOf, isDocLinkOpen, receivedChecklistItemIds } from "../constants";
 import { buildDocLinkGuidance, buildMissingDocsText } from "../guidance";
 import { inspectSubmittedFile } from "../inspect-file";
-import { renderSubmitMessage, renderSubmitPage, submitHeaders } from "../public-page";
+import { groupRequests, publicStatusText, renderSubmitMessage, renderSubmitPage, submitHeaders } from "../public-page";
+import { docLinkHintOf } from "../catalog";
 import { buildDocLinkToken, buildSubmitUrl, docLinkKey, DOC_LINK_SECRET_MIN_LENGTH, DOC_LINK_TOKEN_SOURCE, newDocLinkPublicId, verifyDocLinkToken } from "../token";
 import { DIRTY_JPEG, DIRTY_PNG } from "./fixtures";
 
@@ -135,45 +136,115 @@ describe("保存前の検査(サーバー側で必ず通す)", () => {
 });
 
 describe("お客様のページの HTML", () => {
+  const hint = docLinkHintOf("s_bring_id");
+  const LOGO = "data:image/png;base64,iVBORw0KGgo=";
   const html = renderSubmitPage({
-    companyName: "試験<不動産>", nonce: "NONCE",
+    companyName: "試験<不動産>", companyTel: "03-0000-0000", logo: LOGO, nonce: "NONCE",
     requests: [
-      { id: "r1", label: "本人確認書類", status: "pending", fileCount: 0 },
+      { id: "r1", label: "写真付き身分証明書", status: "pending", fileCount: 0, hint },
       { id: "r2", label: "住民票", status: "submitted", fileCount: 2 },
       { id: "r3", label: "印鑑証明書", status: "received", fileCount: 1 },
-      { id: "r4", label: "実印", status: "rejected", fileCount: 0 },
+      { id: "r4", label: "実<印>", status: "rejected", fileCount: 0 },
     ],
   });
   it("会社名・書類名・提出状況を出し、文字を無害化する", () => {
     expect(html).toContain("試験&lt;不動産&gt;");
-    expect(html).toContain("本人確認書類");
-    expect(html).toContain("届きました(確認中)(2点)");
-    expect(html).toContain("もう一度提出してください");
+    expect(html).toContain("実&lt;印&gt;");
+    expect(html).toContain("届きました(2点)・担当者が確認します");
+    expect(html).toContain("確認しました");
+    expect(html).toContain("もう一度提出してください。担当者からのご連絡をご確認ください");
   });
-  it("撮影とファイル選択がある。受領した書類には出さない", () => {
+  it("状態ごとの文言(差し戻しの理由は出さない)", () => {
+    expect(publicStatusText("pending", 0)).toBe("未提出");
+    expect(publicStatusText("submitted", 0)).toBe("届きました・担当者が確認します");
+    expect(publicStatusText("submitted", 3)).toBe("届きました(3点)・担当者が確認します");
+    expect(publicStatusText("received", 1)).toBe("確認しました");
+  });
+  it("差し戻し → まだ → お送りいただいた の順に並べる(差し戻しをいちばん上・2026-11-20)", () => {
+    const order = ["もう一度お送りください", "ご提出をお願いする書類", "お送りいただいた書類"].map((t) => html.indexOf(t));
+    expect(order.every((i) => i > 0)).toBe(true);
+    expect([...order].sort((a, b) => a - b)).toEqual(order);
+    expect(html.indexOf('data-id="r4"')).toBeLessThan(html.indexOf('data-id="r1"'));
+    expect(html.indexOf('data-id="r1"')).toBeLessThan(html.indexOf('data-id="r2"'));
+    expect(groupRequests([{ id: "a", label: "x", status: "pending", fileCount: 0 }]).map((g) => g.key)).toEqual(["todo"]);
+  });
+  it("進み具合: 提出済み=届いた+確認済み(差し戻しは数えない)。状態ごとの数", () => {
+    expect(html).toContain('<b id="pn">2</b>点 提出済み <span class="of">／ 4点中</span>');
+    expect(html).toContain('<span class="chip rejected">もう一度お願い 1</span><span class="chip pending">未提出 1</span><span class="chip submitted">確認中 1</span><span class="chip received">確認済み 1</span>');
+    expect(html).toContain('<div class="done" id="done" hidden>');
+  });
+  it("隠す指定(hidden)は、枠の見た目の指定より強く効く(「すべてご提出いただきました」が最初から見えない・内部レビュー)", () => {
+    expect(html).toContain("[hidden]{display:none!important}");
+  });
+  it("複数ファイルの送信中は、全部送り終えるまで送信中のまま(1枚ごとに解かない・内部レビュー)", () => {
+    expect(html).not.toMatch(/busy\(doc,false\);row\(/);
+    expect(html).toContain("busy(doc,false)},function(e){busy(doc,false);");
+  });
+  it("まだ・差し戻しが無ければ「すべてご提出いただきました」を出す", () => {
+    const done = renderSubmitPage({ companyName: "試験不動産", nonce: "N", requests: [
+      { id: "a", label: "住民票", status: "submitted", fileCount: 1 }, { id: "b", label: "実印", status: "received", fileCount: 1 },
+    ] });
+    expect(done).toContain('<div class="done" id="done">');
+    expect(done).toContain("すべてご提出いただきました");
+    expect(done).toContain('<b id="pn">2</b>点 提出済み');
+  });
+  it("写真付き身分証明書だけ、使える書類の一言と撮り方の注意(免許証は表裏・パスポートは顔写真・マイナンバーは隠す)", () => {
+    expect(html).toContain("運転免許証・マイナンバーカード・パスポートなど（法務局や住宅ローンの手続きに使えるもの）");
+    expect(html).toContain("<li>運転免許証は表と裏の両方</li>");
+    expect(html).toContain("<li>パスポートは顔写真が載っているページ</li>");
+    expect(html).toContain("<li>マイナンバーカードは表面だけ。裏面の番号（マイナンバー）は写さないか、隠してください</li>");
+    expect(html.match(/class="howto"/g)?.length).toBe(1);
+  });
+  it("撮影とファイル選択は同じ大きさで、確認しました の書類には出さない(届いた書類には残す)", () => {
     expect(html).toContain('capture="environment"');
     expect(html).toContain('accept="image/*,application/pdf"');
     expect(html.match(/capture="environment"/g)?.length).toBe(3);
+    expect(html).toContain("足りないページがあれば、追加で送れます");
+    expect(html).toMatch(/label\.btn\{[^}]*min-height:52px/);
   });
-  it("大きい PDF は自動で縮めると案内し、画面の上限は写真 8MB・PDF 30MB(2026-11-06)", () => {
-    expect(html).toContain("写真とPDFを送れます(写真は自動で縮めます。PDFは30MBまでで、8MBを超えるものは自動で縮めます)。");
+  it("文言は「圧縮」。画面の上限は写真 8MB・PDF 30MB(2026-11-06)", () => {
+    expect(html).toContain("写真とPDFを送れます。PDFは30MBまでです。大きいファイルは自動で圧縮します。");
+    expect(html).toContain("送信しています…(大きいPDFは圧縮するため、1〜2分かかることがあります)");
+    expect(html).not.toContain("縮め");
+    expect(html).not.toContain("小さく");
     expect(html).toContain(`var MAX=${DOC_FILE_MAX_BYTES},PDF_MAX=${DOC_PDF_UPLOAD_MAX_BYTES},`);
     expect(html).toContain("(isPdf(f)?PDF_MAX:MAX)");
-    expect(html).toContain("大きいPDFは縮めるので1〜2分かかることがあります");
-    expect(html).not.toContain("1ファイル8MBまで");
   });
-  it("外部の読み込みがなく、ファイルへのリンクもない", () => {
+  it("開いたときの動きは、動きを減らす設定では止める", () => {
+    expect(html).toContain("@keyframes rise");
+    expect(html).toMatch(/@media \(prefers-reduced-motion:reduce\)\{[^}]*\.doc\{animation:none\}/);
+  });
+  it("いちばん下に会社のロゴ(埋め込み)と会社名・電話", () => {
+    expect(html).toContain(`<img src="${LOGO}" alt="試験&lt;不動産&gt;">`);
+    expect(html).toContain('<a href="tel:03-0000-0000"'.replace("03-0000-0000", "0300000000"));
+    expect(html).toContain(">03-0000-0000</a>");
+    const none = renderSubmitPage({ companyName: "試験", nonce: "N", requests: [] });
+    expect(none).not.toMatch(/<img\b/);
+    expect(none).not.toContain("お問い合わせ");
+  });
+  it("ロゴは PNG・JPEG の埋め込みだけ(外の URL・ほかの形は出さない)", () => {
+    for (const bad of ["https://evil.example/logo.png", "data:image/svg+xml;base64,PHN2Zz4=", "javascript:alert(1)", 'data:image/png;base64,AAA" onerror="x']) {
+      expect(renderSubmitPage({ companyName: "試験", logo: bad, nonce: "N", requests: [] })).not.toMatch(/<img\b/);
+    }
+  });
+  it("外部の読み込みがなく、ファイルへのリンクもない(画像は埋め込みだけ・リンクは電話だけ)", () => {
     expect(html).not.toMatch(/https?:\/\//);
     expect(html).not.toMatch(/<link\b/);
-    expect(html).not.toMatch(/<img\b/);
-    expect(html).not.toContain("<a ");
+    for (const m of html.matchAll(/<img\b[^>]*src="([^"]*)"/g)) expect(m[1]).toMatch(/^data:image\/(png|jpeg);base64,/);
+    for (const m of html.matchAll(/<a\b[^>]*href="([^"]*)"/g)) expect(m[1]).toMatch(/^tel:[0-9+]+$/);
     expect(html).not.toMatch(/<script[^>]+src=/);
+    expect(html).not.toMatch(/\sstyle="/);
     expect(html).toContain('<meta name="robots" content="noindex');
+  });
+  it("埋め込んだスクリプトが JavaScript として読める(壊れると送信が無言で止まる)", () => {
+    const scripts = [...html.matchAll(/<script[^>]*>([\s\S]*?)<\/script>/g)].map((m) => m[1]);
+    expect(scripts.length).toBe(1);
+    expect(() => new Function(scripts[0])).not.toThrow();
   });
   it("使えないリンクの画面も外部を読まない", () => {
     expect(renderSubmitMessage("x")).not.toMatch(/https?:\/\//);
   });
-  it("応答ヘッダ", () => {
+  it("応答ヘッダ(画像は埋め込みと描き直しだけ)", () => {
     const h = submitHeaders("text/html; charset=utf-8", "N");
     expect(h["Referrer-Policy"]).toBe("no-referrer");
     expect(h["Cache-Control"]).toBe("no-store");
@@ -181,6 +252,7 @@ describe("お客様のページの HTML", () => {
     expect(h["X-Content-Type-Options"]).toBe("nosniff");
     const csp = h["Content-Security-Policy"];
     expect(csp).toContain("default-src 'none'");
+    expect(csp).toContain("img-src blob: data:;");
     expect(csp).toContain("script-src 'nonce-N'");
     expect(csp).toContain("connect-src 'self'");
     expect(csp).toContain("frame-ancestors 'none'");
@@ -206,8 +278,9 @@ describe("再案内の文面", () => {
     { label: "印鑑証明書", status: "received", rejectReason: null },
     { label: "実印", status: "submitted", rejectReason: null },
   ];
-  it("足りない書類=未提出と差し戻しだけ(理由つき)", () => {
-    expect(buildMissingDocsText(requests)).toBe("・本人確認書類\n・住民票(再提出:文字が読めません)");
+  it("足りない書類=未提出と差し戻しだけ(理由つき・行頭は〇)", () => {
+    // 行頭は「〇」(2026-11-20 発注者)。
+    expect(buildMissingDocsText(requests)).toBe("〇本人確認書類\n〇住民票(再提出:文字が読めません)");
     expect(buildMissingDocsText(requests.slice(2))).toBeNull();
   });
   it("リンクと期限が入る", () => {
@@ -216,6 +289,8 @@ describe("再案内の文面", () => {
     expect(t).toContain("https://x/submit/t");
     expect(t).toContain("2026年11月15日");
     expect(t).toContain("文字が読めません");
+    expect(t).toContain("【お願いしたい書類】\n〇本人確認書類\n〇住民票(再提出:文字が読めません)");
+    expect(t).not.toMatch(/^・/m);
   });
 });
 

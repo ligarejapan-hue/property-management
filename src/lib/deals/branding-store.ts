@@ -20,6 +20,12 @@ async function readImage(key: string | null | undefined): Promise<string | null>
   }
 }
 
+/** お客様の書類提出ページのロゴだけ(角印は読まない・2026-11-20)。読めなければ無し。 */
+export async function loadDealLogo(): Promise<string | null> {
+  const row = await prisma.dealSettings.findUnique({ where: { id: DEAL_SETTINGS_ID }, select: { logoKey: true } });
+  return readImage(row?.logoKey);
+}
+
 /** 書類を作るときのロゴ・角印。読めなければ無しで作る(発行は止めない)。 */
 export async function loadDealBranding(): Promise<DealBranding> {
   const row = await prisma.dealSettings.findUnique({ where: { id: DEAL_SETTINGS_ID }, select: { logoKey: true, sealKey: true } });

@@ -4,7 +4,6 @@ import { hasPermission } from "@/lib/permissions";
 import { resolveCompanyProfile } from "@/lib/sales-sheet/company-profile-store";
 import { loadSaleDmPublicPageConfig } from "@/lib/sale-dm-letter/config-store";
 import { canOpenReferralDocument } from "@/lib/uploads-authorization";
-import { itemsFor, type ChecklistItem } from "@/lib/deals/checklist";
 import { loadDealSettings } from "@/lib/deals/settings-store";
 import { kindBaseOf } from "@/lib/deals/constants";
 import {
@@ -13,12 +12,11 @@ import {
 } from "./constants";
 import { buildDocLinkGuidance, buildMissingDocsText } from "./guidance";
 import { buildDocLinkToken, buildSubmitUrl, docLinkKey } from "./token";
+import { docLinkOptionsFor } from "./catalog";
 
-/** 発行できる項目 = 決済時の「持参するもの」「受け取るもの」。金額付きと、謄本から足す項目(担保の有無が伝わる)は入れない。 */
-export function docLinkOptions(items: ChecklistItem[], deal: Parameters<typeof itemsFor>[2]): { id: string; label: string }[] {
-  return itemsFor(items, "settlement", deal)
-    .filter((i) => (i.group === "bring" || i.group === "receive") && i.amount === null)
-    .map((i) => ({ id: i.id, label: i.label }));
+/** 発行できる書類(売主・買主ごとの専用の一覧・2026-11-20 発注者)。書類確認書の項目からは作らない。 */
+export function docLinkOptionsByRole(deal: Parameters<typeof docLinkOptionsFor>[1]): Record<DocLinkRole, { id: string; label: string }[]> {
+  return { seller: docLinkOptionsFor("seller", deal), buyer: docLinkOptionsFor("buyer", deal) };
 }
 
 /** リンクの操作は取引を編集できる人。ファイルを開く・受領・差し戻しは、所有者情報をすべて見られる人に絞る(発注者決定 2026-11-01)。 */
@@ -39,7 +37,8 @@ export interface DocLinkView {
 export interface DocLinksResponse {
   links: DocLinkView[];
   parties: { id: string; role: DocLinkRole; name: string }[];
-  options: { id: string; label: string }[];
+  /** 発行できる書類(相手の役割ごと)。 */
+  options: Record<DocLinkRole, { id: string; label: string }[]>;
   canManage: boolean;
   canReview: boolean;
   /** 署名の鍵と公開の URL がそろっている(無ければ発行できない)。 */
@@ -105,7 +104,7 @@ export async function loadDocLinksView(dealId: string, perms: PermissionEntry[],
   return {
     links, canManage, canReview,
     parties: deal.parties.filter((p) => isRole(p.role) && !p.isSelf).map((p) => ({ id: p.id, role: p.role as DocLinkRole, name: p.name })),
-    options: docLinkOptions(settings.checklistItems, { base, hasOc: deal.hasOc }),
+    options: docLinkOptionsByRole({ base, hasOc: deal.hasOc }),
     available: !!key && !!baseUrl,
     dealOpen: isDealOpenForDocs(deal.status),
   };

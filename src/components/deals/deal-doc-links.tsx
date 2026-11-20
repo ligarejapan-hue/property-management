@@ -103,6 +103,13 @@ function IssueForm({ data, actions }: { data: DocLinksResponse; actions: DocLink
   const [days, setDays] = useState(DOC_LINK_DEFAULT_DAYS);
   const [rotate, setRotate] = useState(false);
   const existing = data.links.find((l) => l.partyId === partyId);
+  // 書類は選んだ相手の役割(売主・買主)ごとの一覧から(2026-11-20 発注者)。
+  const role = data.parties.find((p) => p.id === partyId)?.role ?? null;
+  const options = role ? data.options[role] : [];
+  const choose = (id: string) => {
+    setPartyId(id);
+    setPicked([]);
+  };
   const toggle = (id: string, on: boolean) => setPicked((p) => (on ? [...p, id] : p.filter((x) => x !== id)));
   const submit = async () => {
     if (await actions.onIssue({ partyId, itemIds: picked, days, rotate })) {
@@ -118,16 +125,19 @@ function IssueForm({ data, actions }: { data: DocLinksResponse; actions: DocLink
       <h3 className="text-xs font-semibold text-gray-500 dark:text-gray-400">提出用リンクを発行</h3>
       <div className="grid gap-3 sm:grid-cols-2">
         <Field label="相手">
-          <SelectBox label="相手" value={partyId} onChange={setPartyId} options={data.parties.map((p) => ({ value: p.id, label: `${DOC_LINK_ROLE_LABELS[p.role]} ${p.name}` }))} allowEmpty />
+          <SelectBox label="相手" value={partyId} onChange={choose} options={data.parties.map((p) => ({ value: p.id, label: `${DOC_LINK_ROLE_LABELS[p.role]} ${p.name}` }))} allowEmpty />
         </Field>
         <Field label="有効な日数">
           <input type="number" min={1} max={DOC_LINK_MAX_DAYS} value={days} onChange={(e) => setDays(Number(e.target.value))} aria-label="有効な日数" className={inputCls} />
         </Field>
       </div>
       <fieldset>
-        <legend className="text-xs text-gray-600 dark:text-gray-400">提出してもらう書類(書類確認書の「決済時」から)</legend>
+        <legend className="text-xs text-gray-600 dark:text-gray-400">
+          {role ? `提出してもらう書類(${DOC_LINK_ROLE_LABELS[role]}用)` : "提出してもらう書類"}
+        </legend>
+        {!role && <p className="mt-1 text-xs text-gray-500 dark:text-gray-400">相手を選ぶと、売主・買主それぞれの書類が出ます。</p>}
         <div className="mt-1 grid gap-1 sm:grid-cols-2">
-          {data.options.map((o) => (
+          {options.map((o) => (
             <label key={o.id} className="flex items-start gap-2 text-sm">
               <input type="checkbox" className="mt-1" checked={picked.includes(o.id)} onChange={(e) => toggle(o.id, e.target.checked)} />
               {o.label}

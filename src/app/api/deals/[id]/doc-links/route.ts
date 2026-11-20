@@ -7,8 +7,9 @@ import { requireDeal } from "@/lib/deals/guard";
 import { loadDealSettings } from "@/lib/deals/settings-store";
 import { kindBaseOf } from "@/lib/deals/constants";
 import { syncDealScheduleSafe, withDealLock } from "@/lib/deals/schedule-sync";
-import { DOC_LINK_DEFAULT_DAYS, DOC_LINK_MAX_DAYS, DOC_LINK_ROLES, docLinkExpiresAt, isDealOpenForDocs } from "@/lib/deals/doc-links/constants";
-import { docLinkBaseUrl, docLinkOptions, loadDocLinksView } from "@/lib/deals/doc-links/staff-store";
+import { DOC_LINK_DEFAULT_DAYS, DOC_LINK_MAX_DAYS, DOC_LINK_ROLES, docLinkExpiresAt, isDealOpenForDocs, type DocLinkRole } from "@/lib/deals/doc-links/constants";
+import { docLinkBaseUrl, loadDocLinksView } from "@/lib/deals/doc-links/staff-store";
+import { docLinkOptionsFor } from "@/lib/deals/doc-links/catalog";
 import { docLinkKey, newDocLinkPublicId } from "@/lib/deals/doc-links/token";
 
 type Ctx = { params: Promise<{ id: string }> };
@@ -54,7 +55,8 @@ export async function POST(request: Request, ctx: Ctx) {
       throw new ApiError(422, "売主か買主を選んでください", "INVALID_PARTY");
     }
     const settings = await loadDealSettings();
-    const options = docLinkOptions(settings.checklistItems, { base: kindBaseOf(settings, deal.propertyKind), hasOc: deal.hasOc });
+    // 選べる書類は相手の役割ごとの一覧(2026-11-20 発注者)。売主用の書類を買主に出す、などは断る。
+    const options = docLinkOptionsFor(party.role as DocLinkRole, { base: kindBaseOf(settings, deal.propertyKind), hasOc: deal.hasOc });
     const wanted = options.filter((o) => body.itemIds.includes(o.id));
     if (wanted.length !== new Set(body.itemIds).size) throw new ApiError(422, "選べない書類が入っています。画面を読み込み直してください。", "INVALID_ITEM");
 

@@ -4,6 +4,8 @@ import { resolveCompanyProfile } from "@/lib/sales-sheet/company-profile-store";
 import { getStorage } from "@/lib/storage";
 import { DOC_BYTES_PER_LINK, DOC_FILES_PER_LINK, DOC_FILES_PER_REQUEST, DOC_REQUEST_STATUSES, isDocLinkOpen, type DocRequestStatus } from "./constants";
 import type { PublicRequestView } from "./public-page";
+import { docLinkHintOf } from "./catalog";
+import { loadDealLogo } from "../branding-store";
 
 /** ⚠お客様のページへ渡す値はこの select だけで決まる。取引から読むのは状態だけ(住所・氏名・金額を読まない)。 */
 const LINK_SELECT = {
@@ -17,21 +19,33 @@ export async function loadOpenLink(publicId: string, now: Date) {
   return link && isDocLinkOpen(link, now) ? link : null;
 }
 
-/** お客様のページの中身。使えないリンクは null。 */
-export async function loadPublicPage(publicId: string, now: Date): Promise<{ companyName: string; requests: PublicRequestView[] } | null> {
+/**
+ * お客様のページの中身。使えないリンクは null。
+ * 会社の情報(名前・電話・ロゴ)はお客様の個人情報ではない(2026-11-20 発注者「最後に当社のロゴと連絡先を」)。
+ */
+export async function loadPublicPage(
+  publicId: string, now: Date,
+): Promise<{ companyName: string; companyTel: string | null; logo: string | null; requests: PublicRequestView[] } | null> {
   const link = await loadOpenLink(publicId, now);
   if (!link) return null;
-  const [rows, companyRow] = await Promise.all([
+  const [rows, companyRow, logo] = await Promise.all([
     prisma.dealDocRequest.findMany({
       where: { linkId: link.id },
       orderBy: [{ sortOrder: "asc" }, { id: "asc" }],
-      select: { id: true, label: true, status: true, _count: { select: { files: { where: { reviewState: { not: "rejected" } } } } } },
+      select: { id: true, checklistItemId: true, label: true, status: true, _count: { select: { files: { where: { reviewState: { not: "rejected" } } } } } },
     }),
     prisma.companyProfile.findUnique({ where: { id: "singleton" } }),
+    // ロゴが読めなくてもページは出す。
+    loadDealLogo().catch(() => null),
   ]);
+  const company = resolveCompanyProfile(companyRow);
   return {
-    companyName: resolveCompanyProfile(companyRow).nameJa,
-    requests: rows.map((r) => ({ id: r.id, label: r.label, status: statusOf(r.status), fileCount: r._count.files })),
+    companyName: company.nameJa,
+    companyTel: company.tel || null,
+    logo,
+    requests: rows.map((r) => ({
+      id: r.id, label: r.label, status: statusOf(r.status), fileCount: r._count.files, hint: docLinkHintOf(r.checklistItemId),
+    })),
   };
 }
 
