@@ -18,7 +18,7 @@ export const SETTLE_ITEM_KEY = "s_settle";
 
 export type SettleOutcome =
   | { result: "settled"; caseStatusNotChanged: boolean }
-  | { result: "forbidden" | "cancelled" | "already" | "not_found" };
+  | { result: "forbidden" | "cancelled" | "already" | "not_found" | "conflict" };
 
 type Session = { id: string; role: string };
 
@@ -41,15 +41,16 @@ export async function settleDealFromSchedule(
     const first = await tx.deal.findUnique({ where: { id: dealId }, select: { propertyId: true } });
     if (!first) return { result: "not_found" as const };
     if (first.propertyId) await lockPropertyRow(tx, first.propertyId);
-    const cur = await tx.deal.findUnique({ where: { id: dealId }, select: { status: true, assigneeId: true, propertyId: true } });
+    const cur = await tx.deal.findUnique({ where: { id: dealId }, select: { status: true, assigneeId: true, propertyId: true, version: true } });
     if (!cur) return { result: "not_found" as const };
     const property = cur.propertyId
       ? await tx.property.findUnique({ where: { id: cur.propertyId }, select: { createdBy: true, assignedTo: true } })
       : null;
     const decision = settleDecision(session, cur, property);
     if (decision !== "settle") return { result: decision };
-    const res = await tx.deal.updateMany({ where: { id: dealId, status: cur.status }, data: { status: "settled", version: { increment: 1 } } });
-    if (res.count !== 1) return { result: "already" as const };
+    // 権限を見た版のままのときだけ書く(見た後で担当者が替わっていたら、古い権限で状態を変えない・@codex #766 P2)。
+    const res = await tx.deal.updateMany({ where: { id: dealId, status: cur.status, version: cur.version }, data: { status: "settled", version: { increment: 1 } } });
+    if (res.count !== 1) return { result: "conflict" as const };
     await tx.changeLog.create({
       data: { targetTable: "deals", targetId: dealId, fieldName: "status", oldValue: cur.status, newValue: "settled", source: "auto", changedBy: session.id },
     });

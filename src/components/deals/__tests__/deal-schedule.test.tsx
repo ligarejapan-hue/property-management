@@ -149,6 +149,7 @@ describe("「決済・引渡し」の完了のあとの知らせ(2026-11-20 発�
   it("決済完了にした・変えられなかったときだけ出す", () => {
     expect(settleNoticeText("settled")).toBe("取引の状態を「決済完了」にしました。");
     expect(settleNoticeText("forbidden")).toContain("状態は変えていません");
+    expect(settleNoticeText("conflict")).toContain("基本タブで「決済完了」にしてください");
     for (const s of [undefined, "already", "cancelled", "not_found"]) expect(settleNoticeText(s)).toBeNull();
   });
 });

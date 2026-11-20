@@ -7,7 +7,7 @@ import { Field, SelectBox, inputCls, optionsOf } from "./form-parts";
 import { DealBrokerSearch } from "./deal-broker-search";
 import { DealPlaceField } from "./deal-place-field";
 import { dealsApi, DealApiError, errorText, type UserOption } from "@/lib/deals/client";
-import { applyBrokerPick, basicFormFromDeal, basicPatch, type BasicForm } from "@/lib/deals/forms";
+import { applyBrokerPick, basicFormFromDeal, basicPatch, rebaseBasicForm, type BasicForm } from "@/lib/deals/forms";
 import { placeProblem } from "@/lib/deals/place";
 import type { DealView } from "@/lib/deals/view";
 import {
@@ -22,7 +22,16 @@ export default function DealBasicPanel({
   /** 保存のたびに呼ぶ。状態を変えるとこのパネルは作り直されるので、知らせは親が持つ。 */
   onCaseStatusNotChanged: (notChanged: boolean) => void;
 }) {
-  const [form, setForm] = useState<BasicForm>(() => basicFormFromDeal(deal));
+  const fresh = basicFormFromDeal(deal);
+  const freshKey = JSON.stringify(fresh);
+  const [form, setForm] = useState<BasicForm>(fresh);
+  // 取引が読み直されたら(保存・「決済・引渡し」の完了で状態が変わったなど)、触っていない欄だけ新しい値にする。
+  // 作り直すと保存前の入力が消えるため、作り直さずに合わせる(@codex #766 P2)。描画中に前の値と比べて1回だけ直す。
+  const [base, setBase] = useState<{ key: string; form: BasicForm }>({ key: freshKey, form: fresh });
+  if (base.key !== freshKey) {
+    setForm((f) => rebaseBasicForm(f, base.form, fresh));
+    setBase({ key: freshKey, form: fresh });
+  }
   const [saving, setSaving] = useState(false);
   const [message, setMessage] = useState<{ kind: "ok" | "err"; text: string } | null>(null);
   const set = <K extends keyof BasicForm>(k: K, v: BasicForm[K]) => setForm((f) => ({ ...f, [k]: v }));

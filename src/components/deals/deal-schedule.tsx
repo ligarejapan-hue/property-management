@@ -196,6 +196,7 @@ function AddItemForm({ today, users, defaultAssignee, busy, onAdd }: {
 export function settleNoticeText(dealStatus: string | undefined): string | null {
   if (dealStatus === "settled") return "取引の状態を「決済完了」にしました。";
   if (dealStatus === "forbidden") return "取引の状態は変えていません(状態を変えられるのは管理者と担当者だけです)。";
+  if (dealStatus === "conflict") return "ほかの人が同時に取引を更新したため、取引の状態は変えていません。基本タブで「決済完了」にしてください。";
   return null;
 }
 

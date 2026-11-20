@@ -18,10 +18,10 @@ const STAFF = { id: "u-staff", role: "office_staff" };
 const PROP_WRITE: PermissionMap = [{ resource: "property", action: "write", granted: true }, { resource: "deal", action: "write", granted: true }];
 const DEAL_ONLY: PermissionMap = [{ resource: "deal", action: "write", granted: true }];
 
-function fakeDb(deal: { status: string; assigneeId: string | null; propertyId: string | null } | null, property = { createdBy: "u-other", assignedTo: null as string | null }) {
+function fakeDb(deal: { status: string; assigneeId: string | null; propertyId: string | null; version?: number } | null, property = { createdBy: "u-other", assignedTo: null as string | null }) {
   const tx = {
     deal: {
-      findUnique: vi.fn(async () => deal),
+      findUnique: vi.fn(async () => (deal ? { version: 7, ...deal } : null)),
       updateMany: vi.fn(async () => ({ count: 1 })),
     },
     property: { findUnique: vi.fn(async () => property) },
@@ -49,7 +49,7 @@ describe("「決済・引渡し」の完了で取引を決済完了に(2026-11-2
     expect(out).toEqual({ result: "settled", caseStatusNotChanged: false });
     expect(lockPropertyRow).toHaveBeenCalledWith(tx, "p1");
     expect(lockPropertyRow.mock.invocationCallOrder[0]).toBeLessThan(tx.deal.updateMany.mock.invocationCallOrder[0]);
-    expect(tx.deal.updateMany).toHaveBeenCalledWith({ where: { id: "d1", status: "contracted" }, data: { status: "settled", version: { increment: 1 } } });
+    expect(tx.deal.updateMany).toHaveBeenCalledWith({ where: { id: "d1", status: "contracted", version: 7 }, data: { status: "settled", version: { increment: 1 } } });
     expect(tx.changeLog.create.mock.calls[0][0].data).toMatchObject({ targetTable: "deals", targetId: "d1", fieldName: "status", oldValue: "contracted", newValue: "settled", source: "auto", changedBy: ADMIN.id });
     expect(syncDealDocRetention).toHaveBeenCalledWith(tx, "d1", "contracted", "settled");
     expect(syncCaseStatusFromDeals).toHaveBeenCalledWith(tx, { propertyId: "p1", changedBy: ADMIN.id });
@@ -72,6 +72,13 @@ describe("「決済・引渡し」の完了で取引を決済完了に(2026-11-2
       expect(tx.deal.updateMany).not.toHaveBeenCalled();
       expect(tx.changeLog.create).not.toHaveBeenCalled();
     }
+  });
+
+  it("権限を見た版のあとで取引が変わっていたら(担当者の付け替えなど)書かずに conflict(@codex #766 P2)", async () => {
+    const { tx, db } = fakeDb({ status: "contracted", assigneeId: STAFF.id, propertyId: null });
+    tx.deal.updateMany.mockResolvedValueOnce({ count: 0 });
+    expect(await settleDealFromSchedule(STAFF, PROP_WRITE, "d1", db)).toEqual({ result: "conflict" });
+    expect(tx.changeLog.create).not.toHaveBeenCalled();
   });
 
   it("物件の無い取引は案件ステータスに触らない", async () => {

@@ -25,7 +25,6 @@ import { DealDocLinks } from "@/components/deals/deal-doc-links";
 import { DealResaleSide } from "@/components/deals/deal-resale-side";
 import { dealsApi, errorText, type DealDetailResponse, type DealOptions, type UserOption } from "@/lib/deals/client";
 import type { DealCalc } from "@/lib/deals/calc/deal-calc";
-import { basicFormFromDeal } from "@/lib/deals/forms";
 import { MONEY_OVERRIDE_KEYS, SETTLEMENT_OVERRIDE_KEYS, pickOverrides } from "@/lib/deals/money-forms";
 import { DEAL_BUSINESS_TYPE_LABELS, DEAL_STATUS_LABELS } from "@/lib/deals/constants";
 import { dealTitle } from "@/lib/deals/deal-title";
@@ -186,7 +185,7 @@ export default function DealDetailPage({ params }: { params: Promise<{ id: strin
               物件の編集権限がないため、案件ステータスは変更していません
             </p>
           )}
-          <DealBasicPanel key={k(basicFormFromDeal(deal))} deal={deal} canChangeStatus={data.canChangeStatus} canChangeAssignee={data.canChangeAssignee} canMoveCaseStatus={data.canMoveCaseStatus} users={users} kinds={options?.propertyKinds ?? []} onSaved={reload} onCaseStatusNotChanged={setCaseStatusNotChanged} />
+          <DealBasicPanel key={deal.id} deal={deal} canChangeStatus={data.canChangeStatus} canChangeAssignee={data.canChangeAssignee} canMoveCaseStatus={data.canMoveCaseStatus} users={users} kinds={options?.propertyKinds ?? []} onSaved={reload} onCaseStatusNotChanged={setCaseStatusNotChanged} />
         </div>
         <div hidden={tab !== "property"}>
           <DealPropertyPanel key={k([deal.propertySnapshot, deal.assessments, deal.targetParcels, data.parcelOptions])} deal={deal} canOpenProperty={data.canOpenProperty} parcelOptions={data.parcelOptions ?? []} onSaved={reload} />

@@ -3,7 +3,7 @@ import { DEFAULT_FUNDING_INPUTS } from "../funding-schema";
 import { DEFAULT_BUSINESS_INPUTS } from "../business-schema";
 import { agentLabel } from "@/lib/agent-inquiry/desk-form";
 import {
-  applyBrokerPick, basicFormFromDeal, basicPatch, snapshotFormFromDeal, snapshotFromForm,
+  applyBrokerPick, basicFormFromDeal, basicPatch, rebaseBasicForm, snapshotFormFromDeal, snapshotFromForm,
   EMPTY_PARTY_FORM, partyBodyFromForm, partyFormFromView,
 } from "../forms";
 import { EMPTY_PLACE } from "../place";
@@ -102,5 +102,23 @@ describe("当事者", () => {
   it("保存済みから入力の形へ", () => {
     const f = partyFormFromView({ id: "p", role: "buyer", partyType: "corporation", name: "試験株式会社", representative: null, address: null, phone: null, shareNum: null, shareDen: null, isSelf: false, sortOrder: 0, version: 1 });
     expect(f).toMatchObject({ role: "buyer", partyType: "corporation", name: "試験株式会社", shareNum: "", representative: "" });
+  });
+});
+
+describe("取引が読み直されたときの基本タブ(@codex #766 P2)", () => {
+  it("触っていない欄は新しい値・触った欄は入力のまま(状態だけ変わっても保存前の入力を消さない)", () => {
+    const base = basicFormFromDeal(deal);
+    const edited = { ...base, brokerStaff: "入力中の担当", settlementPlace: { ...base.settlementPlace } };
+    const fresh = basicFormFromDeal({ ...deal, status: "settled" });
+    const out = rebaseBasicForm(edited, base, fresh);
+    expect(out.status).toBe("settled");
+    expect(out.brokerStaff).toBe("入力中の担当");
+    // 保存すると、触った欄だけが差分になる(状態を元に戻す差分を作らない)
+    expect(Object.keys(basicPatch(out, { ...deal, status: "settled" }))).toEqual(["counterpartyBroker"]);
+  });
+  it("何も触っていなければ、新しい値そのまま", () => {
+    const base = basicFormFromDeal(deal);
+    const fresh = basicFormFromDeal({ ...deal, status: "settled" });
+    expect(rebaseBasicForm(base, base, fresh)).toEqual(fresh);
   });
 });
