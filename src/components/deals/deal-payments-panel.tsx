@@ -134,7 +134,7 @@ export default function DealPaymentsPanel({
         入れた内容は、残金決済のご案内と書類確認書の払い方に最初から入ります(書類を出すときに直せます)。
       </p>
       {error && <p className="text-sm text-red-600 dark:text-red-400" role="alert">{error}</p>}
-      <PaymentTotalsTable rows={liveRows} />
+      <PaymentTotalsTable rows={liveRows} depositOffset={calc?.settlement.depositOffset ?? 0} />
       <ul className="divide-y divide-gray-200 rounded-md border border-gray-200 dark:divide-gray-800 dark:border-gray-800">
         {liveRows.map((r) => {
           const d = draftOf(r);
@@ -241,8 +241,8 @@ export default function DealPaymentsPanel({
  * 払う人ごとの合計(2026-11-20 発注者「送金合計額・現金用意の金額が一目で分からない」)。
  * 画面の下書き(保存前)の払い方で出す。精算金の「残金と一緒に」は残金の側に入る(lib の paymentTotals)。
  */
-function PaymentTotalsTable({ rows }: { rows: PaymentRow[] }) {
-  const totals = paymentTotals(rows);
+function PaymentTotalsTable({ rows, depositOffset }: { rows: PaymentRow[]; depositOffset: number }) {
+  const totals = paymentTotals(rows, depositOffset);
   const cell = (n: number) => (n === 0 ? "—" : `${yenText(n)}円`);
   const sum = (k: "transfer" | "cash" | "undecided") => totals.reduce((a, g) => a + g[k], 0);
   const missing = totals.reduce((a, g) => a + g.missing, 0);
@@ -279,6 +279,7 @@ function PaymentTotalsTable({ rows }: { rows: PaymentRow[] }) {
       </div>
       <p className="text-xs text-gray-500">
         保存前の選び方で出します。精算金を残金とまとめて払うときは、残金の側に足します(売主から買主へのお金なら残金から差し引きます)。
+        {depositOffset > 0 ? `預り敷金を残代金と相殺する分(${yenText(depositOffset)}円)は、残金の側から差し引いています。` : ""}
         {missing > 0 ? `金額がまだ出ていない行が${missing}件あり、合計に入っていません。` : ""}
       </p>
     </section>

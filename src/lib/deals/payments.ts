@@ -173,9 +173,10 @@ export interface PaymentTotal {
 /**
  * 払う人ごとの、振込・現金・未定の合計(2026-11-20 発注者「送金合計額・現金用意の金額が一目で分からない」)。
  * 精算金の「残金と一緒に」は残金の払い方で、残金の払う人に入れる。向きが逆(売主→買主)なら残金から差し引く。
+ * 預り敷金を残代金と相殺する取引(depositOffset)は、残金の側から差し引く(決済時のお支払額と同じ考え方・@codex #764 P2)。
  * 払う人の並びは行の順(最初に出てきた順)。
  */
-export function paymentTotals(rows: PaymentRow[]): PaymentTotal[] {
+export function paymentTotals(rows: PaymentRow[], depositOffset = 0): PaymentTotal[] {
   const groups = new Map<string, PaymentTotal>();
   const groupOf = (payer: string) => {
     let g = groups.get(payer);
@@ -191,10 +192,11 @@ export function paymentTotals(rows: PaymentRow[]): PaymentTotal[] {
       continue;
     }
     const sign = together && r.from !== balance.from ? -1 : 1;
+    const amount = sign * r.amount - (r.key === "balance" ? depositOffset : 0);
     const m = effectiveMethod(r, rows);
-    if (m === "transfer") g.transfer += sign * r.amount;
-    else if (m === "cash") g.cash += sign * r.amount;
-    else g.undecided += sign * r.amount;
+    if (m === "transfer") g.transfer += amount;
+    else if (m === "cash") g.cash += amount;
+    else g.undecided += amount;
   }
   return [...groups.values()];
 }

@@ -181,6 +181,16 @@ describe("払う人ごとの合計(2026-11-20 発注者「送金合計額・現�
     expect(t.find((g) => g.payer === "買主")!.transfer).toBe(amt(rows, "balance") - 30_000);
     expect(t.find((g) => g.payer === "売主")!.transfer).toBe(0);
   });
+  it("預り敷金を残代金と相殺するなら、残金の側から差し引く(決済時のお支払額と合わせる・@codex #764 P2)", () => {
+    const d = { ...base, payments: { balance: tr(), settlement: { method: "with_balance" as const, account: EMPTY_BANK_ACCOUNT } } };
+    const rows = paymentRows(d, calcOf(d));
+    const without = paymentTotals(rows)[0].transfer;
+    expect(paymentTotals(rows, 240_000)[0].transfer).toBe(without - 240_000);
+    // 残金が現金なら現金の側から
+    const c = { ...base, payments: { balance: cash } };
+    const crows = paymentRows(c, calcOf(c));
+    expect(paymentTotals(crows, 240_000)[0].cash).toBe(amt(crows, "balance") - 240_000);
+  });
   it("金額が出ていない行は数に入れず、件数で知らせる", () => {
     const d = { ...base, price: null };
     const t = paymentTotals(paymentRows(d, calcOf(d)));
