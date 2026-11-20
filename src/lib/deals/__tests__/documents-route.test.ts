@@ -21,7 +21,7 @@ vi.mock("@/lib/storage", () => {
 vi.mock("@/lib/prisma", () => ({
   default: {
     deal: { findUnique: vi.fn() },
-    dealDocument: { findFirst: vi.fn(), findMany: vi.fn(), create: vi.fn() },
+    dealDocument: { findFirst: vi.fn(), findMany: vi.fn(), create: vi.fn(), deleteMany: vi.fn(async () => ({ count: 0 })) },
     dealDocRequest: { findMany: vi.fn(async () => []) },
     dealRateTable: { findMany: vi.fn(async () => []) },
     dealSettings: { findUnique: vi.fn(async () => null) },
@@ -50,7 +50,7 @@ import { DEFAULT_BUSINESS_INPUTS } from "../business-schema";
 type Fn = ReturnType<typeof vi.fn>;
 const pm = prismaMock as never as {
   deal: { findUnique: Fn };
-  dealDocument: { findFirst: Fn; findMany: Fn; create: Fn };
+  dealDocument: { findFirst: Fn; findMany: Fn; create: Fn; deleteMany: Fn };
   dealRateTable: { findMany: Fn };
   user: { findMany: Fn };
 };
@@ -124,6 +124,30 @@ describe("POST /api/deals/[id]/documents(発行)", () => {
     expect(a).toMatchObject({ action: "deal_document_issue", targetTable: "deals", targetId: DEAL_ID });
     expect(a.detail).toEqual({ docType: "funding_plan", variant: "purchase", version: 1, formats: ["pdf", "xlsx"] });
     expect(JSON.stringify(a)).not.toMatch(/架空|30000000|40000000/);
+  });
+
+  it("新しい版を発行したら、同じ書類(種類+書き分け)の古い版の記録とファイルを消し、監査に版の番号だけ残す(11-20 発注者)", async () => {
+    files.set("deals/old/v1.pdf", Buffer.from("x"));
+    files.set("deals/old/v1.xlsx", Buffer.from("x"));
+    pm.dealDocument.findFirst.mockResolvedValueOnce({ version: 1 });
+    pm.dealDocument.findMany.mockResolvedValueOnce([{ id: "old-1", version: 1, pdfKey: "deals/old/v1.pdf", xlsxKey: "deals/old/v1.xlsx" }]);
+    const res = await POST(json("POST", { docType: "funding_plan", version: 3 }), ctx);
+    expect(res.status).toBe(201);
+    expect(pm.dealDocument.findMany.mock.calls[0][0].where).toEqual({ dealId: DEAL_ID, docType: "funding_plan", variant: "purchase", version: { lt: 2 } });
+    expect(pm.dealDocument.deleteMany).toHaveBeenCalledWith({ where: { id: { in: ["old-1"] }, dealId: DEAL_ID } });
+    expect(files.has("deals/old/v1.pdf")).toBe(false);
+    expect(files.has("deals/old/v1.xlsx")).toBe(false);
+    const prune = (writeAuditLog as Fn).mock.calls.map((c) => c[0]).find((a) => a.action === "deal_document_prune");
+    expect(prune.detail).toEqual({ docType: "funding_plan", variant: "purchase", versions: [1], keptVersion: 2, fileErrors: 0 });
+  });
+
+  it("古い版を消せなくても発行は成功のまま", async () => {
+    pm.dealDocument.findMany.mockRejectedValueOnce(new Error("db down"));
+    const err = vi.spyOn(console, "error").mockImplementation(() => undefined);
+    const res = await POST(json("POST", { docType: "funding_plan", version: 3 }), ctx);
+    expect(res.status).toBe(201);
+    expect(pm.dealDocument.deleteMany).not.toHaveBeenCalled();
+    err.mockRestore();
   });
 
   it("版の番号は前の版の次・同時に発行してぶつかったらやり直す", async () => {

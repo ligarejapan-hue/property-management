@@ -292,6 +292,7 @@ const ACTION_LABELS: Record<string, string> = {
   deal_rate_table_update: "取引の税率の表を変更",
   deal_rate_table_delete: "取引の税率の表を削除",
   deal_document_issue: "取引の書類を発行",
+  deal_document_prune: "取引の書類の古い版を削除",
   deal_registry_rights_view: "取引の謄本の登記の現況を表示",
   deal_crosscheck_view: "取引の数値照合を表示",
   deal_schedule_registry_read: "段取りの判定のために謄本を読み取り",

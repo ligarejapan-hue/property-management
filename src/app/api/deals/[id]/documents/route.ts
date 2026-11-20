@@ -28,6 +28,7 @@ import { kindBaseOf } from "@/lib/deals/constants";
 import { loadRegistryDocInfo, registryPropertyFor } from "@/lib/deals/registry-doc-info";
 import { loadReceivedChecklistItemIds } from "@/lib/deals/doc-links/staff-store";
 import { CROSSCHECK_FACTS_KEY, buildCrosscheckFacts } from "@/lib/deals/crosscheck-facts";
+import { pruneOlderVersions } from "@/lib/deals/documents/prune-old-versions";
 import {
   DEAL_DOC_MIME, DEAL_DOC_TYPE_KEYS, dealDocumentBaseName, dealDocumentKey, dealDocumentTitle, type DealDocFormat,
 } from "@/lib/deals/documents/issue";
@@ -206,6 +207,20 @@ export async function POST(request: Request, ctx: Ctx) {
       userId: session.id, action: "deal_document_issue", targetTable: "deals", targetId: id,
       detail: { docType, variant, version: created.version, formats: ["pdf", "xlsx"] },
     });
+
+    // 同じ書類の古い版の記録とファイルを消す(最新版だけ残す・領収書は全部残す・2026-11-20 発注者)。
+    // 失敗しても発行は止めない(新しい版はもうできている。次の発行のときにまた消す)。
+    try {
+      const pruned = await pruneOlderVersions(prisma, storage, { dealId: id, docType, variant, keepVersion: created.version });
+      if (pruned.versions.length > 0) {
+        await writeAuditLog({
+          userId: session.id, action: "deal_document_prune", targetTable: "deals", targetId: id,
+          detail: { docType, variant, versions: pruned.versions, keptVersion: created.version, fileErrors: pruned.fileErrors },
+        });
+      }
+    } catch (e) {
+      console.error("[deal-documents] 古い版を消せませんでした", { docType, variant, error: e instanceof Error ? e.name : "unknown" });
+    }
     return NextResponse.json(
       { id: created.id, version: created.version, title: dealDocumentTitle(docType, variant), fileBaseName },
       { status: 201, headers: NO_STORE },
