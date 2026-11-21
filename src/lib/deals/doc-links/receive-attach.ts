@@ -11,8 +11,11 @@
  * - 取引の書類として付ける(dealId)。取引が物件につながっていない・物件がしまってある → 入れない(理由を返す)。
  * - 名前は書類名だけ(お客様の名前・元のファイル名は使わない)。
  */
+import { randomUUID } from "node:crypto";
 import type { StorageAdapter } from "@/lib/storage/types";
 import { lockPropertyRow } from "@/lib/property-record-guard";
+import { canAccessPropertyRecord } from "@/lib/property-access";
+import { removeFileAndVerify } from "@/lib/report-inbox/remove-file";
 import { docColumnsForKnownKind } from "@/lib/doc-classify/assign";
 import { IDENTITY_DOC_KIND } from "@/lib/attachments/identity-display-name";
 
@@ -29,7 +32,10 @@ export const ATTACH_KIND_BY_ITEM: Readonly<Record<string, string>> = {
   s_recv_leases: "lease_contract",
 };
 
-export const attachKindFor = (checklistItemId: string): string => ATTACH_KIND_BY_ITEM[checklistItemId] ?? IDENTITY_DOC_KIND;
+/** 受領・差し戻しの履歴(DealDocReviewEvent.action)に足す値=物件の添付へ入れ終えた印。 */
+export const ATTACHED_EVENT = "attached";
+
+export const attachKindFor =(checklistItemId: string): string => ATTACH_KIND_BY_ITEM[checklistItemId] ?? IDENTITY_DOC_KIND;
 
 const EXT_BY_MIME: Readonly<Record<string, string>> = {
   "application/pdf": "pdf",
@@ -39,12 +45,15 @@ const EXT_BY_MIME: Readonly<Record<string, string>> = {
 };
 export const extOfMime = (mimeType: string): string => EXT_BY_MIME[mimeType] ?? "bin";
 
-/** 書類のファイル1つに決まった、添付の置き場所。 */
-export const receivedAttachmentKey = (propertyId: string, fileId: string, mimeType: string): string =>
-  `properties/${propertyId}/attachments/deal-doc-${fileId}.${extOfMime(mimeType)}`;
+/**
+ * 添付の置き場所。書類のファイル id に、写すたびの印(attempt)を足す
+ * =写しは毎回別の名前 → 記録を作れなかった写しは自分で消せる(誰も指していない・セキュリティレビュー)。
+ */
+export const receivedAttachmentKey = (propertyId: string, fileId: string, mimeType: string, attempt: string): string =>
+  `properties/${propertyId}/attachments/deal-doc-${fileId}-${attempt}.${extOfMime(mimeType)}`;
 
-/** 置き場所の名前に含まれる印(すでに入れたかを探す)。 */
-export const receivedAttachmentMarker = (fileId: string): string => `/deal-doc-${fileId}.`;
+/** 置き場所の名前に含まれる印(すでに入れたかを探す)。ファイル id は長さが決まった uuid なので前方一致の取り違えはない。 */
+export const receivedAttachmentMarker = (fileId: string): string => `/deal-doc-${fileId}`;
 
 /** 添付の名前=書類名(+複数枚なら番号)。ファイル名に使えない文字は除く。 */
 export function receivedAttachmentFileName(label: string, mimeType: string, index: number, total: number): string {
@@ -53,7 +62,7 @@ export function receivedAttachmentFileName(label: string, mimeType: string, inde
   return `${base}${n}.${extOfMime(mimeType)}`;
 }
 
-export type AttachSkip = "no_property" | "archived" | null;
+export type AttachSkip = "no_property" | "archived" | "no_permission" | null;
 export interface AttachOutcome {
   /** 今回入れた数 */
   attached: number;
@@ -73,6 +82,7 @@ export interface AttachDb {
   dealDocRequest: { findFirst: Fn };
   property: { findUnique: Fn };
   attachment: { findFirst: Fn; findMany: Fn; create: Fn };
+  dealDocReviewEvent: { create: Fn };
   $transaction: <T>(fn: (tx: never) => Promise<T>) => Promise<T>;
 }
 
@@ -81,10 +91,22 @@ type RequestRow = {
   label: string;
   link: { deal: { propertyId: string | null } };
   files: { id: string; storageKey: string; mimeType: string; fileSize: number }[];
+  reviewEvents: { id: string }[];
 };
-type PropertyRow = { id: string; isArchived: boolean; buildingName: string | null; roomNo: string | null; address: string };
+type PropertyRow = {
+  id: string; isArchived: boolean; buildingName: string | null; roomNo: string | null; address: string;
+  createdBy: string; assignedTo: string | null;
+};
 
 class AlreadyAttached extends Error {}
+class Skip extends Error { constructor(readonly reason: Exclude<AttachSkip, null>) { super(reason); } }
+
+/** 押した人がこの物件の添付を増やせるか(しまってある・担当外は入れない)。押した人がいない(スクリプト)ときは確かめない。 */
+function skipReason(p: { isArchived: boolean; createdBy: string; assignedTo: string | null }, actor?: { id: string; role: string }): AttachSkip {
+  if (p.isArchived) return "archived";
+  if (actor && !canAccessPropertyRecord(actor, p)) return "no_permission";
+  return null;
+}
 
 /**
  * 受領した書類1つ分のファイルを添付へ写す。何度呼んでも同じファイルは1件だけ。
@@ -99,6 +121,10 @@ export async function attachReceivedDocFiles(args: {
   now?: Date;
   /** true=数えるだけ(写さない・書き込まない)。attached は「入れる予定の数」。 */
   dryRun?: boolean;
+  /** 押した人。物件の担当の範囲を確かめる(受け取り箱から添付するときと同じ)。 */
+  actor?: { id: string; role: string };
+  /** 写すたびの印(テスト用) */
+  newAttempt?: () => string;
 }): Promise<AttachOutcome> {
   const { db, storage, dealId, requestId, userId } = args;
   const out: AttachOutcome = { attached: 0, existing: 0, failed: 0, skipped: null, attachmentIds: [] };
@@ -109,17 +135,21 @@ export async function attachReceivedDocFiles(args: {
       label: true,
       link: { select: { deal: { select: { propertyId: true } } } },
       files: { where: { reviewState: "received" }, orderBy: { createdAt: "asc" }, select: { id: true, storageKey: true, mimeType: true, fileSize: true } },
+      reviewEvents: { where: { action: ATTACHED_EVENT }, select: { id: true }, take: 1 },
     },
   } as never)) as RequestRow | null;
   if (!req || req.files.length === 0) return out;
+  // 一度入れ終えた書類は二度と入れない(人が消した添付が90日後に記録ごと消えても・@codex P2)
+  if (req.reviewEvents.length > 0) return { ...out, existing: req.files.length };
   const propertyId = req.link.deal.propertyId;
   if (!propertyId) return { ...out, skipped: "no_property" };
   const property = (await db.property.findUnique({
     where: { id: propertyId },
-    select: { id: true, isArchived: true, buildingName: true, roomNo: true, address: true },
+    select: { id: true, isArchived: true, buildingName: true, roomNo: true, address: true, createdBy: true, assignedTo: true },
   } as never)) as PropertyRow | null;
   if (!property) return { ...out, skipped: "no_property" };
-  if (property.isArchived) return { ...out, skipped: "archived" };
+  const first = skipReason(property, args.actor);
+  if (first) return { ...out, skipped: first };
 
   const kind = attachKindFor(req.checklistItemId);
   for (const [i, file] of req.files.entries()) {
@@ -130,7 +160,7 @@ export async function attachReceivedDocFiles(args: {
       continue;
     }
     if (args.dryRun) { out.attached++; continue; }
-    const key = receivedAttachmentKey(propertyId, file.id, file.mimeType);
+    const key = receivedAttachmentKey(propertyId, file.id, file.mimeType, (args.newAttempt ?? randomUUID)());
     const fileName = receivedAttachmentFileName(req.label, file.mimeType, i, req.files.length);
     let url: string;
     try {
@@ -147,6 +177,13 @@ export async function attachReceivedDocFiles(args: {
         const t = tx as unknown as AttachDb & { $queryRaw: Fn };
         // 物件配下を書き換える tx は親を先にロック(書き込み規約)
         await lockPropertyRow(t as never, propertyId);
+        // ⚠ロックを取ってからもう一度確かめる(その間にしまわれた・担当が替わった)
+        const locked = (await t.property.findUnique({
+          where: { id: propertyId }, select: { isArchived: true, createdBy: true, assignedTo: true },
+        } as never)) as Pick<PropertyRow, "isArchived" | "createdBy" | "assignedTo"> | null;
+        if (!locked) throw new Skip("no_property");
+        const again = skipReason(locked, args.actor);
+        if (again) throw new Skip(again);
         if (await t.attachment.findFirst({ where: { propertyId, fileUrl: { contains: marker } }, select: { id: true } } as never)) {
           throw new AlreadyAttached();
         }
@@ -182,13 +219,20 @@ export async function attachReceivedDocFiles(args: {
       out.attached++;
       out.attachmentIds.push(id);
     } catch (e) {
+      // 記録を作らなかった写しは消す(写すたびに別の名前=ほかの添付は指していない)。個人情報の入った写しを残さない。
+      await removeFileAndVerify(storage, key);
       if (e instanceof AlreadyAttached) { out.existing++; continue; }
-      // ⚠写しは消さない。置き場所の名前はファイルごとに決まっていて、同時に動いた別の呼び出し(まだ確定前)の
-      //   添付が同じ写しを指すことがある=消すとその添付が壊れる(内部レビュー)。残った写しは記録が無いので誰も開けず、
-      //   次に入れるときは同じ名前に上書きされる。
+      if (e instanceof Skip) { out.skipped = e.reason; return out; }
       console.error("[deal-doc-attach] create failed", (e as { code?: unknown })?.code ?? "");
       out.failed++;
     }
+  }
+  // 全部入れ終えたら(入っていた分も含めて)、受領・差し戻しの履歴に「添付に入れた」を残す=消えない印。
+  // 失敗が1つでもあれば残さない(次に流したときに入れ直せるように)。
+  if (!args.dryRun && out.failed === 0 && out.skipped === null && out.attached + out.existing > 0) {
+    await db.dealDocReviewEvent.create({
+      data: { requestId, action: ATTACHED_EVENT, reason: null, reviewedById: userId, createdAt: args.now ?? new Date() },
+    } as never);
   }
   return out;
 }
@@ -225,6 +269,7 @@ export async function backfillReceivedDocAttachments(args: { db: BackfillDb; sto
 export function attachNotice(o: AttachOutcome): { notice: string | null; warning: string | null } {
   if (o.skipped === "no_property") return { notice: "受領しました。この取引は物件につながっていないので、添付には入れていません。", warning: null };
   if (o.skipped === "archived") return { notice: "受領しました。物件がしまってあるので、添付には入れていません。", warning: null };
+  if (o.skipped === "no_permission") return { notice: "受領しました。この物件の担当ではないので、添付には入れていません。", warning: null };
   const warning = o.failed > 0
     ? `${o.failed}件のファイルを物件の添付に入れられませんでした。この画面からダウンロードして、物件の添付に入れてください。`
     : null;

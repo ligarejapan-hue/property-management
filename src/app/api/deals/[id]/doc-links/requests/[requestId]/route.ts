@@ -63,7 +63,7 @@ export async function POST(request: Request, ctx: Ctx) {
     // 受領は確定済み。ここからは物件の添付へ写すだけ(失敗しても受領は戻さない・2026-11-21 発注者)。
     let outcome: AttachOutcome;
     try {
-      outcome = await attachReceivedDocFiles({ db: prisma as never, storage: getStorage(), dealId: id, requestId, userId: session.id, now });
+      outcome = await attachReceivedDocFiles({ db: prisma as never, storage: getStorage(), dealId: id, requestId, userId: session.id, now, actor: { id: session.id, role: session.role } });
     } catch (e) {
       console.error("[deal-doc-attach] failed", (e as { code?: unknown })?.code ?? "");
       outcome = { attached: 0, existing: 0, failed: count, skipped: null, attachmentIds: [] };

@@ -206,8 +206,10 @@ export function docFileEvent(r: { id: string; createdAt: Date; request: { label:
 
 export function docReviewEvent(r: { id: string; action: string; reason: string | null; createdAt: Date; reviewedBy: Named | null; request: { label: string } }, deal: DealRef, canManage: boolean) {
   const rejected = r.action === "rejected";
+  // attached=受領した書類を物件の添付へ入れた(2026-11-21)
+  const verb = rejected ? "差し戻し" : r.action === "attached" ? "物件の添付に入れた" : "受領";
   return event("doc_review", r.id, r.createdAt, {
-    title: `${rejected ? "差し戻し" : "受領"}:${r.request.label}`, actor: r.reviewedBy?.name ?? null,
+    title: `${verb}:${r.request.label}`, actor: r.reviewedBy?.name ?? null,
     detail: rejected && canManage ? r.reason : null, ...dealFields(deal),
   });
 }

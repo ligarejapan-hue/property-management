@@ -111,6 +111,7 @@ describe("出どころごとの変換", () => {
     expect(docReviewEvent(row, DEAL, true)).toMatchObject({ source: "doc_review", title: "差し戻し:本人確認書類", detail: "ぼやけています" });
     expect(docReviewEvent(row, DEAL, false).detail).toBeNull();
     expect(docReviewEvent({ ...row, action: "received", reason: null }, DEAL, true).title).toBe("受領:本人確認書類");
+    expect(docReviewEvent({ ...row, action: "attached", reason: null }, DEAL, true)).toMatchObject({ title: "物件の添付に入れた:本人確認書類", detail: null });
   });
 
   it("提出用リンクは発行と無効化を別の行にする", () => {

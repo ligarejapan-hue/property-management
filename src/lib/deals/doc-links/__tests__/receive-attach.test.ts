@@ -25,6 +25,7 @@ function makeWorld(opts: {
   status?: string;
 } = {}) {
   const atts: Att[] = [];
+  const events: { requestId: string; action: string; reviewedById: string }[] = [];
   const files = opts.files ?? [{ id: "f1", storageKey: "deal-docs/x/f1.jpg", mimeType: "image/jpeg", fileSize: 100 }];
   const stored = new Map<string, Uint8Array>(files.map((f) => [f.storageKey, new Uint8Array([1, 2, 3])]));
   const storage = {
@@ -45,11 +46,12 @@ function makeWorld(opts: {
           label: opts.label ?? "写真付き身分証明書",
           link: { deal: { propertyId: opts.propertyId === undefined ? PROP : opts.propertyId } },
           files,
+          reviewEvents: events.filter((e) => e.requestId === REQ && e.action === "attached").map((_, i) => ({ id: `e${i}` })),
         };
       }),
       findMany: vi.fn(async () => [{ id: REQ, reviewedById: null, link: { dealId: DEAL, createdById: "u-issuer" } }]),
     },
-    property: { findUnique: vi.fn(async () => ({ id: PROP, isArchived: !!opts.archived, buildingName: "見本マンション", roomNo: "101", address: "東京都見本区1-1" })) },
+    property: { findUnique: vi.fn(async () => ({ id: PROP, isArchived: !!opts.archived, buildingName: "見本マンション", roomNo: "101", address: "東京都見本区1-1", createdBy: "u-creator", assignedTo: "u-field" })) },
     attachment: {
       findFirst: vi.fn(async ({ where }: { where: { propertyId: string; fileUrl: { contains: string } } }) => {
         const a = contains(where);
@@ -62,14 +64,16 @@ function makeWorld(opts: {
         return { id: a.id };
       }),
     },
+    dealDocReviewEvent: { create: vi.fn(async ({ data }: { data: { requestId: string; action: string; reviewedById: string } }) => { events.push(data); return {}; }) },
     $queryRaw: vi.fn(async () => [{ id: PROP }]),
     $transaction: vi.fn(async (fn: (tx: unknown) => unknown) => fn(db)),
   };
-  return { db, storage, atts, stored };
+  return { db, storage, atts, stored, events };
 }
 
 const run = (w: ReturnType<typeof makeWorld>, extra: Partial<Parameters<typeof attachReceivedDocFiles>[0]> = {}) =>
-  attachReceivedDocFiles({ db: w.db as never, storage: w.storage as never, dealId: DEAL, requestId: REQ, userId: "u-office", ...extra });
+  attachReceivedDocFiles({ db: w.db as never, storage: w.storage as never, dealId: DEAL, requestId: REQ, userId: "u-office", newAttempt: () => "t1", ...extra });
+const COPY = "properties/p1/attachments/deal-doc-f1-t1.jpg";
 
 describe("受領した書類を添付へ(2026-11-21 発注者)", () => {
   let w: ReturnType<typeof makeWorld>;
@@ -79,12 +83,12 @@ describe("受領した書類を添付へ(2026-11-21 発注者)", () => {
     const o = await run(w);
     expect(o).toMatchObject({ attached: 1, existing: 0, failed: 0, skipped: null });
     expect(w.storage.upload).toHaveBeenCalledTimes(1);
-    expect(w.storage.upload.mock.calls[0][1].key).toBe("properties/p1/attachments/deal-doc-f1.jpg");
+    expect(w.storage.upload.mock.calls[0][1].key).toBe(COPY);
     expect(w.storage.delete).not.toHaveBeenCalled();
     expect(w.stored.has("deal-docs/x/f1.jpg")).toBe(true);
     expect(w.atts[0].data).toMatchObject({
       targetType: "property", targetId: PROP, propertyId: PROP, type: "general", dealId: DEAL,
-      fileName: "写真付き身分証明書.jpg", fileUrl: "/uploads/properties/p1/attachments/deal-doc-f1.jpg",
+      fileName: "写真付き身分証明書.jpg", fileUrl: `/uploads/${COPY}`,
       fileSize: 100, mimeType: "image/jpeg", uploadedBy: "u-office", docKind: "identity_document", docStage: "identity",
     });
     // 物件の行を先にロック
@@ -105,23 +109,43 @@ describe("受領した書類を添付へ(2026-11-21 発注者)", () => {
     expect(await run(w)).toMatchObject({ attached: 0, existing: 1 });
   });
 
-  it("写したあとロックの中で先を越されていたら作らず、置き場所のファイルも消さない", async () => {
+  it("写したあとロックの中で先を越されていたら作らず、自分の写しだけ消す(写しは毎回別の名前)", async () => {
     w.db.attachment.findFirst
       .mockResolvedValueOnce(null) // ロックの前
       .mockResolvedValueOnce({ id: "other" }); // ロックの中=もう入っている
     const o = await run(w);
     expect(o).toMatchObject({ attached: 0, existing: 1, failed: 0 });
     expect(w.db.attachment.create).not.toHaveBeenCalled();
-    expect(w.storage.delete).not.toHaveBeenCalled();
+    expect(w.storage.delete).toHaveBeenCalledTimes(1);
+    expect(w.storage.delete).toHaveBeenCalledWith(COPY);
+    expect(w.stored.has("deal-docs/x/f1.jpg")).toBe(true);
   });
 
-  it("添付を作れなかったら失敗と数え、写しは消さない(同時に動いた別の呼び出しの添付を壊さない)。やり直せば入る", async () => {
+  it("添付を作れなかったら失敗と数え、記録の無い写しを残さない(元のファイルは残す)。やり直せば入る", async () => {
     w.db.attachment.create.mockRejectedValueOnce(new Error("db down"));
     const o = await run(w);
     expect(o).toMatchObject({ attached: 0, failed: 1 });
-    expect(w.storage.delete).not.toHaveBeenCalled();
+    expect(w.storage.delete).toHaveBeenCalledWith(COPY);
+    expect(w.stored.has(COPY)).toBe(false);
     expect(w.stored.has("deal-docs/x/f1.jpg")).toBe(true);
     expect(await run(w)).toMatchObject({ attached: 1 });
+  });
+
+  it("押した人が物件の担当外(担当制の役割)なら入れない・担当なら入れる(受け取り箱と同じ範囲)", async () => {
+    const o = await run(w, { actor: { id: "u-other", role: "field_staff" } });
+    expect(o.skipped).toBe("no_permission");
+    expect(w.storage.upload).not.toHaveBeenCalled();
+    expect((await run(w, { actor: { id: "u-field", role: "field_staff" } })).attached).toBe(1);
+    expect((await run(makeWorld(), { actor: { id: "u-x", role: "office_staff" } })).attached).toBe(1);
+  });
+
+  it("ロックの間にしまわれたら作らず、写しを消す", async () => {
+    const base = await w.db.property.findUnique();
+    w.db.property.findUnique.mockResolvedValueOnce(base).mockResolvedValueOnce({ ...base, isArchived: true });
+    const o = await run(w);
+    expect(o).toMatchObject({ attached: 0, skipped: "archived" });
+    expect(w.db.attachment.create).not.toHaveBeenCalled();
+    expect(w.storage.delete).toHaveBeenCalledWith(COPY);
   });
 
   it("元のファイルが読めなければ数えて先へ(受領は戻さない)", async () => {
@@ -193,8 +217,8 @@ describe("種類の対応", () => {
 
 describe("名前と置き場所", () => {
   it("置き場所はファイルごとに決まる", () => {
-    expect(receivedAttachmentKey("p", "f", "application/pdf")).toBe("properties/p/attachments/deal-doc-f.pdf");
-    expect(receivedAttachmentKey("p", "f", "image/webp")).toBe("properties/p/attachments/deal-doc-f.webp");
+    expect(receivedAttachmentKey("p", "f", "application/pdf", "a")).toBe("properties/p/attachments/deal-doc-f-a.pdf");
+    expect(receivedAttachmentKey("p", "f", "image/webp", "b")).toBe("properties/p/attachments/deal-doc-f-b.webp");
   });
   it("名前に使えない文字を除く", () => {
     expect(receivedAttachmentFileName("a/b:c", "image/png", 0, 1)).toBe("abc.png");
@@ -223,5 +247,36 @@ describe("前の分をまとめて入れる", () => {
     expect(w.atts[0].data?.uploadedBy).toBe("u-issuer");
     const r2 = await backfillReceivedDocAttachments({ db: w.db as never, storage: w.storage as never, apply: true });
     expect(r2).toMatchObject({ attached: 0, existing: 1 });
+    expect(w.events).toEqual([{ requestId: REQ, action: "attached", reason: null, reviewedById: "u-issuer", createdAt: expect.any(Date) }]);
+  });
+
+  it("人が消した添付が90日後に記録ごと消えても、もう一度流して入れ直さない(@codex P2)", async () => {
+    const w = makeWorld();
+    await backfillReceivedDocAttachments({ db: w.db as never, storage: w.storage as never, apply: true });
+    w.atts.length = 0; // 消す → 90日後の掃除で行ごと消えた
+    const r = await backfillReceivedDocAttachments({ db: w.db as never, storage: w.storage as never, apply: true });
+    expect(r).toMatchObject({ attached: 0, existing: 1 });
+    expect(w.atts).toHaveLength(0);
+    expect(w.storage.upload).toHaveBeenCalledTimes(1);
+  });
+
+  it("失敗が残った書類には印を付けない=次に流せば入る", async () => {
+    const w = makeWorld();
+    w.db.attachment.create.mockRejectedValueOnce(new Error("db down"));
+    const r1 = await backfillReceivedDocAttachments({ db: w.db as never, storage: w.storage as never, apply: true });
+    expect(r1).toMatchObject({ attached: 0, failed: 1 });
+    expect(w.events).toHaveLength(0);
+    const r2 = await backfillReceivedDocAttachments({ db: w.db as never, storage: w.storage as never, apply: true });
+    expect(r2).toMatchObject({ attached: 1 });
+    expect(w.events).toHaveLength(1);
+  });
+
+  it("数えるだけでは印を付けない・物件が無い取引にも付けない(あとで物件につないだら入る)", async () => {
+    const w = makeWorld();
+    await backfillReceivedDocAttachments({ db: w.db as never, storage: w.storage as never, apply: false });
+    expect(w.events).toHaveLength(0);
+    const n = makeWorld({ propertyId: null });
+    await backfillReceivedDocAttachments({ db: n.db as never, storage: n.storage as never, apply: true });
+    expect(n.events).toHaveLength(0);
   });
 });
