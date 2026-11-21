@@ -31,6 +31,56 @@ export function stageOfDriveFolderName(name: string): DriveStage | null {
   return null;
 }
 
+/**
+ * 物件フォルダの中の「仕入/販売」「購入/売却」(売り買いの側のフォルダ)。名前がその語だけのときに限る
+ * (「売却契約」「販売資料」は側のフォルダではない=今までどおり段階・その他として扱う)。
+ * 側のフォルダは、その中を物件フォルダの直下と同じに見る(2026-11-21 発注者決定「物件フォルダごとつなぐ」)。
+ */
+export type DriveSide = "purchase" | "sale" | "buy" | "sell";
+const SIDE_NAMES: Readonly<Record<string, DriveSide>> = {
+  仕入: "purchase",
+  仕入れ: "purchase",
+  販売: "sale",
+  購入: "buy",
+  売却: "sell",
+};
+
+export function sideOfDriveFolderName(name: string): DriveSide | null {
+  const n = name.normalize("NFKC").replace(/[\s　]+/g, "");
+  return Object.hasOwn(SIDE_NAMES, n) ? SIDE_NAMES[n] : null;
+}
+
+/** 側のフォルダを選ぶための物件の状態(両方あるときだけ使う)。 */
+export type SideContext = {
+  /** 買取再販の仕入の取引(当社が買主)で、まだ決済完了・中止になっていないものがある(=仕入の途中)。 */
+  resaleOpen: boolean;
+  /** 仲介の取引が買主側だけ(=購入の側)。 */
+  brokerageBuyer: boolean;
+};
+
+/**
+ * 物件フォルダの直下から、アプリの写しを入れる側のフォルダを選ぶ。側のフォルダが無ければ null(物件フォルダの直下に置く)。
+ * 片方だけ → それ。仕入と販売 → 仕入の途中なら仕入・それ以外は販売。購入と売却 → 買主側なら購入・それ以外は売却。
+ */
+export async function pickSideFolder<T extends { id: string; name: string }>(
+  direct: readonly T[],
+  ctx: () => Promise<SideContext>,
+): Promise<T | null> {
+  const sides = direct
+    .map((f) => ({ f, side: sideOfDriveFolderName(f.name) }))
+    .filter((x): x is { f: T; side: DriveSide } => x.side !== null);
+  if (sides.length === 0) return null;
+  if (sides.length === 1) return sides[0].f;
+  const find = (s: DriveSide) => sides.find((x) => x.side === s)?.f ?? null;
+  const purchase = find("purchase");
+  const sale = find("sale");
+  const buy = find("buy");
+  const sell = find("sell");
+  if (purchase && sale) return (await ctx()).resaleOpen ? purchase : sale;
+  if (buy && sell) return (await ctx()).brokerageBuyer ? buy : sell;
+  return sale ?? sell ?? purchase ?? buy;
+}
+
 /** アプリが段階のフォルダを新しく作るときの名前(「③契約関係」)。段階なしは「その他」。 */
 export function stageFolderNameForCreate(stage: DocStageCode | null): string {
   const s = DOC_STAGES.find((x) => x.code === stage);
@@ -58,7 +108,9 @@ export const DRIVE_PHOTO_MIMES: ReadonlySet<string> = new Set(["image/jpeg", "im
  * 紐づけたフォルダからの道(フォルダ名の並び)で、入れ先を決める。
  * 直下=受け取り箱 / 段階のフォルダの中(下の階層も最初の段で決める)=添付 / 「写真」の画像=写真タブ。
  */
-export function placementForRelPath(relPath: readonly string[], mimeType: string): Placement {
+export function placementForRelPath(fullPath: readonly string[], mimeType: string): Placement {
+  // 物件フォルダの直下の「仕入/販売」などは、その中を物件フォルダの直下と同じに見る
+  const relPath = fullPath.length > 0 && sideOfDriveFolderName(fullPath[0]) !== null ? fullPath.slice(1) : fullPath;
   if (relPath.length === 0) return { kind: "inbox" };
   // ★道のどこかに「本人確認」があれば本人確認書類として守る(「契約関係/本人確認/免許.pdf」も)
   if (relPath.some((p) => stageOfDriveFolderName(p) === "identity")) return { kind: "attach", stageHint: "identity" };

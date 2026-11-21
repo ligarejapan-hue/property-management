@@ -12,12 +12,15 @@ import { isOwnerPiiDocument } from "@/lib/uploads-authorization";
 import { DriveApiError, FOLDER_MIME, type DriveItem } from "./client";
 import {
   outFileName,
+  pickSideFolder,
   pickStageFolder,
   placementForRelPath,
   shouldCopyOut,
+  sideOfDriveFolderName,
   skipReasonForDriveFile,
   stageFolderNameForCreate,
   type Placement,
+  type SideContext,
 } from "./sync-plan";
 
 export type DriveFiles = {
@@ -128,6 +131,8 @@ export interface SyncRepo {
   importAttachment(link: LinkInfo, item: DriveItem, body: Buffer, stageHint: DocStageCode | null, ledger: LedgerWrite): Promise<string>;
   importInbox(link: LinkInfo, item: DriveItem, body: Buffer, ledger: LedgerWrite): Promise<void>;
   importPhoto(link: LinkInfo, item: DriveItem, body: Buffer, ledger: LedgerWrite): Promise<void>;
+  /** 「仕入/販売」「購入/売却」が両方あるとき、写しをどちらへ入れるかを決める物件の取引の状態。 */
+  sideContext(propertyId: string): Promise<SideContext>;
 }
 
 export type LinkResult = {
@@ -158,16 +163,26 @@ export const emptyLinkResult = (): LinkResult => ({
 export type Budget = { transfers: number };
 
 export type TreeFile = { item: DriveItem; relPath: string[] };
+export type TreeFolder = { item: DriveItem; parentId: string };
 
-/** 紐づけたフォルダの中を最大3階層まで見る(フォルダは最大 50 個まで開く)。 */
+/** 道の深さ。直下の「仕入/販売」などは数えない(その中を物件フォルダの直下と同じに見る)。 */
+function depthOf(relPath: readonly string[]): number {
+  return relPath.length > 0 && sideOfDriveFolderName(relPath[0]) !== null ? relPath.length - 1 : relPath.length;
+}
+
+/**
+ * 紐づけたフォルダの中を最大3階層まで見る(直下の「仕入/販売」などは階層に数えない・フォルダは最大 80 個まで開く)。
+ * folders=開いたフォルダの中にあったフォルダ(親の id つき=側のフォルダの中の段階のフォルダを探すのに使う)。
+ */
 export async function walkLinkedFolder(
   drive: Pick<DriveFiles, "listChildren">,
   folderId: string,
   opts: { maxDepth?: number; maxFolders?: number; skipFolderIds?: ReadonlySet<string> } = {},
-): Promise<{ direct: DriveItem[]; files: TreeFile[] }> {
+): Promise<{ direct: DriveItem[]; files: TreeFile[]; folders: TreeFolder[] }> {
   const maxDepth = opts.maxDepth ?? 3;
-  const maxFolders = opts.maxFolders ?? 50;
+  const maxFolders = opts.maxFolders ?? 80;
   const files: TreeFile[] = [];
+  const folders: TreeFolder[] = [];
   let direct: DriveItem[] = [];
   const queue: { id: string; relPath: string[] }[] = [{ id: folderId, relPath: [] }];
   let opened = 0;
@@ -181,13 +196,15 @@ export async function walkLinkedFolder(
       if (c.mimeType === FOLDER_MIME) {
         // ★別の物件に紐づけたフォルダの中は見ない(ほかの物件の書類を混ぜない・@codex #580 P1)
         if (opts.skipFolderIds?.has(c.id)) continue;
-        if (cur.relPath.length < maxDepth) queue.push({ id: c.id, relPath: [...cur.relPath, c.name] });
+        folders.push({ item: c, parentId: cur.id });
+        const next = [...cur.relPath, c.name];
+        if (depthOf(next) <= maxDepth) queue.push({ id: c.id, relPath: next });
       } else {
         files.push({ item: c, relPath: cur.relPath });
       }
     }
   }
-  return { direct, files };
+  return { direct, files, folders };
 }
 
 function isAuthError(e: unknown): boolean {
@@ -287,7 +304,16 @@ export async function syncOneLink(
       .map((l) => l.md5)
       .filter((m): m is string => !!m),
   );
-  const subfolders = [...tree.direct];
+  // 写しを入れる先の土台: 物件フォルダの直下に「仕入/販売」などがあれば、そのどちらか(初めて複製するときに決める)
+  let target: { parentId: string; subfolders: DriveItem[] } | null = null;
+  const copyTarget = async () => {
+    if (target) return target;
+    const side = await pickSideFolder(tree.direct, () => repo.sideContext(link.propertyId));
+    target = side
+      ? { parentId: side.id, subfolders: tree.folders.filter((f) => f.parentId === side.id).map((f) => f.item) }
+      : { parentId: link.folderId, subfolders: tree.direct.filter((f) => sideOfDriveFolderName(f.name) === null) };
+    return target;
+  };
 
   // ① 写しの名前合わせ(種類を直して名前が変わったもの・アプリが置いた写しだけ)
   for (const a of copied) {
@@ -371,11 +397,12 @@ export async function syncOneLink(
         continue;
       }
       const stage = (docStageOfKind(a.docKind) ?? (a.docStage as DocStageCode | null)) || null;
-      let folder = pickStageFolder(subfolders, stage);
+      const t = await copyTarget();
+      let folder = pickStageFolder(t.subfolders, stage);
       if (!folder) {
-        const id = await drive.createFolder(link.folderId, stageFolderNameForCreate(stage));
+        const id = await drive.createFolder(t.parentId, stageFolderNameForCreate(stage));
         folder = { id, name: stageFolderNameForCreate(stage), mimeType: FOLDER_MIME, md5: null, size: null, modifiedTime: null, appSource: null };
-        subfolders.push(folder);
+        t.subfolders.push(folder);
       }
       const name = outFileName(a);
       const up = await drive.uploadFile({

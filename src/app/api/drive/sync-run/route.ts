@@ -2,6 +2,8 @@ import { timingSafeEqual } from "crypto";
 import { ApiError, handleApiError, apiResponse } from "@/lib/api-helpers";
 import { runDriveSync } from "@/lib/drive/sync-run";
 import { liveRunDeps } from "@/lib/drive/sync-live";
+import { autoLinkDue, autoLinkIfConnected } from "@/lib/drive/auto-link";
+import { getDriveClient } from "@/lib/drive/connection";
 
 /**
  * POST /api/drive/sync-run — Google ドライブの見回り(第2段b・timer `pm-drive-sync` 5分ごと)。
@@ -17,6 +19,25 @@ import { liveRunDeps } from "@/lib/drive/sync-live";
 const BUDGET = 20;
 let running = false;
 let startAt = 0;
+/** 自動の紐づけ(1時間に1回・見回りの前に=新しく紐づけたフォルダもその回から見回る)。再起動で 0 に戻る=起動後の最初の回に1度。 */
+let lastAutoLinkAt = 0;
+
+async function autoLinkIfDue(): Promise<void> {
+  const now = Date.now();
+  if (!autoLinkDue(lastAutoLinkAt, now)) return;
+  lastAutoLinkAt = now;
+  try {
+    const r = await autoLinkIfConnected({ loadConnection: liveRunDeps().loadConnection, getClient: () => getDriveClient() });
+    console.log(
+      "skipped" in r
+        ? `[drive-auto-link] skipped=${r.skipped}`
+        : `[drive-auto-link] linked=${r.linked} planned=${r.planned}${r.truncated ? " truncated" : ""}`,
+    );
+  } catch (e) {
+    // 未接続・再接続が必要なときもここ(見回り本体が状態を残す)。名前は出さない
+    console.log(`[drive-auto-link] error=${e instanceof Error ? e.name : "unknown"}`);
+  }
+}
 
 export async function POST(request: Request) {
   try {
@@ -30,6 +51,7 @@ export async function POST(request: Request) {
     if (running) throw new ApiError(409, "前の見回りがまだ動いています", "ALREADY_RUNNING");
     running = true;
     try {
+      await autoLinkIfDue();
       const result = await runDriveSync(liveRunDeps(), { budget: BUDGET, startAt });
       startAt = result.nextStartAt;
       console.log(

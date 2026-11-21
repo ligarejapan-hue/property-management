@@ -4,6 +4,7 @@
 import { describe, it, expect } from "vitest";
 import { createHash } from "node:crypto";
 import { DriveApiError, FOLDER_MIME, type DriveItem } from "../client";
+import type { SideContext } from "../sync-plan";
 import { LinkedFolderMissingError, OutboundBackoff, syncOneLink, walkLinkedFolder, type DriveFiles, type LedgerRow, type LedgerWrite, type OutCandidate, type SyncRepo } from "../sync-link";
 
 const md5 = (s: string) => createHash("md5").update(Buffer.from(s)).digest("hex");
@@ -53,7 +54,7 @@ function fakeDrive(tree: Record<string, DriveItem[]>, contents: Record<string, s
   return { drive, log };
 }
 
-function fakeRepo(init: { ledger?: LedgerRow[]; toCopy?: OutCandidate[]; copied?: OutCandidate[]; files?: Record<string, string> } = {}) {
+function fakeRepo(init: { ledger?: LedgerRow[]; toCopy?: OutCandidate[]; copied?: OutCandidate[]; files?: Record<string, string>; side?: SideContext } = {}) {
   const writes: LedgerWrite[] = [];
   const log: string[] = [];
   const repo: SyncRepo = {
@@ -97,6 +98,10 @@ function fakeRepo(init: { ledger?: LedgerRow[]; toCopy?: OutCandidate[]; copied?
     async importPhoto(_l, item, _b, w) {
       writes.push(w);
       log.push(`photo:${item.id}`);
+    },
+    async sideContext() {
+      log.push("sideContext");
+      return init.side ?? { resaleOpen: false, brokerageBuyer: false };
     },
   };
   return { repo, writes, log };
@@ -487,5 +492,67 @@ describe("syncOneLink", () => {
     await expect(syncOneLink(drive, repo, LINK, { transfers: 20 })).rejects.toBeInstanceOf(LinkedFolderMissingError);
     expect(log).toEqual([]);
     expect(rlog).toEqual([]);
+  });
+
+  it("★物件フォルダの中の「仕入/販売」の中は、物件フォルダの直下と同じに取り込む(2026-11-21)", async () => {
+    const { drive } = fakeDrive({
+      root1: [folder("s1", "仕入"), folder("s2", "販売")],
+      s1: [folder("c1", "仕入契約"), file("f1", "直下.pdf", "a")],
+      s2: [folder("c2", "売却決済"), folder("p2", "写真")],
+      c1: [file("f2", "契約書.pdf", "b")],
+      c2: [file("f3", "決済.pdf", "c")],
+      p2: [file("f4", "外観.jpg", "d", { mimeType: "image/jpeg" })],
+    });
+    const { repo, log } = fakeRepo();
+    await syncOneLink(drive, repo, LINK, { transfers: 20 });
+    expect(log).toEqual(["inbox:f1", "attach:f2:contract", "attach:f3:settlement", "photo:f4"]);
+  });
+
+  it("★「仕入/販売」の中も3階層まで見る(側のフォルダは階層に数えない)", async () => {
+    const { drive } = fakeDrive({
+      root1: [folder("s1", "販売")],
+      s1: [folder("d1", "売却契約")],
+      d1: [folder("d2", "2024")],
+      d2: [folder("d3", "x")],
+      d3: [file("f3", "deep.pdf", "c"), folder("d4", "y")],
+      d4: [file("f4", "too-deep.pdf", "d")],
+    });
+    const t = await walkLinkedFolder(drive, "root1");
+    expect(t.files.map((f) => [f.item.id, f.relPath])).toEqual([["f3", ["販売", "売却契約", "2024", "x"]]]);
+  });
+
+  it("★複製: 「仕入/販売」が両方あれば、仕入の途中なら仕入の段階のフォルダへ・そのあとは販売へ", async () => {
+    const tree = () => ({
+      root1: [folder("s1", "仕入"), folder("s2", "販売")],
+      s1: [folder("c1", "仕入契約")],
+      s2: [folder("c2", "売却契約")],
+    });
+    const a = fakeDrive(tree());
+    const r1 = fakeRepo({ toCopy: [att("A1")], files: { "/uploads/A1": "pdf-A1" }, side: { resaleOpen: true, brokerageBuyer: false } });
+    await syncOneLink(a.drive, r1.repo, LINK, { transfers: 20 });
+    expect(a.log).toEqual(["upload:c1/売買契約書_A1.pdf:app"]);
+
+    const b = fakeDrive(tree());
+    const r2 = fakeRepo({ toCopy: [att("A1")], files: { "/uploads/A1": "pdf-A1" }, side: { resaleOpen: false, brokerageBuyer: false } });
+    await syncOneLink(b.drive, r2.repo, LINK, { transfers: 20 });
+    expect(b.log).toEqual(["upload:c2/売買契約書_A1.pdf:app"]);
+  });
+
+  it("★複製: 側のフォルダが片方だけならそこへ(取引は見ない)・段階のフォルダが無ければその中に作る", async () => {
+    const { drive, log } = fakeDrive({ root1: [folder("s1", "売却")], s1: [] });
+    const r = fakeRepo({ toCopy: [att("A1")], files: { "/uploads/A1": "pdf-A1" } });
+    await syncOneLink(drive, r.repo, LINK, { transfers: 20 });
+    expect(log).toEqual(["mkdir:s1/③契約関係", "upload:newdir1/売買契約書_A1.pdf:app"]);
+    expect(r.log).not.toContain("sideContext");
+  });
+
+  it("★複製: 「購入/売却」が両方あれば、仲介の買主側なら購入・それ以外は売却", async () => {
+    const tree = () => ({ root1: [folder("b1", "購入"), folder("s1", "売却")], b1: [folder("c1", "購入契約")], s1: [folder("c2", "売却契約")] });
+    const a = fakeDrive(tree());
+    await syncOneLink(a.drive, fakeRepo({ toCopy: [att("A1")], files: { "/uploads/A1": "x1" }, side: { resaleOpen: false, brokerageBuyer: true } }).repo, LINK, { transfers: 20 });
+    expect(a.log).toEqual(["upload:c1/売買契約書_A1.pdf:app"]);
+    const b = fakeDrive(tree());
+    await syncOneLink(b.drive, fakeRepo({ toCopy: [att("A1")], files: { "/uploads/A1": "x1" } }).repo, LINK, { transfers: 20 });
+    expect(b.log).toEqual(["upload:c2/売買契約書_A1.pdf:app"]);
   });
 });

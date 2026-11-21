@@ -5786,6 +5786,8 @@ export interface DriveFolderLink {
   folderPath: string;
   webViewLink: string | null;
   createdAt: string;
+  /** null=見回りが自動で紐づけたもの(2026-11-21〜)。 */
+  linkedById: string | null;
   property: { buildingName: string | null; roomNo: string | null; address: string };
 }
 

@@ -23,6 +23,7 @@ import { extractDocumentDate, fileExtension } from "@/lib/doc-classify/title";
 import { reportInboxStorageKey, SCRUB_ON_DISCARD } from "@/lib/report-inbox/access";
 import { removeFileAndVerify } from "@/lib/report-inbox/remove-file";
 import { stripFieldSurveyPhotoMetadata } from "@/lib/field-survey/exif-strip";
+import { dealSideOf } from "@/lib/property-business-type";
 import type { DriveItem } from "./client";
 import type { LedgerRow, LedgerWrite, LinkInfo, OutCandidate, SyncRepo } from "./sync-link";
 
@@ -357,6 +358,20 @@ export function createSyncRepo(uploaderId: string): SyncRepo {
         targetId: photo.id,
         detail: { propertyId: link.propertyId, source: "drive_sync" },
       });
+    },
+
+    async sideContext(propertyId) {
+      // 中止・決済完了でない取引だけを見る(決済が済んだ仕入は「販売」へ移る)。
+      // 買取再販は仕入と販売が別の取引=当事者の「当社」の立場で仕入側を見分ける(@codex #770)
+      const deals = await prisma.deal.findMany({
+        where: { propertyId, status: { notIn: ["settled", "cancelled"] } },
+        select: { businessType: true, tradeSide: true, parties: { select: { role: true, isSelf: true } } },
+      });
+      const brokerage = deals.filter((d) => d.businessType === "brokerage");
+      return {
+        resaleOpen: deals.some((d) => dealSideOf(d.businessType, d.parties) === "purchase"),
+        brokerageBuyer: brokerage.length > 0 && brokerage.every((d) => d.tradeSide === "buyer"),
+      };
     },
   };
 }
