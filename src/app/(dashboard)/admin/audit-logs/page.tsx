@@ -31,6 +31,7 @@ const ACTION_LABELS: Record<string, string> = {
   drive_disconnect: "ドライブの接続を切る",
   drive_folder_link: "ドライブのフォルダを物件に紐づけ",
   drive_folder_unlink: "ドライブのフォルダの紐づけを外す",
+  drive_folder_auto_link: "ドライブのフォルダを物件に自動で紐づけ",
   property_create: "物件作成",
   property_update: "物件更新",
   property_delete: "物件削除",

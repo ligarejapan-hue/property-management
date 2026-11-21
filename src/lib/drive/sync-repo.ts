@@ -358,6 +358,19 @@ export function createSyncRepo(uploaderId: string): SyncRepo {
         detail: { propertyId: link.propertyId, source: "drive_sync" },
       });
     },
+
+    async sideContext(propertyId) {
+      // 中止・決済完了でない取引だけを見る(決済が済んだ仕入は「販売」へ移る)
+      const deals = await prisma.deal.findMany({
+        where: { propertyId, status: { notIn: ["settled", "cancelled"] } },
+        select: { businessType: true, tradeSide: true },
+      });
+      const brokerage = deals.filter((d) => d.businessType === "brokerage");
+      return {
+        resaleOpen: deals.some((d) => d.businessType === "resale"),
+        brokerageBuyer: brokerage.length > 0 && brokerage.every((d) => d.tradeSide === "buyer"),
+      };
+    },
   };
 }
 

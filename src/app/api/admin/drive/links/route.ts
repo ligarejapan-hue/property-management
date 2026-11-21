@@ -9,7 +9,7 @@ import { getDriveClient } from "@/lib/drive/connection";
 const noStore = { headers: { "Cache-Control": "no-store" } };
 
 const LINK_SELECT = {
-  id: true, propertyId: true, folderId: true, folderName: true, folderPath: true, webViewLink: true, createdAt: true,
+  id: true, propertyId: true, folderId: true, folderName: true, folderPath: true, webViewLink: true, createdAt: true, linkedById: true,
   property: { select: { buildingName: true, roomNo: true, address: true } },
 } as const;
 

@@ -7,6 +7,7 @@ import { AlertTriangle, Cloud, CloudOff, ExternalLink, FolderOpen, Link2, Loader
 import { PageHeader } from "@/components/ui/page-header";
 import { Button } from "@/components/ui/button";
 import { ConfirmDialog } from "@/components/ui/confirm-dialog";
+import StatusBadge from "@/components/ui/status-badge";
 import { DRIVE_ALERT_AFTER_FAILURES } from "@/lib/drive/failure-alert";
 import { folderIdFromUrl } from "@/lib/drive/folder-url";
 import { propertyDetailHref } from "@/lib/property-detail-tab";
@@ -29,7 +30,8 @@ import { roomLabel } from "@/lib/room-label";
  * 管理 › ドライブ連携(書類の自動整理 第2段a・2026-10-24)。
  * - 接続: 「Google に接続」で Google の同意画面へ(戻ってくると ?connected=1)。トークンは画面に出ない。
  * - 紐づけ: ドライブのフォルダをたどり、行の候補(名前一致・住所が近い)か「物件を探す」で物件を選んで紐づける。
- * ⚠候補はあくまで候補。紐づけるのは人が押したときだけ(自動では紐づけない)。
+ * ⚠候補はあくまで候補。ただし「建物名+号室」が物件1件とぴったり合い、合うフォルダが1つだけのものは
+ *   見回りが1時間に1回自動で紐づける(2026-11-21〜・一覧に「自動」の印・外した物件は二度と自動にしない)。
  */
 
 const REASON_LABELS: Record<string, string> = {
@@ -220,7 +222,7 @@ function DriveAdminPageInner() {
       <section className="rounded-lg border border-gray-200 bg-white p-4 dark:border-gray-700 dark:bg-gray-900">
         <h2 className="mb-2 text-sm font-semibold text-gray-900 dark:text-gray-100">紐づけ済みの一覧({links.length})</h2>
         {links.length === 0 ? (
-          <p className="text-xs text-gray-500 dark:text-gray-400">まだありません。下の「ドライブのフォルダ」から紐づけてください。</p>
+          <p className="text-xs text-gray-500 dark:text-gray-400">まだありません。建物名と号室が合うフォルダは1時間に1回自動で紐づきます。それ以外は下の「ドライブのフォルダ」から紐づけてください。</p>
         ) : (
           <ul className="divide-y divide-gray-100 dark:divide-gray-800">
             {links.map((l) => (
@@ -273,6 +275,11 @@ function LinkRow({ link, onRemoved }: { link: DriveFolderLink; onRemoved: () => 
         >
           {propertyLabel(link.property)}
         </Link>
+        {link.linkedById === null && (
+          <span className="ml-2 align-middle">
+            <StatusBadge intent="info">自動</StatusBadge>
+          </span>
+        )}
         <div className="flex items-center gap-1 text-xs text-gray-500 dark:text-gray-400">
           <FolderOpen className="h-3.5 w-3.5" />
           <span className="truncate">{link.folderPath || link.folderName}</span>
@@ -290,7 +297,7 @@ function LinkRow({ link, onRemoved }: { link: DriveFolderLink; onRemoved: () => 
       {confirm && (
         <ConfirmDialog
           title="この紐づけを外しますか?"
-          message="アプリとドライブのファイルはどちらも消えません。あとで同じ物件に付け直しても、取り込み済みの書類は取り込み直しません。"
+          message="アプリとドライブのファイルはどちらも消えません。あとで同じ物件に付け直しても、取り込み済みの書類は取り込み直しません。外した物件は、このあと自動では紐づけません(紐づけるときは下から手で)。"
           confirmLabel="外す"
           busy={busy}
           onCancel={() => setConfirm(false)}

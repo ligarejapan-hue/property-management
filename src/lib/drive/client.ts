@@ -126,6 +126,32 @@ export class DriveClient {
     };
   }
 
+  /**
+   * 見えるフォルダを全部(自動の紐づけ用・名前と親だけ・ゴミ箱を除く)。共有されたフォルダの中も含む。
+   * maxPages で打ち切る(1ページ 1000 件)。truncated=打ち切った(全部は見ていない)。
+   */
+  async listAllFolders(
+    maxPages = 30,
+  ): Promise<{ folders: { id: string; name: string; parents: string[]; ownedByMe: boolean }[]; truncated: boolean }> {
+    const folders: { id: string; name: string; parents: string[]; ownedByMe: boolean }[] = [];
+    let pageToken: string | undefined;
+    for (let page = 0; page < maxPages; page++) {
+      const j = await this.getJson<{ files?: RawFile[]; nextPageToken?: string }>("/files", {
+        q: `mimeType = '${FOLDER_MIME}' and trashed = false`,
+        fields: "nextPageToken,files(id,name,parents,ownedByMe)",
+        pageSize: "1000",
+        supportsAllDrives: "true",
+        includeItemsFromAllDrives: "true",
+        corpora: "allDrives",
+        ...(pageToken ? { pageToken } : {}),
+      });
+      for (const f of j?.files ?? []) folders.push({ id: f.id, name: f.name, parents: f.parents ?? [], ownedByMe: f.ownedByMe === true });
+      pageToken = j?.nextPageToken;
+      if (!pageToken) return { folders, truncated: false };
+    }
+    return { folders, truncated: true };
+  }
+
   /** フォルダ1つ。無い/フォルダでない → null。 */
   async getFolder(id: string): Promise<DriveFolderDetail | null> {
     const f = await this.getJson<RawFile>(`/files/${encodeURIComponent(id)}`, {
