@@ -132,11 +132,16 @@ describe("受領した書類を添付へ(2026-11-21 発注者)", () => {
   });
 
   it("押した人が物件の担当外(担当制の役割)なら入れない・担当なら入れる(受け取り箱と同じ範囲)", async () => {
-    const o = await run(w, { actor: { id: "u-other", role: "field_staff" } });
+    const o = await run(w, { actor: { id: "u-other", role: "field_staff", canWriteProperty: true } });
     expect(o.skipped).toBe("no_permission");
     expect(w.storage.upload).not.toHaveBeenCalled();
-    expect((await run(w, { actor: { id: "u-field", role: "field_staff" } })).attached).toBe(1);
-    expect((await run(makeWorld(), { actor: { id: "u-x", role: "office_staff" } })).attached).toBe(1);
+    expect((await run(w, { actor: { id: "u-field", role: "field_staff", canWriteProperty: true } })).attached).toBe(1);
+    expect((await run(makeWorld(), { actor: { id: "u-x", role: "office_staff", canWriteProperty: true } })).attached).toBe(1);
+    // 物件の編集の権限が無ければ、担当制でない役割でも入れない(@codex P2)
+    const noWrite = makeWorld();
+    expect((await run(noWrite, { actor: { id: "u-x", role: "office_staff", canWriteProperty: false } })).skipped).toBe("no_permission");
+    expect(noWrite.storage.upload).not.toHaveBeenCalled();
+    expect(noWrite.events).toHaveLength(0);
   });
 
   it("ロックの間にしまわれたら作らず、写しを消す", async () => {

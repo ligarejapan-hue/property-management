@@ -98,13 +98,16 @@ type PropertyRow = {
   createdBy: string; assignedTo: string | null;
 };
 
+/** 押した人(物件の編集の権限と担当の範囲を確かめる=物件の添付 API・取引から物件を直すときと同じ)。 */
+export type AttachActor = { id: string; role: string; canWriteProperty: boolean };
+
 class AlreadyAttached extends Error {}
 class Skip extends Error { constructor(readonly reason: Exclude<AttachSkip, null>) { super(reason); } }
 
 /** 押した人がこの物件の添付を増やせるか(しまってある・担当外は入れない)。押した人がいない(スクリプト)ときは確かめない。 */
-function skipReason(p: { isArchived: boolean; createdBy: string; assignedTo: string | null }, actor?: { id: string; role: string }): AttachSkip {
+function skipReason(p: { isArchived: boolean; createdBy: string; assignedTo: string | null }, actor?: AttachActor): AttachSkip {
   if (p.isArchived) return "archived";
-  if (actor && !canAccessPropertyRecord(actor, p)) return "no_permission";
+  if (actor && (!actor.canWriteProperty || !canAccessPropertyRecord(actor, p))) return "no_permission";
   return null;
 }
 
@@ -122,7 +125,7 @@ export async function attachReceivedDocFiles(args: {
   /** true=数えるだけ(写さない・書き込まない)。attached は「入れる予定の数」。 */
   dryRun?: boolean;
   /** 押した人。物件の担当の範囲を確かめる(受け取り箱から添付するときと同じ)。 */
-  actor?: { id: string; role: string };
+  actor?: AttachActor;
   /** 写すたびの印(テスト用) */
   newAttempt?: () => string;
 }): Promise<AttachOutcome> {
@@ -269,7 +272,7 @@ export async function backfillReceivedDocAttachments(args: { db: BackfillDb; sto
 export function attachNotice(o: AttachOutcome): { notice: string | null; warning: string | null } {
   if (o.skipped === "no_property") return { notice: "受領しました。この取引は物件につながっていないので、添付には入れていません。", warning: null };
   if (o.skipped === "archived") return { notice: "受領しました。物件がしまってあるので、添付には入れていません。", warning: null };
-  if (o.skipped === "no_permission") return { notice: "受領しました。この物件の担当ではないので、添付には入れていません。", warning: null };
+  if (o.skipped === "no_permission") return { notice: "受領しました。この物件の添付を編集する権限がないので、添付には入れていません。", warning: null };
   const warning = o.failed > 0
     ? `${o.failed}件のファイルを物件の添付に入れられませんでした。この画面からダウンロードして、物件の添付に入れてください。`
     : null;

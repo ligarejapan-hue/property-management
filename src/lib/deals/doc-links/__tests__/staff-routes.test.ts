@@ -260,9 +260,17 @@ describe("受領・差し戻し", () => {
     attachReceivedDocFiles.mockResolvedValueOnce({ attached: 2, existing: 0, failed: 0, skipped: null, attachmentIds: ["a1", "a2"] });
     const res = await REVIEW(jsonRequest("POST", { action: "receive", fileIds: [FILE_ID] }), ctx);
     expect(res.status).toBe(200);
-    expect(attachReceivedDocFiles.mock.calls[0][0]).toMatchObject({ dealId: DEAL_ID, requestId: REQUEST_ID, userId: "u-office" });
+    // DEAL_PERMS に物件の編集は無い=写す側で入れない(@codex P2)
+    expect(attachReceivedDocFiles.mock.calls[0][0]).toMatchObject({
+      dealId: DEAL_ID, requestId: REQUEST_ID, userId: "u-office", actor: { id: "u-office", role: "office_staff", canWriteProperty: false },
+    });
     expect(await res.json()).toMatchObject({ ok: true, notice: "受領しました。物件の添付に2件入れました。", warning: null });
     expect(writeAuditLog).toHaveBeenCalledWith({ userId: "u-office", action: "create", targetTable: "attachments", targetId: "a2", detail: { dealId: DEAL_ID, source: "deal_doc_receive" } });
+  });
+  it("物件の編集の権限があれば canWriteProperty=true で渡す", async () => {
+    (getUserPermissions as Fn).mockResolvedValue([...DEAL_PERMS, { resource: "property", action: "write", granted: true }]);
+    await REVIEW(jsonRequest("POST", { action: "receive", fileIds: [FILE_ID] }), ctx);
+    expect(attachReceivedDocFiles.mock.calls[0][0]).toMatchObject({ actor: { canWriteProperty: true } });
   });
   it("添付へ写すのが失敗しても受領は成り立ち、注意の一言を返す", async () => {
     attachReceivedDocFiles.mockRejectedValueOnce(new Error("boom"));

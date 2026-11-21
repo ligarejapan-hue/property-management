@@ -9,6 +9,7 @@ import { docLinkAccess } from "@/lib/deals/doc-links/staff-store";
 import { attachNotice, attachReceivedDocFiles, type AttachOutcome } from "@/lib/deals/doc-links/receive-attach";
 import prisma from "@/lib/prisma";
 import { getStorage } from "@/lib/storage";
+import { hasPermission } from "@/lib/permissions";
 
 type Ctx = { params: Promise<{ id: string; requestId: string }> };
 const fileIds = z.array(z.string().uuid()).min(1).max(DOC_FILES_PER_LINK);
@@ -63,7 +64,7 @@ export async function POST(request: Request, ctx: Ctx) {
     // 受領は確定済み。ここからは物件の添付へ写すだけ(失敗しても受領は戻さない・2026-11-21 発注者)。
     let outcome: AttachOutcome;
     try {
-      outcome = await attachReceivedDocFiles({ db: prisma as never, storage: getStorage(), dealId: id, requestId, userId: session.id, now, actor: { id: session.id, role: session.role } });
+      outcome = await attachReceivedDocFiles({ db: prisma as never, storage: getStorage(), dealId: id, requestId, userId: session.id, now, actor: { id: session.id, role: session.role, canWriteProperty: hasPermission(perms, "property", "write") } });
     } catch (e) {
       console.error("[deal-doc-attach] failed", (e as { code?: unknown })?.code ?? "");
       outcome = { attached: 0, existing: 0, failed: count, skipped: null, attachmentIds: [] };
