@@ -2,7 +2,7 @@ import { timingSafeEqual } from "crypto";
 import { ApiError, handleApiError, apiResponse } from "@/lib/api-helpers";
 import { runDriveSync } from "@/lib/drive/sync-run";
 import { liveRunDeps } from "@/lib/drive/sync-live";
-import { autoLinkDue, runAutoLink } from "@/lib/drive/auto-link";
+import { autoLinkDue, autoLinkIfConnected } from "@/lib/drive/auto-link";
 import { getDriveClient } from "@/lib/drive/connection";
 
 /**
@@ -27,8 +27,12 @@ async function autoLinkIfDue(): Promise<void> {
   if (!autoLinkDue(lastAutoLinkAt, now)) return;
   lastAutoLinkAt = now;
   try {
-    const r = await runAutoLink(await getDriveClient());
-    console.log(`[drive-auto-link] linked=${r.linked} planned=${r.planned}${r.truncated ? " truncated" : ""}`);
+    const r = await autoLinkIfConnected({ loadConnection: liveRunDeps().loadConnection, getClient: () => getDriveClient() });
+    console.log(
+      "skipped" in r
+        ? `[drive-auto-link] skipped=${r.skipped}`
+        : `[drive-auto-link] linked=${r.linked} planned=${r.planned}${r.truncated ? " truncated" : ""}`,
+    );
   } catch (e) {
     // 未接続・再接続が必要なときもここ(見回り本体が状態を残す)。名前は出さない
     console.log(`[drive-auto-link] error=${e instanceof Error ? e.name : "unknown"}`);

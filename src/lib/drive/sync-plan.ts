@@ -52,7 +52,7 @@ export function sideOfDriveFolderName(name: string): DriveSide | null {
 
 /** 側のフォルダを選ぶための物件の状態(両方あるときだけ使う)。 */
 export type SideContext = {
-  /** 買取再販の取引で、まだ決済完了・中止になっていないものがある(=仕入の途中)。 */
+  /** 買取再販の仕入の取引(当社が買主)で、まだ決済完了・中止になっていないものがある(=仕入の途中)。 */
   resaleOpen: boolean;
   /** 仲介の取引が買主側だけ(=購入の側)。 */
   brokerageBuyer: boolean;

@@ -74,6 +74,20 @@ export type AutoLinkResult = { linked: number; planned: number; truncated: boole
 
 type Client = Pick<DriveClient, "listAllFolders" | "getFolder" | "folderPath">;
 
+/**
+ * 見回りと同じ止め方をしてから自動の紐づけをする: 未接続・接続した管理者が無効(消された・止められた)なら
+ * 何もしない(見回り本体も、その間は書類を動かさない・@codex #770)。
+ */
+export async function autoLinkIfConnected(deps: {
+  loadConnection(): Promise<{ connected: boolean; uploaderId: string | null }>;
+  getClient(): Promise<Client>;
+}): Promise<AutoLinkResult | { skipped: "not_connected" | "inactive_connector" }> {
+  const conn = await deps.loadConnection();
+  if (!conn.connected) return { skipped: "not_connected" };
+  if (!conn.uploaderId) return { skipped: "inactive_connector" };
+  return runAutoLink(await deps.getClient());
+}
+
 /** 本番: ドライブのフォルダを見て、自動で紐づける。 */
 export async function runAutoLink(client: Client): Promise<AutoLinkResult> {
   const listed = await client.listAllFolders();

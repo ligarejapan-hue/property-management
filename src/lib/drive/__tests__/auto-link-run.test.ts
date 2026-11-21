@@ -14,7 +14,7 @@ vi.mock("@/lib/prisma", () => ({
 
 import prisma from "@/lib/prisma";
 import { writeAuditLog } from "@/lib/audit";
-import { runAutoLink } from "../auto-link";
+import { autoLinkIfConnected, runAutoLink } from "../auto-link";
 
 const db = prisma as unknown as {
   property: { findMany: Mock };
@@ -114,5 +114,16 @@ describe("runAutoLink", () => {
     const r = await runAutoLink(client([{ id: "f1", name: "西荻リリエンハイム 407" }], new Set(), true));
     expect(r).toEqual({ linked: 0, planned: 0, truncated: true });
     expect(db.propertyDriveFolder.create).not.toHaveBeenCalled();
+  });
+
+  it("★未接続・接続した管理者が無効なら、ドライブを読まずに何もしない(見回りと同じ止め方・@codex #770)", async () => {
+    const c = client([{ id: "f1", name: "西荻リリエンハイム 407" }]);
+    const getClient = vi.fn(async () => c);
+    expect(await autoLinkIfConnected({ loadConnection: async () => ({ connected: false, uploaderId: null }), getClient })).toEqual({ skipped: "not_connected" });
+    expect(await autoLinkIfConnected({ loadConnection: async () => ({ connected: true, uploaderId: null }), getClient })).toEqual({ skipped: "inactive_connector" });
+    expect(getClient).not.toHaveBeenCalled();
+    expect(db.propertyDriveFolder.create).not.toHaveBeenCalled();
+    const r = await autoLinkIfConnected({ loadConnection: async () => ({ connected: true, uploaderId: "u1" }), getClient });
+    expect(r).toEqual({ linked: 1, planned: 1, truncated: false });
   });
 });
