@@ -2,7 +2,7 @@
  * ドライブの物件フォルダの自動の紐づけ(2026-11-21 発注者決定: 建物名+号室が1件だけのときだけ)。
  */
 import { describe, it, expect } from "vitest";
-import { autoLinkDue, AUTO_LINK_INTERVAL_MS, planAutoLinks, unlinkedPropertyIds } from "../auto-link";
+import { autoLinkDue, AUTO_LINK_INTERVAL_MS, planAutoLinks, strictRoomNo, unlinkedPropertyIds } from "../auto-link";
 import type { MatchableProperty } from "../folder-match";
 
 const P = (id: string, buildingName: string | null, roomNo: string | null, address = "東京都杉並区西荻北1丁目1"): MatchableProperty => ({ id, buildingName, roomNo, address });
@@ -14,6 +14,8 @@ const props = [
   P("p5", "コスモ上野", "201"), // 同じ建物名+号室の物件が2つ
   P("p6", "パークハウス", null),
   P("p7", null, null, "千葉県流山市鰭ヶ崎2丁目1"),
+  P("p8", "テストマンション", "A-101"),
+  P("p9", "グリーンハイツ", "２０１号室"),
 ];
 const none = new Set<string>();
 const plan = (folders: { id: string; name: string }[], o: { linkedP?: string[]; linkedF?: string[]; excluded?: string[] } = {}) =>
@@ -77,5 +79,27 @@ describe("autoLinkDue(1時間に1回)", () => {
   it("前回から1時間たったら", () => {
     expect(autoLinkDue(0, AUTO_LINK_INTERVAL_MS)).toBe(true);
     expect(autoLinkDue(1000, 1000 + AUTO_LINK_INTERVAL_MS - 1)).toBe(false);
+  });
+});
+
+describe("★号室は数字だけのときだけ自動(@codex #770)", () => {
+  it("物件の号室が「A-101」ならフォルダ「テストマンション 101」とは自動でつながない", () => {
+    expect(plan([{ id: "f1", name: "テストマンション 101" }])).toEqual([]);
+  });
+  it("全角・号室つきの数字は同じ部屋として扱う", () => {
+    expect(plan([{ id: "f1", name: "グリーンハイツ 201" }])).toEqual([{ folderId: "f1", propertyId: "p9" }]);
+  });
+  it.each([
+    ["305", "305"],
+    ["305号室", "305"],
+    ["３０５", "305"],
+    ["0305", "305"],
+    ["A-101", null],
+    ["B101", null],
+    ["101-2", null],
+    ["", null],
+    [null, null],
+  ])("strictRoomNo(%s) → %s", (room, want) => {
+    expect(strictRoomNo(room)).toBe(want);
   });
 });

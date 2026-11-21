@@ -27,6 +27,16 @@ export function autoLinkDue(lastMs: number, nowMs: number): boolean {
   return nowMs - lastMs >= AUTO_LINK_INTERVAL_MS;
 }
 
+/**
+ * 自動にしてよい号室の形: 数字だけ(「305」「305号室」「３０５」)なら数字、英字・棟・枝番を含む
+ * (「A-101」「B101」「101-2」)なら null。候補の照合は数字だけを比べるので、自動ではもう一段厳しく見る(@codex #770)。
+ */
+export function strictRoomNo(roomNo: string | null): string | null {
+  if (!roomNo) return null;
+  const s = roomNo.normalize("NFKC").replace(/[\s　]+/g, "").replace(/(号室|号|室)$/, "");
+  return /^[0-9]{1,4}$/.test(s) ? String(Number(s)) : null;
+}
+
 /** 自動で紐づける組を決める(純関数)。順番はフォルダの id 順(毎回同じ)。 */
 export function planAutoLinks(args: {
   folders: readonly FolderEntry[];
@@ -36,6 +46,7 @@ export function planAutoLinks(args: {
   excludedPropertyIds: ReadonlySet<string>;
 }): AutoLinkPlan[] {
   const props = [...args.properties];
+  const roomOf = new Map(props.map((p) => [p.id, strictRoomNo(p.roomNo)]));
   const byProperty = new Map<string, string[]>();
   for (const f of args.folders) {
     // 中のフォルダ(仕入/販売・〜契約・写真など)は物件フォルダではない
@@ -45,6 +56,8 @@ export function planAutoLinks(args: {
     const exact = matchFolderToProperties(parsed, props).filter((c) => c.reason === "name_room");
     if (exact.length !== 1) continue; // 同じ建物名+号室の物件が2つ以上=人が決める
     const pid = exact[0].propertyId;
+    // 物件の号室が数字だけで、フォルダの号室と同じときだけ(「A-101」と「101」は別の部屋)
+    if (roomOf.get(pid) !== parsed.roomNo) continue;
     byProperty.set(pid, [...(byProperty.get(pid) ?? []), f.id]);
   }
   const out: AutoLinkPlan[] = [];
