@@ -1,6 +1,7 @@
 import { afterAll, beforeEach, describe, expect, it, vi } from "vitest";
 
-const { syncDealScheduleSafe, writeAuditLog, canOpenReferralDocument, storage } = vi.hoisted(() => ({
+const { syncDealScheduleSafe, writeAuditLog, canOpenReferralDocument, storage, attachReceivedDocFiles } = vi.hoisted(() => ({
+  attachReceivedDocFiles: vi.fn(async (_args: Record<string, unknown>): Promise<unknown> => ({ attached: 0, existing: 0, failed: 0, skipped: null, attachmentIds: [] })),
   syncDealScheduleSafe: vi.fn(async () => undefined),
   writeAuditLog: vi.fn(),
   canOpenReferralDocument: vi.fn(() => true),
@@ -12,6 +13,7 @@ vi.mock("@/lib/deals/schedule-sync", async (orig) => ({ ...(await orig<typeof im
 vi.mock("@/lib/audit", () => ({ writeAuditLog }));
 vi.mock("@/lib/storage", () => ({ getStorage: () => storage }));
 vi.mock("@/lib/uploads-authorization", () => ({ canOpenReferralDocument }));
+vi.mock("@/lib/deals/doc-links/receive-attach", async (orig) => ({ ...(await orig<typeof import("../receive-attach")>()), attachReceivedDocFiles }));
 vi.mock("@/lib/sale-dm-letter/config-store", () => ({ loadSaleDmPublicPageConfig: vi.fn(async () => ({ trackingBaseUrl: "https://public.example" })) }));
 vi.mock("@/lib/prisma", () => {
   const db: Record<string, unknown> = {
@@ -253,6 +255,25 @@ describe("受領・差し戻し", () => {
     });
     expect(pm.dealDocReviewEvent.create.mock.calls[0][0].data).toMatchObject({ requestId: REQUEST_ID, action: "received", reason: null, reviewedById: "u-office" });
     expect(writeAuditLog).toHaveBeenCalledWith({ userId: "u-office", action: "deal_doc_receive", targetTable: "deals", targetId: DEAL_ID, detail: { count: 2 } });
+  });
+  it("受領したら物件の添付へ写し、入れた数を返す・添付ごとに監査(2026-11-21)", async () => {
+    attachReceivedDocFiles.mockResolvedValueOnce({ attached: 2, existing: 0, failed: 0, skipped: null, attachmentIds: ["a1", "a2"] });
+    const res = await REVIEW(jsonRequest("POST", { action: "receive", fileIds: [FILE_ID] }), ctx);
+    expect(res.status).toBe(200);
+    expect(attachReceivedDocFiles.mock.calls[0][0]).toMatchObject({ dealId: DEAL_ID, requestId: REQUEST_ID, userId: "u-office" });
+    expect(await res.json()).toMatchObject({ ok: true, notice: "受領しました。物件の添付に2件入れました。", warning: null });
+    expect(writeAuditLog).toHaveBeenCalledWith({ userId: "u-office", action: "create", targetTable: "attachments", targetId: "a2", detail: { dealId: DEAL_ID, source: "deal_doc_receive" } });
+  });
+  it("添付へ写すのが失敗しても受領は成り立ち、注意の一言を返す", async () => {
+    attachReceivedDocFiles.mockRejectedValueOnce(new Error("boom"));
+    const res = await REVIEW(jsonRequest("POST", { action: "receive", fileIds: [FILE_ID] }), ctx);
+    expect(res.status).toBe(200);
+    expect(pm.dealDocRequest.update.mock.calls[0][0].data).toMatchObject({ status: "received" });
+    expect((await res.json()).warning).toContain("物件の添付に入れられませんでした");
+  });
+  it("差し戻しでは添付へ写さない", async () => {
+    await REVIEW(jsonRequest("POST", { action: "reject", fileIds: [FILE_ID], reason: "読めません" }), ctx);
+    expect(attachReceivedDocFiles).not.toHaveBeenCalled();
   });
   it("差し戻しは理由が要る。理由は監査に入れない", async () => {
     expect((await REVIEW(jsonRequest("POST", { action: "reject", fileIds: [FILE_ID], reason: "  " }), ctx)).status).toBe(422);

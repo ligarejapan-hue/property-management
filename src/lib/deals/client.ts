@@ -101,7 +101,7 @@ export const dealsApi = {
   issueDocLink: (id: string, body: { partyId: string; itemIds: string[]; days: number; rotate: boolean }) => call<{ ok: true }>(`/api/deals/${id}/doc-links`, { method: "POST", body }),
   revokeDocLink: (id: string, linkId: string) => call<{ ok: true }>(`/api/deals/${id}/doc-links/${linkId}/revoke`, { method: "POST" }),
   reviewDocRequest: (id: string, requestId: string, body: { action: "receive"; fileIds: string[] } | { action: "reject"; fileIds: string[]; reason: string }) =>
-    call<{ ok: true }>(`/api/deals/${id}/doc-links/requests/${requestId}`, { method: "POST", body }),
+    call<{ ok: true; notice?: string | null; warning?: string | null }>(`/api/deals/${id}/doc-links/requests/${requestId}`, { method: "POST", body }),
   docFileUrl: (id: string, fileId: string) => `/api/deals/${id}/doc-links/files/${fileId}`,
   completePreScheduleItems: (id: string) => call<{ count: number }>(`/api/deals/${id}/schedule/complete-pre`, { method: "POST" }),
   /** この取引の土地・建物(null=全部)。 */

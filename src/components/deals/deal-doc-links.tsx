@@ -221,7 +221,15 @@ export function DealDocLinks({ dealId, revision, onChanged }: { dealId: string; 
           busy,
           onIssue: (body) => run(() => dealsApi.issueDocLink(dealId, body)),
           onRevoke: (linkId) => void run(() => dealsApi.revokeDocLink(dealId, linkId)),
-          onReview: (requestId, body) => void run(() => dealsApi.reviewDocRequest(dealId, requestId, body)),
+          onReview: (requestId, body) => {
+            // 受領したら物件の添付へ写す(2026-11-21)。結果の一言は読み直しのあとに出す(読み直しがエラーを消すため)。
+            let res: { notice?: string | null; warning?: string | null } = {};
+            void run(async () => { res = await dealsApi.reviewDocRequest(dealId, requestId, body); }).then((ok) => {
+              if (!ok) return;
+              if (res.notice) setNotice(res.notice);
+              if (res.warning) setError(res.warning);
+            });
+          },
           onCopy: (text, what) => {
             navigator.clipboard.writeText(text).then(
               () => { setError(null); setNotice(`${what}をコピーしました。ご自分の LINE やメールで送ってください。`); },
