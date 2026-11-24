@@ -1577,6 +1577,9 @@ function RegistryAddressCandidatesPanel() {
   const [cursor, setCursor] = useState<string | null>(null);
   const [cursorStack, setCursorStack] = useState<Array<string | null>>([]);
   const [applyingId, setApplyingId] = useState<string | null>(null);
+  // 「適用」を押した行(確認を出している行)。押した瞬間に住所を変えない(2026-11-24・
+  // registry-address-apply-confirm-ui.test.ts)。
+  const [confirmId, setConfirmId] = useState<string | null>(null);
   const [rowMsg, setRowMsg] = useState<{ id: string; text: string; ok: boolean } | null>(
     null,
   );
@@ -1766,11 +1769,32 @@ function RegistryAddressCandidatesPanel() {
                       </td>
                       <td className="px-3 py-2">
                         <div className="flex flex-col gap-1">
-                          {c.action === "cleanup" ? (
+                          {c.action === "cleanup" && confirmId === c.ownerId ? (
+                            <div className="flex flex-col gap-1 rounded-md border border-amber-300 bg-amber-50 p-2 dark:border-amber-500/40 dark:bg-amber-500/10">
+                              <p className="text-[11px] text-amber-800 dark:text-amber-200">
+                                住所から登記の文字を消します。よろしいですか？
+                              </p>
+                              <div className="flex gap-1">
+                                <Button
+                                  variant="success"
+                                  size="sm"
+                                  onClick={() => {
+                                    setConfirmId(null);
+                                    void onApply(c);
+                                  }}
+                                >
+                                  実行する
+                                </Button>
+                                <Button variant="secondary" size="sm" onClick={() => setConfirmId(null)}>
+                                  やめる
+                                </Button>
+                              </div>
+                            </div>
+                          ) : c.action === "cleanup" ? (
                             <Button
                               variant="success"
                               size="sm"
-                              onClick={() => onApply(c)}
+                              onClick={() => setConfirmId(c.ownerId)}
                               disabled={applyingId === c.ownerId}
                               loading={applyingId === c.ownerId}
                               loadingLabel="適用中"

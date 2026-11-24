@@ -21,6 +21,7 @@ import {
   NAME_ISSUE_LABEL,
   CONTACT_ISSUE_LABEL,
   formatFixableFields,
+  contactFixLabel,
   escapeControlForAudit,
   effectiveRecommendedAction,
   type NameFilterType,
@@ -608,7 +609,7 @@ export default function QualityAuditPage() {
             </thead>
             <tbody className="divide-y divide-gray-200 bg-white dark:divide-gray-800 dark:bg-gray-900">
               {contactRows.map((row) => {
-                const fixableFields = formatFixableFields(row.issues);
+                const fixableFields = formatFixableFields(row.issues, row.currentZipIssues);
                 return (
                   <tr key={row.ownerId} className="align-top hover:bg-gray-50 dark:hover:bg-gray-800">
                     <td className="px-4 py-3 text-sm">
@@ -676,7 +677,7 @@ export default function QualityAuditPage() {
                                   version: row.version,
                                   field,
                                 },
-                                field === "zip" ? "郵便番号を整形" : "電話を整形",
+                                contactFixLabel(field),
                               )}
                             </Fragment>
                           ))}

@@ -22,7 +22,8 @@ import type {
 
 export type NameFilterType = "all" | OwnerNameIssueCode | OwnerNameKanaIssueCode;
 export type ContactFilterType = "all" | OwnerContactIssueCode;
-export type ContactField = "zip" | "phone";
+/** 整形ボタンで直す欄(contact-fix の field)。currentZip=現住所の郵便番号(2026-11-24〜画面からも直せる)。 */
+export type ContactField = "zip" | "phone" | "currentZip";
 
 // ---------------------------------------------------------------------------
 // 表示ラベル（issue コード → 日本語）。
@@ -99,11 +100,26 @@ export const CONTACT_TYPE_OPTIONS: ContactTypeOption[] = [
 
 export function formatFixableFields(
   issues: OwnerContactIssueCode[],
+  currentZipIssues: OwnerContactIssueCode[] = [],
 ): ContactField[] {
   const fields: ContactField[] = [];
   if (issues.includes("zip_unformatted")) fields.push("zip");
   if (issues.includes("phone_unnormalized")) fields.push("phone");
+  // 現住所の郵便番号(route が currentZipIssues に別に分けて返す)。
+  if (currentZipIssues.includes("zip_unformatted")) fields.push("currentZip");
   return fields;
+}
+
+/** 整形ボタンの名前。 */
+export function contactFixLabel(field: ContactField): string {
+  switch (field) {
+    case "zip":
+      return "郵便番号を整形";
+    case "phone":
+      return "電話を整形";
+    case "currentZip":
+      return "現住所の郵便番号を整形";
+  }
 }
 
 // ---------------------------------------------------------------------------

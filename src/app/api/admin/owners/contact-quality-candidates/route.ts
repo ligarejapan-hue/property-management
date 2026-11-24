@@ -251,8 +251,9 @@ export async function GET(request: NextRequest) {
       let recommendedAction: RecommendedAction;
       if (hasSafeguard) {
         recommendedAction = "hold";
-      } else if (result.issues.every((i) => FORMAT_ISSUES.has(i))) {
-        // 整形だけで安全に直せる（valid だが未整形/未正規化のみ）
+      } else if ([...result.issues, ...currentZipIssues].every((i) => FORMAT_ISSUES.has(i))) {
+        // 整形だけで安全に直せる（valid だが未整形/未正規化のみ）。現住所の郵便番号も画面から整形できる
+        // ので(2026-11-24)、そちらが壊れている行は「整形」と勧めない。
         recommendedAction = "format_candidate";
       } else {
         recommendedAction = "review";
