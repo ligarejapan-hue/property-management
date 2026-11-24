@@ -11,13 +11,15 @@ import {
 } from "@/lib/api-client";
 import {
   FOLLOWUP_LIMITS,
+  FOLLOWUP_PROPERTY_INTRODUCTION_ROUTES,
   FOLLOWUP_SERIES,
   FOLLOWUP_SERIES_LABELS,
   type FollowupSeries,
 } from "@/lib/lead-followup/steps";
+import { INTRODUCTION_ROUTE_LABELS } from "@/lib/property-types";
 
 // 追客メール(ステップメール)の区画(メール設定の画面の下)。設計 2026-11-16 §6。
-// 一括査定・査定申込のお客様へ、登録した順番の文面を、登録した日数後に送る。
+// 対象の導入ルートの物件の所有者・査定申込のお客様へ、登録した順番の文面を、登録した日数後に送る。
 // ⚠第1段では送信の仕組みがまだ無い(設定だけ)。送信は第3段の定期実行で始まる。
 
 /** 画面の入力(日数は打ちかけを許すため文字で持つ)。 */
@@ -100,10 +102,10 @@ function SectionFrame({ children }: { children: React.ReactNode }) {
     <section className="space-y-4 rounded-lg border border-gray-200 p-4 dark:border-gray-700" aria-labelledby="lead-followup-title">
       <div>
         <h2 id="lead-followup-title" className="text-sm font-semibold text-gray-800 dark:text-gray-100">
-          追客メール(一括査定・査定申込のお客様へ)
+          追客メール(物件の所有者・査定申込のお客様へ)
         </h2>
         <p className="mt-1 text-xs text-gray-500 dark:text-gray-400">
-          一括査定で登録した物件の所有者と、査定申込のお客様へ、下の順番の文面を、決めた日数後に1通ずつ送ります。
+          一括査定・問い合わせなどで登録した物件の所有者と、査定申込のお客様へ、下の順番の文面を、決めた日数後に1通ずつ送ります。
           お名前や入力内容はメールに載せません。
         </p>
       </div>
@@ -152,8 +154,13 @@ export function LeadFollowupSettingsForm({
   return (
     <SectionFrame>
       <ul className="list-disc space-y-1 pl-5 text-xs text-gray-600 dark:text-gray-300">
-        <li>新規の流れ: 一括査定の物件を登録した日(査定申込は申し込んだ日)から数えます。日数が0の通は登録の直後に送る挨拶です(査定申込には送りません=受付メールが挨拶を兼ねます)。2通目からは、案件の状態が「未着手」「コンタクト中」のお客様だけに送ります。</li>
+        <li>新規の流れ: 物件を登録した日(査定申込は申し込んだ日)から数えます。日数が0の通は登録の直後に送る挨拶です(査定申込には送りません=受付メールが挨拶を兼ねます)。2通目からは、案件の状態が「未着手」「コンタクト中」のお客様だけに送ります。</li>
         <li>保留の流れ: 案件の状態が「保留」になった日から数え直して送ります。</li>
+        <li>
+          物件は、導入ルートが{" "}
+          {FOLLOWUP_PROPERTY_INTRODUCTION_ROUTES.map((r) => `「${INTRODUCTION_ROUTE_LABELS[r]}」`).join("")}
+          の物件の所有者が対象です(ご本人からメールアドレスを知らせていただいた経路だけ)。DM送付不可の物件、DMの拒否・宛先不明が記録された所有者の物件(手紙のQRから来た査定申込も、その手紙の所有者で見ます)、所有者に業者と同じ名前の人・自治体・国がいる物件には送りません。
+        </li>
         <li>受付メールが届いた査定申込だけが対象です。ON にする前からいるお客様にも送ります(登録日・申込日から数えて、次に日が来る通から。日が過ぎた通は送りません)。</li>
         <li>1つのアドレスへは1日1通まで、朝9時〜夜8時に送ります。末尾には会社の情報と配信停止のリンクが自動で付きます。</li>
       </ul>

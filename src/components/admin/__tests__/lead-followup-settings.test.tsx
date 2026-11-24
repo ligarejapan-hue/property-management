@@ -36,6 +36,15 @@ describe("追客メールの区画(メール設定の画面)", () => {
     expect(html).toContain("全員への追客がすぐ止まります");
   });
 
+  it("物件の対象になる導入ルートの名前と、外す物件(DM 送付不可・業者と同じ名前・自治体や国)を出す", () => {
+    const html = renderToStaticMarkup(<LeadFollowupSettingsForm initial={base} onSaved={vi.fn()} />);
+    for (const label of ["一括査定", "DM反響", "電話問い合わせ", "Web問い合わせ", "紹介"]) expect(html).toContain(label);
+    expect(html).toContain("DM送付不可");
+    expect(html).toContain("業者と同じ名前");
+    expect(html).toContain("自治体・国");
+    expect(html).toContain("DMの拒否・宛先不明");
+  });
+
   it("足りない設定があれば一覧で出す・ON にした時刻を出す", () => {
     const html = renderToStaticMarkup(
       <LeadFollowupSettingsForm

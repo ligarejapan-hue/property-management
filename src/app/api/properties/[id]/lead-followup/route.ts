@@ -9,6 +9,7 @@ import { lockPropertyRow } from "@/lib/property-record-guard";
 import { writeAuditLog } from "@/lib/audit";
 import { stopFollowupManually } from "@/lib/lead-followup/manual-stop";
 import { FOLLOWUP_VIEW_SELECT, toFollowupView } from "@/lib/lead-followup/view";
+import { isFollowupPropertyRoute } from "@/lib/lead-followup/steps";
 
 type Ctx = { params: Promise<{ id: string }> };
 
@@ -67,10 +68,10 @@ export async function POST(_req: Request, ctx: Ctx) {
       });
       if (!locked) throw new ApiError(404, "物件が見つかりません", "NOT_FOUND");
       if (!canAccessPropertyRecord(session, locked)) throw new ApiError(403, "この物件を扱う権限がありません", "FORBIDDEN");
-      // 追客の対象は一括査定の物件だけ。対象でない物件に止めた印を作ると、あとで一括査定に直しても
-      // 追客が始まらなくなるので作らない(すでに追客の行があれば、導入ルートが変わっていても止められる)。
-      if (locked.introductionRoute !== "bulk_assessment" && !locked.leadFollowup) {
-        throw new ApiError(409, "一括査定の物件ではないため、追客メールの対象ではありません", "NOT_FOLLOWUP_TARGET");
+      // 追客の対象は決まった導入ルート(FOLLOWUP_PROPERTY_INTRODUCTION_ROUTES)の物件だけ。対象でない物件に止めた印を作ると、
+      // あとで対象の導入ルートに直しても追客が始まらなくなるので作らない(すでに追客の行があれば、導入ルートが変わっていても止められる)。
+      if (!isFollowupPropertyRoute(locked.introductionRoute) && !locked.leadFollowup) {
+        throw new ApiError(409, "追客メールの対象の導入ルートの物件ではありません", "NOT_FOLLOWUP_TARGET");
       }
       return stopFollowupManually(tx, { kind: "property", propertyId: id }, session.id, now);
     });

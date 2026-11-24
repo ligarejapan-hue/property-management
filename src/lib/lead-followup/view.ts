@@ -18,6 +18,11 @@ export const FOLLOWUP_STOP_REASON_LABELS: Record<string, string> = {
   completed: "全部送り終えた",
   duplicate_address: "同じアドレスの追客がほかにある",
   target_deleted: "物件・申込が消された",
+  // 2026-11-24 物件の対象を広げたときに足した(run.ts の FollowupExclusion)
+  dm_no_send: "物件が DM 送付不可",
+  owner_excluded: "所有者が業者と同じ名前・自治体・国",
+  // DM の作成と同じ除外(拒否と、解除していない宛先不明)
+  dm_refused: "所有者が DM を断った・宛先不明",
 };
 
 const SEND_RESULT_LABELS: Record<string, string> = { sent: "送信", skipped: "飛ばした", failed: "送れなかった" };

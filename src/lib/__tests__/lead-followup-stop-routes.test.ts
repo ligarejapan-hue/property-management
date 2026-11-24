@@ -172,15 +172,26 @@ describe("POST /api/properties/[id]/lead-followup(追客を止める)", () => {
   });
 });
 
-describe("POST /api/properties/[id]/lead-followup(一括査定でない物件)", () => {
+describe("POST /api/properties/[id]/lead-followup(対象の導入ルートでない物件)", () => {
   it("追客の行が無ければ 409(止めた印を作らない)", async () => {
-    db.property.findUnique.mockResolvedValue({ ...property, introductionRoute: "dm" });
-    const res = await propertyPost(req(), pctx);
-    expect(res.status).toBe(409);
-    expect((await res.json()).error.code).toBe("NOT_FOLLOWUP_TARGET");
-    expect(db.leadFollowup.updateMany).not.toHaveBeenCalled();
-    expect(db.leadFollowup.createMany).not.toHaveBeenCalled();
-    expect(writeAuditLog).not.toHaveBeenCalled();
+    for (const route of ["reception_csv", "field_survey", "manual_entry", "other", null]) {
+      vi.clearAllMocks();
+      db.property.findUnique.mockResolvedValue({ ...property, introductionRoute: route });
+      const res = await propertyPost(req(), pctx);
+      expect(res.status).toBe(409);
+      expect((await res.json()).error.code).toBe("NOT_FOLLOWUP_TARGET");
+      expect(db.leadFollowup.updateMany).not.toHaveBeenCalled();
+      expect(db.leadFollowup.createMany).not.toHaveBeenCalled();
+      expect(writeAuditLog).not.toHaveBeenCalled();
+    }
+  });
+
+  it("DM反響・電話問い合わせ・Web問い合わせ・紹介の物件は、行が無くても止めた印を作れる(2026-11-24 対象を広げた)", async () => {
+    for (const route of ["dm_response", "phone_inquiry", "web_inquiry", "referral"]) {
+      db.property.findUnique.mockResolvedValue({ ...property, introductionRoute: route });
+      const res = await propertyPost(req(), pctx);
+      expect(res.status).toBe(200);
+    }
   });
 
   it("すでに追客の行があれば(導入ルートが後で変わっても)止められる", async () => {
