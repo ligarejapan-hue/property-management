@@ -249,6 +249,18 @@ describe("受け口(POST /lp/[slug]/inquiry)", () => {
       { slug: "baikyaku", reasons: ["honeypot"], utmSource: null, utmCampaign: null, utmContent: null, hasGclid: false },
     ]);
   });
+  it("honeypot の記録に公開名を残すのは、そのページの署名が正しいときだけ(/lp/090-1234-5678 は残さない・@codex #785 P2)", async () => {
+    // 種類が無い・電話番号の形の公開名 + 署名なし → 公開名は null
+    const r1 = await post({ ...VALID, [HONEYPOT_FIELD]: "x" }, "090-1234-5678");
+    expect(r1.status).toBe(200);
+    // 署名はあるが別の公開名のもの → null
+    await post({ ...VALID, [HONEYPOT_FIELD]: "x", ...stamp("souzoku", 5_000) }, "baikyaku");
+    // 署名が正しい → 公開名を残す
+    await post({ ...VALID, [HONEYPOT_FIELD]: "x", ...stamp("baikyaku-compare", 5_000) }, "baikyaku-compare");
+    expect(botCalls("lp_inquiry_bot_blocked").map((c) => c.detail.slug)).toEqual([null, null, "baikyaku-compare"]);
+    expect(JSON.stringify(audit.mock.calls)).not.toContain("090-1234-5678");
+    expect(findFirst).not.toHaveBeenCalled(); // 今までどおり honeypot は種類を引かない
+  });
   it("入力の不備(422)は申込もボット記録も残さない", async () => {
     const res = await post({ name: "", phone: "", consent: "yes" });
     expect(res.status).toBe(422);

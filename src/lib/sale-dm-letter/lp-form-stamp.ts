@@ -63,6 +63,16 @@ export type LpBotVerdict =
   | { kind: "blocked"; reason: "too_fast" }
   | { kind: "suspect"; reasons: ("no_js" | "bad_sig")[] };
 
+/** 署名が正しいか(=この公開名のページを本当にこのサーバーが描いたか)。timing-safe。 */
+export function isLpFormStampValid(slug: string, t: string | null, sig: string | null, key: Buffer | null): boolean {
+  const tt = (t ?? "").trim();
+  const ss = (sig ?? "").trim();
+  if (!key || !T_RE.test(tt) || !SIG_RE.test(ss)) return false;
+  const expected = Buffer.from(sign(slug, tt, key), "utf8");
+  const got = Buffer.from(ss, "utf8");
+  return expected.length === got.length && crypto.timingSafeEqual(expected, got);
+}
+
 /** 送信の印を判定する純関数。値は表示にも記録にも使わない(判定だけ)。 */
 export function evaluateLpBotSignals(input: {
   slug: string;
@@ -73,13 +83,7 @@ export function evaluateLpBotSignals(input: {
   key: Buffer | null;
 }): LpBotVerdict {
   const t = (input.t ?? "").trim();
-  const sig = (input.sig ?? "").trim();
-  let sigOk = false;
-  if (input.key && T_RE.test(t) && SIG_RE.test(sig)) {
-    const expected = Buffer.from(sign(input.slug, t, input.key), "utf8");
-    const got = Buffer.from(sig, "utf8");
-    sigOk = expected.length === got.length && crypto.timingSafeEqual(expected, got);
-  }
+  const sigOk = isLpFormStampValid(input.slug, input.t, input.sig, input.key);
   if (sigOk && input.nowMs - Number(t) * 1000 < LP_MIN_FILL_MS) return { kind: "blocked", reason: "too_fast" };
   const reasons: ("no_js" | "bad_sig")[] = [];
   if ((input.js ?? "").trim() !== "1") reasons.push("no_js");

@@ -15,6 +15,7 @@ import type { AdParams } from "@/lib/sale-dm-letter/lp-public";
 import {
   deriveLpFormStampKey,
   evaluateLpBotSignals,
+  isLpFormStampValid,
   LP_JS_FIELD,
   LP_STAMP_SIG_FIELD,
   LP_STAMP_TIME_FIELD,
@@ -51,7 +52,7 @@ const botAuditLimiter = createRateLimiter({ limit: 60, windowMs: 3_600_000 });
 /** ボット記録。IP・UA・入力値・gclid の値・形の怪しい utm は書かない(CLAUDE.md §8・§19)。上限を超えた分は書かない。 */
 async function writeBotAudit(
   action: "lp_inquiry_bot_blocked" | "lp_inquiry_bot_suspect",
-  slug: string,
+  slug: string | null,
   reasons: LpBotReason[],
   ad: AdParams,
 ): Promise<void> {
@@ -96,9 +97,13 @@ export async function POST(req: NextRequest, { params }: { params: Promise<{ slu
 
   const parsed = parseInquiryForm(get);
   const ad = readAdParams(get);
+  const stampKey = deriveLpFormStampKey();
   // 機械送信は人と同じ「受け付けました」を返すが、silent=ページが申込完了の合図(Google のコンバージョン)を出さない。
+  // honeypot は種類を引く前に返すので、公開名は「形が合うだけ」(/lp/090-1234-5678 も通る)。記録に公開名を残すのは、
+  // このサーバーがその公開名のページを描いた署名があるときだけ(無ければ null・@codex #785 P2)。
   if (parsed.kind === "bot") {
-    await writeBotAudit("lp_inquiry_bot_blocked", slug, ["honeypot"], ad);
+    const verifiedSlug = isLpFormStampValid(slug, get(LP_STAMP_TIME_FIELD), get(LP_STAMP_SIG_FIELD), stampKey) ? slug : null;
+    await writeBotAudit("lp_inquiry_bot_blocked", verifiedSlug, ["honeypot"], ad);
     return reply("done", 200, [], { silent: true });
   }
   const verdict = evaluateLpBotSignals({
@@ -107,9 +112,9 @@ export async function POST(req: NextRequest, { params }: { params: Promise<{ slu
     sig: get(LP_STAMP_SIG_FIELD),
     js: get(LP_JS_FIELD),
     nowMs: Date.now(),
-    key: deriveLpFormStampKey(),
+    key: stampKey,
   });
-  // 署名が正しく、表示から2秒未満の送信=honeypot と同じ扱い。
+  // 署名が正しく、表示から2秒未満の送信=honeypot と同じ扱い(署名が正しい=公開名は本物)。
   if (verdict.kind === "blocked") {
     await writeBotAudit("lp_inquiry_bot_blocked", slug, [verdict.reason], ad);
     return reply("done", 200, [], { silent: true });
