@@ -19,6 +19,7 @@ import { INQUIRY_LIMITS, HONEYPOT_FIELD, INQUIRY_ERROR_MESSAGES } from "./inquir
 export { PUBLIC_PAGE_HEADERS } from "./unsubscribe-page";
 
 export const LP_CTA_LABEL = "無料査定を申し込む";
+export { SERIF as LP_SERIF };
 const CONTACT_ID = "contact";
 export const INQUIRY_SECTION_ID = "inquiry";
 
@@ -34,7 +35,7 @@ export const LP_PAGE_HEADERS: Readonly<Record<string, string>> = {
 
 /** JSON.stringify の出力を <script> タグ内にそのまま埋め込んでも安全な文字列にする。
  *  "</script>" のような文字列が値に含まれていても要素を閉じない(U+003C/E/&をエスケープ)。 */
-function jsString(s: string): string {
+export function jsString(s: string): string {
   return JSON.stringify(s).replace(/</g, "\\u003c").replace(/>/g, "\\u003e").replace(/&/g, "\\u0026");
 }
 
@@ -595,9 +596,9 @@ export const INQUIRY_CLIENT_CHECK_SOURCE = [
  *  - 無いブラウザは preventDefault せず従来どおり通常送信(JS なしと同じ)+二重送信防止だけ。
  *  - 表示は textContent / createElement だけで組む(innerHTML は使わない)。
  *  - bfcache から戻ったとき(pageshow)は送信ボタンを押せる状態に戻す。 */
-const INQUIRY_SUBMIT_SCRIPT = [
-  "(function(){",
-  'var f=document.querySelector("form[data-inquiry]");if(!f)return;',
+const INQUIRY_FORM_SETUP = [
+  "function(f){",
+  "if(!f)return;",
   'var M={done:"お申し込みを受け付けました。内容を確認のうえ、担当者からご連絡いたします。",' +
     'preview:"まだお申し込みを受け付けていません。お急ぎの場合はお電話ください。",' +
     'throttled:"アクセスが集中しています。しばらく時間をおいてもう一度お試しください。",' +
@@ -652,11 +653,15 @@ const INQUIRY_SUBMIT_SCRIPT = [
   ".then(function(r){return r.json()}).then(handle,function(){show([M.fail]);enable()})",
   "});",
   'window.addEventListener("pageshow",function(){var b=btn();if(b){b.disabled=false}sending=false});',
-  "})();",
+  "}",
 ].join("");
+/** 今の LP: ページの最初の申込フォームだけに付ける(1ページ1フォーム)。 */
+const INQUIRY_SUBMIT_SCRIPT = `(function(){var f=document.querySelector("form[data-inquiry]");if(!f)return;(${INQUIRY_FORM_SETUP})(f)})();`;
+/** 1ページに申込フォームが2つある見た目(売却の代表LP の form 案・lp-design-pages.ts)用: すべての申込フォームに同じ動きを付ける。 */
+export const INQUIRY_SUBMIT_ALL_FORMS_SCRIPT = `(function(){var fs=document.querySelectorAll("form[data-inquiry]");for(var i=0;i<fs.length;i++){(${INQUIRY_FORM_SETUP})(fs[i])}})();`;
 
 /** 入力欄の直下に出す赤字の注意書きの置き場(画面内チェックが textContent で埋める・初期は隠す)。 */
-function fieldError(name: string): string {
+export function fieldError(name: string): string {
   return `<p class="fld-err" data-err-for="${name}" role="alert" hidden></p>`;
 }
 
@@ -679,7 +684,7 @@ const BAR_SCRIPT = [
 ].join("");
 
 /** 広告の印の隠し欄(フォーム名は readAdParams が読む URL の鍵と同じ)。空の印は出さない。 */
-const AD_HIDDEN_FIELDS = [
+export const AD_HIDDEN_FIELDS = [
   ["utmSource", "utm_source"], ["utmMedium", "utm_medium"], ["utmCampaign", "utm_campaign"],
   ["utmTerm", "utm_term"], ["utmContent", "utm_content"], ["gclid", "gclid"],
 ] as const;
@@ -908,7 +913,7 @@ export function renderLpPage(input: LpRenderInput): string {
 const OG_DESCRIPTION_MAX = 120;
 
 /** 見出し情報(OGP・設計 2026-10-20 §1)。説明はリード文、無ければ本文の最初の段落(120字まで)。写真が無ければ og:image と twitter:card は出さない。 */
-function ogMetaTags(input: LpRenderInput, pub: LpPublicInput): string {
+export function ogMetaTags(input: LpRenderInput, pub: LpPublicInput): string {
   const descSource = input.lead ?? input.intro.find((p) => p.trim() !== "") ?? input.sections[0]?.paragraphs[0] ?? "";
   const description = [...descSource.replace(/\s+/g, " ").trim()].slice(0, OG_DESCRIPTION_MAX).join("");
   const tags = [
@@ -931,7 +936,7 @@ function ogMetaTags(input: LpRenderInput, pub: LpPublicInput): string {
  *  - gtag.js は Google が随時差し替える配信物なので integrity(SRI)は付けられない。CSP の script-src で配信元だけを許す。
  *  - 申込完了は送信スクリプトが出す lp:inquiry-done の合図で送る(Google広告のコンバージョン=ラベルがあるとき・GA4 の generate_lead=常に)。
  */
-function googleTagScripts(google: { tagId: string; convLabel: string | null }, safeQuery: string): string {
+export function googleTagScripts(google: { tagId: string; convLabel: string | null }, safeQuery: string): string {
   // 許可リスト([A-Z0-9-] / ラベル [A-Za-z0-9_-] か send_to AW-…/ラベル)を通った値だけを受け取る前提。念のためここでも合わなければ出さない。
   if (!/^[A-Z0-9-]+$/.test(google.tagId) || (google.convLabel !== null && !/^[A-Za-z0-9_-]+$/.test(google.convLabel) && !GOOGLE_ADS_SEND_TO_RE.test(google.convLabel))) return "";
   // コンバージョンの送り先: ラベルだけなら AW- のタグ ID のときだけ(G-/GT- にラベルが残っていても送らない・@codex #535 R2 P2)。
