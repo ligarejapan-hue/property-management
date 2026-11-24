@@ -15,6 +15,8 @@
  *   - archived owner は preview 段階で blocker にする（execute は archived を扱わない）。
  *   - source 側の手動編集履歴（ChangeLog / note / externalLinkKey / version>1）は
  *     blocker（情報が消える危険を operator に明示するため）。
+ *   - 2026-11-24: 法人のペア（法人番号・法人名で一致）だけ、ChangeLog / version>1 では
+ *     止めない（項目は統合で master へ引き継ぎ、違う値は master の変更履歴に残す）。
  */
 
 import {
@@ -33,8 +35,11 @@ export type OwnerMergeBlockReason =
   | "source_has_note"                // source.note 入力済み
   | "source_has_external_link_key"   // source.externalLinkKey 入力済み
   | "source_version_gt_1"            // source.version > 1（編集履歴あり）
-  | "name_address_normalize_mismatch" // 正規化キーが master と一致しない（別人の可能性）
-  | "current_address_conflict"       // 現住所が食い違う（どちらが新しいか決められない）
+  // 同じ所有者と確かめられない（氏名住所・法人番号・法人名のどれでも一致しない＝別人の可能性）。
+  // 旧コード name_address_normalize_mismatch（氏名住所だけで見ていた頃）の後継（2026-11-24）。
+  | "owner_identity_mismatch"
+  | "corporate_number_conflict"      // 両方に法人番号があって違う（別の法人）
+  | "current_address_conflict"      // 現住所が食い違う（どちらが新しいか決められない）
   | "current_zip_conflict"           // 同じ現住所なのに郵便番号が食い違う
   | "version_mismatch";              // execute 時: client 送信 version と DB version が一致しない
 
@@ -71,11 +76,21 @@ export interface OwnerMergeSafetyInput {
    */
   sourceChangeLogFields?: readonly string[];
   /**
-   * master と source の (normalizeName + normalizeAddress) が一致するか。
+   * master と source が同じ所有者と言えるか（resolveOwnerMergeMatch の matchedBy !== null）。
+   * 氏名住所・法人番号・法人名のどれかで一致すれば true。
    * candidate API が出した duplicate グループは原則一致するはずだが、
    * 個別ペアで execute 直前に再検証する。一致しない場合は別人の可能性。
    */
   normalizeKeyMatches: boolean;
+  /**
+   * 法人のペア（法人番号か法人名の経路で同じと言える・resolveOwnerMergeMatch）。
+   * true のときだけ source の変更履歴・version>1 で止めない（2026-11-24 発注者承認）。
+   * 法人は住所・電話の直しが入りやすく、門のままだと法人の重複がほぼ統合できないため。
+   * ⚠備考・外部リンクキーは法人でも止める（消える情報を引き継ぐ先が無い）。
+   */
+  corporatePair?: boolean;
+  /** 両方の法人番号が違う（resolveOwnerMergeMatch の corporateNumberConflict）。 */
+  corporateNumberConflict?: boolean;
 }
 
 export type OwnerMergeSafetyResult =
@@ -118,27 +133,30 @@ export function checkOwnerMergeSafety(
   const relaxForCurrentAddress =
     handoverWrites(handover) &&
     isCurrentAddressOnlyChangeLog(input.sourceChangeLogFields ?? []);
+  // 法人のペアは履歴・version の門を緩める（項目は統合側で master へ引き継ぐ・記録に残す）。
+  const relaxHistory = relaxForCurrentAddress || input.corporatePair === true;
 
   // source 側の手動編集情報を慎重に保護
-  if (input.sourceChangeLogCount > 0 && !relaxForCurrentAddress)
+  if (input.sourceChangeLogCount > 0 && !relaxHistory)
     reasons.push("source_has_changelog");
   if (input.sourceHasNote) reasons.push("source_has_note");
   if (input.sourceHasExternalLinkKey) reasons.push("source_has_external_link_key");
-  if (input.sourceVersion > 1 && !relaxForCurrentAddress)
+  if (input.sourceVersion > 1 && !relaxHistory)
     reasons.push("source_version_gt_1");
 
   // candidate API が出した duplicate ペアでも、preview 直前に再検証する。
-  // master / source の正規化キーが揃わなければ別人の可能性 → blocker。
+  // 同じ所有者と言えなければ別人の可能性 → blocker。
   //
-  // ただし master または source が存在しない場合は key 比較自体が行われていない
-  // ため、name_address_normalize_mismatch は出さない（master_not_found /
+  // ただし master または source が存在しない場合は比較自体が行われていない
+  // ため、owner_identity_mismatch は出さない（master_not_found /
   // source_not_found と同時に出ると原因診断として誤解を招くため）。
-  if (
-    input.masterExists &&
-    input.sourceExists &&
-    !input.normalizeKeyMatches
-  ) {
-    reasons.push("name_address_normalize_mismatch");
+  // 法人番号の食い違いは、それ自体が理由なので重ねて出さない。
+  if (input.masterExists && input.sourceExists) {
+    if (input.corporateNumberConflict) {
+      reasons.push("corporate_number_conflict");
+    } else if (!input.normalizeKeyMatches) {
+      reasons.push("owner_identity_mismatch");
+    }
   }
 
   if (reasons.length > 0) return { ok: false, reasons };

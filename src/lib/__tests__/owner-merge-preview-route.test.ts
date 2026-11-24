@@ -35,6 +35,8 @@ vi.mock("@/lib/api-helpers", () => {
       role: "admin",
     }),
     getUserPermissions: vi.fn(),
+    // 法人番号の経路は owner_corporate_number=full の人だけ（一覧の法人番号一致と同じ）。
+    getOwnerDisplayConfig: vi.fn(async () => ({ corporateNumber: "full" })),
     handleApiError: vi.fn((error: unknown) => {
       if (error instanceof MockApiError) {
         return Response.json(
@@ -240,7 +242,7 @@ describe("POST /api/admin/owners/correction/merge-preview", () => {
     expect(res.status).toBe(404);
   });
 
-  it("source のみ存在しない → 200 + blockReasons=[source_not_found] / name_address_normalize_mismatch は含めない", async () => {
+  it("source のみ存在しない → 200 + blockReasons=[source_not_found] / owner_identity_mismatch は含めない", async () => {
     pm.owner.findUnique.mockImplementation(({ where }: { where: { id: string } }) => {
       if (where.id === MASTER_ID) {
         return Promise.resolve(
@@ -257,10 +259,10 @@ describe("POST /api/admin/owners/correction/merge-preview", () => {
     expect(json.eligible).toBe(false);
     expect(json.blockReasons).toContain("source_not_found");
     // key 比較は不能なので mismatch は出さない（原因診断の誤解防止）
-    expect(json.blockReasons).not.toContain("name_address_normalize_mismatch");
+    expect(json.blockReasons).not.toContain("owner_identity_mismatch");
   });
 
-  it("master のみ存在しない → 200 + blockReasons=[master_not_found] / name_address_normalize_mismatch は含めない", async () => {
+  it("master のみ存在しない → 200 + blockReasons=[master_not_found] / owner_identity_mismatch は含めない", async () => {
     pm.owner.findUnique.mockImplementation(({ where }: { where: { id: string } }) => {
       if (where.id === SOURCE_ID) {
         return Promise.resolve(
@@ -276,7 +278,7 @@ describe("POST /api/admin/owners/correction/merge-preview", () => {
     const json = await res.json();
     expect(json.eligible).toBe(false);
     expect(json.blockReasons).toContain("master_not_found");
-    expect(json.blockReasons).not.toContain("name_address_normalize_mismatch");
+    expect(json.blockReasons).not.toContain("owner_identity_mismatch");
   });
 
   it("source が archived → 200 + blockReasons=[source_archived]", async () => {
@@ -313,7 +315,7 @@ describe("POST /api/admin/owners/correction/merge-preview", () => {
     expect(json.summary.sourceChangeLogCount).toBe(3);
   });
 
-  it("正規化キー不一致 → blockReasons=[name_address_normalize_mismatch]", async () => {
+  it("正規化キー不一致 → blockReasons=[owner_identity_mismatch]", async () => {
     pm.owner.findUnique.mockImplementation(({ where }: { where: { id: string } }) => {
       if (where.id === MASTER_ID) {
         return Promise.resolve(
@@ -329,7 +331,7 @@ describe("POST /api/admin/owners/correction/merge-preview", () => {
     );
     const json = await res.json();
     expect(json.eligible).toBe(false);
-    expect(json.blockReasons).toContain("name_address_normalize_mismatch");
+    expect(json.blockReasons).toContain("owner_identity_mismatch");
     expect(json.summary.normalizeKeyMatches).toBe(false);
   });
 
@@ -442,7 +444,7 @@ describe("POST /api/admin/owners/correction/merge-preview", () => {
     const json = await res.json();
     expect(json.summary.normalizeKeyMatches).toBe(true);
     expect(json.eligible).toBe(true);
-    expect(json.blockReasons).not.toContain("name_address_normalize_mismatch");
+    expect(json.blockReasons).not.toContain("owner_identity_mismatch");
   });
 
   it("addressなし fallback: zip が違うペアは normalizeKeyMatches=false / blockReason", async () => {
@@ -475,7 +477,7 @@ describe("POST /api/admin/owners/correction/merge-preview", () => {
     const json = await res.json();
     expect(json.summary.normalizeKeyMatches).toBe(false);
     expect(json.eligible).toBe(false);
-    expect(json.blockReasons).toContain("name_address_normalize_mismatch");
+    expect(json.blockReasons).toContain("owner_identity_mismatch");
   });
 
   it("addressなし fallback: name 不一致は normalizeKeyMatches=false / blockReason", async () => {
@@ -507,7 +509,7 @@ describe("POST /api/admin/owners/correction/merge-preview", () => {
     );
     const json = await res.json();
     expect(json.summary.normalizeKeyMatches).toBe(false);
-    expect(json.blockReasons).toContain("name_address_normalize_mismatch");
+    expect(json.blockReasons).toContain("owner_identity_mismatch");
   });
 
   it("片方だけ address あり / 片方 null → normalizeKeyMatches=false", async () => {
@@ -576,5 +578,114 @@ describe("POST /api/admin/owners/correction/merge-preview", () => {
         "source_version_gt_1",
       ]),
     );
+  });
+});
+
+// ---- 2026-11-24: 法人のペア（法人番号一致・法人名一致）も統合できる ----
+describe("POST merge-preview: 法人のペア", () => {
+  function setPair(
+    master: Record<string, unknown>,
+    source: Record<string, unknown>,
+  ) {
+    pm.owner.findUnique.mockImplementation(({ where }: { where: { id: string } }) => {
+      if (where.id === MASTER_ID) return Promise.resolve({ ...makeOwner({ id: MASTER_ID }), ...master });
+      if (where.id === SOURCE_ID) return Promise.resolve({ ...makeOwner({ id: SOURCE_ID }), ...source });
+      return Promise.resolve(null);
+    });
+  }
+
+  it("住所が違っても同じ法人名なら eligible・summary.matchedBy=corporate_name", async () => {
+    setPair(
+      { name: "株式会社サンプル商事", address: "東京都架空区1-1" },
+      { name: "㈱サンプル商事", address: "大阪府架空市2-2" },
+    );
+    const res = await POST(makeRequest({ masterId: MASTER_ID, sourceId: SOURCE_ID }));
+    const json = await res.json();
+    expect(json.eligible).toBe(true);
+    expect(json.summary.matchedBy).toBe("corporate_name");
+    expect(json.summary.normalizeKeyMatches).toBe(true);
+  });
+
+  it("法人のペアは source の変更履歴・version>1 で止めない", async () => {
+    setPair(
+      { name: "株式会社サンプル商事", address: "東京都架空区1-1" },
+      { name: "株式会社サンプル商事", address: "大阪府架空市2-2", version: 3 },
+    );
+    pm.changeLog.count.mockResolvedValue(2);
+    const res = await POST(makeRequest({ masterId: MASTER_ID, sourceId: SOURCE_ID }));
+    const json = await res.json();
+    expect(json.eligible).toBe(true);
+    expect(json.blockReasons).toEqual([]);
+  });
+
+  it("法人のペアでも source の備考は止める", async () => {
+    setPair(
+      { name: "株式会社サンプル商事", address: "東京都架空区1-1" },
+      { name: "株式会社サンプル商事", address: "大阪府架空市2-2", note: "架空のメモ" },
+    );
+    const res = await POST(makeRequest({ masterId: MASTER_ID, sourceId: SOURCE_ID }));
+    const json = await res.json();
+    expect(json.blockReasons).toContain("source_has_note");
+  });
+
+  it("法人番号が同じなら名前が違っても eligible（corporate_number）", async () => {
+    setPair(
+      { name: "株式会社サンプル商事", address: "東京都架空区1-1", corporateNumber: "1234567890123" },
+      { name: "サンプル商事", address: "大阪府架空市2-2", corporateNumber: "1234-5678-90123" },
+    );
+    const res = await POST(makeRequest({ masterId: MASTER_ID, sourceId: SOURCE_ID }));
+    const json = await res.json();
+    expect(json.eligible).toBe(true);
+    expect(json.summary.matchedBy).toBe("corporate_number");
+  });
+
+  it("法人番号を見られない人には法人番号の経路を使わない（owner_identity_mismatch）", async () => {
+    const { getOwnerDisplayConfig } = await import("@/lib/api-helpers");
+    vi.mocked(getOwnerDisplayConfig).mockResolvedValueOnce({ corporateNumber: "masked" } as never);
+    setPair(
+      { name: "株式会社サンプル商事", address: "東京都架空区1-1", corporateNumber: "1234567890123" },
+      { name: "サンプル商事", address: "大阪府架空市2-2", corporateNumber: "1234567890123" },
+    );
+    const res = await POST(makeRequest({ masterId: MASTER_ID, sourceId: SOURCE_ID }));
+    const json = await res.json();
+    expect(json.eligible).toBe(false);
+    expect(json.blockReasons).toContain("owner_identity_mismatch");
+  });
+
+  it("両方の法人番号が違えば同じ法人名でも corporate_number_conflict", async () => {
+    setPair(
+      { name: "株式会社サンプル商事", address: "東京都架空区1-1", corporateNumber: "1234567890123" },
+      { name: "株式会社サンプル商事", address: "東京都架空区1-1", corporateNumber: "9876543210987" },
+    );
+    const res = await POST(makeRequest({ masterId: MASTER_ID, sourceId: SOURCE_ID }));
+    const json = await res.json();
+    expect(json.eligible).toBe(false);
+    expect(json.blockReasons).toContain("corporate_number_conflict");
+    expect(json.blockReasons).not.toContain("owner_identity_mismatch");
+  });
+
+  it("個人は住所が違えば従来どおり owner_identity_mismatch", async () => {
+    setPair(
+      { name: "架空太郎", address: "東京都架空区1-1" },
+      { name: "架空太郎", address: "大阪府架空市2-2" },
+    );
+    const res = await POST(makeRequest({ masterId: MASTER_ID, sourceId: SOURCE_ID }));
+    const json = await res.json();
+    expect(json.eligible).toBe(false);
+    expect(json.blockReasons).toContain("owner_identity_mismatch");
+  });
+
+  it("引き継ぐ項目・記録に残す項目を項目名だけで返す（値は返さない）", async () => {
+    setPair(
+      { name: "株式会社サンプル商事", address: "東京都架空区1-1", phone: null },
+      { name: "株式会社サンプル商事", address: "大阪府架空市2-2", phone: "06-0000-0000", zip: "530-0000" },
+    );
+    const res = await POST(makeRequest({ masterId: MASTER_ID, sourceId: SOURCE_ID }));
+    const json = await res.json();
+    expect(json.summary.corporateHandoverFields).toEqual(["phone"]);
+    expect(json.summary.corporateKeptFields).toEqual(["zip"]);
+    const text = JSON.stringify(json);
+    expect(text).not.toContain("06-0000-0000");
+    expect(text).not.toContain("架空市");
   });
 });

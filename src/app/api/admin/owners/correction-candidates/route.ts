@@ -13,6 +13,7 @@ import { writeAuditLog } from "@/lib/audit";
 import {
   buildOwnerDuplicateCandidateKey,
   buildOwnerCorporateNumberDuplicateKey,
+  buildOwnerCorporateNameDuplicateKey,
   buildOwnerExternalLinkKeyDuplicateKey,
   isOwnerAddressEffectivelyEmpty,
 } from "@/lib/owner-correction";
@@ -23,11 +24,13 @@ import { propertyVisibilityScopeWhere } from "@/lib/property-list-query";
 type RecommendedAction = "hold" | "review" | "delete_candidate" | "merge_candidate";
 
 // Phase 2-A: 重複グループの一致経路。1 候補が複数経路で同時にヒットする場合、
-// 既存挙動を優先するため name_address > corporate_number > external_link_key の順で
-// 1 つだけ採用する（duplicateGroupId / duplicateGroupSize と同じグループに紐づく）。
+// 既存挙動を優先するため name_address > corporate_number > corporate_name > external_link_key
+// の順で 1 つだけ採用する（duplicateGroupId / duplicateGroupSize と同じグループに紐づく）。
+// corporate_name（法人名一致）は 2026-11-24 追加。
 type DuplicateMatchedBy =
   | "name_address"
   | "corporate_number"
+  | "corporate_name"
   | "external_link_key";
 
 type Candidate = {
@@ -79,6 +82,7 @@ type Candidate = {
    * duplicate グループの opaque な ID。
    *   - name_address 一致         : "dup-N"
    *   - corporate_number 一致     : "dup-cn-N"
+   *   - corporate_name 一致       : "dup-cname-N"
    *   - external_link_key 一致    : "dup-elk-N"
    * グループサイズ >= 2 のグループに属する candidate のみ非 null。
    * **raw name/address/corporateNumber/externalLinkKey/normalized key を
@@ -92,7 +96,7 @@ type Candidate = {
   /**
    * Phase 2-A: duplicate グループへ採用された経路。複数経路でヒットした
    * candidate にも 1 つだけ付与する（優先順: name_address > corporate_number
-   * > external_link_key）。groupId が null なら null。
+   * > corporate_name > external_link_key）。groupId が null なら null。
    */
   duplicateMatchedBy: DuplicateMatchedBy | null;
   /**
@@ -341,22 +345,24 @@ export async function GET(request: NextRequest) {
       };
     });
 
-    // 5. 重複検出: 3 系統で並行にグループ化する。
+    // 5. 重複検出: 4 系統で並行にグループ化する。
     //    - name_address: buildOwnerDuplicateCandidateKey（既存 / merge-preview と共有）
     //    - corporate_number: buildOwnerCorporateNumberDuplicateKey（13 桁 digits）
+    //    - corporate_name: buildOwnerCorporateNameDuplicateKey（法人格の語を含む名前だけ・住所は問わない）
     //    - external_link_key: buildOwnerExternalLinkKeyDuplicateKey（trim 後非空）
     //
     //    1 owner が複数経路で同時にヒットした場合、duplicateGroupId は **1 つ**だけ
     //    保持する（型上単一フィールド）。優先順位は既存挙動を維持するため
-    //    name_address > corporate_number > external_link_key。先に当たった経路で
+    //    name_address > corporate_number > corporate_name > external_link_key。先に当たった経路で
     //    duplicateGroupId / duplicateGroupSize / duplicateMatchedBy が確定したら
     //    以降の経路では上書きしない。
     //
     //    types["duplicate"] は経路に関わらず実際に group に組まれた候補へ一度だけ
     //    付与する。一方 recommendedAction="merge_candidate" への昇格は
-    //    **name_address 限定**（merge-preview が name+address 検証しか持たないため、
-    //    corporate_number / external_link_key 由来候補を merge_candidate にすると
-    //    UI 上 merge できそうに見えて preview/execute では block されてしまう）。
+    //    **統合の再確認（resolveOwnerMergeMatch）が通す経路だけ**
+    //    = name_address / corporate_number / corporate_name（2026-11-24 から法人の2経路も統合できる）。
+    //    external_link_key は統合の再確認が通さないので昇格させない
+    //    （UI 上 merge できそうに見えて preview/execute で block されるのを防ぐ）。
     const candidateById = new Map<string, Candidate>();
     for (const c of candidates) candidateById.set(c.id, c);
 
@@ -397,7 +403,18 @@ export async function GET(request: NextRequest) {
       }
     }
 
-    // 5-c. external_link_key グループ
+    // 5-c. corporate_name グループ（法人名一致・2026-11-24）。
+    //      氏名は name_address と同じく生値でそろえる（表示のマスクは後段で掛ける）。
+    const cnameGroups = new Map<string, string[]>();
+    for (const o of owners) {
+      const key = buildOwnerCorporateNameDuplicateKey(o.name);
+      if (key === null) continue;
+      const arr = cnameGroups.get(key) ?? [];
+      arr.push(o.id);
+      cnameGroups.set(key, arr);
+    }
+
+    // 5-d. external_link_key グループ
     const elkGroups = new Map<string, string[]>();
     for (const o of owners) {
       const key = buildOwnerExternalLinkKeyDuplicateKey(o.externalLinkKey);
@@ -437,29 +454,29 @@ export async function GET(request: NextRequest) {
       // 未割当が 1 人以下なら group を作らない（孤立 group 防止）。
       if (unassigned.length < 2) return false;
       const size = unassigned.length;
-      // Codex P2-round-2: merge_candidate への昇格は name_address group 限定。
-      // merge-preview API は buildOwnerDuplicateCandidateKey (name+address) でしか
-      // ペア検証していないため、corporate_number / external_link_key 由来の候補に
+      // Codex P2-round-2: merge_candidate への昇格は、統合の再確認
+      // （resolveOwnerMergeMatch）が通す経路だけ。通さない経路の候補に
       // merge_candidate を付けると UI 上 merge できそうに見えて preview/execute で
-      // name_address_normalize_mismatch によりブロックされ、operator に誤解を
-      // 与える機能不整合になる。
+      // owner_identity_mismatch によりブロックされ、operator に誤解を与える。
       //
-      // Codex P1 (round 3): non-name 経路 (corporate_number / external_link_key)
+      // Codex P1 (round 3): 統合できない経路 (external_link_key)
       // で duplicate と判定された候補は **delete_candidate を維持しない**。
       // orphan + import success + safeguards なしの owner が「未解決の重複候補」
       // のまま delete_candidate として残ると、orphan タブの archive ボタンから
       // 削除されてデータ損失する。データ損失防止を優先し、non-name duplicate は
       // 少なくとも review に落として人間の確認に回す（hold はそのまま維持）。
-      const promoteToMergeCandidate = matchedBy === "name_address";
-      const nonNameMatchedBy =
+      //
+      // 2026-11-24: 法人番号一致・法人名一致も統合の再確認が通す経路になったので昇格させる。
+      // 昇格で delete_candidate も merge_candidate に上がる＝孤立タブの削除ボタンは出ない
+      // （上の round 3 のデータ損失防止は保たれる）。要確認に落とすのは external_link_key だけ。
+      const promoteToMergeCandidate =
+        matchedBy === "name_address" ||
         matchedBy === "corporate_number" ||
-        matchedBy === "external_link_key";
-      const nonNameReviewReason =
-        matchedBy === "corporate_number"
-          ? "corporate_number_duplicate_requires_review"
-          : matchedBy === "external_link_key"
-            ? "external_link_key_duplicate_requires_review"
-            : null;
+        matchedBy === "corporate_name";
+      const nonNameMatchedBy = matchedBy === "external_link_key";
+      const nonNameReviewReason = nonNameMatchedBy
+        ? "external_link_key_duplicate_requires_review"
+        : null;
       for (const c of unassigned) {
         if (!c.types.includes("duplicate")) c.types.push("duplicate");
         if (
@@ -494,7 +511,7 @@ export async function GET(request: NextRequest) {
       return true;
     }
 
-    // 5-d. opaque ID 割当（Map 挿入順で安定した連番）
+    // 5-e. opaque ID 割当（Map 挿入順で安定した連番）
     //      counter は assignGroup 成功時のみ進める（飛び番号を作らない）。
     let naCounter = 0;
     for (const group of nameAddrGroups.values()) {
@@ -508,6 +525,13 @@ export async function GET(request: NextRequest) {
       if (group.length < 2) continue;
       if (assignGroup(group, `dup-cn-${cnCounter + 1}`, "corporate_number")) {
         cnCounter++;
+      }
+    }
+    let cnameCounter = 0;
+    for (const group of cnameGroups.values()) {
+      if (group.length < 2) continue;
+      if (assignGroup(group, `dup-cname-${cnameCounter + 1}`, "corporate_name")) {
+        cnameCounter++;
       }
     }
     let elkCounter = 0;
@@ -550,6 +574,9 @@ export async function GET(request: NextRequest) {
       ).length,
       corporate_number: candidates.filter(
         (c) => c.duplicateMatchedBy === "corporate_number",
+      ).length,
+      corporate_name: candidates.filter(
+        (c) => c.duplicateMatchedBy === "corporate_name",
       ).length,
       external_link_key: candidates.filter(
         (c) => c.duplicateMatchedBy === "external_link_key",

@@ -99,6 +99,19 @@ function normalizeName(name: string): string {
 }
 
 /**
+ * 名前に法人格を明示する語（株式会社・(株)・各種法人 など）を含むか。
+ *
+ * 所有者の重複候補「法人名一致」と、統合で法人のペアとして扱うかの判定に使う
+ * （2026-11-24）。⚠語彙は CORP_MARKER_RE の1か所だけに持つ（ここで別の表を作らない）。
+ * 組織名サフィックス（管理組合・町内会 等）は含めない＝法人格の語だけを見る。
+ */
+export function hasCorporateMarkerWord(name: string | null | undefined): boolean {
+  if (typeof name !== "string") return false;
+  const normalized = normalizeName(name);
+  return normalized.length > 0 && CORP_MARKER_RE.test(normalized);
+}
+
+/**
  * 名称が組織名サフィックスのいずれかで終わるか（語尾一致）。
  * 正規化後の文字列に対して判定する。空文字は false。
  */

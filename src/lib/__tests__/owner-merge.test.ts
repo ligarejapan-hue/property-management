@@ -76,13 +76,13 @@ describe("checkOwnerMergeSafety", () => {
     if (!r.ok) expect(r.reasons).toContain("source_version_gt_1");
   });
 
-  it("normalizeKeyMatches=false（両者存在） → name_address_normalize_mismatch", () => {
+  it("normalizeKeyMatches=false（両者存在） → owner_identity_mismatch", () => {
     const r = checkOwnerMergeSafety({ ...baseOk, normalizeKeyMatches: false });
     expect(r.ok).toBe(false);
-    if (!r.ok) expect(r.reasons).toContain("name_address_normalize_mismatch");
+    if (!r.ok) expect(r.reasons).toContain("owner_identity_mismatch");
   });
 
-  it("master_not_found のとき name_address_normalize_mismatch は含めない", () => {
+  it("master_not_found のとき owner_identity_mismatch は含めない", () => {
     const r = checkOwnerMergeSafety({
       ...baseOk,
       masterExists: false,
@@ -91,11 +91,11 @@ describe("checkOwnerMergeSafety", () => {
     expect(r.ok).toBe(false);
     if (!r.ok) {
       expect(r.reasons).toContain("master_not_found");
-      expect(r.reasons).not.toContain("name_address_normalize_mismatch");
+      expect(r.reasons).not.toContain("owner_identity_mismatch");
     }
   });
 
-  it("source_not_found のとき name_address_normalize_mismatch は含めない", () => {
+  it("source_not_found のとき owner_identity_mismatch は含めない", () => {
     const r = checkOwnerMergeSafety({
       ...baseOk,
       sourceExists: false,
@@ -104,11 +104,11 @@ describe("checkOwnerMergeSafety", () => {
     expect(r.ok).toBe(false);
     if (!r.ok) {
       expect(r.reasons).toContain("source_not_found");
-      expect(r.reasons).not.toContain("name_address_normalize_mismatch");
+      expect(r.reasons).not.toContain("owner_identity_mismatch");
     }
   });
 
-  it("master/source 両方とも存在しないときも name_address_normalize_mismatch は含めない", () => {
+  it("master/source 両方とも存在しないときも owner_identity_mismatch は含めない", () => {
     const r = checkOwnerMergeSafety({
       ...baseOk,
       masterExists: false,
@@ -120,7 +120,7 @@ describe("checkOwnerMergeSafety", () => {
       expect(r.reasons).toEqual(
         expect.arrayContaining(["master_not_found", "source_not_found"]),
       );
-      expect(r.reasons).not.toContain("name_address_normalize_mismatch");
+      expect(r.reasons).not.toContain("owner_identity_mismatch");
     }
   });
 
@@ -144,7 +144,7 @@ describe("checkOwnerMergeSafety", () => {
     expect(r.ok).toBe(false);
     if (!r.ok) {
       expect(r.reasons).toContain("source_not_found");
-      expect(r.reasons).not.toContain("name_address_normalize_mismatch");
+      expect(r.reasons).not.toContain("owner_identity_mismatch");
       // sourceIsArchived は sourceExists=true の時のみ反映するため、ここでは出ない
       expect(r.reasons).not.toContain("source_archived");
     }

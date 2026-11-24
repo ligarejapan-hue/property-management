@@ -38,6 +38,8 @@ vi.mock("@/lib/api-helpers", () => {
       role: "admin",
     }),
     getUserPermissions: vi.fn(),
+    // 法人番号の経路は owner_corporate_number=full の人だけ（一覧の法人番号一致と同じ）。
+    getOwnerDisplayConfig: vi.fn(async () => ({ corporateNumber: "full" })),
     handleApiError: vi.fn((error: unknown) => {
       if (error instanceof MockApiError) {
         return Response.json(
@@ -484,7 +486,7 @@ describe("POST merge: dryRun=true", () => {
       }),
     );
     const json = await res.json();
-    expect(json.blockReasons).toContain("name_address_normalize_mismatch");
+    expect(json.blockReasons).toContain("owner_identity_mismatch");
   });
 });
 
@@ -1018,5 +1020,244 @@ describe("POST merge: 現住所の引き継ぎ", () => {
     );
     const res = await execMerge();
     expect(res.status).toBe(200);
+  });
+});
+
+// ── 2026-11-24: 法人のペア（法人番号一致・法人名一致）の統合 ───────────────────
+
+const PERMS_CORP_WRITE = [
+  ...FULL_PERMS,
+  { resource: "owner", action: "write", granted: true },
+  { resource: "owner_address", action: "edit", granted: true },
+  { resource: "owner_zip", action: "edit", granted: true },
+  { resource: "owner_phone", action: "edit", granted: true },
+  { resource: "owner_corporate_number", action: "edit", granted: true },
+];
+
+const CORP_MASTER = {
+  ...makeOwner({ id: MASTER_ID, name: "株式会社サンプル商事", address: "東京都架空区1-1" }),
+  corporateNumber: null as string | null,
+  currentAddress: null,
+  currentZip: null,
+};
+const CORP_SOURCE = {
+  ...makeOwner({ id: SOURCE_ID, name: "㈱サンプル商事", address: "大阪府架空市2-2", phone: "06-0000-0000" }),
+  corporateNumber: null as string | null,
+  currentAddress: null,
+  currentZip: null,
+  version: 3,
+};
+
+/** 法人のペアを置く。fresh を渡すと tx 内の読み直しだけ差し替える（再確認のテスト用）。 */
+function setupCorpPair(
+  master: Record<string, unknown> = {},
+  source: Record<string, unknown> = {},
+  fresh?: { master?: Record<string, unknown>; source?: Record<string, unknown> },
+) {
+  setupEligiblePair();
+  const m = { ...CORP_MASTER, ...master };
+  const s = { ...CORP_SOURCE, ...source };
+  pm.owner.findUnique.mockImplementation(({ where }: { where: { id: string } }) =>
+    Promise.resolve(where.id === MASTER_ID ? m : where.id === SOURCE_ID ? s : null),
+  );
+  const fm = { ...m, ...(fresh?.master ?? {}) };
+  const fsrc = { ...s, ...(fresh?.source ?? {}) };
+  pm._tx.owner.findUnique.mockImplementation(({ where }: { where: { id: string } }) =>
+    Promise.resolve(where.id === MASTER_ID ? fm : where.id === SOURCE_ID ? fsrc : null),
+  );
+  // source は法人の住所・電話の直しで履歴が付いている
+  const rows = [{ fieldName: "phone" }, { fieldName: "address" }];
+  pm.changeLog.count.mockResolvedValue(rows.length);
+  pm.changeLog.findMany.mockResolvedValue(rows);
+  pm._tx.changeLog.findMany.mockResolvedValue(rows);
+}
+
+function execCorpMerge() {
+  return POST(
+    makeRequest({
+      masterId: MASTER_ID,
+      sourceId: SOURCE_ID,
+      masterVersion: 1,
+      sourceVersion: 3,
+      dryRun: false,
+    }),
+  );
+}
+
+function masterUpdates() {
+  return pm._tx.owner.updateMany.mock.calls
+    .map((c: unknown[]) => c[0] as { where: { id: string }; data: Record<string, unknown> })
+    .filter((c) => c.where.id === MASTER_ID && c.data.version !== undefined);
+}
+
+function changeLogEntries() {
+  return (pm._tx.changeLog.createMany.mock.calls[0]?.[0]?.data ?? []) as Array<{
+    targetId: string;
+    fieldName: string;
+    oldValue: string | null;
+    newValue: string | null;
+  }>;
+}
+
+describe("POST merge: 法人のペア", () => {
+  beforeEach(() => {
+    vi.mocked(getUserPermissions).mockResolvedValue(PERMS_CORP_WRITE);
+  });
+
+  it("住所違いの同じ法人名・source に履歴と version>1 があっても統合できる（dryRun の summary に経路と項目名）", async () => {
+    setupCorpPair();
+    const res = await POST(
+      makeRequest({
+        masterId: MASTER_ID,
+        sourceId: SOURCE_ID,
+        masterVersion: 1,
+        sourceVersion: 3,
+        dryRun: true,
+      }),
+    );
+    const json = await res.json();
+    expect(json.eligible).toBe(true);
+    expect(json.summary.matchedBy).toBe("corporate_name");
+    expect(json.summary.corporateHandoverFields).toEqual(["phone"]);
+    expect(JSON.stringify(json)).not.toContain("06-0000-0000");
+  });
+
+  it("master が空の電話を写し、master の版上げは1回だけ・同じ更新で書く", async () => {
+    setupCorpPair();
+    const res = await execCorpMerge();
+    expect(res.status).toBe(200);
+    const updates = masterUpdates();
+    expect(updates).toHaveLength(1);
+    expect(updates[0].data.phone).toBe("06-0000-0000");
+    // 住所は master にあるので写さない
+    expect(updates[0].data.address).toBeUndefined();
+    expect(changeLogEntries()).toContainEqual(
+      expect.objectContaining({
+        targetId: MASTER_ID,
+        fieldName: "phone",
+        oldValue: null,
+        newValue: "06-0000-0000",
+      }),
+    );
+  });
+
+  it("source の登記上の住所は必ず master の変更履歴に1行残る", async () => {
+    setupCorpPair();
+    await execCorpMerge();
+    const rows = changeLogEntries().filter((e) => e.fieldName === "_merged_source_address");
+    expect(rows).toEqual([
+      expect.objectContaining({ targetId: MASTER_ID, newValue: "大阪府架空市2-2" }),
+    ]);
+  });
+
+  it("両方に電話があって違うなら写さず、source の値を記録に残す", async () => {
+    setupCorpPair({ phone: "03-1111-1111" });
+    const res = await execCorpMerge();
+    expect(res.status).toBe(200);
+    expect(masterUpdates()[0].data.phone).toBeUndefined();
+    expect(changeLogEntries()).toContainEqual(
+      expect.objectContaining({
+        targetId: MASTER_ID,
+        fieldName: "_merged_source_phone",
+        newValue: "06-0000-0000",
+      }),
+    );
+  });
+
+  it("master の住所・郵便番号・法人番号が空なら写す（法人番号は13桁にそろえる）", async () => {
+    setupCorpPair(
+      { address: null, corporateNumber: null },
+      { zip: "530-0000", corporateNumber: "1234-5678-90123" },
+    );
+    const res = await execCorpMerge();
+    expect(res.status).toBe(200);
+    const data = masterUpdates()[0].data;
+    expect(data.address).toBe("大阪府架空市2-2");
+    expect(data.zip).toBe("530-0000");
+    expect(data.corporateNumber).toBe("1234567890123");
+  });
+
+  it("⚠写す項目の編集権限が無ければ 403（黙って捨てない）", async () => {
+    vi.mocked(getUserPermissions).mockResolvedValue(
+      PERMS_CORP_WRITE.filter((p) => p.resource !== "owner_phone"),
+    );
+    setupCorpPair();
+    const res = await execCorpMerge();
+    expect(res.status).toBe(403);
+    expect(pm._tx.owner.updateMany).not.toHaveBeenCalled();
+  });
+
+  it("⚠tx 内で読み直した値で写す項目が増え、その権限が無ければ 403（何も書かない）", async () => {
+    vi.mocked(getUserPermissions).mockResolvedValue(
+      PERMS_CORP_WRITE.filter((p) => p.resource !== "owner_phone"),
+    );
+    // 事前: master に電話あり（写さない＝電話の権限は要らない）→ tx 内: master の電話が消えていた
+    setupCorpPair({ phone: "03-1111-1111" }, {}, { master: { phone: null } });
+    const res = await execCorpMerge();
+    expect(res.status).toBe(403);
+    expect(pm._tx.changeLog.createMany).not.toHaveBeenCalled();
+    expect(masterUpdates()).toHaveLength(0);
+  });
+
+  it("⚠tx 内で読み直すと別の名前（個人）になっていたら止める（owner_identity_mismatch）", async () => {
+    setupCorpPair({}, {}, { source: { name: "架空太郎" } });
+    const res = await execCorpMerge();
+    expect(res.status).toBe(422);
+    const body = await res.json();
+    expect(body.error.blockReasons).toContain("owner_identity_mismatch");
+    expect(pm._tx.changeLog.createMany).not.toHaveBeenCalled();
+  });
+
+  it("⚠tx 内で読み直すと法人番号が食い違っていたら止める（corporate_number_conflict）", async () => {
+    setupCorpPair(
+      { corporateNumber: "1234567890123" },
+      {},
+      { source: { corporateNumber: "9876543210987" } },
+    );
+    const res = await execCorpMerge();
+    expect(res.status).toBe(422);
+    const body = await res.json();
+    expect(body.error.blockReasons).toContain("corporate_number_conflict");
+  });
+
+  it("個人は従来どおり: 住所が違えば止め、同じなら項目の引き継ぎも住所の記録もしない", async () => {
+    setupCorpPair({ name: "架空太郎" }, { name: "架空太郎", version: 1 });
+    pm.changeLog.count.mockResolvedValue(0);
+    pm.changeLog.findMany.mockResolvedValue([]);
+    pm._tx.changeLog.findMany.mockResolvedValue([]);
+    const blocked = await POST(
+      makeRequest({ masterId: MASTER_ID, sourceId: SOURCE_ID, masterVersion: 1, sourceVersion: 1, dryRun: false }),
+    );
+    expect(blocked.status).toBe(422);
+    expect((await blocked.json()).error.blockReasons).toContain("owner_identity_mismatch");
+
+    vi.clearAllMocks();
+    vi.mocked(getUserPermissions).mockResolvedValue(PERMS_CORP_WRITE);
+    pm.$transaction.mockImplementation((fn: (tx: unknown) => unknown) => fn(pm._tx));
+    setupCorpPair(
+      { name: "架空太郎" },
+      { name: "架空太郎", address: "東京都架空区1-1", version: 1 },
+    );
+    pm.changeLog.count.mockResolvedValue(0);
+    pm.changeLog.findMany.mockResolvedValue([]);
+    pm._tx.changeLog.findMany.mockResolvedValue([]);
+    const ok = await POST(
+      makeRequest({ masterId: MASTER_ID, sourceId: SOURCE_ID, masterVersion: 1, sourceVersion: 1, dryRun: false }),
+    );
+    expect(ok.status).toBe(200);
+    expect(masterUpdates()[0].data.phone).toBeUndefined();
+    expect(changeLogEntries().map((e) => e.fieldName)).not.toContain("_merged_source_address");
+  });
+
+  it("AuditLog detail は経路と項目名だけ（名前・住所・電話を含まない）", async () => {
+    setupCorpPair();
+    await execCorpMerge();
+    const detail = vi.mocked(writeAuditLog).mock.calls[0][0].detail as Record<string, unknown>;
+    expect(detail.matchedBy).toBe("corporate_name");
+    expect(detail.corporateHandoverFields).toEqual(["phone"]);
+    const serialized = JSON.stringify(detail);
+    expect(serialized).not.toContain("サンプル");
+    expect(serialized).not.toContain("架空");
+    expect(serialized).not.toContain("06-0000-0000");
   });
 });

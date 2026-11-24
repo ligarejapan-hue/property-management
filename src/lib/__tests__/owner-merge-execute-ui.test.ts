@@ -87,8 +87,13 @@ describe("OwnerMergePreviewButton: execute UI", () => {
     }
   });
 
-  it("version_mismatch label が含まれる", () => {
-    expect(buttonSrc).toContain("version_mismatch");
+  it("version_mismatch label が含まれる（ラベルは owner-merge-reason-labels.ts に1か所）", () => {
+    const labelsSrc = fs.readFileSync(
+      path.resolve(process.cwd(), "src/lib/owner-merge-reason-labels.ts"),
+      "utf8",
+    );
+    expect(labelsSrc).toContain("version_mismatch");
+    expect(buttonSrc).toContain("mergeBlockReasonLabel");
   });
 });
 
