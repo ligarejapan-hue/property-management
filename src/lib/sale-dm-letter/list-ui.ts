@@ -43,6 +43,8 @@ export function buildSaleDmPartialNotice(res: {
   excludedAgentName?: number;
   // 所有者の名前に謄本の外字(私用領域の字)があり自動で除外した宛先数(宛名が □ になる・2026-11-11)。
   excludedGaijiName?: number;
+  // 所有者の名前が自治体・国で自動で除外した宛先数(2026-11-24)。
+  excludedPublicName?: number;
   // 同じ所有者あての2通目として自動で除外した宛先数(登録の新しい物件から送る・2026-11-16)と、
   // そのために DM判断を「送付不可」にした物件数。
   excludedSecondLetter?: number;
@@ -66,6 +68,9 @@ export function buildSaleDmPartialNotice(res: {
     lines.push(
       `所有者が業者(業者の名簿・国交省の業者一覧)と同じ名前の ${res.excludedAgentName} 件の宛先は自動で除外しました。`,
     );
+  }
+  if ((res.excludedPublicName ?? 0) > 0) {
+    lines.push(`所有者が自治体・国の ${res.excludedPublicName} 件の宛先は自動で除外しました。`);
   }
   if ((res.excludedGaijiName ?? 0) > 0) {
     lines.push(

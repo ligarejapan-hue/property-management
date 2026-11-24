@@ -23,11 +23,12 @@ export async function assertOwnersForDmSend(
 }
 
 export const AGENT_NAME_DM_SEND_MESSAGE =
-  "業者の名簿と同じ名前の所有者がいる物件は「送付可」にできません(DM は送付不可です)";
+  "業者の名簿と同じ名前の所有者か、自治体・国が持ち主の物件は「送付可」にできません(DM は送付不可です)";
 
 /**
  * 業者の名簿(国交省の業者一覧を含む)と同じ名前の所有者がいる物件は、手で「送付可」にできない
  * (2026-11-16 発注者「業者の名簿と同一名は DM 送付不可」)。判定は DM の作成と同じ(agent-name-exclusion.ts)。
+ * 2026-11-24: 名前が自治体・国の所有者がいる物件も同じく「送付可」にできない(public-owner-name.ts)。
  * 入口: ワンタッチの DM判断・一覧のまとめて変更・物件の編集(PATCH)。
  */
 export async function assertNoAgentNameOwnersForDmSend(

@@ -324,6 +324,8 @@ export async function POST(request: NextRequest) {
     let excludedAgentNameCount = 0;
     // 名前に謄本の外字(私用領域の字)がある所有者で外した宛先数(2026-11-11)
     let excludedGaijiNameCount = 0;
+    // 名前が自治体・国の所有者で外した宛先数(2026-11-24)
+    let excludedPublicNameCount = 0;
     // 同じ所有者あての2通目として外した宛先数(2026-11-16)と、そのために DM判断を「送付不可」にする物件
     let excludedSecondLetterCount = 0;
     let demotedSecondLetterCount = 0;
@@ -417,6 +419,7 @@ export async function POST(request: NextRequest) {
         excludedTerminalCount = pairs.filter(({ reason }) => reason === "terminal").length;
         excludedAgentNameCount = pairs.filter(({ reason }) => reason === "agent_name").length;
         excludedGaijiNameCount = pairs.filter(({ reason }) => reason === "gaiji_name").length;
+        excludedPublicNameCount = pairs.filter(({ reason }) => reason === "public_name").length;
         // 全宛先が除外 → 空のキャンペーンを作らない。RECIPIENTS_CHANGED(409=再試行)とは
         // 別の恒久的な状態なので、原因が分かる文言で 400 を返す(catch がクレームを削除)。
         if (surviving.length === 0 && pairs.length > 0) {
@@ -424,9 +427,9 @@ export async function POST(request: NextRequest) {
             400,
             excludedSecondLetterCount > 0
               ? ALL_SECOND_LETTER_MESSAGE
-              : excludedAgentNameCount === 0 && excludedGaijiNameCount === 0
+              : excludedAgentNameCount === 0 && excludedGaijiNameCount === 0 && excludedPublicNameCount === 0
               ? "選択した宛先はすべて「拒否・宛先不明」の記録があるため除外されました(その方の別物件での記録も含みます)。物件のDM送付履歴をご確認ください"
-              : "選択した宛先はすべて、「拒否・宛先不明」の記録があるか、所有者が業者(業者の名簿・国交省の業者一覧)と同じ名前か、所有者の名前か住所に読めない字(外字)があるため除外されました",
+              : "選択した宛先はすべて、「拒否・宛先不明」の記録があるか、所有者が業者(業者の名簿・国交省の業者一覧)と同じ名前か、自治体・国が持ち主か、所有者の名前か住所に読めない字(外字)があるため除外されました",
             excludedSecondLetterCount > 0 ? "ALL_EXCLUDED_SECOND_LETTER" : "ALL_EXCLUDED_TERMINAL",
           );
         }
@@ -579,6 +582,7 @@ export async function POST(request: NextRequest) {
                 excludedTerminal: excludedTerminalCount,
                 excludedAgentName: excludedAgentNameCount,
                 excludedGaijiName: excludedGaijiNameCount,
+                excludedPublicName: excludedPublicNameCount,
                 excludedSecondLetter: excludedSecondLetterCount,
                 failed: drafts.filter((d) => d.error).length,
                 truncated,
@@ -606,13 +610,13 @@ export async function POST(request: NextRequest) {
     // AuditLog は非PIIメタのみ(本文・宛名・住所は残さない)。
     await writeAuditLog({
       userId: session.id, action: "sale_dm_campaign_create", targetTable: "dm_campaigns",
-      detail: { campaignId: claimed.id, requested: recipients.length, generated: drafts.length, saved: persistedCount, skippedByUnlink: skippedByUnlinkCount, excludedTerminal: excludedTerminalCount, excludedAgent: excludedAgentNameCount, excludedGaiji: excludedGaijiNameCount, excludedSecond: excludedSecondLetterCount, demotedSecond: demotedSecondLetterCount, failed: drafts.filter((d) => d.error).length, truncated, ...(isScenarioCampaign({ defaultScenarioId }) ? { scenarioCount, blankBodyCount } : {}), createdAt: new Date().toISOString() },
+      detail: { campaignId: claimed.id, requested: recipients.length, generated: drafts.length, saved: persistedCount, skippedByUnlink: skippedByUnlinkCount, excludedTerminal: excludedTerminalCount, excludedAgent: excludedAgentNameCount, excludedGaiji: excludedGaijiNameCount, excludedPublic: excludedPublicNameCount, excludedSecond: excludedSecondLetterCount, demotedSecond: demotedSecondLetterCount, failed: drafts.filter((d) => d.error).length, truncated, ...(isScenarioCampaign({ defaultScenarioId }) ? { scenarioCount, blankBodyCount } : {}), createdAt: new Date().toISOString() },
     });
 
     return NextResponse.json(
       // requested=生成する手紙数(共有者ぶんで物件数より多くなり得る)。matchedProperties=対象になった物件数
       // (=選択のうち住所ありで生成対象になった物件)。UI の「対象外」通知は物件単位で出すため両方返す。
-      { campaignId: claimed.id, requested: recipients.length, matchedProperties, generated: drafts.length, saved: persistedCount, skippedByUnlink: skippedByUnlinkCount, excludedTerminal: excludedTerminalCount, excludedAgentName: excludedAgentNameCount, excludedGaijiName: excludedGaijiNameCount, excludedSecondLetter: excludedSecondLetterCount, demotedSecondLetter: demotedSecondLetterCount, failed: drafts.filter((d) => d.error).length, truncated, blankBodyCount, lpMissingScenarios, scenarioCounts },
+      { campaignId: claimed.id, requested: recipients.length, matchedProperties, generated: drafts.length, saved: persistedCount, skippedByUnlink: skippedByUnlinkCount, excludedTerminal: excludedTerminalCount, excludedAgentName: excludedAgentNameCount, excludedGaijiName: excludedGaijiNameCount, excludedPublicName: excludedPublicNameCount, excludedSecondLetter: excludedSecondLetterCount, demotedSecondLetter: demotedSecondLetterCount, failed: drafts.filter((d) => d.error).length, truncated, blankBodyCount, lpMissingScenarios, scenarioCounts },
       { headers: { "Cache-Control": "no-store" } },
     );
   } catch (error) {

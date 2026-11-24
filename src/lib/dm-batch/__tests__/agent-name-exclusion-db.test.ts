@@ -24,6 +24,7 @@ import {
   findPropertiesWithAgentNameOwners,
   findSendPropertiesWithAgentNameOwners,
 } from "../agent-name-exclusion";
+import { PUBLIC_OWNER_NAME_CASES, isPublicOwnerName } from "@/lib/public-owner-name";
 
 const USER = "11111111-1111-4111-8111-111111111111";
 
@@ -153,5 +154,27 @@ describe.skipIf(!process.env.PUSH_DB_TEST_URL)("業者と同じ名前の所有�
     const got = await findSendPropertiesWithAgentNameOwners(prisma, 10);
     expect(got).toEqual([send]);
     expect(got).not.toContain(sendPlain);
+  });
+
+  // 自治体・国が持ち主(2026-11-24): JS(isPublicOwnerName)と同じ表を本物の Postgres の SQL でも当て、結果が同じこと
+  it("自治体・国の判定は JS と SQL で同じ(PUBLIC_OWNER_NAME_CASES)", async () => {
+    const made: { id: string; name: string; expected: boolean }[] = [];
+    for (const [name, expected] of PUBLIC_OWNER_NAME_CASES) {
+      expect(isPublicOwnerName(name)).toBe(expected);
+      made.push({ id: await owner(name), name, expected });
+    }
+    const got = await findOwnerNameExclusions(prisma, made.map((m) => m.id));
+    for (const m of made) expect([m.name, got.publicOwnerIds.has(m.id)]).toEqual([m.name, m.expected]);
+    // 業者の集合には入れない
+    for (const m of made) expect(got.agentOwnerIds.has(m.id)).toBe(false);
+  });
+
+  it("自治体・国が持ち主の物件も物件ごとの判定と送付可の見回りで当たる", async () => {
+    await prisma.$executeRawUnsafe(`UPDATE properties SET dm_status = 'no_send'`);
+    const city = await owner("横浜市");
+    const pub = await property("send", [ids.other, city]);
+    const plain = await property("send", [ids.other]);
+    expect([...(await findPropertiesWithAgentNameOwners(prisma, [pub, plain]))]).toEqual([pub]);
+    expect(await findSendPropertiesWithAgentNameOwners(prisma, 10)).toEqual([pub]);
   });
 });

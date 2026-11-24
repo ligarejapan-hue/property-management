@@ -538,6 +538,16 @@ function OwnerCorrectionPageInner() {
                               空白のみ
                             </span>
                           )}
+                          {/* 名前が自治体・国(2026-11-24)。表示だけの印=DM は自動で送付不可になる。 */}
+                          {c.isPublicOwner && (
+                            <span
+                              data-testid="public-owner-badge"
+                              title="名前が自治体・国の所有者です(DM は送付不可)"
+                              className="rounded-full bg-sky-100 dark:bg-sky-500/20 px-1.5 py-0.5 text-xs font-medium text-sky-700 dark:text-sky-300"
+                            >
+                              自治体
+                            </span>
+                          )}
                         </div>
                       </td>
                       <td className="px-3 py-2">

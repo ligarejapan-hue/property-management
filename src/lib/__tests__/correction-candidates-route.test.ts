@@ -2021,6 +2021,26 @@ describe("GET correction-candidates: Phase 2-B 空白のみ address", () => {
   });
 });
 
+// ── 自治体・国が持ち主(2026-11-24): 表示だけの印 ─────────────────────────────
+
+describe("GET correction-candidates: 自治体・国の印(isPublicOwner)", () => {
+  it("名前が自治体・国なら isPublicOwner=true・ふつうの名前は false(候補の決め方は変えない)", async () => {
+    pm.owner.findMany.mockResolvedValue([
+      makeOwner({ id: "11111111-1111-4111-8111-111111111111", name: "東京都世田谷区", address: null, propertyOwnerCount: 0 }),
+      makeOwner({ id: "22222222-2222-4222-8222-222222222222", name: "木村太郎", address: null, propertyOwnerCount: 0 }),
+    ]);
+    const res = await GET(makeRequest("all"));
+    const json = await res.json();
+    expect(json.candidates).toHaveLength(2);
+    const byId = new Map(json.candidates.map((c: { id: string; isPublicOwner: boolean; types: string[] }) => [c.id, c]));
+    const pub = byId.get("11111111-1111-4111-8111-111111111111") as { isPublicOwner: boolean; types: string[] };
+    const person = byId.get("22222222-2222-4222-8222-222222222222") as { isPublicOwner: boolean; types: string[] };
+    expect(pub.isPublicOwner).toBe(true);
+    expect(person.isPublicOwner).toBe(false);
+    expect(pub.types).toEqual(person.types);
+  });
+});
+
 // ── singlePropertyId: propertyOwners fixture (take:2) の end-to-end 検証 ──
 //
 // 回帰の原因: route 側が `propertyOwners: { select: { propertyId: true },

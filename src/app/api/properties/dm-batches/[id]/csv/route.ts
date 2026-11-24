@@ -265,7 +265,8 @@ export async function GET(
       // (2b) 業者(名簿・国交省の一覧)と同じ名前の所有者(2026-11-09)。控えの作成時に外しているが、
       // 作成後に業者が一覧に載った宛先もここで止める(判定は作成時と同じ agent-name-exclusion.ts)。
       // (2c) 名前に謄本の外字(私用領域の字)がある所有者も同じ SQL で見つけて止める(宛名が □ になる・2026-11-11)。
-      const { agentOwnerIds: agentNameOwnerIds, gaijiOwnerIds } = await findOwnerNameExclusions(tx, allOwnerIds);
+      // (2d) 名前が自治体・国の所有者も同じ SQL で見つけて止める(2026-11-24)。
+      const { agentOwnerIds: agentNameOwnerIds, gaijiOwnerIds, publicOwnerIds } = await findOwnerNameExclusions(tx, allOwnerIds);
 
       const elig = checkBatchEligibility(
         items,
@@ -276,6 +277,7 @@ export async function GET(
         resendStalePropertyIds,
         agentNameOwnerIds,
         gaijiOwnerIds,
+        publicOwnerIds,
       );
 
       if (elig.scopeMissingCount > 0) {
@@ -297,6 +299,13 @@ export async function GET(
           409,
           `業者(業者の名簿・国交省の業者一覧)と同じ名前の所有者の宛先が含まれています(${elig.agentNameCount}件)。この控えは使えません。再出力してください`,
           "AGENT_NAME",
+        );
+      }
+      if (elig.publicNameCount > 0) {
+        throw new ApiError(
+          409,
+          `自治体・国が持ち主の宛先が含まれています(${elig.publicNameCount}件)。この控えは使えません。再出力してください`,
+          "PUBLIC_OWNER_NAME",
         );
       }
       if (elig.gaijiNameCount > 0) {

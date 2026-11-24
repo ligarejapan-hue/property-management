@@ -1,6 +1,13 @@
 import { describe, expect, it, vi } from "vitest";
 import { Prisma } from "@/generated/prisma";
-import { agentNameKeySql, findAgentNameOwnerIds } from "../agent-name-exclusion";
+import {
+  agentNameKeySql,
+  findAgentNameOwnerIds,
+  findOwnerNameExclusions,
+  findPropertiesWithAgentNameOwners,
+  findSendPropertiesWithAgentNameOwners,
+} from "../agent-name-exclusion";
+import { PUBLIC_OWNER_NAME_PATTERN } from "@/lib/public-owner-name";
 import { NAME_VARIANTS } from "@/lib/name-variants";
 
 // 業者と同じ名前の所有者には DM を送らない(2026-11-09 発注者指示)。
@@ -42,5 +49,37 @@ describe("findAgentNameOwnerIds", () => {
     expect(q.sql).toContain("k.key <> ''");
     // 所有者は重複を除いて渡す
     expect(q.values.filter((v) => v === "o1" || v === "o2")).toEqual(["o1", "o2"]);
+  });
+});
+
+// 自治体・国が持ち主の所有者も DM 送付不可(2026-11-24 発注者承認)。判定は public-owner-name.ts の1つの正規表現。
+describe("自治体・国が持ち主(public-owner-name.ts と同じ正規表現)", () => {
+  it("findOwnerNameExclusions は同じ SQL 1本で自治体・国を別の集合に返す(業者の集合には入れない)", async () => {
+    const $queryRaw = vi.fn(async () => [
+      { id: "o1", agent: false, gaiji: false, public: true },
+      { id: "o2", agent: true, gaiji: false, public: false },
+    ]);
+    const got = await findOwnerNameExclusions({ $queryRaw } as never, ["o1", "o2"]);
+    expect([...got.publicOwnerIds]).toEqual(["o1"]);
+    expect([...got.agentOwnerIds]).toEqual(["o2"]);
+    expect($queryRaw).toHaveBeenCalledTimes(1);
+    const q = ($queryRaw.mock.calls[0] as unknown as [Prisma.Sql])[0];
+    expect(q.values).toContain(PUBLIC_OWNER_NAME_PATTERN);
+    expect(q.sql).toContain("r.public");
+  });
+  it("所有者がいなければ DB を引かない(publicOwnerIds も空)", async () => {
+    const $queryRaw = vi.fn();
+    const got = await findOwnerNameExclusions({ $queryRaw } as never, []);
+    expect(got.publicOwnerIds.size).toBe(0);
+    expect($queryRaw).not.toHaveBeenCalled();
+  });
+  it("物件ごとの判定と送付可の見回りも、業者と同じ名前か自治体・国のどちらかで当てる", async () => {
+    const $queryRaw = vi.fn(async () => []);
+    await findPropertiesWithAgentNameOwners({ $queryRaw } as never, ["p1"]);
+    await findSendPropertiesWithAgentNameOwners({ $queryRaw } as never, 5);
+    for (const call of $queryRaw.mock.calls as unknown as [Prisma.Sql][]) {
+      expect(call[0].values).toContain(PUBLIC_OWNER_NAME_PATTERN);
+      expect(call[0].sql).toContain("k.public");
+    }
   });
 });

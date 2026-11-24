@@ -162,11 +162,13 @@ export async function GET(
       const excludedTerminalCount = reasons.filter((r) => r === "terminal").length;
       const excludedAgentNameCount = reasons.filter((r) => r === "agent_name").length;
       const excludedGaijiNameCount = reasons.filter((r) => r === "gaiji_name").length;
+      // 名前が自治体・国の所有者(2026-11-24)
+      const excludedPublicNameCount = reasons.filter((r) => r === "public_name").length;
       // 全滅なら白紙を刷らせず理由を返す(作成時の ALL_EXCLUDED_TERMINAL と同じ扱い)。
       if (printableDrafts.length === 0 && visibleDrafts.length > 0) {
         throw new ApiError(
           409,
-          "確定済みの宛先はすべて、拒否・宛先不明が記録されたか、所有者が業者と同じ名前か、所有者の名前か住所に読めない字(外字)があるため印刷できません。宛先を作り直してください",
+          "確定済みの宛先はすべて、拒否・宛先不明が記録されたか、所有者が業者と同じ名前か、自治体・国が持ち主か、所有者の名前か住所に読めない字(外字)があるため印刷できません。宛先を作り直してください",
           "ALL_EXCLUDED_TERMINAL",
         );
       }
@@ -211,10 +213,12 @@ export async function GET(
         excludedTerminalCount,
         excludedAgentNameCount,
         excludedGaijiNameCount,
+        excludedPublicNameCount,
         printedCount: printableDrafts.length,
       };
     });
-    const { excludedTerminalCount, excludedAgentNameCount, excludedGaijiNameCount, printedCount } = materialized;
+    const { excludedTerminalCount, excludedAgentNameCount, excludedGaijiNameCount, excludedPublicNameCount, printedCount } =
+      materialized;
     let html = materialized.html;
     if (printedCount === 0) {
       // 白紙だけだと理由が分からない(2026-09-26 発注者の実機テスト=送付済みにした後に
@@ -224,10 +228,11 @@ export async function GET(
         `<body$1><div style="padding:16px 20px;border:2px solid #b45309;border-radius:8px;margin:16px;font-size:15px;line-height:1.7;color:#1f2937;background:#fff">印刷できる手紙がありません。印刷の対象は、売却DMの画面で「確定」にした手紙だけです(送付済みにした手紙と、本文が空の手紙は出ません)。<br>手順は「確定」→「印刷」→「確定分を送付済みに」の順です。</div>`,
       );
     }
-    if (excludedTerminalCount > 0 || excludedAgentNameCount > 0 || excludedGaijiNameCount > 0) {
+    if (excludedTerminalCount > 0 || excludedAgentNameCount > 0 || excludedPublicNameCount > 0 || excludedGaijiNameCount > 0) {
       const parts = [
         ...(excludedTerminalCount > 0 ? [`拒否・宛先不明が記録された ${excludedTerminalCount} 件`] : []),
         ...(excludedAgentNameCount > 0 ? [`所有者が業者と同じ名前の ${excludedAgentNameCount} 件`] : []),
+        ...(excludedPublicNameCount > 0 ? [`所有者が自治体・国の ${excludedPublicNameCount} 件`] : []),
         ...(excludedGaijiNameCount > 0 ? [`所有者の名前か住所に読めない字(外字)がある ${excludedGaijiNameCount} 件`] : []),
       ];
       // 黙って減らさない: 何通除外したかを**画面にだけ**示す(@codex #384 R2 P2)。
@@ -246,7 +251,7 @@ export async function GET(
       targetTable: "dm_campaigns",
       // field_staff は visibleDrafts のみ印刷されるため、監査件数も実際に出力した可視分を記録する
       // (drafts.length だと担当外で隠れた宛先まで数えて実出力数を過大計上する)。
-      detail: { campaignId: id, count: printedCount, excludedTerminal: excludedTerminalCount, excludedAgent: excludedAgentNameCount, excludedGaiji: excludedGaijiNameCount, printedAt: new Date().toISOString() },
+      detail: { campaignId: id, count: printedCount, excludedTerminal: excludedTerminalCount, excludedAgent: excludedAgentNameCount, excludedGaiji: excludedGaijiNameCount, excludedPublic: excludedPublicNameCount, printedAt: new Date().toISOString() },
     });
 
     return new NextResponse(html, {

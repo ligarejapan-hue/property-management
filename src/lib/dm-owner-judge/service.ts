@@ -126,6 +126,7 @@ export async function judgeWithOwners(
     });
     const decision = decideDmByOwners({
       agentNameOwnerIds: ownerIds.filter((id) => sets.agentOwnerIds.has(id)),
+      publicOwnerIds: ownerIds.filter((id) => sets.publicOwnerIds.has(id)),
       otherSendOwnerIds: others.filter((o) => o.property.dmStatus === "send").map((o) => o.ownerId),
       otherNoSendOwnerIds: others.filter((o) => o.property.dmStatus === "no_send").map((o) => o.ownerId),
       terminalOwnerIds: ownerIds.filter((id) => sets.ownerIds.has(id)),

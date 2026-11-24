@@ -177,21 +177,31 @@ export async function GET(request: NextRequest) {
     // 判定は宛名CSV・売却DM と同じ agent-name-exclusion.ts。
     // 名前に謄本の外字(私用領域の字)がある所有者がいる物件も出さない(宛名が □ になる・2026-11-11)。
     // ⚠この CSV は物件の住所に刷る=所有者の住所の外字では外さない(mailingAddress: false・@codex P2 2026-11-13)。
-    const { agentOwnerIds: agentNameOwnerIds, gaijiOwnerIds } = await findOwnerNameExclusions(
+    // 名前が自治体・国の所有者がいる物件も出さない(2026-11-24・public-owner-name.ts)。
+    const { agentOwnerIds: agentNameOwnerIds, gaijiOwnerIds, publicOwnerIds } = await findOwnerNameExclusions(
       prisma,
       properties.flatMap((p) => p.propertyOwners.map((po) => po.owner.id)),
       { mailingAddress: false },
     );
     const isAgentNameProperty = (p: (typeof properties)[number]) =>
       p.propertyOwners.some((po) => agentNameOwnerIds.has(po.owner.id));
+    const isPublicNameProperty = (p: (typeof properties)[number]) =>
+      !isAgentNameProperty(p) && p.propertyOwners.some((po) => publicOwnerIds.has(po.owner.id));
     const isGaijiNameProperty = (p: (typeof properties)[number]) =>
-      !isAgentNameProperty(p) && p.propertyOwners.some((po) => gaijiOwnerIds.has(po.owner.id));
+      !isAgentNameProperty(p) &&
+      !isPublicNameProperty(p) &&
+      p.propertyOwners.some((po) => gaijiOwnerIds.has(po.owner.id));
     const excludedAgentNameCount = properties.filter(isAgentNameProperty).length;
     const excludedGaijiNameCount = properties.filter(isGaijiNameProperty).length;
+    const excludedPublicNameCount = properties.filter(isPublicNameProperty).length;
 
     // some 述語で所有者ありに絞っているが、race 防御として空所有者は行にしない。
     const exportable = properties.filter(
-      (p) => p.propertyOwners.length > 0 && !isAgentNameProperty(p) && !isGaijiNameProperty(p),
+      (p) =>
+        p.propertyOwners.length > 0 &&
+        !isAgentNameProperty(p) &&
+        !isPublicNameProperty(p) &&
+        !isGaijiNameProperty(p),
     );
 
     // 取込元(管理ID)を一括逆引き(一覧 API と共有・N+1 回避)。
@@ -251,6 +261,7 @@ export async function GET(request: NextRequest) {
         skippedCount,
         excludedAgent: excludedAgentNameCount,
         excludedGaiji: excludedGaijiNameCount,
+        excludedPublic: excludedPublicNameCount,
         exportedAt: new Date().toISOString(),
       },
     });

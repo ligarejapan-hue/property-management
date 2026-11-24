@@ -499,6 +499,8 @@ function PropertiesPageInner() {
         excludedAgentName: res.excludedAgentName,
         // 所有者の名前に謄本の外字がある自動除外(宛名が □ になる・2026-11-11)。
         excludedGaijiName: res.excludedGaijiName,
+        // 所有者が自治体・国の自動除外(2026-11-24)。
+        excludedPublicName: res.excludedPublicName,
         // 同じ所有者あての2通目の自動除外と、そのために「送付不可」にした物件数(2026-11-16)。
         excludedSecondLetter: res.excludedSecondLetter,
         demotedSecondLetter: res.demotedSecondLetter,
@@ -624,6 +626,8 @@ function PropertiesPageInner() {
         res.excludedGaijiNameCount,
         // 同じ所有者あての2通目(登録の新しい物件から送る・2026-11-16)。
         res.excludedSecondLetterCount,
+        // 所有者が自治体・国(2026-11-24)。
+        res.excludedPublicNameCount,
       );
       // 2通目として宛先が残らなかった物件は、DM判断を「送付不可」にしている。黙って変えない。
       const demoted = dmSecondLetterDemotedText(res.demotedSecondLetterCount);

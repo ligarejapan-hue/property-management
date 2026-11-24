@@ -19,6 +19,7 @@ import {
 import { maskCorporateNumber } from "@/lib/display-level";
 import { pickSinglePropertyId } from "@/lib/owner-property-link";
 import { propertyVisibilityScopeWhere } from "@/lib/property-list-query";
+import { isPublicOwnerName } from "@/lib/public-owner-name";
 
 type RecommendedAction = "hold" | "review" | "delete_candidate" | "merge_candidate";
 
@@ -69,6 +70,11 @@ type Candidate = {
    * ([#139] fallout の再発)。boolean のみで物件ID/件数などの中身は含まない。
    */
   hasReachableProperty: boolean;
+  /**
+   * 名前が自治体・国(public-owner-name.ts・2026-11-24)。画面の「自治体」の印だけに使う(候補の決め方は変えない)。
+   * マスク前の名前から決める。真偽値のみで名前そのものは含まない。
+   */
+  isPublicOwner: boolean;
   changeLogCount: number;
   importFileName: string | null;
   importRowNumber: number | null;
@@ -328,6 +334,7 @@ export async function GET(request: NextRequest) {
         propertyOwnerCount,
         singlePropertyId,
         hasReachableProperty,
+        isPublicOwner: isPublicOwnerName(owner.name),
         changeLogCount,
         importFileName: importInfo?.fileName ?? null,
         importRowNumber: importInfo?.rowNumber ?? null,

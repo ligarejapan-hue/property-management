@@ -1,8 +1,9 @@
 import { describe, it, expect } from "vitest";
-import { decideDmByOwners, ownerlessDmStep, type OwnerSignals } from "../decide";
+import { NO_SEND_REASON_LABELS, decideDmByOwners, ownerlessDmStep, type OwnerSignals } from "../decide";
 
 const clean: OwnerSignals = {
   agentNameOwnerIds: [],
+  publicOwnerIds: [],
   otherSendOwnerIds: [],
   otherNoSendOwnerIds: [],
   terminalOwnerIds: [],
@@ -19,6 +20,14 @@ describe("decideDmByOwners(所有者が入ったときの DM判断の仕分け�
       dmStatus: "no_send",
       reasons: ["agent_name"],
     });
+  });
+
+  it("自治体・国が持ち主の所有者がいれば送付不可(2026-11-24)", () => {
+    expect(decideDmByOwners({ ...clean, publicOwnerIds: ["o1"] })).toEqual({
+      dmStatus: "no_send",
+      reasons: ["public_name"],
+    });
+    expect(NO_SEND_REASON_LABELS.public_name).toBe("自治体・国が持ち主");
   });
 
   it("同じ所有者がほかの物件で送付可なら送付不可(二重に送らない)", () => {
@@ -38,12 +47,13 @@ describe("decideDmByOwners(所有者が入ったときの DM判断の仕分け�
     expect(
       decideDmByOwners({
         agentNameOwnerIds: ["o1"],
+        publicOwnerIds: ["o4"],
         otherSendOwnerIds: ["o2"],
         otherNoSendOwnerIds: ["o2"],
         terminalOwnerIds: ["o3"],
         terminalOnProperty: false,
       }).reasons,
-    ).toEqual(["agent_name", "other_send", "other_no_send", "terminal"]);
+    ).toEqual(["agent_name", "public_name", "other_send", "other_no_send", "terminal"]);
   });
 });
 
