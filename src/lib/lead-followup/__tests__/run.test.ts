@@ -9,8 +9,9 @@ const db = vi.hoisted(() => {
     leadFollowup: { updateMany: vi.fn(), findMany: vi.fn(), findFirst: vi.fn(), findUnique: vi.fn(), createMany: vi.fn() },
     leadFollowupSend: { createMany: vi.fn(), count: vi.fn() },
     mailUnsubscribe: { findUnique: vi.fn(), findMany: vi.fn() },
-    property: { findMany: vi.fn() },
-    dmInquiry: { findMany: vi.fn() },
+    // findUnique = 送る直前に押さえる所有者・物件を読む(先読み・押さえたあとの読み直し)
+    property: { findMany: vi.fn(), findUnique: vi.fn() },
+    dmInquiry: { findMany: vi.fn(), findUnique: vi.fn() },
     // DM の拒否・宛先不明の記録(判定は DM と同じ findTerminalExclusions をそのまま動かす)
     propertyDmLog: { findMany: vi.fn() },
     $executeRaw: vi.fn(),
@@ -102,6 +103,8 @@ beforeEach(() => {
   sendMail.mockResolvedValue({ ok: true });
   names.findOwnerNameExclusions.mockResolvedValue(noExclusions());
   db.propertyDmLog.findMany.mockResolvedValue([]);
+  db.property.findUnique.mockResolvedValue({ id: PROP_ID, propertyOwners: [] });
+  db.dmInquiry.findUnique.mockResolvedValue({ draft: null });
 });
 
 function noExclusions(over: { agent?: string[]; public?: string[] } = {}) {
@@ -717,5 +720,87 @@ describe("DM を断った所有者には追客メールを送らない(セキュ
     const s = await run(new Date("2026-12-04T01:00:00Z"));
     expect(s).toMatchObject({ sent: 0, stopped: 1 });
     expect(stopReasons()).toContain("dm_refused");
+  });
+});
+
+describe("送る直前は所有者・物件を押さえてから外す理由を見る(@codex #782 P2)", () => {
+  const OWNER_A = "8b9c0d1e-2f3a-4b4c-8d5e-6f7a8b9c0d1e";
+  const OWNER_B = "9c0d1e2f-3a4b-4c5d-8e6f-7a8b9c0d1e2f";
+  const DRAFT_PROP = "a0b1c2d3-e4f5-4a6b-8c7d-8e9f0a1b2c3d";
+  const sqlOf = (c: unknown[]) => (Array.isArray(c[0]) ? (c[0] as string[]).join("?") : String(c[0]));
+  /** $queryRaw の呼び出しのうち、文に text を含む最初の1つの順番 */
+  const rawOrder = (text: RegExp) => {
+    const i = db.$queryRaw.mock.calls.findIndex((c) => text.test(sqlOf(c)));
+    return i < 0 ? -1 : db.$queryRaw.mock.invocationCallOrder[i];
+  };
+  const lockCalls = (table: "owners" | "properties") =>
+    db.$queryRaw.mock.calls.filter((c) => new RegExp(`FROM ${table} WHERE id = ANY`).test(sqlOf(c)));
+  const claimOrder = () => {
+    const i = db.leadFollowup.updateMany.mock.calls.findIndex((c) => c[0].data.status === "sending");
+    return i < 0 ? -1 : db.leadFollowup.updateMany.mock.invocationCallOrder[i];
+  };
+  const owned = property({ dmStatus: "send", propertyOwners: [{ owner: { id: OWNER_A, email: "owner@example.test" } }] });
+
+  it("物件: 設定の行 → アドレスの鍵 → 所有者(FOR SHARE・id順)→ 物件(FOR SHARE)→ 読み直し・拒否の照会 → 取り合い の順", async () => {
+    withActiveRows([activeRow({ newNextPosition: 1 })], [owned]);
+    db.property.findUnique.mockResolvedValue({ id: PROP_ID, propertyOwners: [{ ownerId: OWNER_B }, { ownerId: OWNER_A }] });
+    const s = await run();
+    expect(s.sent).toBe(1);
+    const cfg = rawOrder(/FROM mail_config/);
+    const email = db.$executeRaw.mock.invocationCallOrder[0];
+    const owners = rawOrder(/FROM owners WHERE id = ANY/);
+    const props = rawOrder(/FROM properties WHERE id = ANY/);
+    expect(sqlOf(lockCalls("owners")[0])).toMatch(/ORDER BY id FOR SHARE/);
+    expect(lockCalls("owners")[0][1]).toEqual([OWNER_A, OWNER_B].sort());
+    expect(sqlOf(lockCalls("properties")[0])).toMatch(/ORDER BY id FOR SHARE/);
+    expect(lockCalls("properties")[0][1]).toEqual([PROP_ID]);
+    // 送る直前の読み直し(物件の3回目の findMany)と拒否の照会(2回目)は押さえたあと
+    const reread = db.property.findMany.mock.invocationCallOrder[2];
+    const refusal = db.propertyDmLog.findMany.mock.invocationCallOrder[1];
+    expect(cfg).toBeGreaterThan(0);
+    expect(cfg).toBeLessThan(email);
+    expect(email).toBeLessThan(owners);
+    expect(owners).toBeLessThan(props);
+    expect(props).toBeLessThan(reread);
+    expect(props).toBeLessThan(refusal);
+    expect(refusal).toBeLessThan(claimOrder());
+    expect(reread).toBeLessThan(claimOrder());
+  });
+
+  it("押さえる前と後で所有者の顔ぶれが変わっていたら(名寄せの付け替えなど)送らない=次の回に任せる", async () => {
+    withActiveRows([activeRow({ newNextPosition: 1 })], [owned]);
+    db.property.findUnique
+      .mockResolvedValueOnce({ id: PROP_ID, propertyOwners: [{ ownerId: OWNER_A }] })
+      .mockResolvedValueOnce({ id: PROP_ID, propertyOwners: [{ ownerId: OWNER_A }, { ownerId: OWNER_B }] });
+    const s = await run();
+    expect(s.sent).toBe(0);
+    expect(sendMail).not.toHaveBeenCalled();
+    expect(claimOrder()).toBe(-1);
+  });
+
+  it("手紙の QR から来た査定申込: その手紙の所有者(代表・共有者)と物件を押さえてから見る", async () => {
+    const q = activeRow({ targetType: "inquiry", propertyId: null, inquiryId: "q1", newNextPosition: 2 });
+    db.leadFollowup.findMany.mockResolvedValue([q]);
+    const draft = { propertyId: DRAFT_PROP, representativeOwnerId: OWNER_B, draftOwners: [{ ownerId: OWNER_A }] };
+    db.dmInquiry.findMany.mockResolvedValueOnce([]).mockResolvedValue([{ id: "q1", handleStatus: "open", email: "owner@example.test", draft }]);
+    db.dmInquiry.findUnique.mockResolvedValue({ draft });
+    const s = await run(new Date("2026-12-04T01:00:00Z"));
+    expect(s.sent).toBe(1);
+    expect(lockCalls("owners")[0][1]).toEqual([OWNER_A, OWNER_B].sort());
+    expect(lockCalls("properties")[0][1]).toEqual([DRAFT_PROP]);
+    const props = rawOrder(/FROM properties WHERE id = ANY/);
+    expect(rawOrder(/FROM owners WHERE id = ANY/)).toBeLessThan(props);
+    expect(props).toBeLessThan(db.propertyDmLog.findMany.mock.invocationCallOrder[1]);
+    expect(props).toBeLessThan(claimOrder());
+  });
+
+  it("広告の公開ページからの査定申込(手紙なし)は所有者・物件を押さえない", async () => {
+    const q = activeRow({ targetType: "inquiry", propertyId: null, inquiryId: "q1", newNextPosition: 2 });
+    db.leadFollowup.findMany.mockResolvedValue([q]);
+    db.dmInquiry.findMany.mockResolvedValueOnce([]).mockResolvedValue([{ id: "q1", handleStatus: "open", email: "owner@example.test", draft: null }]);
+    const s = await run(new Date("2026-12-04T01:00:00Z"));
+    expect(s.sent).toBe(1);
+    expect(lockCalls("owners")).toHaveLength(0);
+    expect(lockCalls("properties")).toHaveLength(0);
   });
 });

@@ -17,6 +17,7 @@ import {
 } from "./steps";
 import { classifyInquiry, classifyProperty, decideFollowup, initialNewPosition, type CaseClass, type DecideRow } from "./decide";
 import { dmExclusionReason, findTerminalExclusions, type TerminalExclusionTx } from "@/lib/dm-batch/terminal-exclusion";
+import { lockOwnersForShare, lockPropertiesForShare, sortUniqueIds, type RawTx } from "@/lib/dm-batch/locks";
 
 // 対象の導入ルートの決まり(と理由)は steps.ts(設定の画面からも読むため画面でも読める場所に置く)。
 export { FOLLOWUP_PROPERTY_INTRODUCTION_ROUTES };
@@ -496,6 +497,54 @@ type SendContext = {
   enabledAt: Date;
 };
 
+type LockTx = Pick<Prisma.TransactionClient, "property" | "dmInquiry" | "$queryRaw">;
+
+/** 押さえる所有者(今の所有者・手紙の代表と共有者)と物件。結べない申込(広告の公開ページ)は null。 */
+async function readLockTargets(tx: LockTx, row: ActiveRow): Promise<{ ownerIds: string[]; propertyId: string } | null> {
+  if (row.targetType === "property" && row.propertyId) {
+    const p = await tx.property.findUnique({
+      where: { id: row.propertyId },
+      // 外す理由の判定(OWNER_EMAILS_SELECT)と同じ「今の所有者」
+      select: { id: true, propertyOwners: { where: { endDate: null }, select: { ownerId: true } } },
+    });
+    return p ? { ownerIds: sortUniqueIds(p.propertyOwners.map((o) => o.ownerId)), propertyId: p.id } : null;
+  }
+  if (row.targetType === "inquiry" && row.inquiryId) {
+    const q = await tx.dmInquiry.findUnique({ where: { id: row.inquiryId }, select: { draft: INQUIRY_DRAFT_SELECT } });
+    return q?.draft ? { ownerIds: sortUniqueIds(draftOwnerIds(q.draft)), propertyId: q.draft.propertyId } : null;
+  }
+  return null;
+}
+
+/**
+ * 送る直前に、対象の所有者と物件を FOR SHARE で押さえる(@codex #782 P2)。
+ * findTerminalExclusions の決まり(terminal-exclusion.ts: 所有者と物件の親行を押さえたまま照会し、状態を移し終えるまで持つ)に従う。
+ * DM の拒否を書く側(反響の保存 dm-logs/[logId]/reaction・手紙の配信停止 /u/[token])は 所有者 FOR UPDATE → 物件の親行 の順で
+ * 押さえて書くので、ここで押さえれば「照会したあと、取り合い(sending)の前に拒否が入る」が起きない。
+ *
+ * 押さえる順番(この transaction 全体): 設定の行(mail_config FOR UPDATE)→ アドレスの鍵(advisory)→ 所有者(id 順 FOR SHARE)
+ *   → 物件(FOR SHARE)→ 追客の行(lead_followups の更新)。
+ * 待ち合いにならない理由:
+ * - 所有者 → 物件 は DM の書き手の決まり(dm-batch/locks.ts「Owner → 物件親行 → 子行」)と同じ向き・同じ id 順の文。
+ * - 設定の行とアドレスの鍵を取るのは追客だけ(行を作る startFollowup・配信停止の記録・設定の保存)で、どれも所有者・物件を押さえない。
+ *   所有者・物件を押さえる側(DM の書き手・物件の編集)は設定の行もアドレスの鍵も取らない=逆向きの待ちが無い。
+ * - 追客を手で止める API は 物件 → 追客の行 の順で、ここも 物件 → 追客の行 の順(押さえるより前に追客の行を書かない)。
+ * 押さえる前に読んだ所有者の顔ぶれと、押さえたあとに読み直した顔ぶれが違えば(名寄せの付け替えなど)false=送らずに次の回へ。
+ */
+async function lockTargetOwnersAndProperty(tx: LockTx, row: ActiveRow): Promise<boolean> {
+  const pre = await readLockTargets(tx, row);
+  if (!pre) return true;
+  await lockOwnersForShare(tx as unknown as RawTx, pre.ownerIds);
+  await lockPropertiesForShare(tx as unknown as RawTx, [pre.propertyId]);
+  const again = await readLockTargets(tx, row);
+  return (
+    !!again &&
+    again.propertyId === pre.propertyId &&
+    again.ownerIds.length === pre.ownerIds.length &&
+    again.ownerIds.every((id, i) => id === pre.ownerIds[i])
+  );
+}
+
 /** 1通を送る(鍵 → 配信停止の確かめ → 取り合い → 送る → 書き戻し)。 */
 async function sendOne(
   row: ActiveRow,
@@ -512,6 +561,8 @@ async function sendOne(
     // 実行の途中で画面から OFF にされていたら送らない(OFF の保存は進行中を止めるが、この回が後から作った行もある)。
     if (!(await lockEnabledPeriod(tx, ctx.enabledAt))) return "disabled";
     await lockEmail(tx, to.normalized);
+    // 所有者・物件を押さえてから外す理由を見る(@codex #782 P2)。押さえた状態は取り合い(sending)まで持つ。
+    if (!(await lockTargetOwnersAndProperty(tx, row))) return "changed";
     // 対象の今の状態とアドレスを読み直す(先に読んだ状態は数分前のことがある。その間に担当が「対応済み」・
     // 商談中などにしていたら、ここで気づいて送らない=次の回の判断に任せる・@codex #757 P2)。
     const fresh = (await loadTargets([row], tx)).get(row.id) ?? null;
