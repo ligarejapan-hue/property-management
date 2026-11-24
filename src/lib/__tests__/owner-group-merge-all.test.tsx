@@ -180,6 +180,30 @@ describe("OwnerGroupMergeAllButton", () => {
   });
 });
 
+// @codex P2: 一覧の読み直し(load → loading=true)でボタンが外れ、結果が消えていた。
+// 結果を閉じるまで一覧を読み直さない(閉じるボタンで読み直す)。
+describe("OwnerGroupMergeAllButton: 結果を一覧の読み直しで消さない", () => {
+  const src = fs.readFileSync(
+    path.resolve(process.cwd(), "src/components/owners/OwnerGroupMergeAllButton.tsx"),
+    "utf8",
+  );
+  const fnBody = (name: string) => {
+    const start = src.indexOf(`const ${name} = `);
+    expect(start).toBeGreaterThanOrEqual(0);
+    const next = src.indexOf("\n  const ", start + 1);
+    return src.slice(start, next === -1 ? undefined : next);
+  };
+  it("実行の直後には onExecuted を呼ばない（結果を出したまま）", () => {
+    expect(fnBody("handleClick")).not.toContain("onExecuted");
+  });
+  it("結果を閉じるときに、1人以上まとまっていれば一覧を読み直す", () => {
+    const body = fnBody("handleClose");
+    expect(body).toContain("onExecuted");
+    expect(body).toMatch(/\.some\(\(x\)\s*=>\s*x\.ok\)/);
+    expect(src).toContain("閉じて一覧を更新");
+  });
+});
+
 describe("correction page: 法人のグループもまとめられる", () => {
   const src = fs.readFileSync(
     path.resolve(process.cwd(), "src/app/(dashboard)/admin/owners/correction/page.tsx"),

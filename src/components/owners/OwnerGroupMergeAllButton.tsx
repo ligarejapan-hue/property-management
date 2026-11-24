@@ -19,7 +19,7 @@ interface OwnerGroupMergeAllButtonProps {
   masterId: string;
   /** グループの全員（master が混ざっていても除いて数える）。 */
   sourceIds: string[];
-  /** 1人以上まとまったら候補一覧を読み直す。 */
+  /** 結果を閉じたとき、1人以上まとまっていれば候補一覧を読み直す。 */
   onExecuted?: () => void;
 }
 
@@ -51,9 +51,17 @@ export function OwnerGroupMergeAllButton({
       sourceIds: targets,
       onProgress: (done, total) => setProgress({ done, total }),
     });
+    // ⚠ここで一覧を読み直さない: 読み直すと一覧が「読み込み中」になってこの部品ごと外れ、
+    //   1人ずつの結果が見えないまま消える(@codex P2)。結果を閉じるときに読み直す。
     setResults(r);
     setRunning(false);
-    if (r.some((x) => x.ok)) onExecuted?.();
+  };
+
+  const handleClose = () => {
+    const merged = results?.some((x) => x.ok) ?? false;
+    setResults(null);
+    setProgress(null);
+    if (merged) onExecuted?.();
   };
 
   const okCount = results?.filter((r) => r.ok).length ?? 0;
@@ -65,7 +73,8 @@ export function OwnerGroupMergeAllButton({
           variant="danger"
           size="sm"
           onClick={handleClick}
-          disabled={running || targets.length === 0}
+          // 結果を出している間は押せない（一覧が古いまま＝統合済みの人にもう一度かけない）
+          disabled={running || results !== null || targets.length === 0}
         >
           {running ? "まとめています..." : "この1人に全部まとめる"}
         </Button>
@@ -109,6 +118,9 @@ export function OwnerGroupMergeAllButton({
               止まった人は統合されずにそのまま残っています。理由を直してから、もう一度まとめられます。
             </p>
           )}
+          <Button variant="secondary" size="sm" className="mt-2" onClick={handleClose}>
+            閉じて一覧を更新
+          </Button>
         </div>
       )}
     </div>

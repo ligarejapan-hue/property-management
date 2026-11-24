@@ -245,7 +245,19 @@ const OWNER_CHANGE_FIELDS: Record<string, { label: string; level: keyof OwnerDis
   currentZip: { label: "現住所の郵便番号", level: "zip" }, currentAddress: { label: "現住所", level: "address" },
   note: { label: "備考", level: "note" }, email: { label: "メール", level: "email" },
   corporateNumber: { label: "法人番号", level: "corporateNumber" }, companyRegistryNumber: { label: "会社法人等番号", level: "corporateNumber" },
+  // 法人の統合で、消える側の値を残す側に記録した行(2026-11-24・owner-merge-corporate-handover.ts)。
+  // 表示レベルは元の項目と同じ(住所は owner_address・電話は owner_phone・番号は owner_corporate_number など)。
+  _merged_source_address: { label: "統合前の登記上の住所", level: "address" },
+  _merged_source_zip: { label: "統合前の登記上の郵便番号", level: "zip" },
+  _merged_source_phone: { label: "統合前の電話番号", level: "phone" },
+  _merged_source_email: { label: "統合前のメール", level: "email" },
+  _merged_source_nameKana: { label: "統合前のフリガナ", level: "nameKana" },
+  _merged_source_name: { label: "統合前の氏名", level: "name" },
+  _merged_source_corporateNumber: { label: "統合前の法人番号", level: "corporateNumber" },
+  _merged_source_companyRegistryNumber: { label: "統合前の会社法人等番号", level: "corporateNumber" },
 };
+/** 統合の記録(変更ではなく、消える側の値を残しただけ)。値は1つだけ出し、見出しは「を記録」。 */
+const isMergedSourceRow = (row: ChangeRow) => row.targetTable === "owners" && row.fieldName.startsWith("_merged_source_");
 /** つながりを解除した印。⚠値は所有者の ID なので出さない。 */
 const OWNER_UNLINK_FIELDS = new Set(["_unlinked_from_property", "_deleted_via_mislink_correction", "_deleted_via_merge"]);
 /** 値が人の ID の項目(名前に直す)。それ以外の ID の値は出さない。 */
@@ -355,8 +367,13 @@ export function changeEvents(rows: readonly ChangeRow[], ctx: ChangeContext): { 
     if (visible.length === 0) continue;
     const first = visible[0].row;
     const labels = visible.map((v) => fieldLabel(v.row));
-    const change = (v: (typeof visible)[number]) => (v.hideValues ? null : `${displayValue(v.row, v.row.oldValue, ctx)} → ${displayValue(v.row, v.row.newValue, ctx)}`);
+    const change = (v: (typeof visible)[number]) => (v.hideValues
+      ? null
+      : isMergedSourceRow(v.row)
+        ? displayValue(v.row, v.row.newValue, ctx)
+        : `${displayValue(v.row, v.row.oldValue, ctx)} → ${displayValue(v.row, v.row.newValue, ctx)}`);
     const single = visible.length === 1;
+    const verb = single && isMergedSourceRow(first) ? "を記録" : "を変更";
     const table = TABLE_LABELS[first.targetTable] ?? first.targetTable;
     const shown = labels.length > 3 ? `${labels.slice(0, 3).join("・")} ほか${labels.length - 3}項目` : labels.join("・");
     const detail = single
@@ -365,7 +382,7 @@ export function changeEvents(rows: readonly ChangeRow[], ctx: ChangeContext): { 
     const deal = first.targetTable === "deals" ? ctx.dealsById.get(first.targetId) : undefined;
     const ofOwner = first.targetTable === "owners";
     events.push(event(first.targetTable === "property_owners" || ofOwner ? "owner_change" : "change", first.id, first.changedAt, {
-      title: single ? `${ofOwner ? "所有者の" : ""}${labels[0]}を変更` : `${table}を変更(${shown})`,
+      title: single ? `${ofOwner ? "所有者の" : ""}${labels[0]}${verb}` : `${table}を変更(${shown})`,
       // 自動の切り替えは、記録上の人が手で変えたように見せない(変更履歴タブと同じ)。
       actor: first.source === "auto" ? "自動" : first.changer.name, detail,
       ...(deal ? dealFields(deal) : { href: ofOwner ? ownerTabHref : ctx.propertyId ? propertyDetailHref(ctx.propertyId, "history") : null }),
