@@ -260,10 +260,7 @@ export const LP_DESIGN_EXTRA_CSS = {
   compare: `.duo.dk .pane.a{background:var(--on-ink);color:var(--ink)}
 .duo.dk .pane.a small{color:var(--brass-d)}
 .duo.dk .pane.b{background:transparent;color:var(--on-ink);border:1px solid var(--brass)}
-.duo.dk .pane.b small{color:var(--brass-l)}
-.cmp{width:100%;border-collapse:collapse;font-size:14.5px;line-height:1.5;margin-top:30px}
-.cmp th,.cmp td{padding:13px 6px;text-align:left;border-bottom:1px solid var(--line-paper);font-weight:500}
-.cmp thead th{border-bottom:1px solid var(--on-paper);font-family:var(--mincho);font-weight:700;letter-spacing:.1em}`,
+.duo.dk .pane.b small{color:var(--brass-l)}`,
   editorial: `.vhero{justify-content:center;padding-block:100px 40px}
 .vh{display:flex;flex-direction:row-reverse;justify-content:space-between;gap:14px;min-height:74svh}
 .vt{writing-mode:vertical-rl;font-family:var(--mincho);font-weight:600;font-size:clamp(33px,10vw,48px);line-height:1.7;letter-spacing:.14em;margin:0}

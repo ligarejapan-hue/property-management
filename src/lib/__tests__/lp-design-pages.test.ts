@@ -192,6 +192,31 @@ describe("question 案: 種類・都県・市区町村を message / propertyAddr
   });
 });
 
+// 2026-11-24 発注者: 査定書はこの表の形式では作らない(査定では仲介と買取の両方の金額を伝える)=金額の表と注記を外す。
+describe("compare 案: 金額の表を外す", () => {
+  const h = renderLpDesignPage("compare", input());
+  it("表の仮の金額と注記を出さない", () => {
+    expect(h).not.toContain("○,○○○万円");
+    expect(h).not.toContain("体裁の見本");
+    expect(h).not.toContain('class="cmp');
+    expect(LP_DESIGN_EXTRA_CSS.compare).not.toContain(".cmp");
+  });
+  it("新しい見出し(2行)と説明文・ボタンはそのまま", () => {
+    expect(h).toContain('<h2 class="h2"><span class="m"><span>迷うときは、</span></span><span class="m"><span>両方の金額を聞いてから</span></span></h2>');
+    expect(h).toContain("査定では、仲介で売る場合の金額と、買取の場合の金額の両方をお伝えします。比べてから、お決めください。");
+    expect(h).not.toContain("両方の金額を並べて</span>");
+    expect(h).toContain("両方の金額を無料で確かめる");
+  });
+  it.each(["base", "form", "question", "editorial"] as const)("ほかの案(%s)には compare 案の節が入らず、表の CSS も無い", (d) => {
+    const o = renderLpDesignPage(d, input());
+    expect(o).not.toContain("両方の金額を聞いてから");
+    expect(o).not.toContain("両方の金額を無料で確かめる");
+    expect(o).not.toContain(".cmp");
+    // 仲介と買取の節(今のまま)
+    expect(o).toContain("どちらもご案内できます。迷うときは、両方の金額を並べてお出しします。");
+  });
+});
+
 describe("form 案: 冒頭と下の2つのフォーム", () => {
   it("2つとも今の受け口に送り、id が重ならない", () => {
     const h = renderLpDesignPage("form", input());
