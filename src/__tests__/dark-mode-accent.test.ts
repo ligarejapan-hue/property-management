@@ -20,7 +20,7 @@ const read = (rel: string) => readFileSync(join(SRC, rel), "utf8");
 // このPRでダーク文字色を追加した(=純変更のある)ファイル群
 const TOUCHED = [
   "app/(auth)/login/page.tsx",
-  "app/(dashboard)/admin/postal-code-audit/page.tsx",
+  "components/owners/checks/postal-code-audit-panel.tsx",
   "app/(dashboard)/admin/templates/[id]/page.tsx",
   "app/(dashboard)/buildings/[id]/page.tsx",
   "app/(dashboard)/import/page.tsx",

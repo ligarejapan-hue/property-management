@@ -177,10 +177,10 @@ describe("(⑪) タブ行の手書き禁止(ラチェット)", () => {
 
   it("移行済み4画面は Tabs を使っている(逆行防止)", () => {
     for (const f of [
-      "src/app/(dashboard)/admin/owners/quality-audit/page.tsx",
+      "src/components/owners/checks/quality-audit-panel.tsx",
       "src/app/(dashboard)/admin/owners/correction/page.tsx",
-      "src/app/(dashboard)/admin/postal-code-audit/page.tsx",
-      "src/app/(dashboard)/admin/display-name-audit/page.tsx",
+      "src/components/owners/checks/postal-code-audit-panel.tsx",
+      "src/components/owners/checks/display-name-audit-panel.tsx",
     ]) {
       expect(
         readFileSync(join(process.cwd(), f), "utf8"),
@@ -191,10 +191,10 @@ describe("(⑪) タブ行の手書き禁止(ラチェット)", () => {
 
   it("移行済み4画面はパネル側も tabPanelProps で紐付けている(@codex #406 R3 P2)", () => {
     for (const f of [
-      "src/app/(dashboard)/admin/owners/quality-audit/page.tsx",
+      "src/components/owners/checks/quality-audit-panel.tsx",
       "src/app/(dashboard)/admin/owners/correction/page.tsx",
-      "src/app/(dashboard)/admin/postal-code-audit/page.tsx",
-      "src/app/(dashboard)/admin/display-name-audit/page.tsx",
+      "src/components/owners/checks/postal-code-audit-panel.tsx",
+      "src/components/owners/checks/display-name-audit-panel.tsx",
     ]) {
       expect(
         readFileSync(join(process.cwd(), f), "utf8"),

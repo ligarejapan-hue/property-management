@@ -38,9 +38,8 @@ describe("確定した並び(仕事の流れ順)", () => {
       "dm",
       "imp",
       "sheet",
+      // 物件データ編集=画面2つ(2026-11-24 発注者決定・dq-two-pages.test.ts)。点検のグループは無くした。
       "dq",
-      // 物件データ編集の残りの画面(2026-11-24 発注者決定・dq-menu-split.test.ts)。
-      "dq-check",
       "admin",
       "doc",
     ]);
@@ -100,7 +99,7 @@ describe("グループの一言説明", () => {
     expect(group("inquiry")?.description).toBeUndefined();
     expect(group("doc")?.description).toBeUndefined();
     // 残りは付ける(とくに「システム管理」は名前が分かりにくいという指摘の当事者)。
-    for (const key of ["imp", "dm", "sheet", "dq", "dq-check", "admin"]) {
+    for (const key of ["imp", "dm", "sheet", "dq", "admin"]) {
       expect(group(key)?.description, key).toBeTruthy();
     }
   });
@@ -376,11 +375,9 @@ describe("⚠変えないもの", () => {
       "/sales-sheets/new",
       "/admin/company-settings",
       // 売却DM設定(/admin/sale-dm-settings)は第2回でLPメニューの中へ(sale-dm-settings-nav-source.test.ts)。
+      // 表示名監査・郵便番号×住所・テキスト衛生監査・氏名・連絡先チェックは 2026-11-24 に
+      //   「所有者の直し」の点検タブへ移した(古いアドレスはそこへ飛ぶ=dq-two-pages.test.ts)。
       "/admin/owners/correction",
-      "/admin/display-name-audit",
-      "/admin/postal-code-audit",
-      "/admin/owners/text-hygiene",
-      "/admin/owners/quality-audit",
       "/admin/orphan-dm-logs",
       "/admin/users",
       "/admin/templates",
@@ -411,7 +408,7 @@ describe("左メニューの柱(発注者決定 2026-10-15)", () => {
       "imp",
       "sheet",
     ]);
-    for (const key of ["dq", "dq-check", "admin", "doc"]) {
+    for (const key of ["dq", "admin", "doc"]) {
       expect(group(key)?.pillar, key).toBeFalsy();
     }
     // 柱には見出しの絵がある。

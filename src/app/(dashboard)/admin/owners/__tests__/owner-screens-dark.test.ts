@@ -6,7 +6,7 @@ import { dirname, join } from "node:path";
 const dir = dirname(fileURLToPath(import.meta.url));
 const detailSrc = readFileSync(join(dir, "..", "[id]", "page.tsx"), "utf8");
 const hygieneSrc = readFileSync(
-  join(dir, "..", "text-hygiene", "page.tsx"),
+  join(dir, "..", "..", "..", "..", "..", "components", "owners", "checks", "text-hygiene-panel.tsx"),
   "utf8",
 );
 // -----------------------------------------------------------------------
@@ -56,7 +56,7 @@ describe("owners/[id]/page.tsx dark: 配色 (O1)", () => {
   // --- hover 可読化（backlink） ---
   it("back リンクは共通 BackLink(dark:hover は部品側で担保・第2弾⑩)", () => {
     // dark:hover:text-gray-200 は src/components/ui/back-link.tsx が持つ。
-    expect(detailSrc).toContain('to: "補正候補一覧"');
+    expect(detailSrc).toContain('to: "所有者の直し"');
   });
 
   // --- ライト側不変担保 ---

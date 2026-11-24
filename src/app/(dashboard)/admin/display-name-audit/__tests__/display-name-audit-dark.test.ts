@@ -4,7 +4,7 @@ import { fileURLToPath } from "node:url";
 import { dirname, join } from "node:path";
 
 const dir = dirname(fileURLToPath(import.meta.url));
-const src = readFileSync(join(dir, "..", "page.tsx"), "utf8");
+const src = readFileSync(join(dir, "..", "..", "..", "..", "..", "components", "owners", "checks", "display-name-audit-panel.tsx"), "utf8");
 
 // -----------------------------------------------------------------------
 // display-name-audit/page.tsx (表示名監査) dark: 配色
@@ -87,9 +87,9 @@ describe("display-name-audit/page.tsx dark: 配色", () => {
     expect(src).toContain("dark:bg-gray-800 dark:text-gray-300");
   });
 
-  // --- ナビ breadcrumb リンク可読化 ---
-  it("breadcrumb ホバーに dark:hover:text-gray-200 がある", () => {
-    expect(src).toContain("dark:hover:text-gray-200");
+  // --- パンくずは無くした(2026-11-24・「所有者の直し」の点検タブの中身になったため) ---
+  it("単独の画面だったころのパンくず(管理 / 表示名監査)は持たない", () => {
+    expect(src).not.toContain("<nav");
   });
 
   // --- ライトモード不変担保 ---

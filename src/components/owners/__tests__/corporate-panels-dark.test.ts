@@ -7,11 +7,11 @@ const dir = dirname(fileURLToPath(import.meta.url));
 const lookupSrc = readFileSync(join(dir, "..", "corporate-lookup-panel.tsx"), "utf8");
 const cleanupSrc = readFileSync(join(dir, "..", "corporate-cleanup-panel.tsx"), "utf8");
 const auditSrc = readFileSync(
-  join(dir, "..", "..", "..", "app", "(dashboard)", "admin", "owners", "quality-audit", "page.tsx"),
+  join(dir, "..", "checks", "quality-audit-panel.tsx"),
   "utf8",
 );
 const hygieneSrc = readFileSync(
-  join(dir, "..", "..", "..", "app", "(dashboard)", "admin", "owners", "text-hygiene", "page.tsx"),
+  join(dir, "..", "checks", "text-hygiene-panel.tsx"),
   "utf8",
 );
 

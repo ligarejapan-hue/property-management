@@ -171,7 +171,8 @@ describe("パンくずの現在地(あれば)も同じ名前", () => {
       const f = sourceOf(l.href);
       return existsSync(f) && extractBreadcrumbCurrent(read(f)) !== null;
     });
-    expect(withCrumb.length).toBeGreaterThanOrEqual(6);
+    // 2026-11-24: パンくずを持っていた点検の3画面が「所有者の直し」のタブになったので 6→5。
+    expect(withCrumb.length).toBeGreaterThanOrEqual(5);
   });
 
   it.each(titledLeaves().map((l) => [l.href, l.label] as const))(
@@ -203,13 +204,16 @@ describe("タブへ飛ぶ項目は、タブの名前と一致させる", () => {
     i.href.includes("?tab="),
   );
 
-  it("走査対象が空振りしていない", () => {
-    expect(tabbed.length).toBeGreaterThanOrEqual(1);
+  // 2026-11-24: タブへ飛ぶ項目は今は無い(物件データ編集を画面2つにした=dq-two-pages.test.ts)。
+  //   足したときにこの照合が働くよう、走査そのものは残す(空なら it.each は何も作らない)。
+  it("今はタブへ飛ぶ項目が無い(足したら下の照合が働く)", () => {
+    expect(tabbed.map((i) => i.href)).toEqual([]);
   });
 
-  it.each(tabbed.map((i) => [i.href, i.label] as const))(
+  it.each(tabbed.length ? tabbed.map((i) => [i.href, i.label] as const) : [["(なし)", "(なし)"] as const])(
     "%s のタブ名が「%s」である",
     (href, label) => {
+      if (href === "(なし)") return; // 項目が無いときの空の行(it.each は空配列を受け付けない)
       const [path, query] = href.split("?");
       const tabKey = new URLSearchParams(query).get("tab");
       expect(tabKey, `${href} に tab= が無い`).not.toBeNull();

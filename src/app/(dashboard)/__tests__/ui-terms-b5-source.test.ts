@@ -54,9 +54,9 @@ describe("B-5: 所有者補正候補の開発用語を平易化・事実に合�
     expect(withoutComments).not.toMatch(/soft-?delete/i);
   });
 
-  it("タイトルは補足なしの「所有者補正候補」(第2弾⑧でPageHeader化)", () => {
-    expect(src).toMatch(/title="所有者補正候補"/);
-    expect(src).not.toContain("所有者補正候補 (");
+  it("タイトルは補足なしの「所有者の直し」(第2弾⑧でPageHeader化・2026-11-24 改名)", () => {
+    expect(src).toMatch(/title="所有者の直し"/);
+    expect(src).not.toContain("所有者の直し (");
   });
 
   it("実装済みの統合実行を「未実装」と説明しない・Phase 表記を出さない", () => {

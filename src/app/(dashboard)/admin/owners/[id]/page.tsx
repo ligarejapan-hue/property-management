@@ -281,7 +281,7 @@ export default function AdminOwnerDetailPage() {
       <PageHeader
         back={{
           href: "/admin/owners/correction?tab=corporate_number",
-          to: "補正候補一覧",
+          to: "所有者の直し",
         }}
         title={
           <>
