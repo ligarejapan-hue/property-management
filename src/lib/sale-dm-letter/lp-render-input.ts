@@ -5,6 +5,7 @@
  *  - LpRenderInput には氏名・番地・所有者住所を**持たせない**(キー集合をテストで固定)。
  */
 import { expandLetterTags, hasUnresolvedTag, coarsePropertyLocation, propertyTypeLabel } from "./tags";
+import type { LpFormStamp } from "./lp-form-stamp";
 import type { LpFaqItem } from "./lp-template";
 import { isFigureKind, type FigureKind } from "./lp-figures";
 import type { AdParams, GoogleTagConfig } from "./lp-public";
@@ -26,6 +27,8 @@ export interface LpPublicInput {
   google: GoogleTagConfig | null;
   /** 見出し情報(OGP)。url=このページの絶対URL(追跡用URL未設定なら相対)・imageUrl=一番上の写真の絶対URL(無ければ null)。 */
   og: { url: string; imageUrl: string | null };
+  /** フォームのボット対策の印(表示の時刻と署名・lp-form-stamp.ts)。鍵が無いときは null=隠し欄 lp_t・lp_ts を出さない。 */
+  formStamp?: LpFormStamp | null;
 }
 export interface LpRenderInput {
   mode: LpMode;

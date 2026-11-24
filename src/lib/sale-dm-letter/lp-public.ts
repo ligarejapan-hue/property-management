@@ -75,6 +75,16 @@ export const EMPTY_AD_PARAMS: Readonly<AdParams> = Object.freeze({
  */
 const SAFE_UTM_RE = /^[A-Za-z0-9_.-]{1,100}$/;
 const SAFE_GCLID_RE = /^[A-Za-z0-9_-]{1,200}$/;
+/**
+ * utm の値を、監査に記録してよい形のときだけ返す。それ以外は null(電話・メール等が紛れても残さない)。
+ *  - 英数字と _ . - だけ・100文字まで(Google のタグに渡す値と同じ規則)
+ *  - そのうえで日本の電話番号に見える値(区切りを除いて 0 で始まる10〜11桁)は外す。数字だけのキャンペーン ID は残す。
+ */
+export function safeUtmValue(v: string | null): string | null {
+  if (v === null || !SAFE_UTM_RE.test(v)) return null;
+  if (/^0\d{9,10}$/.test(v.replace(/[-._]/g, ""))) return null;
+  return v;
+}
 export function safeAdQuery(ad: AdParams): string {
   const parts: string[] = [];
   for (const [query, field] of AD_PARAM_KEYS) {

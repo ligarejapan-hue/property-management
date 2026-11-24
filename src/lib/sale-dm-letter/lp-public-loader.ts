@@ -3,6 +3,7 @@
  *  - 公開ゲート(SALE_DM_LP_PUBLIC_ENABLED)・公開名の規則・削除済みでない・「使う」・文章あり、をすべて満たすときだけページ。
  *  - 物件を差し込まない(所在・種別は null=一般形)。宛先が無いので配信停止・電話タップの計測も無い。
  *  - 設定は loadSaleDmPublicPageConfig(描画に要る列だけ・課金APIキーは読まない)。
+ *  - 申込フォームにボット対策の印(lp_t・lp_ts・lp_js・lp-form-stamp.ts・2026-11-24)。
  *  - 売却の代表LP の比較テスト(2026-11-24): 公開名が LP_DESIGN_BY_SLUG にあれば、上の条件をすべて満たしたうえで新しい見た目で描く。
  */
 import { loadSaleDmPublicPageConfig } from "./config-store";
@@ -10,6 +11,7 @@ import { buildLpRenderInput, hasRenderableLpVariant, type LpSourceRows } from ".
 import { renderLpPage } from "./lp-page";
 import { lpDesignForSlug, renderLpDesignPage } from "./lp-design-pages";
 import { DEFAULT_PRIVACY_TEXT } from "./privacy-text";
+import { deriveLpFormStampKey, issueLpFormStamp } from "./lp-form-stamp";
 import { normalizePublicSlug, readAdParams, buildPublicLpHeaders, publicLpPath, safeAdQuery } from "./lp-public";
 
 export interface PublicLpScenarioRow {
@@ -88,6 +90,8 @@ export async function loadPublicLpPage(
         safeQuery: safeAdQuery(readAdParams(query)),
         google: cfg.google,
         og: { url: `${base}${path}`, imageUrl: heroImage ? `${base}/lp-assets/${heroImage.publicId}` : null },
+        // ボット対策の印(表示の時刻と署名)。鍵(NEXTAUTH_SECRET)が無ければ null=隠し欄を出さず、受け口は「署名なし」で受け付ける。
+        formStamp: issueLpFormStamp(slug, Date.now(), deriveLpFormStampKey()),
       },
     },
   );

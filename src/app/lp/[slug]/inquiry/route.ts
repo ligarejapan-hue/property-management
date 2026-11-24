@@ -8,9 +8,18 @@ import { startInquiryNotify } from "@/lib/sale-dm-letter/inquiry-notify";
 import { startInquiryAutoReply } from "@/lib/sale-dm-letter/inquiry-auto-reply";
 import { hasRenderableLpVariant } from "@/lib/sale-dm-letter/lp-render-input";
 import { loadSaleDmPublicPageConfig } from "@/lib/sale-dm-letter/config-store";
-import { normalizePublicSlug, readAdParams, publicLpPath } from "@/lib/sale-dm-letter/lp-public";
+import { normalizePublicSlug, readAdParams, publicLpPath, safeUtmValue } from "@/lib/sale-dm-letter/lp-public";
 import { recordPublicInquiry } from "@/lib/sale-dm-letter/lp-public-record";
 import { createResponder, readFormBody, wantsJsonReply } from "@/lib/sale-dm-letter/inquiry-http";
+import type { AdParams } from "@/lib/sale-dm-letter/lp-public";
+import {
+  deriveLpFormStampKey,
+  evaluateLpBotSignals,
+  LP_JS_FIELD,
+  LP_STAMP_SIG_FIELD,
+  LP_STAMP_TIME_FIELD,
+  type LpBotReason,
+} from "@/lib/sale-dm-letter/lp-form-stamp";
 
 /**
  * 広告用の公開ページの査定申込の受け口(設計 2026-10-20 §2)。認証不要(proxy.ts の PUBLIC_PATHS "/lp/")。
@@ -20,7 +29,9 @@ import { createResponder, readFormBody, wantsJsonReply } from "@/lib/sale-dm-let
  *  2. 送信元判定(public-origin.ts) — よそのサイトから踏ませる送信を 403。
  *  3. 公開名の形式門前払い(DB 無アクセス)→ 公開ゲート(lpPublicEnabled)— 無効なら 404。
  *  4. 本文の形式・上限(32KB)。
- *  5. honeypot — 機械送信は「受け付けました」を返して何も残さない。
+ *  5. honeypot・速すぎる送信(lp-form-stamp.ts) — 機械送信は「受け付けました」(silent)を返して申込を残さない。
+ *     ボット記録(AuditLog lp_inquiry_bot_blocked)だけ残す。入力操作の印(lp_js)が無い・表示の署名が無い/不正な送信は
+ *     受け付けたうえで lp_inquiry_bot_suspect を残す(取りこぼさない)。記録は公開名・理由・広告の印・gclid の有無だけ。
  *  6. 入力検証(inquiry-input.ts) — 不備は 422。入力値は画面に送り返さない。
  *  7. 存在確認(読み取りのみ) — 公開名に合う「使う」種類が無い・文章が無ければ 404(記録・監査なし)。
  *     判定はページを出す条件(lp-public-loader.ts)と同じ関数(hasRenderableLpVariant)。
@@ -34,6 +45,31 @@ const ipHourLimiter = createRateLimiter({ limit: 5, windowMs: 3_600_000 });
 const slugLimiter = createRateLimiter({ limit: 200, windowMs: 3_600_000 });
 const globalLimiter = createRateLimiter({ limit: 120, windowMs: 3_600_000 });
 const throttleAuditLimiter = createRateLimiter({ limit: 1, windowMs: 300_000 });
+/** ボット記録の上限(action ごとに1時間60件)。大量送信で監査が埋まらないように(throttleAuditLimiter と同じ考え方)。 */
+const botAuditLimiter = createRateLimiter({ limit: 60, windowMs: 3_600_000 });
+
+/** ボット記録。IP・UA・入力値・gclid の値・形の怪しい utm は書かない(CLAUDE.md §8・§19)。上限を超えた分は書かない。 */
+async function writeBotAudit(
+  action: "lp_inquiry_bot_blocked" | "lp_inquiry_bot_suspect",
+  slug: string,
+  reasons: LpBotReason[],
+  ad: AdParams,
+): Promise<void> {
+  if (!botAuditLimiter.hit(action)) return;
+  await writeAuditLog({
+    action,
+    targetTable: "dm_scenarios",
+    detail: {
+      slug,
+      reasons,
+      // 広告の印は形が安全なもの(英数字と _ . - だけ)だけ。電話・メール等が紛れた値は null(Google のタグに渡す値と同じ規則)。
+      utmSource: safeUtmValue(ad.utmSource),
+      utmCampaign: safeUtmValue(ad.utmCampaign),
+      utmContent: safeUtmValue(ad.utmContent),
+      hasGclid: ad.gclid !== null,
+    },
+  });
+}
 
 export async function POST(req: NextRequest, { params }: { params: Promise<{ slug: string }> }) {
   const { slug: rawSlug } = await params;
@@ -59,8 +95,25 @@ export async function POST(req: NextRequest, { params }: { params: Promise<{ slu
   const get = (key: string): string | null => body.fields.get(key);
 
   const parsed = parseInquiryForm(get);
+  const ad = readAdParams(get);
   // 機械送信は人と同じ「受け付けました」を返すが、silent=ページが申込完了の合図(Google のコンバージョン)を出さない。
-  if (parsed.kind === "bot") return reply("done", 200, [], { silent: true });
+  if (parsed.kind === "bot") {
+    await writeBotAudit("lp_inquiry_bot_blocked", slug, ["honeypot"], ad);
+    return reply("done", 200, [], { silent: true });
+  }
+  const verdict = evaluateLpBotSignals({
+    slug,
+    t: get(LP_STAMP_TIME_FIELD),
+    sig: get(LP_STAMP_SIG_FIELD),
+    js: get(LP_JS_FIELD),
+    nowMs: Date.now(),
+    key: deriveLpFormStampKey(),
+  });
+  // 署名が正しく、表示から2秒未満の送信=honeypot と同じ扱い。
+  if (verdict.kind === "blocked") {
+    await writeBotAudit("lp_inquiry_bot_blocked", slug, [verdict.reason], ad);
+    return reply("done", 200, [], { silent: true });
+  }
   if (parsed.kind === "invalid") return reply("invalid", 422, parsed.errors.map((e) => INQUIRY_ERROR_MESSAGES[e]));
 
   let scenario: { id: string; lpHeadline: string | null; lpBodyText: string | null } | null;
@@ -98,7 +151,7 @@ export async function POST(req: NextRequest, { params }: { params: Promise<{ slu
 
   let recorded: Awaited<ReturnType<typeof recordPublicInquiry>>;
   try {
-    recorded = await recordPublicInquiry(prisma, { id: scenario.id, slug }, parsed.value, readAdParams(get));
+    recorded = await recordPublicInquiry(prisma, { id: scenario.id, slug }, parsed.value, ad);
   } catch (err) {
     console.error("[lp_public_inquiry] record failed", { name: err instanceof Error ? err.name : "Unknown" });
     return reply("busy", 503);
@@ -113,6 +166,8 @@ export async function POST(req: NextRequest, { params }: { params: Promise<{ slu
     targetId: scenario.id,
     detail: { slug, at: new Date().toISOString() },
   });
+  // 入力操作の印が無い・署名が無い/不正 = 受け付けたうえで、ボット記録にだけ「入力操作なし」として残す。
+  if (verdict.kind === "suspect") await writeBotAudit("lp_inquiry_bot_suspect", slug, verdict.reasons, ad);
   try {
     startInquiryNotify(inquiryId);
   } catch {
