@@ -50,7 +50,7 @@ describe("公式の市区町村の一覧から作る集合", () => {
     for (const v of Object.values(GSI_MUNICIPALITIES)) expect(PUBLIC_OWNER_NAMES.has(v)).toBe(true);
     for (const n of PUBLIC_OWNER_NAMES) {
       if (PREFECTURE_NAMES.has(n) || [...PREFECTURE_NAMES].some((p) => n.startsWith(p))) continue;
-      expect(n).toMatch(/(市|区|省|^国)$/u);
+      expect(n).toMatch(/(市|区|省|庁|^内閣府|^国)$/u);
     }
   });
 });

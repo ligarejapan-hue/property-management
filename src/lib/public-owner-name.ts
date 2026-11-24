@@ -28,7 +28,10 @@ export function normalizePublicOwnerName(name: string | null | undefined): strin
   return (name ?? "").normalize("NFKC").replace(/\s+/gu, "");
 }
 
+// 1府11省+土地を持つことの多い庁(2026-11-24 @codex #781: 外務省が抜けていた)
 const MINISTRIES = [
+  "内閣府",
+  "外務省",
   "財務省",
   "国土交通省",
   "農林水産省",
@@ -39,6 +42,15 @@ const MINISTRIES = [
   "法務省",
   "経済産業省",
   "環境省",
+  "復興庁",
+  "デジタル庁",
+  "宮内庁",
+  "林野庁",
+  "水産庁",
+  "国税庁",
+  "文化庁",
+  "気象庁",
+  "海上保安庁",
 ];
 
 /** 一覧の値の頭の都道府県(県は2〜3字+県。短い方から当てる=「神奈川県」も取れる)。 */
@@ -99,6 +111,10 @@ export const PUBLIC_OWNER_NAME_CASES: ReadonlyArray<readonly [string, boolean]> 
   ["京都府", true],
   ["大阪府", true],
   ["神奈川県", true],
+  ["外務省", true],
+  ["内閣府", true],
+  ["林野庁", true],
+  ["外務省前ビル株式会社", false],
   ["千葉県", true],
   ["東京都世田谷区", true],
   ["東京都　世田谷区", true],
