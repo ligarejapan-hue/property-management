@@ -73,6 +73,18 @@ describe("safeAdQuery(Google のタグに渡してよい印だけの query・@co
     expect(safeAdQuery(readAdParams(get({ utm_source: "a".repeat(101) })))).toBe("");
     expect(safeAdQuery(readAdParams(get({ utm_source: "a".repeat(100) })))).toBe(`?utm_source=${"a".repeat(100)}`);
   });
+  it("電話番号に見える utm(区切りを除いて数字が10桁以上続く)は国番号つきも含めて落とす。gclid はそのまま", () => {
+    for (const v of ["81-90-1234-5678", "819012345678", "090-1234-5678", "09012345678", "03.1234.5678", "tel_0312345678"]) {
+      expect(safeAdQuery(readAdParams(get({ utm_term: v, utm_source: "google" })))).toBe("?utm_source=google");
+    }
+    for (const f of ["utm_source", "utm_medium", "utm_campaign", "utm_content", "utm_term"]) {
+      expect(safeAdQuery(readAdParams(get({ [f]: "81-90-1234-5678" })))).toBe("");
+    }
+    // 9桁以下の数字の ID・日付は残す(安全な印は今までどおり渡す)
+    expect(safeAdQuery(readAdParams(get({ utm_campaign: "123456789", utm_content: "2026-11-24" }))))
+      .toBe("?utm_campaign=123456789&utm_content=2026-11-24");
+    expect(safeAdQuery(readAdParams(get({ gclid: "Cj0KCQ1234567890abc" })))).toBe("?gclid=Cj0KCQ1234567890abc");
+  });
 });
 
 describe("Google のタグの設定値", () => {
