@@ -36,7 +36,7 @@ import {
 } from "@/lib/api-client";
 import SplitPdfDialog from "@/components/properties/split-pdf-dialog";
 import { DealScopeBar, DealScopeSelect, FixedUploadScopeNote, UploadScopeSelect } from "@/components/properties/attachment-deal-scope";
-import { estimatedAssignments, filterByScope, splitDealsOf, type ScopeDeal } from "@/lib/attachments/deal-scope";
+import { estimatedAssignments, filterByScope, quietUploadDealOf, splitDealsOf, type ScopeDeal } from "@/lib/attachments/deal-scope";
 import {
   bundleHasRegistry,
   dropKindOf,
@@ -165,12 +165,14 @@ export default function AttachmentTab({
 }: {
   /**
    * 取引の画面から開いたときのその取引の id。最初はその取引の書類だけを出し、入れた書類はその取引の書類にする。
-   * その取引が仕入/売却の分からない取引(仲介など)なら、物件の画面と同じ出し方。
+   * その取引を分けない物件(仲介の取引が1件だけ・仕入/売却の分からない買取再販)なら、物件の画面と同じ出し方
+   * (仲介の取引なら、入れた書類にはその取引を付ける=画面には出さない・2026-11-24)。
    */
   fixedDealId?: string | null;
   /**
    * この物件の取引(物件の画面が受け取ったもの)。null=取引を見る権限が無い。
    * 仕入か売却の分かる取引があるときだけ、添付を取引で分ける(買取再販・2026-11-04 発注者 案A)。
+   * 仲介の取引は、分けられる取引が2件以上あるときに分ける(2026-11-24 発注者 案a)。
    */
   deals?: readonly ScopeDeal[] | null;
   /** 現況。賃貸中(rented)のときだけ「⑤ 賃貸関係」のフォルダを空でも出す。 */
@@ -232,16 +234,21 @@ export default function AttachmentTab({
   // （@codex #395 R7 P2）。独自の世代ガードだと、**新しい取り直しが失敗しただけ**で
   // 先に届いていた使える一覧を捨て、タブが空/古いままエラーになる。
   const refreshStateRef = useRef(createRefreshState());
-  // 取引で分ける(買取再販の仕入/売却)。分けられる取引が無い物件では何も出さない。
+  // 取引で分ける(買取再販の仕入/売却・仲介の取引が2件以上)。分けられる取引が無い物件では何も出さない。
   const scopeDeals = deals ? splitDealsOf(deals) : [];
   const scopeEnabled = scopeDeals.length > 0;
-  // 取引の画面から開いたときのその取引(仕入/売却の分かる取引のときだけ)。
+  // 取引の画面から開いたときのその取引(分ける取引のときだけ)。
   const fixedDeal = fixedDealId ? (scopeDeals.find((d) => d.id === fixedDealId) ?? null) : null;
   // 取引の画面では、最初はその取引の書類だけを出す。
   const [scopeFilter, setScopeFilter] = useState(() => fixedDeal?.id ?? "all");
   // 入れるときの取引(空=あとで決める)。取引の画面ではその取引に決まっている(選ばせない)。
   const [uploadScope, setUploadScope] = useState("");
   const activeUploadScope = fixedDeal ? fixedDeal.id : uploadScope;
+  // 入れた書類に付ける取引(null=付けない)。分けない物件でも、仲介の取引の画面から入れたらその取引を付ける
+  // (画面は今までどおり・あとで取引が増えたときに正しく分かれる・2026-11-24 発注者 案ア)。
+  const uploadDealScope = scopeEnabled
+    ? (activeUploadScope !== "" ? activeUploadScope : null)
+    : quietUploadDealOf(deals, fixedDealId);
   const [scopeSaving, setScopeSaving] = useState(false);
 
   const fetchAttachmentsData = useCallback(async (options?: { silent?: boolean }) => {
@@ -306,7 +313,7 @@ export default function AttachmentTab({
     setCompressing(compressible && file.size > MAX_FILE_SIZE);
     try {
       // 選んだ取引は通常の添付にだけ付ける(謄本は共通として扱う)。
-      const dealScope = scopeEnabled && type === "general" && activeUploadScope !== "" ? activeUploadScope : null;
+      const dealScope = type === "general" ? uploadDealScope : null;
       const saved = await uploadFile(propertyId, file, "attachment", { attachmentType: type, dealScope });
       if (saved.registryNotice) onRegistryNotice?.(saved.registryNotice);
       return null;
@@ -561,8 +568,8 @@ export default function AttachmentTab({
     scanMoveRef.current = { attachmentId: result.id, originals, uploaded: 0 };
     // 「入れる書類の取引」を選んでいたら、撮った書類にも付ける(@codex P2)。
     // ⚠saveScopes は別の取引の変更中だと黙って何もしない=撮った書類が未区分のまま残るので、ここは直接送る。
-    if (scopeEnabled && activeUploadScope !== "") {
-      void updateAttachmentDealScope(propertyId, [{ attachmentId: result.id, scope: activeUploadScope }])
+    if (uploadDealScope !== null) {
+      void updateAttachmentDealScope(propertyId, [{ attachmentId: result.id, scope: uploadDealScope }])
         .then(() => fetchAttachmentsData({ silent: true }))
         .catch((err) => setError(err instanceof Error ? err.message : "取引の変更に失敗しました"));
     }
@@ -880,7 +887,7 @@ export default function AttachmentTab({
           onSave={async (segments) => {
             const r = await saveSplitPdf(propertyId, splitTarget.file, segments, {
               containsRegistry: bundleHasRegistry(splitTarget.analysis.pageKinds, segments),
-              dealScope: scopeEnabled && activeUploadScope !== "" ? activeUploadScope : null,
+              dealScope: uploadDealScope,
             });
             finishSplit({ kind: "split", parts: r.parts, registryParts: r.registryParts, registryNotice: r.registryNotice });
           }}

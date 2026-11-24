@@ -5,6 +5,7 @@ import {
   estimatedAssignments,
   filterByScope,
   parseScopeInput,
+  quietUploadDealOf,
   splitDealsOf,
   type ScopeDeal,
 } from "../deal-scope";
@@ -92,5 +93,88 @@ describe("選択肢と入力", () => {
     expect(parseScopeInput(null)).toEqual({ dealId: null, dealCommon: false });
     expect(parseScopeInput("6F9619FF-8B86-D011-B42D-00C04FC964FF")).toEqual({ dealId: "6f9619ff-8b86-d011-b42d-00c04fc964ff", dealCommon: false });
     expect(parseScopeInput("xyz")).toBeUndefined();
+  });
+});
+
+describe("仲介の取引も分ける(2026-11-24 発注者 案a)", () => {
+  // 購入時の仲介(買主側・6/10 決済)→ 売却時の仲介(売主側)。物件の API と同じ新しい順で渡す。
+  const buy: ScopeDeal = { id: "bb", dealNo: "2026-0007", status: "settled", side: null, businessType: "brokerage", tradeSide: "buyer", settlementAt: "2026-06-10T01:00:00.000Z", createdAt: "2026-04-01T00:00:00.000Z" };
+  const sell: ScopeDeal = { id: "bs", dealNo: "2026-0012", status: "considering", side: null, businessType: "brokerage", tradeSide: "seller", settlementAt: null, createdAt: "2026-09-01T00:00:00.000Z" };
+  const deals = [sell, buy];
+
+  it("中止でない仲介の取引が2件以上なら分ける・1件だけなら分けない(今までどおり)", () => {
+    expect(splitDealsOf(deals).map((d) => d.id)).toEqual(["bs", "bb"]);
+    expect(splitDealsOf([buy])).toEqual([]);
+    // 中止した取引は数えない・分ける対象にしない
+    expect(splitDealsOf([{ ...sell, status: "cancelled" }, buy])).toEqual([]);
+    const third = { ...sell, id: "bc", status: "cancelled" };
+    expect(splitDealsOf([third, sell, buy]).map((d) => d.id)).toEqual(["bs", "bb"]);
+  });
+  it("買取再販だけの物件は今までどおり(1件でも分ける・仕入/売却の分からない取引は外す)", () => {
+    expect(splitDealsOf([purchase]).map((d) => d.id)).toEqual(["dp"]);
+    expect(splitDealsOf([{ ...sale, side: null, businessType: "resale" }, purchase]).map((d) => d.id)).toEqual(["dp"]);
+  });
+  it("買取再販と仲介が両方ある物件は、仲介の取引も分ける(どこにも出ない書類をなくす)", () => {
+    expect(splitDealsOf([sell, purchase]).map((d) => d.id)).toEqual(["bs", "dp"]);
+    // 仲介の取引の印が付いた書類が、その取引の絞り込みに出る(11-21 の自動で入れた書類など)
+    expect(filterByScope([att({ dealId: "bs" })], [sell, purchase], "bs").map((a) => a.id)).toEqual(["a1"]);
+  });
+  it("買取再販の仕入・売却+仲介の3件: 作った順の決まりで推定する", () => {
+    // 作った順: 購入仲介 1/10(2/20 決済)→ 仕入 3/1(5/30 決済)→ 売却 8/1
+    const early = { ...buy, settlementAt: "2026-02-20T00:00:00.000Z", createdAt: "2026-01-10T00:00:00.000Z" };
+    const mixed = [sale, purchase, early];
+    expect(dealScopeOf(att({ createdAt: "2026-02-01T00:00:00.000Z" }), mixed).scope).toBe("bb");
+    expect(dealScopeOf(att({ createdAt: "2026-04-15T03:00:00.000Z" }), mixed).scope).toBe("dp");
+    expect(dealScopeOf(att({ createdAt: "2026-06-01T00:00:00.000Z" }), mixed).scope).toBe("ds");
+  });
+  it("名前: 購入仲介・売却仲介・両手仲介・態様が未入力なら仲介", () => {
+    const both = { ...sell, id: "bw", dealNo: "2026-0020", tradeSide: "both" };
+    const none = { ...sell, id: "bn", dealNo: "2026-0021", tradeSide: null };
+    expect(dealScopeOptions([sell, buy, both, none])).toEqual([
+      { value: "bs", label: "売却仲介 2026-0012" },
+      { value: "bb", label: "購入仲介 2026-0007" },
+      { value: "bw", label: "両手仲介 2026-0020" },
+      { value: "bn", label: "仲介 2026-0021" },
+      { value: "common", label: "共通" },
+    ]);
+  });
+  it("推定: 作った順に並べ、前の取引の決済日(日本時間)までは前の取引・後は次の取引", () => {
+    expect(dealScopeOf(att({ createdAt: "2026-05-01T00:00:00.000Z" }), deals)).toEqual({ scope: "bb", estimated: true });
+    expect(dealScopeOf(att({ createdAt: "2026-06-10T14:00:00.000Z" }), deals)).toEqual({ scope: "bb", estimated: true });
+    expect(dealScopeOf(att({ createdAt: "2026-06-10T15:00:00.000Z" }), deals)).toEqual({ scope: "bs", estimated: true });
+    // 謄本・調査資料は共通と推定(買取再販と同じ)
+    expect(dealScopeOf(att({ type: "registry", docStage: null }), deals)).toEqual({ scope: "common", estimated: true });
+  });
+  it("推定: 前の取引に決済日が無ければ、次の取引を作った日を境に", () => {
+    const b = { ...buy, settlementAt: null };
+    expect(dealScopeOf(att({ createdAt: "2026-08-31T00:00:00.000Z" }), [sell, b])).toEqual({ scope: "bb", estimated: true });
+    expect(dealScopeOf(att({ createdAt: "2026-09-02T00:00:00.000Z" }), [sell, b])).toEqual({ scope: "bs", estimated: true });
+  });
+  it("推定: 取引が3件以上でも同じ決まり(最後の取引の後はいちばん新しい取引)", () => {
+    const sell2 = { ...sell, settlementAt: "2026-10-01T00:00:00.000Z" };
+    const next: ScopeDeal = { ...buy, id: "bn", dealNo: "2026-0030", status: "considering", tradeSide: "buyer", settlementAt: null, createdAt: "2026-11-01T00:00:00.000Z" };
+    const three = [next, sell2, buy];
+    expect(dealScopeOf(att({ createdAt: "2026-05-01T00:00:00.000Z" }), three).scope).toBe("bb");
+    expect(dealScopeOf(att({ createdAt: "2026-07-01T00:00:00.000Z" }), three).scope).toBe("bs");
+    expect(dealScopeOf(att({ createdAt: "2026-12-01T00:00:00.000Z" }), three).scope).toBe("bn");
+  });
+  it("推定どおりに確定・未区分の絞り込みも仲介の取引で動く", () => {
+    const items = [att({ id: "a1" }), att({ id: "a2", createdAt: "2026-10-01T00:00:00.000Z" }), att({ id: "a3", dealId: "bs" })];
+    expect(estimatedAssignments(items, deals)).toEqual([
+      { attachmentId: "a1", scope: "bb" },
+      { attachmentId: "a2", scope: "bs" },
+    ]);
+    expect(filterByScope(items, deals, "bs").map((a) => a.id)).toEqual(["a2", "a3"]);
+    expect(filterByScope(items, deals, "unset").map((a) => a.id)).toEqual(["a1", "a2"]);
+  });
+  it("仲介の取引が1件だけ(分けない)物件の取引の画面からは、画面に出さずにその取引を付ける(案ア)", () => {
+    expect(quietUploadDealOf([buy], "bb")).toBe("bb");
+    // 分ける物件では付けない(画面で決めた取引を使う)・中止の取引・買取再販・取引の画面でないときも付けない
+    expect(quietUploadDealOf(deals, "bb")).toBeNull();
+    expect(quietUploadDealOf([{ ...buy, status: "cancelled" }], "bb")).toBeNull();
+    expect(quietUploadDealOf([{ ...sale, side: null, businessType: "resale" }], "ds")).toBeNull();
+    expect(quietUploadDealOf([buy], null)).toBeNull();
+    expect(quietUploadDealOf(null, "bb")).toBeNull();
+    expect(quietUploadDealOf([buy], "other")).toBeNull();
   });
 });

@@ -57,8 +57,8 @@ describe("物件の取引の一覧", () => {
   ];
   it("取引番号・区分・仕入/売却の名前を出す(決済日・作った日も・添付の推定に使う)", () => {
     expect(summarizePropertyDeals(deals)).toEqual([
-      { id: "d2", dealNo: "2026-0031", businessType: "resale", status: "considering", side: "sale", label: "買取再販(売却)", settlementAt: null, createdAt: "2026-03-01T00:00:00.000Z" },
-      { id: "d1", dealNo: "2026-0012", businessType: "resale", status: "settled", side: "purchase", label: "買取再販(仕入)", settlementAt: "2026-05-30T01:00:00.000Z", createdAt: "2026-03-01T00:00:00.000Z" },
+      { id: "d2", dealNo: "2026-0031", businessType: "resale", status: "considering", side: "sale", tradeSide: null, label: "買取再販(売却)", settlementAt: null, createdAt: "2026-03-01T00:00:00.000Z" },
+      { id: "d1", dealNo: "2026-0012", businessType: "resale", status: "settled", side: "purchase", tradeSide: null, label: "買取再販(仕入)", settlementAt: "2026-05-30T01:00:00.000Z", createdAt: "2026-03-01T00:00:00.000Z" },
     ]);
   });
   it("仕入か売却か分からない買取再販・仲介は区分の名前だけ", () => {
@@ -68,6 +68,18 @@ describe("物件の取引の一覧", () => {
     ]);
     expect(a.label).toBe("買取再販");
     expect(b.label).toBe("仲介");
+  });
+  it("仲介の取引態様を渡す(添付を取引で分ける名前に使う)・買取再販は null", () => {
+    const [a, b, c] = summarizePropertyDeals([
+      { id: "x", dealNo: "2026-0001", businessType: "brokerage", tradeSide: "buyer", status: "considering", settlementAt: null, createdAt: created, parties: [] },
+      { id: "y", dealNo: "2026-0002", businessType: "brokerage", status: "considering", settlementAt: null, createdAt: created, parties: [] },
+      { id: "z", dealNo: "2026-0003", businessType: "resale", tradeSide: "seller", status: "considering", settlementAt: null, createdAt: created, parties: [] },
+    ]);
+    expect(a.tradeSide).toBe("buyer");
+    expect(b.tradeSide).toBeNull();
+    expect(c.tradeSide).toBeNull();
+    // 取引が仕入か売却かの読み方は変えない(仲介は null のまま)
+    expect(a.side).toBeNull();
   });
 });
 

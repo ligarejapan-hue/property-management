@@ -82,11 +82,13 @@ describe("GET /api/properties/[id] — 物件の取引", () => {
     expect(status).toBe(200);
     expect(body.businessType).toBe("resale");
     expect(body.deals).toEqual([
-      { id: "d2", dealNo: "2026-0031", businessType: "resale", status: "considering", side: "sale", label: "買取再販(売却)", settlementAt: null, createdAt: "2026-03-01T00:00:00.000Z" },
-      { id: "d1", dealNo: "2026-0012", businessType: "resale", status: "settled", side: "purchase", label: "買取再販(仕入)", settlementAt: "2026-05-30T01:00:00.000Z", createdAt: "2026-03-01T00:00:00.000Z" },
+      { id: "d2", dealNo: "2026-0031", businessType: "resale", status: "considering", side: "sale", tradeSide: null, label: "買取再販(売却)", settlementAt: null, createdAt: "2026-03-01T00:00:00.000Z" },
+      { id: "d1", dealNo: "2026-0012", businessType: "resale", status: "settled", side: "purchase", tradeSide: null, label: "買取再販(仕入)", settlementAt: "2026-05-30T01:00:00.000Z", createdAt: "2026-03-01T00:00:00.000Z" },
     ]);
-    const arg = pm.deal.findMany.mock.calls[0][0] as { where: unknown; select: { parties: { where: unknown; select: unknown } } };
+    const arg = pm.deal.findMany.mock.calls[0][0] as { where: unknown; select: { tradeSide?: boolean; parties: { where: unknown; select: unknown } } };
     expect(arg.where).toEqual({ propertyId: "p1" });
+    // 添付を取引で分けるときの名前(購入仲介・売却仲介)に使う(2026-11-24)
+    expect(arg.select.tradeSide).toBe(true);
     expect(arg.select.parties.where).toEqual({ isSelf: true });
     expect(arg.select.parties.select).toEqual({ role: true, isSelf: true });
   });

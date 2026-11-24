@@ -82,12 +82,15 @@ describe("添付タブの配線(ソース)", () => {
     expect(tab).toContain("{scopeEnabled && (");
   });
   it("入れるときの取引は通常の添付にだけ付ける(謄本には付けない)", () => {
-    expect(tab).toContain('scopeEnabled && type === "general" && activeUploadScope !== "" ? activeUploadScope : null');
+    expect(tab).toContain('const dealScope = type === "general" ? uploadDealScope : null;');
+  });
+  it("付ける取引: 分ける物件は選んだ取引・分けない物件は仲介の取引の画面のときだけその取引(2026-11-24)", () => {
+    expect(tab).toMatch(/const uploadDealScope = scopeEnabled\s*\? \(activeUploadScope !== "" \? activeUploadScope : null\)\s*: quietUploadDealOf\(deals, fixedDealId\);/);
   });
   it("分けて保存・書類を撮ったときも選んだ取引を付ける(@codex P2)", () => {
-    expect(tab).toContain('dealScope: scopeEnabled && activeUploadScope !== "" ? activeUploadScope : null,');
+    expect(tab).toContain("dealScope: uploadDealScope,");
     // 撮った書類は saveScopes の「変更中なら何もしない」を通さずに直接送る(見直しの指摘)。
-    expect(tab).toMatch(/handleScanSaved[\s\S]{0,800}updateAttachmentDealScope\(propertyId, \[\{ attachmentId: result\.id, scope: activeUploadScope \}\]\)/);
+    expect(tab).toMatch(/handleScanSaved[\s\S]{0,800}updateAttachmentDealScope\(propertyId, \[\{ attachmentId: result\.id, scope: uploadDealScope \}\]\)/);
   });
   it("取引の画面から: 最初はその取引だけ・入れた書類はその取引(選ばせない)", () => {
     expect(tab).toContain('const fixedDeal = fixedDealId ? (scopeDeals.find((d) => d.id === fixedDealId) ?? null) : null;');

@@ -73,6 +73,8 @@ export interface PropertyDealSummary {
   businessType: string;
   status: string;
   side: DealSide | null;
+  /** 仲介の取引態様(buyer/seller/both・未入力は null)。添付を取引で分けるときの名前に使う(2026-11-24)。 */
+  tradeSide: string | null;
   /** 「買取再販(仕入)」「仲介」など。 */
   label: string;
   /** 決済日・作った日(ISO)。添付の仕入/売却の推定の境に使う(2026-11-04)。 */
@@ -84,6 +86,7 @@ export interface PropertyDealSummary {
 export function summarizePropertyDeals(
   deals: Array<{
     id: string; dealNo: string; businessType: string; status: string;
+    tradeSide?: string | null;
     settlementAt: Date | null; createdAt: Date;
     parties: Array<{ role: string; isSelf: boolean }>;
   }>,
@@ -93,6 +96,7 @@ export function summarizePropertyDeals(
     const name = businessTypeLabel(d.businessType);
     return {
       id: d.id, dealNo: d.dealNo, businessType: d.businessType, status: d.status, side,
+      tradeSide: d.businessType === "brokerage" ? (d.tradeSide ?? null) : null,
       label: side ? `${name}(${SIDE_LABELS[side]})` : name,
       settlementAt: d.settlementAt ? d.settlementAt.toISOString() : null,
       createdAt: d.createdAt.toISOString(),
