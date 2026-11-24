@@ -61,6 +61,12 @@ import {
   type RegistryAddressCandidatesResponse,
 } from "@/lib/registry-address-cleanup-client";
 import type { RegistryStringType } from "@/lib/registry-address-cleanup";
+import {
+  ARCHIVE_ORIGIN_LABEL,
+  type ArchivedOwnerRow,
+  type ArchivedOwnersResponse,
+} from "@/lib/owner-archived";
+import { fetchArchivedOwners, unarchiveOwner } from "@/lib/owner-archived-client";
 
 type FilterType =
   | "all"
@@ -69,13 +75,15 @@ type FilterType =
   | "duplicate"
   | "corporate_number"
   | "corporate_restore"
-  | "registry_address";
+  | "registry_address"
+  | "archived";
 
 // DQ-03: 自前 API で self-fetch するタブ（上位の data 駆動 fetch/描画から除外する）。
 const SELF_FETCH_TABS: FilterType[] = [
   "corporate_number",
   "corporate_restore",
   "registry_address",
+  "archived",
 ];
 
 // Phase 2-A: duplicate タブ内のサブフィルタ。matchedBy で絞り込む。
@@ -186,6 +194,7 @@ function parseFilterTypeFromQuery(value: string | null): FilterType {
     case "corporate_number":
     case "corporate_restore":
     case "registry_address":
+    case "archived":
     case "all":
       return value;
     default:
@@ -353,13 +362,15 @@ function OwnerCorrectionPageInner() {
     { key: "corporate_restore", label: "法人番号紐づけ" },
     // DQ-03: 住所の登記文字列タブ。件数は子コンポーネント側 fetch。
     { key: "registry_address", label: "住所の登記文字列" },
+    // アーカイブ・統合で隠れた所有者を戻すタブ(2026-11-24)。件数は子コンポーネント側 fetch。
+    { key: "archived", label: "アーカイブ済み" },
   ];
 
   return (
     <div>
       <PageHeader title="所有者補正候補" />
       <p className="mb-6 text-sm text-amber-700 bg-amber-50 border border-amber-200 rounded-md px-3 py-2 dark:text-amber-300 dark:bg-amber-950/40 dark:border-amber-800">
-        「住所なし」タブの候補には住所補完、「孤立」タブの削除候補にはアーカイブ（一覧・検索から除外されます）、「重複候補」タブの同一キーグループには統合のプレビューと実行（確認のうえ）を個別に行えます。
+        「住所なし」タブの候補には住所補完、「孤立」タブの削除候補にはアーカイブ（一覧・検索から除外されます）、「重複候補」タブの同一キーグループには統合のプレビューと実行（確認のうえ）を個別に行えます。アーカイブや統合で隠れた人は「アーカイブ済み」タブから戻せます。
       </p>
 
       {/* Filter tabs(第3弾⑪: 共通 Tabs) */}
@@ -397,6 +408,7 @@ function OwnerCorrectionPageInner() {
       {filterType === "corporate_number" && <CorporateNumberCandidatesPanel />}
       {filterType === "corporate_restore" && <CorporateRestorePanel />}
       {filterType === "registry_address" && <RegistryAddressCandidatesPanel />}
+      {filterType === "archived" && <ArchivedOwnersPanel />}
 
       {!SELF_FETCH_TABS.includes(filterType) && data && !loading && (
         <>
@@ -1855,6 +1867,231 @@ function RegistryAddressCandidatesPanel() {
               }}
               disabled={!data.hasNextPage || !data.nextCursor}
             >
+              次へ
+            </Button>
+          </div>
+        </>
+      )}
+    </div>
+  );
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// アーカイブ済みタブ(2026-11-24 発注者「作る」): アーカイブ・統合で隠れた所有者を
+// 1人ずつ戻す。「戻す」は確認を開くだけで、「戻す（実行）」のときだけ API を呼ぶ
+// (owner-unarchive-ui.test.ts)。統合で隠れた人の物件・メモは統合先に残ったまま。
+// ─────────────────────────────────────────────────────────────────────────────
+function ArchivedOwnersPanel() {
+  const [page, setPage] = useState(0);
+  const [data, setData] = useState<ArchivedOwnersResponse | null>(null);
+  // 最初の読み込みは loading で始める。頁を替えるときは goToPage が立てる
+  // (effect の中で同期の setState をしない=react-hooks/set-state-in-effect)。
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState<string | null>(null);
+  const [confirmId, setConfirmId] = useState<string | null>(null);
+  const [runningId, setRunningId] = useState<string | null>(null);
+  const [message, setMessage] = useState<{ text: string; ok: boolean } | null>(null);
+  // 戻したあとに同じ頁を読み直すための合図。
+  const [reloadKey, setReloadKey] = useState(0);
+
+  const mountedRef = useRef(true);
+  useEffect(() => {
+    mountedRef.current = true;
+    return () => {
+      mountedRef.current = false;
+    };
+  }, []);
+
+  // 読み込みの結果は then の中でだけ state に入れる。頁・合図が変わったら古い応答は捨てる。
+  useEffect(() => {
+    let stale = false;
+    fetchArchivedOwners(page).then(
+      (res) => {
+        if (stale) return;
+        setError(null);
+        setData(res);
+        setLoading(false);
+      },
+      (e: unknown) => {
+        if (stale) return;
+        setError(e instanceof Error ? e.message : "エラーが発生しました");
+        setData(null);
+        setLoading(false);
+      },
+    );
+    return () => {
+      stale = true;
+    };
+  }, [page, reloadKey]);
+
+  const goToPage = (p: number) => {
+    setLoading(true);
+    setError(null);
+    setPage(p);
+  };
+
+  const onUnarchive = useCallback(
+    async (row: ArchivedOwnerRow) => {
+      setRunningId(row.ownerId);
+      setMessage(null);
+      try {
+        await unarchiveOwner(row.ownerId, row.version);
+        if (!mountedRef.current) return;
+        setMessage({
+          text: `${row.ownerNameMasked ?? "所有者"} を戻しました（所有者一覧・検索に出ます）`,
+          ok: true,
+        });
+        // その頁の最後の1人を戻したら1つ前の頁へ(空の頁を出さない)。
+        if (page > 0 && data?.rows.length === 1) setPage(page - 1);
+        else setReloadKey((k) => k + 1);
+      } catch (e) {
+        if (!mountedRef.current) return;
+        setMessage({ text: e instanceof Error ? e.message : "戻せませんでした", ok: false });
+        // ほかの人が先に戻した・直した(404/409)ときに古い行と版が残らないよう、読み直す。
+        setReloadKey((k) => k + 1);
+      } finally {
+        if (mountedRef.current) setRunningId(null);
+      }
+    },
+    [page, data],
+  );
+
+  const lastPage = data ? Math.max(0, Math.ceil(data.total / data.pageSize) - 1) : 0;
+
+  return (
+    <div className="space-y-3">
+      <p className="rounded-md border border-blue-200 dark:border-blue-500/30 bg-blue-50 dark:bg-blue-500/15 px-3 py-2 text-xs text-blue-800 dark:text-blue-300">
+        アーカイブや統合で一覧・検索から隠れた所有者です。「戻す」で一覧・検索に戻ります。
+        <strong>統合で隠れた人は、物件・メモ・DM の記録が統合先に残ったまま</strong>
+        戻ります（物件とのつながりは戻りません）。同じ人として重複候補にまた出ることがあります。
+      </p>
+
+      {message && (
+        <p
+          className={`rounded-md border px-3 py-2 text-xs ${
+            message.ok
+              ? "border-emerald-200 bg-emerald-50 text-emerald-800 dark:border-emerald-800 dark:bg-emerald-950/40 dark:text-emerald-300"
+              : "border-red-200 bg-red-50 text-red-700 dark:border-red-800 dark:bg-red-950/40 dark:text-red-300"
+          }`}
+        >
+          {message.text}
+        </p>
+      )}
+
+      {loading && (
+        <p className="py-8 text-center text-sm text-gray-400 dark:text-gray-500">読み込み中...</p>
+      )}
+      {error && (
+        <p className="rounded-md border border-red-200 bg-red-50 px-3 py-2 text-sm text-red-700 dark:border-red-800 dark:bg-red-950/40 dark:text-red-300">
+          {error}
+        </p>
+      )}
+
+      {data && !loading && !error && (
+        <>
+          <p className="text-xs text-gray-600 dark:text-gray-300">アーカイブ済み {data.total} 件</p>
+          {data.rows.length === 0 ? (
+            <p className="py-8 text-center text-sm text-gray-400 dark:text-gray-500">
+              アーカイブ済みの所有者はいません
+            </p>
+          ) : (
+            <div className="overflow-x-auto rounded-md border border-gray-200 dark:border-gray-800">
+              <table className="min-w-full text-sm">
+                <thead className="bg-gray-50 dark:bg-gray-800 text-xs text-gray-500 dark:text-gray-400">
+                  <tr>
+                    <th className="px-3 py-2 text-left font-medium">氏名</th>
+                    <th className="px-3 py-2 text-left font-medium">住所</th>
+                    <th className="px-3 py-2 text-left font-medium">隠れた理由</th>
+                    <th className="px-3 py-2 text-left font-medium">隠れた日</th>
+                    <th className="px-3 py-2 text-left font-medium">操作</th>
+                  </tr>
+                </thead>
+                <tbody className="divide-y divide-gray-100 dark:divide-gray-800">
+                  {data.rows.map((r) => (
+                    <tr key={r.ownerId} className="hover:bg-gray-50 dark:hover:bg-gray-800 align-top">
+                      <td className="px-3 py-2 font-medium text-gray-900 dark:text-gray-100">
+                        {r.ownerNameMasked ?? <span className="text-gray-400 dark:text-gray-500">***</span>}
+                      </td>
+                      <td className="px-3 py-2 text-gray-600 dark:text-gray-300">
+                        {r.addressMasked ?? <span className="text-gray-400 dark:text-gray-500">—</span>}
+                      </td>
+                      <td className="px-3 py-2 text-xs text-gray-700 dark:text-gray-200">
+                        {ARCHIVE_ORIGIN_LABEL[r.origin]}
+                        {r.mergedInto && (
+                          <p className="mt-0.5 text-[11px] text-gray-500 dark:text-gray-400">
+                            統合先:{" "}
+                            <Link
+                              href={`/admin/owners/${r.mergedInto.ownerId}`}
+                              className="text-blue-600 hover:underline dark:text-blue-400"
+                            >
+                              {r.mergedInto.ownerNameMasked ?? "所有者"}
+                            </Link>
+                            {r.mergedInto.isArchived && "（統合先もアーカイブ済み）"}
+                          </p>
+                        )}
+                      </td>
+                      <td className="px-3 py-2 text-xs text-gray-600 dark:text-gray-300">
+                        {r.archivedAt
+                          ? new Date(r.archivedAt).toLocaleDateString("ja-JP", { timeZone: "Asia/Tokyo" })
+                          : "—"}
+                      </td>
+                      <td className="px-3 py-2">
+                        <div className="flex flex-col gap-1">
+                          {confirmId === r.ownerId ? (
+                            <div className="flex flex-col gap-1 rounded-md border border-amber-300 bg-amber-50 p-2 dark:border-amber-500/40 dark:bg-amber-500/10">
+                              <p className="text-[11px] text-amber-800 dark:text-amber-200">
+                                {r.origin === "merged"
+                                  ? "一覧・検索に戻します。物件・メモは統合先に残ります。戻した人はもう一度アーカイブできません。よろしいですか？"
+                                  : "一覧・検索に戻します。戻した人はもう一度アーカイブできません。よろしいですか？"}
+                              </p>
+                              <div className="flex gap-1">
+                                <Button
+                                  variant="success"
+                                  size="sm"
+                                  onClick={() => {
+                                    setConfirmId(null);
+                                    void onUnarchive(r);
+                                  }}
+                                >
+                                  戻す（実行）
+                                </Button>
+                                <Button variant="secondary" size="sm" onClick={() => setConfirmId(null)}>
+                                  やめる
+                                </Button>
+                              </div>
+                            </div>
+                          ) : (
+                            <Button
+                              variant="secondary"
+                              size="sm"
+                              onClick={() => setConfirmId(r.ownerId)}
+                              disabled={runningId !== null}
+                              loading={runningId === r.ownerId}
+                              loadingLabel="戻しています"
+                            >
+                              戻す
+                            </Button>
+                          )}
+                          <Link
+                            href={r.detailUrl}
+                            className="rounded-md border border-gray-300 dark:border-gray-700 px-2 py-1 text-center text-xs text-gray-700 dark:text-gray-200 hover:bg-gray-50 dark:hover:bg-gray-800"
+                          >
+                            所有者詳細
+                          </Link>
+                        </div>
+                      </td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+          )}
+
+          <div className="flex items-center justify-end gap-2 text-xs">
+            <Button variant="secondary" size="sm" onClick={() => goToPage(Math.max(0, page - 1))} disabled={page === 0}>
+              前へ
+            </Button>
+            <Button variant="secondary" size="sm" onClick={() => goToPage(page + 1)} disabled={page >= lastPage}>
               次へ
             </Button>
           </div>

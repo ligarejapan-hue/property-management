@@ -104,6 +104,8 @@ const ACTION_LABELS: Record<string, string> = {
   owner_correction_candidates_list: "補正候補一覧",
   owner_correction_address_fill: "住所補完",
   owner_correction_archive: "オーナーをアーカイブ",
+  owner_correction_archived_list: "アーカイブ済み一覧",
+  owner_correction_unarchive: "オーナーのアーカイブを戻す",
   owner_correction_merge_preview: "オーナー統合プレビュー",
   owner_correction_merge: "オーナー統合実行",
   owner_correction_mislink_preview: "誤紐づけ解除プレビュー",
