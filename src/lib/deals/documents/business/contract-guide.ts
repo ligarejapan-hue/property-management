@@ -5,7 +5,7 @@ import { jstDateString } from "../../datetime";
 import { html } from "../html";
 import { companyBlock, documentHtml } from "../layout";
 import { checklistItemsOf } from "./checklist-doc";
-import { dateJa, dateTimeJa, headTable, money, namesOf, partiesOf, propertyLabel, type BusinessDocContext, type Choice, type ValueRow } from "./common";
+import { addresseeOf, dateJa, dateTimeJa, headTable, money, namesOf, partiesOf, propertyLabel, type BusinessDocContext, type Choice, type ValueRow } from "./common";
 
 export { CHECKLIST_TEXT_MAX };
 
@@ -74,7 +74,7 @@ const LATER = "(決まりしだいご案内します)";
 /** 契約のご案内(設計 第2段階 §4.1)。宛先・日時・場所・手付金・お持ちいただくもの・この後の流れ・会社と担当。 */
 export function buildContractGuide(c: BusinessDocContext, o: ContractGuideOptions): { html: string; rows: ValueRow[] } {
   const d = c.deal;
-  const to = namesOf(partiesOf(d, o.addressee));
+  const to = addresseeOf(partiesOf(d, o.addressee));
   const title = "不動産売買契約のご案内";
   const items = lines(o.belongings);
   const flow: [string, string | null][] = [
@@ -84,7 +84,7 @@ export function buildContractGuide(c: BusinessDocContext, o: ContractGuideOption
   const staff = c.staff?.sales ?? null;
   const body = html`
 <h1>${title}</h1>
-<div class="meta"><div class="customer">${to ?? ""} 様</div><div class="right">${dateJa(c.today)}</div></div>
+<div class="meta"><div class="customer">${to}</div><div class="right">${dateJa(c.today)}</div></div>
 <p class="greeting">拝啓　平素は格別のお引き立てを賜り、厚く御礼申し上げます。
 さて、不動産の売買契約につきまして、下記のとおりご案内申し上げます。</p>
 <p class="right">敬具</p>
@@ -105,7 +105,7 @@ ${staff ? html`<div class="right">担当 ${staff}</div>` : null}`;
   return {
     html: documentHtml({ title, font: "mincho", body }),
     rows: [
-      { label: "宛先", value: to }, { label: "物件", value: propertyLabel(d) },
+      { label: "宛先", value: namesOf(partiesOf(d, o.addressee)) }, { label: "物件", value: propertyLabel(d) },
       { label: "契約日時", value: d.contractAt ? dateTimeJa(d.contractAt) : null }, { label: "契約場所", value: d.contractPlace },
       { label: "手付金", value: d.deposit }, { label: "お持ちいただくもの", value: o.belongings },
       { label: "決済予定日", value: ymdJa(d.settlementAt) }, { label: "ご連絡事項", value: o.notes }, { label: "担当", value: staff },

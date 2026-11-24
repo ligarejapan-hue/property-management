@@ -53,7 +53,7 @@ export function buildSellerSurvey(c: BusinessDocContext, o: FormValues): { html:
 ${headTable(head)}
 <h2>売主</h2>
 <table><tr><th style="width:30%">名前</th><th>住所</th><th style="width:14%">持分</th></tr>
-${sellers.map((p) => html`<tr><td>${p.name}</td><td>${p.address ?? ""}</td><td>${share(p.shareNum, p.shareDen)}</td></tr>`)}</table>
+${sellers.map((p) => html`<tr><td>${p.name} 様</td><td>${p.address ?? ""}</td><td>${share(p.shareNum, p.shareDen)}</td></tr>`)}</table>
 ${renderFormHtml(SELLER_SURVEY_FORM, o)}
 <table style="margin-top:6mm"><tr><th style="width:33%">営業担当</th><th style="width:33%">業務担当</th><th>承認</th></tr>
 <tr><td style="height:16mm"></td><td></td><td></td></tr></table>`;

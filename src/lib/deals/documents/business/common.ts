@@ -41,6 +41,12 @@ export const partiesOf = (deal: DealView, role: DealPartyView["role"]) => deal.p
 export function namesOf(ps: DealPartyView[]): string | null {
   return ps.length ? ps.map((p) => p.name).join("・") : null;
 }
+/** 書類に出す当事者の名前(1人ずつ「様」を付けて「・」でつなぐ)。いなければ null。契約・委任の署名の欄には使わない(2026-11-24 発注者)。 */
+export function honorNamesOf(ps: DealPartyView[]): string | null {
+  return ps.length ? ps.map((p) => `${p.name} 様`).join("・") : null;
+}
+/** 宛名の行(「○○ 様」)。いなければ名前を手で書く余白+様。 */
+export const addresseeOf = (ps: DealPartyView[]): string => honorNamesOf(ps) ?? " 様";
 
 /** 物件の書き方(物件名 号室・所在)。 */
 export function propertyLabel(deal: DealView): string {

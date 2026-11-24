@@ -4,7 +4,7 @@ import { html } from "../html";
 import { documentHtml } from "../layout";
 import { checklistItemsOf } from "./checklist-doc";
 import { ymdJa } from "./contract-guide";
-import { DASH, dateJa, headTable, namesOf, partiesOf, propertyLabel, type BusinessDocContext, type Choice, type ValueRow } from "./common";
+import { honorNamesOf, DASH, dateJa, headTable, partiesOf, propertyLabel, type BusinessDocContext, type Choice, type ValueRow } from "./common";
 
 /** 準備チェックリストの種類(設計 第2段階 §2 の 4・5)。 */
 export const PREP_KINDS = { land: "土地建物用", unit: "マンション用" } as const;
@@ -57,7 +57,7 @@ export function buildPrepChecklist(c: BusinessDocContext, o: PrepChecklistOption
   const due: Record<ChecklistPhase, string | null> = { contract: ymdJa(d.contractAt), settlement: ymdJa(d.settlementAt) };
   const head: [string, string | null][] = [
     ["取引番号", d.dealNo], ["物件", propertyLabel(d)],
-    ["売主", namesOf(partiesOf(d, "seller"))], ["買主", namesOf(partiesOf(d, "buyer"))],
+    ["売主", honorNamesOf(partiesOf(d, "seller"))], ["買主", honorNamesOf(partiesOf(d, "buyer"))],
     ["契約日", due.contract], ["決済日", due.settlement],
     ["営業担当", c.staff?.sales ?? null], ["業務担当", c.staff?.ops ?? null],
   ];

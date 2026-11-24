@@ -7,7 +7,7 @@ import type { BASE_PROPERTY_KINDS } from "../../constants";
 import { html } from "../html";
 import { checklistPayDefault } from "../../payments";
 import { documentHtml } from "../layout";
-import { DASH, dateJa, dateTimeJa, headTable, money, namesOf, partiesOf, propertyLabel, type BusinessDocContext, type Choice, type ValueRow } from "./common";
+import { honorNamesOf, DASH, dateJa, dateTimeJa, headTable, money, partiesOf, propertyLabel, type BusinessDocContext, type Choice, type ValueRow } from "./common";
 
 const payEntrySchema = z.object({
   method: z.enum(Object.keys(CHECKLIST_PAY_METHODS) as [ChecklistPayMethod, ...ChecklistPayMethod[]]),
@@ -123,7 +123,7 @@ export function buildChecklistDoc(phase: ChecklistPhase, c: BusinessDocContext, 
   const scrivener = joinParts(sc.name, sc.staff && `担当 ${sc.staff}`, sc.tel && `TEL ${sc.tel}`);
   const head: [string, string | null][] = [
     ["取引番号", d.dealNo], ["物件", propertyLabel(d)],
-    ["売主", namesOf(partiesOf(d, "seller"))], ["買主", namesOf(partiesOf(d, "buyer"))],
+    ["売主", honorNamesOf(partiesOf(d, "seller"))], ["買主", honorNamesOf(partiesOf(d, "buyer"))],
     ["日時", at ? dateTimeJa(at) : null], ["場所", place],
     ["相手方の仲介", broker], ["司法書士", scrivener],
     ["営業担当", c.staff?.sales ?? null], ["業務担当", c.staff?.ops ?? null],

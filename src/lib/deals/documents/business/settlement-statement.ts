@@ -2,7 +2,7 @@ import { yen } from "../../calc/format";
 import type { SettlementRow } from "../../calc/settlement";
 import { html, type SafeHtml } from "../html";
 import { companyBlock, documentHtml } from "../layout";
-import { DASH, dateJa, dateTimeJa, headTable, money, namesOf, partiesOf, propertyLabel, type BusinessDocContext, type ValueRow } from "./common";
+import { honorNamesOf, DASH, dateJa, dateTimeJa, headTable, money, partiesOf, propertyLabel, type BusinessDocContext, type ValueRow } from "./common";
 
 const cell = (n: number) => (n ? `${yen(n)}円` : "");
 /** 計算式の欄。手で直した行は、元の計算式を金額の根拠に見せない(@codex)。 */
@@ -25,8 +25,8 @@ function head(c: BusinessDocContext): SafeHtml {
     ["売買価格", money(d.price)],
     ["決済日時", dateTimeJa(d.settlementAt)],
     ["決済場所", d.settlementPlace],
-    ["売主", namesOf(partiesOf(d, "seller"))],
-    ["買主", namesOf(partiesOf(d, "buyer"))],
+    ["売主", honorNamesOf(partiesOf(d, "seller"))],
+    ["買主", honorNamesOf(partiesOf(d, "buyer"))],
   ]);
 }
 
