@@ -42,6 +42,7 @@ describe("追客メールの区画(メール設定の画面)", () => {
     expect(html).toContain("DM送付不可");
     expect(html).toContain("業者と同じ名前");
     expect(html).toContain("自治体・国");
+    expect(html).toContain("DMの拒否・宛先不明");
   });
 
   it("足りない設定があれば一覧で出す・ON にした時刻を出す", () => {

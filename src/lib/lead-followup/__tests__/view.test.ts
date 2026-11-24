@@ -63,7 +63,7 @@ describe("toFollowupView(画面に出す追客の様子)", () => {
 
   it("理由の言葉は設計の9種類と、送信の処理で足した2種類(同じアドレス・対象の削除)と、対象を広げたときの2種類(DM 送付不可・所有者の名前)にある", () => {
     expect(Object.keys(FOLLOWUP_STOP_REASON_LABELS).sort()).toEqual(
-      ["completed", "case_closed", "disabled", "handled_done", "interrupted", "manual", "no_address", "send_failed", "unsubscribed", "duplicate_address", "target_deleted", "dm_no_send", "owner_excluded"].sort(),
+      ["completed", "case_closed", "disabled", "handled_done", "interrupted", "manual", "no_address", "send_failed", "unsubscribed", "duplicate_address", "target_deleted", "dm_no_send", "owner_excluded", "dm_refused"].sort(),
     );
   });
 });

@@ -16,7 +16,7 @@ import {
   type FollowupStepsBySeries,
 } from "./steps";
 import { classifyInquiry, classifyProperty, decideFollowup, initialNewPosition, type CaseClass, type DecideRow } from "./decide";
-import { findOwnerNameExclusions } from "@/lib/dm-batch/agent-name-exclusion";
+import { dmExclusionReason, findTerminalExclusions, type TerminalExclusionTx } from "@/lib/dm-batch/terminal-exclusion";
 
 // 対象の導入ルートの決まり(と理由)は steps.ts(設定の画面からも読むため画面でも読める場所に置く)。
 export { FOLLOWUP_PROPERTY_INTRODUCTION_ROUTES };
@@ -61,32 +61,76 @@ const NOT_SENT_CODES = new Set(["ECONNREFUSED", "EDNS", "ENOTFOUND", "EAI_AGAIN"
  * - owner_excluded: 今の所有者に、業者の名簿と同じ名前の人、または名前が自治体・国の人がいる
  *   (DM と同じ判定=dm-batch/agent-name-exclusion.ts の findOwnerNameExclusions。ご本人から知らせたアドレスとは
  *   言えない・営業のメールを送る相手ではない、という DM と同じ理由)。外字の名前はメールでは宛名を刷らないので外さない。
+ * - dm_refused: DM の拒否・解除していない宛先不明の記録がある(セキュリティレビュー 2026-11-24)。拒否は送付不可に
+ *   ならないこともあるので、DM の作成・印刷と同じ dm-batch/terminal-exclusion.ts の findTerminalExclusions で見る
+ *   (代表の所有者・共有者・所有者に紐づかない物件の記録の3経路。「一度お断りをいただいた方へ、また連絡が行く」を防ぐ)。
+ *   手紙の QR から来た査定申込は、その手紙の物件・所有者で同じに見る(広告の公開ページの申込は物件・所有者に結べないので見ない)。
+ * 判定は DM と同じ dmExclusionReason の順(拒否・宛先不明 → 業者と同じ名前 → 自治体・国)。
  */
-type PropertyExclusion = "dm_no_send" | "owner_excluded";
+type FollowupExclusion = "dm_no_send" | "owner_excluded" | "dm_refused";
+
+type ExclusionReader = Pick<Prisma.TransactionClient, "$queryRaw" | "propertyDmLog">;
 
 type PropertyForExclusion = {
+  id: string;
   dmStatus?: string | null;
   propertyOwners: Array<{ owner: { id?: string } }>;
 };
 
-/** 物件ごとの外す理由(無ければ入れない)。所有者の名前の判定は DM と同じ SQL を1回だけ。 */
-async function propertyExclusions(
-  client: Pick<Prisma.TransactionClient, "$queryRaw">,
-  props: Array<PropertyForExclusion & { id: string }>,
-): Promise<Map<string, PropertyExclusion>> {
-  const out = new Map<string, PropertyExclusion>();
-  const ownerIds = [...new Set(props.flatMap((p) => p.propertyOwners.flatMap((o) => (o.owner.id ? [o.owner.id] : []))))];
-  const names = ownerIds.length > 0 ? await findOwnerNameExclusions(client, ownerIds, { mailingAddress: false }) : null;
+type InquiryDraftLink = {
+  propertyId: string;
+  representativeOwnerId: string | null;
+  draftOwners: Array<{ ownerId: string }>;
+} | null;
+
+/** 査定申込の手紙の物件・所有者(代表と共有者)を読むための select。 */
+const INQUIRY_DRAFT_SELECT = {
+  select: { propertyId: true, representativeOwnerId: true, draftOwners: { select: { ownerId: true } } },
+};
+
+function draftOwnerIds(d: NonNullable<InquiryDraftLink>): string[] {
+  return [...(d.representativeOwnerId ? [d.representativeOwnerId] : []), ...d.draftOwners.map((o) => o.ownerId)];
+}
+
+/** DM の除外セット(DM の作成・印刷と同じ関数。DB の照会もそのまま)。 */
+function dmExclusionSets(client: ExclusionReader, ownerIds: string[], propertyIds: string[]) {
+  return findTerminalExclusions(client as unknown as TerminalExclusionTx, ownerIds, propertyIds);
+}
+
+/** 物件ごとの外す理由(無ければ入れない)。DM の除外セットは1回だけ引く。 */
+async function propertyExclusions(client: ExclusionReader, props: PropertyForExclusion[]): Promise<Map<string, FollowupExclusion>> {
+  const out = new Map<string, FollowupExclusion>();
+  if (props.length === 0) return out;
+  const ownersOf = (p: PropertyForExclusion) => p.propertyOwners.flatMap((o) => (o.owner.id ? [o.owner.id] : []));
+  const sets = await dmExclusionSets(client, props.flatMap(ownersOf), props.map((p) => p.id));
   for (const p of props) {
     if (p.dmStatus === "no_send") {
       out.set(p.id, "dm_no_send");
       continue;
     }
-    if (
-      names &&
-      p.propertyOwners.some((o) => !!o.owner.id && (names.agentOwnerIds.has(o.owner.id) || names.publicOwnerIds.has(o.owner.id)))
-    ) {
-      out.set(p.id, "owner_excluded");
+    const reason = dmExclusionReason(sets, { propertyId: p.id, ownerIds: ownersOf(p) });
+    if (reason === "terminal") out.set(p.id, "dm_refused");
+    else if (reason === "agent_name" || reason === "public_name") out.set(p.id, "owner_excluded");
+  }
+  return out;
+}
+
+/** 手紙の QR から来た査定申込で、その手紙の物件・所有者に DM の拒否・宛先不明があるもの(dm_refused)。 */
+async function inquiryExclusions(
+  client: ExclusionReader,
+  inqs: Array<{ id: string; draft?: InquiryDraftLink }>,
+): Promise<Map<string, FollowupExclusion>> {
+  const out = new Map<string, FollowupExclusion>();
+  const linked = inqs.flatMap((q) => (q.draft ? [{ id: q.id, draft: q.draft }] : []));
+  if (linked.length === 0) return out;
+  const sets = await dmExclusionSets(
+    client,
+    linked.flatMap((q) => draftOwnerIds(q.draft)),
+    linked.map((q) => q.draft.propertyId),
+  );
+  for (const q of linked) {
+    if (dmExclusionReason(sets, { propertyId: q.draft.propertyId, ownerIds: draftOwnerIds(q.draft) }) === "terminal") {
+      out.set(q.id, "dm_refused");
     }
   }
   return out;
@@ -220,8 +264,8 @@ async function startFollowup(
   newNextPosition: number,
   /** 新規の流れが全部過ぎていて保留でもない=送るものが無い。進行中で作るとアドレスを塞ぐので完了で作る(@codex #762 P2) */
   nothingToSend: boolean,
-  /** 物件の追客から外す理由(業者と同じ名前・自治体や国の所有者)。あれば止めた行として作る(毎回見直さないため) */
-  excluded: PropertyExclusion | null = null,
+  /** 追客から外す理由(DM の拒否・業者と同じ名前・自治体や国の所有者)。あれば止めた行として作る(毎回見直さないため) */
+  excluded: FollowupExclusion | null = null,
 ): Promise<"active" | "stopped" | "completed" | "exists"> {
   return prisma.$transaction(async (tx) => {
     // 探している最中に OFF(や OFF→ON)にされていたら作らない。
@@ -301,9 +345,9 @@ async function discover(
     take: DISCOVER_LIMIT,
     select: { id: true, createdAt: true, caseStatus: true, dmStatus: true, propertyOwners: OWNER_EMAILS_SELECT },
   });
-  // 業者と同じ名前・自治体や国の所有者がいる物件は SQL の条件にできない(DM と同じ名前のそろえ方)ので、ここで見る。
+  // DM の拒否・業者と同じ名前・自治体や国の所有者がいる物件は SQL の条件にできない(DM と同じ判定を使う)ので、ここで見る。
   // 止めた行として作る=次の回に同じ物件で探す枠を埋めない。
-  const excludedProps = properties.length > 0 ? await propertyExclusions(prisma, properties) : new Map<string, PropertyExclusion>();
+  const excludedProps = await propertyExclusions(prisma, properties);
   for (const p of properties) {
     if (Date.now() > deadline) return;
     const email = firstOwnerEmail(p.propertyOwners);
@@ -330,8 +374,9 @@ async function discover(
     },
     orderBy: { submittedAt: "asc" },
     take: DISCOVER_LIMIT,
-    select: { id: true, submittedAt: true, email: true },
+    select: { id: true, submittedAt: true, email: true, draft: INQUIRY_DRAFT_SELECT },
   });
+  const excludedInqs = await inquiryExclusions(prisma, inquiries);
   for (const q of inquiries) {
     if (Date.now() > deadline) return;
     const pos = initialNewPosition(q.submittedAt, enabledAt, now, steps);
@@ -344,6 +389,7 @@ async function discover(
       pos,
       // 査定申込には保留の流れが無い
       pos > steps.new.length,
+      excludedInqs.get(q.id) ?? null,
     );
     countStart(r, summary);
   }
@@ -359,11 +405,11 @@ type ActiveRow = DecideRow & {
 type TargetState = {
   cls: CaseClass;
   email: { raw: string; normalized: string } | null;
-  /** 物件の追客から外す理由(DM 送付不可・業者と同じ名前や自治体・国の所有者)。申込は常に null */
-  excluded: PropertyExclusion | null;
+  /** 追客から外す理由(物件: DM 送付不可・DM の拒否・業者と同じ名前や自治体・国の所有者/申込: 手紙の物件・所有者に DM の拒否) */
+  excluded: FollowupExclusion | null;
 } | null;
 
-type TargetReader = Pick<Prisma.TransactionClient, "property" | "dmInquiry" | "$queryRaw">;
+type TargetReader = Pick<Prisma.TransactionClient, "property" | "dmInquiry" | "$queryRaw" | "propertyDmLog">;
 
 /** 行の対象(物件・申込)の今の状態とアドレス。client は送る直前の読み直しでは transaction を渡す。 */
 async function loadTargets(rows: ActiveRow[], client: TargetReader = prisma): Promise<Map<string, TargetState>> {
@@ -377,11 +423,15 @@ async function loadTargets(rows: ActiveRow[], client: TargetReader = prisma): Pr
         })
       : Promise.resolve([]),
     inqIds.length
-      ? client.dmInquiry.findMany({ where: { id: { in: inqIds } }, select: { id: true, handleStatus: true, email: true } })
+      ? client.dmInquiry.findMany({
+          where: { id: { in: inqIds } },
+          select: { id: true, handleStatus: true, email: true, draft: INQUIRY_DRAFT_SELECT },
+        })
       : Promise.resolve([]),
   ]);
-  // 外す理由も同じ client で読む(送る直前の読み直しでは鍵の下の transaction=途中で送付不可にされた物件で止まる)。
-  const excludedProps = props.length > 0 ? await propertyExclusions(client, props) : new Map<string, PropertyExclusion>();
+  // 外す理由も同じ client で読む(送る直前の読み直しでは鍵の下の transaction=途中で送付不可・拒否になった物件で止まる)。
+  const excludedProps = await propertyExclusions(client, props);
+  const excludedInqs = await inquiryExclusions(client, inqs);
   const byProp = new Map(props.map((p) => [p.id, p]));
   const byInq = new Map(inqs.map((q) => [q.id, q]));
   const out = new Map<string, TargetState>();
@@ -400,7 +450,7 @@ async function loadTargets(rows: ActiveRow[], client: TargetReader = prisma): Pr
       out.set(
         r.id,
         q
-          ? { cls: classifyInquiry(q.handleStatus), email: normalized && q.email ? { raw: q.email.trim(), normalized } : null, excluded: null }
+          ? { cls: classifyInquiry(q.handleStatus), email: normalized && q.email ? { raw: q.email.trim(), normalized } : null, excluded: excludedInqs.get(q.id) ?? null }
           : null,
       );
     } else {
