@@ -12,6 +12,8 @@ import {
 } from "./reception-owner-link";
 import { normalizeName, normalizeAddress } from "./normalize";
 import { normalizeCorporateNumber } from "./corporate-number";
+import { hasCorporateMarkerWord } from "./owner-honorific";
+import { NAME_VARIANTS } from "./name-variants";
 
 // ---------------------------------------------------------------------------
 // Phase 2-B: Owner.address「実質空欄」判定 helper
@@ -106,6 +108,48 @@ export function buildOwnerCorporateNumberDuplicateKey(
   corporateNumber: string | null | undefined,
 ): string | null {
   return normalizeCorporateNumber(corporateNumber);
+}
+
+const VARIANT_ENTRIES = Object.entries(NAME_VARIANTS);
+
+/**
+ * 法人名をそろえた比較用の値（比較専用・保存値は変えない）。
+ *
+ * そろえ方は DM の業者の名前の照合（agentNameKeySql）と同じ順番:
+ *   NFKC（全角/半角・㈱→(株)）→ 空白を全部除く → 小文字 →
+ *   (株)/(有)/(同) を 株式会社/有限会社/合同会社 に → よくある異体字（NAME_VARIANTS）をそろえる。
+ * ⚠前株と後株（「株式会社○○」と「○○株式会社」）はそろえない（別の会社のことがある）。
+ */
+function foldCorporateName(name: string): string {
+  let s = name
+    .normalize("NFKC")
+    .replace(/[\s　]+/gu, "")
+    .toLowerCase()
+    .replaceAll("(株)", "株式会社")
+    .replaceAll("(有)", "有限会社")
+    .replaceAll("(同)", "合同会社");
+  for (const [from, to] of VARIANT_ENTRIES) s = s.replaceAll(from, to);
+  return s;
+}
+
+/**
+ * 重複候補「法人名一致」のキー（2026-11-24）。
+ *
+ * - 法人格の語（hasCorporateMarkerWord）を含む名前だけキーを返す。個人名は null
+ *   （個人は従来どおり氏名住所一致でしか重複にしない）。
+ * - 住所は見ない（同じ会社が本店移転などで別の住所で登録されていることがあるため）。
+ * - 戻り値は重複グルーピングの Map key と統合の再確認にだけ使い、
+ *   **API レスポンス / AuditLog / URL には出さない**（opaque ID 経由のみ）。
+ */
+export function buildOwnerCorporateNameDuplicateKey(
+  name: string | null | undefined,
+): string | null {
+  if (typeof name !== "string") return null;
+  const key = foldCorporateName(name);
+  if (key === "") return null;
+  // (同) は CORP_MARKER の語彙に無いので、そろえた後の値で判定する。
+  if (!hasCorporateMarkerWord(key)) return null;
+  return key;
 }
 
 /**

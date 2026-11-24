@@ -47,6 +47,7 @@ import {
 import { AddressFillButton } from "@/components/owners/AddressFillButton";
 import { OwnerArchiveButton } from "@/components/owners/OwnerArchiveButton";
 import { OwnerMergePreviewButton } from "@/components/owners/OwnerMergePreviewButton";
+import { OwnerGroupMergeAllButton } from "@/components/owners/OwnerGroupMergeAllButton";
 import {
   applyMasterSelection,
   applySourceSelection,
@@ -83,23 +84,40 @@ type DuplicateSubFilter =
   | "all"
   | "name_address"
   | "corporate_number"
+  | "corporate_name"
   | "external_link_key";
+
+type DuplicateMatchedBy = Exclude<DuplicateSubFilter, "all">;
 
 const DUPLICATE_SUB_FILTER_LABELS: Record<DuplicateSubFilter, string> = {
   all: "すべて",
   name_address: "氏名住所一致",
   corporate_number: "法人番号一致",
+  corporate_name: "法人名一致",
   external_link_key: "リンクキー一致",
 };
 
-const DUPLICATE_MATCHED_BY_LABEL: Record<
-  "name_address" | "corporate_number" | "external_link_key",
-  string
-> = {
+const DUPLICATE_MATCHED_BY_LABEL: Record<DuplicateMatchedBy, string> = {
   name_address: "氏名住所一致",
   corporate_number: "法人番号一致",
+  corporate_name: "法人名一致",
   external_link_key: "リンクキー一致",
 };
+
+// 統合（プレビュー・実行・「この1人に全部まとめる」）できる経路。
+// サーバーの再確認（resolveOwnerMergeMatch）が通す経路と同じにする（2026-11-24）。
+// リンクキー一致は統合の再確認が通さないので、表示だけ。
+const MERGEABLE_MATCHED_BY: readonly DuplicateMatchedBy[] = [
+  "name_address",
+  "corporate_number",
+  "corporate_name",
+];
+
+function isMergeableMatchedBy(
+  matchedBy: DuplicateMatchedBy | null | undefined,
+): boolean {
+  return matchedBy != null && MERGEABLE_MATCHED_BY.includes(matchedBy);
+}
 
 function parseDuplicateSubFilterFromQuery(
   value: string | null,
@@ -107,6 +125,7 @@ function parseDuplicateSubFilterFromQuery(
   switch (value) {
     case "name_address":
     case "corporate_number":
+    case "corporate_name":
     case "external_link_key":
     case "all":
       return value;
@@ -606,7 +625,8 @@ function OwnerCorrectionPageInner() {
                           // archive button を出さない（万が一サーバが旧形式の
                           // レスポンスを返してもデータ損失を防ぐ）。
                           c.duplicateMatchedBy !== "corporate_number" &&
-                          c.duplicateMatchedBy !== "external_link_key" && (
+                          c.duplicateMatchedBy !== "external_link_key" &&
+                          c.duplicateMatchedBy !== "corporate_name" && (
                             <OwnerArchiveButton
                               ownerId={c.id}
                               ownerVersion={c.version}
@@ -625,7 +645,7 @@ function OwnerCorrectionPageInner() {
               })()}
 
           <p className="mt-4 text-xs text-gray-400 dark:text-gray-500">
-            ※ 統合の実行は「氏名住所一致」グループでのみ行えます（プレビューで内容を確認してから実行します）。
+            ※ 統合は「氏名住所一致」「法人番号一致」「法人名一致」のグループで行えます（プレビューで内容を確認してから実行します）。「リンクキー一致」は表示だけです。
           </p>
         </>
       )}
@@ -659,6 +679,8 @@ interface DuplicateSubFilterBarProps {
     | {
         name_address: number;
         corporate_number: number;
+        /** 2026-11-24 追加。古い応答には無い。 */
+        corporate_name?: number;
         external_link_key: number;
       }
     | undefined;
@@ -682,6 +704,11 @@ function DuplicateSubFilterBar({
       key: "corporate_number",
       label: DUPLICATE_SUB_FILTER_LABELS.corporate_number,
       count: counts?.corporate_number ?? 0,
+    },
+    {
+      key: "corporate_name",
+      label: DUPLICATE_SUB_FILTER_LABELS.corporate_name,
+      count: counts?.corporate_name ?? 0,
     },
     {
       key: "external_link_key",
@@ -754,7 +781,7 @@ function DuplicateGroupSummary({
         重複グループ ({groupList.length} 件)
       </h2>
       <p className="mb-3 text-xs text-purple-700 dark:text-purple-300">
-        重複候補をグループごとに表示しています。<strong>氏名住所一致</strong>グループのみ master / source を選んで統合プレビューを取得できます。<strong>法人番号一致 / リンクキー一致</strong>は表示のみで、統合はできません。
+        重複候補をグループごとに表示しています。<strong>氏名住所一致・法人番号一致・法人名一致</strong>のグループは、master / source を選んで統合プレビューを取得し、統合できます。master を選ぶと「この1人に全部まとめる」でグループの残りを1人ずつまとめて統合できます。法人のグループ（法人番号一致・法人名一致）は、master が空の住所・電話・法人番号・会社法人等番号・メール・フリガナを引き継ぎ、違う値は master の変更履歴に残します。<strong>リンクキー一致</strong>は表示のみで、統合はできません。
       </p>
       <div className="space-y-3">
         {groupList.map(([key, members], idx) => (
@@ -804,11 +831,10 @@ function DuplicateGroupCard({
   // Phase 2-A: グループの一致経路（全 member 同一なので最初の 1 件を使う）。
   // raw 法人番号 / externalLinkKey は含まずラベル文字列のみ。
   const matchedBy = sample.duplicateMatchedBy;
-  // Codex P2-round-2: merge preview / execute は name_address 経路のみ対応。
-  // corporate_number / external_link_key 経路では master/source 選択列も
-  // プレビューボタンも表示しない（API 側 merge-preview が name+address 検証
-  // しかしないので UI で merge できそうに見せると誤解を招く）。
-  const supportsMerge = matchedBy === "name_address";
+  // Codex P2-round-2: merge preview / execute はサーバーの再確認が通す経路だけ。
+  // 2026-11-24 から 氏名住所一致・法人番号一致・法人名一致。external_link_key 経路では
+  // master/source 選択列もプレビューボタンも表示しない（UI で merge できそうに見せると誤解を招く）。
+  const supportsMerge = isMergeableMatchedBy(matchedBy);
 
   // master / source は disabled にしない（disabled だと一度選んだ後に役割を
   // 入れ替えられない）。代わりに、既に相手側に選ばれている owner を選んだら
@@ -848,8 +874,7 @@ function DuplicateGroupCard({
         <thead className="bg-gray-50 dark:bg-gray-800 text-gray-500 dark:text-gray-400">
           <tr>
             {/* Codex P2-round-2: master/source/推奨 列は merge 可能な
-                name_address group のみ表示。corporate_number / external_link_key
-                では merge 経路がないため列ごと出さない。 */}
+                group のみ表示。external_link_key では merge 経路がないため列ごと出さない。 */}
             {supportsMerge && <th className="px-2 py-1 text-left">master</th>}
             {supportsMerge && <th className="px-2 py-1 text-left">source</th>}
             {supportsMerge && <th className="px-2 py-1 text-left">推奨</th>}
@@ -931,19 +956,28 @@ function DuplicateGroupCard({
           </p>
         )
       ) : (
-        // Codex P2-round-2: corporate_number / external_link_key 経路は
-        // merge-preview API 未対応。merge ボタンを出さず「要確認」注記のみ。
+        // Codex P2-round-2: external_link_key 経路は統合の再確認が通さない。
+        // merge ボタンを出さず「要確認」注記のみ。
         <p
           className="rounded-md border border-amber-200 bg-amber-50 px-3 py-2 text-xs text-amber-800 dark:border-amber-800 dark:bg-amber-950/40 dark:text-amber-300"
           data-testid="duplicate-group-merge-unsupported-notice"
         >
-          {matchedBy === "corporate_number"
-            ? "法人番号一致のため要確認。"
-            : matchedBy === "external_link_key"
-              ? "リンクキー一致のため要確認。"
-              : "要確認。"}
-          統合のプレビューと実行は「氏名住所一致」グループのみ対応しています。法人番号 / リンクキー一致グループは候補表示のみです。
+          {matchedBy === "external_link_key"
+            ? "リンクキー一致のため要確認。"
+            : "要確認。"}
+          リンクキー一致のグループは候補表示のみです（統合は 氏名住所一致・法人番号一致・法人名一致 のグループで行えます）。
         </p>
+      )}
+
+      {/* 2026-11-24: 選んだ master にグループの残りを1人ずつ全部まとめる。
+          確認は1回だけ・止まった人がいても残りは続け、1人ずつ結果を出す。 */}
+      {supportsMerge && masterId && members.length >= 2 && (
+        <OwnerGroupMergeAllButton
+          key={`all:${masterId}`}
+          masterId={masterId}
+          sourceIds={members.map((m) => m.id)}
+          onExecuted={onExecuted}
+        />
       )}
     </div>
   );

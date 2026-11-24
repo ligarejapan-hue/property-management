@@ -3,6 +3,7 @@ import prisma from "@/lib/prisma";
 import {
   getApiSession,
   getUserPermissions,
+  getOwnerDisplayConfig,
   ApiError,
   handleApiError,
   apiResponse,
@@ -14,7 +15,16 @@ import {
   checkOwnerMergeSafety,
   type OwnerMergeBlockReason,
 } from "@/lib/owner-merge";
-import { buildOwnerDuplicateCandidateKey } from "@/lib/owner-correction";
+import {
+  resolveOwnerMergeMatch,
+  type OwnerMergeMatch,
+} from "@/lib/owner-merge-match";
+import {
+  planCorporateFieldHandover,
+  requiredCorporateHandoverPermissions,
+  type CorporateHandoverPlan,
+} from "@/lib/owner-merge-corporate-handover";
+import type { PermissionEntry } from "@/lib/api-helpers";
 import { deleteEditLocksFor } from "@/lib/edit-lock/service";
 import { moveRegistryEntriesToLink } from "@/lib/registry-entries/write";
 
@@ -64,8 +74,17 @@ import { moveRegistryEntriesToLink } from "@/lib/registry-entries/write";
 //   7. 残る PropertyOwner を master に付け替え
 //   8. source を isArchived=true + version increment（WHERE に防御的に
 //      propertyOwners: { none: {} } と ownerMemos: { none: {} } を入れる）
-//   9. master.version を increment
+//   9. master.version を increment（現住所・法人のペアの項目の引き継ぎも同じ更新で書く）
 //   10. ChangeLog を batch 書き込み
+//
+// 同じ所有者と言える経路（2026-11-24 発注者承認・resolveOwnerMergeMatch）:
+//   氏名住所一致 / 法人番号一致（owner_corporate_number=full の人だけ）/ 法人名一致。
+//   tx の前と、tx 内で読み直した行の両方で確かめる。両方の法人番号が違えば止める。
+// 法人のペア（法人番号一致・法人名一致）だけ:
+//   - source の変更履歴・version>1 では止めない（備考・外部リンクキーは止める）
+//   - master が空の 登記上の住所(+郵便番号)・電話・法人番号 を写す。違う値は写さず
+//     master の変更履歴に残す。source の登記上の住所は必ず1行残す（_merged_source_address）
+//   - 写す項目の明示の編集権限が無ければ 403（現住所の引き継ぎと同じ扱い）
 // transaction commit 後に AuditLog（PII フリー）
 // ---------------------------------------------------------------------------
 
@@ -92,6 +111,11 @@ interface OwnerState {
   isArchived: boolean;
   note: string | null;
   externalLinkKey: string | null;
+  corporateNumber: string | null;
+  // 法人のペアの引き継ぎ（review P2: source にだけある値を落とさない）と会社法人等番号の食い違い。
+  companyRegistryNumber: string | null;
+  email: string | null;
+  nameKana: string | null;
 }
 
 interface MergeSummary {
@@ -104,6 +128,12 @@ interface MergeSummary {
   sourceVersion: number | null;
   masterVersion: number | null;
   normalizeKeyMatches: boolean;
+  /** 採用した経路（enum のみ）。 */
+  matchedBy: OwnerMergeMatch["matchedBy"];
+  /** 法人のペアで master へ写す項目名（値は出さない）。 */
+  corporateHandoverFields: string[];
+  /** 法人のペアで写さず記録に残す項目名（値は出さない）。 */
+  corporateKeptFields: string[];
 }
 
 function statusFromReasons(reasons: OwnerMergeBlockReason[]): number {
@@ -128,6 +158,11 @@ async function loadOwnerForMerge(id: string): Promise<OwnerState | null> {
       isArchived: true,
       note: true,
       externalLinkKey: true,
+      // 法人番号一致の経路・食い違いの確認と、法人のペアの引き継ぎに使う。
+      corporateNumber: true,
+      companyRegistryNumber: true,
+      email: true,
+      nameKana: true,
     },
   });
 }
@@ -151,31 +186,53 @@ async function loadOwnerForMergeTx(
       isArchived: true,
       note: true,
       externalLinkKey: true,
+      // 法人番号一致の経路・食い違いの確認と、法人のペアの引き継ぎに使う。
+      corporateNumber: true,
+      companyRegistryNumber: true,
+      email: true,
+      nameKana: true,
     },
   });
 }
 
-function computeNormalizeKeyMatches(
+/** 同じ所有者と言えるか（一覧・プレビューと同じ resolveOwnerMergeMatch）。 */
+function computeMatch(
   master: OwnerState | null,
   source: OwnerState | null,
+  corporateNumberAvailable: boolean,
+): OwnerMergeMatch | null {
+  if (!master || !source) return null;
+  return resolveOwnerMergeMatch(master, source, { corporateNumberAvailable });
+}
+
+/** 法人のペアだけ、項目の引き継ぎ計画を立てる（個人は null＝従来どおり何も写さない）。 */
+function planFor(
+  match: OwnerMergeMatch | null,
+  master: OwnerState,
+  source: OwnerState,
+): CorporateHandoverPlan | null {
+  return match?.corporatePair ? planCorporateFieldHandover(master, source) : null;
+}
+
+/**
+ * 計画どおり master へ写す権限があるか。通常の編集経路が守っている項目ごとの境界を、
+ * 統合で迂回させない（現住所の引き継ぎと同じ考え方）。
+ */
+function canWriteCorporateHandover(
+  perms: PermissionEntry[],
+  plan: CorporateHandoverPlan | null,
 ): boolean {
-  return Boolean(
-    master &&
-      source &&
-      buildOwnerDuplicateCandidateKey({
-        name: master.name,
-        address: master.address,
-        zip: master.zip,
-        phone: master.phone,
-      }) ===
-        buildOwnerDuplicateCandidateKey({
-          name: source.name,
-          address: source.address,
-          zip: source.zip,
-          phone: source.phone,
-        }),
+  if (!plan) return true;
+  const needed = requiredCorporateHandoverPermissions(plan);
+  if (needed.length === 0) return true;
+  return (
+    hasPermission(perms, "owner", "write") &&
+    needed.every((r) => hasExplicitWritePerm(perms, r))
   );
 }
+
+const CORPORATE_HANDOVER_FORBIDDEN_MESSAGE =
+  "所有者の項目を引き継ぐ権限がありません（所有者の住所・郵便番号・電話・法人番号のうち、引き継ぐ項目の編集権限が必要です）";
 
 export async function POST(request: NextRequest) {
   try {
@@ -305,7 +362,16 @@ export async function POST(request: NextRequest) {
       }
     }
 
-    const normalizeKeyMatches = computeNormalizeKeyMatches(master, source);
+    // 法人番号の経路は owner_corporate_number=full の人だけ（一覧の法人番号一致と同じ境界）。
+    const displayConfig = await getOwnerDisplayConfig(session.id, perms);
+    const corporateNumberAvailable = displayConfig.corporateNumber === "full";
+    const match = computeMatch(master, source, corporateNumberAvailable);
+    const normalizeKeyMatches = match?.matchedBy != null;
+    const corporatePlan =
+      master && source ? planFor(match, master, source) : null;
+    if (!canWriteCorporateHandover(perms, corporatePlan)) {
+      throw new ApiError(403, CORPORATE_HANDOVER_FORBIDDEN_MESSAGE, "FORBIDDEN");
+    }
 
     // 現住所の引き継ぎ（設計 §7）。食い違いはここで拒否理由になる。
     const currentAddressHandover =
@@ -356,6 +422,9 @@ export async function POST(request: NextRequest) {
         !!source?.externalLinkKey && source.externalLinkKey.trim().length > 0,
       sourceVersion: source?.version ?? 1,
       normalizeKeyMatches,
+      corporatePair: match?.corporatePair ?? false,
+      corporateNumberConflict: match?.corporateNumberConflict ?? false,
+      companyRegistryNumberConflict: match?.companyRegistryNumberConflict ?? false,
       currentAddressHandover,
       sourceChangeLogFields,
     });
@@ -383,6 +452,11 @@ export async function POST(request: NextRequest) {
       sourceVersion: source?.version ?? null,
       masterVersion: master?.version ?? null,
       normalizeKeyMatches,
+      matchedBy: match?.matchedBy ?? null,
+      corporateHandoverFields: corporatePlan ? Object.keys(corporatePlan.writes) : [],
+      corporateKeptFields: corporatePlan
+        ? corporatePlan.keptSourceValues.map((k) => k.field)
+        : [],
     };
 
     // ── dryRun: DB / AuditLog 一切書かない ─────────────────────────────────
@@ -419,6 +493,10 @@ export async function POST(request: NextRequest) {
     const TX_BLOCKED_SENTINEL = "__merge_blocked_in_tx__";
     let txBlockedReasons: OwnerMergeBlockReason[] | null = null;
     let txNotFound = false;
+    let txForbidden = false;
+    let executedMatchedBy: OwnerMergeMatch["matchedBy"] = null;
+    let executedHandoverFields: string[] = [];
+    let executedKeptFields: string[] = [];
     let propertyOwnersMoved = 0;
     let propertyOwnersDeduplicated = 0;
     let ownerMemosMoved = 0;
@@ -476,7 +554,15 @@ export async function POST(request: NextRequest) {
         ] = await Promise.all([
           tx.changeLog.findMany({
             where: { targetTable: "owners", targetId: sourceFresh.id },
-            select: { fieldName: true },
+            // 値・日時・記録した人も読む: 前の統合の記録(_merged_source_*)を master へ写すため。
+            select: {
+              fieldName: true,
+              oldValue: true,
+              newValue: true,
+              source: true,
+              changedBy: true,
+              changedAt: true,
+            },
           }),
           tx.ownerMemo.count({ where: { ownerId: sourceFresh.id } }),
           tx.propertyOwner.findMany({
@@ -494,10 +580,20 @@ export async function POST(request: NextRequest) {
         );
         const freshChangeLog = freshChangeLogRows.length;
         const freshChangeLogFields = freshChangeLogRows.map((r) => r.fieldName);
-        const freshNormalizeKeyMatches = computeNormalizeKeyMatches(
+        // ⚠ロックの下で読み直した行で、同じ所有者と言えるかを確かめ直す
+        //   （一覧やプレビューの後に名前・法人番号が直されていても通さない）。
+        const freshMatch = computeMatch(
           masterFresh,
           sourceFresh,
+          corporateNumberAvailable,
         );
+        const freshNormalizeKeyMatches = freshMatch?.matchedBy != null;
+        // 法人のペアの引き継ぎも読み直した値で決める。写す項目が増えて権限が足りなければ断る。
+        const freshPlan = planFor(freshMatch, masterFresh, sourceFresh);
+        if (!canWriteCorporateHandover(perms, freshPlan)) {
+          txForbidden = true;
+          throw new Error(TX_BLOCKED_SENTINEL);
+        }
         // ロックの下で読み直した値で引き継ぎを決める。
         const freshHandover = resolveCurrentAddressHandover(
           masterFresh,
@@ -519,6 +615,10 @@ export async function POST(request: NextRequest) {
             sourceFresh.externalLinkKey.trim().length > 0,
           sourceVersion: sourceFresh.version,
           normalizeKeyMatches: freshNormalizeKeyMatches,
+          corporatePair: freshMatch?.corporatePair ?? false,
+          corporateNumberConflict: freshMatch?.corporateNumberConflict ?? false,
+          companyRegistryNumberConflict:
+            freshMatch?.companyRegistryNumberConflict ?? false,
           currentAddressHandover: freshHandover,
           sourceChangeLogFields: freshChangeLogFields,
         });
@@ -677,6 +777,13 @@ export async function POST(request: NextRequest) {
         } else if (freshHandover.kind === "zip_only") {
           handoverData.currentZip = freshHandover.currentZip;
         }
+        // 法人のペア: master が空の 登記上の住所(+郵便番号)・電話・法人番号 を同じ更新で写す。
+        // ⚠版上げはこの1回だけ（項目ごとに別の更新にしない）。
+        if (freshPlan) {
+          for (const [field, value] of Object.entries(freshPlan.writes)) {
+            handoverData[field] = value;
+          }
+        }
         const masterBump = await tx.owner.updateMany({
           where: {
             id: masterFresh.id,
@@ -697,9 +804,11 @@ export async function POST(request: NextRequest) {
           fieldName: string;
           oldValue: string | null;
           newValue: string | null;
-          source: "manual";
+          source: (typeof freshChangeLogRows)[number]["source"];
           changedBy: string;
           propertyId?: string;
+          /** 前の統合の記録を写すときだけ、元の日時を残す（経緯の並びを本当の順にする）。 */
+          changedAt?: Date;
         }> = [];
 
         // source の isArchived 変化（archive route と同じ shape）
@@ -735,6 +844,66 @@ export async function POST(request: NextRequest) {
             newValue: handoverData.currentZip,
             source: "manual",
             changedBy: session.id,
+          });
+        }
+
+        // 法人のペア: 写した項目の前後・写さなかった source の値・source の登記上の住所を残す
+        //   （source は archive されて見えなくなるので、master の履歴から追えるようにする）。
+        if (freshPlan) {
+          for (const [field, value] of Object.entries(freshPlan.writes)) {
+            changeLogs.push({
+              targetTable: "owners",
+              targetId: masterFresh.id,
+              fieldName: field,
+              oldValue: masterFresh[field as keyof OwnerState] as string | null,
+              newValue: value,
+              source: "manual",
+              changedBy: session.id,
+            });
+          }
+          for (const kept of freshPlan.keptSourceValues) {
+            changeLogs.push({
+              targetTable: "owners",
+              targetId: masterFresh.id,
+              fieldName: `_merged_source_${kept.field}`,
+              oldValue: null,
+              newValue: kept.value,
+              source: "manual",
+              changedBy: session.id,
+            });
+          }
+          changeLogs.push({
+            targetTable: "owners",
+            targetId: masterFresh.id,
+            fieldName: "_merged_source_address",
+            oldValue: null,
+            newValue: freshPlan.sourceAddress,
+            source: "manual",
+            changedBy: session.id,
+          });
+        }
+        executedMatchedBy = freshMatch?.matchedBy ?? null;
+        executedHandoverFields = freshPlan ? Object.keys(freshPlan.writes) : [];
+        executedKeptFields = freshPlan
+          ? freshPlan.keptSourceValues.map((k) => k.field)
+          : [];
+
+        // 前の統合の記録を引き継ぐ（@codex R3）: B→A のあと A→C と続けて統合すると、B の値の記録
+        //   (_merged_source_*) は archive された A に残ったままになり、経緯（今つながっている
+        //   所有者の履歴だけを読む）から見えなくなる。同じ項目名・値・元の日時・記録した人のまま
+        //   master にも写す。source の行は消さない（A の履歴としても残す）。
+        //   ⚠個人の氏名住所一致は source に履歴があれば止まるので、実際に効くのは法人のペア。
+        for (const r of freshChangeLogRows) {
+          if (!r.fieldName.startsWith("_merged_source_")) continue;
+          changeLogs.push({
+            targetTable: "owners",
+            targetId: masterFresh.id,
+            fieldName: r.fieldName,
+            oldValue: r.oldValue,
+            newValue: r.newValue,
+            source: r.source,
+            changedBy: r.changedBy,
+            changedAt: r.changedAt,
           });
         }
 
@@ -783,6 +952,9 @@ export async function POST(request: NextRequest) {
         if (txNotFound) {
           throw new ApiError(404, "所有者が見つかりません", "NOT_FOUND");
         }
+        if (txForbidden) {
+          throw new ApiError(403, CORPORATE_HANDOVER_FORBIDDEN_MESSAGE, "FORBIDDEN");
+        }
         const reasons = txBlockedReasons ?? [];
         return apiResponse(
           {
@@ -818,6 +990,10 @@ export async function POST(request: NextRequest) {
         dmDraftsMoved,
         dmAssociationsMoved,
         sourceArchived: true,
+        // 経路と項目名だけ（値は書かない）。
+        matchedBy: executedMatchedBy,
+        corporateHandoverFields: executedHandoverFields,
+        corporateKeptFields: executedKeptFields,
       },
     });
 
@@ -836,6 +1012,8 @@ export async function POST(request: NextRequest) {
         dmDraftsMoved,
         dmAssociationsMoved,
         sourceArchived: true,
+        matchedBy: executedMatchedBy,
+        corporateHandoverFields: executedHandoverFields,
       },
     });
   } catch (error) {

@@ -3,6 +3,7 @@ import prisma from "@/lib/prisma";
 import {
   getApiSession,
   getUserPermissions,
+  getOwnerDisplayConfig,
   ApiError,
   handleApiError,
   apiResponse,
@@ -13,7 +14,8 @@ import {
   checkOwnerMergeSafety,
   type OwnerMergeBlockReason,
 } from "@/lib/owner-merge";
-import { buildOwnerDuplicateCandidateKey } from "@/lib/owner-correction";
+import { resolveOwnerMergeMatch } from "@/lib/owner-merge-match";
+import { planCorporateFieldHandover } from "@/lib/owner-merge-corporate-handover";
 
 // ---------------------------------------------------------------------------
 // POST /api/admin/owners/correction/merge-preview
@@ -40,7 +42,8 @@ import { buildOwnerDuplicateCandidateKey } from "@/lib/owner-correction";
 //       sourceOwnerMemoCount, sourceOwnerMemoWithPropertyCount,
 //       sourceChangeLogCount, sourceImportJobRowCount,
 //       sourceVersion, masterVersion,
-//       normalizeKeyMatches,
+//       normalizeKeyMatches, matchedBy,
+//       corporateHandoverFields, corporateKeptFields,  // 法人のペアだけ（項目名のみ）
 //     }
 //   }
 //   400 masterId / sourceId が UUID 形式でない
@@ -70,6 +73,11 @@ interface OwnerState {
   isArchived: boolean;
   note: string | null;
   externalLinkKey: string | null;
+  corporateNumber: string | null;
+  // 法人のペアの引き継ぎ（review P2: source にだけある値を落とさない）と会社法人等番号の食い違い。
+  companyRegistryNumber: string | null;
+  email: string | null;
+  nameKana: string | null;
 }
 
 async function loadOwnerForMerge(id: string): Promise<OwnerState | null> {
@@ -85,6 +93,11 @@ async function loadOwnerForMerge(id: string): Promise<OwnerState | null> {
       isArchived: true,
       note: true,
       externalLinkKey: true,
+      // 法人番号一致の経路・法人番号の食い違いの確認に使う（レスポンスには出さない）。
+      corporateNumber: true,
+      companyRegistryNumber: true,
+      email: true,
+      nameKana: true,
     },
   });
 }
@@ -203,27 +216,24 @@ export async function POST(request: NextRequest) {
       }
     }
 
-    // 候補キー一致確認: correction-candidates API と同じ buildOwnerDuplicateCandidateKey
-    // を使う。address あり → normalizeName + normalizeAddress、address なし →
-    // normalizeName + __noaddr__zip__phone のフォールバック。これにより
-    // candidate API が duplicate として並べているペアは preview でも一致扱いになる。
+    // 同じ所有者と言えるかの確認: correction-candidates API と同じ resolveOwnerMergeMatch
+    // を使う（氏名住所一致 → 法人番号一致 → 法人名一致）。これにより candidate API が
+    // 統合候補として並べているペアは preview でも一致扱いになる。
+    // ⚠法人番号の経路は owner_corporate_number=full の人だけ（一覧と同じ境界）。
     // レスポンスのフィールド名は互換のため normalizeKeyMatches を維持。
-    const normalizeKeyMatches = Boolean(
-      master &&
-        source &&
-        buildOwnerDuplicateCandidateKey({
-          name: master.name,
-          address: master.address,
-          zip: master.zip,
-          phone: master.phone,
-        }) ===
-          buildOwnerDuplicateCandidateKey({
-            name: source.name,
-            address: source.address,
-            zip: source.zip,
-            phone: source.phone,
-          }),
-    );
+    const displayConfig = await getOwnerDisplayConfig(session.id, perms);
+    const match =
+      master && source
+        ? resolveOwnerMergeMatch(master, source, {
+            corporateNumberAvailable: displayConfig.corporateNumber === "full",
+          })
+        : null;
+    const normalizeKeyMatches = match?.matchedBy != null;
+    // 法人のペアだけ、統合で master へ写す項目と記録に残す項目（項目名だけ返す）。
+    const corporatePlan =
+      master && source && match?.corporatePair
+        ? planCorporateFieldHandover(master, source)
+        : null;
 
     // safety check
     const safety = checkOwnerMergeSafety({
@@ -238,6 +248,9 @@ export async function POST(request: NextRequest) {
         !!source?.externalLinkKey && source.externalLinkKey.trim().length > 0,
       sourceVersion: source?.version ?? 1,
       normalizeKeyMatches,
+      corporatePair: match?.corporatePair ?? false,
+      corporateNumberConflict: match?.corporateNumberConflict ?? false,
+      companyRegistryNumberConflict: match?.companyRegistryNumberConflict ?? false,
     });
 
     const summary = {
@@ -250,6 +263,11 @@ export async function POST(request: NextRequest) {
       sourceVersion: source?.version ?? null,
       masterVersion: master?.version ?? null,
       normalizeKeyMatches,
+      matchedBy: match?.matchedBy ?? null,
+      corporateHandoverFields: corporatePlan ? Object.keys(corporatePlan.writes) : [],
+      corporateKeptFields: corporatePlan
+        ? corporatePlan.keptSourceValues.map((k) => k.field)
+        : [],
     };
 
     const eligible = safety.ok;

@@ -2,26 +2,34 @@
 
 import { Button } from "@/components/ui/button";
 import { useEffect, useState } from "react";
+import { mergeBlockReasonLabel } from "@/lib/owner-merge-reason-labels";
 
-// blockReason enum → 日本語ラベル（owner-merge.ts の OwnerMergeBlockReason と一致）
-const MERGE_BLOCK_REASON_LABELS: Record<string, string> = {
-  same_owner_id: "master と source が同一です",
-  master_not_found: "master 所有者が存在しません",
-  source_not_found: "source 所有者が存在しません",
-  master_archived: "master 所有者がアーカイブ済みです",
-  source_archived: "source 所有者がアーカイブ済みです",
-  source_has_changelog: "source に手動編集履歴があります",
-  source_has_note: "source に備考が入力されています",
-  source_has_external_link_key: "source に外部リンクキーが設定されています",
-  source_version_gt_1: "source に編集履歴があります（version > 1）",
-  name_address_normalize_mismatch:
-    "氏名・住所の正規化結果が一致しません（別人の可能性）",
-  version_mismatch:
-    "他のユーザーが先に更新しました（version が変わっています）",
+// blockReason enum → 日本語ラベル（「この1人に全部まとめる」と共有・owner-merge-reason-labels.ts）
+function reasonLabel(r: string): string {
+  return mergeBlockReasonLabel(r);
+}
+
+// 同じ所有者と言えた経路（enum → 画面の言葉）。
+const MATCHED_BY_LABELS: Record<string, string> = {
+  name_address: "氏名住所一致",
+  corporate_number: "法人番号一致",
+  corporate_name: "法人名一致",
 };
 
-function reasonLabel(r: string): string {
-  return MERGE_BLOCK_REASON_LABELS[r] ?? r;
+// 法人のペアで引き継ぐ・記録に残す項目（項目名だけ。値は API も返さない）。
+const HANDOVER_FIELD_LABELS: Record<string, string> = {
+  address: "登記上の住所",
+  zip: "郵便番号",
+  phone: "電話",
+  corporateNumber: "法人番号",
+  companyRegistryNumber: "会社法人等番号",
+  email: "メール",
+  nameKana: "フリガナ",
+  name: "名前の書き方",
+};
+
+function fieldList(fields: string[] | undefined): string {
+  return (fields ?? []).map((f) => HANDOVER_FIELD_LABELS[f] ?? f).join("・");
 }
 
 interface MergePreviewSummary {
@@ -34,6 +42,12 @@ interface MergePreviewSummary {
   sourceVersion: number | null;
   masterVersion: number | null;
   normalizeKeyMatches: boolean;
+  /** 同じ所有者と言えた経路（2026-11-24〜。古い応答には無い）。 */
+  matchedBy?: string | null;
+  /** 法人のペアで master へ写す項目名。 */
+  corporateHandoverFields?: string[];
+  /** 法人のペアで写さず master の変更履歴に残す項目名。 */
+  corporateKeptFields?: string[];
 }
 
 interface MergePreviewResponse {
@@ -321,11 +335,25 @@ export function OwnerMergePreviewButton({
             <dd className="font-mono">
               {result.summary.sourceVersion ?? "—"}
             </dd>
-            <dt>正規化キー一致</dt>
+            <dt>同じ所有者の確認</dt>
             <dd className="font-mono">
-              {result.summary.normalizeKeyMatches ? "yes" : "no"}
+              {result.summary.normalizeKeyMatches
+                ? MATCHED_BY_LABELS[result.summary.matchedBy ?? ""] ?? "yes"
+                : "no"}
             </dd>
           </dl>
+
+          {/* 法人のペアだけ: 引き継ぐ項目と記録に残す項目（項目名のみ・値は出さない）。 */}
+          {result.summary.matchedBy &&
+            ((result.summary.corporateHandoverFields?.length ?? 0) > 0 ||
+              (result.summary.corporateKeptFields?.length ?? 0) > 0) && (
+              <p className="mt-1 text-gray-600 dark:text-gray-300">
+                {(result.summary.corporateHandoverFields?.length ?? 0) > 0 &&
+                  `master が空の項目を引き継ぎます: ${fieldList(result.summary.corporateHandoverFields)}。`}
+                {(result.summary.corporateKeptFields?.length ?? 0) > 0 &&
+                  `値が違う項目は引き継がず、master の変更履歴に残します: ${fieldList(result.summary.corporateKeptFields)}。`}
+              </p>
+            )}
 
           {/* execute UI: eligible=true かつ result が現在の master/source pair に
               対応している場合のみ表示。useEffect で pair 変更時に result が

@@ -625,6 +625,7 @@ describe("GET correction-candidates: Phase 2-A duplicate by external_link_key", 
     expect(json.summary.duplicateMatchedByCounts).toEqual({
       name_address: 2,
       corporate_number: 0,
+      corporate_name: 0,
       external_link_key: 2,
     });
     expect(JSON.stringify(json.summary)).not.toContain(ELK_A);
@@ -1031,6 +1032,7 @@ describe("GET correction-candidates: Codex P1 グループ割当 atomicity", () 
     expect(json.summary.duplicateMatchedByCounts).toEqual({
       name_address: 2,
       corporate_number: 0,
+      corporate_name: 0,
       external_link_key: 0,
     });
     // duplicateCount も 2（types["duplicate"] 持ち）
@@ -1116,7 +1118,8 @@ describe("GET correction-candidates: Codex P2 (round 2) merge_candidate scoping"
     }
   });
 
-  it("corporate_number group の候補は merge_candidate に昇格しない（review のまま）", async () => {
+  // 2026-11-24 発注者承認: 法人番号一致も統合できるようになった＝merge_candidate に昇格する。
+  it("corporate_number group の候補も merge_candidate に昇格する（法人番号一致は統合できる）", async () => {
     pm.owner.findMany.mockResolvedValue([
       makeOwner({
         id: "11111111-1111-4111-8111-111111111111",
@@ -1136,10 +1139,7 @@ describe("GET correction-candidates: Codex P2 (round 2) merge_candidate scoping"
     expect(json.candidates).toHaveLength(2);
     for (const c of json.candidates as { duplicateMatchedBy: string; recommendedAction: string }[]) {
       expect(c.duplicateMatchedBy).toBe("corporate_number");
-      // duplicate group には属するが、merge_candidate には昇格しない
-      expect(c.recommendedAction).not.toBe("merge_candidate");
-      // 既存の review / hold / delete_candidate のいずれか（このケースでは review）
-      expect(c.recommendedAction).toBe("review");
+      expect(c.recommendedAction).toBe("merge_candidate");
     }
   });
 
@@ -1197,7 +1197,7 @@ describe("GET correction-candidates: Codex P2 (round 2) merge_candidate scoping"
     expect(byId.get("22222222-2222-4222-8222-222222222222")?.recommendedAction).toBe("merge_candidate");
   });
 
-  it("name_address の優先で corporate_number 経路を抑制されたケースでも、name_address 側だけ merge_candidate になる", async () => {
+  it("name_address の優先で corporate_number 経路を抑制されたケースでも、残りの B-D は corporate_number で merge_candidate になる", async () => {
     const ID_A = "11111111-1111-4111-8111-111111111111";
     const ID_B = "22222222-2222-4222-8222-222222222222";
     const ID_C = "33333333-3333-4333-8333-333333333333";
@@ -1218,11 +1218,109 @@ describe("GET correction-candidates: Codex P2 (round 2) merge_candidate scoping"
     // A-C は name_address → merge_candidate
     expect(byId.get(ID_A)?.recommendedAction).toBe("merge_candidate");
     expect(byId.get(ID_C)?.recommendedAction).toBe("merge_candidate");
-    // B-D は corporate_number → review のまま（昇格しない）
-    expect(byId.get(ID_B)?.recommendedAction).toBe("review");
-    expect(byId.get(ID_D)?.recommendedAction).toBe("review");
+    // B-D は corporate_number → 2026-11-24 から統合できる＝merge_candidate
+    expect(byId.get(ID_B)?.recommendedAction).toBe("merge_candidate");
+    expect(byId.get(ID_D)?.recommendedAction).toBe("merge_candidate");
     expect(byId.get(ID_B)?.duplicateMatchedBy).toBe("corporate_number");
     expect(byId.get(ID_D)?.duplicateMatchedBy).toBe("corporate_number");
+  });
+});
+
+// ---- 2026-11-24: 法人名一致（住所が違っても同じ法人名ならまとめられる） ----
+describe("GET correction-candidates: corporate_name（法人名一致）", () => {
+  const ID_A = "11111111-1111-4111-8111-111111111111";
+  const ID_B = "22222222-2222-4222-8222-222222222222";
+  const ID_C = "33333333-3333-4333-8333-333333333333";
+  type Row = {
+    id: string;
+    duplicateGroupId: string | null;
+    duplicateMatchedBy: string | null;
+    recommendedAction: string;
+    blockReasons: string[];
+  };
+  async function fetchById() {
+    const res = await GET(makeRequest("duplicate"));
+    const json = await res.json();
+    return {
+      json,
+      byId: new Map<string, Row>((json.candidates as Row[]).map((c) => [c.id, c])),
+    };
+  }
+
+  it("(株)/株式会社 の違い・住所の違いがあっても同じ法人名なら dup-cname-N / matchedBy=corporate_name / merge_candidate", async () => {
+    pm.owner.findMany.mockResolvedValue([
+      makeOwner({ id: ID_A, name: "株式会社サンプル商事", address: "東京都架空区1-1" }),
+      makeOwner({ id: ID_B, name: "（株）サンプル商事", address: "大阪府架空市2-2" }),
+    ]);
+    const { json, byId } = await fetchById();
+    for (const id of [ID_A, ID_B]) {
+      const c = byId.get(id);
+      expect(c?.duplicateMatchedBy).toBe("corporate_name");
+      expect(c?.duplicateGroupId).toMatch(/^dup-cname-\d+$/);
+      expect(c?.recommendedAction).toBe("merge_candidate");
+    }
+    expect(json.summary.duplicateMatchedByCounts.corporate_name).toBe(2);
+  });
+
+  it("個人名は住所が違えば同じ名前でも重複にしない（法人だけ）", async () => {
+    pm.owner.findMany.mockResolvedValue([
+      makeOwner({ id: ID_A, name: "架空太郎", address: "東京都架空区1-1" }),
+      makeOwner({ id: ID_B, name: "架空太郎", address: "大阪府架空市2-2" }),
+    ]);
+    const { json } = await fetchById();
+    expect(json.candidates).toHaveLength(0);
+  });
+
+  it("優先順: name_address > corporate_number > corporate_name（1人は1グループだけ）", async () => {
+    pm.owner.findMany.mockResolvedValue([
+      // A-B は氏名住所も同じ → name_address
+      makeOwner({ id: ID_A, name: "株式会社サンプル商事", address: "東京都架空区1-1" }),
+      makeOwner({ id: ID_B, name: "株式会社サンプル商事", address: "東京都架空区1-1" }),
+      // C は住所違いの同じ法人名。A/B は割当済みなので C 単独 → グループにならない
+      makeOwner({ id: ID_C, name: "㈱サンプル商事", address: "大阪府架空市2-2" }),
+    ]);
+    const { byId } = await fetchById();
+    expect(byId.get(ID_A)?.duplicateMatchedBy).toBe("name_address");
+    expect(byId.get(ID_B)?.duplicateMatchedBy).toBe("name_address");
+    expect(byId.get(ID_C)).toBeUndefined();
+  });
+
+  it("法人番号一致が先に採られ、残りが法人名一致で組まれる", async () => {
+    const CN = "1234567890123";
+    const ID_D = "44444444-4444-4444-8444-444444444444";
+    pm.owner.findMany.mockResolvedValue([
+      makeOwner({ id: ID_A, name: "株式会社サンプル商事", address: "a1", corporateNumber: CN }),
+      makeOwner({ id: ID_B, name: "サンプル商事", address: "a2", corporateNumber: CN }),
+      makeOwner({ id: ID_C, name: "株式会社テスト架空", address: "a3" }),
+      makeOwner({ id: ID_D, name: "株式会社 テスト架空", address: "a4" }),
+    ]);
+    const { byId } = await fetchById();
+    expect(byId.get(ID_A)?.duplicateMatchedBy).toBe("corporate_number");
+    expect(byId.get(ID_B)?.duplicateMatchedBy).toBe("corporate_number");
+    expect(byId.get(ID_C)?.duplicateMatchedBy).toBe("corporate_name");
+    expect(byId.get(ID_D)?.duplicateMatchedBy).toBe("corporate_name");
+  });
+
+  it("corporate_name は external_link_key より先に採られる", async () => {
+    pm.owner.findMany.mockResolvedValue([
+      makeOwner({ id: ID_A, name: "株式会社サンプル商事", address: "a1", externalLinkKey: "ELK-X" }),
+      makeOwner({ id: ID_B, name: "株式会社サンプル商事", address: "a2", externalLinkKey: "ELK-X" }),
+    ]);
+    const { byId } = await fetchById();
+    expect(byId.get(ID_A)?.duplicateMatchedBy).toBe("corporate_name");
+  });
+
+  it("opaque ID・AuditLog に法人名（生値・そろえた値）が入らない", async () => {
+    pm.owner.findMany.mockResolvedValue([
+      makeOwner({ id: ID_A, name: "株式会社サンプル商事", address: "東京都架空区1-1" }),
+      makeOwner({ id: ID_B, name: "㈱サンプル商事", address: "大阪府架空市2-2" }),
+    ]);
+    const { writeAuditLog } = await import("@/lib/audit");
+    const { byId } = await fetchById();
+    expect(byId.get(ID_A)?.duplicateGroupId).not.toContain("サンプル");
+    const serialized = JSON.stringify(vi.mocked(writeAuditLog).mock.calls[0]?.[0]);
+    expect(serialized).not.toContain("サンプル");
+    expect(serialized).not.toContain("架空");
   });
 });
 
@@ -1660,7 +1758,9 @@ describe("GET correction-candidates: Codex P1 (round 3) non-name duplicate demot
     );
   }
 
-  it("corporate_number duplicate の delete_candidate 候補は review に落ちる + 非PII reason 追加", async () => {
+  // 2026-11-24: 法人番号一致は統合できる経路になった。delete_candidate は（氏名住所一致と同じく）
+  // merge_candidate へ上げる＝孤立タブの削除ボタンは出ない（データ損失防止は保たれる）。
+  it("corporate_number duplicate の delete_candidate 候補は merge_candidate に上がる（削除候補に残らない）", async () => {
     const ID_A = "11111111-1111-4111-8111-111111111111";
     const ID_B = "22222222-2222-4222-8222-222222222222";
     pm.owner.findMany.mockResolvedValue([
@@ -1696,19 +1796,12 @@ describe("GET correction-candidates: Codex P1 (round 3) non-name duplicate demot
     for (const id of [ID_A, ID_B]) {
       const c = byId.get(id);
       expect(c?.duplicateMatchedBy).toBe("corporate_number");
-      // delete_candidate にならない（review に落ちている）
       expect(c?.recommendedAction).not.toBe("delete_candidate");
-      expect(c?.recommendedAction).toBe("review");
-      // 非 PII reason が付与されている
-      expect(c?.blockReasons).toContain(
+      expect(c?.recommendedAction).toBe("merge_candidate");
+      // 統合できる経路なので「要確認」の理由は付けない
+      expect(c?.blockReasons).not.toContain(
         "corporate_number_duplicate_requires_review",
       );
-      // 重複追加されていない
-      expect(
-        c?.blockReasons.filter(
-          (r) => r === "corporate_number_duplicate_requires_review",
-        ).length,
-      ).toBe(1);
     }
   });
 
@@ -1828,7 +1921,7 @@ describe("GET correction-candidates: Codex P1 (round 3) non-name duplicate demot
     }
   });
 
-  it("corporate_number duplicate でも review/hold は維持される", async () => {
+  it("corporate_number duplicate の review は merge_candidate に上がる", async () => {
     // CN + name/address 違い + import row 無し → blockReasons に
     // import_source_unknown 入る（これは hasSafeguard には含まれない）。
     // recommendedAction は review（orphan && !addressNull && success ではない）。
@@ -1857,8 +1950,8 @@ describe("GET correction-candidates: Codex P1 (round 3) non-name duplicate demot
       recommendedAction: string;
       blockReasons: string[];
     }[]) {
-      expect(c.recommendedAction).toBe("review");
-      expect(c.blockReasons).toContain(
+      expect(c.recommendedAction).toBe("merge_candidate");
+      expect(c.blockReasons).not.toContain(
         "corporate_number_duplicate_requires_review",
       );
     }

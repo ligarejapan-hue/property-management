@@ -4269,6 +4269,7 @@ export interface OwnerCorrectionCandidate {
    * 経路ごとに prefix が異なる:
    *   - name_address      : "dup-N"
    *   - corporate_number  : "dup-cn-N"
+   *   - corporate_name    : "dup-cname-N"（法人名一致・2026-11-24）
    *   - external_link_key : "dup-elk-N"
    */
   duplicateGroupId: string | null;
@@ -4277,12 +4278,13 @@ export interface OwnerCorrectionCandidate {
   /**
    * Phase 2-A: duplicate グループの一致経路。
    * 1 candidate が複数経路で同時にヒットしても 1 つだけ採用される
-   * （優先順: name_address > corporate_number > external_link_key）。
+   * （優先順: name_address > corporate_number > corporate_name > external_link_key）。
    * duplicateGroupId が null なら null。
    */
   duplicateMatchedBy:
     | "name_address"
     | "corporate_number"
+    | "corporate_name"
     | "external_link_key"
     | null;
   /**
@@ -4310,6 +4312,8 @@ export interface OwnerCorrectionCandidatesResponse {
     duplicateMatchedByCounts?: {
       name_address: number;
       corporate_number: number;
+      /** 法人名一致（2026-11-24 追加）。 */
+      corporate_name?: number;
       external_link_key: number;
     };
     /**

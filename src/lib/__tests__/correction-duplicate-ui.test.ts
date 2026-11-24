@@ -127,13 +127,13 @@ describe("correction page: Codex P2 URL↔state 同期", () => {
 
 // Codex P2 (round 2): merge UI scoping
 //
-// DuplicateGroupCard は matchedBy === "name_address" のときのみ merge 関連 UI
-// (master/source 列 + OwnerMergePreviewButton) を表示する。corporate_number /
-// external_link_key 経路ではメッセージのみで merge ボタンを出さない。
+// DuplicateGroupCard は統合できる経路（2026-11-24 から name_address / corporate_number /
+// corporate_name）のときのみ merge 関連 UI (master/source 列 + OwnerMergePreviewButton) を
+// 表示する。external_link_key 経路ではメッセージのみで merge ボタンを出さない。
 describe("correction page: Codex P2 (round 2) merge UI scoping", () => {
-  it("supportsMerge は matchedBy === 'name_address' と紐づけている", () => {
+  it("supportsMerge は統合できる経路の一覧（isMergeableMatchedBy）と紐づけている", () => {
     expect(src).toMatch(
-      /const\s+supportsMerge\s*=\s*matchedBy\s*===\s*"name_address"/,
+      /const\s+supportsMerge\s*=\s*isMergeableMatchedBy\(matchedBy\)/,
     );
   });
 
@@ -158,13 +158,14 @@ describe("correction page: Codex P2 (round 2) merge UI scoping", () => {
     expect(src).toMatch(/data-testid="duplicate-group-merge-unsupported-notice"/);
   });
 
-  it("merge 非対応 group の注記文言に「要確認」を含む", () => {
-    expect(src).toMatch(/法人番号一致のため要確認/);
+  it("merge 非対応 group（リンクキー一致）の注記文言に「要確認」を含む", () => {
     expect(src).toMatch(/リンクキー一致のため要確認/);
+    // 法人番号一致は 2026-11-24 から統合できる＝要確認の注記は出さない
+    expect(src).not.toMatch(/法人番号一致のため要確認/);
   });
 
-  it("DuplicateGroupSummary の説明文が氏名住所一致限定の merge 制限を明示している", () => {
-    expect(src).toMatch(/氏名住所一致[\s\S]{0,80}master\s*\/\s*source[\s\S]{0,80}統合プレビュー/);
+  it("DuplicateGroupSummary の説明文が統合できる経路と master / source の選び方を明示している", () => {
+    expect(src).toMatch(/氏名住所一致・法人番号一致・法人名一致[\s\S]{0,80}master\s*\/\s*source[\s\S]{0,80}統合プレビュー/);
   });
 });
 

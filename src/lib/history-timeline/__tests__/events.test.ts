@@ -406,6 +406,28 @@ describe("足した記録", () => {
     expect(JSON.stringify(events)).not.toContain("東京都");
   });
 
+  // 2026-11-24: 法人の統合で消える側の値を master に残した記録(_merged_source_*)を経緯に出す。
+  it.each([
+    ["_merged_source_address", "統合前の登記上の住所", "address", "大阪府架空市2-2"],
+    ["_merged_source_zip", "統合前の登記上の郵便番号", "zip", "530-0000"],
+    ["_merged_source_phone", "統合前の電話番号", "phone", "06-0000-0000"],
+    ["_merged_source_email", "統合前のメール", "email", "b@example.invalid"],
+    ["_merged_source_nameKana", "統合前のフリガナ", "nameKana", "サンプルショウジ"],
+    ["_merged_source_name", "統合前の氏名", "name", "㈱サンプル商事"],
+    ["_merged_source_corporateNumber", "統合前の法人番号", "corporateNumber", "9876543210987"],
+    ["_merged_source_companyRegistryNumber", "統合前の会社法人等番号", "corporateNumber", "020001054321"],
+  ])("★統合の記録 %s: 見られる人には「%s」と値・伏せる人には項目名だけ・非表示なら出さない", (fieldName, label, level, value) => {
+    const row = ownerRow({ fieldName, oldValue: null, newValue: value });
+    const shown = changeEvents([row], ctx()).events;
+    expect(shown[0]).toMatchObject({ source: "owner_change", title: `所有者の${label}を記録`, detail: value });
+
+    const masked = changeEvents([row], ctx({ ownerLevels: { ...ctx().ownerLevels, [level]: "masked" } })).events;
+    expect(masked[0].title).toBe(`所有者の${label}を記録`);
+    expect(JSON.stringify(masked)).not.toContain(value);
+
+    expect(changeEvents([row], ctx({ ownerLevels: { ...ctx().ownerLevels, [level]: "hidden" } })).events).toEqual([]);
+  });
+
   it("★所有者本体の変更: 一覧に無い項目(統合の印など)は出さない", () => {
     expect(changeEvents([ownerRow({ fieldName: "_merged_from", newValue: "11111111-1111-4111-8111-111111111111" })], ctx()).events).toEqual([]);
     expect(changeEvents([ownerRow({ fieldName: "isArchived" })], ctx()).events).toEqual([]);
