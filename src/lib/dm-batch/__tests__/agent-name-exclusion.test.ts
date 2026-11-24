@@ -7,7 +7,7 @@ import {
   findPropertiesWithAgentNameOwners,
   findSendPropertiesWithAgentNameOwners,
 } from "../agent-name-exclusion";
-import { PUBLIC_OWNER_NAME_PATTERN } from "@/lib/public-owner-name";
+import { STATE_OWNER_NAME_PATTERN } from "@/lib/public-owner-name";
 import { NAME_VARIANTS } from "@/lib/name-variants";
 
 // 業者と同じ名前の所有者には DM を送らない(2026-11-09 発注者指示)。
@@ -64,7 +64,7 @@ describe("自治体・国が持ち主(public-owner-name.ts と同じ正規表現
     expect([...got.agentOwnerIds]).toEqual(["o2"]);
     expect($queryRaw).toHaveBeenCalledTimes(1);
     const q = ($queryRaw.mock.calls[0] as unknown as [Prisma.Sql])[0];
-    expect(q.values).toContain(PUBLIC_OWNER_NAME_PATTERN);
+    expect(q.values).toContain(STATE_OWNER_NAME_PATTERN);
     expect(q.sql).toContain("r.public");
   });
   it("所有者がいなければ DB を引かない(publicOwnerIds も空)", async () => {
@@ -78,7 +78,7 @@ describe("自治体・国が持ち主(public-owner-name.ts と同じ正規表現
     await findPropertiesWithAgentNameOwners({ $queryRaw } as never, ["p1"]);
     await findSendPropertiesWithAgentNameOwners({ $queryRaw } as never, 5);
     for (const call of $queryRaw.mock.calls as unknown as [Prisma.Sql][]) {
-      expect(call[0].values).toContain(PUBLIC_OWNER_NAME_PATTERN);
+      expect(call[0].values).toContain(STATE_OWNER_NAME_PATTERN);
       expect(call[0].sql).toContain("k.public");
     }
   });
