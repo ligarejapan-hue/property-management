@@ -64,6 +64,7 @@ Task 7 が直した「謄本取込が所有者の法人番号を版番号を進�
 |---|---|
 | `src/app/api/admin/owners/[id]/correction/address-fill/route.ts:275` | `owner.address`(空欄補完) |
 | `src/app/api/admin/owners/[id]/correction/archive/route.ts:247` | `owner.isArchived` |
+| `src/app/api/admin/owners/[id]/correction/unarchive/route.ts:70` | `owner.isArchived=false`(アーカイブを戻す・2026-11-24) |
 | `src/app/api/admin/owners/[id]/correction/contact-fix/route.ts:332` | `owner` の連絡先系動的フィールド |
 | `src/app/api/admin/owners/[id]/correction/name-fix/route.ts:239` | `owner.name` |
 | `src/app/api/admin/owners/[id]/correction/text-fix/route.ts:299` | `owner` の動的フィールド + `currentZip` |

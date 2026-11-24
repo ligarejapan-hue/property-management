@@ -29,6 +29,8 @@ const VERSIONED: Record<string, string> = {
     "owner.address(空欄補完)+version increment",
   "src/app/api/admin/owners/[id]/correction/archive/route.ts:247":
     "owner.isArchived(アーカイブ)+version increment",
+  "src/app/api/admin/owners/[id]/correction/unarchive/route.ts:70":
+    "owner.isArchived=false(アーカイブを戻す・2026-11-24)+version increment(所有者行ロック後)",
   "src/app/api/admin/owners/[id]/correction/contact-fix/route.ts:332":
     "owner の連絡先フィールド(動的 [field])+version increment",
   "src/app/api/admin/owners/[id]/correction/name-fix/route.ts:239":
