@@ -27,7 +27,7 @@ describe("topNavEntries", () => {
     const other = topNavEntries(visibleSidebar("admin")).find((e) => e.label === "その他")!;
     expect(other.kind).toBe("menu");
     if (other.kind !== "menu") return;
-    expect(other.sections.map((s) => s.label)).toEqual(["物件データ編集", "システム管理", "資料"]);
+    expect(other.sections.map((s) => s.label)).toEqual(["物件データ編集", "点検（ふだんは不要）", "システム管理", "資料"]);
   });
 
   it("左メニューに出る項目は、上部ナビにも全部・1回ずつ出る(役割ごと)", () => {
