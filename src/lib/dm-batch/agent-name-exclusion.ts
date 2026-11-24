@@ -17,10 +17,13 @@
  * 2026-11-11: 名前に謄本の外字(私用領域の字)がある所有者も、同じ SQL で見つけて外す(宛名が □ になる・
  * 外字のまま自動で登録された同じ方に2通届く)。件数は理由ごとに分けて見せる。
  * 2026-11-13(発注者 案A): 実際に刷る住所(現住所があれば現住所・無ければ登記上の住所)に外字がある所有者も外す。
+ * 2026-11-24(発注者承認): 名前が自治体・国の所有者も同じ SQL で見つけて外す(判定は public-owner-name.ts の1つの正規表現)。
+ *   件数は「自治体・国が持ち主」として分ける。物件ごとの判定(送付可にできない・見回り)も業者と同じ名前と同じ扱い。
  */
 
 import { Prisma } from "@/generated/prisma";
 import { NAME_VARIANTS } from "@/lib/deals/crosscheck";
+import { publicOwnerNameSql } from "@/lib/public-owner-name";
 
 const VARIANT_FROM = Object.keys(NAME_VARIANTS).join("");
 const VARIANT_TO = Object.values(NAME_VARIANTS).join("");
@@ -51,6 +54,8 @@ export interface OwnerNameExclusions {
   agentOwnerIds: Set<string>;
   /** 名前か実際に刷る住所に謄本の外字(私用領域の字)がある=宛名が □ になる(2026-11-11 実機確認・住所は 11-13・物件住所宛は名前だけ) */
   gaijiOwnerIds: Set<string>;
+  /** 名前が自治体・国(public-owner-name.ts・2026-11-24) */
+  publicOwnerIds: Set<string>;
 }
 
 /** どの住所に刷るか。 */
@@ -73,13 +78,14 @@ export async function findOwnerNameExclusions(
 ): Promise<OwnerNameExclusions> {
   const mailingAddress = options.mailingAddress ?? true;
   const all = [...new Set(ownerIds)].sort();
-  const found: OwnerNameExclusions = { agentOwnerIds: new Set(), gaijiOwnerIds: new Set() };
+  const found: OwnerNameExclusions = { agentOwnerIds: new Set(), gaijiOwnerIds: new Set(), publicOwnerIds: new Set() };
   // 物件住所宛 CSV は最大1万物件=所有者が数万人になり得る。1回の SQL の引数の上限(65535)に届かないよう分ける。
   for (let i = 0; i < all.length; i += OWNER_CHUNK) {
     for (const r of await findChunk(tx, all.slice(i, i + OWNER_CHUNK), mailingAddress)) {
       // agent の列が無い行(古い形)は業者と同じ名前として扱う
       if (r.agent !== false) found.agentOwnerIds.add(r.id);
       if (r.gaiji === true) found.gaijiOwnerIds.add(r.id);
+      if (r.public === true) found.publicOwnerIds.add(r.id);
     }
   }
   return found;
@@ -105,21 +111,22 @@ async function findChunk(
   tx: AgentNameExclusionTx,
   ids: string[],
   mailingAddress: boolean,
-): Promise<{ id: string; agent?: boolean; gaiji?: boolean }[]> {
+): Promise<{ id: string; agent?: boolean; gaiji?: boolean; public?: boolean }[]> {
   const addressGaiji = mailingAddress
     ? Prisma.sql`OR ${mailingAddressSql()} ~ ${PRIVATE_USE_CLASS}`
     : Prisma.empty;
   const ownerKey = agentNameKeySql(Prisma.sql`o.name`);
   const agentKey = agentNameKeySql(Prisma.sql`a.company_name`);
   const mlitKey = agentNameKeySql(Prisma.sql`m.company_name`);
-  return tx.$queryRaw<{ id: string; agent: boolean; gaiji: boolean }[]>(Prisma.sql`
+  return tx.$queryRaw<{ id: string; agent: boolean; gaiji: boolean; public: boolean }[]>(Prisma.sql`
     WITH k AS (
       SELECT o.id::text AS id, ${ownerKey} AS key,
-        (coalesce(o.name, '') ~ ${PRIVATE_USE_CLASS} ${addressGaiji}) AS gaiji
+        (coalesce(o.name, '') ~ ${PRIVATE_USE_CLASS} ${addressGaiji}) AS gaiji,
+        ${publicOwnerNameSql(Prisma.sql`o.name`)} AS public
       FROM owners o
       WHERE o.id IN (${Prisma.join(ids.map((id) => Prisma.sql`${id}::uuid`))})
     ), r AS (
-      SELECT k.id, k.gaiji,
+      SELECT k.id, k.gaiji, k.public,
         (k.key <> ''
           AND (
             k.key IN (SELECT ${agentKey} FROM agents a WHERE a.is_archived = false)
@@ -127,14 +134,15 @@ async function findChunk(
           )) AS agent
       FROM k
     )
-    SELECT r.id, r.agent, r.gaiji FROM r WHERE r.agent OR r.gaiji
+    SELECT r.id, r.agent, r.gaiji, r.public FROM r WHERE r.agent OR r.gaiji OR r.public
   `);
 }
 
 /**
  * 業者と同じ名前の所有者がいる物件(2026-11-16 発注者「業者の名簿と同じ名前は DM 送付不可」)。
  * propertyIds のうち、つながっている所有者に1人でも業者と同じ名前の人がいる物件の id を返す。
- * 判定は上の findOwnerNameExclusions と同じ式(agentNameKeySql)。空なら DB を引かない。
+ * 2026-11-24: 名前が自治体・国の所有者がいる物件も返す(同じ「DM 送付不可」の扱い・public-owner-name.ts)。
+ * 判定は上の findOwnerNameExclusions と同じ式(agentNameKeySql・publicOwnerNameSql)。空なら DB を引かない。
  * ⚠返す id は小文字(property_id::text)。大文字の id を渡した呼び出し元は `.has(id)` で比べない(@codex #747 P2)。
  */
 export async function findPropertiesWithAgentNameOwners(
@@ -147,12 +155,13 @@ export async function findPropertiesWithAgentNameOwners(
     const chunk = ids.slice(i, i + OWNER_CHUNK);
     const rows = await tx.$queryRaw<{ id: string }[]>(Prisma.sql`
       WITH k AS (
-        SELECT po.property_id::text AS id, ${agentNameKeySql(Prisma.sql`o.name`)} AS key
+        SELECT po.property_id::text AS id, ${agentNameKeySql(Prisma.sql`o.name`)} AS key,
+          ${publicOwnerNameSql(Prisma.sql`o.name`)} AS public
         FROM property_owners po JOIN owners o ON o.id = po.owner_id
         WHERE po.property_id IN (${Prisma.join(chunk.map((id) => Prisma.sql`${id}::uuid`))})
       )
       SELECT DISTINCT k.id FROM k
-      WHERE ${agentKeyMatchSql(Prisma.sql`k.key`)}
+      WHERE k.public OR ${agentKeyMatchSql(Prisma.sql`k.key`)}
     `);
     for (const r of rows) found.add(r.id);
   }
@@ -160,7 +169,8 @@ export async function findPropertiesWithAgentNameOwners(
 }
 
 /**
- * 「送付可」なのに業者と同じ名前の所有者がいる物件(アーカイブを除く)を最大 take 件。見回りが送付不可に直す。
+ * 「送付可」なのに業者と同じ名前の所有者(2026-11-24 から自治体・国の所有者も)がいる物件(アーカイブを除く)を
+ * 最大 take 件。見回りが送付不可に直す。
  */
 export async function findSendPropertiesWithAgentNameOwners(
   tx: AgentNameExclusionTx,
@@ -168,14 +178,15 @@ export async function findSendPropertiesWithAgentNameOwners(
 ): Promise<string[]> {
   const rows = await tx.$queryRaw<{ id: string }[]>(Prisma.sql`
     WITH k AS (
-      SELECT p.id::text AS id, ${agentNameKeySql(Prisma.sql`o.name`)} AS key
+      SELECT p.id::text AS id, ${agentNameKeySql(Prisma.sql`o.name`)} AS key,
+        ${publicOwnerNameSql(Prisma.sql`o.name`)} AS public
       FROM properties p
       JOIN property_owners po ON po.property_id = p.id
       JOIN owners o ON o.id = po.owner_id
       WHERE p.dm_status = 'send' AND p.is_archived = false
     )
     SELECT DISTINCT k.id FROM k
-    WHERE ${agentKeyMatchSql(Prisma.sql`k.key`)}
+    WHERE k.public OR ${agentKeyMatchSql(Prisma.sql`k.key`)}
     ORDER BY k.id
     LIMIT ${Math.max(1, Math.floor(take))}
   `);

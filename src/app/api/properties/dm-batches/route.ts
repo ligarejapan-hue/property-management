@@ -359,6 +359,8 @@ export async function POST(request: NextRequest) {
     let excludedAgentNameCount = 0;
     // 名前に謄本の外字(私用領域の字)がある所有者で外した宛先数(2026-11-11)
     let excludedGaijiNameCount = 0;
+    // 名前が自治体・国の所有者で外した宛先数(2026-11-24)
+    let excludedPublicNameCount = 0;
     // 同じ所有者あての2通目として外した宛先数(2026-11-16)と、そのために DM判断を「送付不可」にする物件
     let excludedSecondLetterCount = 0;
     let demoteIds: string[] = [];
@@ -448,6 +450,7 @@ export async function POST(request: NextRequest) {
         excludedTerminalCount = reasons.filter((r) => r === "terminal").length;
         excludedAgentNameCount = reasons.filter((r) => r === "agent_name").length;
         excludedGaijiNameCount = reasons.filter((r) => r === "gaiji_name").length;
+        excludedPublicNameCount = reasons.filter((r) => r === "public_name").length;
         savedRowCount = survivingItems.length;
 
         await tx.dmExportBatch.create({
@@ -560,6 +563,7 @@ export async function POST(request: NextRequest) {
         // ⚠監査の鍵に "Name" を含めると個人情報として伏せられる → excludedAgent
         excludedAgent: excludedAgentNameCount,
         excludedGaiji: excludedGaijiNameCount,
+        excludedPublic: excludedPublicNameCount,
         // 同じ所有者あての2通目で外した宛先数・そのために「送付不可」にした物件数(件数のみ)
         excludedSecond: excludedSecondLetterCount,
         demotedSecond: demotedSecondLetterCount,
@@ -579,6 +583,8 @@ export async function POST(request: NextRequest) {
       excludedAgentNameCount,
       // 名前に外字がある所有者で自動除外した宛先数
       excludedGaijiNameCount,
+      // 名前が自治体・国の所有者で自動除外した宛先数
+      excludedPublicNameCount,
       // 同じ所有者あての2通目として自動除外した宛先数と、DM判断を「送付不可」にした物件数
       excludedSecondLetterCount,
       demotedSecondLetterCount,

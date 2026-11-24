@@ -44,3 +44,13 @@ describe("同じ所有者あての2通目の通知(2026-11-16)", () => {
     expect(buildSaleDmPartialNotice({ generated: 3, failed: 0, truncated: false, excludedSecondLetter: 0, demotedSecondLetter: 0 })).toBeNull();
   });
 });
+
+describe("buildSaleDmPartialNotice: 自治体・国が持ち主の自動除外(2026-11-24)", () => {
+  it("excludedPublicName>0 なら件数と理由を通知に含める", () => {
+    const msg = buildSaleDmPartialNotice({ generated: 3, failed: 0, truncated: false, excludedPublicName: 2 }) ?? "";
+    expect(msg).toContain("所有者が自治体・国の 2 件の宛先は自動で除外しました");
+  });
+  it("0 件なら書かない", () => {
+    expect(buildSaleDmPartialNotice({ generated: 3, failed: 0, truncated: false, excludedPublicName: 0 })).toBeNull();
+  });
+});

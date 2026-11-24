@@ -23,6 +23,7 @@ const fakeTx = (
   rows: Array<{ ownerId: string | null; propertyId: string | null; logOwners: { ownerId: string }[] }>,
   agentOwnerIds: string[] = [],
   gaijiOwnerIds: string[] = [],
+  publicOwnerIds: string[] = [],
 ) => {
   const findMany = vi.fn(async (_args: FindArgs) => rows);
   // 業者と同じ名前の所有者(agent-name-exclusion.ts の SQL の結果)
@@ -30,6 +31,8 @@ const fakeTx = (
   const $queryRaw = vi.fn(async () => [
     ...agentOwnerIds.map((id) => ({ id, agent: true, gaiji: gaijiOwnerIds.includes(id) })),
     ...gaijiOwnerIds.filter((id) => !agentOwnerIds.includes(id)).map((id) => ({ id, agent: false, gaiji: true })),
+    // 自治体・国が持ち主(2026-11-24)も同じ SQL の結果に public の印つきで返る
+    ...publicOwnerIds.map((id) => ({ id, agent: false, gaiji: false, public: true })),
   ]);
   return { tx: { propertyDmLog: { findMany }, $queryRaw: $queryRaw as never }, findMany, $queryRaw };
 };
@@ -94,6 +97,14 @@ describe("findTerminalExclusions（集合の構築）", () => {
     expect([...sets.agentOwnerIds]).toEqual(["o2"]);
     expect([...sets.gaijiOwnerIds]).toEqual(["o3"]);
   });
+
+  it("自治体・国が持ち主の所有者は別の集合へ(同じ SQL 1本・業者の集合には入れない・2026-11-24)", async () => {
+    const { tx, $queryRaw } = fakeTx([], ["o2"], [], ["o4"]);
+    const sets = await findTerminalExclusions(tx, ["o1", "o2", "o4"], ["p1"]);
+    expect($queryRaw).toHaveBeenCalledTimes(1);
+    expect([...sets.agentOwnerIds]).toEqual(["o2"]);
+    expect([...sets.publicOwnerIds]).toEqual(["o4"]);
+  });
 });
 
 describe("isTerminalExcluded（宛先グループの判定）", () => {
@@ -102,6 +113,7 @@ describe("isTerminalExcluded（宛先グループの判定）", () => {
     propertyIds: new Set(["pBad"]),
     agentOwnerIds: new Set(["oAgent"]),
     gaijiOwnerIds: new Set(["oGaiji"]),
+    publicOwnerIds: new Set<string>(),
   };
 
   it("代表・共有者のどちらかが terminal なら除外", () => {
@@ -128,7 +140,8 @@ describe("dmExclusionReason（外す理由）", () => {
     ownerIds: new Set(["oBad"]),
     propertyIds: new Set(["pBad"]),
     agentOwnerIds: new Set(["oAgent", "oBad"]),
-    gaijiOwnerIds: new Set(["oGaiji", "oAgent", "oBad"]),
+    gaijiOwnerIds: new Set(["oGaiji", "oAgent", "oBad", "oPublic"]),
+    publicOwnerIds: new Set(["oPublic", "oAgent"]),
   };
 
   it("業者と同じ名前の所有者が代表でも共有者でも外す(住所に関係なく)", () => {
@@ -145,6 +158,17 @@ describe("dmExclusionReason（外す理由）", () => {
     expect(dmExclusionReason(sets, { propertyId: "p1", ownerIds: ["oOk", "oGaiji"] })).toBe("gaiji_name");
     expect(dmExclusionReason(sets, { propertyId: "p1", ownerIds: ["oAgent"] })).toBe("agent_name");
     expect(dmExclusionReason(sets, { propertyId: "p1", ownerIds: ["oBad"] })).toBe("terminal");
+  });
+  it("自治体・国が持ち主=public_name(拒否・宛先不明と業者と同じ名前を先に・外字より先に見る・2026-11-24)", () => {
+    expect(dmExclusionReason(sets, { propertyId: "p1", ownerIds: ["oPublic"] })).toBe("public_name");
+    expect(dmExclusionReason(sets, { propertyId: "p1", ownerIds: ["oOk", "oPublic"] })).toBe("public_name");
+    expect(dmExclusionReason(sets, { propertyId: "p1", ownerIds: ["oAgent"] })).toBe("agent_name");
+    expect(dmExclusionReason(sets, { propertyId: "pBad", ownerIds: ["oPublic"] })).toBe("terminal");
+  });
+  it("古い形の集合(publicOwnerIds が無い)でも落ちない", () => {
+    const { publicOwnerIds: _omit, ...old } = sets;
+    void _omit;
+    expect(dmExclusionReason(old as never, { propertyId: "p1", ownerIds: ["oOk"] })).toBeNull();
   });
   it("どれにも当たらなければ null", () => {
     expect(dmExclusionReason(sets, { propertyId: "p1", ownerIds: ["oOk"] })).toBeNull();

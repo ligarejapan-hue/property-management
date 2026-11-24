@@ -14,7 +14,12 @@ let prop: Prop;
 let others: Array<{ ownerId: string; property: { dmStatus: string } }>;
 let logs: Array<Record<string, unknown>>;
 const editLocked = { value: false };
-const terminal = { ownerIds: new Set<string>(), propertyIds: new Set<string>(), agentOwnerIds: new Set<string>() };
+const terminal = {
+  ownerIds: new Set<string>(),
+  propertyIds: new Set<string>(),
+  agentOwnerIds: new Set<string>(),
+  publicOwnerIds: new Set<string>(),
+};
 
 const tx = {
   property: {
@@ -72,6 +77,7 @@ beforeEach(() => {
   terminal.ownerIds = new Set();
   terminal.propertyIds = new Set();
   terminal.agentOwnerIds = new Set();
+  terminal.publicOwnerIds = new Set();
   agentProps.value = new Set();
   tx.property.update.mockClear();
 });
@@ -123,6 +129,12 @@ describe("judgeWithOwners(所有者が入った物件の仕分け)", () => {
   it("業者と同じ名前なら送付不可", async () => {
     terminal.agentOwnerIds = new Set(["o1"]);
     expect(await judgeWithOwners("p1")).toEqual({ outcome: "no_send", reasons: ["agent_name"] });
+    expect(prop.dmStatus).toBe("no_send");
+  });
+
+  it("自治体・国が持ち主なら送付不可(2026-11-24)", async () => {
+    terminal.publicOwnerIds = new Set(["o1"]);
+    expect(await judgeWithOwners("p1")).toEqual({ outcome: "no_send", reasons: ["public_name"] });
     expect(prop.dmStatus).toBe("no_send");
   });
 

@@ -248,11 +248,12 @@ const ACTION_EXTRA_KEYS: Readonly<Record<string, ReadonlySet<string>>> = {
   // excludedTerminal=拒否・宛先不明の反響で控え作成時に自動除外した宛先数(PR-B・非PII)
   // excludedAgent=業者(名簿・国交省の一覧)と同じ名前の所有者で自動除外した宛先数(2026-11-09・件数のみ)
   // excludedGaiji=名前に謄本の外字(私用領域の字)がある所有者で自動除外した宛先数(2026-11-11・件数のみ)
+  // excludedPublic=名前が自治体・国の所有者で自動除外した宛先数(2026-11-24・件数のみ)
   // excludedSecond=同じ所有者あての2通目で自動除外した宛先数・demotedSecond=そのために DM判断を「送付不可」にした物件数(2026-11-16・件数のみ)
-  dm_batch_create: new Set(["batchId", "reused", "createdAt", "excludedTerminal", "excludedAgent", "excludedGaiji", "excludedSecond", "demotedSecond"]),
+  dm_batch_create: new Set(["batchId", "reused", "createdAt", "excludedTerminal", "excludedAgent", "excludedGaiji", "excludedPublic", "excludedSecond", "demotedSecond"]),
   property_dm_csv_export: new Set(["batchId", "retry", "exportedAt"]),
   // 物件住所宛DM CSV: excludedAgent=所有者が業者(名簿・国交省の一覧)と同じ名前で外した物件数(2026-11-09・件数のみ)。
-  property_address_dm_csv_export: new Set(["excludedAgent", "excludedGaiji"]),
+  property_address_dm_csv_export: new Set(["excludedAgent", "excludedGaiji", "excludedPublic"]),
   dm_sent_confirm: new Set(["batchId", "sentOn"]),
   dm_sent_record: new Set(["sentOn"]),
   // orphan=物件削除で孤児化した行への操作(admin 訂正経路=設計§2.4)を区別する boolean。
@@ -266,12 +267,12 @@ const ACTION_EXTRA_KEYS: Readonly<Record<string, ReadonlySet<string>>> = {
   // campaignId/variantId/propertyId/count/fields は ALWAYS_SAFE。本文・宛名・住所・メモ・trackingToken は
   // detail に載せておらず、ここにも含めない(perVariant の variantId キー別件数は redact のまま)。
   // scenarioCount=使ったDMの種類の数・blankBodyCount=本文を差し込めなかった宛先数(件数のみ・非PII)。
-  sale_dm_campaign_create: new Set(["requested", "generated", "saved", "skippedByUnlink", "excludedTerminal", "excludedAgent", "excludedGaiji", "excludedSecond", "demotedSecond", "truncated", "scenarioCount", "blankBodyCount", "createdAt"]),
+  sale_dm_campaign_create: new Set(["requested", "generated", "saved", "skippedByUnlink", "excludedTerminal", "excludedAgent", "excludedGaiji", "excludedPublic", "excludedSecond", "demotedSecond", "truncated", "scenarioCount", "blankBodyCount", "createdAt"]),
   sale_dm_assign_variants: new Set(["mode", "order", "assigned", "assignedLp", "assignedAt"]),
   // 「種類を変える」(物件単位・DMの種類 PR-S2 Task 5)。切り替えた宛先数と本文を差し込めなかった宛先数(件数のみ)。
   // campaignId/propertyId は ALWAYS_SAFE。文面・種類名は detail に載せない。
   sale_dm_scenario_change: new Set(["changedDrafts", "blankBodyCount"]),
-  sale_dm_campaign_print: new Set(["printedAt", "excludedTerminal", "excludedAgent", "excludedGaiji"]),
+  sale_dm_campaign_print: new Set(["printedAt", "excludedTerminal", "excludedAgent", "excludedGaiji", "excludedPublic"]),
   sale_dm_variant_create: new Set(["createdAt"]),
   sale_dm_variant_update: new Set(["updatedAt"]),
   sale_dm_variant_delete: new Set(["deletedAt"]),

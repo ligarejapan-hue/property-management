@@ -452,6 +452,41 @@ describe("POST /api/properties/dm-batches", () => {
     expect(audit?.detail?.excludedAgent).toBe(0);
   });
 
+  it("所有者が自治体・国の宛先グループは除外し、件数を分けて返す(2026-11-24)", async () => {
+    pm.property.findMany.mockResolvedValue([
+      makeProp({
+        propertyOwners: [
+          makePropertyOwner({ owner: { id: "o1", address: "東京都A" } }),
+          makePropertyOwner({
+            owner: { id: "o2", address: "神奈川県B" },
+            isPrimary: false,
+          }),
+        ],
+      }),
+    ]);
+    // 名前の照会(agent-name-exclusion.ts)が o2 を「自治体・国」(業者ではない)として返す。
+    pm.$queryRaw.mockImplementation(async (q: unknown) =>
+      q && typeof q === "object" && "sql" in q && String((q as { sql: string }).sql).includes("mlit_agents")
+        ? [{ id: "o2", agent: false, gaiji: false, public: true }]
+        : [],
+    );
+    const res = await POST(makeRequest(BODY));
+    expect(res.status).toBe(200);
+    const body = (await res.json()) as {
+      rowCount: number;
+      excludedAgentNameCount: number;
+      excludedPublicNameCount: number;
+    };
+    expect(body.rowCount).toBe(1);
+    expect(body.excludedAgentNameCount).toBe(0);
+    expect(body.excludedPublicNameCount).toBe(1);
+    const itemsData = pm.dmExportBatchItem.createMany.mock.calls[0][0].data;
+    expect(itemsData.map((it: { ownerId: string }) => it.ownerId)).toEqual(["o1"]);
+    const audit = lastAudit();
+    expect(audit?.detail?.excludedPublic).toBe(1);
+    expect(audit?.detail?.excludedAgent).toBe(0);
+  });
+
   describe("同じ所有者あての2通目を外す(2026-11-16)", () => {
     const withWrite = () =>
       vi.mocked(getUserPermissions).mockResolvedValue([

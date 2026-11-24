@@ -19,10 +19,10 @@ const VERSIONED: Record<string, string> = {
   "src/lib/dm-owner-judge/service.ts:66":
     "property.dmStatus=hold+dmOwnerPending(所有者が入っていない送付可を未判断に戻す・2026-11-14)+version increment" +
     "(物件行ロック後・編集の鍵があれば書かない)",
-  "src/lib/dm-owner-judge/service.ts:135":
+  "src/lib/dm-owner-judge/service.ts:136":
     "property.dmStatus=send/no_send+dmOwnerPending=false(所有者が入ったときの自動仕分け・2026-11-14)+version increment" +
     "(物件行ロック後・編集の鍵があれば書かない)",
-  "src/lib/dm-owner-judge/service.ts:164":
+  "src/lib/dm-owner-judge/service.ts:165":
     "property.dmStatus=no_send+dmOwnerPending=false(送付可なのに業者の名簿と同じ名前の所有者・2026-11-16)+version increment" +
     "(物件行ロック後・編集の鍵があれば書かない)",
   "src/app/api/admin/owners/[id]/correction/address-fill/route.ts:275":

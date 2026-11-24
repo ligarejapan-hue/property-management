@@ -58,7 +58,22 @@ describe("checkBatchEligibility", () => {
       resendStaleCount: 0,
       agentNameCount: 0,
       gaijiNameCount: 0,
+      publicNameCount: 0,
     });
+  });
+
+  it("(2d) 代表か共有者が自治体・国なら publicNameCount(2026-11-24)・業者と同じ名前を先に・外字より先に見る", () => {
+    const empty = new Set<string>();
+    const pub = new Set(["o1"]);
+    const r = checkBatchEligibility([item()], new Map([["p1", prop()]]), ADMIN, empty, empty, empty, empty, empty, pub);
+    expect(r.publicNameCount).toBe(1);
+    expect(r.stateIssueCount).toBe(0);
+    const withAgent = checkBatchEligibility([item()], new Map([["p1", prop()]]), ADMIN, empty, empty, empty, pub, empty, pub);
+    expect(withAgent.agentNameCount).toBe(1);
+    expect(withAgent.publicNameCount).toBe(0);
+    const withGaiji = checkBatchEligibility([item()], new Map([["p1", prop()]]), ADMIN, empty, empty, empty, empty, pub, pub);
+    expect(withGaiji.publicNameCount).toBe(1);
+    expect(withGaiji.gaijiNameCount).toBe(0);
   });
 
   it("(2c) 代表か共有者の名前に謄本の外字があれば gaijiNameCount(2026-11-11)・業者と同じ名前を先に見る", () => {

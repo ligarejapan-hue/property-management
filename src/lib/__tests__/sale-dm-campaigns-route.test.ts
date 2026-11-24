@@ -791,6 +791,42 @@ describe("POST /campaigns — 拒否・宛先不明の宛先を保存しない",
     expect(upd.data.filterSnapshot.__result.excludedGaijiName).toBe(1);
   });
 
+  it("所有者が自治体・国 → その宛先は保存されず excludedPublicName に数える(2026-11-24)", async () => {
+    setup();
+    txDmLogFindMany.mockResolvedValueOnce([]);
+    txQueryRaw.mockImplementation(async (q?: unknown) =>
+      q && typeof q === "object" && "sql" in q && String((q as { sql: string }).sql).includes("mlit_agents")
+        ? [{ id: "o2", agent: false, gaiji: false, public: true }]
+        : [],
+    );
+    const res = await post();
+    expect(res.status).toBe(200);
+    const json = await res.json();
+    expect(json.excludedAgentName).toBe(0);
+    expect(json.excludedPublicName).toBe(1);
+    expect(draftCreate).toHaveBeenCalledTimes(1);
+    expect(draftCreate.mock.calls[0][0].data.propertyId).toBe("pA");
+    const detail = (writeAuditLog as ReturnType<typeof vi.fn>).mock.calls[0][0].detail;
+    expect(detail.excludedPublic).toBe(1);
+    const upd = txCampaignUpdate.mock.calls[0][0] as { data: { filterSnapshot: { __result: Record<string, unknown> } } };
+    expect(upd.data.filterSnapshot.__result.excludedPublicName).toBe(1);
+  });
+
+  it("全宛先が自治体・国 → 400・理由に自治体・国を含める", async () => {
+    setup();
+    txDmLogFindMany.mockResolvedValueOnce([]);
+    txQueryRaw.mockImplementation(async (q?: unknown) =>
+      q && typeof q === "object" && "sql" in q
+        ? [{ id: "o1", agent: false, gaiji: false, public: true }, { id: "o2", agent: false, gaiji: false, public: true }]
+        : [],
+    );
+    const res = await post();
+    expect(res.status).toBe(400);
+    const json = await res.json();
+    expect(json.error.message).toContain("自治体・国");
+    expect(draftCreate).not.toHaveBeenCalled();
+  });
+
   it("全宛先が外字の名前 → 400・理由に外字を含める", async () => {
     setup();
     txDmLogFindMany.mockResolvedValueOnce([]);

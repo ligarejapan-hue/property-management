@@ -105,3 +105,41 @@ describe("件数は理由ごとに残す", () => {
     expect(dmExclusionCountsText(0, 0, 0)).toBeNull();
   });
 });
+
+// 自治体・国が持ち主の所有者も DM 送付不可(2026-11-24 発注者承認)。業者と同じ名前と同じ道を通り、理由は別に数える。
+describe("自治体・国が持ち主の除外の配線", () => {
+  it("terminal-exclusion.ts が自治体・国の集合を取り込み、理由 public_name を返す", () => {
+    const src = read("src/lib/dm-batch/terminal-exclusion.ts");
+    expect(src).toContain("sets.publicOwnerIds = byName.publicOwnerIds;");
+    expect(src).toMatch(/if \(item\.ownerIds\.some\(\(id\) => sets\.publicOwnerIds\?\.has\(id\)\)\) return "public_name";/);
+  });
+  it.each(DIRECT)("%s は自治体・国の所有者も外す", (p) => {
+    expect(read(p)).toContain("publicOwnerIds");
+  });
+  it.each(["src/app/api/properties/dm-batches/route.ts", "src/app/api/properties/sale-dm/campaigns/route.ts", "src/app/api/properties/sale-dm/campaigns/[id]/print/route.ts"])(
+    "%s は自治体・国で外した件数を数える",
+    (p) => {
+      expect(read(p)).toContain('=== "public_name"');
+    },
+  );
+  it("宛名CSVのダウンロードは自治体・国の宛先が残っていたら止める", () => {
+    const src = read("src/app/api/properties/dm-batches/[id]/csv/route.ts");
+    expect(src).toContain("elig.publicNameCount > 0");
+    expect(src).toContain("自治体・国が持ち主の宛先が含まれています");
+  });
+  it("画面のお知らせに自治体・国で外した件数を渡す", () => {
+    const page = read("src/app/(dashboard)/properties/page.tsx");
+    expect(page).toContain("res.excludedPublicNameCount");
+    expect(page).toContain("excludedPublicName: res.excludedPublicName");
+  });
+  it("監査の detail に自治体・国で外した件数が残る(件数のみ)", () => {
+    for (const action of ["dm_batch_create", "sale_dm_campaign_create", "sale_dm_campaign_print", "property_address_dm_csv_export"]) {
+      expect(sanitizeAuditDetail(action, { excludedPublic: 4 })).toMatchObject({ excludedPublic: 4 });
+    }
+  });
+  it("お知らせの文に自治体・国の件数を理由ごとに書く", () => {
+    expect(dmExclusionCountsText(0, 0, 0, 0, 2)).toBe("所有者が自治体・国の 2 件");
+    expect(dmExclusionCountsText(0, 1, 0, 0, 2)).toBe("所有者が業者と同じ名前の 1 件と、所有者が自治体・国の 2 件");
+    expect(dmExclusionCountsText(0, 0, 0, 0, 0)).toBeNull();
+  });
+});

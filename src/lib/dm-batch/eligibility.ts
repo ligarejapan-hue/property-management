@@ -77,6 +77,8 @@ export interface EligibilityResult {
   agentNameCount: number;
   /** (2c) 名前に謄本の外字(私用領域の字)がある所有者(代表or共有者)を含む item 数 → 409(2026-11-11) */
   gaijiNameCount: number;
+  /** (2d) 代表か共有者の名前が自治体・国(2026-11-24) */
+  publicNameCount: number;
 }
 
 type OwnerWithId = DmRowPropertyOwner & { owner: { id: string } };
@@ -100,6 +102,8 @@ export function checkBatchEligibility(
   agentNameOwnerIds: ReadonlySet<string> = new Set(),
   /** (2c) 名前に謄本の外字がある所有者 id 集合(agent-name-exclusion.ts)。宛名が □ になるので止める。省略時=検査(2c)なし。 */
   gaijiOwnerIds: ReadonlySet<string> = new Set(),
+  /** (2d) 名前が自治体・国の所有者 id 集合(agent-name-exclusion.ts・2026-11-24)。省略時=検査(2d)なし。 */
+  publicOwnerIds: ReadonlySet<string> = new Set(),
 ): EligibilityResult {
   const prunedItemIds: string[] = [];
   let scopeMissingCount = 0;
@@ -109,6 +113,7 @@ export function checkBatchEligibility(
   let resendStaleCount = 0;
   let agentNameCount = 0;
   let gaijiNameCount = 0;
+  let publicNameCount = 0;
   const seenGroups = new Set<string>();
 
   for (const it of items) {
@@ -137,6 +142,11 @@ export function checkBatchEligibility(
     // (2) の後=両方に当たるときは拒否・宛先不明の理由を優先する(terminal-exclusion.ts と同じ順)。
     if (agentNameOwnerIds.has(it.ownerId) || it.groupOwnerIds.some((oid) => agentNameOwnerIds.has(oid))) {
       agentNameCount += 1;
+      continue;
+    }
+    // (2d) 代表or共有者の名前が自治体・国(2026-11-24)。(2)(2b) の後・(2c) の前(terminal-exclusion.ts と同じ順)。
+    if (publicOwnerIds.has(it.ownerId) || it.groupOwnerIds.some((oid) => publicOwnerIds.has(oid))) {
+      publicNameCount += 1;
       continue;
     }
     // (2c) 代表or共有者の名前に謄本の外字がある(2026-11-11)。(2)(2b) の後=理由はそちらを優先(terminal-exclusion.ts と同じ順)。
@@ -199,5 +209,6 @@ export function checkBatchEligibility(
     resendStaleCount,
     agentNameCount,
     gaijiNameCount,
+    publicNameCount,
   };
 }

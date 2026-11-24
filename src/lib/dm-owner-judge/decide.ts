@@ -4,6 +4,7 @@
  * 所有者が入った物件(所有者待ちの印あり・未判断)を、次のどれかに当たれば送付不可、どれにも当たらなければ送付可にする。
  * 所有者が複数いれば、1人でも当たれば送付不可。
  * - 業者と同じ名前の所有者(DM の作成で外している判定と同じ=dm-batch/agent-name-exclusion)
+ * - 名前が自治体・国の所有者(同じく DM の作成で外している判定=public-owner-name・2026-11-24)
  * - 同じ所有者がほかの物件で送付可(二重に送らない)
  * - 同じ所有者がほかの物件で送付不可(過去に送付不可にした人)
  * - DM を断った・宛先不明(解除していないもの)の記録がある(DM の作成で外している判定と同じ=dm-batch/terminal-exclusion)
@@ -13,6 +14,8 @@ export type DmStatusValue = "send" | "hold" | "no_send";
 
 export interface OwnerSignals {
   agentNameOwnerIds: readonly string[];
+  /** 名前が自治体・国の所有者(2026-11-24) */
+  publicOwnerIds: readonly string[];
   otherSendOwnerIds: readonly string[];
   otherNoSendOwnerIds: readonly string[];
   terminalOwnerIds: readonly string[];
@@ -20,10 +23,11 @@ export interface OwnerSignals {
   terminalOnProperty: boolean;
 }
 
-export type NoSendReason = "agent_name" | "other_send" | "other_no_send" | "terminal";
+export type NoSendReason = "agent_name" | "public_name" | "other_send" | "other_no_send" | "terminal";
 
 export const NO_SEND_REASON_LABELS: Record<NoSendReason, string> = {
   agent_name: "業者と同じ名前の所有者",
+  public_name: "自治体・国が持ち主",
   other_send: "同じ所有者がほかの物件で送付可",
   other_no_send: "同じ所有者がほかの物件で送付不可",
   terminal: "DMを断った・宛先不明の記録",
@@ -32,6 +36,7 @@ export const NO_SEND_REASON_LABELS: Record<NoSendReason, string> = {
 export function decideDmByOwners(s: OwnerSignals): { dmStatus: "send" | "no_send"; reasons: NoSendReason[] } {
   const reasons: NoSendReason[] = [];
   if (s.agentNameOwnerIds.length > 0) reasons.push("agent_name");
+  if (s.publicOwnerIds.length > 0) reasons.push("public_name");
   if (s.otherSendOwnerIds.length > 0) reasons.push("other_send");
   if (s.otherNoSendOwnerIds.length > 0) reasons.push("other_no_send");
   if (s.terminalOwnerIds.length > 0 || s.terminalOnProperty) reasons.push("terminal");
