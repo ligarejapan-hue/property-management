@@ -1261,3 +1261,77 @@ describe("POST merge: 法人のペア", () => {
     expect(serialized).not.toContain("06-0000-0000");
   });
 });
+
+// ── review P2: 法人のペアで メール・会社法人等番号・フリガナ を落とさない ─────────────
+describe("POST merge: 法人のペア（メール・会社法人等番号・フリガナ）", () => {
+  const PERMS_ALL = [
+    ...PERMS_CORP_WRITE,
+    { resource: "owner_email", action: "edit", granted: true },
+    { resource: "owner_name_kana", action: "edit", granted: true },
+  ];
+  beforeEach(() => {
+    vi.mocked(getUserPermissions).mockResolvedValue(PERMS_ALL);
+  });
+
+  it("master が空のメール・会社法人等番号・フリガナを写し、変更履歴に前後を残す", async () => {
+    setupCorpPair(
+      { phone: "06-0000-0000", email: null, nameKana: null, companyRegistryNumber: null },
+      { email: "info@example.invalid", nameKana: "サンプルショウジ", companyRegistryNumber: "0100-01-012345" },
+    );
+    const res = await execCorpMerge();
+    expect(res.status).toBe(200);
+    const data = masterUpdates()[0].data;
+    expect(data.email).toBe("info@example.invalid");
+    expect(data.nameKana).toBe("サンプルショウジ");
+    expect(data.companyRegistryNumber).toBe("010001012345");
+    const fields = changeLogEntries().map((e) => e.fieldName);
+    expect(fields).toEqual(expect.arrayContaining(["email", "nameKana", "companyRegistryNumber"]));
+  });
+
+  it("両方にあって違うメールは写さず _merged_source_email に残す", async () => {
+    setupCorpPair(
+      { phone: "06-0000-0000", email: "a@example.invalid" },
+      { email: "b@example.invalid" },
+    );
+    const res = await execCorpMerge();
+    expect(res.status).toBe(200);
+    expect(masterUpdates()[0].data.email).toBeUndefined();
+    expect(changeLogEntries()).toContainEqual(
+      expect.objectContaining({ fieldName: "_merged_source_email", newValue: "b@example.invalid" }),
+    );
+  });
+
+  it("⚠メールの編集権限が無く、写す必要があれば 403", async () => {
+    vi.mocked(getUserPermissions).mockResolvedValue(
+      PERMS_ALL.filter((p) => p.resource !== "owner_email"),
+    );
+    setupCorpPair({ phone: "06-0000-0000", email: null }, { email: "info@example.invalid" });
+    const res = await execCorpMerge();
+    expect(res.status).toBe(403);
+    expect(masterUpdates()).toHaveLength(0);
+  });
+
+  it("⚠会社法人等番号が両方にあって違えば止める（tx の前）", async () => {
+    setupCorpPair(
+      { companyRegistryNumber: "010001012345" },
+      { companyRegistryNumber: "020001054321" },
+    );
+    const res = await execCorpMerge();
+    expect(res.status).toBe(422);
+    const body = await res.json();
+    expect(body.error.blockReasons).toContain("company_registry_number_conflict");
+  });
+
+  it("⚠tx 内で読み直すと会社法人等番号が食い違っていたら止める", async () => {
+    setupCorpPair(
+      { companyRegistryNumber: "010001012345" },
+      {},
+      { source: { companyRegistryNumber: "020001054321" } },
+    );
+    const res = await execCorpMerge();
+    expect(res.status).toBe(422);
+    const body = await res.json();
+    expect(body.error.blockReasons).toContain("company_registry_number_conflict");
+    expect(pm._tx.changeLog.createMany).not.toHaveBeenCalled();
+  });
+});

@@ -74,6 +74,10 @@ interface OwnerState {
   note: string | null;
   externalLinkKey: string | null;
   corporateNumber: string | null;
+  // 法人のペアの引き継ぎ（review P2: source にだけある値を落とさない）と会社法人等番号の食い違い。
+  companyRegistryNumber: string | null;
+  email: string | null;
+  nameKana: string | null;
 }
 
 async function loadOwnerForMerge(id: string): Promise<OwnerState | null> {
@@ -91,6 +95,9 @@ async function loadOwnerForMerge(id: string): Promise<OwnerState | null> {
       externalLinkKey: true,
       // 法人番号一致の経路・法人番号の食い違いの確認に使う（レスポンスには出さない）。
       corporateNumber: true,
+      companyRegistryNumber: true,
+      email: true,
+      nameKana: true,
     },
   });
 }
@@ -243,6 +250,7 @@ export async function POST(request: NextRequest) {
       normalizeKeyMatches,
       corporatePair: match?.corporatePair ?? false,
       corporateNumberConflict: match?.corporateNumberConflict ?? false,
+      companyRegistryNumberConflict: match?.companyRegistryNumberConflict ?? false,
     });
 
     const summary = {

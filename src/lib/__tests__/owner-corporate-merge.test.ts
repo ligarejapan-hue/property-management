@@ -93,6 +93,7 @@ describe("resolveOwnerMergeMatch", () => {
       matchedBy: "name_address",
       corporatePair: false,
       corporateNumberConflict: false,
+      companyRegistryNumberConflict: false,
     });
   });
 
@@ -344,5 +345,100 @@ describe("planCorporateFieldHandover", () => {
     expect(
       requiredCorporateHandoverPermissions(planCorporateFieldHandover(emptyOwner, emptyOwner)),
     ).toEqual([]);
+  });
+});
+
+// ---- review P2: 法人のペアで source にだけある項目を落とさない ----
+const fullEmpty = {
+  name: "株式会社サンプル商事",
+  nameKana: null,
+  address: null,
+  zip: null,
+  phone: null,
+  email: null,
+  corporateNumber: null,
+  companyRegistryNumber: null,
+};
+
+describe("planCorporateFieldHandover: メール・会社法人等番号・フリガナ・名前", () => {
+  it("master が空ならメール・会社法人等番号(12桁にそろえる)・フリガナを写す", () => {
+    const plan = planCorporateFieldHandover(fullEmpty, {
+      ...fullEmpty,
+      email: "info@example.invalid",
+      companyRegistryNumber: "0100-01-012345",
+      nameKana: "カブシキガイシャサンプルショウジ",
+    });
+    expect(plan.writes).toEqual({
+      email: "info@example.invalid",
+      companyRegistryNumber: "010001012345",
+      nameKana: "カブシキガイシャサンプルショウジ",
+    });
+    expect(requiredCorporateHandoverPermissions(plan).sort()).toEqual(
+      ["owner_corporate_number", "owner_email", "owner_name_kana"].sort(),
+    );
+  });
+
+  it("両方にあって違えば写さず記録に残す(名前の書き方の違いも残す)", () => {
+    const plan = planCorporateFieldHandover(
+      { ...fullEmpty, email: "a@example.invalid", nameKana: "サンプル", companyRegistryNumber: "010001012345" },
+      {
+        ...fullEmpty,
+        name: "㈱サンプル商事",
+        email: "b@example.invalid",
+        nameKana: "サンプルショウジ",
+        companyRegistryNumber: "0100-01-012345",
+      },
+    );
+    expect(plan.writes).toEqual({});
+    expect(plan.keptSourceValues).toEqual([
+      { field: "email", value: "b@example.invalid" },
+      { field: "nameKana", value: "サンプルショウジ" },
+      { field: "name", value: "㈱サンプル商事" },
+    ]);
+  });
+
+  it("同じ値(大文字小文字・空白の違いだけ)なら何もしない", () => {
+    const plan = planCorporateFieldHandover(
+      { ...fullEmpty, email: "Info@Example.invalid", nameKana: "サンプル ショウジ" },
+      { ...fullEmpty, name: " 株式会社サンプル商事 ", email: "info@example.invalid", nameKana: "サンプルショウジ" },
+    );
+    expect(plan.writes).toEqual({});
+    expect(plan.keptSourceValues).toEqual([]);
+  });
+});
+
+describe("会社法人等番号の食い違い", () => {
+  it("両方にあって違えば companyRegistryNumberConflict(見られる人だけ)", () => {
+    const a = { ...corpA, companyRegistryNumber: "010001012345" };
+    const b = { ...corpA, companyRegistryNumber: "0200-01-054321" };
+    const m = resolveOwnerMergeMatch(a, b, { corporateNumberAvailable: true });
+    expect(m.matchedBy).toBeNull();
+    expect(m.companyRegistryNumberConflict).toBe(true);
+    const hidden = resolveOwnerMergeMatch(a, b, { corporateNumberAvailable: false });
+    expect(hidden.matchedBy).toBeNull();
+    expect(hidden.companyRegistryNumberConflict).toBe(false);
+  });
+
+  it("表記の違いだけなら食い違いにしない", () => {
+    const m = resolveOwnerMergeMatch(
+      { ...corpA, companyRegistryNumber: "010001012345" },
+      { ...corpA, companyRegistryNumber: "0100-01-012345" },
+      { corporateNumberAvailable: true },
+    );
+    expect(m.matchedBy).toBe("name_address");
+    expect(m.companyRegistryNumberConflict).toBe(false);
+  });
+
+  it("safety は company_registry_number_conflict で止め、owner_identity_mismatch を重ねない", () => {
+    const r = checkOwnerMergeSafety({
+      ...baseOk,
+      normalizeKeyMatches: false,
+      companyRegistryNumberConflict: true,
+    });
+    expect(r.ok).toBe(false);
+    if (!r.ok) {
+      expect(r.reasons).toContain("company_registry_number_conflict");
+      expect(r.reasons).not.toContain("owner_identity_mismatch");
+    }
   });
 });

@@ -43,10 +43,10 @@ const VERSIONED: Record<string, string> = {
     "owner.name(断片型の救出)+version increment",
   "src/app/api/admin/owners/correction/corporate-restore-apply/route.ts:208":
     "owner.name/corporateNumber/companyRegistryNumber/address(分断型復元)+version increment",
-  "src/app/api/admin/owners/correction/merge/route.ts:733":
+  "src/app/api/admin/owners/correction/merge/route.ts:746":
     "owner.isArchived(統合で消えるsource)+version increment",
-  "src/app/api/admin/owners/correction/merge/route.ts:766":
-    "owner.currentAddress/currentZip(master引き継ぎ)+法人のペアの address/zip/phone/corporateNumber(空欄だけ・2026-11-24)+version increment",
+  "src/app/api/admin/owners/correction/merge/route.ts:779":
+    "owner.currentAddress/currentZip(master引き継ぎ)+法人のペアの address/zip/phone/corporateNumber/companyRegistryNumber/email/nameKana(空欄だけ・2026-11-24)+version increment",
   "src/app/api/admin/owners/correction/mislink/route.ts:518":
     "owner の version のみ進める(所有者付け替えのinvalidation)",
   "src/app/api/admin/owners/correction/mislink/route.ts:531":
@@ -180,11 +180,11 @@ const ALLOWED_WITHOUT_VERSION: Record<string, AllowedEntry> = {
     reason: "property.dmOwnerPending のみ(人が先に DM判断を決めた物件の印を下ろす・2026-11-14)",
     keys: ["dmOwnerPending"],
   },
-  "src/app/api/admin/owners/correction/merge/route.ts:505": {
+  "src/app/api/admin/owners/correction/merge/route.ts:516": {
     reason: "owner.updatedAt のみ(行ロック獲得のための touch。updatedAt は編集画面の送信項目に無い)",
     keys: ["updatedAt"],
   },
-  "src/app/api/admin/owners/correction/merge/route.ts:513": {
+  "src/app/api/admin/owners/correction/merge/route.ts:524": {
     reason: "owner.updatedAt のみ(同上・source側の行ロックtouch)",
     keys: ["updatedAt"],
   },

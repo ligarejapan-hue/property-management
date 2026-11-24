@@ -22,6 +22,10 @@ const HANDOVER_FIELD_LABELS: Record<string, string> = {
   zip: "郵便番号",
   phone: "電話",
   corporateNumber: "法人番号",
+  companyRegistryNumber: "会社法人等番号",
+  email: "メール",
+  nameKana: "フリガナ",
+  name: "名前の書き方",
 };
 
 function fieldList(fields: string[] | undefined): string {

@@ -771,7 +771,7 @@ function DuplicateGroupSummary({
         重複グループ ({groupList.length} 件)
       </h2>
       <p className="mb-3 text-xs text-purple-700 dark:text-purple-300">
-        重複候補をグループごとに表示しています。<strong>氏名住所一致・法人番号一致・法人名一致</strong>のグループは、master / source を選んで統合プレビューを取得し、統合できます。master を選ぶと「この1人に全部まとめる」でグループの残りを1人ずつまとめて統合できます。法人のグループ（法人番号一致・法人名一致）は、master が空の住所・電話・法人番号を引き継ぎ、違う値は master の変更履歴に残します。<strong>リンクキー一致</strong>は表示のみで、統合はできません。
+        重複候補をグループごとに表示しています。<strong>氏名住所一致・法人番号一致・法人名一致</strong>のグループは、master / source を選んで統合プレビューを取得し、統合できます。master を選ぶと「この1人に全部まとめる」でグループの残りを1人ずつまとめて統合できます。法人のグループ（法人番号一致・法人名一致）は、master が空の住所・電話・法人番号・会社法人等番号・メール・フリガナを引き継ぎ、違う値は master の変更履歴に残します。<strong>リンクキー一致</strong>は表示のみで、統合はできません。
       </p>
       <div className="space-y-3">
         {groupList.map(([key, members], idx) => (

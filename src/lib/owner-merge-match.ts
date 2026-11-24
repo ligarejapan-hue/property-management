@@ -24,6 +24,7 @@ import {
   buildOwnerCorporateNameDuplicateKey,
   buildOwnerCorporateNumberDuplicateKey,
 } from "@/lib/owner-correction";
+import { normalizeCompanyRegistryNumber } from "@/lib/corporate-number";
 
 export type OwnerMergeMatchKind =
   | "name_address"
@@ -36,6 +37,8 @@ export interface OwnerMergeIdentity {
   zip: string | null;
   phone: string | null;
   corporateNumber: string | null;
+  /** 会社法人等番号（12桁）。渡されなければ比べない。 */
+  companyRegistryNumber?: string | null;
 }
 
 export interface OwnerMergeMatch {
@@ -48,6 +51,11 @@ export interface OwnerMergeMatch {
   corporatePair: boolean;
   /** 両方の法人番号が違う（見られる人にだけ true を返す）。 */
   corporateNumberConflict: boolean;
+  /**
+   * 両方の会社法人等番号（12桁）が違う（review P2）。法人番号と同じく
+   * owner_corporate_number の境界の中なので、見られる人にだけ true を返す。
+   */
+  companyRegistryNumberConflict: boolean;
 }
 
 export function resolveOwnerMergeMatch(
@@ -62,6 +70,18 @@ export function resolveOwnerMergeMatch(
       matchedBy: null,
       corporatePair: false,
       corporateNumberConflict: options.corporateNumberAvailable,
+      companyRegistryNumberConflict: false,
+    };
+  }
+  // ⚠会社法人等番号（12桁）も両方あって違えば別の法人（名前・住所が同じでも止める）。
+  const crnMaster = normalizeCompanyRegistryNumber(master.companyRegistryNumber);
+  const crnSource = normalizeCompanyRegistryNumber(source.companyRegistryNumber);
+  if (crnMaster !== null && crnSource !== null && crnMaster !== crnSource) {
+    return {
+      matchedBy: null,
+      corporatePair: false,
+      corporateNumberConflict: false,
+      companyRegistryNumberConflict: options.corporateNumberAvailable,
     };
   }
 
@@ -88,5 +108,6 @@ export function resolveOwnerMergeMatch(
     matchedBy,
     corporatePair: corporateNumber || corporateName,
     corporateNumberConflict: false,
+    companyRegistryNumberConflict: false,
   };
 }

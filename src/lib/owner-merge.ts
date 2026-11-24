@@ -39,6 +39,7 @@ export type OwnerMergeBlockReason =
   // 旧コード name_address_normalize_mismatch（氏名住所だけで見ていた頃）の後継（2026-11-24）。
   | "owner_identity_mismatch"
   | "corporate_number_conflict"      // 両方に法人番号があって違う（別の法人）
+  | "company_registry_number_conflict" // 両方に会社法人等番号（12桁）があって違う（別の法人）
   | "current_address_conflict"      // 現住所が食い違う（どちらが新しいか決められない）
   | "current_zip_conflict"           // 同じ現住所なのに郵便番号が食い違う
   | "version_mismatch";              // execute 時: client 送信 version と DB version が一致しない
@@ -91,6 +92,8 @@ export interface OwnerMergeSafetyInput {
   corporatePair?: boolean;
   /** 両方の法人番号が違う（resolveOwnerMergeMatch の corporateNumberConflict）。 */
   corporateNumberConflict?: boolean;
+  /** 両方の会社法人等番号が違う（resolveOwnerMergeMatch の companyRegistryNumberConflict）。 */
+  companyRegistryNumberConflict?: boolean;
 }
 
 export type OwnerMergeSafetyResult =
@@ -154,6 +157,8 @@ export function checkOwnerMergeSafety(
   if (input.masterExists && input.sourceExists) {
     if (input.corporateNumberConflict) {
       reasons.push("corporate_number_conflict");
+    } else if (input.companyRegistryNumberConflict) {
+      reasons.push("company_registry_number_conflict");
     } else if (!input.normalizeKeyMatches) {
       reasons.push("owner_identity_mismatch");
     }

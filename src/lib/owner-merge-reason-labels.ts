@@ -19,6 +19,8 @@ const MERGE_BLOCK_REASON_LABELS: Record<string, string> = {
     "同じ所有者と確かめられません（氏名と住所・法人番号・法人名のどれも一致しません。別人の可能性）",
   corporate_number_conflict:
     "法人番号が食い違っています（別の法人の可能性。法人番号を確かめてください）",
+  company_registry_number_conflict:
+    "会社法人等番号が食い違っています（別の法人の可能性。会社法人等番号を確かめてください）",
   name_address_normalize_mismatch:
     "氏名・住所の正規化結果が一致しません（別人の可能性）",
   current_address_conflict:
