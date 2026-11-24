@@ -90,11 +90,15 @@ function owner(
     externalLinkKey: string | null;
     version: number;
     propertyOwners: number;
+    currentZip: string | null;
+    currentAddress: string | null;
   }> = {},
 ) {
   return {
     id: over.id ?? "o-1",
     zip: over.zip ?? null,
+    currentZip: over.currentZip ?? null,
+    currentAddress: over.currentAddress ?? null,
     phone: over.phone ?? null,
     note: over.note ?? null,
     externalLinkKey: over.externalLinkKey ?? null,
@@ -198,6 +202,28 @@ describe("blockReasons / recommendedAction", () => {
     const res = await GET(url("?type=zip_unformatted"));
     const json = await res.json();
     expect(json.candidates[0].recommendedAction).toBe("format_candidate");
+  });
+
+  // 2026-11-24: 現住所の郵便番号にも整形ボタンを出すので、推奨は現住所の検出結果も合わせて決める
+  //   (登記上がきれいで現住所の番号が壊れている行を「整形」と勧めない)。
+  it("現住所の番号が未整形のみ・safeguard なしは format_candidate", async () => {
+    pm.owner.findMany.mockResolvedValue([
+      owner({ id: "o-1", zip: "123-4567", currentZip: "1234567", currentAddress: "東京都千代田区1-1" }),
+    ]);
+    pm.importJobRow.findMany.mockResolvedValue([{ createdId: "o-1", status: "success" }]);
+    const json = await (await GET(url("?type=zip_unformatted"))).json();
+    expect(json.candidates[0].currentZipIssues).toEqual(["zip_unformatted"]);
+    expect(json.candidates[0].recommendedAction).toBe("format_candidate");
+  });
+
+  it("現住所の番号が不正なら、登記上がきれいでも review", async () => {
+    pm.owner.findMany.mockResolvedValue([
+      owner({ id: "o-1", zip: "123-4567", currentZip: "123", currentAddress: "東京都千代田区1-1" }),
+    ]);
+    pm.importJobRow.findMany.mockResolvedValue([{ createdId: "o-1", status: "success" }]);
+    const json = await (await GET(url("?type=zip_suspicious"))).json();
+    expect(json.candidates[0].currentZipIssues).toEqual(["zip_suspicious"]);
+    expect(json.candidates[0].recommendedAction).toBe("review");
   });
 
   it("suspicious・safeguard なしは review", async () => {

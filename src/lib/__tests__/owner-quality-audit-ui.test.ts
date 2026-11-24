@@ -7,6 +7,7 @@
 import { describe, it, expect } from "vitest";
 import {
   formatFixableFields,
+  contactFixLabel,
   escapeControlForAudit,
   effectiveRecommendedAction,
   NAME_ISSUE_LABEL,
@@ -41,6 +42,25 @@ describe("formatFixableFields", () => {
   });
   it("空 → []", () => {
     expect(formatFixableFields([])).toEqual([]);
+  });
+  // 2026-11-24: 現住所の郵便番号は「現住所: 郵便番号 未整形」と出るのに整形ボタンが無かった。
+  //   contact-fix は field=currentZip を受けられるので、画面からも出す。
+  it("現住所の zip_unformatted → [currentZip]（登記上の欄の後ろ）", () => {
+    expect(formatFixableFields([], ["zip_unformatted"])).toEqual(["currentZip"]);
+    expect(
+      formatFixableFields(["zip_unformatted", "phone_unnormalized"], ["zip_unformatted"]),
+    ).toEqual(["zip", "phone", "currentZip"]);
+  });
+  it("現住所が整形で直せない（不正）なら出さない", () => {
+    expect(formatFixableFields([], ["zip_suspicious"])).toEqual([]);
+  });
+});
+
+describe("contactFixLabel", () => {
+  it("欄ごとのボタン名", () => {
+    expect(contactFixLabel("zip")).toBe("郵便番号を整形");
+    expect(contactFixLabel("phone")).toBe("電話を整形");
+    expect(contactFixLabel("currentZip")).toBe("現住所の郵便番号を整形");
   });
 });
 
