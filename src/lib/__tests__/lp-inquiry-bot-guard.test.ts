@@ -282,7 +282,12 @@ describe("受け口(POST /lp/[slug]/inquiry)", () => {
     expect(JSON.stringify(audit.mock.calls)).not.toMatch(/090-1234-5678|taro@example\.com|山田様/);
     expect(safeUtmValue("03.1234.5678")).toBeNull();
     expect(safeUtmValue("09012345678")).toBeNull();
-    expect(safeUtmValue("1234567890")).toBe("1234567890"); // 0 で始まらない数字の ID は残す
+    // 国番号つき・区切りの違い・前後に文字があっても、10桁以上の数字の並びは残さない(@codex #785 P1)
+    for (const v of ["81-90-1234-5678", "819012345678", "+81", "tel09012345678", "0120.123.456", "1-800-555-0199x", "camp_81_3_1234_5678"]) {
+      expect(safeUtmValue(v)).toBeNull();
+    }
+    expect(safeUtmValue("123456789")).toBe("123456789"); // 9桁以下の数字の ID は残す
+    expect(safeUtmValue("2026-11-24")).toBe("2026-11-24"); // 日付(8桁)は残す
     expect(safeUtmValue("smartnews")).toBe("smartnews");
     expect(rec).toHaveBeenCalledTimes(1); // 申込の受け付けは変わらない(広告の印は申込の方には今までどおり残る)
   });

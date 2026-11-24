@@ -78,11 +78,13 @@ const SAFE_GCLID_RE = /^[A-Za-z0-9_-]{1,200}$/;
 /**
  * utm の値を、監査に記録してよい形のときだけ返す。それ以外は null(電話・メール等が紛れても残さない)。
  *  - 英数字と _ . - だけ・100文字まで(Google のタグに渡す値と同じ規則)
- *  - そのうえで日本の電話番号に見える値(区切りを除いて 0 で始まる10〜11桁)は外す。数字だけのキャンペーン ID は残す。
+ *  - そのうえで、区切り(- . _)を除いて数字が10桁以上続く値は外す。電話番号は国内(0 始まり10〜11桁)も国番号つき
+ *    (81-90-… など)も10桁以上になるので、形を1つずつ禁止するのでなく「長い数字の並び」を丸ごと残さない(@codex #785 P1)。
+ *    9桁以下の数字の ID は残す。
  */
 export function safeUtmValue(v: string | null): string | null {
   if (v === null || !SAFE_UTM_RE.test(v)) return null;
-  if (/^0\d{9,10}$/.test(v.replace(/[-._]/g, ""))) return null;
+  if (/[0-9]{10,}/.test(v.replace(/[-._]/g, ""))) return null;
   return v;
 }
 export function safeAdQuery(ad: AdParams): string {
