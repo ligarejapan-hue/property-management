@@ -406,8 +406,8 @@ function IssueDialog({ dealId, doc, version, onCancel, onDone }: {
         )}
         {doc.docType === "completion_confirmation" && (
           <>
-            <Field label="引き渡した書類など(1行に1つ・チェック欄は空けて出す)">
-              <textarea value={str(values.handover)} onChange={(e) => set("handover", e.target.value || null)} maxLength={CHECKLIST_TEXT_MAX} rows={6} aria-label="引き渡した書類など" className={inputCls} />
+            <Field label="お引き渡し完了したもの(1行に1つ・チェック欄は空けて出す)">
+              <textarea value={str(values.handover)} onChange={(e) => set("handover", e.target.value || null)} maxLength={CHECKLIST_TEXT_MAX} rows={6} aria-label="お引き渡し完了したもの" className={inputCls} />
             </Field>
             <p className="text-xs text-gray-500">署名・押印の欄は空けて出します。前に発行したことがあれば、そのときの入力が初めから入っています。</p>
           </>

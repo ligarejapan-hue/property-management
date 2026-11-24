@@ -7,7 +7,7 @@ import { checklistItemsOf } from "./checklist-doc";
 import { CHECKLIST_TEXT_MAX, ymdJa } from "./contract-guide";
 import { honorNamesOf, namesOf, partiesOf, propertyLabel, type BusinessDocContext, type ValueRow } from "./common";
 
-/** 発行のときに直すもの: 引き渡した書類など(1行に1つ・設計 第2段階 §4.3)。 */
+/** 発行のときに直すもの: お引き渡し完了したもの(1行に1つ・設計 第2段階 §4.3)。 */
 export const completionOptionsSchema = z.object({ handover: text(CHECKLIST_TEXT_MAX) }).strict();
 export type CompletionOptions = z.output<typeof completionOptionsSchema>;
 
@@ -51,10 +51,10 @@ export function buildCompletion(c: BusinessDocContext, o: CompletionOptions): { 
 <style>.sign-blank{width:48mm;vertical-align:top;font-size:8pt;color:#666}</style>
 <h1>${title}</h1>
 <div class="right">${settledOn ?? BLANK_DATE}</div>
-<p class="greeting">売主 ${honorNamesOf(sellers) ?? "　　　　　　 様"} と買主 ${honorNamesOf(buyers) ?? "　　　　　　 様"} との間で${contractOn ?? BLANK_DATE}付で締結した下記不動産の売買契約について、残代金の授受、物件の引渡し及び所有権移転登記の申請手続きが本日完了したことを確認します。</p>
+<p class="greeting">売主 ${honorNamesOf(sellers) ?? "　　　　　　 様"} と買主 ${honorNamesOf(buyers) ?? "　　　　　　 様"} との間で${contractOn ?? BLANK_DATE}付で締結した下記不動産の売買契約について、残代金及び精算金の授受、物件の引渡し及び所有権移転登記の申請手続きが本日完了したことを確認します。</p>
 <h2>対象の不動産</h2>
 <table><tr><th style="width:28%">物件</th><td>${propertyLabel(d)}</td></tr></table>
-<h2>引き渡した書類など</h2>
+<h2>お引き渡し完了したもの</h2>
 ${items.length ? html`<table>${items.map((i) => html`<tr><td>□ ${i}</td></tr>`)}</table>` : null}
 <h2>署名・押印</h2>
 <table>
@@ -68,7 +68,7 @@ ${brokerage ? html`<tr><th>仲介業者</th><td>${c.company.address ?? ""}<br>${
     rows: [
       { label: "売主", value: namesOf(sellers) }, { label: "買主", value: namesOf(buyers) },
       { label: "契約日", value: contractOn }, { label: "決済日", value: settledOn }, { label: "物件", value: propertyLabel(d) },
-      { label: "引き渡した書類など", value: o.handover }, { label: "司法書士", value: scrivener },
+      { label: "お引き渡し完了したもの", value: o.handover }, { label: "司法書士", value: scrivener },
     ],
   };
 }
