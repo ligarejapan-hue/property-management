@@ -325,6 +325,15 @@ export const REGISTRY_OWNER_CHECK_RETRY_AFTER_HOURS = 1;
 export const REGISTRY_OWNER_GAIJI_AWARE_SINCE_UTC = "2026-11-11 02:10:00";
 
 /**
+ * 「読めない」で終わった物件を、もう一度比べるまでの日数(2026-11-24)。
+ * ⚠「読めない」は、謄本そのものが読めない(画像だけ等)ときのほかに、読み取りの途中の一時的な失敗
+ *   (本番の入れ替えで読み取りが切れた等)でも付く。11-15 に16件がそれで「読めない」に確定し、
+ *   そのあと一度も比べ直されなかった(今読むと全部読めた)。数日おきに試し直して、一時的な失敗が
+ *   残り続けないようにする。本当に読めない謄本は、数日に1回読むだけ(件数はわずか)。
+ */
+export const REGISTRY_OWNER_UNREADABLE_RETRY_DAYS = 3;
+
+/**
  * まだ比べていない・比べ直しが要る物件(アーカイブを除く・所有者事項の謄本あり)。
  * 「違う」で未判断なのに違いの種類がまだ無い行(種類を残す前に比べた行)も、比べ直しに数える
  * (比べ直すと種類が埋まる・その間も一覧には出たまま)。
@@ -344,6 +353,7 @@ function pendingWhereSql(limit: number | null, backoff = false) {
   const gaijiSince = REGISTRY_OWNER_GAIJI_AWARE_SINCE_UTC;
   // 登記上の記載の記録を試し終えた印(ENTRIES_DONE_TOKEN)。無い行は1回比べ直して記録する。
   const entriesLike = `%${ENTRIES_DONE_TOKEN}%`;
+  const unreadableRetryDays = REGISTRY_OWNER_UNREADABLE_RETRY_DAYS;
   return limit === null
     ? prisma.$queryRaw<{ n: bigint }[]>`
         SELECT count(*)::bigint AS n FROM properties p
@@ -355,7 +365,9 @@ function pendingWhereSql(limit: number | null, backoff = false) {
                           AND NOT (c.result = 'mismatch' AND c.decision IS NULL
                                    AND (c.diff_kind IS NULL OR c.diff_kind NOT LIKE ${doneTokenLike}
                                         OR (c.checked_at < ${gaijiSince}::timestamp
-                                            AND c.diff_kind NOT LIKE ${gaijiLike}))))`
+                                            AND c.diff_kind NOT LIKE ${gaijiLike})))
+                          AND NOT (c.result = 'unreadable'
+                                   AND c.checked_at < (now() AT TIME ZONE 'UTC') - make_interval(days => ${unreadableRetryDays}::int)))`
     : prisma.$queryRaw<{ id: string }[]>`
         SELECT p.id FROM properties p
         WHERE p.is_archived = false
@@ -366,7 +378,9 @@ function pendingWhereSql(limit: number | null, backoff = false) {
                           AND NOT (c.result = 'mismatch' AND c.decision IS NULL
                                    AND (c.diff_kind IS NULL OR c.diff_kind NOT LIKE ${doneTokenLike}
                                         OR (c.checked_at < ${gaijiSince}::timestamp
-                                            AND c.diff_kind NOT LIKE ${gaijiLike}))))
+                                            AND c.diff_kind NOT LIKE ${gaijiLike})))
+                          AND NOT (c.result = 'unreadable'
+                                   AND c.checked_at < (now() AT TIME ZONE 'UTC') - make_interval(days => ${unreadableRetryDays}::int)))
           AND NOT EXISTS (SELECT 1 FROM registry_owner_checks c WHERE c.property_id = p.id AND c.stale = true
                           AND ${backoffHours}::int > 0
                           AND c.checked_at > (now() AT TIME ZONE 'UTC') - make_interval(hours => ${backoffHours}::int))
