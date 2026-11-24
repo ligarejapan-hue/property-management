@@ -8,6 +8,7 @@
  *    </script>-safe にしたもの)で埋める。
  */
 import { GOOGLE_ADS_SEND_TO_RE, googleConversionTarget } from "./google-conversion";
+import { lpStampHiddenFields } from "./lp-form-stamp";
 import { escapeHtml } from "./templates/index";
 import { renderFigureHtml, type FigureOptions } from "./lp-figures";
 import { jaHeadingHtml, jaWrapHtml } from "./ja-line-break";
@@ -599,6 +600,10 @@ export const INQUIRY_CLIENT_CHECK_SOURCE = [
 const INQUIRY_FORM_SETUP = [
   "function(f){",
   "if(!f)return;",
+  // ボット対策(公開ページだけ・lp-form-stamp.ts): 入力欄に触れた・押した・キーを押したら隠し欄 lp_js を "1" に。
+  // 欄が無いページ(DM 用の /t/<token>)では何もしない。値を入れるだけで、送信は止めない。
+  'var J=f.querySelector(\'input[name="lp_js"]\');if(J){var mk=function(){J.value="1"};' +
+    'var EV=["focusin","pointerdown","mousedown","touchstart","keydown"];for(var ei=0;ei<EV.length;ei++){f.addEventListener(EV[ei],mk,{capture:true,passive:true})}}',
   'var M={done:"お申し込みを受け付けました。内容を確認のうえ、担当者からご連絡いたします。",' +
     'preview:"まだお申し込みを受け付けていません。お急ぎの場合はお電話ください。",' +
     'throttled:"アクセスが集中しています。しばらく時間をおいてもう一度お試しください。",' +
@@ -701,7 +706,7 @@ function formSection(form: LpFormInput, telHref: string | null, phone: string | 
     ? AD_HIDDEN_FIELDS.map(([field, name]) => {
         const v = pub.adParams[field];
         return v ? `<input type="hidden" name="${name}" value="${escapeHtml(v)}" />` : "";
-      }).join("")
+      }).join("") + lpStampHiddenFields(pub.formStamp, true)
     : "";
   // 申込欄の頭に安心の一言(お名前と電話だけで送れる=必須が2つだけなのは parseInquiryForm の規則どおり)と電話の案内(2026-10-19 見本)。
   const lead = `<p class="inq-lead"><b>お名前と電話番号だけ</b>でお送りいただけます(ほかは任意)。査定・ご相談は無料で、売却を前提にしません。</p>`;

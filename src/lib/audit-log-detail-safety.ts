@@ -166,6 +166,11 @@ const ACTION_EXTRA_KEYS: Readonly<Record<string, ReadonlySet<string>>> = {
   // 広告用の公開ページ(/lp/<公開名>)の査定申込(設計 2026-10-20)。slug=公開名(公開のもの・PII ではない)・at=ISO時刻・
   // result=throttled(全体上限)。入力文字(氏名・電話・所在地・要望)は載せない。DMの種類は targetId で辿る。
   lp_public_inquiry_submit: new Set(["slug", "at", "result"]),
+  // 広告用の公開ページの申込のボット記録(2026-11-24・lp-form-stamp.ts)。blocked=止めた(honeypot/too_fast・何も残さない)・
+  // suspect=受け付けたが入力操作なし(no_js/bad_sig)。slug=公開名・reasons=理由の列挙値・utmSource/utmCampaign/utmContent=広告の印・
+  // hasGclid=gclid の有無だけ(値は書かない)。IP・UA・入力値は書かない(CLAUDE.md §8・§19)。
+  lp_inquiry_bot_blocked: new Set(["slug", "reasons", "utmSource", "utmCampaign", "utmContent", "hasGclid"]),
+  lp_inquiry_bot_suspect: new Set(["slug", "reasons", "utmSource", "utmCampaign", "utmContent", "hasGclid"]),
   // 社内の申込一覧の閲覧(PII アクセスの痕跡)。count=表示件数・viewedAt=ISO時刻。対象キャンペーンは targetId。
   sale_dm_inquiry_view: new Set(["count", "viewedAt"]),
   // 申込の対応状況の変更。handleStatus=列挙値・updatedAt=ISO時刻(メモ本文は載せない)。

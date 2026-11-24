@@ -12,6 +12,7 @@
  *  - 動的な値はすべて escapeHtml。スクリプトはすべて固定の文字列(値を埋めない)。
  */
 import { escapeHtml } from "./templates/index";
+import { lpStampHiddenFields } from "./lp-form-stamp";
 import { formatPhoneJp } from "../phone-format-jp";
 import { LP_BRAND } from "./lp-brand";
 import { HONEYPOT_FIELD, INQUIRY_LIMITS } from "./inquiry-input";
@@ -99,7 +100,7 @@ function formFields(ctx: Ctx, idp: string, form: LpFormInput): string {
     ? AD_HIDDEN_FIELDS.map(([field, name]) => {
         const v = ctx.pub!.adParams[field];
         return v ? `<input type="hidden" name="${name}" value="${escapeHtml(v)}">` : "";
-      }).join("")
+      }).join("") + lpStampHiddenFields(ctx.pub.formStamp, false)
     : "";
   return `<div class="fld"><input id="${idp}nm" type="text" name="name" placeholder=" " autocomplete="name" required maxlength="${INQUIRY_LIMITS.name}"><label for="${idp}nm">お名前</label></div>${fieldError("name")}` +
     `<div class="fld"><input id="${idp}tl" type="tel" name="phone" placeholder=" " autocomplete="tel" inputmode="tel" required maxlength="${INQUIRY_LIMITS.phone}"><label for="${idp}tl">電話番号</label></div>${fieldError("phone")}` +
