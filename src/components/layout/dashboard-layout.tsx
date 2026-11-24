@@ -1,7 +1,7 @@
 "use client";
 
-import { useEffect } from "react";
-import { usePathname } from "next/navigation";
+import { Suspense, useEffect, useState } from "react";
+import { usePathname, useSearchParams } from "next/navigation";
 import { MAIN_WINDOW_NAME, windowNameFor } from "@/lib/agent-inquiry/main-view";
 import { useSession } from "next-auth/react";
 import { signOutWithNotificationCleanup } from "@/lib/notifications/logout";
@@ -11,6 +11,18 @@ import TopNav from "./top-nav";
 import { USE_MOCK } from "@/lib/api-client";
 import ScreenProtectionProvider from "@/components/screen-protection/screen-protection-provider";
 
+/**
+ * URL の ? 以降を外枠へ知らせるだけの部品(何も描かない)。画面の中でタブを切り替えたとき
+ * (router.replace で ? だけ変わる)にも追いつく。
+ */
+function SearchReporter({ onChange }: { onChange: (search: string) => void }) {
+  const qs = useSearchParams()?.toString() ?? "";
+  useEffect(() => {
+    onChange(qs ? `?${qs}` : "");
+  }, [qs, onChange]);
+  return null;
+}
+
 export default function DashboardLayout({
   children,
 }: {
@@ -18,6 +30,9 @@ export default function DashboardLayout({
 }) {
   const pathname = usePathname();
   const { data: session, status } = useSession();
+  // URL の ? 以降(タブへ飛ぶメニュー項目の現在地・@codex #784 P2)。読むのは下の SearchReporter
+  // (useSearchParams は Suspense の中で使う=外枠ごと読み込み待ちにしない)。読むまでは空=前と同じ光り方。
+  const [search, setSearch] = useState("");
 
   // 受付の窓の「メイン画面で物件を開く」(target="pm-main")が、この窓に開くようにする。
   // 名前が空の窓だけ名乗る(受付の窓として開いた窓をメイン画面と呼ばない)。
@@ -68,11 +83,14 @@ export default function DashboardLayout({
   return (
     <ScreenProtectionProvider>
       <div className="flex h-screen overflow-hidden bg-page">
-        <Sidebar userRole={userRole} currentPath={pathname} />
+        <Suspense fallback={null}>
+          <SearchReporter onChange={setSearch} />
+        </Suspense>
+        <Sidebar userRole={userRole} currentPath={pathname} currentSearch={search} />
         <div className="flex flex-1 flex-col overflow-hidden">
           <Header userName={userName} userRole={userRole} currentPath={pathname} onLogout={handleLogout} />
           {/* 見た目の設定 段階3: 上部ナビ(選んだ人だけ・広い画面だけ。中身のページは同じ) */}
-          <TopNav userRole={userRole} currentPath={pathname} />
+          <TopNav userRole={userRole} currentPath={pathname} currentSearch={search} />
           {/*
            * v2: 超ワイド画面での行の間延びを防ぐ(1536px 上限・中央寄せ)。
            * h-full は子の % 高さ(例: field-survey/map の h-full エラー表示)を

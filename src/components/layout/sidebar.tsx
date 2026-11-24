@@ -11,9 +11,11 @@ import { DISPLAY_SETTINGS_HREF } from "./user-menu";
 interface SidebarProps {
   userRole: string;
   currentPath: string;
+  /** URL の ? 以降(タブへ飛ぶ項目の現在地に使う・@codex #784 P2)。 */
+  currentSearch?: string;
 }
 
-export default function Sidebar({ userRole, currentPath }: SidebarProps) {
+export default function Sidebar({ userRole, currentPath, currentSearch = "" }: SidebarProps) {
   const [mobileOpen, setMobileOpen] = useState(false);
   const groups = visibleSidebar(userRole);
 
@@ -26,7 +28,7 @@ export default function Sidebar({ userRole, currentPath }: SidebarProps) {
     setFromHref(href);
   };
 
-  const isActive = (href: string) => isNavItemActive(href, currentPath, hash);
+  const isActive = (href: string) => isNavItemActive(href, currentPath, hash, currentSearch);
 
   // 折りたたみグループの開閉: 手動トグル(未操作=未設定)が無ければ、現在地がグループ内なら
   // 自動で開く。dashboard layout は永続で Sidebar が再マウントされないため、遷移のたび

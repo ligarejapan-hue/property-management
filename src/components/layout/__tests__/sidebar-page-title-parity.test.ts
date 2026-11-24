@@ -214,8 +214,11 @@ describe("タブへ飛ぶ項目は、タブの名前と一致させる", () => {
       const tabKey = new URLSearchParams(query).get("tab");
       expect(tabKey, `${href} に tab= が無い`).not.toBeNull();
       const src = read(join(ROOT, "src", "app", "(dashboard)" + path, "page.tsx"));
+      // 件数つきのタブは `{\n key: "…",\n label: "…",\n count: … }` と複数行で書かれる(所有者補正候補)ので、
+      // key と label の間の空白・改行は問わない。
+      const esc = (s: string) => s.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
       expect(
-        src.includes(`{ key: "${tabKey}", label: "${label}" }`),
+        new RegExp(`\\{\\s*key: "${esc(tabKey!)}",\\s*label: "${esc(label)}"`).test(src),
         `${href} の飛び先タブの名前がメニューの名前と違う`,
       ).toBe(true);
     },

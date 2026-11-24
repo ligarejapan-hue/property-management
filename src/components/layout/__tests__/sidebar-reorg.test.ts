@@ -39,6 +39,8 @@ describe("確定した並び(仕事の流れ順)", () => {
       "imp",
       "sheet",
       "dq",
+      // 物件データ編集の残りの画面(2026-11-24 発注者決定・dq-menu-split.test.ts)。
+      "dq-check",
       "admin",
       "doc",
     ]);
@@ -98,7 +100,7 @@ describe("グループの一言説明", () => {
     expect(group("inquiry")?.description).toBeUndefined();
     expect(group("doc")?.description).toBeUndefined();
     // 残りは付ける(とくに「システム管理」は名前が分かりにくいという指摘の当事者)。
-    for (const key of ["imp", "dm", "sheet", "dq", "admin"]) {
+    for (const key of ["imp", "dm", "sheet", "dq", "dq-check", "admin"]) {
       expect(group(key)?.description, key).toBeTruthy();
     }
   });
@@ -409,7 +411,7 @@ describe("左メニューの柱(発注者決定 2026-10-15)", () => {
       "imp",
       "sheet",
     ]);
-    for (const key of ["dq", "admin", "doc"]) {
+    for (const key of ["dq", "dq-check", "admin", "doc"]) {
       expect(group(key)?.pillar, key).toBeFalsy();
     }
     // 柱には見出しの絵がある。

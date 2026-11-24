@@ -206,18 +206,38 @@ export const SIDEBAR_GROUPS: NavGroup[] = [
   {
     key: "dq",
     label: "物件データ編集",
-    description: "名寄せ・誤りの一括修正・チェック",
+    // 普段やる3つだけ(発注者決定 2026-11-24・案1)。どれも DM の宛先・通数に効く。
+    //   残りの画面は消さずに下の「点検（ふだんは不要）」へたたむ(dq-menu-split.test.ts)。
+    //   ⚠件数はメニューに出さない(数えるのに重い集計が要り、どの画面を開いても走ってしまうため)。
+    description: "DM に効くもの。普段はこの3つだけ（名義の違い・同じ人をまとめる・住所を補う）",
     collapsible: true,
     items: [
       // 謄本の名義とシステムの所有者が違う物件(2026-11-08)。⚠開けるのは氏名を伏せずに見られて
       //   謄本も見られる人だけ(API が判定)。直すのは管理者・「このままでよい」は所有者を編集できる人。
+      //   ここに残った物件は DM が「未判断」のまま止まる。
       { label: "謄本の名義の確認", href: "/properties/registry-owner-review", icon: ic(FileSearch), minRole: "office_staff" },
+      // 所有者補正候補の2つのタブを直接開く(?tab= はページ側が追従する=corporate-link-nav-source.test.ts)。
+      // 同じ人が2人に分かれていると DM が2通届く。
+      // ⚠名前はタブの名前と同じにする(sidebar-page-title-parity.test.ts)。
+      { label: "重複候補", href: "/admin/owners/correction?tab=duplicate", icon: ic(Users), minRole: "admin" },
+      // 住所が空だと DM が届かない。
+      { label: "住所なし", href: "/admin/owners/correction?tab=address_null", icon: ic(MapPinned), minRole: "admin" },
+    ],
+  },
+  {
+    key: "dq-check",
+    label: "点検（ふだんは不要）",
+    description: "昔の取り込みの汚れ直し・見るだけの点検",
+    collapsible: true,
+    items: [
       { label: "所有者補正候補", href: "/admin/owners/correction", icon: ic(UserCog), minRole: "admin" },
       { label: "法人番号紐づけ", href: "/admin/owners/correction?tab=corporate_restore", icon: ic(Link2), minRole: "admin" },
+      { label: "住所の登記文字列", href: "/admin/owners/correction?tab=registry_address", icon: ic(ScanText), minRole: "admin" },
+      { label: "氏名・連絡先チェック", href: "/admin/owners/quality-audit", icon: ic(ClipboardCheck), minRole: "admin" },
+      { label: "テキスト衛生監査", href: "/admin/owners/text-hygiene", icon: ic(ScanText), minRole: "admin" },
+      // 下の2つは見るだけ(直すボタンが無い)。
       { label: "表示名監査", href: "/admin/display-name-audit", icon: ic(ScanSearch), minRole: "admin" },
       { label: "郵便番号×住所チェック", href: "/admin/postal-code-audit", icon: ic(MapPinned), minRole: "admin" },
-      { label: "テキスト衛生監査", href: "/admin/owners/text-hygiene", icon: ic(ScanText), minRole: "admin" },
-      { label: "氏名・連絡先チェック", href: "/admin/owners/quality-audit", icon: ic(ClipboardCheck), minRole: "admin" },
       // ⚠物件削除で孤児化した送付記録の訂正・取消(PR-B・設計§2.4)は
       //   「DM・LP関係」グループへ移した(DM の道具がここに紛れていたため)。
     ],
@@ -282,6 +302,21 @@ const ANCHOR_HREFS = SIDEBAR_GROUPS.flatMap((g) => g.items)
   .map((i) => i.href)
   .filter((h) => h.includes("#"));
 
+/** 同じ画面のタブへ飛ぶ項目(`?tab=…` 付き)の一覧。 */
+const QUERY_HREFS = SIDEBAR_GROUPS.flatMap((g) => g.items)
+  .map((i) => i.href)
+  .filter((h) => h.includes("?"));
+
+/** `?` 付きの項目が、いまの画面(道+ ? 以降)に当たるか。項目に書いた値が全部同じなら当たり(ほかの値は問わない)。 */
+function queryItemMatches(href: string, currentPath: string, currentSearch: string): boolean {
+  const at = href.indexOf("?");
+  if (currentPath !== href.slice(0, at)) return false;
+  const want = new URLSearchParams(href.slice(at + 1));
+  const have = new URLSearchParams(currentSearch.startsWith("?") ? currentSearch.slice(1) : currentSearch);
+  for (const [k, v] of want) if (have.get(k) !== v) return false;
+  return true;
+}
+
 /**
  * サイドバー項目の現在地ハイライト判定(純関数=テスト可能)。
  * - `/properties` は一覧および物件詳細(`/properties/<id>`)で点灯するが、上記の別機能ページ
@@ -297,7 +332,19 @@ export function isNavItemActive(
   href: string,
   currentPath: string,
   currentHash = "",
+  currentSearch = "",
 ): boolean {
+  // 同じ画面のタブへ飛ぶ項目(`/admin/owners/correction?tab=duplicate`)は、画面とタブ(書いてある値)が
+  // 全部合うときだけ光る(@codex #784 P2)。裏返して、タブ専用の項目が当たっている間は、
+  // その画面全体を指す項目(`/admin/owners/correction`)は光らせない=2つ同時に光らせない。
+  const queryAt = href.indexOf("?");
+  if (queryAt !== -1) return queryItemMatches(href, currentPath, currentSearch);
+  if (
+    currentSearch &&
+    QUERY_HREFS.some((q) => q.slice(0, q.indexOf("?")) === href && queryItemMatches(q, currentPath, currentSearch))
+  ) {
+    return false;
+  }
   const hashAt = href.indexOf("#");
   if (hashAt !== -1) {
     const base = href.slice(0, hashAt);
