@@ -39,9 +39,9 @@ export function topNavEntries(groups: NavGroup[]): TopNavEntry[] {
 }
 
 /** その並びの中に、いま見ている画面があるか(左メニューと同じ判定 isNavItemActive を使う)。 */
-export function isTopEntryActive(entry: TopNavEntry, currentPath: string, currentHash = ""): boolean {
+export function isTopEntryActive(entry: TopNavEntry, currentPath: string, currentHash = "", currentSearch = ""): boolean {
   const items = entry.kind === "link" ? [entry.item] : entry.sections.flatMap((s) => s.items);
-  return items.some((i) => isNavItemActive(i.href, currentPath, currentHash));
+  return items.some((i) => isNavItemActive(i.href, currentPath, currentHash, currentSearch));
 }
 
 /** 開くメニューの幅(rem)。top-nav.tsx の w-64 と同じ。 */

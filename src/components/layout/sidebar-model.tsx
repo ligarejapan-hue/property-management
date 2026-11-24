@@ -302,6 +302,21 @@ const ANCHOR_HREFS = SIDEBAR_GROUPS.flatMap((g) => g.items)
   .map((i) => i.href)
   .filter((h) => h.includes("#"));
 
+/** 同じ画面のタブへ飛ぶ項目(`?tab=…` 付き)の一覧。 */
+const QUERY_HREFS = SIDEBAR_GROUPS.flatMap((g) => g.items)
+  .map((i) => i.href)
+  .filter((h) => h.includes("?"));
+
+/** `?` 付きの項目が、いまの画面(道+ ? 以降)に当たるか。項目に書いた値が全部同じなら当たり(ほかの値は問わない)。 */
+function queryItemMatches(href: string, currentPath: string, currentSearch: string): boolean {
+  const at = href.indexOf("?");
+  if (currentPath !== href.slice(0, at)) return false;
+  const want = new URLSearchParams(href.slice(at + 1));
+  const have = new URLSearchParams(currentSearch.startsWith("?") ? currentSearch.slice(1) : currentSearch);
+  for (const [k, v] of want) if (have.get(k) !== v) return false;
+  return true;
+}
+
 /**
  * サイドバー項目の現在地ハイライト判定(純関数=テスト可能)。
  * - `/properties` は一覧および物件詳細(`/properties/<id>`)で点灯するが、上記の別機能ページ
@@ -317,7 +332,19 @@ export function isNavItemActive(
   href: string,
   currentPath: string,
   currentHash = "",
+  currentSearch = "",
 ): boolean {
+  // 同じ画面のタブへ飛ぶ項目(`/admin/owners/correction?tab=duplicate`)は、画面とタブ(書いてある値)が
+  // 全部合うときだけ光る(@codex #784 P2)。裏返して、タブ専用の項目が当たっている間は、
+  // その画面全体を指す項目(`/admin/owners/correction`)は光らせない=2つ同時に光らせない。
+  const queryAt = href.indexOf("?");
+  if (queryAt !== -1) return queryItemMatches(href, currentPath, currentSearch);
+  if (
+    currentSearch &&
+    QUERY_HREFS.some((q) => q.slice(0, q.indexOf("?")) === href && queryItemMatches(q, currentPath, currentSearch))
+  ) {
+    return false;
+  }
   const hashAt = href.indexOf("#");
   if (hashAt !== -1) {
     const base = href.slice(0, hashAt);

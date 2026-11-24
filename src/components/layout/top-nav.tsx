@@ -15,6 +15,8 @@ import { useNavHash } from "./use-nav-hash";
 interface TopNavProps {
   userRole: string;
   currentPath: string;
+  /** URL の ? 以降(タブへ飛ぶ項目の現在地に使う・@codex #784 P2)。 */
+  currentSearch?: string;
 }
 
 const entryClass = (active: boolean) =>
@@ -24,7 +26,7 @@ const entryClass = (active: boolean) =>
       : "text-side-text hover:bg-side-hover-bg hover:text-side-hover-text"
   }`;
 
-export default function TopNav({ userRole, currentPath }: TopNavProps) {
+export default function TopNav({ userRole, currentPath, currentSearch = "" }: TopNavProps) {
   const entries = topNavEntries(visibleSidebar(userRole));
   const { hash, setFromHref } = useNavHash(currentPath);
   const [openKey, setOpenKey] = useState<string | null>(null);
@@ -71,7 +73,7 @@ export default function TopNav({ userRole, currentPath }: TopNavProps) {
   }, [openKey]);
 
   const renderLeaf = (item: NavLeaf, opts: { label?: string; icon?: React.ReactNode; inMenu?: boolean }) => {
-    const active = isNavItemActive(item.href, currentPath, hash);
+    const active = isNavItemActive(item.href, currentPath, hash, currentSearch);
     const label = opts.label ?? item.label;
     const icon = opts.icon ?? item.icon;
     const cls = opts.inMenu
@@ -117,7 +119,7 @@ export default function TopNav({ userRole, currentPath }: TopNavProps) {
   const renderEntry = (e: TopNavEntry) => {
     if (e.kind === "link") return <li key={e.key}>{renderLeaf(e.item, { label: e.label, icon: e.icon })}</li>;
     const open = openKey === e.key;
-    const here = isTopEntryActive(e, currentPath, hash);
+    const here = isTopEntryActive(e, currentPath, hash, currentSearch);
     const panelId = `topnav-menu-${e.key}`;
     return (
       <li key={e.key} className="relative">
