@@ -211,14 +211,10 @@ function duoDark(): string {
   return `<section class="sec dark" style="padding-top:26px"><div class="wrap"><div class="duo dk" data-rv style="margin-top:0">${PANES}</div></div></section>`;
 }
 
-function compareTable(): string {
-  return `<section class="sec light"><div class="wrap"><div data-rv><div class="rule"></div>` + h2(["迷うときは、", "両方の金額を並べて"]) +
-    `<p class="lede f d2">仲介で売った場合と買取で売った場合、それぞれの金額と手元に残る見込みを1枚にまとめます。比べてから、お決めください。</p></div>` +
-    `<table class="cmp f" data-rv><thead><tr><th style="width:36%"></th><th>仲介</th><th>買取</th></tr></thead><tbody>` +
-    `<tr><th>売れる金額</th><td>○,○○○万円</td><td>○,○○○万円</td></tr>` +
-    `<tr><th>かかる期間</th><td>3〜6か月ほど</td><td>仲介より短い</td></tr>` +
-    `<tr><th>手元に残る金額</th><td>○,○○○万円</td><td>○,○○○万円</td></tr>` +
-    `</tbody></table><p class="note" style="text-align:left">※表は体裁の見本です。金額は入れていません。</p>` +
+/** compare 案の「両方の金額」の節。金額の表は置かない(2026-11-24 発注者: 査定書はこの表の形式では作らない・査定では仲介と買取の両方の金額を伝える)。 */
+function compareBoth(): string {
+  return `<section class="sec light"><div class="wrap"><div data-rv><div class="rule"></div>` + h2(["迷うときは、", "両方の金額を聞いてから"]) +
+    `<p class="lede f d2">査定では、仲介で売る場合の金額と、買取の場合の金額の両方をお伝えします。比べてから、お決めください。</p></div>` +
     ctaLink("両方の金額を無料で確かめる") + `</div></section>`;
 }
 
@@ -288,7 +284,7 @@ const ORDER: Record<LpDesignKey, (ctx: Ctx) => string[]> = {
   base: (c) => [heroBase(), marquee(), say(), ways(), duo(), flow(), cases(), faq(), apply(c)],
   form: (c) => [heroForm(c), marquee(), say(), ways(), duo(), flow(), cases(), faq(), apply(c)],
   question: (c) => [heroQuestion(c), marquee(), say(), ways(), duo(), flow(), cases(), faq(), apply(c)],
-  compare: (c) => [heroCompare(), duoDark(), compareTable(), ways(), say(), flow(), cases(), faq(), apply(c)],
+  compare: (c) => [heroCompare(), duoDark(), compareBoth(), ways(), say(), flow(), cases(), faq(), apply(c)],
   editorial: (c) => [heroEditorial(), marquee(), chapters(), ways(), duo(), flow(), cases(), faq(), apply(c)],
 };
 
