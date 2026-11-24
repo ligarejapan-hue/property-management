@@ -228,12 +228,15 @@ describe("取引完了確認書", () => {
     const out = doc(C).build(ctx(brokerDeal), { handover: "鍵\n登記識別情報" });
     expect(out.html).toContain("取引完了確認書");
     expect(out.html).toContain("2026年5月1日付で締結した下記不動産の売買契約");
-    expect(out.html).toContain("残代金の授受、物件の引渡し及び所有権移転登記の申請手続きが本日完了したことを確認します");
+    expect(out.html).toContain("残代金及び精算金の授受、物件の引渡し及び所有権移転登記の申請手続きが本日完了したことを確認します");
     expect(out.html).toContain("架空 一郎&lt;i&gt;");
     expect(out.html).toContain("架空県架空市1-1");
     expect(out.html).toContain("架空 花子");
     expect(out.html).toContain("2026年6月30日");
     expect(out.html).toContain("試験ハイツ&lt;b&gt;");
+    // 見出しは「お引き渡し完了したもの」(2026-11-24 発注者)
+    expect(out.html).toContain("<h2>お引き渡し完了したもの</h2>");
+    expect(out.html).not.toContain("引き渡した書類など");
     expect(out.html).toContain("□ 鍵");
     expect(out.html).toContain("□ 登記識別情報");
     expect(out.html).toContain("架空司法書士事務所");
@@ -241,7 +244,7 @@ describe("取引完了確認書", () => {
     expect(out.html).toContain("架空不動産株式会社");
     expect(out.html).not.toContain(SEAL);
     expect(out.rows).toContainEqual({ label: "売主", value: "架空 一郎<i>" });
-    expect(out.rows).toContainEqual({ label: "引き渡した書類など", value: "鍵\n登記識別情報" });
+    expect(out.rows).toContainEqual({ label: "お引き渡し完了したもの", value: "鍵\n登記識別情報" });
     // 登録した住所・氏名とは別に、手書きの署名の空欄を当事者ごとに出す(@codex)
     expect(out.html.match(/<td class="sign-blank">署名<\/td>/g)?.length).toBe(2);
     expect(doc(C).build(ctx({ ...deal, parties: [] }), { handover: null }).html.match(/<td class="sign-blank">署名<\/td>/g)?.length).toBe(2);
