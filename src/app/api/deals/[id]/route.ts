@@ -52,7 +52,7 @@ export async function GET(_req: Request, ctx: Ctx) {
     const canMoveCaseStatus = !!p && hasPermission(perms, "property", "write") && canAccessPropertyRecord(session, p);
     const related = row.propertyId ? await prisma.deal.findMany({
       where: { propertyId: row.propertyId, id: { not: id } }, orderBy: [{ createdAt: "asc" }],
-      select: { id: true, dealNo: true, businessType: true, status: true, price: true, settlementAt: true, createdAt: true, parties: { select: { role: true, isSelf: true } } },
+      select: { id: true, dealNo: true, businessType: true, tradeSide: true, status: true, price: true, settlementAt: true, createdAt: true, parties: { select: { role: true, isSelf: true } } },
     }) : [];
     const relatedDeals = summarizePropertyDeals(related).map((d, i) => ({ ...d, price: related[i].price === null ? null : Number(related[i].price) }));
     const parcelOptions = p && canOpenProperty && !supportsUnitFields(p.propertyType) ? dealParcelOptions(p, { always: !!readTargetParcels(row.targetParcels) }) : [];

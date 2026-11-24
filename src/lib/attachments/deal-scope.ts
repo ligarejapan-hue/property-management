@@ -11,6 +11,10 @@ export interface ScopeDeal {
   dealNo: string;
   status: string;
   side: "purchase" | "sale" | null;
+  /** 事業区分(brokerage=仲介 / resale=買取再販)。無い=買取再販の扱い(古い呼び出し)。 */
+  businessType?: string;
+  /** 仲介の取引態様(buyer=買主側 / seller=売主側 / both=両手 / 空=未入力)。 */
+  tradeSide?: string | null;
   /** ISO 文字列。 */
   settlementAt: string | null;
   createdAt: string;
@@ -29,10 +33,34 @@ export interface ScopeAttachment {
 export type DealScope = string | null;
 
 const SIDE_LABELS = { purchase: "仕入", sale: "売却" } as const;
+const BROKERAGE_LABELS: Record<string, string> = { buyer: "購入仲介", seller: "売却仲介", both: "両手仲介" };
 
-/** 仕入・売却に分ける取引(仕入/売却の分かる・中止していない取引)。並びは渡された順。 */
+const isBrokerage = (d: ScopeDeal) => d.businessType === "brokerage";
+
+/**
+ * 分ける取引(中止していない・並びは渡された順)。
+ * 買取再販は仕入/売却の分かる取引を1件からでも分ける。仲介は分けられる取引が2件以上あるときだけ(1件なら今までどおり)。
+ */
 export function splitDealsOf(deals: readonly ScopeDeal[]): ScopeDeal[] {
-  return deals.filter((d) => d.side !== null && d.status !== "cancelled");
+  const candidates = deals.filter((d) => d.status !== "cancelled" && (d.side !== null || isBrokerage(d)));
+  const withBrokerage = candidates.length >= 2;
+  return candidates.filter((d) => d.side !== null || withBrokerage);
+}
+
+/** 取引の名前(「仕入」「購入仲介」など)。 */
+function dealKindLabel(d: ScopeDeal): string {
+  if (d.side) return SIDE_LABELS[d.side];
+  return BROKERAGE_LABELS[d.tradeSide ?? ""] ?? "仲介";
+}
+
+/**
+ * 取引の画面から入れた書類に、画面に出さずに付ける取引(2026-11-24 発注者 案ア)。
+ * 仲介の取引が1件だけで分けない物件でも、あとで取引が増えたときに正しく分かれるように。分ける物件・その他は null。
+ */
+export function quietUploadDealOf(deals: readonly ScopeDeal[] | null | undefined, fixedDealId: string | null | undefined): string | null {
+  if (!deals || !fixedDealId || splitDealsOf(deals).length > 0) return null;
+  const d = deals.find((x) => x.id === fixedDealId);
+  return d && isBrokerage(d) && d.status !== "cancelled" ? d.id : null;
 }
 
 /** 日本時間の日("YYYY-MM-DD")。 */
@@ -50,6 +78,7 @@ function estimate(a: ScopeAttachment, deals: readonly ScopeDeal[]): DealScope {
   // 分ける取引が無い物件では推定しない(分ける意味が無い)。
   if (split.length === 0) return null;
   if (isCommonByNature(a)) return "common";
+  if (split.some(isBrokerage)) return estimateByOrder(a, split);
   // 新しい順に来るので、最初に見つかったものがいちばん新しい取引。
   const purchase = split.find((d) => d.side === "purchase");
   const sale = split.find((d) => d.side === "sale");
@@ -58,6 +87,17 @@ function estimate(a: ScopeAttachment, deals: readonly ScopeDeal[]): DealScope {
     return jstDay(a.createdAt) <= jstDay(boundary) ? purchase.id : sale.id;
   }
   return purchase?.id ?? sale?.id ?? null;
+}
+
+/** 仲介が入る物件: 作った順に並べ、前の取引の決済日(無ければ次の取引を作った日)までは前の取引。 */
+function estimateByOrder(a: ScopeAttachment, split: readonly ScopeDeal[]): DealScope {
+  const ordered = [...split].sort((x, y) => Date.parse(x.createdAt) - Date.parse(y.createdAt));
+  const day = jstDay(a.createdAt);
+  for (let i = 0; i < ordered.length - 1; i++) {
+    const boundary = ordered[i].settlementAt ?? ordered[i + 1].createdAt;
+    if (day <= jstDay(boundary)) return ordered[i].id;
+  }
+  return ordered[ordered.length - 1].id;
 }
 
 /** 添付の取引。estimated=true は推定(まだ確定していない)。 */
@@ -91,10 +131,10 @@ export function filterByScope<T extends ScopeAttachment>(items: readonly T[], de
   });
 }
 
-/** 取引の選択肢(「仕入 2026-0012」)+共通。 */
+/** 取引の選択肢(「仕入 2026-0012」「購入仲介 2026-0007」)+共通。 */
 export function dealScopeOptions(deals: readonly ScopeDeal[]): Array<{ value: string; label: string }> {
   return [
-    ...splitDealsOf(deals).map((d) => ({ value: d.id, label: `${SIDE_LABELS[d.side as "purchase" | "sale"]} ${d.dealNo}` })),
+    ...splitDealsOf(deals).map((d) => ({ value: d.id, label: `${dealKindLabel(d)} ${d.dealNo}` })),
     { value: "common", label: "共通" },
   ];
 }

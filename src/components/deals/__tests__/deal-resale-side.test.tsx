@@ -9,7 +9,7 @@ const SELF_BUYER = { role: "buyer", isSelf: true };
 const SELF_SELLER = { role: "seller", isSelf: true };
 const deal = (parties: Array<{ role: string; isSelf: boolean }>, businessType = "resale") => ({ businessType, propertyId: "p1", parties });
 const related = (over: Partial<RelatedDeal>): RelatedDeal => ({
-  id: "d2", dealNo: "2026-0031", businessType: "resale", status: "considering", side: "sale", label: "", settlementAt: null, createdAt: "", price: 50_000_000, ...over,
+  id: "d2", dealNo: "2026-0031", businessType: "resale", status: "considering", side: "sale", tradeSide: null, label: "", settlementAt: null, createdAt: "", price: 50_000_000, ...over,
 });
 const render = (d: ReturnType<typeof deal>, rel: RelatedDeal[] = [], canOpenProperty = true) =>
   renderToStaticMarkup(<DealResaleSide deal={d} relatedDeals={rel} canOpenProperty={canOpenProperty} />);
