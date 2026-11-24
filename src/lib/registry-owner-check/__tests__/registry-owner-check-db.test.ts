@@ -97,6 +97,7 @@ import {
   runRegistryOwnerChecks,
   NIGHTLY_REGISTRY_OWNER_CHECK,
   REGISTRY_OWNER_READ_TIMEOUT_MS,
+  REGISTRY_OWNER_UNREADABLE_RETRY_DAYS,
 } from "@/lib/registry-owner-check/service";
 import { QUALITY_RULES, qualityWarningWhere } from "@/lib/quality-check-rules";
 import { replaceRegistryOwnersOnProperty } from "@/lib/registry-owner-apply/apply";
@@ -1104,6 +1105,42 @@ async function main() {
         (await row(pd))?.result === "same",
       { pd: await linkedNames(pd), rg },
     );
+  }
+
+  // ---- 18. 「読めない」で終わった物件は、数日たったら比べ直す(2026-11-24・一時的な失敗で残り続けない) ----
+  await reset();
+  {
+    const u = await user();
+    const p = await property(u);
+    await link(p, await owner("山田太郎"));
+    await registry(p, u, "表のない文字だけ");
+    const r1 = await runRegistryOwnerChecks(50);
+    check("18a まず読めない", r1.counts.unreadable === 1 && (await row(p))?.result === "unreadable", r1);
+    // 謄本はそのまま、今は読めるようになった(一時的な失敗だった)
+    const url = (await prisma.attachment.findFirstOrThrow({ where: { propertyId: p }, select: { fileUrl: true } })).fileUrl;
+    TEXTS.set(url, registryText([{ name: "山田太郎" }]));
+    const r2 = await runRegistryOwnerChecks(50);
+    check("18b 比べたばかりの読めないは比べ直さない", r2.processed === 0, r2);
+    const days = REGISTRY_OWNER_UNREADABLE_RETRY_DAYS;
+    await prisma.$executeRawUnsafe(
+      `UPDATE registry_owner_checks SET checked_at = (now() AT TIME ZONE 'UTC') - make_interval(days => $2::int, hours => 1) WHERE property_id = $1::uuid`,
+      p, days,
+    );
+    const r3 = await runRegistryOwnerChecks(50);
+    check("18c 日数がたった読めないは比べ直して、今度は同じ", r3.processed === 1 && (await row(p))?.result === "same", { r3, row: await row(p) });
+    const r4 = await runRegistryOwnerChecks(50);
+    check("18d 比べ直したあとは回らない", r4.processed === 0, r4);
+    // 日数の手前(1時間前)ならまだ比べ直さない
+    const q = await property(u);
+    await link(q, await owner("鈴木一郎"));
+    await registry(q, u, "表のない文字だけ");
+    await runRegistryOwnerChecks(50);
+    await prisma.$executeRawUnsafe(
+      `UPDATE registry_owner_checks SET checked_at = (now() AT TIME ZONE 'UTC') - make_interval(days => $2::int) + interval '1 hour' WHERE property_id = $1::uuid`,
+      q, days,
+    );
+    const r5 = await runRegistryOwnerChecks(50);
+    check("18e 日数の手前の読めないは比べ直さない", r5.processed === 0, r5);
   }
 }
 
