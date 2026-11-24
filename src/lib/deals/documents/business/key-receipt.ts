@@ -3,7 +3,7 @@ import { isoDate } from "../../schema-parts";
 import { html } from "../html";
 import { documentHtml } from "../layout";
 import { DocOptionError } from "./receipts";
-import { dateJa, headTable, namesOf, partiesOf, propertyLabel, signBox, type BusinessDocContext, type Choice, type ValueRow } from "./common";
+import { addresseeOf, dateJa, headTable, namesOf, partiesOf, propertyLabel, signBox, type BusinessDocContext, type Choice, type ValueRow } from "./common";
 
 /** 番号・種類は空でもよい(番号が分からないことがある・2026-11-14 発注者)。 */
 const keyRow = z.object({ label: z.string().trim().max(50), count: z.number().int().min(1).max(99) }).strict();
@@ -42,13 +42,13 @@ export function buildKeyReceipt(c: BusinessDocContext, o: KeyReceiptOptions): { 
     if (!p) throw new DocOptionError("受け取る人を選び直してください");
     receiver = { name: p.name, address: p.address };
   }
-  const sellers = namesOf(partiesOf(c.deal, "seller"));
+  const sellers = addresseeOf(partiesOf(c.deal, "seller"));
   const handwritten = o.keys.length === 0;
   const total = o.keys.reduce((a, k) => a + k.count, 0);
 
   const body = html`
 <h1>鍵受領書</h1>
-<div class="meta"><div class="customer">${sellers ?? ""} 様</div><div class="right">${o.receivedOn ? dateJa(o.receivedOn) : "　　年　　月　　日"}</div></div>
+<div class="meta"><div class="customer">${sellers}</div><div class="right">${o.receivedOn ? dateJa(o.receivedOn) : "　　年　　月　　日"}</div></div>
 ${headTable([["物件", propertyLabel(c.deal)]])}
 <h2>受け取った鍵</h2>
 <table>
@@ -65,7 +65,7 @@ ${signBox("署名・押印")}`;
   return {
     html: documentHtml({ title: "鍵受領書", font: "mincho", body, css: KEY_RECEIPT_CSS }),
     rows: [
-      { label: "書類", value: "鍵受領書" }, { label: "宛先", value: sellers }, { label: "物件", value: propertyLabel(c.deal) },
+      { label: "書類", value: "鍵受領書" }, { label: "宛先", value: namesOf(partiesOf(c.deal, "seller")) }, { label: "物件", value: propertyLabel(c.deal) },
       { label: "受領日", value: o.receivedOn },
       ...(handwritten
         ? [{ label: "鍵の番号・本数", value: `手書きの欄(${BLANK_KEY_ROWS}行)` }]

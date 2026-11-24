@@ -3,7 +3,7 @@ import { text, yenInt } from "../../schema-parts";
 import { html } from "../html";
 import { companyBlock, documentHtml } from "../layout";
 import { balancePayeeText, isOtherKey, paymentRows, sellerReceiveText } from "../../payments";
-import { bankAccountText, dateJa, dateTimeJa, headTable, money, namesOf, partiesOf, propertyLabel, type BusinessDocContext, type ValueRow } from "./common";
+import { addresseeOf, bankAccountText, dateJa, dateTimeJa, headTable, money, namesOf, partiesOf, propertyLabel, type BusinessDocContext, type ValueRow } from "./common";
 
 /** 発行のときに選ぶもの(計画の読み替え 2・7)。 */
 export const settlementGuideOptionsSchema = z.object({
@@ -53,14 +53,14 @@ export function defaultReceiveTo(c: BusinessDocContext): string | null {
 export function buildSettlementGuide(c: BusinessDocContext, o: SettlementGuideOptions): { html: string; rows: ValueRow[] } {
   const s = c.calc.settlement;
   const d = c.deal;
-  const buyer = namesOf(partiesOf(d, "buyer"));
+  const buyer = addresseeOf(partiesOf(d, "buyer"));
   const netSigned = s.net.direction === "sellerToBuyer" ? -s.net.amount : s.net.amount;
   const fee = o.registrationFee ?? null;
   const prepare = fee === null || s.paymentAtSettlement === null ? null : s.paymentAtSettlement + fee;
   const title = "残金決済のご案内";
   const body = html`
 <h1>${title}</h1>
-<div class="meta"><div class="customer">${buyer ?? ""} 様</div><div class="right">${dateJa(c.today)}</div></div>
+<div class="meta"><div class="customer">${buyer}</div><div class="right">${dateJa(c.today)}</div></div>
 <p>このたびはお取引をいただき、ありがとうございます。残金のお支払い(決済)について、次のとおりご案内いたします。</p>
 ${headTable([["物件", propertyLabel(d)], ["決済日時", dateTimeJa(d.settlementAt)], ["決済場所", d.settlementPlace]])}
 ${priceTable(c, PAID_BY_BUYER)}
@@ -86,7 +86,7 @@ ${companyBlock(c.company, c.logo)}`;
   return {
     html: documentHtml({ title, font: "mincho", body }),
     rows: [
-      { label: "宛先", value: buyer }, { label: "物件", value: propertyLabel(d) }, { label: "決済日時", value: dateTimeJa(d.settlementAt) },
+      { label: "宛先", value: namesOf(partiesOf(d, "buyer")) }, { label: "物件", value: propertyLabel(d) }, { label: "決済日時", value: dateTimeJa(d.settlementAt) },
       { label: "決済場所", value: d.settlementPlace }, { label: "売買価格", value: d.price }, { label: PAID_BY_BUYER, value: d.deposit ?? 0 }, { label: "残代金", value: s.remaining }, { label: "精算金", value: netSigned },
       { label: "預り敷金の承継(相殺)", value: s.depositOffset ? -s.depositOffset : null }, { label: "決済時のお支払額", value: s.paymentAtSettlement },
       { label: "登記費用(司法書士へ)", value: fee }, ...(prepare === null ? [] : [{ label: "当日ご用意いただく金額の合計", value: prepare }]),
@@ -155,7 +155,7 @@ export function defaultSellerCosts(c: BusinessDocContext): { label: string; amou
 export function buildSellerSettlementGuide(c: BusinessDocContext, o: SellerGuideOptions): { html: string; rows: ValueRow[] } {
   const s = c.calc.settlement;
   const d = c.deal;
-  const seller = namesOf(partiesOf(d, "seller"));
+  const seller = addresseeOf(partiesOf(d, "seller"));
   const netSigned = s.net.direction === "sellerToBuyer" ? -s.net.amount : s.net.amount;
   const costTotal = o.costs.reduce((a, r) => a + r.amount, 0);
   const receive = s.paymentAtSettlement === null ? null : s.paymentAtSettlement - costTotal;
@@ -165,7 +165,7 @@ export function buildSellerSettlementGuide(c: BusinessDocContext, o: SellerGuide
   const title = "残金決済のご案内";
   const body = html`
 <h1>${title}</h1>
-<div class="meta"><div class="customer">${seller ?? ""} 様</div><div class="right">${dateJa(c.today)}</div></div>
+<div class="meta"><div class="customer">${seller}</div><div class="right">${dateJa(c.today)}</div></div>
 <p>このたびはお取引をいただき、ありがとうございます。残代金のお受け取り(決済)について、次のとおりご案内いたします。</p>
 ${headTable([["物件", propertyLabel(d)], ["決済日時", dateTimeJa(d.settlementAt)], ["決済場所", d.settlementPlace]])}
 ${priceTable(c, RECEIVED_BY_SELLER)}
@@ -193,7 +193,7 @@ ${companyBlock(c.company, c.logo)}`;
   return {
     html: documentHtml({ title, font: "mincho", body }),
     rows: [
-      { label: "宛先", value: seller }, { label: "物件", value: propertyLabel(d) }, { label: "決済日時", value: dateTimeJa(d.settlementAt) },
+      { label: "宛先", value: namesOf(partiesOf(d, "seller")) }, { label: "物件", value: propertyLabel(d) }, { label: "決済日時", value: dateTimeJa(d.settlementAt) },
       { label: "決済場所", value: d.settlementPlace }, { label: "売買価格", value: d.price }, { label: RECEIVED_BY_SELLER, value: d.deposit ?? 0 }, { label: "残代金", value: s.remaining }, { label: "精算金", value: netSigned },
       { label: "預り敷金の承継(相殺)", value: s.depositOffset ? -s.depositOffset : null },
       { label: "諸費用", heading: true }, ...o.costs.map((r) => ({ label: r.label, value: r.amount })),

@@ -5,8 +5,7 @@ import { jstDateString } from "../../datetime";
 import type { Lease } from "../../schemas";
 import { html, type SafeHtml } from "../html";
 import { companyBlock, documentHtml } from "../layout";
-import {
-  DASH, LEASE_CONTRACT_LABELS, bankAccountText, dateJa, headTable, money, namesOf, partiesOf, propertyLabel, signBox,
+import { honorNamesOf,   DASH, LEASE_CONTRACT_LABELS, bankAccountText, dateJa, headTable, money, namesOf, partiesOf, propertyLabel, signBox,
   type BusinessDocContext, type ValueRow,
 } from "./common";
 
@@ -127,7 +126,7 @@ export function buildLandlordChangeNotice(c: BusinessDocContext, o: LandlordChan
 <div class="meta"><div class="customer">${roomOf(l, i)} ${l.tenant} 様</div><div class="right">${dateJa(c.today)}</div></div>
 <p>平素は格別のご高配を賜り、厚く御礼申し上げます。</p>
 <p>このたび、お借りいただいている下記の建物が売買されたことにより、賃貸人が次のとおり変わりますので、お知らせいたします。賃料・敷金などの賃貸借の条件は、そのまま新しい賃貸人に引き継がれます。</p>
-${headTable([["物件", propertyLabel(d)], ["お部屋", roomOf(l, i)], ["変更日", changeOn], ["新しい賃貸人", namesOf(buyers)]])}
+${headTable([["物件", propertyLabel(d)], ["お部屋", roomOf(l, i)], ["変更日", changeOn], ["新しい賃貸人", honorNamesOf(buyers)]])}
 <h2>賃料のお振込先</h2>
 <p>変更日以降にお支払い期日が来る賃料は、次の口座へお振り込みください。</p>
 <p class="remarks" style="font-size:10pt">${o.payee ?? "(新しい賃貸人から、あらためてご案内いたします)"}</p>
@@ -179,7 +178,7 @@ export function buildHandoverChecklist(c: BusinessDocContext): { html: string; r
   const body = html`
 <h1>引継書類チェックリスト</h1>
 <div class="right">${dateJa(c.today)}</div>
-${headTable([["取引番号", d.dealNo], ["物件", propertyLabel(d)], ["売主", namesOf(partiesOf(d, "seller"))], ["買主", namesOf(partiesOf(d, "buyer"))]])}
+${headTable([["取引番号", d.dealNo], ["物件", propertyLabel(d)], ["売主", honorNamesOf(partiesOf(d, "seller"))], ["買主", honorNamesOf(partiesOf(d, "buyer"))]])}
 <h2>お部屋ごと</h2>
 <table>${head}${roomRows.map(tr)}</table>
 <h2>全体</h2>
