@@ -8,15 +8,26 @@ import { buildFollowupFooter, composeFollowupText, type FollowupSender } from ".
 import { buildFollowupUnsubscribeUrl } from "./unsubscribe-token";
 import { followupLockKey } from "./unsubscribe-record";
 import { loadFollowupSetupContext } from "./settings-store";
-import { FOLLOWUP_SERIES, followupStepsEnableProblems, type FollowupSeries, type FollowupStepsBySeries } from "./steps";
+import {
+  FOLLOWUP_PROPERTY_INTRODUCTION_ROUTES,
+  FOLLOWUP_SERIES,
+  followupStepsEnableProblems,
+  type FollowupSeries,
+  type FollowupStepsBySeries,
+} from "./steps";
 import { classifyInquiry, classifyProperty, decideFollowup, initialNewPosition, type CaseClass, type DecideRow } from "./decide";
+import { findOwnerNameExclusions } from "@/lib/dm-batch/agent-name-exclusion";
+
+// 対象の導入ルートの決まり(と理由)は steps.ts(設定の画面からも読むため画面でも読める場所に置く)。
+export { FOLLOWUP_PROPERTY_INTRODUCTION_ROUTES };
 
 /**
  * 追客メールの1回分の実行(15分おきの timer から・設計 2026-11-16 §2・§3)。
  * 1. OFF なら進行中を全部止めて終わり(disabled)
  * 2. 送っている途中(sending)のまま30分を過ぎた行を止める(interrupted=届いたか分からないので送り直さない)
  * 3. 送るのに足りないもの(SMTP・会社の設定・外向きの URL・鍵・文面)があれば、行に触らず終わり
- * 4. 新しい対象を見つけて行を作る(一括査定の物件・受付メールが届いた査定申込。2026-11-19 発注者: ON にする前からいるお客様も対象。
+ * 4. 新しい対象を見つけて行を作る(対象の導入ルートの物件=FOLLOWUP_PROPERTY_INTRODUCTION_ROUTES・2026-11-24 一括査定から広げた・
+ *    DM 送付不可と業者と同じ名前/自治体・国の所有者の物件は除く。受付メールが届いた査定申込。2026-11-19 発注者: ON にする前からいるお客様も対象。
  *    その場合は登録日・申込日から数えて、次に日が来る通から=initialNewPosition)
  * 5. 進行中の行を1つずつ見て、送る/飛ばす/待つ/保留へ移る/止める/終わり を決めて書く
  *
@@ -43,6 +54,43 @@ const MAX_STEPS_PER_ROW = 12;
  *   ほかの失敗と同じく、届いたか分からない=その追客を止める(送り直さない・@codex #757 P1)。
  */
 const NOT_SENT_CODES = new Set(["ECONNREFUSED", "EDNS", "ENOTFOUND", "EAI_AGAIN", "EAUTH", "ETLS"]);
+
+/**
+ * 物件の追客から外す理由(行を作るとき・進行中の行を見るとき・送る直前の読み直しで同じに見る)。
+ * - dm_no_send: DM 送付不可の物件(手紙を送らないと決めた物件にはメールも送らない)
+ * - owner_excluded: 今の所有者に、業者の名簿と同じ名前の人、または名前が自治体・国の人がいる
+ *   (DM と同じ判定=dm-batch/agent-name-exclusion.ts の findOwnerNameExclusions。ご本人から知らせたアドレスとは
+ *   言えない・営業のメールを送る相手ではない、という DM と同じ理由)。外字の名前はメールでは宛名を刷らないので外さない。
+ */
+type PropertyExclusion = "dm_no_send" | "owner_excluded";
+
+type PropertyForExclusion = {
+  dmStatus?: string | null;
+  propertyOwners: Array<{ owner: { id?: string } }>;
+};
+
+/** 物件ごとの外す理由(無ければ入れない)。所有者の名前の判定は DM と同じ SQL を1回だけ。 */
+async function propertyExclusions(
+  client: Pick<Prisma.TransactionClient, "$queryRaw">,
+  props: Array<PropertyForExclusion & { id: string }>,
+): Promise<Map<string, PropertyExclusion>> {
+  const out = new Map<string, PropertyExclusion>();
+  const ownerIds = [...new Set(props.flatMap((p) => p.propertyOwners.flatMap((o) => (o.owner.id ? [o.owner.id] : []))))];
+  const names = ownerIds.length > 0 ? await findOwnerNameExclusions(client, ownerIds, { mailingAddress: false }) : null;
+  for (const p of props) {
+    if (p.dmStatus === "no_send") {
+      out.set(p.id, "dm_no_send");
+      continue;
+    }
+    if (
+      names &&
+      p.propertyOwners.some((o) => !!o.owner.id && (names.agentOwnerIds.has(o.owner.id) || names.publicOwnerIds.has(o.owner.id)))
+    ) {
+      out.set(p.id, "owner_excluded");
+    }
+  }
+  return out;
+}
 
 const CLOSED_CASE_STATUSES = [
   "negotiating",
@@ -147,7 +195,8 @@ async function loadSteps(): Promise<FollowupStepsBySeries> {
 const OWNER_EMAILS_SELECT = {
   where: { endDate: null },
   orderBy: [{ isPrimary: "desc" as const }, { createdAt: "asc" as const }],
-  select: { owner: { select: { email: true } } },
+  // id は業者と同じ名前・自治体や国の所有者の判定に使う(今の所有者の全員を見る)
+  select: { owner: { select: { id: true, email: true } } },
 };
 
 /** 物件の最初の所有者のうち、メールがある1人のアドレス(元の書き方・比べる形)。 */
@@ -171,13 +220,18 @@ async function startFollowup(
   newNextPosition: number,
   /** 新規の流れが全部過ぎていて保留でもない=送るものが無い。進行中で作るとアドレスを塞ぐので完了で作る(@codex #762 P2) */
   nothingToSend: boolean,
+  /** 物件の追客から外す理由(業者と同じ名前・自治体や国の所有者)。あれば止めた行として作る(毎回見直さないため) */
+  excluded: PropertyExclusion | null = null,
 ): Promise<"active" | "stopped" | "completed" | "exists"> {
   return prisma.$transaction(async (tx) => {
     // 探している最中に OFF(や OFF→ON)にされていたら作らない。
     if (!(await lockEnabledPeriod(tx, enabledAt))) return "exists";
     let status = "active";
     let stopReason: string | null = null;
-    if (!email) {
+    if (excluded) {
+      status = "stopped";
+      stopReason = excluded;
+    } else if (!email) {
       status = "stopped";
       stopReason = "no_address";
     } else {
@@ -235,7 +289,9 @@ async function discover(
 ) {
   const properties = await prisma.property.findMany({
     where: {
-      introductionRoute: "bulk_assessment",
+      introductionRoute: { in: [...FOLLOWUP_PROPERTY_INTRODUCTION_ROUTES] },
+      // DM 送付不可の物件は探さない(行も作らない=あとで送付可に戻せば対象になる)
+      dmStatus: { not: "no_send" },
       leadFollowup: { is: null },
       caseStatus: { notIn: [...CLOSED_CASE_STATUSES] },
       // メールのある所有者がいる物件だけ(メールの無い物件で毎回の上限を埋めない)。
@@ -243,8 +299,11 @@ async function discover(
     },
     orderBy: { createdAt: "asc" },
     take: DISCOVER_LIMIT,
-    select: { id: true, createdAt: true, caseStatus: true, propertyOwners: OWNER_EMAILS_SELECT },
+    select: { id: true, createdAt: true, caseStatus: true, dmStatus: true, propertyOwners: OWNER_EMAILS_SELECT },
   });
+  // 業者と同じ名前・自治体や国の所有者がいる物件は SQL の条件にできない(DM と同じ名前のそろえ方)ので、ここで見る。
+  // 止めた行として作る=次の回に同じ物件で探す枠を埋めない。
+  const excludedProps = properties.length > 0 ? await propertyExclusions(prisma, properties) : new Map<string, PropertyExclusion>();
   for (const p of properties) {
     if (Date.now() > deadline) return;
     const email = firstOwnerEmail(p.propertyOwners);
@@ -257,6 +316,7 @@ async function discover(
       enabledAt,
       pos,
       pos > steps.new.length && classifyProperty(p.caseStatus) !== "hold",
+      excludedProps.get(p.id) ?? null,
     );
     countStart(r, summary);
   }
@@ -296,9 +356,14 @@ type ActiveRow = DecideRow & {
   emailNormalized: string | null;
 };
 
-type TargetState = { cls: CaseClass; email: { raw: string; normalized: string } | null } | null;
+type TargetState = {
+  cls: CaseClass;
+  email: { raw: string; normalized: string } | null;
+  /** 物件の追客から外す理由(DM 送付不可・業者と同じ名前や自治体・国の所有者)。申込は常に null */
+  excluded: PropertyExclusion | null;
+} | null;
 
-type TargetReader = Pick<Prisma.TransactionClient, "property" | "dmInquiry">;
+type TargetReader = Pick<Prisma.TransactionClient, "property" | "dmInquiry" | "$queryRaw">;
 
 /** 行の対象(物件・申込)の今の状態とアドレス。client は送る直前の読み直しでは transaction を渡す。 */
 async function loadTargets(rows: ActiveRow[], client: TargetReader = prisma): Promise<Map<string, TargetState>> {
@@ -308,24 +373,36 @@ async function loadTargets(rows: ActiveRow[], client: TargetReader = prisma): Pr
     propIds.length
       ? client.property.findMany({
           where: { id: { in: propIds } },
-          select: { id: true, caseStatus: true, propertyOwners: OWNER_EMAILS_SELECT },
+          select: { id: true, caseStatus: true, dmStatus: true, propertyOwners: OWNER_EMAILS_SELECT },
         })
       : Promise.resolve([]),
     inqIds.length
       ? client.dmInquiry.findMany({ where: { id: { in: inqIds } }, select: { id: true, handleStatus: true, email: true } })
       : Promise.resolve([]),
   ]);
+  // 外す理由も同じ client で読む(送る直前の読み直しでは鍵の下の transaction=途中で送付不可にされた物件で止まる)。
+  const excludedProps = props.length > 0 ? await propertyExclusions(client, props) : new Map<string, PropertyExclusion>();
   const byProp = new Map(props.map((p) => [p.id, p]));
   const byInq = new Map(inqs.map((q) => [q.id, q]));
   const out = new Map<string, TargetState>();
   for (const r of rows) {
     if (r.targetType === "property" && r.propertyId) {
       const p = byProp.get(r.propertyId);
-      out.set(r.id, p ? { cls: classifyProperty(p.caseStatus), email: firstOwnerEmail(p.propertyOwners) } : null);
+      out.set(
+        r.id,
+        p
+          ? { cls: classifyProperty(p.caseStatus), email: firstOwnerEmail(p.propertyOwners), excluded: excludedProps.get(p.id) ?? null }
+          : null,
+      );
     } else if (r.targetType === "inquiry" && r.inquiryId) {
       const q = byInq.get(r.inquiryId);
       const normalized = normalizeFollowupEmail(q?.email);
-      out.set(r.id, q ? { cls: classifyInquiry(q.handleStatus), email: normalized && q.email ? { raw: q.email.trim(), normalized } : null } : null);
+      out.set(
+        r.id,
+        q
+          ? { cls: classifyInquiry(q.handleStatus), email: normalized && q.email ? { raw: q.email.trim(), normalized } : null, excluded: null }
+          : null,
+      );
     } else {
       out.set(r.id, null);
     }
@@ -388,6 +465,15 @@ async function sendOne(
     // 対象の今の状態とアドレスを読み直す(先に読んだ状態は数分前のことがある。その間に担当が「対応済み」・
     // 商談中などにしていたら、ここで気づいて送らない=次の回の判断に任せる・@codex #757 P2)。
     const fresh = (await loadTargets([row], tx)).get(row.id) ?? null;
+    if (fresh?.excluded) {
+      // その間に DM 送付不可にされた・所有者が業者と同じ名前や自治体・国になった物件は、送らずにここで止める
+      // (次の回に任せると、また送る直前まで進んでしまう)。
+      const s = await tx.leadFollowup.updateMany({
+        where: { id: row.id, status: "active" },
+        data: { status: "stopped", stopReason: fresh.excluded, stoppedAt: now, claimedAt: null },
+      });
+      return s.count > 0 ? "excluded" : "lost";
+    }
     if (!fresh || !fresh.email || fresh.email.normalized !== to.normalized) return "changed";
     const again = decideFollowup(row, fresh.cls, ctx.steps, now);
     if (again.kind !== "send" || again.series !== series || again.position !== position) return "changed";
@@ -413,7 +499,7 @@ async function sendOne(
     });
     return c.count > 0 ? "claimed" : "lost";
   });
-  if (claim === "unsubscribed") {
+  if (claim === "unsubscribed" || claim === "excluded") {
     summary.stopped += 1;
     return;
   }
@@ -494,6 +580,10 @@ async function evaluateRow(
   summary.evaluated += 1;
   if (!target) {
     if (await stopRow(row, "target_deleted", now)) summary.stopped += 1;
+    return false;
+  }
+  if (target.excluded) {
+    if (await stopRow(row, target.excluded, now)) summary.stopped += 1;
     return false;
   }
   if (!target.email || target.email.normalized !== row.emailNormalized) {

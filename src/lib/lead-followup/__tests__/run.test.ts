@@ -25,8 +25,17 @@ const setup = vi.hoisted(() => ({
 vi.mock("@/lib/lead-followup/settings-store", () => setup);
 const mail = vi.hoisted(() => ({ loadMailSendConfig: vi.fn() }));
 vi.mock("@/lib/mail/mail-config", () => ({ MAIL_CONFIG_ID: "singleton", loadMailSendConfig: mail.loadMailSendConfig }));
+// 業者と同じ名前・自治体や国の所有者の判定(SQL は DM と同じもの)は差し替える。
+const names = vi.hoisted(() => ({ findOwnerNameExclusions: vi.fn() }));
+vi.mock("@/lib/dm-batch/agent-name-exclusion", () => names);
 
-import { isWithinSendHoursJst, normalizeFollowupEmail, runLeadFollowups } from "@/lib/lead-followup/run";
+import {
+  FOLLOWUP_PROPERTY_INTRODUCTION_ROUTES,
+  isWithinSendHoursJst,
+  normalizeFollowupEmail,
+  runLeadFollowups,
+} from "@/lib/lead-followup/run";
+import { INTRODUCTION_ROUTE_VALUES } from "@/lib/property-types";
 import { NEW_FLOW_ENDED_BY_HOLD } from "@/lib/lead-followup/decide";
 import { writeAuditLog } from "@/lib/audit";
 
@@ -89,7 +98,12 @@ beforeEach(() => {
   setup.loadFollowupSetupContext.mockResolvedValue({ sender, unsubscribeBaseUrl: "https://pub.example.test/", problems: [] });
   mail.loadMailSendConfig.mockResolvedValue({ host: "h", port: 465, secure: true, user: "u", pass: "p", from: "f@example.test" });
   sendMail.mockResolvedValue({ ok: true });
+  names.findOwnerNameExclusions.mockResolvedValue(noExclusions());
 });
+
+function noExclusions(over: { agent?: string[]; public?: string[] } = {}) {
+  return { agentOwnerIds: new Set(over.agent ?? []), gaijiOwnerIds: new Set<string>(), publicOwnerIds: new Set(over.public ?? []) };
+}
 
 const run = (now = NOW, opts: Record<string, unknown> = {}) =>
   runLeadFollowups(now, { sendMail, deadline: Date.now() + 60_000, ...opts });
@@ -150,10 +164,10 @@ describe("OFF・準備不足", () => {
 });
 
 describe("新しい対象を見つける", () => {
-  it("一括査定・行が無い・終わっていない・メールのある所有者がいる物件を探す(ON にする前からいるお客様も・2026-11-19)", async () => {
+  it("対象の導入ルート・行が無い・終わっていない・メールのある所有者がいる物件を探す(ON にする前からいるお客様も・2026-11-19)", async () => {
     await run();
     const where = db.property.findMany.mock.calls[0][0].where;
-    expect(where).toMatchObject({ introductionRoute: "bulk_assessment", leadFollowup: { is: null } });
+    expect(where).toMatchObject({ introductionRoute: { in: [...FOLLOWUP_PROPERTY_INTRODUCTION_ROUTES] }, leadFollowup: { is: null } });
     expect(where.createdAt).toBeUndefined();
     expect(where.caseStatus.notIn).toContain("negotiating");
     expect(where.caseStatus.notIn).not.toContain("hold");
@@ -518,5 +532,102 @@ describe("@codex #762: 送るものが無い古いお客様は、同じアドレ
     const s = await run();
     expect(s.startedCompleted).toBe(1);
     expect(db.leadFollowup.createMany.mock.calls[0][0].data[0]).toMatchObject({ inquiryId: "q1", status: "completed" });
+  });
+});
+
+describe("物件の対象を広げる(2026-11-24 発注者承認)", () => {
+  const OWNER_ID = "5e6f7a8b-9c0d-4e1f-8a2b-3c4d5e6f7a8b";
+  const found = (over: Record<string, unknown> = {}) => ({
+    id: PROP_ID,
+    createdAt: CREATED,
+    caseStatus: "contact_attempting",
+    dmStatus: "send",
+    propertyOwners: [{ owner: { id: OWNER_ID, email: "owner@example.test" } }],
+    ...over,
+  });
+
+  it("対象の導入ルートは 一括査定・DM反響・電話問い合わせ・Web問い合わせ・紹介 だけ(受付帳取込・現地調査・手入力・その他・空は入れない)", async () => {
+    await run();
+    const allowed: unknown[] = db.property.findMany.mock.calls[0][0].where.introductionRoute.in;
+    const expected: Record<string, boolean> = {
+      bulk_assessment: true,
+      dm_response: true,
+      phone_inquiry: true,
+      web_inquiry: true,
+      referral: true,
+      reception_csv: false,
+      field_survey: false,
+      manual_entry: false,
+      other: false,
+    };
+    // 導入ルートの値を全部見る(増えたらここで気づく)
+    expect(Object.keys(expected).sort()).toEqual([...INTRODUCTION_ROUTE_VALUES].sort());
+    for (const v of INTRODUCTION_ROUTE_VALUES) expect(allowed.includes(v)).toBe(expected[v]);
+    // 空(null)は `in` に入らない=対象にしない
+    expect(allowed.includes(null)).toBe(false);
+    expect(allowed).toHaveLength(5);
+  });
+
+  it("DM 送付不可(no_send)の物件は探さない", async () => {
+    await run();
+    expect(db.property.findMany.mock.calls[0][0].where.dmStatus).toEqual({ not: "no_send" });
+  });
+
+  it("業者と同じ名前の所有者がいる物件は、止めた行として作る(送らない・毎回見直さない)", async () => {
+    db.property.findMany.mockResolvedValueOnce([found()]);
+    names.findOwnerNameExclusions.mockResolvedValueOnce(noExclusions({ agent: [OWNER_ID] }));
+    const s = await run();
+    expect(names.findOwnerNameExclusions.mock.calls[0][1]).toEqual([OWNER_ID]);
+    expect(s).toMatchObject({ started: 0, startedStopped: 1 });
+    expect(db.leadFollowup.createMany.mock.calls[0][0].data[0]).toMatchObject({ propertyId: PROP_ID, status: "stopped", stopReason: "owner_excluded" });
+  });
+
+  it("所有者が自治体・国の物件も、止めた行として作る", async () => {
+    db.property.findMany.mockResolvedValueOnce([found()]);
+    names.findOwnerNameExclusions.mockResolvedValueOnce(noExclusions({ public: [OWNER_ID] }));
+    const s = await run();
+    expect(s.startedStopped).toBe(1);
+    expect(db.leadFollowup.createMany.mock.calls[0][0].data[0]).toMatchObject({ status: "stopped", stopReason: "owner_excluded" });
+  });
+
+  it("外字だけの所有者は外さない(宛名を刷らないメールなので)", async () => {
+    db.property.findMany.mockResolvedValueOnce([found()]);
+    names.findOwnerNameExclusions.mockResolvedValueOnce({ agentOwnerIds: new Set(), gaijiOwnerIds: new Set([OWNER_ID]), publicOwnerIds: new Set() });
+    const s = await run();
+    expect(s.started).toBe(1);
+  });
+
+  it("進行中の物件が DM 送付不可になっていたら止める(dm_no_send)", async () => {
+    withActiveRows([activeRow()], [property({ dmStatus: "no_send" })]);
+    const s = await run();
+    expect(s.stopped).toBe(1);
+    expect(db.leadFollowup.updateMany.mock.calls.map((c) => c[0].data.stopReason)).toContain("dm_no_send");
+    expect(sendMail).not.toHaveBeenCalled();
+  });
+
+  it("送る直前(鍵の下)の読み直しで DM 送付不可になっていたら、送らずに止める", async () => {
+    db.leadFollowup.findMany.mockResolvedValue([activeRow({ newNextPosition: 1 })]);
+    db.property.findMany
+      .mockResolvedValueOnce([])
+      .mockResolvedValueOnce([property()])
+      .mockResolvedValueOnce([property({ dmStatus: "no_send" })]);
+    const s = await run();
+    expect(s).toMatchObject({ sent: 0, stopped: 1 });
+    expect(sendMail).not.toHaveBeenCalled();
+    expect(db.leadFollowup.updateMany.mock.calls.some((c) => c[0].data.status === "sending")).toBe(false);
+    const stop = db.leadFollowup.updateMany.mock.calls.find((c) => c[0].data.stopReason === "dm_no_send");
+    expect(stop?.[0].where).toMatchObject({ id: ROW_ID, status: "active" });
+  });
+
+  it("送る直前の読み直しで所有者が業者と同じ名前になっていたら、送らずに止める", async () => {
+    const owned = property({ propertyOwners: [{ owner: { id: OWNER_ID, email: "owner@example.test" } }] });
+    withActiveRows([activeRow({ newNextPosition: 1 })], [owned]);
+    names.findOwnerNameExclusions
+      .mockResolvedValueOnce(noExclusions())
+      .mockResolvedValueOnce(noExclusions({ agent: [OWNER_ID] }));
+    const s = await run();
+    expect(s).toMatchObject({ sent: 0, stopped: 1 });
+    expect(sendMail).not.toHaveBeenCalled();
+    expect(db.leadFollowup.updateMany.mock.calls.map((c) => c[0].data.stopReason)).toContain("owner_excluded");
   });
 });

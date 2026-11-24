@@ -9,10 +9,11 @@ import {
   type LeadFollowupStopResponse,
   type LeadFollowupView,
 } from "@/lib/api-client";
+import { isFollowupPropertyRoute } from "@/lib/lead-followup/steps";
 
 /**
  * 「追客メール」の様子と「追客を止める」ボタン(設計 2026-11-16 §6 PR2)。
- * - 物件の画面(一括査定の物件だけ)と、査定申込の一覧の行に出す。
+ * - 物件の画面(対象の導入ルートの物件だけ=FOLLOWUP_PROPERTY_INTRODUCTION_ROUTES・2026-11-24 一括査定から広げた)と、査定申込の一覧の行に出す。
  * - 様子はメールを平文で見られる人にだけ届く(API が null / visible=false を返す)=そのときは何も出さない。
  * - 止めたら終わり(再開なし)。押す前に確認を出す。
  */
@@ -91,7 +92,7 @@ function stopErrorMessage(e: unknown): string {
   const status = (e as { status?: number } | null)?.status;
   if (status === 403) return "追客を止める権限がありません";
   if (status === 404) return "見つかりませんでした。画面を読み直してください";
-  if (status === 409) return "一括査定の物件ではないため、追客メールの対象ではありません";
+  if (status === 409) return "追客メールの対象の導入ルートの物件ではありません";
   return "止められませんでした。少し待ってからもう一度押してください";
 }
 
@@ -115,7 +116,7 @@ function useStopAction(stop: () => Promise<LeadFollowupStopResponse>, onDone: (v
   return { busy, error, run };
 }
 
-/** 物件の画面の欄(一括査定の物件だけ)。 */
+/** 物件の画面の欄(対象の導入ルートの物件だけ)。 */
 export function PropertyLeadFollowupField({
   propertyId,
   introductionRoute,
@@ -125,7 +126,7 @@ export function PropertyLeadFollowupField({
   introductionRoute: string | null;
   canWrite: boolean;
 }) {
-  const target = introductionRoute === "bulk_assessment";
+  const target = isFollowupPropertyRoute(introductionRoute);
   const [view, setView] = useState<LeadFollowupView | null>(null);
   const { busy, error, run } = useStopAction(() => stopPropertyLeadFollowup(propertyId), setView);
 

@@ -1,4 +1,25 @@
 import { z } from "zod";
+import type { IntroductionRouteValue } from "@/lib/property-types";
+
+/**
+ * 追客メールを送る物件の導入ルート(2026-11-24 発注者承認で一括査定から広げた・run.ts の新しい対象探しが使う)。
+ * この経路の所有者のメールアドレスは、ご本人が DM への返信・問い合わせ・査定の依頼・紹介の連絡で自分から知らせたもの
+ * =特定電子メール法の「自分のメールアドレスを通知した者」に当たる。
+ * 受付帳取込・現地調査・手入力・その他・空(null)は、アドレスがご本人から来たと示せないので入れない。
+ * ⚠値は INTRODUCTION_ROUTE_VALUES(property-types.ts)の中から選ぶ(型で縛る)。設定の画面の説明もこの一覧から作る。
+ */
+export const FOLLOWUP_PROPERTY_INTRODUCTION_ROUTES = [
+  "bulk_assessment",
+  "dm_response",
+  "phone_inquiry",
+  "web_inquiry",
+  "referral",
+] as const satisfies readonly IntroductionRouteValue[];
+
+/** 物件の導入ルートが追客メールの対象か(物件の画面の欄・止める API が使う)。 */
+export function isFollowupPropertyRoute(route: string | null | undefined): boolean {
+  return !!route && (FOLLOWUP_PROPERTY_INTRODUCTION_ROUTES as readonly string[]).includes(route);
+}
 
 /**
  * 追客メールの文面(流れ・通)の決まり。純関数(DB・env に触らない)。
