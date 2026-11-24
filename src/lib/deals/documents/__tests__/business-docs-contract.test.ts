@@ -248,6 +248,11 @@ describe("取引完了確認書", () => {
     // 登録した住所・氏名とは別に、手書きの署名の空欄を当事者ごとに出す(@codex)
     expect(out.html.match(/<td class="sign-blank">署名<\/td>/g)?.length).toBe(2);
     expect(doc(C).build(ctx({ ...deal, parties: [] }), { handover: null }).html.match(/<td class="sign-blank">署名<\/td>/g)?.length).toBe(2);
+    // 横判でも押せる広さ(2026-11-24 発注者): 署名 75mm×28mm・印 22mm。仲介業者の欄も同じ広さ
+    expect(out.html).toContain(".sign-blank{width:75mm;height:28mm;");
+    expect(out.html).toContain(".seal-blank{width:22mm;height:28mm;");
+    expect(out.html).toContain('<td class="sign-blank-co"></td><td class="seal-blank">印</td>');
+    expect(out.html.match(/<td class="seal-blank">印<\/td>/g)?.length).toBe(3);
     // 仲介でない取引(買取再販)には仲介業者の欄を出さない
     expect(doc(C).build(ctx(), { handover: null }).html).not.toContain("仲介業者");
   });
