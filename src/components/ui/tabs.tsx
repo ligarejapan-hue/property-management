@@ -93,7 +93,12 @@ export function Tabs<K extends string = string>({
   const handleKeyDown = (e: KeyboardEvent<HTMLDivElement>) => {
     const idx = tabs.findIndex((t) => t.key === active);
     let next = -1;
-    if (e.key === "ArrowRight") next = (idx + 1) % tabs.length;
+    if (idx < 0) {
+      // 選択中のタブがこの段に無い(1つのパネルを2段のタブで切り替える画面・@codex #790 P2)。
+      //   -1 から数えると左で末尾の1つ前へ飛ぶので、右/Home=先頭・左/End=末尾にする。
+      if (e.key === "ArrowRight" || e.key === "Home") next = 0;
+      else if (e.key === "ArrowLeft" || e.key === "End") next = tabs.length - 1;
+    } else if (e.key === "ArrowRight") next = (idx + 1) % tabs.length;
     else if (e.key === "ArrowLeft") next = (idx - 1 + tabs.length) % tabs.length;
     else if (e.key === "Home") next = 0;
     else if (e.key === "End") next = tabs.length - 1;
@@ -106,6 +111,9 @@ export function Tabs<K extends string = string>({
     const btns = listRef.current?.querySelectorAll<HTMLButtonElement>('[role="tab"]');
     btns?.[next]?.focus();
   };
+  // Tab キーで入る1か所(roving tabIndex)。選択中のタブがこの段に無いときは先頭のタブにする
+  //   (無いと段ごと tabIndex=-1 になり、キーボードだけでは入れない・@codex #790 P2)。
+  const tabStop = tabs.some((t) => t.key === active) ? active : tabs[0]?.key;
   return (
     <div
       ref={listRef}
@@ -121,7 +129,7 @@ export function Tabs<K extends string = string>({
           role="tab"
           aria-selected={active === t.key}
           aria-controls={`${idBase}-panel`}
-          tabIndex={active === t.key ? 0 : -1}
+          tabIndex={tabStop === t.key ? 0 : -1}
           onClick={() => onChange(t.key)}
           className={`border-b-2 px-4 py-2 text-sm font-medium transition-colors group-data-[slider=ready]/tabs:border-transparent dark:group-data-[slider=ready]/tabs:border-transparent ${
             active === t.key

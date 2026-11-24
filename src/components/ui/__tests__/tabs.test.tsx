@@ -18,6 +18,28 @@ const TABS = [
 ];
 
 describe("Tabs", () => {
+  // @codex #790 P2: 1つのパネルを2段のタブで切り替える画面(所有者の直し)で、選択中のタブが
+  //   無い段は全部 tabIndex=-1 になり、キーボードだけでは入れなかった。
+  it("選択中のタブがこの段に無いときは、先頭のタブに Tab キーで入れる(tabIndex=0 はちょうど1つ)", () => {
+    const html = render(<Tabs idBase="t" tabs={TABS} active={"z" as "a"} onChange={() => {}} />);
+    const btns = html.match(/<button[^>]*>/g) ?? [];
+    expect(btns[0]).toContain('tabindex="0"');
+    expect(btns[1]).toContain('tabindex="-1"');
+    expect(html).not.toContain('aria-selected="true"');
+  });
+
+  it("選択中のタブがこの段にあるときは、今まで通りそのタブだけが tabIndex=0", () => {
+    const html = render(<Tabs idBase="t" tabs={TABS} active="b" onChange={() => {}} />);
+    const btns = html.match(/<button[^>]*>/g) ?? [];
+    expect(btns[0]).toContain('tabindex="-1"');
+    expect(btns[1]).toContain('tabindex="0"');
+  });
+
+  it("選択中のタブがこの段に無いときの矢印キー: 右/Home=先頭・左/End=末尾(-1 から数えて変な位置へ飛ばない)", () => {
+    const src = readFileSync(join(process.cwd(), "src/components/ui/tabs.tsx"), "utf8");
+    expect(src).toMatch(/if \(idx < 0\)/);
+  });
+
   it("active タブだけ indigo の下線+文字色(dark対応)", () => {
     const html = render(<Tabs idBase="t" tabs={TABS} active="a" onChange={() => {}} />);
     const btns = html.match(/<button[^>]*>/g) ?? [];
