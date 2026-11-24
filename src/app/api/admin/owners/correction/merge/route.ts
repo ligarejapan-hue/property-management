@@ -554,7 +554,15 @@ export async function POST(request: NextRequest) {
         ] = await Promise.all([
           tx.changeLog.findMany({
             where: { targetTable: "owners", targetId: sourceFresh.id },
-            select: { fieldName: true },
+            // 値・日時・記録した人も読む: 前の統合の記録(_merged_source_*)を master へ写すため。
+            select: {
+              fieldName: true,
+              oldValue: true,
+              newValue: true,
+              source: true,
+              changedBy: true,
+              changedAt: true,
+            },
           }),
           tx.ownerMemo.count({ where: { ownerId: sourceFresh.id } }),
           tx.propertyOwner.findMany({
@@ -796,9 +804,11 @@ export async function POST(request: NextRequest) {
           fieldName: string;
           oldValue: string | null;
           newValue: string | null;
-          source: "manual";
+          source: (typeof freshChangeLogRows)[number]["source"];
           changedBy: string;
           propertyId?: string;
+          /** 前の統合の記録を写すときだけ、元の日時を残す（経緯の並びを本当の順にする）。 */
+          changedAt?: Date;
         }> = [];
 
         // source の isArchived 変化（archive route と同じ shape）
@@ -877,6 +887,25 @@ export async function POST(request: NextRequest) {
         executedKeptFields = freshPlan
           ? freshPlan.keptSourceValues.map((k) => k.field)
           : [];
+
+        // 前の統合の記録を引き継ぐ（@codex R3）: B→A のあと A→C と続けて統合すると、B の値の記録
+        //   (_merged_source_*) は archive された A に残ったままになり、経緯（今つながっている
+        //   所有者の履歴だけを読む）から見えなくなる。同じ項目名・値・元の日時・記録した人のまま
+        //   master にも写す。source の行は消さない（A の履歴としても残す）。
+        //   ⚠個人の氏名住所一致は source に履歴があれば止まるので、実際に効くのは法人のペア。
+        for (const r of freshChangeLogRows) {
+          if (!r.fieldName.startsWith("_merged_source_")) continue;
+          changeLogs.push({
+            targetTable: "owners",
+            targetId: masterFresh.id,
+            fieldName: r.fieldName,
+            oldValue: r.oldValue,
+            newValue: r.newValue,
+            source: r.source,
+            changedBy: r.changedBy,
+            changedAt: r.changedAt,
+          });
+        }
 
         // master への合成: どの source から統合されたかを記録
         changeLogs.push({

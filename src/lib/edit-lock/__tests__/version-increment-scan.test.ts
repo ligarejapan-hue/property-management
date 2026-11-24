@@ -43,9 +43,9 @@ const VERSIONED: Record<string, string> = {
     "owner.name(断片型の救出)+version increment",
   "src/app/api/admin/owners/correction/corporate-restore-apply/route.ts:208":
     "owner.name/corporateNumber/companyRegistryNumber/address(分断型復元)+version increment",
-  "src/app/api/admin/owners/correction/merge/route.ts:746":
+  "src/app/api/admin/owners/correction/merge/route.ts:754":
     "owner.isArchived(統合で消えるsource)+version increment",
-  "src/app/api/admin/owners/correction/merge/route.ts:779":
+  "src/app/api/admin/owners/correction/merge/route.ts:787":
     "owner.currentAddress/currentZip(master引き継ぎ)+法人のペアの address/zip/phone/corporateNumber/companyRegistryNumber/email/nameKana(空欄だけ・2026-11-24)+version increment",
   "src/app/api/admin/owners/correction/mislink/route.ts:518":
     "owner の version のみ進める(所有者付け替えのinvalidation)",

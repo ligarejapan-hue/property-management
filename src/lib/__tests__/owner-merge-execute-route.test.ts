@@ -1384,3 +1384,38 @@ describe("POST merge: 法人のペア（番号の形式またぎ・住所と郵�
     expect(masterUpdates()).toHaveLength(0);
   });
 });
+
+// ── @codex R3: 続けて統合しても、前の統合の記録(_merged_source_*)を落とさない ─────────────
+describe("POST merge: 前の統合の記録を引き継ぐ", () => {
+  beforeEach(() => {
+    vi.mocked(getUserPermissions).mockResolvedValue(PERMS_CORP_WRITE);
+  });
+
+  it("source に残っている _merged_source_* の行を、元の日時・記録した人のまま master にも写す（source の行は消さない）", async () => {
+    setupCorpPair({ phone: "06-0000-0000" });
+    const earlier = new Date("2026-11-01T01:02:03Z");
+    pm._tx.changeLog.findMany.mockResolvedValue([
+      { fieldName: "phone", oldValue: "06-1", newValue: "06-0000-0000", source: "manual", changedBy: "user-9", changedAt: earlier },
+      { fieldName: "_merged_source_address", oldValue: null, newValue: "京都府架空市3-3", source: "manual", changedBy: "user-9", changedAt: earlier },
+      { fieldName: "_merged_from", oldValue: null, newValue: "33333333-3333-4333-8333-333333333333", source: "manual", changedBy: "user-9", changedAt: earlier },
+    ]);
+    const res = await execCorpMerge();
+    expect(res.status).toBe(200);
+    const carried = changeLogEntries().filter(
+      (e) => e.targetId === MASTER_ID && e.newValue === "京都府架空市3-3",
+    );
+    expect(carried).toEqual([
+      expect.objectContaining({
+        targetTable: "owners",
+        fieldName: "_merged_source_address",
+        oldValue: null,
+        changedBy: "user-9",
+        changedAt: earlier,
+      }),
+    ]);
+    // 統合の記録以外（phone の変更・_merged_from）は写さない
+    expect(changeLogEntries().filter((e) => e.targetId === MASTER_ID && e.newValue === "06-0000-0000" && e.fieldName === "phone")).toEqual([]);
+    // source の行を消す呼び出しは無い
+    expect((pm._tx.changeLog as Record<string, unknown>).deleteMany).toBeUndefined();
+  });
+});

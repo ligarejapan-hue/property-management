@@ -71,8 +71,8 @@ Task 7 が直した「謄本取込が所有者の法人番号を版番号を進�
 | `src/app/api/admin/owners/correction/corporate-number-bulk-apply/route.ts:124` | `owner.corporateNumber` |
 | `src/app/api/admin/owners/correction/corporate-restore-apply/route.ts:135` | `owner.name` |
 | `src/app/api/admin/owners/correction/corporate-restore-apply/route.ts:208` | `owner.name`/`corporateNumber`/`companyRegistryNumber`/`address` |
-| `src/app/api/admin/owners/correction/merge/route.ts:746` | `owner.isArchived`(source側の統合アーカイブ) |
-| `src/app/api/admin/owners/correction/merge/route.ts:779` | `owner.currentAddress`/`currentZip`(master引き継ぎ)+法人のペアの `address`/`zip`/`phone`/`corporateNumber`/`companyRegistryNumber`/`email`/`nameKana`(空欄だけ写す・2026-11-24) |
+| `src/app/api/admin/owners/correction/merge/route.ts:754` | `owner.isArchived`(source側の統合アーカイブ) |
+| `src/app/api/admin/owners/correction/merge/route.ts:787` | `owner.currentAddress`/`currentZip`(master引き継ぎ)+法人のペアの `address`/`zip`/`phone`/`corporateNumber`/`companyRegistryNumber`/`email`/`nameKana`(空欄だけ写す・2026-11-24) |
 | `src/app/api/admin/owners/correction/mislink/route.ts:518` | `owner.version` のみ(付け替えのinvalidation) |
 | `src/app/api/admin/owners/correction/mislink/route.ts:531` | `owner.version` のみ(target側) |
 | `src/app/api/admin/owners/correction/mislink/route.ts:545` | `property.version` のみ |
