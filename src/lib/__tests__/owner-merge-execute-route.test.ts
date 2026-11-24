@@ -1335,3 +1335,52 @@ describe("POST merge: 法人のペア（メール・会社法人等番号・フ�
     expect(pm._tx.changeLog.createMany).not.toHaveBeenCalled();
   });
 });
+
+// ── @codex R2: 形式をまたぐ番号の食い違い・住所と郵便番号の組 ─────────────────────
+describe("POST merge: 法人のペア（番号の形式またぎ・住所と郵便番号の組）", () => {
+  beforeEach(() => {
+    vi.mocked(getUserPermissions).mockResolvedValue(PERMS_CORP_WRITE);
+  });
+
+  it("⚠tx 内で読み直すと、相手の12桁が自分の13桁の後ろ12桁と違っていたら止める", async () => {
+    // 010001012345 から作った13桁 = 4010001012345
+    setupCorpPair(
+      { corporateNumber: "4010001012345" },
+      {},
+      { source: { companyRegistryNumber: "020001054321" } },
+    );
+    const res = await execCorpMerge();
+    expect(res.status).toBe(422);
+    const body = await res.json();
+    expect(body.error.blockReasons).toContain("company_registry_number_conflict");
+    expect(pm._tx.changeLog.createMany).not.toHaveBeenCalled();
+  });
+
+  it("master の住所が空で郵便番号が違えば、住所と郵便番号を組で上書きし、古い郵便番号を変更履歴に残す", async () => {
+    setupCorpPair(
+      { address: null, zip: "100-0000", phone: "06-0000-0000" },
+      { zip: "530-0000" },
+    );
+    const res = await execCorpMerge();
+    expect(res.status).toBe(200);
+    const data = masterUpdates()[0].data;
+    expect(data.address).toBe("大阪府架空市2-2");
+    expect(data.zip).toBe("530-0000");
+    expect(changeLogEntries()).toContainEqual(
+      expect.objectContaining({ fieldName: "zip", oldValue: "100-0000", newValue: "530-0000" }),
+    );
+  });
+
+  it("⚠郵便番号の編集権限が無ければ、住所だけ写すのではなく 403", async () => {
+    vi.mocked(getUserPermissions).mockResolvedValue(
+      PERMS_CORP_WRITE.filter((p) => p.resource !== "owner_zip"),
+    );
+    setupCorpPair(
+      { address: null, zip: "100-0000", phone: "06-0000-0000" },
+      { zip: "530-0000" },
+    );
+    const res = await execCorpMerge();
+    expect(res.status).toBe(403);
+    expect(masterUpdates()).toHaveLength(0);
+  });
+});

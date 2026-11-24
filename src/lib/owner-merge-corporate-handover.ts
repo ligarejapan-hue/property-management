@@ -7,7 +7,8 @@
  * | 項目 | master が空・source に値 | 両方に値があって違う | 同じ（表記の違いだけ） |
  * |---|---|---|---|
  * | 登記上の住所（address） | master へ写す | 写さない（source の住所は必ず記録に残る） | 何もしない |
- * | 郵便番号（zip） | 住所を写すとき・同じ住所のときだけ写す | 写さず記録に残す | 何もしない |
+ * | 郵便番号（zip） | 同じ住所のときだけ写す | 写さず記録に残す | 何もしない |
+ * | （住所を写すとき） | 住所と組で source の郵便番号にそろえる（master の別の番号は上書き・source が空なら空に） | ← | 何もしない |
  * | 電話（phone） | 写す | 写さず記録に残す | 何もしない |
  * | 法人番号（corporateNumber・13桁） | 13桁にそろえて写す | 統合の門で止まる（別の法人） | 何もしない |
  * | 会社法人等番号（companyRegistryNumber・12桁） | 12桁にそろえて写す | 統合の門で止まる（別の法人） | 何もしない |
@@ -62,8 +63,11 @@ export interface CorporateHandoverState {
 }
 
 export interface CorporateHandoverPlan {
-  /** master へ写す値（master が空の項目だけ）。 */
-  writes: Partial<Record<CorporateHandoverField, string>>;
+  /**
+   * master へ写す値（master が空の項目だけ）。null は「空にする」（住所と組で郵便番号を
+   * そろえるときだけ使う）。
+   */
+  writes: Partial<Record<CorporateHandoverField, string | null>>;
   /** 写さないが、消えないよう master の変更履歴に残す source の値（住所は sourceAddress で残る）。 */
   keptSourceValues: Array<{ field: CorporateHandoverField; value: string }>;
   /** 必ず記録に残す source の登記上の住所（空なら null）。 */
@@ -145,21 +149,28 @@ export function planCorporateFieldHandover(
   const writes: Writes = {};
   const kept: Kept = [];
 
-  // 住所と郵便番号（郵便番号は住所とそろうときだけ写す＝別の住所の番号を混ぜない）
+  // 住所と郵便番号は1組（@codex R2）。
+  // - 住所を写すとき（master の住所が空）は、郵便番号も source の値にそろえる。master に別の
+  //   郵便番号が残っていれば上書きし、source の郵便番号が空なら master の郵便番号も空にする
+  //   （別の住所の番号を組にしたまま残さない）。古い番号は変更履歴の oldValue に残る。
+  //   郵便番号を書くので owner_zip の編集権限も要る（無ければ統合を断る＝住所だけ写さない）。
+  // - 同じ住所なら、master の郵便番号が空のときだけ source の番号を写す。違えば記録に残す。
+  // - 住所が違うなら写さず、違う郵便番号は記録に残す。
   const srcAddress = trimmed(source.address);
   const masterAddress = trimmed(master.address);
   const srcZip = trimmed(source.zip);
   const masterZip = trimmed(master.zip);
+  const sameZipValue = normalizeZipForGroup(masterZip) === normalizeZipForGroup(srcZip);
   let zipBelongsToMasterAddress = false;
   if (srcAddress !== "") {
     if (masterAddress === "") {
       writes.address = srcAddress;
-      zipBelongsToMasterAddress = true;
+      if (!sameZipValue) writes.zip = srcZip === "" ? null : srcZip;
     } else if (normalizeAddress(masterAddress) === normalizeAddress(srcAddress)) {
       zipBelongsToMasterAddress = true;
     }
   }
-  if (srcZip !== "") {
+  if (srcZip !== "" && writes.address === undefined) {
     const sameZip = normalizeZipForGroup(masterZip) === normalizeZipForGroup(srcZip);
     if (masterZip === "" && zipBelongsToMasterAddress) {
       writes.zip = srcZip;

@@ -76,7 +76,21 @@ export function resolveOwnerMergeMatch(
   // ⚠会社法人等番号（12桁）も両方あって違えば別の法人（名前・住所が同じでも止める）。
   const crnMaster = normalizeCompanyRegistryNumber(master.companyRegistryNumber);
   const crnSource = normalizeCompanyRegistryNumber(source.companyRegistryNumber);
-  if (crnMaster !== null && crnSource !== null && crnMaster !== crnSource) {
+  // ⚠形式をまたいで比べる（@codex R2）: 片方は13桁の法人番号だけ・もう片方は12桁の会社法人等番号だけ、
+  //   のときも別の法人を見逃さない。13桁 = チェックデジット1桁 + 12桁の会社法人等番号
+  //   （calculateCorporateNumberFromCompanyNumber の逆）なので、13桁の後ろ12桁と相手の12桁を比べる。
+  //   同じ形式どうしで比べられるときはそちらだけで決める（1人の中で13桁と12桁が食い違っている
+  //   データでも、比べられるものだけを比べる＝落ちない・余計に止めない）。
+  //   チェックデジットは見ない（打ち間違いの1桁で別の法人扱いにしない）。
+  const crossConflict =
+    !(cnMaster !== null && cnSource !== null) &&
+    !(crnMaster !== null && crnSource !== null) &&
+    ((cnMaster !== null && crnSource !== null && cnMaster.slice(1) !== crnSource) ||
+      (cnSource !== null && crnMaster !== null && cnSource.slice(1) !== crnMaster));
+  if (
+    (crnMaster !== null && crnSource !== null && crnMaster !== crnSource) ||
+    crossConflict
+  ) {
     return {
       matchedBy: null,
       corporatePair: false,

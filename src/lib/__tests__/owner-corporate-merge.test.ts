@@ -13,6 +13,7 @@ import { buildOwnerCorporateNameDuplicateKey } from "../owner-correction";
 import { hasCorporateMarkerWord } from "../owner-honorific";
 import { resolveOwnerMergeMatch } from "../owner-merge-match";
 import { checkOwnerMergeSafety } from "../owner-merge";
+import { calculateCorporateNumberFromCompanyNumber } from "../corporate-number";
 import {
   planCorporateFieldHandover,
   requiredCorporateHandoverPermissions,
@@ -440,5 +441,82 @@ describe("会社法人等番号の食い違い", () => {
       expect(r.reasons).toContain("company_registry_number_conflict");
       expect(r.reasons).not.toContain("owner_identity_mismatch");
     }
+  });
+});
+
+// ---- @codex R2: 法人番号(13桁)と会社法人等番号(12桁)をまたいで比べる ----
+// 13桁 = チェックデジット1桁 + 12桁の会社法人等番号（calculateCorporateNumberFromCompanyNumber）。
+describe("法人番号と会社法人等番号の食い違い（形式をまたぐ）", () => {
+  const CRN_A = "010001012345";
+  const CN_A = calculateCorporateNumberFromCompanyNumber(CRN_A)!; // CRN_A から作った13桁
+  const CRN_B = "020001054321";
+
+  it("片方は13桁だけ・もう片方は12桁だけで、別の法人なら止める（見られる人だけ理由を出す）", () => {
+    const m = resolveOwnerMergeMatch(
+      { ...corpA, corporateNumber: CN_A },
+      { ...corpA, companyRegistryNumber: CRN_B },
+      { corporateNumberAvailable: true },
+    );
+    expect(m.matchedBy).toBeNull();
+    expect(m.companyRegistryNumberConflict).toBe(true);
+    const hidden = resolveOwnerMergeMatch(
+      { ...corpA, companyRegistryNumber: CRN_B },
+      { ...corpA, corporateNumber: CN_A },
+      { corporateNumberAvailable: false },
+    );
+    expect(hidden.matchedBy).toBeNull();
+    expect(hidden.companyRegistryNumberConflict).toBe(false);
+  });
+
+  it("13桁の後ろ12桁が相手の12桁と同じなら食い違いにしない", () => {
+    const m = resolveOwnerMergeMatch(
+      { ...corpA, corporateNumber: CN_A },
+      { ...corpA, companyRegistryNumber: "0100-01-012345" },
+      { corporateNumberAvailable: true },
+    );
+    expect(m.matchedBy).toBe("name_address");
+    expect(m.companyRegistryNumberConflict).toBe(false);
+  });
+
+  it("同じ形式で比べられるときはそちらで決める（1人の中で13桁と12桁が食い違っていても落ちない）", () => {
+    const m = resolveOwnerMergeMatch(
+      { ...corpA, corporateNumber: CN_A, companyRegistryNumber: CRN_B },
+      { ...corpA, corporateNumber: CN_A },
+      { corporateNumberAvailable: true },
+    );
+    expect(m.matchedBy).toBe("name_address");
+    expect(m.corporateNumberConflict).toBe(false);
+    expect(m.companyRegistryNumberConflict).toBe(false);
+  });
+});
+
+// ---- @codex R2: 住所と郵便番号は1組で写す ----
+describe("planCorporateFieldHandover: 住所を写すときは郵便番号も組で", () => {
+  const empty = { address: null, zip: null, phone: null, corporateNumber: null };
+
+  it("master の住所が空で郵便番号だけ違う値なら、住所と一緒に source の郵便番号で上書きする", () => {
+    const plan = planCorporateFieldHandover(
+      { ...empty, zip: "100-0000" },
+      { ...empty, address: "大阪府架空市2-2", zip: "530-0000" },
+    );
+    expect(plan.writes).toEqual({ address: "大阪府架空市2-2", zip: "530-0000" });
+    expect(plan.keptSourceValues).toEqual([]);
+    expect(requiredCorporateHandoverPermissions(plan).sort()).toEqual(["owner_address", "owner_zip"]);
+  });
+
+  it("source の郵便番号が空なら、住所と一緒に master の郵便番号を空にする（別の住所の番号を残さない）", () => {
+    const plan = planCorporateFieldHandover(
+      { ...empty, zip: "100-0000" },
+      { ...empty, address: "大阪府架空市2-2" },
+    );
+    expect(plan.writes).toEqual({ address: "大阪府架空市2-2", zip: null });
+  });
+
+  it("郵便番号が同じ（表記の違いだけ）なら住所だけ写す", () => {
+    const plan = planCorporateFieldHandover(
+      { ...empty, zip: "5300000" },
+      { ...empty, address: "大阪府架空市2-2", zip: "530-0000" },
+    );
+    expect(plan.writes).toEqual({ address: "大阪府架空市2-2" });
   });
 });
