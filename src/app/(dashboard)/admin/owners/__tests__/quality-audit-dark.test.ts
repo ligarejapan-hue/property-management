@@ -4,7 +4,7 @@ import { fileURLToPath } from "node:url";
 import { dirname, join } from "node:path";
 
 const dir = dirname(fileURLToPath(import.meta.url));
-const src = readFileSync(join(dir, "..", "quality-audit", "page.tsx"), "utf8");
+const src = readFileSync(join(dir, "..", "..", "..", "..", "..", "components", "owners", "checks", "quality-audit-panel.tsx"), "utf8");
 
 // -----------------------------------------------------------------------
 // owners/quality-audit/page.tsx (品質監査) dark: 配色 (O2)

@@ -21,7 +21,7 @@ import { INDETERMINATE_REASON_LABELS } from "@/lib/postal-code-audit";
 
 const read = (rel: string) => readFileSync(resolve(process.cwd(), rel), "utf8");
 
-const page = read("src/app/(dashboard)/admin/postal-code-audit/page.tsx");
+const page = read("src/components/owners/checks/postal-code-audit-panel.tsx");
 
 describe("api-client 型: not_processed と時間バジェット系フィールドを網羅する", () => {
   it("PostalAuditIndeterminateReason に not_processed を含む（型レベル）", () => {

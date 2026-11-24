@@ -67,6 +67,10 @@ import {
   type ArchivedOwnersResponse,
 } from "@/lib/owner-archived";
 import { fetchArchivedOwners, unarchiveOwner } from "@/lib/owner-archived-client";
+import { QualityAuditPanel } from "@/components/owners/checks/quality-audit-panel";
+import { TextHygienePanel } from "@/components/owners/checks/text-hygiene-panel";
+import { DisplayNameAuditPanel } from "@/components/owners/checks/display-name-audit-panel";
+import { PostalCodeAuditPanel } from "@/components/owners/checks/postal-code-audit-panel";
 
 type FilterType =
   | "all"
@@ -76,7 +80,12 @@ type FilterType =
   | "corporate_number"
   | "corporate_restore"
   | "registry_address"
-  | "archived";
+  | "archived"
+  // 点検(2026-11-24 発注者「わざわざ分けず可能な限りページ数を減らして」=もとは単独の4画面)。
+  | "quality_audit"
+  | "text_hygiene"
+  | "display_name"
+  | "postal_code";
 
 // DQ-03: 自前 API で self-fetch するタブ（上位の data 駆動 fetch/描画から除外する）。
 const SELF_FETCH_TABS: FilterType[] = [
@@ -84,6 +93,10 @@ const SELF_FETCH_TABS: FilterType[] = [
   "corporate_restore",
   "registry_address",
   "archived",
+  "quality_audit",
+  "text_hygiene",
+  "display_name",
+  "postal_code",
 ];
 
 // Phase 2-A: duplicate タブ内のサブフィルタ。matchedBy で絞り込む。
@@ -195,6 +208,10 @@ function parseFilterTypeFromQuery(value: string | null): FilterType {
     case "corporate_restore":
     case "registry_address":
     case "archived":
+    case "quality_audit":
+    case "text_hygiene":
+    case "display_name":
+    case "postal_code":
     case "all":
       return value;
     default:
@@ -365,18 +382,25 @@ function OwnerCorrectionPageInner() {
     // アーカイブ・統合で隠れた所有者を戻すタブ(2026-11-24)。件数は子コンポーネント側 fetch。
     { key: "archived", label: "アーカイブ済み" },
   ];
+  // 点検のタブ(2段目)。もとは単独の画面だったもの。件数は各タブの中で数える。
+  const checkTabs: { key: FilterType; label: string }[] = [
+    { key: "quality_audit", label: "氏名・連絡先チェック" },
+    { key: "text_hygiene", label: "テキスト衛生監査" },
+    { key: "display_name", label: "表示名監査" },
+    { key: "postal_code", label: "郵便番号×住所チェック" },
+  ];
 
   return (
     <div>
-      <PageHeader title="所有者補正候補" />
+      <PageHeader title="所有者の直し" />
       <p className="mb-6 text-sm text-amber-700 bg-amber-50 border border-amber-200 rounded-md px-3 py-2 dark:text-amber-300 dark:bg-amber-950/40 dark:border-amber-800">
-        「住所なし」タブの候補には住所補完、「孤立」タブの削除候補にはアーカイブ（一覧・検索から除外されます）、「重複候補」タブの同一キーグループには統合のプレビューと実行（確認のうえ）を個別に行えます。アーカイブや統合で隠れた人は「アーカイブ済み」タブから戻せます。
+        「住所なし」タブの候補には住所補完、「孤立」タブの削除候補にはアーカイブ（一覧・検索から除外されます）、「重複候補」タブの同一キーグループには統合のプレビューと実行（確認のうえ）を個別に行えます。アーカイブや統合で隠れた人は「アーカイブ済み」タブから戻せます。下の段の「点検」は、昔の取り込みの汚れ直しと見るだけの点検です（ふだんは開かなくて大丈夫です）。
       </p>
 
       {/* Filter tabs(第3弾⑪: 共通 Tabs) */}
       <Tabs
         idBase="owner-correction"
-        className="mb-4"
+        className="mb-2"
         tabs={tabs.map((tab) => ({
           key: tab.key,
           label: (
@@ -393,6 +417,16 @@ function OwnerCorrectionPageInner() {
         active={filterType}
         onChange={setFilterType}
       />
+      {/* 2段目=点検。同じ idBase にして、下の中身(tabpanel)をどちらの段のタブからも指せるようにする。 */}
+      <div className="mb-4 flex flex-wrap items-center gap-x-3">
+        <span className="text-xs text-gray-500 dark:text-gray-400">点検</span>
+        <Tabs
+          idBase="owner-correction"
+          tabs={checkTabs}
+          active={filterType}
+          onChange={setFilterType}
+        />
+      </div>
 
       {/* タブが切り替える中身の全域(@codex #406 R3 P2: tabpanel の紐付け) */}
       <div {...tabPanelProps("owner-correction", filterType)}>
@@ -409,6 +443,10 @@ function OwnerCorrectionPageInner() {
       {filterType === "corporate_restore" && <CorporateRestorePanel />}
       {filterType === "registry_address" && <RegistryAddressCandidatesPanel />}
       {filterType === "archived" && <ArchivedOwnersPanel />}
+      {filterType === "quality_audit" && <QualityAuditPanel />}
+      {filterType === "text_hygiene" && <TextHygienePanel />}
+      {filterType === "display_name" && <DisplayNameAuditPanel />}
+      {filterType === "postal_code" && <PostalCodeAuditPanel />}
 
       {!SELF_FETCH_TABS.includes(filterType) && data && !loading && (
         <>

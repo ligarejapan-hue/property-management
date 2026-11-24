@@ -19,10 +19,11 @@ const PROPERTY_DETAIL_SRC = fs.readFileSync(
 );
 
 describe("sidebar.tsx — admin nav エントリ追加（既存 text-hygiene 様式）", () => {
-  it("氏名・連絡先チェック(旧: 品質監査) → /admin/owners/quality-audit の nav item がある", () => {
-    // 2026-07-14 ユーザー要望で「品質監査」から改名(URL不変)。
-    expect(SIDEBAR_SRC).toMatch(/href:\s*"\/admin\/owners\/quality-audit"/);
-    expect(SIDEBAR_SRC).toMatch(/氏名・連絡先チェック/);
+  // 氏名・連絡先チェック・テキスト衛生監査は 2026-11-24 に「所有者の直し」の点検タブへ移した
+  //   (メニュー項目ではなくなった=dq-two-pages.test.ts)。
+  it("点検の画面はメニューに単独で置かない(所有者の直しのタブ)", () => {
+    expect(SIDEBAR_SRC).not.toMatch(/href:\s*"\/admin\/owners\/quality-audit"/);
+    expect(SIDEBAR_SRC).not.toMatch(/href:\s*"\/admin\/owners\/text-hygiene"/);
   });
 
   it("添付ファイル検索 → /admin/attachments の nav item がある", () => {
@@ -33,10 +34,6 @@ describe("sidebar.tsx — admin nav エントリ追加（既存 text-hygiene 様
     expect(SIDEBAR_SRC).not.toMatch(/label: "添付検索"/);
   });
 
-  it("既配線の text-hygiene を重複追加しない（/admin/owners/text-hygiene は 1 回のみ）", () => {
-    const matches = SIDEBAR_SRC.match(/\/admin\/owners\/text-hygiene/g) ?? [];
-    expect(matches.length).toBe(1);
-  });
 });
 
 describe("properties/[id]/page.tsx — dm-logs 導線（既存ページへのリンク・route 新設なし）", () => {

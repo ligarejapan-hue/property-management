@@ -19,7 +19,7 @@ import * as path from "path";
 const pageSrc = fs.readFileSync(
   path.resolve(
     process.cwd(),
-    "src/app/(dashboard)/admin/display-name-audit/page.tsx",
+    "src/components/owners/checks/display-name-audit-panel.tsx",
   ),
   "utf8",
 );

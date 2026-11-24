@@ -26,9 +26,9 @@ const pageSrc = fs.readFileSync(
 );
 
 describe("/admin/owners/[id] page (Phase F)", () => {
-  it("「補正候補一覧へ戻る」導線が correction?tab=corporate_number へ向く(第2弾⑩でBackLink化)", () => {
+  it("「所有者の直しへ戻る」導線(旧: 補正候補一覧・2026-11-24 改名)が correction?tab=corporate_number へ向く(第2弾⑩でBackLink化)", () => {
     expect(pageSrc).toContain('from "@/components/ui/page-header"');
-    expect(pageSrc).toContain('to: "補正候補一覧"');
+    expect(pageSrc).toContain('to: "所有者の直し"');
     expect(pageSrc).toContain("/admin/owners/correction?tab=corporate_number");
   });
 

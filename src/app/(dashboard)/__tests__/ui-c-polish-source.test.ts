@@ -62,7 +62,7 @@ describe("C-6: 淡色の警告/エラーカードがダークモード対応(UI�
   });
 
   it("謄本取得の資格情報など主要画面のエラーカードが dark を持つ", () => {
-    const src = read("src/app/(dashboard)/admin/owners/quality-audit/page.tsx");
+    const src = read("src/components/owners/checks/quality-audit-panel.tsx");
     expect(src).toMatch(/bg-red-50[^"]*dark:bg-red-950/);
   });
 });
