@@ -49,7 +49,9 @@ const contactFields = {
 export const inquiryCreateSchema = z
   .object({
     propertyId: uuid,
-    agentId: uuid,
+    // 名簿の業者か、名簿に入れずに受け付ける業者の名前のどちらか1つ(2026-11-25 代表電話・宅建業の無い会社もある)。
+    agentId: uuid.optional().nullable(),
+    agentNameText: optText(100),
     ...contactFields,
     kind: z.enum(INQUIRY_KINDS),
     channel: z.enum(INQUIRY_CHANNELS).default("phone"),
@@ -57,6 +59,10 @@ export const inquiryCreateSchema = z
     viewing: viewingCreateSchema.optional(),
     // 押し直しの鍵(二重登録を防ぐ)。
     clientToken: uuid.optional(),
+  })
+  .refine((v) => (v.agentId ? 1 : 0) + (v.agentNameText?.trim() ? 1 : 0) === 1, {
+    message: "業者を名簿から選ぶか、名簿に入れずに受け付ける業者の名前を入れてください",
+    path: ["agentId"],
   })
   .refine((v) => !v.viewing || v.kind === "viewing", {
     message: "内見の予定は用件が内見のときだけ入れられます",
@@ -73,6 +79,8 @@ export const inquiryUpdateSchema = z.object({
   status: z.enum(INQUIRY_STATUSES).optional(),
   assigneeId: uuid.optional().nullable(),
   note: optText(10000),
+  // 名簿に入れずに受け付けた反響を名簿の業者に付け替える(2026-11-25)。名簿の業者が付いた反響は付け替えない。
+  agentId: uuid.optional(),
   version: z.number().int().positive(),
 });
 

@@ -14,7 +14,7 @@ import {
   CHANNEL_LABEL,
   type DeskFormAction,
   type DeskFormState,
-  splitNewAgentPhone,
+  newAgentPrefill,
   shouldBlockEnterSubmit,
   tokenForSubmit,
 } from "@/lib/agent-inquiry/desk-form";
@@ -91,6 +91,8 @@ export function InquiryFormView({
           onQuery={(v) => dispatch({ type: "agentQuery", value: v })}
           onPick={(a) => dispatch({ type: "agentSelected", agent: a })}
           onCreateNew={onCreateAgent}
+          nameOnly={s.agentNameOnly}
+          onUseNameOnly={() => dispatch({ type: "agentNameOnly" })}
         />
         <Err text={errors.agent} />
       </section>
@@ -318,7 +320,7 @@ export default function InquiryForm({
       setSubmitting(false);
     }
   };
-  const newAgentPhone = splitNewAgentPhone(state.agentQuery);
+  const newAgentPhone = newAgentPrefill(state.agentQuery);
   return (
     <>
       <InquiryFormView
@@ -336,6 +338,7 @@ export default function InquiryForm({
       {creating && (
         <AgentCreateModal
           initialPhone={newAgentPhone.agentPhone}
+          initialCompanyName={newAgentPhone.companyName}
           onClose={() => setCreating(false)}
           onCreated={(hit: AgentHit) => {
             act({ type: "agentSelected", agent: hit });

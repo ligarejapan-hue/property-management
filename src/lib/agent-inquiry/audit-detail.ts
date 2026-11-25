@@ -6,7 +6,7 @@ import { INQUIRY_KINDS, INQUIRY_STATUSES } from "./constants";
  * 安全なものだけで組み立てる)。
  */
 const FIELD_NAMES = new Set([
-  "propertyId", "agentId", "contactName", "contactMobile", "contactEmail", "kind", "channel", "status", "assigneeId", "note",
+  "propertyId", "agentId", "agentNameText", "contactName", "contactMobile", "contactEmail", "kind", "channel", "status", "assigneeId", "note",
   "companyName", "companyKana", "branchName", "licenseNo", "phone", "fax", "email", "address", "isArchived",
   "scheduledAt", "viewingType", "attendantId", "resultNote", "canceled", "adPermissions",
 ]);

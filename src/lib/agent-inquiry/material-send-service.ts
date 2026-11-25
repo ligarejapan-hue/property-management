@@ -31,6 +31,7 @@ export async function loadMaterialInquiry(id: string, session: ApiSession, perms
     select: {
       id: true, kind: true, status: true, version: true, propertyId: true, contactName: true, contactEmail: true,
       agent: { select: { companyName: true } },
+      agentNameText: true,
       // 物件名は受付の窓と同じ作り(棟の名前→建物名→町名まで=番地は出さない)。
       property: { select: DESK_PROPERTY_SELECT },
     },
@@ -302,7 +303,8 @@ export async function initialMaterialText(
   });
   const v = {
     propertyName: propertyDisplayName(toDeskProperty(q.property)),
-    companyName: q.agent.companyName,
+    // 名簿に入れずに受け付けた反響は、受付で打った名前(2026-11-25)。
+    companyName: q.agent?.companyName ?? q.agentNameText ?? "",
     contactName: q.contactName,
     senderName,
   };

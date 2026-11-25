@@ -93,12 +93,21 @@ export function AgentPicker({
   onQuery,
   onPick,
   onCreateNew,
+  nameOnly = false,
+  onUseNameOnly,
+  emptyHint = "見つかりませんでした。下の欄に手で入力してください。",
 }: {
   query: string;
   selected: AgentHit | null;
   onQuery: (v: string) => void;
   onPick: (a: AgentHit) => void;
   onCreateNew?: () => void;
+  /** 名簿に入れずに、打った名前で受け付けると決めた(探すのをやめる・2026-11-25)。 */
+  nameOnly?: boolean;
+  /** 渡したときだけ「名簿に入れずに受け付ける」を出す(反響の受付の窓)。 */
+  onUseNameOnly?: () => void;
+  /** onCreateNew を渡さないときの、見つからなかったときの案内。 */
+  emptyHint?: string;
 }) {
   const [res, setRes] = useState<(SearchResult<AgentHit> & { registry: RegistryHit[] }) | null>(null);
   const [adoptingId, setAdoptingId] = useState<string | null>(null);
@@ -109,7 +118,7 @@ export function AgentPicker({
   useEffect(() => {
     queryGen.current += 1;
   }, [query]);
-  const searching = !selected && agentQueryReady(query);
+  const searching = !selected && !nameOnly && agentQueryReady(query);
   const { readDenied } = useDeskAccess();
   useEffect(() => {
     if (!searching) return;
@@ -147,6 +156,11 @@ export function AgentPicker({
   const createNew = () => {
     queryGen.current += 1;
     onCreateNew?.();
+  };
+  // 名簿に入れずに受け付ける、も選び直しと同じ=写す途中の古い返事で選び直さない。
+  const pickNameOnly = () => {
+    queryGen.current += 1;
+    onUseNameOnly?.();
   };
   const pickRegistry = (h: RegistryHit) => {
     const asked = queryGen.current;
@@ -192,16 +206,27 @@ export function AgentPicker({
           ＋ 名簿にない業者を新しく登録
         </button>
       )}
-      {!onCreateNew && createAction === "empty" && (
-        <p className="text-xs text-gray-500">見つかりませんでした。下の欄に手で入力してください。</p>
-      )}
+      {!onCreateNew && createAction === "empty" && <p className="text-xs text-gray-500">{emptyHint}</p>}
       {onCreateNew && createAction === "hasHits" && (
         // data-ui=raw: 文中の下線リンク風
         <button data-ui="raw" type="button" onClick={createNew} className="text-xs text-gray-500 underline">
           上の候補に無い(別の支店など)ときだけ、新しく登録
         </button>
       )}
-      {!selected && !searching && (
+      {/* 名簿に入れずに受け付ける(代表電話の無い会社・宅建業の無い会社もある・2026-11-25)。 */}
+      {/* 探し終えてから・電話番号だけの語では出さない(名前として残すので)。 */}
+      {onUseNameOnly && createAction !== "none" && !isPhoneCharsOnly(query) && (
+        // data-ui=raw: 文中の下線リンク風
+        <button data-ui="raw" type="button" onClick={pickNameOnly} className="block text-sm text-teal-700 underline dark:text-teal-300">
+          {`名簿に入れずに「${query.trim()}」で受け付ける`}
+        </button>
+      )}
+      {nameOnly && (
+        <p className="rounded bg-teal-50 px-2 py-1 text-xs text-teal-800 dark:bg-gray-800 dark:text-teal-200">
+          名簿に入れずに、この名前で受け付けます(あとで反響の詳細から名簿の業者に付け替えられます)。打ち直すと探し直します。
+        </p>
+      )}
+      {!selected && !searching && !nameOnly && (
         <p className="text-xs text-gray-500">
           {isPhoneCharsOnly(query)
             ? "電話番号は7桁以上入れると探します。"

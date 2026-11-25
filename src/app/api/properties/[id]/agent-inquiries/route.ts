@@ -27,6 +27,7 @@ export async function GET(_req: Request, ctx: Ctx) {
           status: true,
           contactName: true,
           agent: { select: { companyName: true } },
+          agentNameText: true,
           viewings: {
             select: {
               id: true,

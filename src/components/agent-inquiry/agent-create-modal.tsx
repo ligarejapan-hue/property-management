@@ -26,15 +26,18 @@ const PHONE_KEYS = new Set<Key>(["phone", "fax"]);
 /** 名簿にない業者をその場で登録する小窓(設計 §2.2-1・方針7)。会社の情報だけ。 */
 export function AgentCreateModal({
   initialPhone,
+  initialCompanyName = "",
   onClose,
   onCreated,
 }: {
   initialPhone: string;
+  /** 業者の欄に打った会社名(探した語をそのまま商号に入れる=一から打ち直さない・2026-11-25)。 */
+  initialCompanyName?: string;
   onClose: () => void;
   onCreated: (hit: AgentHit) => void;
 }) {
   const [v, setV] = useState<Record<Key, string>>({
-    companyName: "",
+    companyName: initialCompanyName,
     branchName: "",
     phone: initialPhone,
     fax: "",

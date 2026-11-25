@@ -2244,7 +2244,10 @@ model MlitCrawlState {
 model AgentInquiry {
   id            String              @id @default(uuid()) @db.Uuid
   propertyId    String              @map("property_id") @db.Uuid
-  agentId       String              @map("agent_id") @db.Uuid
+  /// 名簿の業者。名簿に入れずに受け付けた反響は NULL で、agentNameText に名前がある(2026-11-25)。
+  agentId       String?             @map("agent_id") @db.Uuid
+  /// 名簿に入れずに受け付けたときの業者の名前(手入力)。名簿の業者に付け替えたら NULL に戻す。
+  agentNameText String?             @map("agent_name_text")
   contactName   String?             @map("contact_name")
   contactMobile String?             @map("contact_mobile")
   contactEmail  String?             @map("contact_email")
@@ -2265,7 +2268,7 @@ model AgentInquiry {
   updatedAt     DateTime            @updatedAt @map("updated_at")
 
   property  Property       @relation(fields: [propertyId], references: [id], onDelete: Restrict)
-  agent     Agent          @relation(fields: [agentId], references: [id], onDelete: Restrict)
+  agent     Agent?         @relation(fields: [agentId], references: [id], onDelete: Restrict)
   assignee  User?          @relation("AgentInquiryAssignee", fields: [assigneeId], references: [id])
   createdBy User           @relation("AgentInquiryCreatedBy", fields: [createdById], references: [id])
   viewings  AgentViewing[]

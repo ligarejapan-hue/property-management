@@ -1,3 +1,5 @@
+import { inquiryAgentName } from "./agent-name";
+
 export interface TimelineViewing {
   id: string;
   scheduledAt: Date | null;
@@ -11,7 +13,9 @@ export interface TimelineInquiry {
   kind: "viewing" | "ad_permission" | "material_request";
   receivedAt: Date;
   status: string;
-  agent: { companyName: string };
+  /** 名簿に入れずに受け付けた反響は null で、agentNameText に名前がある(2026-11-25)。 */
+  agent: { companyName: string } | null;
+  agentNameText?: string | null;
   contactName: string | null;
   viewings: TimelineViewing[];
 }
@@ -40,7 +44,7 @@ export const TIMELINE_LIMIT = 500;
 export function buildPropertyTimeline(inquiries: TimelineInquiry[]): TimelineEntry[] {
   const out: TimelineEntry[] = [];
   for (const q of inquiries) {
-    const base = { inquiryId: q.id, kind: q.kind, agentName: q.agent.companyName, contactName: q.contactName };
+    const base = { inquiryId: q.id, kind: q.kind, agentName: inquiryAgentName(q), contactName: q.contactName };
     if (q.kind === "viewing" && q.viewings.length > 0) {
       for (const v of q.viewings) {
         out.push({

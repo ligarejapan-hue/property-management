@@ -14,6 +14,8 @@ export const INQUIRY_LIST_SELECT = {
   note: true,
   assignee: { select: { id: true, name: true } },
   agent: { select: { id: true, companyName: true, branchName: true, phone: true } },
+  // 名簿に入れずに受け付けた反響の業者の名前(agent は null・2026-11-25)。
+  agentNameText: true,
   viewings: {
     orderBy: { scheduledAt: "asc" as const },
     select: {

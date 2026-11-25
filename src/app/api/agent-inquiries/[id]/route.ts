@@ -10,6 +10,7 @@ import { inquiryAuditDetail } from "@/lib/agent-inquiry/audit-detail";
 import { INQUIRY_LIST_SELECT, toInquiryView } from "@/lib/agent-inquiry/inquiry-view";
 import { DESK_PROPERTY_SELECT } from "@/lib/agent-inquiry/desk-property";
 import { assertActiveUser } from "@/lib/agent-inquiry/user-check";
+import { assertAgentSelectable } from "@/lib/agent-inquiry/agent-check";
 
 type Ctx = { params: Promise<{ id: string }> };
 const NO_STORE = { "Cache-Control": "no-store" };
@@ -45,10 +46,13 @@ export async function PATCH(request: Request, ctx: Ctx) {
   try {
     const { session } = await requireAgentInquiry("write");
     const id = await idOf(ctx);
-    const { version, status, assigneeId, note, ...contactIn } = inquiryUpdateSchema.parse(await parseJsonBody(request));
+    const { version, status, assigneeId, note, agentId, ...contactIn } = inquiryUpdateSchema.parse(await parseJsonBody(request));
     await assertActiveUser(assigneeId, "INVALID_ASSIGNEE");
+    // 名簿の業者への付け替えは、名簿に入れずに受け付けた反響だけ(付けた業者を別の業者に替えない・2026-11-25)。
+    if (agentId !== undefined) await assertAgentSelectable(agentId);
     const data = {
       ...normalizeInquiryContact(contactIn),
+      ...(agentId !== undefined ? { agentId, agentNameText: null } : {}),
       ...(status !== undefined ? { status } : {}),
       ...(assigneeId !== undefined ? { assigneeId } : {}),
       ...(note !== undefined ? { note: note?.trim() || null } : {}),
@@ -59,12 +63,15 @@ export async function PATCH(request: Request, ctx: Ctx) {
       ...("contactEmail" in data ? { contactEmailEditSeq: { increment: 1 } } : {}),
     };
     const res = await prisma.agentInquiry.updateMany({
-      where: { id, version },
+      where: { id, version, ...(agentId !== undefined ? { agentId: null } : {}) },
       data: { ...data, ...editSeq, version: { increment: 1 } },
     });
     if (res.count === 0) {
-      const cur = await prisma.agentInquiry.findUnique({ where: { id }, select: { id: true } });
+      const cur = await prisma.agentInquiry.findUnique({ where: { id }, select: { id: true, version: true, agentId: true } });
       if (!cur) throw new ApiError(404, "反響が見つかりません", "NOT_FOUND");
+      if (agentId !== undefined && cur.version === version && cur.agentId !== null) {
+        throw new ApiError(409, "この反響はもう名簿の業者が付いています", "AGENT_ALREADY_SET");
+      }
       throw new ApiError(409, VERSION_CONFLICT_MESSAGE, "VERSION_CONFLICT");
     }
     await writeAuditLog({

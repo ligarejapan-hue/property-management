@@ -3,7 +3,7 @@
 import { useEffect, useRef, useState } from "react";
 import { useRouter } from "next/navigation";
 import { apiErrorCode, fetchAgentDirectory, searchDeskAgents, type AgentDirectoryRow, type AgentHit } from "@/lib/api-client";
-import { hitsForQuery, newAgentAction, splitNewAgentPhone, type SearchResult } from "@/lib/agent-inquiry/desk-form";
+import { hitsForQuery, newAgentAction, newAgentPrefill, type SearchResult } from "@/lib/agent-inquiry/desk-form";
 import { agentQueryReady } from "@/lib/agent-inquiry/agent-query";
 import { PageHeader } from "@/components/ui/page-header";
 import { SearchField } from "@/components/ui/search-field";
@@ -169,8 +169,9 @@ export default function AgentsPage() {
       )}
       {creating && (
         <AgentCreateModal
-          // 電話番号らしい語で探していたら代表電話の欄へ(携帯は会社の代表電話には入れない)。
-          initialPhone={splitNewAgentPhone(query).agentPhone}
+          // 電話番号らしい語で探していたら代表電話の欄へ(携帯は会社の代表電話には入れない)・会社名なら商号の欄へ。
+          initialPhone={newAgentPrefill(query).agentPhone}
+          initialCompanyName={newAgentPrefill(query).companyName}
           onClose={() => setCreating(false)}
           onCreated={(hit) => {
             setCreating(false);

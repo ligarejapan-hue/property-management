@@ -25,6 +25,7 @@ export async function GET() {
             id: true,
             contactName: true,
             agent: { select: { companyName: true, branchName: true } },
+            agentNameText: true,
             property: { select: DESK_PROPERTY_SELECT },
           },
         },

@@ -258,7 +258,8 @@ describe("新しい業者の小窓にも透かしを描く(@codex #459 R21)", ()
 describe("業者の欄はサーバーと同じ基準で探す(@codex #459 R22)", () => {
   it("2文字の固定判定ではなく agentQueryReady を使う", () => {
     const picker = readFileSync(join(process.cwd(), "src/components/agent-inquiry/agent-picker.tsx"), "utf8");
-    expect(picker).toMatch(/const searching = !selected && agentQueryReady\(query\);/);
+    // 名簿に入れずに受け付けると決めたら探さない(2026-11-25)。
+    expect(picker).toMatch(/const searching = !selected && !nameOnly && agentQueryReady\(query\);/);
   });
 });
 
