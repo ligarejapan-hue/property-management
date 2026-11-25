@@ -207,6 +207,17 @@ html:not(.rv) .case .more,html:not(.rv) .mqbtn{display:none}
 .dark .inq-done{color:var(--on-ink);border-color:var(--brass)}
 .fld input.invalid{border-bottom-color:#a3261c}
 .pv a{text-decoration:underline}
+/* 連絡方法・時間帯(compare・question 案・2026-11-25) */
+.ct{display:flex;flex-direction:column;gap:8px}
+.ctl{font-size:14px;letter-spacing:.06em;color:var(--on-paper-2)}
+.dark .ctl{color:var(--on-ink-2)}
+.pref{display:flex;flex-wrap:wrap;gap:4px 20px}
+.pref label{display:inline-flex;align-items:center;gap:8px;min-height:44px;font-size:15.5px;cursor:pointer}
+.pref input{width:20px;height:20px;margin:0;accent-color:var(--brass-d);flex:none}
+.ct select{width:100%;height:50px;border:1px solid var(--on-paper-2);background:transparent;font:500 16px var(--goth);color:var(--on-paper);padding:0 12px;border-radius:0}
+.ct select option{color:#14202e;background:#fff}
+.dark .ct select{border-color:var(--on-ink-2);color:var(--on-ink)}
+.dark .pref input{accent-color:var(--brass-l)}
 .telbig{font-family:var(--mincho);font-weight:600;font-variant-numeric:lining-nums tabular-nums;font-size:clamp(32px,9.4vw,44px);letter-spacing:.06em;line-height:1.2;text-decoration:none;display:block;margin-top:8px;color:var(--on-paper)}
 
 /* ---------- footer / bar ---------- */
@@ -214,11 +225,14 @@ html:not(.rv) .case .more,html:not(.rv) .mqbtn{display:none}
 .bar{position:fixed;left:0;right:0;bottom:0;z-index:25;background:rgba(12,20,32,.94);backdrop-filter:blur(10px);-webkit-backdrop-filter:blur(10px);border-top:1px solid var(--line-ink);padding:10px var(--gr) calc(10px + env(safe-area-inset-bottom,0px)) var(--gl);transition:transform .6s var(--out)}
 .rv .bar{transform:translateY(110%)}
 .rv .bar.show{transform:none}
-.bar div{max-width:560px;margin:0 auto;display:grid;grid-template-columns:minmax(0,1fr) 104px;gap:10px}
+.bar div{max-width:560px;margin:0 auto;display:grid;grid-template-columns:minmax(0,1fr) minmax(104px,auto);gap:10px}
 .bar a{min-height:50px;display:flex;align-items:center;justify-content:center;text-decoration:none;font-family:var(--mincho);font-weight:600;font-size:15.5px;letter-spacing:.14em;transition:transform .16s var(--out)}
 .bar a:active{transform:scale(.97)}
 .bar .p{background:var(--brass);color:var(--ink)}
 .bar .s{border:1px solid var(--brass);color:var(--on-ink)}
+/* 「電話」ボタンに番号も(2026-11-25) */
+.bar .s{flex-direction:column;padding:0 12px;font-size:15px;letter-spacing:.03em;line-height:1.25;white-space:nowrap;font-variant-numeric:lining-nums tabular-nums}
+.bar .s small{font-size:11px;letter-spacing:.2em;color:var(--brass-l)}
 .bar div.one{grid-template-columns:minmax(0,1fr)}
 
 @media (min-width:760px){.duo{grid-template-columns:1fr 1fr}.way{flex-basis:300px}}
@@ -256,11 +270,21 @@ export const LP_DESIGN_EXTRA_CSS = {
 .tile[aria-pressed=true] small{color:var(--on-paper-2)}
 .tile:focus-visible{outline:2px solid var(--brass-l);outline-offset:3px}
 .back{all:unset;cursor:pointer;min-height:44px;display:inline-flex;align-items:center;font-size:14px;color:var(--on-ink-2);text-decoration:underline;text-underline-offset:4px;margin-top:8px}
-@media (prefers-reduced-motion:reduce){.stp.on{animation:none}.pl b,.tile{transition:none}}`,
+@media (prefers-reduced-motion:reduce){.stp.on{animation:none}.pl b,.tile{transition:none}}
+#wz .cs-only{display:none}#wz.cs .cs-only{display:block}#wz.cs .qn-only{display:none}
+.qsafe{text-align:left;margin-top:8px}
+.qtel{font-size:14px;line-height:1.8;margin-top:14px;color:var(--on-ink-2)}
+.qtel a{color:var(--on-ink);font-weight:600;text-decoration:underline;text-underline-offset:4px;font-variant-numeric:lining-nums tabular-nums}
+.qnote{display:flex;flex-direction:column;gap:10px}
+.qnote textarea{width:100%;box-sizing:border-box;min-height:110px;border:1px solid var(--on-ink-2);background:transparent;color:var(--on-ink);font:500 16px/1.7 var(--goth);padding:10px 12px;border-radius:0;resize:vertical}
+.qnote textarea:focus{outline:2px solid var(--brass-l);outline-offset:2px}
+.stp>.qn-only+.qh{margin-top:30px}`,
   compare: `.duo.dk .pane.a{background:var(--on-ink);color:var(--ink)}
 .duo.dk .pane.a small{color:var(--brass-d)}
 .duo.dk .pane.b{background:transparent;color:var(--on-ink);border:1px solid var(--brass)}
-.duo.dk .pane.b small{color:var(--brass-l)}`,
+.duo.dk .pane.b small{color:var(--brass-l)}
+.cpq{margin-top:18px;font-family:var(--mincho);font-weight:600;font-size:16px;line-height:1.9;letter-spacing:.06em;color:var(--brass-l)}
+.cpcall{margin-top:28px}`,
   editorial: `.vhero{justify-content:center;padding-block:100px 40px}
 .vh{display:flex;flex-direction:row-reverse;justify-content:space-between;gap:14px;min-height:74svh}
 .vt{writing-mode:vertical-rl;font-family:var(--mincho);font-weight:600;font-size:clamp(33px,10vw,48px);line-height:1.7;letter-spacing:.14em;margin:0}

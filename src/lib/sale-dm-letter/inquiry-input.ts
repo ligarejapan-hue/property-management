@@ -85,7 +85,15 @@ function normalizePhone(v: string): string {
     .replace(/^-+|-+$/g, "");
 }
 
-export function parseInquiryForm(get: (key: string) => string | null): InquiryParse {
+export interface InquiryParseOptions {
+  /**
+   * 「どちらでも」を選んだときもメールアドレスを必須にする(売却の代表LP の compare・question 案だけ・2026-11-25 発注者)。
+   * 既定(DM 用・今の LP)は「メール」のときだけ必須のまま。
+   */
+  emailRequiredForEither?: boolean;
+}
+
+export function parseInquiryForm(get: (key: string) => string | null, opts: InquiryParseOptions = {}): InquiryParse {
   if (single(get(HONEYPOT_FIELD)) !== "") return { kind: "bot" };
 
   const errors: InquiryFieldError[] = [];
@@ -113,7 +121,9 @@ export function parseInquiryForm(get: (key: string) => string | null): InquiryPa
     if ((CONTACT_PREFS as readonly string[]).includes(prefRaw)) contactPref = prefRaw as ContactPref;
     else errors.push("contact_pref_invalid");
   }
-  if (contactPref === "email" && email == null) errors.push("email_required_for_pref");
+  if ((contactPref === "email" || (opts.emailRequiredForEither === true && contactPref === "either")) && email == null) {
+    errors.push("email_required_for_pref");
+  }
 
   const timeRaw = single(get("contactTime"));
   const contactTime = timeRaw === "" ? null : timeRaw;

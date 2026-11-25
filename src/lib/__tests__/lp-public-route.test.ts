@@ -187,3 +187,49 @@ describe("POST /lp/[slug]/inquiry(広告用の公開ページの申込)", () => 
     expect((await post(VALID, {}, "invalid")).status).toBe(200);
   });
 });
+
+// 2026-11-25 発注者: 売却の代表LP の compare・question 案に連絡方法・時間帯の欄
+describe("POST /lp/[slug]/inquiry: 連絡方法・時間帯(compare・question 案)", () => {
+  const any = () => findFirst.mockImplementation(async () => ({ ...SCENARIO }));
+  const input0 = () => (rec.mock.calls[0] as unknown as [unknown, unknown, Record<string, unknown>])[2];
+
+  it.each(["baikyaku-compare", "baikyaku-question"])("%s: メール・どちらでも を選んでメールが無ければ 422(記録なし)", async (slug) => {
+    any();
+    for (const contactPref of ["email", "either"]) {
+      const res = await post({ ...VALID, contactPref }, { accept: "application/json" }, slug);
+      expect(res.status).toBe(422);
+      expect(JSON.parse(await res.text()).messages).toEqual(["メールでのご連絡をご希望の場合は、メールアドレスをご入力ください。"]);
+    }
+    expect(rec).not.toHaveBeenCalled();
+  });
+  it("連絡方法・メール・時間帯・ご事情つきの message をそのまま保存する", async () => {
+    any();
+    const res = await post({
+      ...VALID, contactPref: "either", email: "a@example.com", contactTime: "平日 12〜15時",
+      message: "物件の種類: 戸建て\nご事情: 兄弟で共有しています",
+    }, {}, "baikyaku-question");
+    expect(res.status).toBe(200);
+    expect(input0()).toMatchObject({
+      contactPref: "either", email: "a@example.com", contactTime: "平日 12〜15時",
+      message: "物件の種類: 戸建て\nご事情: 兄弟で共有しています", phone: "090-1234-5678",
+    });
+  });
+  it("電話を選べばメールは要らない・時間帯は任意", async () => {
+    any();
+    expect((await post({ ...VALID, contactPref: "phone" }, {}, "baikyaku-compare")).status).toBe(200);
+    expect(input0()).toMatchObject({ contactPref: "phone", email: null, contactTime: null });
+  });
+  it("電話番号は必須のまま(メールがあっても)", async () => {
+    any();
+    const res = await post({ name: "山田", consent: "yes", contactPref: "email", email: "a@example.com" }, { accept: "application/json" }, "baikyaku-compare");
+    expect(res.status).toBe(422);
+    expect(rec).not.toHaveBeenCalled();
+  });
+  it("ほかの公開名(今までの見た目・ほかの案)は「どちらでも」でメールなしを今までどおり受け付ける", async () => {
+    any();
+    for (const slug of ["souzoku", "baikyaku", "baikyaku-form"]) {
+      expect((await post({ ...VALID, contactPref: "either" }, {}, slug)).status).toBe(200);
+    }
+    expect(rec).toHaveBeenCalledTimes(3);
+  });
+});
