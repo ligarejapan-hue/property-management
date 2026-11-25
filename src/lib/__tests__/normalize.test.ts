@@ -244,3 +244,16 @@ describe("buildPropertyDedupeKey", () => {
     expect(a).toEqual(b);
   });
 });
+
+describe("保存の形とそろえる(数字のあいだの「ー」・2026-11-25 @codex P1)", () => {
+  it("★保存した「1-2」と取り込む「1ー2」「１－２」を同じ住所・号室・建物名として見る", () => {
+    expect(normalizeAddress("港区1ー2")).toBe(normalizeAddress("港区1-2"));
+    expect(normalizeAddress("港区１－２")).toBe(normalizeAddress("港区1-2"));
+    expect(normalizeRoomNo("Aー101")).toBe(normalizeRoomNo("A-101"));
+    expect(normalizeBuildingName("第1ー2ビル")).toBe(normalizeBuildingName("第1-2ビル"));
+  });
+
+  it("カタカナの長音は残す", () => {
+    expect(normalizeBuildingName("センター1")).toBe("センター1");
+  });
+});
