@@ -149,6 +149,11 @@ describe("数字のあいだの「ー」「－」「−」を「-」にそろえ
     expect(searchVariants("港区1－2ー3")).toContain("港区１－２ー３");
   });
 
+  it("★数字のあいだでないハイフンも、前と同じく幅の違いで探す(ハイツ-1・@codex)", () => {
+    expect(searchVariants("ハイツ－１")).toContain("ハイツ-1");
+    expect(searchVariants("ハイツ-1")).toContain("ハイツ－１");
+  });
+
   it("カタカナの長音だけの語は候補を増やさない", () => {
     expect(searchVariants("センター")).toEqual(["センター"]);
   });

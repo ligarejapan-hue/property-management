@@ -52,7 +52,9 @@ function widthVariants(q: string): string[] {
   const dashes = sep().test(norm) ? DASH_FORMS : ["-"];
   // ⚠数字だけ変えた形も残す: 前の保存は数字だけ半角にしたので「１－２ー３」は「1－2ー3」で入っている(@codex)。
   const half = toHalfWidthDigits(q);
-  const out = [q, half, toFullWidthDigits(half)];
+  const full = toFullWidthDigits(half);
+  // ⚠前からある候補(ハイフンの幅だけ変えた形)も残す: 数字のあいだでない「ハイツ-1」なども探せるように(@codex)。
+  const out = [q, half, full, half.replace(/－/g, "-"), full.replace(/-/g, "－")];
   for (const digits of [norm, toFullWidthDigits(norm)]) {
     for (const d of dashes) out.push(digits.replace(sep(), d));
   }
