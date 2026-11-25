@@ -10,6 +10,7 @@ import { hasRenderableLpVariant } from "@/lib/sale-dm-letter/lp-render-input";
 import { loadSaleDmPublicPageConfig } from "@/lib/sale-dm-letter/config-store";
 import { normalizePublicSlug, readAdParams, publicLpPath, safeUtmValue } from "@/lib/sale-dm-letter/lp-public";
 import { recordPublicInquiry } from "@/lib/sale-dm-letter/lp-public-record";
+import { lpDesignAsksContactPref } from "@/lib/sale-dm-letter/lp-design-pages";
 import { createResponder, readFormBody, wantsJsonReply } from "@/lib/sale-dm-letter/inquiry-http";
 import type { AdParams } from "@/lib/sale-dm-letter/lp-public";
 import {
@@ -33,7 +34,8 @@ import {
  *  5. honeypot・速すぎる送信(lp-form-stamp.ts) — 機械送信は「受け付けました」(silent)を返して申込を残さない。
  *     ボット記録(AuditLog lp_inquiry_bot_blocked)だけ残す。入力操作の印(lp_js)が無い・表示の署名が無い/不正な送信は
  *     受け付けたうえで lp_inquiry_bot_suspect を残す(取りこぼさない)。記録は公開名・理由・広告の印・gclid の有無だけ。
- *  6. 入力検証(inquiry-input.ts) — 不備は 422。入力値は画面に送り返さない。
+ *  6. 入力検証(inquiry-input.ts) — 不備は 422。入力値は画面に送り返さない。連絡方法・メール・時間帯も同じ検証で受ける
+ *     (compare・question 案だけ「どちらでも」でもメール必須=lpDesignAsksContactPref)。
  *  7. 存在確認(読み取りのみ) — 公開名に合う「使う」種類が無い・文章が無ければ 404(記録・監査なし)。
  *     判定はページを出す条件(lp-public-loader.ts)と同じ関数(hasRenderableLpVariant)。
  *  8. 端末IPの1時間の上限(5/時)・公開名ごとの上限(200/時)・全体の上限(120/時・DM 用とは別の枠) — 存在確認を通った
@@ -95,7 +97,9 @@ export async function POST(req: NextRequest, { params }: { params: Promise<{ slu
   if (!body.ok) return reply("unavailable", body.status);
   const get = (key: string): string | null => body.fields.get(key);
 
-  const parsed = parseInquiryForm(get);
+  // 売却の代表LP の compare・question 案は「どちらでも」を選んだときもメールアドレスが要る(2026-11-25 発注者)。
+  // ほかの公開名(今の LP・ほかの案)は今までどおり「メール」のときだけ。
+  const parsed = parseInquiryForm(get, { emailRequiredForEither: lpDesignAsksContactPref(slug) });
   const ad = readAdParams(get);
   const stampKey = deriveLpFormStampKey();
   // 機械送信は人と同じ「受け付けました」を返すが、silent=ページが申込完了の合図(Google のコンバージョン)を出さない。

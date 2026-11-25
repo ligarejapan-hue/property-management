@@ -586,7 +586,8 @@ export const INQUIRY_CLIENT_CHECK_SOURCE = [
   'var ph=n(v.phone).replace(/\\s+/g,"").replace(/[\\u30fc\\u2212\\u2013\\u2014\\u2015\\u2010\\u2011\\u2012().\\u30fb/]/g,"-").replace(/-{2,}/g,"-").replace(/^-+|-+$/g,"");',
   `if(ph===""){E.push({f:"phone",m:M.phone_required})}else if(canN&&(ph.length>${INQUIRY_LIMITS.phone}||!/^[0-9+\\-]+$/.test(ph)||ph.replace(/[^0-9]/g,"").length<10)){E.push({f:"phone",m:M.phone_invalid})}`,
   'var em=n(v.email);if(canN&&em!==""&&!/^[^\\s@]+@[^\\s@]+\\.[^\\s@]+$/.test(em)){E.push({f:"email",m:M.email_invalid})}',
-  'if(n(v.pref)==="email"&&em===""){E.push({f:"email",m:M.email_required_for_pref})}',
+  // v.ee=「どちらでも」もメールが要るフォーム(売却の代表LP の compare・question 案=form の data-either-email・parseInquiryForm の emailRequiredForEither と同じ)。
+  'var pf=n(v.pref);if((pf==="email"||(v.ee===true&&pf==="either"))&&em===""){E.push({f:"email",m:M.email_required_for_pref})}',
   'if(!v.consent){E.push({f:"consent",m:M.consent_required})}',
   "return E}",
 ].join("");
@@ -622,7 +623,7 @@ const INQUIRY_FORM_SETUP = [
   'function clearErrs(){var ps=f.querySelectorAll(".fld-err");for(var i=0;i<ps.length;i++){ps[i].hidden=true;ps[i].textContent=""}var bad=f.querySelectorAll(".invalid");for(var j=0;j<bad.length;j++){bad[j].classList.remove("invalid");bad[j].removeAttribute("aria-invalid")}}',
   "function vals(){var c=fieldOf(\"consent\");var p=f.querySelector('input[name=\"contactPref\"]:checked');" +
     'function val(k){var el=fieldOf(k);return el?el.value:""}' +
-    'return{name:val("name"),phone:val("phone"),email:val("email"),pref:p?p.value:"",consent:!!(c&&c.checked)}}',
+    'return{name:val("name"),phone:val("phone"),email:val("email"),pref:p?p.value:"",consent:!!(c&&c.checked),ee:f.getAttribute("data-either-email")==="1"}}',
   "function flag(errs){for(var i=0;i<errs.length;i++){var p=errEl(errs[i].f);if(p){p.textContent=errs[i].m;p.hidden=false}" +
     'var el=fieldOf(errs[i].f);if(el){el.classList.add("invalid");el.setAttribute("aria-invalid","true")}}' +
     'var first=errEl(errs[0].f)||fieldOf(errs[0].f);if(first&&first.scrollIntoView){first.scrollIntoView({block:"center"})}' +

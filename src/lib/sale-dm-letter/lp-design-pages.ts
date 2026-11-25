@@ -4,6 +4,8 @@
  *  - 文言は見本(同じフォルダの design-*.html・発注者確認済み)のものだけ。足さない・変えない。
  *    例外は今の LP と同じものを出す部分=個人情報の取り扱いの文面(設定)・申込の注意/完了の文言(送信スクリプト)・
  *    電話番号と会社名(差出人の設定)・所在地と免許番号と受付時間(lp-brand.ts)。
+ *    2026-11-25 発注者の依頼で compare・question 案に足した文言(連絡方法・時間帯の欄・相談の分岐・電話の案内など)と、
+ *    5案共通の下の固定バーの番号も例外。
  *  - どの公開名でどの見た目を出すかは LP_DESIGN_BY_SLUG(比較テストのための仮の形。続けるなら種類ごとの列にする=migration は相談)。
  *  - 外部の読み込みなし(CSP は今の公開ページのまま)。書体は端末の明朝体・ゴシック体、ロゴは /lp-assets/brand/。
  *  - 申込フォームは今の受け口(POST /lp/<公開名>/inquiry)。欄の名前・同意・ボット除け・広告の印の隠し欄・
@@ -37,28 +39,65 @@ export function lpDesignForSlug(slug: string): LpDesignKey | null {
   return Object.prototype.hasOwnProperty.call(LP_DESIGN_BY_SLUG, slug) ? LP_DESIGN_BY_SLUG[slug] : null;
 }
 
+/** 連絡方法・メール・時間帯の欄を出す案(2026-11-25 発注者: compare・question だけ)。 */
+const CONTACT_PREF_DESIGNS: ReadonlySet<LpDesignKey> = new Set<LpDesignKey>(["compare", "question"]);
+
+/**
+ * この公開名のフォームは連絡方法を聞く案か(=「どちらでも」でもメールアドレスが要る)。
+ * 申込口(/lp/<公開名>/inquiry)が parseInquiryForm の emailRequiredForEither に渡す。
+ */
+export function lpDesignAsksContactPref(slug: string): boolean {
+  const d = lpDesignForSlug(slug);
+  return d !== null && CONTACT_PREF_DESIGNS.has(d);
+}
+
+/** 連絡のつきやすい時間帯の選択肢(任意・今の contactTime 欄にこの文字のまま入る)。 */
+export const LP_CONTACT_TIME_OPTIONS = ["平日 10〜12時", "平日 12〜15時", "平日 15〜19時", "いつでも"] as const;
+
+/** question 案の「相談しながら進めたい」(選ぶと質問2と連絡先の詳しい欄を飛ばす・この文字が message に入る)。 */
+export const QUESTION_CONSULT_LABEL = "事情が複雑なので、相談しながら進めたい";
+
 /** 濃い地に載せるロゴ(文字を生成り色にした版・赤い丸はそのまま)。 */
 export const LP_LOGO_LIGHT = { src: "/lp-assets/brand/logo-light.png", width: 560, height: 80, alt: "Ligare Japan" } as const;
 
 /**
- * question 案の「種類・都県・市区町村」を、新しい列を作らずに今の欄へ入れる(ES5 の関数式の文字列・ブラウザで走る)。
- * 種類 → message、都県+市区町村 → propertyAddress。市区町村に都県から書いてあれば重ねない。
+ * question 案の「種類・都県・市区町村・ご事情」を、新しい列を作らずに今の欄へ入れる(ES5 の関数式の文字列・ブラウザで走る)。
+ * 種類 → message、ご事情(任意の自由記述・2026-11-25)→ message の答えの後ろ、都県+市区町村 → propertyAddress。
+ * 市区町村に都県から書いてあれば重ねない。message は上限(INQUIRY_LIMITS.message)で切る(サロゲートの片割れは残さない)。
+ * cs(相談しながら進めたい)のときは、その選択だけを message に入れる(質問2・ご事情の欄は飛ばしている)。
  */
 export const QUESTION_COMPOSE_SOURCE = [
-  "function(k,p,c){",
+  "function(k,p,c,n,cs){",
   'function t(s){return String(s==null?"":s).replace(/\\s+/g," ").replace(/^\\s+|\\s+$/g,"")}',
+  `if(cs){return{message:${JSON.stringify(`ご希望: ${QUESTION_CONSULT_LABEL}`)},propertyAddress:""}}`,
+  'n=String(n==null?"":n).replace(/\\r\\n?/g,"\\n").replace(/^\\s+|\\s+$/g,"");',
   "k=t(k);p=t(p);c=t(c);",
   'var a=p&&c.indexOf(p)===0?c:(p+c);',
-  'return{message:k?"物件の種類: "+k:"",propertyAddress:a}}',
+  'var L=[];if(k){L.push("物件の種類: "+k)}if(n){L.push("ご事情: "+n)}var m=L.join("\\n");',
+  // 受け口は NFKC にそろえてから数える(「…」は3字・「㈱」は3字に伸びる)=先にそろえてから切る(内部レビュー P3)。
+  'if(typeof m.normalize==="function"){try{m=m.normalize("NFKC")}catch(_){}}',
+  `if(m.length>${INQUIRY_LIMITS.message}){m=m.slice(0,${INQUIRY_LIMITS.message});var z=m.charCodeAt(m.length-1);if(z>=55296&&z<=56319){m=m.slice(0,-1)}}`,
+  "return{message:m,propertyAddress:a}}",
 ].join("");
 
 /** 市区町村の欄の上限: いちばん長い都県名(4字)をつないでも所在地の上限に収まる長さ。 */
 const CITY_MAX = INQUIRY_LIMITS.propertyAddress - 4;
+/** ご事情の欄の上限: 「物件の種類: そのほか」+改行+「ご事情: 」を足しても message の上限に収まる長さ(超えた分は組み立てで切る)。 */
+const NOTE_MAX = INQUIRY_LIMITS.message - 20;
 
 interface Ctx {
   tel: { href: string; text: string } | null;
+  /** 電話の受付時間(LP_BRAND.phoneHours)。空なら null=受付時間を含む文は出さない。 */
+  hours: string | null;
   form: LpFormInput | null;
   pub: LpPublicInput | null;
+  /** 連絡方法・メール・時間帯の欄を出すか(compare・question 案)。 */
+  contact: boolean;
+}
+
+/** 番号と受付時間の両方があるときだけ返す(どちらかが無ければ電話を案内する文と導線を出さない)。 */
+function telWithHours(ctx: Ctx): { href: string; text: string; hours: string } | null {
+  return ctx.tel && ctx.hours ? { ...ctx.tel, hours: ctx.hours } : null;
 }
 
 const arrow = `<span class="ar" aria-hidden="true"></span>`;
@@ -104,6 +143,7 @@ function formFields(ctx: Ctx, idp: string, form: LpFormInput): string {
     : "";
   return `<div class="fld"><input id="${idp}nm" type="text" name="name" placeholder=" " autocomplete="name" required maxlength="${INQUIRY_LIMITS.name}"><label for="${idp}nm">お名前</label></div>${fieldError("name")}` +
     `<div class="fld"><input id="${idp}tl" type="tel" name="phone" placeholder=" " autocomplete="tel" inputmode="tel" required maxlength="${INQUIRY_LIMITS.phone}"><label for="${idp}tl">電話番号</label></div>${fieldError("phone")}` +
+    (ctx.contact ? contactFields(idp) : "") +
     ad +
     `<div class="hp" aria-hidden="true"><label>この欄は空のままにしてください<input name="${HONEYPOT_FIELD}" type="text" tabindex="-1" autocomplete="off"></label></div>` +
     `<details class="pv"><summary>個人情報の取り扱いについて</summary><p>${privacy}<br>詳しくは当社の<a href="${escapeHtml(LP_BRAND.privacyPolicyUrl)}" target="_blank" rel="noopener">プライバシーポリシー</a>をご覧ください。</p></details>` +
@@ -111,9 +151,31 @@ function formFields(ctx: Ctx, idp: string, form: LpFormInput): string {
     `<div class="inq-msg" role="alert" aria-live="assertive" hidden></div>`;
 }
 
-function formOpen(form: LpFormInput, cls: string, style = "", id = ""): string {
-  return `<form class="${cls}"${id ? ` id="${id}"` : ""} method="post" action="${escapeHtml(form.action)}" data-inquiry="1" novalidate${style ? ` style="${style}"` : ""}>`;
+/**
+ * 連絡方法(既定は電話)・メールアドレス・連絡のつきやすい時間帯(任意・選ぶだけ)。欄の名前は今の受け口のまま
+ * (contactPref / email / contactTime)。メール・どちらでもを選んだらメールアドレスが要る(form の data-either-email)。
+ * 相談の分岐(question 案)では .qn-only ごと隠す(電話が選ばれたまま・時間帯は空=そのまま送れる)。
+ */
+function contactFields(idp: string): string {
+  const pref = (value: string, label: string, checked = false) =>
+    `<label><input type="radio" name="contactPref" value="${value}"${checked ? " checked" : ""}><span>${label}</span></label>`;
+  return `<div class="ct qn-only"><p class="ctl">ご希望の連絡方法</p><div class="pref">${pref("phone", "電話", true)}${pref("email", "メール")}${pref("either", "どちらでも")}</div></div>` +
+    `<div class="fld qn-only"><input id="${idp}em" type="email" name="email" placeholder=" " autocomplete="email" maxlength="${INQUIRY_LIMITS.email}"><label for="${idp}em">メールアドレス（メールをご希望の方）</label></div>` +
+    `<div class="qn-only">${fieldError("email")}</div>` +
+    `<div class="ct qn-only"><label class="ctl" for="${idp}ctm">連絡のつきやすい時間帯（任意）</label><select id="${idp}ctm" name="contactTime"><option value="">指定なし</option>` +
+    LP_CONTACT_TIME_OPTIONS.map((t) => `<option>${escapeHtml(t)}</option>`).join("") + `</select></div>`;
 }
+
+function formOpen(ctx: Ctx, form: LpFormInput, cls: string, style = "", id = ""): string {
+  return `<form class="${cls}"${id ? ` id="${id}"` : ""} method="post" action="${escapeHtml(form.action)}" data-inquiry="1"${ctx.contact ? ` data-either-email="1"` : ""} novalidate${style ? ` style="${style}"` : ""}>`;
+}
+
+/** 「お電話で直接ご相談: 番号(受付時間)」(question 案の各段・番号と受付時間が両方あるときだけ)。 */
+function qtel(ctx: Ctx, extra = ""): string {
+  const t = telWithHours(ctx);
+  return t ? `<p class="qtel${extra}">お電話で直接ご相談: <a href="${t.href}">${escapeHtml(t.text)}</a>（${escapeHtml(t.hours)}）</p>` : "";
+}
+const Q_SAFE = `<p class="note qsafe">連絡先を入れるまで、当社からご連絡することはありません。</p>`;
 const submit = (style: string) => `<button class="cta" type="submit" style="${style}"><span>${escapeHtml(LP_CTA_LABEL)}</span>${arrow}</button>`;
 
 // ── 冒頭(案ごと) ──
@@ -127,7 +189,7 @@ function heroBase(): string {
 
 function heroForm(ctx: Ctx): string {
   const form = ctx.form
-    ? formOpen(ctx.form, "form f d3", "margin-top:28px;gap:22px") + formFields(ctx, "h", ctx.form) + submit("margin-top:4px") +
+    ? formOpen(ctx, ctx.form, "form f d3", "margin-top:28px;gap:22px") + formFields(ctx, "h", ctx.form) + submit("margin-top:4px") +
       `<p class="note" style="margin-top:-8px">入力はこの2つだけです。しつこい電話はしません。</p></form>`
     : "";
   return `<section class="hero dark" id="hero" style="justify-content:flex-start;padding-top:calc(64px + min(25svh,210px) + 30px)">${SKY}<div class="wrap" data-rv>${KICKER}` +
@@ -138,21 +200,28 @@ function heroForm(ctx: Ctx): string {
 function heroQuestion(ctx: Ctx): string {
   const tile = (attr: string, v: string, small: string | null, style = "") =>
     `<button type="button" class="tile" aria-pressed="false" ${attr}="${escapeHtml(v)}"${style ? ` style="${style}"` : ""}><b>${escapeHtml(v)}</b>${small ? `<small>${escapeHtml(small)}</small>` : ""}</button>`;
+  // 質問3(連絡先)の段: ご事情の欄(任意・2026-11-25)+すぐ下に電話 → お届け先の欄。
+  // 「相談しながら進めたい」を選んだとき(#wz.cs)は、ご事情・連絡方法などの欄(.qn-only)を隠し、お名前・電話番号だけにする。
+  // ⚠査定書の見本の画像(public/lp-assets/brand/satei-sample.jpg)はファイルが届くまで載せない(2026-11-25 保留)。
   const step3 = ctx.form
-    ? `<div class="stp"><h2 class="qh">査定書のお届け先を、<br>教えてください</h2><div class="form" style="margin-top:22px;gap:22px">` +
+    ? `<div class="stp"><div class="qn-only"><div class="qnote"><label class="ctl" for="wnt">ご事情があればお書きください（任意）</label>` +
+      `<textarea id="wnt" data-q-note="1" maxlength="${NOTE_MAX}" rows="4"></textarea></div>${qtel(ctx)}</div>` +
+      `<h2 class="qh qn-only">査定書のお届け先を、<br>教えてください</h2><h2 class="qh cs-only">お名前とお電話番号を、<br>教えてください</h2>${qtel(ctx, " cs-only")}` +
+      `<div class="form" style="margin-top:22px;gap:22px">` +
       formFields(ctx, "w", ctx.form) +
       `<input type="hidden" name="message" value=""><input type="hidden" name="propertyAddress" value="">` +
       `</div>${submit("")}<p class="note">査定書は2〜3営業日でお届けします。しつこい電話はしません。</p></div>`
     : "";
   const body = `<div class="stp on"><h1 class="qh">売却を考えているのは、<br><span class="nb">どのような不動産ですか？</span></h1><div class="tiles">` +
     tile("data-qk", "戸建て", "土地つきの家") + tile("data-qk", "マンション", "1室・区分") + tile("data-qk", "土地", "更地・駐車場など") + tile("data-qk", "そのほか", "アパート・ビルなど") +
-    `</div><p class="note" style="text-align:left;margin-top:18px">選ぶと、次の質問へ進みます。</p></div>` +
+    tile("data-qcs", QUESTION_CONSULT_LABEL, null, "grid-column:1/-1;min-height:62px") +
+    `</div><p class="note" style="text-align:left;margin-top:18px">選ぶと、次の質問へ進みます。</p>${Q_SAFE}${qtel(ctx)}</div>` +
     `<div class="stp"><h2 class="qh">その不動産は、<br>どちらにありますか？</h2><div class="tiles">` +
     ["東京都", "神奈川県", "埼玉県", "千葉県"].map((p) => tile("data-qp", p, null, "min-height:62px")).join("") +
     `</div><div class="fld" style="margin-top:22px"><input id="wct" type="text" data-q-city="1" maxlength="${CITY_MAX}" placeholder=" "><label for="wct">市区町村（任意）</label></div>` +
-    `<button class="cta nx" type="button"><span>次の質問へ進む</span>${arrow}</button></div>` +
+    `<button class="cta nx" type="button"><span>次の質問へ進む</span>${arrow}</button>${Q_SAFE}${qtel(ctx)}</div>` +
     step3 + `<button type="button" class="back" hidden>前の質問に戻る</button>`;
-  const open = ctx.form ? formOpen(ctx.form, "f d1", "", "wz") : `<div id="wz" class="f d1">`;
+  const open = ctx.form ? formOpen(ctx, ctx.form, "f d1", "", "wz") : `<div id="wz" class="f d1">`;
   return `<section class="hero dark" id="hero" style="justify-content:flex-start;padding-top:calc(64px + min(25svh,210px) + 44px)">${SKY}<div class="wrap" data-rv>` +
     `<div class="prog f"><span id="pgt">質問 一／三</span><span>残り1分ほど</span></div><div class="pl f"><b id="pgb"></b></div>` +
     open + body + (ctx.form ? `</form>` : `</div>`) + `</div></section>`;
@@ -162,6 +231,8 @@ function heroCompare(): string {
   return `<section class="hero dark" id="hero">${SKY}<div class="wrap" data-rv>${KICKER}` +
     lines("h1", ["不動産の売り方は、", "二つあります"], "不動産の売り方は、二つあります") +
     `<p class="lede f d3">どちらが合うかは、何を優先するかで決まります。当社はどちらもご案内できます。</p>` +
+    // 2026-11-25 発注者: 冒頭の直下に、答えが届くまでの日数
+    `<p class="cpq f d4">仲介と買取、両方の金額を2〜3営業日でお答えします。</p>` +
     SCROLLCUE(" f d4") + `</div></section>`;
 }
 
@@ -216,7 +287,17 @@ function duoDark(): string {
 function compareBoth(): string {
   return `<section class="sec light"><div class="wrap"><div data-rv><div class="rule"></div>` + h2(["迷うときは、", "両方の金額を聞いてから"]) +
     `<p class="lede f d2">査定では、仲介で売る場合の金額と、買取の場合の金額の両方をお伝えします。比べてから、お決めください。</p></div>` +
-    ctaLink("両方の金額を無料で確かめる") + `</div></section>`;
+    ctaLink("両方の金額を無料で確かめる") +
+    // 2026-11-25 発注者: ボタンの近くに、査定書の使い道
+    `<p class="note" style="text-align:left">査定書は、ご家族の話し合いの材料としてお使いいただけます。</p></div></section>`;
+}
+
+/** compare 案のフォームの直前の一言(番号と受付時間が両方あるときだけ・2026-11-25 発注者)。 */
+function compareCallNote(ctx: Ctx): string {
+  const t = telWithHours(ctx);
+  return t
+    ? `<p class="lede cpcall">お申込みのあと、${escapeHtml(t.hours)}に担当者から1回お電話します。${escapeHtml(t.text)}からおかけします。メールをご希望の方には、メールでお送りします。</p>`
+    : "";
 }
 
 function chapters(): string {
@@ -270,8 +351,8 @@ function faq(): string {
     `</div></div></section>`;
 }
 
-function apply(ctx: Ctx): string {
-  const form = ctx.form ? formOpen(ctx.form, "form", "", "form") + formFields(ctx, "", ctx.form) + submit("margin-top:6px") + `</form>` : "";
+function apply(ctx: Ctx, beforeForm = ""): string {
+  const form = ctx.form ? beforeForm + formOpen(ctx, ctx.form, "form", "", "form") + formFields(ctx, "", ctx.form) + submit("margin-top:6px") + `</form>` : "";
   const tel = ctx.tel
     ? `<div style="margin-top:56px;text-align:center" data-rv class="f"><p style="font-family:var(--mincho);letter-spacing:.2em;font-size:14px">お電話でのご相談</p>` +
       `<a class="telbig" href="${ctx.tel.href}">${escapeHtml(ctx.tel.text)}</a><p class="note" style="margin-top:6px">${escapeHtml(LP_BRAND.phoneHours)}</p></div>`
@@ -285,7 +366,7 @@ const ORDER: Record<LpDesignKey, (ctx: Ctx) => string[]> = {
   base: (c) => [heroBase(), marquee(), say(), ways(), duo(), flow(), cases(), faq(), apply(c)],
   form: (c) => [heroForm(c), marquee(), say(), ways(), duo(), flow(), cases(), faq(), apply(c)],
   question: (c) => [heroQuestion(c), marquee(), say(), ways(), duo(), flow(), cases(), faq(), apply(c)],
-  compare: (c) => [heroCompare(), duoDark(), compareBoth(), ways(), say(), flow(), cases(), faq(), apply(c)],
+  compare: (c) => [heroCompare(), duoDark(), compareBoth(), ways(), say(), flow(), cases(), faq(), apply(c, compareCallNote(c))],
   editorial: (c) => [heroEditorial(), marquee(), chapters(), ways(), duo(), flow(), cases(), faq(), apply(c)],
 };
 
@@ -341,14 +422,20 @@ const QUESTION_SCRIPT = [
   '(function(){var w=document.getElementById("wz");if(!w)return;try{',
   `var CP=${QUESTION_COMPOSE_SOURCE};`,
   'var s=0,A=function(l){return Array.prototype.slice.call(l)},st=A(w.querySelectorAll(".stp")),pb=document.getElementById("pgb"),pt=document.getElementById("pgt"),bk=w.querySelector(".back"),nm=["一","二","三"];',
-  'var kind="",pref="",city=w.querySelector("[data-q-city]");',
-  'function sync(){var v=CP(kind,pref,city?city.value:"");var m=w.querySelector("input[name=message]"),a=w.querySelector("input[name=propertyAddress]");if(m){m.value=v.message}if(a){a.value=v.propertyAddress}}',
+  'var kind="",pref="",cs=false,city=w.querySelector("[data-q-city]"),note=w.querySelector("[data-q-note]");',
+  'function sync(){var v=CP(kind,pref,city?city.value:"",note?note.value:"",cs);var m=w.querySelector("input[name=message]"),a=w.querySelector("input[name=propertyAddress]");if(m){m.value=v.message}if(a){a.value=v.propertyAddress}}',
+  // 相談しながら進めたい(cs): 連絡方法などの欄を隠す。隠した欄は「電話・メールなし・時間帯なし」に戻す(隠れた欄で送信が止まらない)。
+  'function setCs(on){cs=on;w.classList.toggle("cs",cs);if(!cs)return;var ph=w.querySelector(\'input[name="contactPref"][value="phone"]\');if(ph){ph.checked=true}' +
+    'var em=w.querySelector("input[name=email]");if(em){em.value=""}var tm=w.querySelector("select[name=contactTime]");if(tm){tm.value=""}}',
   'function go(n){s=n;st.forEach(function(e,i){e.classList.toggle("on",i===n)});if(pb){pb.style.transform="scaleX("+((n+1)/3).toFixed(4)+")"}if(pt){pt.textContent="質問 "+nm[n]+"／三"}if(bk){bk.hidden=n===0}}',
   'st.forEach(function(e,i){var ts=A(e.querySelectorAll(".tile"));ts.forEach(function(t){t.addEventListener("click",function(){ts.forEach(function(o){o.setAttribute("aria-pressed",String(o===t))});',
-  'if(t.hasAttribute("data-qk")){kind=t.getAttribute("data-qk")}if(t.hasAttribute("data-qp")){pref=t.getAttribute("data-qp")}sync();if(i===0){setTimeout(function(){go(1)},380)}})})});',
+  'if(t.hasAttribute("data-qcs")){kind="";setCs(true)}else if(t.hasAttribute("data-qk")){kind=t.getAttribute("data-qk");setCs(false)}if(t.hasAttribute("data-qp")){pref=t.getAttribute("data-qp")}sync();' +
+    'if(i===0){setTimeout(function(){go(cs?st.length-1:1)},380)}})})});',
   'if(city){city.addEventListener("input",sync);city.addEventListener("keydown",function(e){if(e.isComposing||e.keyCode===229)return;if(e.key==="Enter"||e.keyCode===13){e.preventDefault();sync();go(Math.min(st.length-1,s+1))}})}',
+  'if(note){note.addEventListener("input",sync)}',
   'A(w.querySelectorAll(".nx")).forEach(function(b){b.addEventListener("click",function(){sync();go(Math.min(st.length-1,s+1))})});',
-  'if(bk){bk.addEventListener("click",function(){go(Math.max(0,s-1))})}',
+  // 相談の段から戻ると質問1へ(質問2は飛ばしている)。
+  'if(bk){bk.addEventListener("click",function(){go(cs&&s===st.length-1?0:Math.max(0,s-1))})}',
   '}catch(_){document.documentElement.classList.remove("rv")}})();',
 ].join("");
 
@@ -356,8 +443,10 @@ export function renderLpDesignPage(design: LpDesignKey, input: LpRenderInput): s
   const phone = input.company.phone;
   const ctx: Ctx = {
     tel: phone ? { href: `tel:${escapeHtml(phone)}`, text: formatPhoneJp(phone).value } : null,
+    hours: LP_BRAND.phoneHours.trim() || null,
     form: input.form && !input.form.disabled ? input.form : null,
     pub: input.mode === "public" ? (input.public ?? null) : null,
+    contact: CONTACT_PREF_DESIGNS.has(design),
   };
   const logo = (style = "") =>
     `<img class="logo" src="${LP_LOGO_LIGHT.src}" alt="${LP_LOGO_LIGHT.alt}" width="${LP_LOGO_LIGHT.width}" height="${LP_LOGO_LIGHT.height}"${style ? ` style="${style}"` : ""}>`;
@@ -366,7 +455,8 @@ export function renderLpDesignPage(design: LpDesignKey, input: LpRenderInput): s
     (input.company.name ? `${escapeHtml(input.company.name)}<br>` : "") +
     `${escapeHtml(LP_BRAND.address)}<br>${escapeHtml(LP_BRAND.license)}</div></footer>`;
   const bar = `<div class="bar" id="bar"><div${ctx.tel ? "" : ` class="one"`}><a class="p" href="#apply">${escapeHtml(LP_CTA_LABEL)}</a>` +
-    (ctx.tel ? `<a class="s" href="${ctx.tel.href}">電話</a>` : "") + `</div></div>`;
+    // 「電話」ボタンに番号も出す(5案共通・2026-11-25 発注者)。
+    (ctx.tel ? `<a class="s" href="${ctx.tel.href}"><small>電話</small>${escapeHtml(ctx.tel.text)}</a>` : "") + `</div></div>`;
   const ogMeta = ctx.pub ? ogMetaTags(input, ctx.pub) : "";
   const googleTag = ctx.pub?.google ? googleTagScripts(ctx.pub.google, ctx.pub.safeQuery) : "";
   const css = LP_DESIGN_COMMON_CSS + "\n" + LP_DESIGN_EXTRA_CSS[design];

@@ -7,10 +7,10 @@ vi.mock("@/lib/sale-dm-letter/config-store", () => ({
 import { loadPublicLpPage } from "@/lib/sale-dm-letter/lp-public-loader";
 import { loadSaleDmPublicPageConfig } from "@/lib/sale-dm-letter/config-store";
 import {
-  LP_DESIGN_BY_SLUG, LP_DESIGN_KEYS, QUESTION_COMPOSE_SOURCE, lpDesignForSlug, renderLpDesignPage, type LpDesignKey,
+  LP_DESIGN_BY_SLUG, LP_DESIGN_KEYS, QUESTION_COMPOSE_SOURCE, lpDesignAsksContactPref, lpDesignForSlug, renderLpDesignPage, type LpDesignKey,
 } from "@/lib/sale-dm-letter/lp-design-pages";
 import { LP_DESIGN_COMMON_CSS, LP_DESIGN_EXTRA_CSS } from "@/lib/sale-dm-letter/lp-design-styles";
-import { LP_PAGE_HEADERS } from "@/lib/sale-dm-letter/lp-page";
+import { INQUIRY_CLIENT_CHECK_SOURCE, LP_PAGE_HEADERS } from "@/lib/sale-dm-letter/lp-page";
 import type { LpRenderInput } from "@/lib/sale-dm-letter/lp-render-input";
 import { parseInquiryForm } from "@/lib/sale-dm-letter/inquiry-input";
 
@@ -46,6 +46,28 @@ const SAMPLE_ONLY = new Set([
 ]);
 /** 本番だけの文言(今の LP と同じ個人情報の取り扱いの文面・プライバシーポリシーへの案内)。 */
 const PROD_ONLY = new Set([PRIVACY, "詳しくは当社の", "プライバシーポリシー", "をご覧ください。"]);
+/** 2026-11-25 発注者の依頼で足した文言(compare・question だけ。ほかの案は見本のまま)。 */
+const CONTACT_TEXTS = [
+  "ご希望の連絡方法", "電話", "メール", "どちらでも", "メールアドレス（メールをご希望の方）",
+  "連絡のつきやすい時間帯（任意）", "指定なし", "平日 10〜12時", "平日 12〜15時", "平日 15〜19時", "いつでも",
+];
+const ADDED_20261125: Record<LpDesignKey, Set<string>> = {
+  base: new Set(), form: new Set(), editorial: new Set(),
+  compare: new Set([
+    ...CONTACT_TEXTS,
+    "仲介と買取、両方の金額を2〜3営業日でお答えします。",
+    "査定書は、ご家族の話し合いの材料としてお使いいただけます。",
+    "お申込みのあと、平日 10:00〜19:00に担当者から1回お電話します。03-6823-2760からおかけします。メールをご希望の方には、メールでお送りします。",
+  ]),
+  question: new Set([
+    ...CONTACT_TEXTS,
+    "事情が複雑なので、相談しながら進めたい",
+    "連絡先を入れるまで、当社からご連絡することはありません。",
+    "お電話で直接ご相談:", "（平日 10:00〜19:00）",
+    "ご事情があればお書きください（任意）",
+    "お名前とお電話番号を、",
+  ]),
+};
 
 describe("公開名と見た目の対応表", () => {
   it("5つの公開名が5つの見た目に対応する", () => {
@@ -67,7 +89,7 @@ describe.each(LP_DESIGN_KEYS)("見た目 %s", (design) => {
     const want = texts(sample).filter((t) => !SAMPLE_ONLY.has(t));
     const got = texts(html);
     const missing = [...new Set(want)].filter((t) => !got.includes(t));
-    const added = [...new Set(got)].filter((t) => !want.includes(t) && !PROD_ONLY.has(t));
+    const added = [...new Set(got)].filter((t) => !want.includes(t) && !PROD_ONLY.has(t) && !ADDED_20261125[design].has(t));
     expect(missing).toEqual([]);
     expect(added).toEqual([]);
   });
@@ -133,6 +155,136 @@ describe.each(LP_DESIGN_KEYS)("見た目 %s", (design) => {
     const h = renderLpDesignPage(design, input({ company: { name: null, contact: null, phone: null } }));
     expect(h).not.toContain("tel:");
     expect(h).toContain('<div class="one">');
+    // 2026-11-25: 電話の文と導線も出さない
+    expect(h).not.toContain("お電話で直接ご相談");
+    expect(h).not.toContain("からおかけします");
+    expect(h).not.toContain('class="s"');
+  });
+
+  it("下の固定バーの「電話」ボタンに番号を出す(2026-11-25)", () => {
+    expect(html).toContain('<a class="s" href="tel:0368232760"><small>電話</small>03-6823-2760</a>');
+  });
+
+  it("連絡方法・時間帯の欄は compare・question だけ", () => {
+    const asks = design === "compare" || design === "question";
+    // スクリプトの中の欄の名前(送信スクリプトが読む)は除いて、画面の欄だけを見る
+    const markup = html.replace(/<script[\s\S]*?<\/script>/g, "");
+    for (const s of ['name="contactPref"', 'name="contactTime"', 'name="email"', 'data-either-email="1"']) {
+      expect(markup.includes(s)).toBe(asks);
+    }
+  });
+});
+
+// 2026-11-25 発注者: compare・question の改善(連絡方法・時間帯)
+describe("連絡方法・時間帯の欄(compare・question)", () => {
+  it.each(["compare", "question"] as const)("%s: 既定は電話・メール欄・時間帯は選ぶだけ(任意)", (d) => {
+    const h = renderLpDesignPage(d, input());
+    expect(h).toContain('<input type="radio" name="contactPref" value="phone" checked>');
+    expect(h).toContain('<input type="radio" name="contactPref" value="email">');
+    expect(h).toContain('<input type="radio" name="contactPref" value="either">');
+    expect(h).toMatch(/<input id="[a-z]*em" type="email" name="email" placeholder=" " autocomplete="email" maxlength="254">/);
+    expect(h).toMatch(/<select id="[a-z]*ctm" name="contactTime"><option value="">指定なし<\/option><option>平日 10〜12時<\/option><option>平日 12〜15時<\/option><option>平日 15〜19時<\/option><option>いつでも<\/option><\/select>/);
+    expect(h).toContain(`data-err-for="email"`);
+    // 電話番号は必須のまま
+    expect(h).toMatch(/type="tel" name="phone"[^>]*required/);
+    // ページ内の id は重ならない(フォームが2つあるため)
+    const ids = [...h.matchAll(/ id="([^"]+)"/g)].map((m) => m[1]);
+    expect(new Set(ids).size).toBe(ids.length);
+  });
+
+  type Err = { f: string; m: string };
+  const check = new Function(`return (${INQUIRY_CLIENT_CHECK_SOURCE})`)() as (v: Record<string, unknown>) => Err[];
+  const base = { name: "架空 太郎", phone: "090-1234-5678", email: "", consent: true };
+  it("画面内のチェック: メール・どちらでも(この2案)はメールアドレスが要る", () => {
+    expect(check({ ...base, pref: "email", ee: true }).map((e) => e.f)).toEqual(["email"]);
+    expect(check({ ...base, pref: "either", ee: true }).map((e) => e.f)).toEqual(["email"]);
+    expect(check({ ...base, pref: "phone", ee: true })).toEqual([]);
+    expect(check({ ...base, pref: "either", ee: true, email: "a@example.com" })).toEqual([]);
+    // 今の LP・DM 用(印なし)は「どちらでも」でメールなしを今までどおり通す
+    expect(check({ ...base, pref: "either" })).toEqual([]);
+  });
+  it("送信スクリプトはフォームの印(data-either-email)を読む", () => {
+    const h = renderLpDesignPage("compare", input());
+    expect(h).toContain('ee:f.getAttribute("data-either-email")==="1"');
+  });
+  it("受け口の検証: emailRequiredForEither のときは「どちらでも」でメールが要る・時間帯はそのまま保存", () => {
+    const f = (o: Record<string, string>) => (k: string) => ({ name: "架空 太郎", phone: "090-1234-5678", consent: "yes", ...o } as Record<string, string>)[k] ?? null;
+    expect(parseInquiryForm(f({ contactPref: "either" }), { emailRequiredForEither: true })).toEqual({ kind: "invalid", errors: ["email_required_for_pref"] });
+    expect(parseInquiryForm(f({ contactPref: "email" }), { emailRequiredForEither: true })).toEqual({ kind: "invalid", errors: ["email_required_for_pref"] });
+    expect(parseInquiryForm(f({ contactPref: "either" }))).toMatchObject({ kind: "ok" });
+    expect(parseInquiryForm(f({ contactPref: "either", email: "a@example.com", contactTime: "平日 12〜15時" }), { emailRequiredForEither: true }))
+      .toMatchObject({ kind: "ok", value: { contactPref: "either", email: "a@example.com", contactTime: "平日 12〜15時" } });
+  });
+  it("この印を付ける公開名は compare・question だけ", () => {
+    expect(lpDesignAsksContactPref("baikyaku-compare")).toBe(true);
+    expect(lpDesignAsksContactPref("baikyaku-question")).toBe(true);
+    for (const s of ["baikyaku", "baikyaku-form", "baikyaku-editorial", "souzoku", "constructor"]) expect(lpDesignAsksContactPref(s)).toBe(false);
+  });
+});
+
+describe("compare 案の文言(2026-11-25)", () => {
+  const h = renderLpDesignPage("compare", input());
+  it("冒頭の直下・ボタンの近く・フォームの直前", () => {
+    expect(h).toContain("仲介と買取、両方の金額を2〜3営業日でお答えします。");
+    const both = h.indexOf("両方の金額を無料で確かめる");
+    const family = h.indexOf("査定書は、ご家族の話し合いの材料としてお使いいただけます。");
+    expect(family).toBeGreaterThan(both);
+    const call = h.indexOf("お申込みのあと、平日 10:00〜19:00に担当者から1回お電話します。03-6823-2760からおかけします。メールをご希望の方には、メールでお送りします。");
+    expect(call).toBeGreaterThan(0);
+    expect(call).toBeLessThan(h.indexOf('id="form"'));
+    // 冒頭の節の中
+    expect(h.indexOf("仲介と買取、両方の金額を2〜3営業日でお答えします。")).toBeLessThan(h.indexOf("</section>"));
+  });
+  it("ほかの案には出さない", () => {
+    for (const d of ["base", "form", "question", "editorial"] as const) {
+      const o = renderLpDesignPage(d, input());
+      expect(o).not.toContain("両方の金額を2〜3営業日でお答えします");
+      expect(o).not.toContain("からおかけします");
+      expect(o).not.toContain("ご家族の話し合いの材料として");
+    }
+  });
+});
+
+describe("question 案: 相談の分岐・安心の一言・電話・ご事情の欄(2026-11-25)", () => {
+  const h = renderLpDesignPage("question", input());
+  const compose = new Function(`return (${QUESTION_COMPOSE_SOURCE})`)() as (k: string, p: string, c: string, n?: string, cs?: boolean) => { message: string; propertyAddress: string };
+  it("質問1に「相談しながら進めたい」を足す(選ぶと分岐)", () => {
+    expect(h).toContain('data-qcs="事情が複雑なので、相談しながら進めたい"');
+    expect(h.match(/class="tile"/g)?.length).toBe(9);
+    expect(h).toContain('w.classList.toggle("cs",cs)');
+  });
+  it("相談を選んだら message はその選択だけ(種類・所在地・ご事情は入れない)", () => {
+    expect(compose("戸建て", "東京都", "世田谷区", "書いた", true)).toEqual({ message: "ご希望: 事情が複雑なので、相談しながら進めたい", propertyAddress: "" });
+  });
+  it("ご事情の欄は答えの後ろに足す・上限に収める・受け口の検証を通る", () => {
+    expect(compose("戸建て", "東京都", "世田谷区", " 兄弟で共有しています\r\n急ぎません ")).toEqual({
+      message: "物件の種類: 戸建て\nご事情: 兄弟で共有しています\n急ぎません", propertyAddress: "東京都世田谷区",
+    });
+    expect(compose("", "", "", "だけ")).toEqual({ message: "ご事情: だけ", propertyAddress: "" });
+    const long = compose("マンション", "", "", "あ".repeat(2000));
+    expect([...long.message].length).toBe(1000);
+    const r = parseInquiryForm((k) => ({ name: "架空 太郎", phone: "090-1234-5678", consent: "yes", ...long } as Record<string, string>)[k] ?? null);
+    expect(r.kind).toBe("ok");
+    // NFKC で伸びる文字(「…」→「...」)を詰めても、受け口の上限を超えない
+    const dots = compose("戸建て", "", "", "…".repeat(900));
+    expect([...dots.message].length).toBeLessThanOrEqual(1000);
+    const r2 = parseInquiryForm((k) => ({ name: "架空 太郎", phone: "090-1234-5678", consent: "yes", ...dots } as Record<string, string>)[k] ?? null);
+    expect(r2.kind).toBe("ok");
+    // 欄は名前を持たない(そのままは送らない)・上限つき
+    expect(h).toMatch(/<textarea id="wnt" data-q-note="1" maxlength="\d+" rows="4"><\/textarea>/);
+    expect(h).toContain("ご事情があればお書きください（任意）");
+  });
+  it("質問1・2に「連絡先を入れるまで…」、各段に電話(番号と受付時間)", () => {
+    expect(h.match(/連絡先を入れるまで、当社からご連絡することはありません。/g)?.length).toBe(2);
+    const line = 'お電話で直接ご相談: <a href="tel:0368232760">03-6823-2760</a>（平日 10:00〜19:00）';
+    // 質問1・質問2・ご事情の欄のすぐ下・相談の段
+    expect(h.split(line).length - 1).toBe(4);
+    const note = h.indexOf('data-q-note="1"');
+    expect(h.indexOf(line, note)).toBeGreaterThan(note);
+    expect(h.indexOf(line, note)).toBeLessThan(h.indexOf('name="name"', note));
+  });
+  it("見本の査定書の画像は、ファイルが無い間は出さない", () => {
+    if (!existsSync(join(process.cwd(), "public/lp-assets/brand/satei-sample.jpg"))) expect(h).not.toContain("satei-sample");
   });
 });
 
