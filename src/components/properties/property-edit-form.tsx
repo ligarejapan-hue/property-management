@@ -47,6 +47,7 @@ import { canSubmitSave, shouldShowLockUnavailableNotice } from "@/lib/edit-lock/
 // 1回だけ問い合わせて差し替える。
 import { showComposedEditLockedMessage } from "@/lib/edit-lock/locked-message";
 import { INQUIRER_NAME_MAX_LENGTH } from "@/lib/inquirer-name";
+import { orderFieldsLikeBasicInfo } from "@/lib/property-edit-field-order";
 import { ExtraParcelsEditor, parcelRowsOf } from "./extra-parcels-editor";
 
 interface AssigneeOption {
@@ -585,10 +586,11 @@ export default function PropertyEditForm({
     hasBuilding: property.building != null,
     occupancy: values.occupancyStatus,
   });
-  const allFields = [
-    ...FORM_FIELDS.filter((f) => f.key !== "inquirerName" || canEditInquirer),
-    ...salesFields,
-  ];
+  // 欄の並びは物件の詳細「基本情報」と同じ順(基本情報に出る欄を「基本」区分へ寄せる・2026-11-25 発注者)。
+  const allFields = orderFieldsLikeBasicInfo(
+    [...FORM_FIELDS.filter((f) => f.key !== "inquirerName" || canEditInquirer), ...salesFields],
+    values.propertyType ?? property.propertyType,
+  );
   const isMansion = isMansionUnit(values.propertyType ?? property.propertyType);
 
   const editDraftData = useMemo<PropertyEditDraft>(
@@ -1041,7 +1043,8 @@ export default function PropertyEditForm({
               {/* 区分マンション: 構造・地上階・地下階・総戸数・築年月は「棟の値が正」
                   (既存設計)。この画面では編集できない・読み取り専用表示+棟の画面への
                   リンクのみ(F3 Task7)。 */}
-              {section === "販売" && isMansion && property.building && (
+              {/* 基本情報の並びに合わせ、部屋の欄と同じ「基本」区分に出す(2026-11-25)。 */}
+              {section === "基本" && isMansion && property.building && (
                 <div className="mt-3 rounded border border-neutral-200 p-2 text-sm dark:border-neutral-700">
                   <p className="mb-1 font-semibold">棟の項目(この画面では変更できません)</p>
                   {/* 棟の欄が空のときは、この物件の欄の値を出す(詳細・販売図面と同じ読み方・2026-11-15)。 */}
