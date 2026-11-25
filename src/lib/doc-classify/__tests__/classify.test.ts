@@ -41,6 +41,20 @@ describe("normalizeForMatch", () => {
   });
 });
 
+describe("本人確認書類は守りの側に倒す(2026-11-25 セキュリティの自動レビュー)", () => {
+  it("ファイル名に本人確認の語があれば、前に別の種類の語があっても本人確認書類", () => {
+    expect(classifyDocument({ fileName: "覚書_運転免許証写し.pdf" })?.kind).toBe("identity_document");
+    expect(classifyDocument({ fileName: "購入申込書（印鑑証明添付）.pdf" })?.kind).toBe("identity_document");
+    expect(classifyDocument({ fileName: "見積書_住民票.pdf" })?.kind).toBe("identity_document");
+  });
+  it("本文は見出し域に本人確認の語があるときだけ本人確認書類", () => {
+    expect(classifyDocument({ fileName: "scan.pdf", text: "覚書 印鑑登録証明書 写し" })?.kind).toBe("identity_document");
+    // 決済のご案内の持ち物欄(見出し域より後ろ)の「本人確認書類」では決めない
+    const notice = `決済のご案内${"あ".repeat(500)}お持ちいただくもの 本人確認書類 印鑑証明書`;
+    expect(classifyDocument({ fileName: "scan.pdf", text: notice })?.kind).toBe("settlement_notice");
+  });
+});
+
 describe("classifyDocument: ファイル名", () => {
   const byName = (fileName: string) => classifyDocument({ fileName });
 

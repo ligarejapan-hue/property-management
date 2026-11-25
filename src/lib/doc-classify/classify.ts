@@ -107,6 +107,9 @@ export const DOC_KINDS: readonly DocKind[] = [
   { code: "identity_document", label: "本人確認書類・印鑑証明・住民票", stage: "identity", keywords: ["運転免許", "マイナンバー", "在留カード", "本人確認", "パスポート", "健康保険証", "印鑑証明", "印鑑登録証明", "住民票"] },
 ];
 
+/** 本人確認書類(開ける人を絞る種類・uploads-authorization の OWNER_PII_DOC_KINDS と同じ値)。 */
+const IDENTITY_KIND = "identity_document";
+
 /** 領収書・預り証のしるし。見つかったら手付/残代金の文脈で振り分ける。 */
 const RECEIPT_MARKERS = ["領収書", "領収証", "預り証"] as const;
 const DEPOSIT_CONTEXT = ["手付"] as const;
@@ -238,7 +241,13 @@ function keywordsOf(code: string): readonly string[] {
  * - 本文で当たれば、見出し域なら high・後ろなら low
  */
 export function classifyDocument(input: { fileName: string; text?: string | null }): DocClassification | null {
-  const byName = bestHit(normalizeForMatch(input.fileName), true);
+  const name = normalizeForMatch(input.fileName);
+  // 本人確認書類(開ける人を絞る種類)は語が1つでもあれば先に決める=守りの側に倒す(2026-11-25)。
+  // 「覚書_運転免許証写し」のように別の種類の語が前にあっても、本人確認書類として守る。
+  if (firstIndexOf(name, keywordsOf(IDENTITY_KIND)) >= 0) {
+    return { kind: IDENTITY_KIND, stage: "identity", confidence: "high" };
+  }
+  const byName = bestHit(name, true);
   if (byName) {
     return {
       kind: byName.kind,
@@ -249,6 +258,10 @@ export function classifyDocument(input: { fileName: string; text?: string | null
   const raw = input.text ?? "";
   if (raw === "") return null;
   const body = normalizeForMatch(raw.slice(0, TEXT_SCAN_LIMIT));
+  // 本文は見出し域に本人確認の語があるときだけ先に決める(決済のご案内の持ち物欄の「本人確認書類」
+  // のような本文の後ろの語では決めない=今までどおり最も前の語で競わせる)。
+  const idAt = firstIndexOf(body, keywordsOf(IDENTITY_KIND));
+  if (idAt >= 0 && idAt < HEADING_ZONE) return { kind: IDENTITY_KIND, stage: "identity", confidence: "high" };
   const byText = bestHit(body, false);
   if (!byText) return null;
   return {
