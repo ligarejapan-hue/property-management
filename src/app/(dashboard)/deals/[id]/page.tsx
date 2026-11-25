@@ -7,6 +7,7 @@ import { Button } from "@/components/ui/button";
 import { PageHeader } from "@/components/ui/page-header";
 import { Tabs, tabPanelProps } from "@/components/ui/tabs";
 import DealBasicPanel from "@/components/deals/deal-basic-panel";
+import DealMailboxPanel from "@/components/deals/deal-mailbox-panel";
 import DealPropertyPanel from "@/components/deals/deal-property-panel";
 import DealPartiesPanel from "@/components/deals/deal-parties-panel";
 import DealMoneyPanel from "@/components/deals/deal-money-panel";
@@ -189,6 +190,10 @@ export default function DealDetailPage({ params }: { params: Promise<{ id: strin
         </div>
         <div hidden={tab !== "property"}>
           <DealPropertyPanel key={k([deal.propertySnapshot, deal.assessments, deal.targetParcels, data.parcelOptions])} deal={deal} canOpenProperty={data.canOpenProperty} parcelOptions={data.parcelOptions ?? []} onSaved={reload} />
+          {/* 集合ポストの解除番号の確認欄(鍵受領書に載せる・2026-11-26 発注者)。 */}
+          <div className="mt-6">
+            <DealMailboxPanel key={k([deal.mailbox])} deal={deal} onSaved={reload} />
+          </div>
         </div>
         <div hidden={tab !== "parties"}>
           <DealPartiesPanel deal={deal} selfParty={options?.selfParty ?? null} canOpenProperty={data.canOpenProperty} sellerMismatch={sellerNameMismatch(crosscheckResult)} onSaved={reload} />

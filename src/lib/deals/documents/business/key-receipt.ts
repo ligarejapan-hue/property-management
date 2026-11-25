@@ -3,6 +3,7 @@ import { isoDate } from "../../schema-parts";
 import { html } from "../html";
 import { documentHtml } from "../layout";
 import { DocOptionError } from "./receipts";
+import { DEFAULT_MAILBOX } from "../../mailbox";
 import { addresseeOf, dateJa, headTable, namesOf, partiesOf, propertyLabel, signBox, type BusinessDocContext, type Choice, type ValueRow } from "./common";
 
 /** 番号・種類は空でもよい(番号が分からないことがある・2026-11-14 発注者)。 */
@@ -33,6 +34,7 @@ const KEY_RECEIPT_CSS = "tr.blank td { height: 2.4em; }";
 /**
  * 鍵受領書(依頼書 4.3)。宛先は売主。受領者の署名・押印の欄は空欄で、自社が受け取るときも角印は付けない。
  * 鍵の行が無いときは、番号と本数を手で書く空の行を BLANK_KEY_ROWS 行出す(合計の本数も空ける)。
+ * 集合ポスト(取引の物件タブ・2026-11-26 発注者): 「なし」でなければ解除番号と解除方法の欄を出す。入っていない欄は手で書く空欄。
  */
 export function buildKeyReceipt(c: BusinessDocContext, o: KeyReceiptOptions): { html: string; rows: ValueRow[] } {
   let receiver: { name: string; address: string | null };
@@ -45,6 +47,8 @@ export function buildKeyReceipt(c: BusinessDocContext, o: KeyReceiptOptions): { 
   const sellers = addresseeOf(partiesOf(c.deal, "seller"));
   const handwritten = o.keys.length === 0;
   const total = o.keys.reduce((a, k) => a + k.count, 0);
+  const mailbox = c.deal.mailbox ?? DEFAULT_MAILBOX;
+  const showMailbox = mailbox.status !== "none";
 
   const body = html`
 <h1>鍵受領書</h1>
@@ -58,7 +62,12 @@ ${handwritten
     : o.keys.map((k) => html`<tr><td>${k.label || "　"}</td><td class="num">${k.count}本</td></tr>`)}
 <tr class="total"><th>合計</th><td class="num">${handwritten ? "合計　　　本" : `合計 ${total}本`}</td></tr>
 </table>
-<p>上記の鍵を、確かに受け取りました。</p>
+${showMailbox ? html`<h2>集合ポスト</h2>
+<table>
+<tr class="${mailbox.code ? "" : "blank"}"><th style="width:25%">解除番号</th><td>${mailbox.code ?? "　"}</td></tr>
+<tr class="${mailbox.method ? "" : "blank"}"><th>解除方法</th><td>${mailbox.method ?? "　"}</td></tr>
+</table>` : ""}
+<p>${showMailbox ? "上記の鍵と集合ポストの解除番号・解除方法を、確かに受け取りました。" : "上記の鍵を、確かに受け取りました。"}</p>
 <h2>受領者</h2>
 ${headTable([["住所", receiver.address], ["氏名(名称)", receiver.name]])}
 ${signBox("署名・押印")}`;
@@ -70,6 +79,9 @@ ${signBox("署名・押印")}`;
       ...(handwritten
         ? [{ label: "鍵の番号・本数", value: `手書きの欄(${BLANK_KEY_ROWS}行)` }]
         : [...o.keys.map((k) => ({ label: k.label || "(番号なし)", value: k.count })), { label: "合計本数", value: total }]),
+      ...(showMailbox
+        ? [{ label: "集合ポストの解除番号", value: mailbox.code ?? "手書きの欄" }, { label: "集合ポストの解除方法", value: mailbox.method ?? "手書きの欄" }]
+        : []),
       { label: "受領者", value: receiver.name },
     ],
   };

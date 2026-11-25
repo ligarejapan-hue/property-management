@@ -151,6 +151,35 @@ describe("鍵受領書", () => {
   });
 });
 
+describe("鍵受領書の集合ポスト(2026-11-26 発注者)", () => {
+  const opts = { receiver: "p-buyer", keys: [{ label: "玄関", count: 2 }], receivedOn: null };
+  it("取引に入っている解除番号と解除方法を載せる(エスケープする)", () => {
+    const d = { ...deal, mailbox: { status: "present" as const, code: "1234<", method: "右に2回で1、左で2", checked: true } };
+    const { html, rows } = doc("key_receipt").build(ctx(d), opts);
+    expect(html).toContain("<h2>集合ポスト</h2>");
+    expect(html).toContain("1234&lt;");
+    expect(html).toContain("右に2回で1、左で2");
+    expect(html).toContain("上記の鍵と集合ポストの解除番号・解除方法を、確かに受け取りました。");
+    expect(rows).toContainEqual({ label: "集合ポストの解除番号", value: "1234<" });
+    expect(rows).toContainEqual({ label: "集合ポストの解除方法", value: "右に2回で1、左で2" });
+  });
+  it("未確認(入っていない)なら手で書く空欄を出す", () => {
+    for (const d of [deal, { ...deal, mailbox: { status: "unknown" as const, code: null, method: null, checked: false } }]) {
+      const { html, rows } = doc("key_receipt").build(ctx(d), opts);
+      expect(html).toContain('<tr class="blank"><th style="width:25%">解除番号</th><td>　</td></tr>');
+      expect(html).toContain('<tr class="blank"><th>解除方法</th><td>　</td></tr>');
+      expect(rows).toContainEqual({ label: "集合ポストの解除番号", value: "手書きの欄" });
+    }
+  });
+  it("「なし」の取引には欄を出さない", () => {
+    const d = { ...deal, mailbox: { status: "none" as const, code: null, method: null, checked: false } };
+    const { html, rows } = doc("key_receipt").build(ctx(d), opts);
+    expect(html).not.toContain("集合ポスト");
+    expect(html).toContain("上記の鍵を、確かに受け取りました。");
+    expect(rows.some((r) => r.label.startsWith("集合ポスト"))).toBe(false);
+  });
+});
+
 describe("OC の書類", () => {
   it("仕入相談表: 利回り・NOI は事業計画書と同じ値。賃借人の名前は出さず入居中/空室だけ", () => {
     const c = ctx(OC);
