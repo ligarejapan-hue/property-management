@@ -48,6 +48,9 @@ export const PROPERTY_TRACKED_FIELDS = [
   "rosenkaYear",
   "rebuildPermission",
   "architectureNote",
+  // キーボックスの設置場所・解除番号(2026-11-26 発注者)。
+  "keyBoxLocation",
+  "keyBoxCode",
   "note",
   "assignedTo",
   // 区分マンションの8列(CSV の「既存物件の更新」= UPDATABLE_PROPERTY_FIELDS が書く)。

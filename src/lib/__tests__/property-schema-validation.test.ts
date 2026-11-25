@@ -142,3 +142,22 @@ describe("updatePropertySchema: 契約予定日・決済予定日(案件ステ�
     expect(() => updatePropertySchema.parse({ version: 1, settlementPlannedOn: "20261115" })).toThrow();
   });
 });
+
+describe("updatePropertySchema: キーボックスの設置場所・解除番号(2026-11-26)", () => {
+  it("上限ちょうどは通り、前後の空白を落とす", () => {
+    const out = updatePropertySchema.parse({ version: 1, keyBoxLocation: ` ${"あ".repeat(200)} `, keyBoxCode: ` ${"1".repeat(50)} ` });
+    expect(out.keyBoxLocation).toBe("あ".repeat(200));
+    expect(out.keyBoxCode).toBe("1".repeat(50));
+  });
+  it("長すぎる値を弾く(設置場所200文字・解除番号50文字まで)", () => {
+    expect(() => updatePropertySchema.parse({ version: 1, keyBoxLocation: "あ".repeat(201) })).toThrow(/設置場所は200文字以内/);
+    expect(() => updatePropertySchema.parse({ version: 1, keyBoxCode: "1".repeat(51) })).toThrow(/解除番号は50文字以内/);
+  });
+  it("空・空白だけは null(消す)・null と未指定も通す", () => {
+    const out = updatePropertySchema.parse({ version: 1, keyBoxLocation: "   ", keyBoxCode: "" });
+    expect(out.keyBoxLocation).toBeNull();
+    expect(out.keyBoxCode).toBeNull();
+    expect(updatePropertySchema.parse({ version: 1, keyBoxLocation: null }).keyBoxLocation).toBeNull();
+    expect("keyBoxCode" in updatePropertySchema.parse({ version: 1 })).toBe(false);
+  });
+});

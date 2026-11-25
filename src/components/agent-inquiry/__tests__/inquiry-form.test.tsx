@@ -23,6 +23,17 @@ const view = (over: Partial<ViewProps> = {}) =>
   );
 
 describe("登録フォーム", () => {
+  it("選んだ物件のキーボックスを出す(2026-11-26)・未入力なら出さない", () => {
+    const withBox = deskFormReducer(EMPTY_DESK_FORM, {
+      type: "propertySelected", property: { ...property, keyBoxLocation: "玄関横", keyBoxCode: "4321" },
+    });
+    const html = view({ state: withBox });
+    expect(html).toContain('data-testid="key-box-info"');
+    expect(html).toContain("玄関横");
+    expect(html).toContain("4321");
+    const none = deskFormReducer(EMPTY_DESK_FORM, { type: "propertySelected", property });
+    expect(view({ state: none })).not.toContain('data-testid="key-box-info"');
+  });
   it("並び順=業者→問い合わせ者→物件→用件→入口→保存(方針12)", () => {
     const html = view();
     const idx = ["業者(代表電話・携帯・会社名)", "問い合わせ者", "物件(物件名・部屋・所在地)", "用件", "入口", "保存する"]

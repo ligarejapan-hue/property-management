@@ -5258,6 +5258,12 @@ export interface DeskProperty {
   town: string;
   propertyType: string;
   adPermissions: Partial<Record<AdMediumKey, AdValueKey>>;
+  /**
+   * キーボックスの設置場所・解除番号(2026-11-26 発注者=全員に見せる)。API は必ず返す(null=未入力)。
+   * 省略できる形にしてあるのは、画面の部品が古い形の値(テストの物件など)でも動くようにするため。
+   */
+  keyBoxLocation?: string | null;
+  keyBoxCode?: string | null;
 }
 export interface AgentHit {
   id: string;

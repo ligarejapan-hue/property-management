@@ -33,6 +33,7 @@ import {
 } from "@/lib/agent-inquiry/desk-form";
 import { inquiryAgentName } from "@/lib/agent-inquiry/agent-name";
 import { AgentPicker } from "./agent-picker";
+import { KeyBoxInfo } from "./key-box-info";
 import type { AgentHit } from "@/lib/api-client";
 
 /**
@@ -277,6 +278,7 @@ export function InquiryDetailView({
           {q.property.roomNo ? `${q.property.name} ${q.property.roomNo}` : q.property.name}
           <span className="ml-2 text-xs text-gray-500">{q.property.town}</span>
         </p>
+        <KeyBoxInfo location={q.property.keyBoxLocation} code={q.property.keyBoxCode} />
         {canOpenProperty && (
           // 素の <a target> で名前付きの窓に開く(window.open はブロックされる環境がある)。
           <a href={mainWindowPropertyHref(q.property.id)} target="pm-main" className="text-teal-700 underline dark:text-teal-300">

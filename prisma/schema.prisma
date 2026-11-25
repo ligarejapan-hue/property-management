@@ -484,6 +484,10 @@ model Property {
   assignedTo               String?           @map("assigned_to") @db.Uuid
   isArchived               Boolean           @default(false) @map("is_archived")
   note                     String?
+  /// キーボックスの設置場所・解除番号(2026-11-26 発注者)。反響の受付の窓で全員に見せる
+  keyBoxLocation           String?           @map("key_box_location")
+  /// キーボックスの解除番号(2026-11-26 発注者)。反響の受付の窓で全員に見せる
+  keyBoxCode               String?           @map("key_box_code")
   version                  Int               @default(1)
   createdBy                String            @map("created_by") @db.Uuid
   createdAt                DateTime          @default(now()) @map("created_at")

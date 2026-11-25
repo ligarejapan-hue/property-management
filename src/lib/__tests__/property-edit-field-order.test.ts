@@ -9,7 +9,7 @@ const BASE = [
   ["propertyType", "基本"], ["postalCode", "基本"], ["address", "基本"], ["lotNumber", "基本"], ["buildingNumber", "基本"],
   ["extraParcels", "基本"], ["buildingName", "基本"], ["roomNo", "基本"], ["realEstateNumber", "基本"],
   ["businessType", "基本"], ["registryStatus", "基本"], ["dmStatus", "基本"], ["assignedTo", "基本"],
-  ["gpsLat", "基本"], ["gpsLng", "基本"], ["inquirerName", "基本"], ["note", "基本"],
+  ["gpsLat", "基本"], ["gpsLng", "基本"], ["inquirerName", "基本"], ["keyBoxLocation", "基本"], ["keyBoxCode", "基本"], ["note", "基本"],
   ["zoningDistrict", "調査"], ["architectureNote", "調査"],
 ].map(([key, section]) => ({ key, section }));
 
@@ -24,7 +24,7 @@ describe("物件の編集画面を基本情報の順に並べる(2026-11-25)", (
       "extraParcels", "realEstateNumber", "roomNo", "floorNo", "exclusiveArea", "exclusiveAreaRegistry",
       "balconyArea", "layoutType", "orientation", "managementFee", "repairReserveFee", "occupancyStatus",
       "ownershipShareNote", "structureType", "aboveFloors", "basementFloors", "totalUnits", "builtYear", "builtMonth",
-      "registryStatus", "dmStatus", "inquirerName", "assignedTo", "gpsLat", "gpsLng", "note",
+      "registryStatus", "dmStatus", "inquirerName", "assignedTo", "gpsLat", "gpsLng", "keyBoxLocation", "keyBoxCode", "note",
     ]);
     // 基本情報に出ない欄は販売のまま(価格・消費税・交通・駐車場)
     expect(bySection(out, "販売")).toEqual(["salePrice", "saleTaxType", "saleTaxAmount", "access", "parking"]);

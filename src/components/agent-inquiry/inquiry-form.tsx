@@ -22,6 +22,7 @@ import { formatPhoneJp, isValidPhoneJp } from "@/lib/phone-format-jp";
 import { AgentPicker } from "./agent-picker";
 import { PropertyPicker } from "./property-picker";
 import { AdPermissionChips } from "./ad-permission-chips";
+import { KeyBoxInfo } from "./key-box-info";
 import { AgentCreateModal } from "./agent-create-modal";
 import { useDeskAccess } from "./desk-access";
 import { Button } from "@/components/ui/button";
@@ -148,6 +149,7 @@ export function InquiryFormView({
               {s.property.roomNo ? `${s.property.name} ${s.property.roomNo}` : s.property.name}
             </p>
             <p className="text-xs text-gray-500">{s.property.town}</p>
+            <KeyBoxInfo location={s.property.keyBoxLocation} code={s.property.keyBoxCode} />
             <AdPermissionChips value={s.property.adPermissions} />
           </div>
         )}

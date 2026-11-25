@@ -14,6 +14,7 @@ import { notifyInquiryChanged, onInquiryChanged } from "@/lib/agent-inquiry/desk
 import { AD_TONE } from "@/components/agent-inquiry/ad-permission-chips";
 import { Button } from "@/components/ui/button";
 import { MaterialSendDialog } from "@/components/agent-inquiry/material-send-dialog";
+import { KeyBoxInfo } from "@/components/agent-inquiry/key-box-info";
 
 /** 広告の可否の保存に失敗したときの文言。 */
 export function adSaveErrorMessage(e: unknown): string {
@@ -157,11 +158,17 @@ export default function AgentInquiryTab({
   propertyId,
   canWrite,
   canSendMaterial = false,
+  keyBoxLocation = null,
+  keyBoxCode = null,
 }: {
   propertyId: string;
   canWrite: boolean;
   canSendMaterial?: boolean;
+  /** キーボックスの設置場所・解除番号(2026-11-26)。物件の値を親から渡す=反響の読み込みを待たずに出す。 */
+  keyBoxLocation?: string | null;
+  keyBoxCode?: string | null;
 }) {
+  const keyBox = <KeyBoxInfo location={keyBoxLocation} code={keyBoxCode} className="mb-3" />;
   const [data, setData] = useState<PropertyAgentInquiries | null>(null);
   // 資料を送る小窓。×は隠すだけ(入力が残る)・キャンセルは外す(消える)=既存の決まり。
   const [materialFor, setMaterialFor] = useState<string | null>(null);
@@ -234,6 +241,7 @@ export default function AgentInquiryTab({
   if (loadError && !data) {
     return (
       <div className="text-sm">
+        {keyBox}
         <p className="mb-2 text-rose-600 dark:text-rose-400">{loadError}</p>
         <Button variant="secondary" size="sm" onClick={() => void load()}>
           もう一度読む
@@ -241,9 +249,17 @@ export default function AgentInquiryTab({
       </div>
     );
   }
-  if (!data) return <p className="text-sm text-gray-500 dark:text-gray-400">読み込み中…</p>;
+  if (!data) {
+    return (
+      <>
+        {keyBox}
+        <p className="text-sm text-gray-500 dark:text-gray-400">読み込み中…</p>
+      </>
+    );
+  }
   return (
     <>
+      {keyBox}
       {loadError && (
         <p role="alert" className="mb-2 text-sm text-rose-600 dark:text-rose-400">
           {loadError}(下の表示は最新ではないかもしれません)

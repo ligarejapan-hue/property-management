@@ -51,7 +51,7 @@ const deskRow = {
   id: PID, propertyType: "land", buildingName: null, roomNo: null,
   address: "東京都中野区中野2丁目3", building: null, adPermissions: [],
 };
-const DESK_KEYS = ["adPermissions", "id", "name", "propertyType", "roomNo", "town"];
+const DESK_KEYS = ["adPermissions", "id", "keyBoxCode", "keyBoxLocation", "name", "propertyType", "roomNo", "town"];
 
 beforeEach(() => {
   vi.clearAllMocks();

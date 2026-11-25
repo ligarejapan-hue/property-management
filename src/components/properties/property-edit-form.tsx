@@ -47,6 +47,7 @@ import { canSubmitSave, shouldShowLockUnavailableNotice } from "@/lib/edit-lock/
 // 1回だけ問い合わせて差し替える。
 import { showComposedEditLockedMessage } from "@/lib/edit-lock/locked-message";
 import { INQUIRER_NAME_MAX_LENGTH } from "@/lib/inquirer-name";
+import { KEY_BOX_CODE_MAX_LENGTH, KEY_BOX_LOCATION_MAX_LENGTH } from "@/lib/key-box";
 import { orderFieldsLikeBasicInfo } from "@/lib/property-edit-field-order";
 import { ExtraParcelsEditor, parcelRowsOf } from "./extra-parcels-editor";
 
@@ -85,6 +86,9 @@ interface PropertyData {
   rebuildPermission: string | null;
   architectureNote: string | null;
   note: string | null;
+  /** キーボックスの設置場所・解除番号(2026-11-26)。 */
+  keyBoxLocation?: string | null;
+  keyBoxCode?: string | null;
   /** 問い合わせ者。API が返さない(owner:read が無い)ときは undefined。 */
   inquirerName?: string | null;
   assignedTo: string | null;
@@ -450,6 +454,9 @@ const FORM_FIELDS: FormField[] = [
   // 問い合わせ者(反響の申込者の氏名・2026-10-24)。⚠個人情報=書ける人にだけ出す
   //   (canEditInquirer。出さないときは allFields から外す=送らない)。
   { key: "inquirerName", label: "問い合わせ者", type: "text", section: "基本", maxLength: INQUIRER_NAME_MAX_LENGTH },
+  // キーボックス(2026-11-26 発注者)。⚠反響の受付の窓で全員に見せる値。
+  { key: "keyBoxLocation", label: "キーボックスの設置場所", type: "text", section: "基本", maxLength: KEY_BOX_LOCATION_MAX_LENGTH },
+  { key: "keyBoxCode", label: "キーボックスの解除番号", type: "text", section: "基本", maxLength: KEY_BOX_CODE_MAX_LENGTH },
   { key: "note", label: "備考", type: "textarea", section: "基本" },
   // Investigation
   { key: "zoningDistrict", label: "用途地域", type: "text", section: "調査" },

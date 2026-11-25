@@ -40,6 +40,8 @@ describe("受付の窓の物件検索", () => {
       }],
     });
     expect(JSON.stringify(arg.where)).not.toMatch(/owner|lotNumber|note/i);
+    // キーボックスは返すだけ=検索では当たらない(2026-11-26)。
+    expect(JSON.stringify(arg.where)).not.toMatch(/keyBox/i);
     expect(arg.select).toEqual(DESK_PROPERTY_SELECT);
     expect(arg.take).toBe(20);
   });
@@ -70,7 +72,7 @@ describe("受付の窓の物件検索", () => {
       address: "東京都中野区中野2丁目3", building: null, adPermissions: [], salePrice: 9,
     }]);
     const body = await (await SEARCH(url("ab"))).json();
-    expect(Object.keys(body.properties[0]).sort()).toEqual(["adPermissions", "id", "name", "propertyType", "roomNo", "town"]);
+    expect(Object.keys(body.properties[0]).sort()).toEqual(["adPermissions", "id", "keyBoxCode", "keyBoxLocation", "name", "propertyType", "roomNo", "town"]);
   });
   it("権限が無ければ 403・1文字は検索しない", async () => {
     (getUserPermissions as Fn).mockResolvedValue([]);
