@@ -177,6 +177,13 @@ describe("数字のあいだの「ー」「－」「−」を「-」にそろえ
     expect(searchVariants("港区1-2-3").length).toBeLessThanOrEqual(45);
   });
 
+  it("★区切りで始まる・終わる語でも、保存し直した「1-2」が見つかる(港区1ー・ー2・@codex)", () => {
+    expect(searchVariants("港区1ー")).toContain("港区1-");
+    expect(searchVariants("ー2")).toContain("-2");
+    expect(searchVariants("港区1-")).toContain("港区1ー");
+    expect(searchVariants("センター")).toEqual(["センター"]);
+  });
+
   it("カタカナの長音だけの語は候補を増やさない", () => {
     expect(searchVariants("センター")).toEqual(["センター"]);
   });

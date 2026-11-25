@@ -46,12 +46,21 @@ const DASH_FORMS = ["-", "－", "ー", "−", "‐", "‑", "‒", "–", "—",
  * 数字の幅と区切りの書き方の候補。⚠打った形も残す。
  * もとから全角・半角でそろって入っている行と、数字だけ半角にして保存した行(「1－2」)の両方を探す。
  */
+/**
+ * 検索の語の中の区切り。保存のときの決まりに、語の端を足す(「港区1ー」「ー2」のように区切りで始まる・終わる語・@codex)。
+ */
+const searchDash = (dash: string, digit = "0-9") =>
+  new RegExp(
+    `(?:(?<=[${digit}])(?:${dash})(?=[${digit}A-Za-z]|$)|(?<=[A-Za-z一-龥々]|^)(?:${dash})(?=[${digit}]))`,
+    "g",
+  );
+
 function widthVariants(q: string): string[] {
   if (!/[0-9０-９]/.test(q)) return [q];
-  const norm = toHalfWidthAddress(q);
+  const norm = toHalfWidthDigits(q).replace(searchDash(`${CHIBAN_DASH_SOURCE}|ｰ`), "-");
   // そろえたあとの区切り(半角の「-」)を、今あるデータの書き方に置き換える。
   // ⚠全角の数字の形にも当てるので、全角の数字も数字として見る。
-  const sep = () => dashBetween("-", "0-9０-９");
+  const sep = () => searchDash("-", "0-9０-９");
   const dashes = sep().test(norm) ? DASH_FORMS : ["-"];
   // ⚠数字だけ変えた形も残す: 前の保存は数字だけ半角にしたので「１－２ー３」は「1－2ー3」で入っている(@codex)。
   const half = toHalfWidthDigits(q);
