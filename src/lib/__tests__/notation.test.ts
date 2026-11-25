@@ -172,6 +172,11 @@ describe("数字のあいだの「ー」「－」「−」を「-」にそろえ
     }
   });
 
+  it("★区切りが2か所で字が違う行も、画面の形を写して探せる(港区1-2-3 → 1－2ー3・@codex)", () => {
+    expect(searchVariants("港区1-2-3")).toEqual(expect.arrayContaining(["港区1－2ー3", "港区1ー2-3", "港区１－２ー３"]));
+    expect(searchVariants("港区1-2-3").length).toBeLessThanOrEqual(45);
+  });
+
   it("カタカナの長音だけの語は候補を増やさない", () => {
     expect(searchVariants("センター")).toEqual(["センター"]);
   });

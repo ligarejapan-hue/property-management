@@ -60,6 +60,28 @@ function widthVariants(q: string): string[] {
   const out = [q, half, full, half.replace(/－/g, "-"), full.replace(/-/g, "－")];
   for (const digits of [norm, toFullWidthDigits(norm)]) {
     for (const d of dashes) out.push(digits.replace(sep(), d));
+    out.push(...mixedDashForms(digits, sep()));
+  }
+  return out;
+}
+
+/** 位置ごとに区切りが違う行(「1－2ー3」)を探すときの字。⚠よく使われる3つだけ(組み合わせが増えすぎないように)。 */
+const MIXED_DASH_FORMS = ["-", "－", "ー"];
+/** 位置ごとの組み合わせを作る区切りの数の上限。3か所以上は同じ字にそろえた候補だけ。 */
+const MAX_MIXED_POSITIONS = 2;
+
+/**
+ * 区切りの位置ごとに字を変えた候補(画面の「1-2-3」を写して、前からある「1－2ー3」を探す・@codex)。
+ * 区切りが2か所のときだけ・よく使われる3つの字だけ(3×3=9通り)。
+ */
+function mixedDashForms(digits: string, re: RegExp): string[] {
+  const at = [...digits.matchAll(re)].map((m) => m.index);
+  if (at.length < 2 || at.length > MAX_MIXED_POSITIONS) return [];
+  const out: string[] = [];
+  for (const a of MIXED_DASH_FORMS) {
+    for (const b of MIXED_DASH_FORMS) {
+      out.push(digits.slice(0, at[0]) + a + digits.slice(at[0] + 1, at[1]) + b + digits.slice(at[1] + 1));
+    }
   }
   return out;
 }
