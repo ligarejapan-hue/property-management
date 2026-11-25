@@ -1,5 +1,5 @@
 import { extraParcelsSchema, parcelNumberKey, readExtraParcels, type ExtraParcel } from "@/lib/property-parcels";
-import { toHalfWidthDigits } from "@/lib/registry-fetch/chiban-input";
+import { toHalfWidthAddress } from "@/lib/notation";
 import { MAIN_LAND_KEY } from "@/lib/deals/target-parcels";
 
 /**
@@ -38,7 +38,7 @@ export type ParcelChangeResult =
   | { ok: false; message: string };
 
 const fail = (message: string): ParcelChangeResult => ({ ok: false, message });
-const cleanNumber = (v: string) => toHalfWidthDigits(v.trim());
+const cleanNumber = (v: string) => toHalfWidthAddress(v.trim());
 const areaText = (a: number | null) => (a === null ? "" : `（${a}㎡）`);
 const landLabel = (number: string, location: string | null) => `${location ? `${location} ` : ""}${number}`;
 

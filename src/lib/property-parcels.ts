@@ -1,6 +1,7 @@
 import { z } from "zod";
 import { normalizeAddress, normalizeLotNumber } from "@/lib/address-normalizer";
-import { toHalfWidthDigits, unifyChibanSeparators } from "@/lib/registry-fetch/chiban-input";
+import { unifyChibanSeparators } from "@/lib/registry-fetch/chiban-input";
+import { toHalfWidthAddress } from "@/lib/notation";
 
 /**
  * 物件の2筆目以降の土地・2棟目以降の建物(2026-11-05 発注者 案A「物件の中に土地・建物の内訳」1回目)。
@@ -27,7 +28,7 @@ export interface ExtraParcel {
 
 const optText = (max: number, label: string) =>
   z.union([z.string(), z.null()]).optional()
-    .transform((v) => (v == null ? null : toHalfWidthDigits(v.trim()) || null))
+    .transform((v) => (v == null ? null : toHalfWidthAddress(v.trim()) || null))
     .refine((v) => v === null || v.length <= max, `${label}は${max}文字以内で入力してください`);
 
 /** 面積: 数でも文字でも(画面は文字で送る)。空=null・0以上・小数2桁まで。 */
@@ -46,7 +47,7 @@ export const extraParcelSchema = z.object({
   id: z.string().min(1).max(64),
   kind: z.enum(["land", "building"]),
   location: optText(200, "ほかの土地・建物の所在"),
-  number: z.string().transform((v) => toHalfWidthDigits(v.trim()))
+  number: z.string().transform((v) => toHalfWidthAddress(v.trim()))
     .refine((v) => v.length >= 1, "ほかの土地・建物の地番・家屋番号を入れてください")
     .refine((v) => v.length <= 50, "ほかの土地・建物の地番・家屋番号は50文字以内で入力してください"),
   realEstateNumber: optText(20, "ほかの土地・建物の不動産番号"),

@@ -8,7 +8,7 @@
  * ⚠今ある全角のデータは書き換えない(発注者決定=後回し)。書き換えるまで全角と半角が混ざるので、検索は両方を探す。
  * ⚠所有者の氏名・名簿・備考・ファイル名・履歴は対象にしない。
  */
-import { toHalfWidthDigits } from "@/lib/registry-fetch/chiban-input";
+import { CHIBAN_DASH_SOURCE, toHalfWidthDigits } from "@/lib/registry-fetch/chiban-input";
 import { nameVariantSpellings } from "@/lib/name-variants";
 
 const KE_LETTERS = ["ケ", "ヶ", "が"];
@@ -20,14 +20,41 @@ const MAX_KE = 2;
 const toFullWidthDigits = (s: string) => s.replace(/[0-9]/g, (d) => String.fromCharCode(d.charCodeAt(0) + 0xfee0));
 
 /**
- * 数字の幅の候補。⚠数字だけ変えた形も探す: 保存は数字だけ半角にするので「１－２」は「1－2」で入る(@codex)。
- * 区切りごと変えた形は、もとから半角や全角でそろって入っている行のため。
+ * 数字のあいだの区切りに使われるダッシュ(長音「ー」・全角「－」・マイナス「−」・半角カナの長音「ｰ」など)。
+ * ⚠「数字のあと・数字か英字の前」か「英字・漢字のあと・数字の前」のときだけ区切りとみなす。
+ *   カタカナの後ろの「ー」は音を伸ばす記号(センター・ハイツー1)なので変えない。英字どうし(Park—Side)も変えない。
+ */
+const dashBetween = (dash: string, digit = "0-9") =>
+  new RegExp(`(?:(?<=[${digit}])(?:${dash})(?=[${digit}A-Za-z])|(?<=[A-Za-z一-龥々])(?:${dash})(?=[${digit}]))`, "g");
+const ADDRESS_DASH = dashBetween(`${CHIBAN_DASH_SOURCE}|ｰ`);
+
+/**
+ * 住所・番号の書き方をそろえる: 数字を半角に+数字のあいだの「ー」「－」「−」などを「-」に
+ * (2026-11-25 発注者「「ー」「-」が混在しているのは修正して」)。保存・画面・変更履歴で同じ形にする。
+ */
+export function toHalfWidthAddress(value: string): string {
+  return toHalfWidthDigits(value).replace(ADDRESS_DASH, "-");
+}
+
+/** 今あるデータで区切りに使われている書き方(書き換えるまで混ざるので、検索は全部探す)。 */
+const DASH_FORMS = ["-", "－", "ー", "−", "‐"];
+
+/**
+ * 数字の幅と区切りの書き方の候補。⚠打った形も残す。
+ * もとから全角・半角でそろって入っている行と、数字だけ半角にして保存した行(「1－2」)の両方を探す。
  */
 function widthVariants(q: string): string[] {
   if (!/[0-9０-９]/.test(q)) return [q];
-  const half = toHalfWidthDigits(q);
-  const full = toFullWidthDigits(half);
-  return [q, half, full, half.replace(/－/g, "-"), full.replace(/-/g, "－")];
+  const norm = toHalfWidthAddress(q);
+  // そろえたあとの区切り(半角の「-」)を、今あるデータの書き方に置き換える。
+  // ⚠全角の数字の形にも当てるので、全角の数字も数字として見る。
+  const sep = () => dashBetween("-", "0-9０-９");
+  const dashes = sep().test(norm) ? DASH_FORMS : ["-"];
+  const out = [q];
+  for (const digits of [norm, toFullWidthDigits(norm)]) {
+    for (const d of dashes) out.push(digits.replace(sep(), d));
+  }
+  return out;
 }
 
 function keVariants(q: string): string[] {
@@ -102,7 +129,7 @@ const WRITE_OPERATIONS = new Set(["create", "createMany", "createManyAndReturn",
  * 半角で入っている行へ全角で打っても変わらないので記録しない・@codex)。
  */
 export function savedTextValue(model: string, field: string, value: string): string {
-  return HALF_WIDTH_FIELDS[model]?.includes(field) ? toHalfWidthDigits(value) : value;
+  return HALF_WIDTH_FIELDS[model]?.includes(field) ? toHalfWidthAddress(value) : value;
 }
 
 /**
@@ -111,7 +138,7 @@ export function savedTextValue(model: string, field: string, value: string): str
  * ⚠入力欄の値には使わない(打っていないのに変わったことになる)。
  */
 export function displayHalfWidth<T extends string | null | undefined>(value: T): T {
-  return (typeof value === "string" ? toHalfWidthDigits(value) : value) as T;
+  return (typeof value === "string" ? toHalfWidthAddress(value) : value) as T;
 }
 
 type Row = Record<string, unknown>;
@@ -120,9 +147,9 @@ function convertRow(row: Row, fields: readonly string[]): Row {
   const out: Row = { ...row };
   for (const f of fields) {
     const v = out[f];
-    if (typeof v === "string") out[f] = toHalfWidthDigits(v);
+    if (typeof v === "string") out[f] = toHalfWidthAddress(v);
     else if (v && typeof v === "object" && typeof (v as { set?: unknown }).set === "string") {
-      out[f] = { ...v, set: toHalfWidthDigits((v as { set: string }).set) };
+      out[f] = { ...v, set: toHalfWidthAddress((v as { set: string }).set) };
     }
   }
   return out;

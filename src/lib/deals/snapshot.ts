@@ -1,4 +1,4 @@
-import { toHalfWidthDigits } from "@/lib/registry-fetch/chiban-input";
+import { toHalfWidthAddress } from "@/lib/notation";
 import { joinedParcelNumbers, parcelNumberLabel, type ParcelKind } from "@/lib/property-parcels";
 
 /**
@@ -53,7 +53,7 @@ const num = (v: Num): number | null => {
 };
 const str = (v: string | null) => (v && v.trim() ? v.trim() : null);
 /** 住所・番号の数字は半角で写す(発注者「数字を半角で統一」)。 */
-const strHalf = (v: string | null) => { const s = str(v); return s && toHalfWidthDigits(s); };
+const strHalf = (v: string | null) => { const s = str(v); return s && toHalfWidthAddress(s); };
 
 /** 物件 → 写し。住居表示の専用欄は無いので住所を当てる(設計 §1)。土地の権利は物件に無い=空。 */
 export function buildSnapshotFromProperty(p: SnapshotSource): PropertySnapshot {

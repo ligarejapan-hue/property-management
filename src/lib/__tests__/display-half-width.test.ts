@@ -4,8 +4,8 @@ import { describe, expect, it } from "vitest";
 import { displayHalfWidth } from "../notation";
 
 describe("画面に出すときだけ数字を半角に(2026-11-07)", () => {
-  it("★全角の数字だけを半角にする(区切りや漢字・ケヶはそのまま)", () => {
-    expect(displayHalfWidth("東京都大田区北千束１丁目２－３")).toBe("東京都大田区北千束1丁目2－3");
+  it("★全角の数字を半角にし、数字のあいだの区切りは「-」に(漢字・ケヶはそのまま・2026-11-25)", () => {
+    expect(displayHalfWidth("東京都大田区北千束１丁目２－３")).toBe("東京都大田区北千束1丁目2-3");
     expect(displayHalfWidth("１２３番４")).toBe("123番4");
     expect(displayHalfWidth("茅ヶ崎市１")).toBe("茅ヶ崎市1");
     expect(displayHalfWidth("1-2-3")).toBe("1-2-3");

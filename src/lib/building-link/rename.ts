@@ -11,7 +11,7 @@
 import type { Prisma } from "@/generated/prisma";
 import { canAccessPropertyRecord } from "@/lib/property-access";
 import { EDIT_LOCK_HEARTBEAT_GRACE_MS, EDIT_LOCK_IDLE_LIMIT_MS } from "@/lib/edit-lock/rules";
-import { toHalfWidthDigits } from "@/lib/registry-fetch/chiban-input";
+import { toHalfWidthAddress } from "@/lib/notation";
 
 const GRACE_SEC = EDIT_LOCK_HEARTBEAT_GRACE_MS / 1000;
 const IDLE_SEC = EDIT_LOCK_IDLE_LIMIT_MS / 1000;
@@ -26,7 +26,7 @@ export function isBuildingRename(oldName: string, newName: string | undefined): 
 }
 
 /** 実際に保存される名前(数字は半角になる・lib/notation.ts)。⚠比べる前にそろえる(「第１ビル」を保存すると「第1ビル」に変わるので、部屋へも反映する・@codex)。 */
-const savedName = (name: string) => toHalfWidthDigits(name.trim());
+const savedName = (name: string) => toHalfWidthAddress(name.trim());
 
 export function renamePropagateConfirmMessage(oldName: string, newName: string, unitCount: number): string | null {
   if (unitCount <= 0 || !isBuildingRename(oldName, newName)) return null;
@@ -120,7 +120,7 @@ export async function propagateBuildingName(
   input: { units: LockedUnit[]; newName: string; userId: string },
 ): Promise<{ updated: number; changeLogs: RenameChangeLog[] }> {
   // ⚠物件名が null の部屋も直す(`!==` なので null は常に対象)。
-  const newName = toHalfWidthDigits(input.newName);
+  const newName = toHalfWidthAddress(input.newName);
   const targets = input.units.filter((u) => u.buildingName !== newName);
   if (targets.length === 0) return { updated: 0, changeLogs: [] };
   const res = await tx.property.updateMany({
