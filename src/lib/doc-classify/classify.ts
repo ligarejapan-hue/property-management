@@ -47,7 +47,15 @@ export const DOC_KINDS: readonly DocKind[] = [
   // ① 調査資料等
   { code: "brokerage_agreement", label: "媒介契約書", stage: "pre_contract", keywords: ["媒介契約", "専任媒介", "一般媒介"] },
   { code: "appraisal_report", label: "査定書・査定報告書", stage: "pre_contract", keywords: ["査定報告", "査定書"] },
-  { code: "drawings", label: "公図・測量図・建物図面", stage: "pre_contract", keywords: ["公図", "測量図", "地積測量", "建物図面", "各階平面図", "間取図", "間取り図"] },
+  // 測量図は「測量関係資料」へ分けた(2026-11-25 発注者)。code は今のまま(DB の値を変えない)。
+  { code: "drawings", label: "公図・建物図面", stage: "pre_contract", keywords: ["公図", "建物図面", "各階平面図", "間取図", "間取り図"] },
+  // ↓ 2026-11-25 発注者「添付ファイルの種類が足りていない」で足した種類。
+  { code: "survey_docs", label: "測量関係資料", stage: "pre_contract", keywords: ["測量図", "地積測量", "確定測量", "現況測量", "境界確認", "境界確定", "筆界確認"] },
+  // ⚠「建築確認台帳記載事項証明」は台帳記載事項証明=素の「建築確認」は語にしない。
+  { code: "building_permit", label: "建築確認・検査済証", stage: "pre_contract", keywords: ["確認済証", "検査済証", "建築確認申請", "建築計画概要書"] },
+  { code: "building_plan", label: "建築プラン(土地)", stage: "pre_contract", keywords: ["建築プラン", "参考プラン", "プラン図"] },
+  { code: "sales_sheet", label: "販売図面", stage: "pre_contract", keywords: ["販売図面", "マイソク"] },
+  { code: "estimate", label: "各種見積もり", stage: "pre_contract", keywords: ["見積書", "御見積", "お見積", "見積り", "見積もり"] },
   // ⚠「固定資産(土地・家屋)関係証明書」(評価証明の東京都の書式)は「評価証明」の語を持たない。
   { code: "tax_certificate", label: "評価証明・公課証明", stage: "pre_contract", keywords: ["評価証明", "公課証明", "固定資産評価", "名寄帳", "固定資産(土地", "家屋)関係証明"] },
   // まとめてある PDF の中身として届く書類(2026-10-28 発注者依頼・物件概要書 藤和氷川台コープ710)。
@@ -70,13 +78,21 @@ export const DOC_KINDS: readonly DocKind[] = [
   { code: "fixtures_list", label: "付帯設備表", stage: "contract", keywords: ["付帯設備表", "設備表"] },
   { code: "condition_report", label: "物件状況告知書", stage: "contract", keywords: ["物件状況告知書", "物件状況報告書", "告知書"] },
   { code: "deposit_receipt", label: "手付金 領収書・預り証", stage: "contract", keywords: [] },
+  { code: "purchase_application", label: "購入申込書", stage: "contract", keywords: ["購入申込", "買付証明", "買付申込", "購入申し込み"] },
+  // 「更新の覚書」(賃貸)は語が先に当たる・refineHit で直す。ここは売買などのそのほかの覚書。
+  { code: "memorandum", label: "覚書", stage: "contract", keywords: ["覚書"] },
+  { code: "construction_docs", label: "工事関係書類", stage: "contract", keywords: ["工事請負契約", "工事契約書", "工事完了", "工事内容", "施工図", "工事工程"] },
   // ④ 決済関係
   { code: "settlement_notice", label: "決済のご案内", stage: "settlement", keywords: ["決済ご案内", "決済のご案内", "決済案内"] },
   { code: "settlement_statement", label: "精算書", stage: "settlement", keywords: ["精算書", "精算金", "残金精算", "固定資産税精算"] },
   { code: "settlement_receipt", label: "領収書(残代金・仲介手数料)", stage: "settlement", keywords: [] },
   { code: "completion_confirmation", label: "取引完了確認書", stage: "settlement", keywords: ["取引完了確認"] },
-  { code: "owner_change_forms", label: "区分所有者変更届・口座振替依頼書", stage: "settlement", keywords: ["区分所有者変更", "口座振替", "自動振込"] },
+  // 区分マンション以外の「所有者変更届」も入れる(2026-11-25 発注者)。
+  { code: "owner_change_forms", label: "所有者変更届・口座振替依頼書", stage: "settlement", keywords: ["区分所有者変更", "所有者変更届", "口座振替", "自動振込"] },
   { code: "key_handover", label: "鍵・引渡し関係", stage: "settlement", keywords: ["鍵引渡", "引渡確認", "引き渡し確認", "鍵の引"] },
+  { code: "registration_docs", label: "登記関係書類", stage: "settlement", keywords: ["登記識別情報", "権利証", "登記済証", "登記申請", "登記原因証明", "抵当権抹消", "抹消書類", "登記委任状"] },
+  // 手付・残代金・仲介手数料のどれでもない領収書(人が選ぶ・語では当てない=今の振り分けを変えない)。
+  { code: "receipt_other", label: "領収書(その他)", stage: "settlement", keywords: [] },
   // ⑤ 賃貸関係(現況が賃貸中の物件)
   { code: "lease_contract", label: "賃貸借契約書", stage: "rental", keywords: ["賃貸借契約", "賃貸契約", "定期借家契約"] },
   { code: "rent_roll", label: "レントロール", stage: "rental", keywords: ["レントロール", "賃料一覧", "家賃一覧", "rentroll"] },
@@ -87,7 +103,8 @@ export const DOC_KINDS: readonly DocKind[] = [
   { code: "termination_notice", label: "解約通知", stage: "rental", keywords: ["解約通知", "解約予告", "退去届", "退去通知"] },
   { code: "owner_change_notice", label: "所有者変更通知(入居者あて)", stage: "rental", keywords: ["所有者変更通知", "所有者変更のお知らせ", "オーナー変更", "貸主変更", "賃貸人変更"] },
   // 本人確認(番号なし・最後)
-  { code: "identity_document", label: "本人確認書類", stage: "identity", keywords: ["運転免許", "マイナンバー", "在留カード", "本人確認", "パスポート", "健康保険証"] },
+  // 印鑑証明・住民票も同じ種類(所有者の個人情報=同じ守り。お客様の提出でも同じ種類で受けている・2026-11-25)。
+  { code: "identity_document", label: "本人確認書類・印鑑証明・住民票", stage: "identity", keywords: ["運転免許", "マイナンバー", "在留カード", "本人確認", "パスポート", "健康保険証", "印鑑証明", "印鑑登録証明", "住民票"] },
 ];
 
 /** 領収書・預り証のしるし。見つかったら手付/残代金の文脈で振り分ける。 */
