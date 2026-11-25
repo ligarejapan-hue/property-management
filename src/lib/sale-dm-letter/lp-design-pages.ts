@@ -197,14 +197,19 @@ function heroForm(ctx: Ctx): string {
     form + `</div></section>`;
 }
 
+export const LP_SATEI_SAMPLE = { src: "/lp-assets/brand/satei-sample.webp", width: 960, height: 625, alt: "査定書の見本（査定結果・成約事例・相場のページ）" } as const;
+const SATEI_SAMPLE =
+  `<figure class="qsmp"><img src="${LP_SATEI_SAMPLE.src}" width="${LP_SATEI_SAMPLE.width}" height="${LP_SATEI_SAMPLE.height}" alt="${LP_SATEI_SAMPLE.alt}" loading="lazy" decoding="async">` +
+  `<figcaption>2〜3営業日で、このような査定書をお届けします。ご家族と話し合うための資料としてお使いいただけます。<small>画像は見本です。</small></figcaption></figure>`;
+
 function heroQuestion(ctx: Ctx): string {
   const tile = (attr: string, v: string, small: string | null, style = "") =>
     `<button type="button" class="tile" aria-pressed="false" ${attr}="${escapeHtml(v)}"${style ? ` style="${style}"` : ""}><b>${escapeHtml(v)}</b>${small ? `<small>${escapeHtml(small)}</small>` : ""}</button>`;
   // 質問3(連絡先)の段: ご事情の欄(任意・2026-11-25)+すぐ下に電話 → お届け先の欄。
   // 「相談しながら進めたい」を選んだとき(#wz.cs)は、ご事情・連絡方法などの欄(.qn-only)を隠し、お名前・電話番号だけにする。
-  // ⚠査定書の見本の画像(public/lp-assets/brand/satei-sample.jpg)はファイルが届くまで載せない(2026-11-25 保留)。
+  // 連絡先の前に査定書の見本(2026-11-25 発注者確認済み: 実在の査定報告書から所在地・駅名・コメントを外し、金額は見本の数字に差し替えたもの)。
   const step3 = ctx.form
-    ? `<div class="stp"><div class="qn-only"><div class="qnote"><label class="ctl" for="wnt">ご事情があればお書きください（任意）</label>` +
+    ? `<div class="stp"><div class="qn-only">${SATEI_SAMPLE}<div class="qnote"><label class="ctl" for="wnt">ご事情があればお書きください（任意）</label>` +
       `<textarea id="wnt" data-q-note="1" maxlength="${NOTE_MAX}" rows="4"></textarea></div>${qtel(ctx)}</div>` +
       `<h2 class="qh qn-only">査定書のお届け先を、<br>教えてください</h2><h2 class="qh cs-only">お名前とお電話番号を、<br>教えてください</h2>${qtel(ctx, " cs-only")}` +
       `<div class="form" style="margin-top:22px;gap:22px">` +
