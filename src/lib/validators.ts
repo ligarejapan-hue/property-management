@@ -293,10 +293,8 @@ export const updatePropertySchema = z.object({
   registryStatus: z.enum(["unconfirmed", "scheduled", "obtained"]).optional(),
   dmStatus: z.enum(["send", "hold", "no_send"]).optional(),
   caseStatus: z.enum(CASE_STATUS_VALUES).optional(),
-  // 契約予定日・決済予定日(案件ステータス 8〜10 の欄・2026-10-23)。null=未定。
-  // ⚠ステータスとの整合は見ない(欄は画面が出し分ける・値は戻しても残す)。
-  contractPlannedOn: dateOnlyColumn,
-  settlementPlannedOn: dateOnlyColumn,
+  // 契約予定日・決済予定日は受け付けない=連動する取引の日付の写し(2026-11-26 発注者「入れるのは取引からのみ」)。
+  //   lib/deals/case-dates-sync.ts。送られても捨てる(この schema は未知の項目を捨てる)。
   // 問い合わせ者(反響の申込者の氏名・2026-10-24)。⚠個人情報=書けるのは owner:read と
   //   owner_name の書き込み権限がある人だけ(route で確かめる)。空は null(消す)。
   //   長さは整えてから測る(切り詰めない)。
