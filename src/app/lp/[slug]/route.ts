@@ -3,6 +3,7 @@ import type { NextRequest } from "next/server";
 import prisma from "@/lib/prisma";
 import { clientRateKey, createRateLimiter } from "@/lib/public-rate-limit";
 import { loadPublicLpPage } from "@/lib/sale-dm-letter/lp-public-loader";
+import { lpSlugRedirectTarget } from "@/lib/sale-dm-letter/lp-slug-redirects";
 
 /**
  * 広告用の公開ページ(設計 docs/superpowers/specs/2026-10-20-lp-public-page-design.md §1)。
@@ -19,7 +20,14 @@ export async function GET(req: NextRequest, { params }: { params: Promise<{ slug
     return new NextResponse(null, { status: 429, headers: { "Cache-Control": "no-store" } });
   }
   const { slug } = await params;
-  const query = new URL(req.url).searchParams;
+  const url = new URL(req.url);
+  // 旧公開名は新公開名へ恒久転送(固定の対応表・DB は読まない)。utm_* / gclid などのクエリはそのまま引き継ぐ。
+  // Location は相対パス=手前の公開ホストのまま(req.url の host は内部の 127.0.0.1 になり得る)。
+  const moved = lpSlugRedirectTarget(slug);
+  if (moved) {
+    return new NextResponse(null, { status: 308, headers: { Location: `/lp/${moved}${url.search}` } });
+  }
+  const query = url.searchParams;
   let page: Awaited<ReturnType<typeof loadPublicLpPage>>;
   try {
     page = await loadPublicLpPage(prisma, slug, (k) => query.get(k));
