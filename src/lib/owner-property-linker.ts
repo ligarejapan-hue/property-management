@@ -1,6 +1,7 @@
 import prisma from "@/lib/prisma";
 import { lockPropertyRow } from "@/lib/property-record-guard";
 import { normalizeAddress } from "@/lib/address-normalizer";
+import { containsVariants } from "@/lib/notation";
 
 /**
  * Owner ↔ Property の自動リンク処理。
@@ -86,7 +87,8 @@ export async function relinkOwnersToProperties(
     let candidates = propertyByNormAddr.get(norm);
     if (!candidates) {
       const cands = await prisma.property.findMany({
-        where: { address: { contains: owner.address.slice(0, 8) } },
+        // ⚠頭の8文字は書き方の候補(1ー2/1-2・全角/半角)で探す。保存の形とずれて候補から落とさない(@codex)。
+        where: { OR: containsVariants("address", owner.address.slice(0, 8)) },
         select: { id: true, address: true },
       });
       candidates = cands

@@ -43,7 +43,9 @@ describe("検索の書き方の違い", () => {
   it("★数が増えすぎない(3つ目からのケは変えない)", () => {
     expect(searchVariants("井ヶ谷千ヶ谷富ヶ谷").length).toBeLessThanOrEqual(9);
     expect(searchVariants("井ヶ谷千ヶ谷富ヶ谷１").length).toBeLessThanOrEqual(18);
-    expect(searchVariants("井ヶ谷千ヶ谷富ヶ谷１－２").length).toBeLessThanOrEqual(90);
+    // 区切りの字(11)× 数字の幅(2)× ケ(最大9)。ケ3つ+区切りはまれ=ふつうの住所(ケ1つ以下)は66以下。
+    expect(searchVariants("井ヶ谷千ヶ谷富ヶ谷１－２").length).toBeLessThanOrEqual(200);
+    expect(searchVariants("井土ヶ谷1-2").length).toBeLessThanOrEqual(66);
   });
 
   it("条件にして返す", () => {
@@ -152,6 +154,22 @@ describe("数字のあいだの「ー」「－」「−」を「-」にそろえ
   it("★数字のあいだでないハイフンも、前と同じく幅の違いで探す(ハイツ-1・@codex)", () => {
     expect(searchVariants("ハイツ－１")).toContain("ハイツ-1");
     expect(searchVariants("ハイツ-1")).toContain("ハイツ－１");
+  });
+
+  it("★保存・画面でそろえる区切りの字は、どれで入っていても検索で見つかる(画面の「1-2」を写して探す・@codex)", () => {
+    for (const d of ["-", "－", "ー", "−", "‐", "‑", "‒", "–", "—", "―", "ｰ"]) {
+      expect(toHalfWidthAddress(`港区1${d}2`)).toBe("港区1-2");
+      expect(searchVariants("港区1-2")).toContain(`港区1${d}2`);
+    }
+  });
+
+  it("★所有者の取り込みで物件につなぐ候補も、書き方の候補で探す(頭の8文字・@codex)", async () => {
+    const { readFileSync } = await import("node:fs");
+    for (const f of ["src/app/api/import/owner-csv/route.ts", "src/lib/owner-property-linker.ts"]) {
+      const src = readFileSync(f, "utf8");
+      expect(src).toMatch(/OR: containsVariants\("address", \w+(\.address)?\.slice\(0, 8\)\)/);
+      expect(src).not.toMatch(/address: \{ contains: \w+(\.address)?\.slice\(0, 8\) \}/);
+    }
   });
 
   it("カタカナの長音だけの語は候補を増やさない", () => {

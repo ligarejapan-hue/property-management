@@ -36,8 +36,11 @@ export function toHalfWidthAddress(value: string): string {
   return toHalfWidthDigits(value).replace(ADDRESS_DASH, "-");
 }
 
-/** 今あるデータで区切りに使われている書き方(書き換えるまで混ざるので、検索は全部探す)。 */
-const DASH_FORMS = ["-", "－", "ー", "−", "‐"];
+/**
+ * 今あるデータで区切りに使われている書き方(書き換えるまで混ざるので、検索は全部探す)。
+ * ⚠保存・画面でそろえる字(ADDRESS_DASH)を全部入れる。画面の「1-2」を写して探しても「1―2」の行が見つかるように(@codex)。
+ */
+const DASH_FORMS = ["-", "－", "ー", "−", "‐", "‑", "‒", "–", "—", "―", "ｰ"];
 
 /**
  * 数字の幅と区切りの書き方の候補。⚠打った形も残す。
