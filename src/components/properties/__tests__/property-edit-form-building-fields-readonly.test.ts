@@ -121,16 +121,17 @@ describe("property-edit-form: 棟の項目は編集不可(F3 Task7 fix)", () => 
       expect(src).toContain("/buildings/${property.building.id}");
     });
 
-    it("読み取り専用ブロックは section === '販売' && isMansion && property.building の条件で描画", () => {
+    it("読み取り専用ブロックは section === '基本' && isMansion && property.building の条件で描画", () => {
       const src = readFileSync(
         join(dirname(fileURLToPath(import.meta.url)), "..", "property-edit-form.tsx"),
         "utf8"
       );
-      // 読み取り専用ブロック(棟の項目の表示)は販売セクションで apartment_unit 型かつ building がある場合のみ出す
-      expect(src).toContain('section === "販売" && isMansion && property.building');
+      // 読み取り専用ブロック(棟の項目の表示)は apartment_unit 型かつ building がある場合のみ出す。
+      // 基本情報の並びに合わせ、部屋の欄と同じ「基本」区分に出す(2026-11-25・前は販売区分)。
+      expect(src).toContain('section === "基本" && isMansion && property.building');
       // その中で building の各フィールド(structureType, totalFloors, basementFloors, totalUnits, builtYear, builtMonth)を表示
       const readOnlyBlockMatch = src.match(
-        /section === "販売" && isMansion && property\.building &&([\s\S]*?)(<\/div>\s*\)\))/
+        /section === "基本" && isMansion && property\.building &&([\s\S]*?)(<\/div>\s*\)\))/
       );
       expect(readOnlyBlockMatch).toBeTruthy();
       const readOnlyBlock = readOnlyBlockMatch?.[1] ?? "";
