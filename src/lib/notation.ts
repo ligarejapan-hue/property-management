@@ -108,7 +108,12 @@ export function searchVariants(q: string): string[] {
 export function nameSearchVariants(q: string): string[] {
   // ⚠数字の幅・ケ・異体字の候補は掛け算で増える。OR の数に上限を付ける(元の書き方の候補を先に残す)。
   const base = searchVariants(q);
-  const out = new Set(base.slice(0, MAX_NAME_SEARCH_VARIANTS));
+  // ⚠打った語の異体字の候補を先に入れる(区切りの候補だけで上限が埋まり「山﨑」が入らない、を防ぐ・@codex)。
+  const out = new Set([q, ...nameVariantSpellings(q)].slice(0, MAX_NAME_SEARCH_VARIANTS));
+  for (const b of base) {
+    if (out.size >= MAX_NAME_SEARCH_VARIANTS) return [...out];
+    out.add(b);
+  }
   for (const b of base) {
     for (const v of nameVariantSpellings(b)) {
       if (out.size >= MAX_NAME_SEARCH_VARIANTS) return [...out];

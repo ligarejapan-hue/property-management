@@ -81,6 +81,12 @@ describe("名前の検索語の候補", () => {
     expect(nameContainsVariants("name", q).length).toBeLessThanOrEqual(MAX_NAME_SEARCH_VARIANTS);
   });
 
+  it("★区切りの候補が多くても、打った語の異体字は上限の中に必ず入る(山崎ヶ丘1-2 → 山﨑ヶ丘1-2・@codex)", () => {
+    const got = nameSearchVariants("山崎ヶ丘1-2");
+    expect(got.length).toBeLessThanOrEqual(MAX_NAME_SEARCH_VARIANTS);
+    expect(got).toContain("山﨑ヶ丘1-2");
+  });
+
   it("名前の検索はケ・数字の幅の候補にも異体字を足す。住所の検索(containsVariants)は広げない", () => {
     expect(nameSearchVariants("渡邊")).toEqual(["渡邊", "渡辺", "渡邉"]);
     expect(containsVariants("address", "渡邊")).toEqual([{ address: { contains: "渡邊" } }]);
