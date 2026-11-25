@@ -51,7 +51,7 @@ export function addressLooseKey(address: string | null | undefined): string | nu
   let s = address.normalize("NFKC").replace(/\s/g, "");
   s = s.replace(/^〒?\d{3}-?\d{4}/, "");
   s = s
-    .replace(/[ー－−‐―–—]/g, "-")
+    .replace(/[ー－−‐‑‒―–—]/g, "-") // ⚠保存でそろえる区切りの字を全部(@codex)
     .replace(/(\d+)丁目/g, "$1-")
     .replace(/(\d+)番地?/g, "$1-")
     .replace(/(\d+)号/g, "$1")

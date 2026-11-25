@@ -9,7 +9,8 @@ export function toHalfWidth(s: string): string {
     .replace(/[Ａ-Ｚａ-ｚ０-９]/g, (c) =>
       String.fromCharCode(c.charCodeAt(0) - 0xfee0),
     )
-    .replace(/[－ー−―]/g, "-");
+    // ⚠保存でそろえる区切りの字(notation.ts の toHalfWidthAddress)を全部含める。足りないと保存した「1-2」と貼った「1–2」が別物に見える(@codex)。
+    .replace(/[－ー−―‐‑‒–—ｰ]/g, "-");
 }
 
 /**
