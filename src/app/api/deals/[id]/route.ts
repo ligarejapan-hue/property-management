@@ -22,6 +22,7 @@ import { lockPropertyRow } from "@/lib/property-record-guard";
 import { summarizePropertyDeals } from "@/lib/property-business-type";
 import { supportsUnitFields } from "@/lib/property-building-name";
 import { dealParcelOptions, readTargetParcels } from "@/lib/deals/target-parcels";
+import { withMailbox } from "@/lib/deals/mailbox";
 
 type Ctx = { params: Promise<{ id: string }> };
 const NO_STORE = { "Cache-Control": "no-store" };
@@ -122,6 +123,8 @@ export async function PATCH(request: Request, ctx: Ctx) {
           ...(patch.businessPlan !== undefined ? { business: patch.businessPlan } : {}),
         };
       }
+      // 集合ポストは checklist_state の mailbox の鍵だけを差し替える(ほかの鍵は残す)。
+      if (patch.mailbox !== undefined) data.checklistState = withMailbox(cur.checklistState, patch.mailbox);
       const res = await tx.deal.updateMany({ where: { id, version }, data: { ...data, version: { increment: 1 } } });
       if (res.count === 0) throw new ApiError(409, DEAL_VERSION_CONFLICT_MESSAGE, "VERSION_CONFLICT");
       if (statusChanges && patch.status) await syncDealDocRetention(tx, id, cur.status, patch.status);

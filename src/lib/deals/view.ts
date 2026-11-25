@@ -5,6 +5,7 @@ import { readAssessments, readCosts, readLeases, readOverrides, readPayments, re
 import { readFundingInputs, type FundingInputs } from "./funding-schema";
 import { readBusinessInputs, type BusinessInputs } from "./business-schema";
 import { readTargetParcels } from "./target-parcels";
+import { readMailbox, type Mailbox } from "./mailbox";
 import type { Assessments, CounterpartyBroker, Costs, Lease, Overrides, Payments, PropertySnapshot, SettlementTerms } from "./schemas";
 
 const iso = (d: Date | null) => (d ? d.toISOString() : null);
@@ -41,7 +42,7 @@ export const DEAL_DETAIL_SELECT = {
   contractAt: true, contractPlace: true, settlementAt: true, settlementPlace: true,
   price: true, buildingTax: true, deposit: true, taxRateBp: true,
   propertySnapshot: true, counterpartyBroker: true, version: true, createdAt: true, updatedAt: true,
-  assessments: true, costs: true, settlementTerms: true, leases: true, overrides: true, payments: true, planInputs: true, targetParcels: true,
+  assessments: true, costs: true, settlementTerms: true, leases: true, overrides: true, payments: true, planInputs: true, targetParcels: true, checklistState: true,
   parties: { select: DEAL_PARTY_SELECT, orderBy: [{ role: "asc" }, { sortOrder: "asc" }, { createdAt: "asc" }] },
 } satisfies Prisma.DealSelect;
 
@@ -61,6 +62,8 @@ export interface DealView {
   targetParcels?: string[] | null;
   /** お金の受け渡し(払い方・振込先)。省略=全部未定。src/lib/deals/payments.ts。 */
   payments?: Payments;
+  /** 集合ポストの解除番号の確認欄。省略=未確認。src/lib/deals/mailbox.ts。 */
+  mailbox?: Mailbox;
   version: number; createdAt: string; updatedAt: string; parties: DealPartyView[];
 }
 
@@ -75,6 +78,7 @@ export function toDealView(r: Prisma.DealGetPayload<{ select: typeof DEAL_DETAIL
     assessments: readAssessments(r.assessments), costs: readCosts(r.costs), settlementTerms: readTerms(r.settlementTerms, r.overrides),
     leases: readLeases(r.leases), overrides: readOverrides(r.overrides), fundingPlan: readFundingInputs(r.planInputs),
     businessPlan: readBusinessInputs(r.planInputs), targetParcels: readTargetParcels(r.targetParcels), payments: readPayments(r.payments),
+    mailbox: readMailbox(r.checklistState),
     version: r.version, createdAt: r.createdAt.toISOString(), updatedAt: r.updatedAt.toISOString(), parties: r.parties,
   };
 }

@@ -528,6 +528,7 @@ function IssueDialog({ dealId, doc, version, onCancel, onDone }: {
             </Field>
             <p className="text-xs text-gray-500">番号が分からないときは、番号の欄を空けて出せます。番号も本数も空のままなら、手で書く空の行を5つ入れて出します。</p>
             <p className="text-xs text-gray-500">受領者の署名・押印の欄は空けて出します(自社が受け取るときも角印は付けません)。</p>
+            <p className="text-xs text-gray-500">集合ポストの解除番号・解除方法は、この取引の「物件」タブの「集合ポスト」の内容を載せます(「なし」なら載せません)。</p>
           </>
         )}
         {doc.docType === "landlord_change_notice" && (
