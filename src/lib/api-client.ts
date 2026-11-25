@@ -5288,7 +5288,9 @@ export interface InquiryView {
   contactEmail: string | null;
   note: string | null;
   assignee: { id: string; name: string } | null;
-  agent: { id: string; companyName: string; branchName: string | null; phone: string };
+  /** 名簿に入れずに受け付けた反響は null で、agentNameText に名前がある(2026-11-25)。 */
+  agent: { id: string; companyName: string; branchName: string | null; phone: string } | null;
+  agentNameText?: string | null;
   viewings: ViewingView[];
   property: DeskProperty;
 }
@@ -5298,7 +5300,13 @@ export interface UpcomingViewing {
   viewingType: ViewingTypeKey;
   version: number;
   attendant: { id: string; name: string } | null;
-  inquiry: { id: string; contactName: string | null; agent: { companyName: string; branchName: string | null }; property: DeskProperty };
+  inquiry: {
+    id: string;
+    contactName: string | null;
+    agent: { companyName: string; branchName: string | null } | null;
+    agentNameText?: string | null;
+    property: DeskProperty;
+  };
 }
 export interface InquiryCounts {
   open: number;
@@ -5323,7 +5331,9 @@ export interface DeskAgentInput {
 }
 export interface AgentInquiryCreateBody {
   propertyId: string;
-  agentId: string;
+  /** 名簿の業者か、名簿に入れずに受け付ける業者の名前(agentNameText)のどちらか1つ(2026-11-25)。 */
+  agentId?: string | null;
+  agentNameText?: string | null;
   kind: InquiryKindKey;
   channel: InquiryChannelKey;
   contactName?: string | null;
@@ -5408,7 +5418,8 @@ export async function fetchAgentInquiry(id: string) {
 }
 export async function updateAgentInquiry(
   id: string,
-  body: { version: number; status?: string; assigneeId?: string | null; note?: string | null },
+  /** agentId=名簿に入れずに受け付けた反響を名簿の業者に付け替える(2026-11-25)。 */
+  body: { version: number; status?: string; assigneeId?: string | null; note?: string | null; agentId?: string },
 ) {
   if (USE_MOCK) {
     await mockDelay();

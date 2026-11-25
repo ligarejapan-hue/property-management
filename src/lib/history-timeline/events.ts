@@ -1,4 +1,5 @@
 import { INQUIRY_KIND_LABELS } from "@/lib/agent-inquiry/constants";
+import { inquiryAgentName } from "@/lib/agent-inquiry/agent-name";
 import { DEAL_STATUS_LABELS } from "@/lib/deals/constants";
 import { DOC_LINK_ROLE_LABELS } from "@/lib/deals/doc-links/constants";
 import { dealDocumentTitle } from "@/lib/deals/documents/issue";
@@ -98,29 +99,29 @@ export function dmReactionEvent(r: { id: string; reactedAt: Date; reactionStatus
   });
 }
 
-export function inquiryEvent(r: { id: string; kind: string; receivedAt: Date; contactName: string | null; agent: { companyName: string }; createdBy: Named }, propertyId: string) {
+export function inquiryEvent(r: { id: string; kind: string; receivedAt: Date; contactName: string | null; agent: { companyName: string } | null; agentNameText?: string | null; createdBy: Named }, propertyId: string) {
   const kind = (INQUIRY_KIND_LABELS as Record<string, string>)[r.kind] ?? r.kind;
   return event("inquiry", r.id, r.receivedAt, {
-    title: `反響を受付:${kind}(${r.agent.companyName})`, actor: r.createdBy.name,
+    title: `反響を受付:${kind}(${inquiryAgentName(r)})`, actor: r.createdBy.name,
     detail: r.contactName ? `担当者:${r.contactName}` : null, href: propertyDetailHref(propertyId, "inquiries"),
   });
 }
 
 export function viewingEvent(
-  r: { id: string; scheduledAt: Date | null; createdAt: Date; canceledAt: Date | null; resultNote: string | null; attendant: Named | null; inquiry: { agent: { companyName: string } } },
+  r: { id: string; scheduledAt: Date | null; createdAt: Date; canceledAt: Date | null; resultNote: string | null; attendant: Named | null; inquiry: { agent: { companyName: string } | null; agentNameText?: string | null } },
   propertyId: string,
 ) {
   return event("viewing", r.id, r.scheduledAt ?? r.createdAt, {
-    title: `${r.canceledAt ? "内見を中止" : "内見"}(${r.inquiry.agent.companyName})`, actor: r.attendant?.name ?? null,
+    title: `${r.canceledAt ? "内見を中止" : "内見"}(${inquiryAgentName(r.inquiry)})`, actor: r.attendant?.name ?? null,
     detail: r.resultNote, href: propertyDetailHref(propertyId, "inquiries"),
   });
 }
 
 /** ⚠宛先・件名・本文は読まない・出さない。 */
-export function materialSendEvent(r: { id: string; createdAt: Date; result: string; sentBy: Named; inquiry: { agent: { companyName: string } } }, propertyId: string) {
+export function materialSendEvent(r: { id: string; createdAt: Date; result: string; sentBy: Named; inquiry: { agent: { companyName: string } | null; agentNameText?: string | null } }, propertyId: string) {
   const failed = r.result === "failed";
   return event("material_send", r.id, r.createdAt, {
-    title: `資料を送付${failed ? "(失敗)" : ""}(${r.inquiry.agent.companyName})`, actor: r.sentBy.name, href: propertyDetailHref(propertyId, "inquiries"),
+    title: `資料を送付${failed ? "(失敗)" : ""}(${inquiryAgentName(r.inquiry)})`, actor: r.sentBy.name, href: propertyDetailHref(propertyId, "inquiries"),
   });
 }
 

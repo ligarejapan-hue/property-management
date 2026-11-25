@@ -9,6 +9,7 @@ import { inquiryAuditDetail } from "@/lib/agent-inquiry/audit-detail";
 import { INQUIRY_STATUSES } from "@/lib/agent-inquiry/constants";
 import { INQUIRY_LIST_SELECT, toInquiryView } from "@/lib/agent-inquiry/inquiry-view";
 import { assertActiveUser } from "@/lib/agent-inquiry/user-check";
+import { assertAgentSelectable } from "@/lib/agent-inquiry/agent-check";
 import { lockPropertyRow } from "@/lib/property-record-guard";
 
 const NO_STORE = { "Cache-Control": "no-store" };
@@ -68,11 +69,10 @@ export async function POST(request: Request) {
         : null;
     const prev = await replay();
     if (prev) return NextResponse.json({ id: prev.id, replayed: true }, { headers: NO_STORE });
-    const agent = await prisma.agent.findUnique({ where: { id: input.agentId }, select: { id: true, isArchived: true } });
-    if (!agent) throw new ApiError(404, "業者が見つかりません", "AGENT_NOT_FOUND");
-    if (agent.isArchived) {
-      throw new ApiError(409, "この業者はしまわれています。名簿で戻してから選んでください", "AGENT_ARCHIVED");
-    }
+    // 名簿の業者を選んだときだけ確かめる。名簿に入れずに受け付けるときは名前だけ(2026-11-25)。
+    const agentId = input.agentId ?? null;
+    const agentNameText = agentId ? null : input.agentNameText?.trim() || null;
+    if (agentId) await assertAgentSelectable(agentId);
     await assertActiveUser(input.viewing?.attendantId, "INVALID_ATTENDANT");
     const contact = normalizeInquiryContact(input);
     const note = input.note?.trim() || null;
@@ -94,7 +94,8 @@ export async function POST(request: Request) {
         return tx.agentInquiry.create({
           data: {
             propertyId: input.propertyId,
-            agentId: input.agentId,
+            agentId,
+            agentNameText,
             ...contact,
             kind: input.kind,
             channel: input.channel,
@@ -131,6 +132,8 @@ export async function POST(request: Request) {
     const filled = Object.entries(contact)
       .filter(([, v]) => v != null)
       .map(([k]) => k);
+    // 名簿に入れずに受け付けたことは項目名だけ残す(名前の中身は書かない)。
+    if (agentNameText) filled.push("agentNameText");
     await writeAuditLog({
       userId: session.id,
       action: "agent_inquiry_create",

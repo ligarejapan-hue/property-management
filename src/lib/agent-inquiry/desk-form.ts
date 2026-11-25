@@ -8,6 +8,8 @@ import { isPhoneCharsOnly } from "@/lib/phone-format-jp";
 export interface DeskFormState {
   agentQuery: string;
   agent: AgentHit | null;
+  /** 名簿に入れずに、業者の欄に打った名前(agentQuery)で受け付ける(2026-11-25)。agent とは同時に立たない。 */
+  agentNameOnly: boolean;
   contactName: string;
   contactMobile: string;
   contactEmail: string;
@@ -30,6 +32,7 @@ export interface DeskFormState {
 export const EMPTY_DESK_FORM: DeskFormState = {
   agentQuery: "",
   agent: null,
+  agentNameOnly: false,
   contactName: "",
   contactMobile: "",
   contactEmail: "",
@@ -48,6 +51,7 @@ export const EMPTY_DESK_FORM: DeskFormState = {
 export type DeskFormAction =
   | { type: "agentQuery"; value: string }
   | { type: "agentSelected"; agent: AgentHit }
+  | { type: "agentNameOnly" }
   | { type: "contact"; field: "contactName" | "contactMobile" | "contactEmail"; value: string }
   | { type: "propertyQuery"; value: string }
   | { type: "propertySelected"; property: DeskProperty }
@@ -67,32 +71,38 @@ export function deskFormReducer(s: DeskFormState, a: DeskFormAction): DeskFormSt
   return keys.length === Object.keys(s).length && keys.every((k) => next[k] === s[k]) ? s : next;
 }
 
+/** 前の業者から自動で入れたままの欄だけ消す(別の業者の担当者として保存しない)。自分で直した欄は残す。 */
+function clearAutofill(s: DeskFormState): DeskFormState {
+  const f = s.contactAutofill;
+  const keep = (field: "contactName" | "contactMobile" | "contactEmail") => (f && s[field] === f[field] ? "" : s[field]);
+  return {
+    ...s,
+    contactName: keep("contactName"),
+    contactMobile: keep("contactMobile"),
+    contactEmail: keep("contactEmail"),
+    contactAutofill: null,
+  };
+}
+
 function reduceDeskForm(s: DeskFormState, a: DeskFormAction): DeskFormState {
   switch (a.type) {
     case "agentQuery":
       // 選んだ後に打ち直したら選択を外す(画面の表示と保存される業者が食い違わないように)。
-      return { ...s, agentQuery: a.value, agent: null };
+      // 名簿に入れずに受け付ける印も外す(打ち直した名前で黙って受け付けない=もう一度選び直す)。
+      return { ...s, agentQuery: a.value, agent: null, agentNameOnly: false };
     case "agentSelected": {
       // 携帯で当たったときは、その携帯の人の前回の名前・携帯・メールで埋める(書き換え可)。
       const c = a.agent.lastContact;
       if (c) {
         const fill = { contactName: c.name ?? "", contactMobile: c.mobile ?? "", contactEmail: c.email ?? "" };
-        return { ...s, agent: a.agent, agentQuery: agentLabel(a.agent), ...fill, contactAutofill: fill };
+        return { ...s, agent: a.agent, agentNameOnly: false, agentQuery: agentLabel(a.agent), ...fill, contactAutofill: fill };
       }
-      // 前の業者から自動で入れたままの欄だけ消す(別の業者の担当者として保存しない)。自分で直した欄は残す。
-      const f = s.contactAutofill;
-      const keep = (field: "contactName" | "contactMobile" | "contactEmail") =>
-        f && s[field] === f[field] ? "" : s[field];
-      return {
-        ...s,
-        agent: a.agent,
-        agentQuery: agentLabel(a.agent),
-        contactName: keep("contactName"),
-        contactMobile: keep("contactMobile"),
-        contactEmail: keep("contactEmail"),
-        contactAutofill: null,
-      };
+      return { ...clearAutofill(s), agent: a.agent, agentNameOnly: false, agentQuery: agentLabel(a.agent) };
     }
+    case "agentNameOnly":
+      // 名前が空なら何もしない(業者の分からない反響を作らない)。
+      if (s.agentQuery.trim() === "") return s;
+      return { ...clearAutofill(s), agent: null, agentNameOnly: true, agentQuery: s.agentQuery.trim() };
     case "contact":
       return { ...s, [a.field]: a.value };
     case "propertyQuery":
@@ -133,7 +143,7 @@ export const DESK_GUIDE_TIPS: Record<DeskGuideStep, string> = {
 
 /** 次に押す所(方針14)。 */
 export function nextDeskGuideStep(s: DeskFormState): DeskGuideStep {
-  if (!s.agent) return "agent";
+  if (!s.agent && !s.agentNameOnly) return "agent";
   if (!s.property) return "property";
   if (!s.kind) return "kind";
   if (s.kind === "viewing" && !s.viewingType) return "viewingType";
@@ -186,7 +196,9 @@ export function partialScheduleError(date: string, time: string): string | null 
 
 export function validateDeskForm(s: DeskFormState) {
   const e: Partial<Record<"agent" | "property" | "kind" | "viewingType" | "viewingAt", string>> = {};
-  if (!s.agent) e.agent = "業者を選んでください";
+  if (!s.agent && !(s.agentNameOnly && s.agentQuery.trim() !== "")) {
+    e.agent = "業者を選んでください(名簿に無いときは、名簿に入れずに受け付けることもできます)";
+  }
   if (!s.property) e.property = "物件を選んでください";
   if (!s.kind) e.kind = "用件を選んでください";
   if (s.kind === "viewing" && !s.viewingType) e.viewingType = "案内か下見かを選んでください";
@@ -208,7 +220,8 @@ const orNull = (v: string) => (v.trim() === "" ? null : v.trim());
 export function buildCreateBody(s: DeskFormState): AgentInquiryCreateBody {
   return {
     propertyId: s.property!.id,
-    agentId: s.agent!.id,
+    // 名簿の業者か、名簿に入れずに打った名前のどちらか1つだけ送る(2026-11-25)。
+    ...(s.agent ? { agentId: s.agent.id } : { agentNameText: s.agentQuery.trim() }),
     kind: s.kind!,
     channel: s.channel,
     contactName: orNull(s.contactName),
@@ -357,7 +370,17 @@ export function splitNewAgentPhone(query: string): { agentPhone: string; callerM
   return { agentPhone: q, callerMobile: null };
 }
 
-export type ViewingInputs = { date: string; time: string; result: string; attendant: string };
+/**
+ * 業者の欄に打った語を、新しい業者の小窓の欄へ写す(2026-11-25 発注者「一から入れなおすのは面倒」)。
+ * 電話番号らしい語は代表電話(携帯は問い合わせ者へ)・それ以外は商号へ。
+ */
+export function newAgentPrefill(query: string): { companyName: string; agentPhone: string; callerMobile: string | null } {
+  const q = query.trim();
+  if (isPhoneCharsOnly(q)) return { companyName: "", ...splitNewAgentPhone(q) };
+  return { companyName: q, agentPhone: "", callerMobile: null };
+}
+
+export type ViewingInputs ={ date: string; time: string; result: string; attendant: string };
 export type ViewingEditPatch = { scheduledAt?: string | null; resultNote?: string | null; attendantId?: string | null };
 
 /**

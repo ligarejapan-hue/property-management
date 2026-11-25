@@ -6,10 +6,10 @@ import {
   DONE_PERIODS,
   KIND_LABEL,
   STATUS_LABEL,
-  agentLabel,
   formatJst,
   type DonePeriodKey,
 } from "@/lib/agent-inquiry/desk-form";
+import { inquiryAgentName } from "@/lib/agent-inquiry/agent-name";
 
 const TABS: InquiryStatusKey[] = ["open", "in_progress", "done"];
 
@@ -88,7 +88,7 @@ export function InquiryListView({
                 <span>{KIND_LABEL[q.kind]}</span>
               </span>
               <span className="block text-sm font-medium">
-                {q.property.roomNo ? `${q.property.name} ${q.property.roomNo}` : q.property.name} ― {agentLabel(q.agent)}
+                {q.property.roomNo ? `${q.property.name} ${q.property.roomNo}` : q.property.name} ― {inquiryAgentName(q)}
                 {/* 画面保護はボタンの中を外で見ないので、個人情報には自前の印を付ける(@codex #459 R4)。 */}
                 {q.contactName && (
                   <span data-pii-protected="true" data-pii-surface="dashboard">{`(${q.contactName}様)`}</span>

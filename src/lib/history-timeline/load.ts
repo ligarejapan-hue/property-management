@@ -102,13 +102,13 @@ async function loadPropertyEvents(propertyId: string, access: TimelineAccess, wa
   if (wants("inquiry")) {
     tasks.push(read("receivedAt", (receivedAt, n) => prisma.agentInquiry.findMany({
       where: { propertyId, receivedAt }, orderBy: { receivedAt: "desc" }, take: n,
-      select: { id: true, kind: true, receivedAt: true, contactName: true, agent: { select: { companyName: true } }, createdBy: { select: { name: true } } },
+      select: { id: true, kind: true, receivedAt: true, contactName: true, agent: { select: { companyName: true } }, agentNameText: true, createdBy: { select: { name: true } } },
     })).then((rows) => rows.map((r) => inquiryEvent(r, propertyId))));
   }
   if (wants("viewing")) {
     const viewingSelect = {
       id: true, scheduledAt: true, createdAt: true, canceledAt: true, resultNote: true, attendant: { select: { name: true } },
-      inquiry: { select: { agent: { select: { companyName: true } } } },
+      inquiry: { select: { agent: { select: { companyName: true } }, agentNameText: true } },
     } as const;
     // 経緯の時刻は予定日、無ければ登録日。列ごとに読むと、それぞれ時刻の順に切れる。
     tasks.push(read("scheduledAt", (scheduledAt, n) => prisma.agentViewing.findMany({
@@ -121,7 +121,7 @@ async function loadPropertyEvents(propertyId: string, access: TimelineAccess, wa
   if (access.material && wants("material_send")) {
     tasks.push(read("createdAt", (createdAt, n) => prisma.agentInquiryMaterialSend.findMany({
       where: { inquiry: { propertyId }, createdAt, result: { in: ["sent", "failed"] } }, orderBy: { createdAt: "desc" }, take: n,
-      select: { id: true, createdAt: true, result: true, sentBy: { select: { name: true } }, inquiry: { select: { agent: { select: { companyName: true } } } } },
+      select: { id: true, createdAt: true, result: true, sentBy: { select: { name: true } }, inquiry: { select: { agent: { select: { companyName: true } }, agentNameText: true } } },
     })).then((rows) => rows.map((r) => materialSendEvent(r, propertyId))));
   }
   if (wants("next_action")) {

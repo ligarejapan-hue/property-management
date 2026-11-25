@@ -19,7 +19,6 @@ import {
 import {
   CONFLICT_MESSAGE,
   KIND_LABEL,
-  agentLabel,
   STATUS_LABEL,
   VIEWING_TYPE_LABEL,
   formatJst,
@@ -32,6 +31,23 @@ import {
   partialScheduleError,
   type Draft,
 } from "@/lib/agent-inquiry/desk-form";
+import { inquiryAgentName } from "@/lib/agent-inquiry/agent-name";
+import { AgentPicker } from "./agent-picker";
+import type { AgentHit } from "@/lib/api-client";
+
+/**
+ * 名簿に入れずに受け付けた反響を、名簿の業者に付け替える(2026-11-25)。名簿で探して選ぶだけ
+ * (ここでは新しく登録しない=名簿の画面で登録してから選ぶ)。選んだらすぐ保存する。
+ */
+function AttachAgent({ onPick }: { onPick: (a: AgentHit) => void }) {
+  const [query, setQuery] = useState("");
+  return (
+    <div className="space-y-1 rounded-md border border-dashed border-gray-300 p-2 dark:border-gray-600">
+      <p className="text-xs text-gray-500">名簿の業者に付け替える(名簿で探して選ぶと、すぐ付け替えます)</p>
+      <AgentPicker query={query} selected={null} onQuery={setQuery} onPick={onPick} />
+    </div>
+  );
+}
 
 export const mainWindowPropertyHref = (id: string) => `/properties/${id}`;
 const inputCls = "w-full rounded-md border border-gray-300 px-2 py-1.5 text-sm dark:border-gray-700 dark:bg-gray-900";
@@ -188,6 +204,7 @@ export function InquiryDetailView({
   onConfirmAdd,
   canSendMaterial = false,
   onMaterialSent,
+  onAttachAgent,
 }: {
   inquiry: InquiryView;
   canOpenProperty: boolean;
@@ -213,6 +230,8 @@ export function InquiryDetailView({
   canSendMaterial?: boolean;
   /** 資料を送れた(反響が対応済みになった)=最新を読み直す。 */
   onMaterialSent?: () => void;
+  /** 名簿に入れずに受け付けた反響を、名簿の業者に付け替える(書けるときだけ渡す)。 */
+  onAttachAgent?: (a: AgentHit) => void;
 }) {
   // 資料を送る小窓。×は隠すだけ(入力が残る)・キャンセルは外す(消える)=既存の決まり。
   const [materialOpen, setMaterialOpen] = useState(false);
@@ -242,7 +261,7 @@ export function InquiryDetailView({
     <>
     <ModalShell
       size="lg"
-      title={`${KIND_LABEL[q.kind]} ― ${agentLabel(q.agent)}`}
+      title={`${KIND_LABEL[q.kind]} ― ${inquiryAgentName(q)}`}
       // 保存中は閉じない(閉じて開き直すと古い内容のまま「内見を足す」を押せて二重登録になる・@codex #459 R8)。
       onClose={closeLocked ? undefined : onClose}
       footer={
@@ -268,8 +287,10 @@ export function InquiryDetailView({
           問い合わせ者:{q.contactName ?? "—"} ・ 携帯 {q.contactMobile ?? "—"} ・ メール {q.contactEmail ?? "—"}
         </p>
         <p className="text-xs text-gray-500">
-          受けた日時 {formatJst(q.receivedAt)} ・ 代表 {q.agent.phone}
+          受けた日時 {formatJst(q.receivedAt)}
+          {q.agent ? ` ・ 代表 ${q.agent.phone}` : " ・ 業者は名簿に入れずに受け付けました"}
         </p>
+        {!q.agent && onAttachAgent && !busy && <AttachAgent onPick={onAttachAgent} />}
         <div className="grid grid-cols-3 gap-1">
           {(["open", "in_progress", "done"] as const).map((s) => (
             <button
@@ -534,6 +555,7 @@ export default function InquiryDetail({
       onStatus={(status) => run(() => updateAgentInquiry(q.id, { version: q.version, status }))}
       onAssignee={(assigneeId) => run(() => updateAgentInquiry(q.id, { version: q.version, assigneeId }))}
       onSaveNote={(note) => run(() => updateAgentInquiry(q.id, { version: q.version, note }))}
+      onAttachAgent={(a) => run(() => updateAgentInquiry(q.id, { version: q.version, agentId: a.id }))}
       onAddViewing={(viewingType) => run(() => addAgentViewing(q.id, { viewingType }), { addsViewing: true })}
       onSaveViewing={(v, patch) => run(() => updateAgentViewing(q.id, v.id, { version: v.version, ...patch }))}
       onClose={onClose}
