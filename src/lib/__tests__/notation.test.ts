@@ -144,6 +144,11 @@ describe("数字のあいだの「ー」「－」「−」を「-」にそろえ
     }
   });
 
+  it("★区切りが混ざった値は、数字だけ半角・全角にした形も探す(前の保存の形・@codex)", () => {
+    expect(searchVariants("港区１－２ー３")).toEqual(expect.arrayContaining(["港区1－2ー3", "港区１－２ー３", "港区1-2-3"]));
+    expect(searchVariants("港区1－2ー3")).toContain("港区１－２ー３");
+  });
+
   it("カタカナの長音だけの語は候補を増やさない", () => {
     expect(searchVariants("センター")).toEqual(["センター"]);
   });

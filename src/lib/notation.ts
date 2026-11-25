@@ -50,7 +50,9 @@ function widthVariants(q: string): string[] {
   // ⚠全角の数字の形にも当てるので、全角の数字も数字として見る。
   const sep = () => dashBetween("-", "0-9０-９");
   const dashes = sep().test(norm) ? DASH_FORMS : ["-"];
-  const out = [q];
+  // ⚠数字だけ変えた形も残す: 前の保存は数字だけ半角にしたので「１－２ー３」は「1－2ー3」で入っている(@codex)。
+  const half = toHalfWidthDigits(q);
+  const out = [q, half, toFullWidthDigits(half)];
   for (const digits of [norm, toFullWidthDigits(norm)]) {
     for (const d of dashes) out.push(digits.replace(sep(), d));
   }
