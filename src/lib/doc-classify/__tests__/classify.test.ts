@@ -41,6 +41,20 @@ describe("normalizeForMatch", () => {
   });
 });
 
+describe("本人確認書類は守りの側に倒す(2026-11-25 セキュリティの自動レビュー)", () => {
+  it("ファイル名に本人確認の語があれば、前に別の種類の語があっても本人確認書類", () => {
+    expect(classifyDocument({ fileName: "覚書_運転免許証写し.pdf" })?.kind).toBe("identity_document");
+    expect(classifyDocument({ fileName: "購入申込書（印鑑証明添付）.pdf" })?.kind).toBe("identity_document");
+    expect(classifyDocument({ fileName: "見積書_住民票.pdf" })?.kind).toBe("identity_document");
+  });
+  it("本文は見出し域に本人確認の語があるときだけ本人確認書類", () => {
+    expect(classifyDocument({ fileName: "scan.pdf", text: "覚書 印鑑登録証明書 写し" })?.kind).toBe("identity_document");
+    // 決済のご案内の持ち物欄(見出し域より後ろ)の「本人確認書類」では決めない
+    const notice = `決済のご案内${"あ".repeat(500)}お持ちいただくもの 本人確認書類 印鑑証明書`;
+    expect(classifyDocument({ fileName: "scan.pdf", text: notice })?.kind).toBe("settlement_notice");
+  });
+});
+
 describe("classifyDocument: ファイル名", () => {
   const byName = (fileName: string) => classifyDocument({ fileName });
 
@@ -52,7 +66,30 @@ describe("classifyDocument: ファイル名", () => {
     ["ハマイハイライズ　媒介契約書.pdf", "brokerage_agreement", "pre_contract"],
     ["査定報告書_2026.pdf", "appraisal_report", "pre_contract"],
     ["公図.pdf", "drawings", "pre_contract"],
-    ["地積測量図_123-4.pdf", "drawings", "pre_contract"],
+    // 測量図は「測量関係資料」へ分けた(2026-11-25 発注者)。
+    ["地積測量図_123-4.pdf", "survey_docs", "pre_contract"],
+    ["確定測量図.pdf", "survey_docs", "pre_contract"],
+    ["境界確認書.pdf", "survey_docs", "pre_contract"],
+    ["検査済証.pdf", "building_permit", "pre_contract"],
+    ["確認済証_中野.pdf", "building_permit", "pre_contract"],
+    ["建築計画概要書.pdf", "building_permit", "pre_contract"],
+    ["建築プラン_A案.pdf", "building_plan", "pre_contract"],
+    ["販売図面_中野2丁目.pdf", "sales_sheet", "pre_contract"],
+    ["マイソク.pdf", "sales_sheet", "pre_contract"],
+    ["解体工事御見積書.pdf", "estimate", "pre_contract"],
+    ["リフォーム見積書.pdf", "estimate", "pre_contract"],
+    ["購入申込書.pdf", "purchase_application", "contract"],
+    ["買付証明書.pdf", "purchase_application", "contract"],
+    ["覚書（引渡し日の変更）.pdf", "memorandum", "contract"],
+    ["工事請負契約書.pdf", "construction_docs", "contract"],
+    ["工事完了報告書.pdf", "construction_docs", "contract"],
+    ["登記識別情報通知.pdf", "registration_docs", "settlement"],
+    ["抵当権抹消書類.pdf", "registration_docs", "settlement"],
+    ["所有者変更届.pdf", "owner_change_forms", "settlement"],
+    ["印鑑証明書.pdf", "identity_document", "identity"],
+    ["住民票.jpg", "identity_document", "identity"],
+    // 「建築確認台帳記載事項証明書」は台帳記載事項証明のまま(建築確認の語に取られない)。
+    ["建築確認台帳記載事項証明書.pdf", "ledger_certificate", "pre_contract"],
     ["固定資産評価証明書.pdf", "tax_certificate", "pre_contract"],
     ["管理に係る重要事項調査報告書.pdf", "mgmt_report", "management"],
     ["管理規約.pdf", "bylaws", "management"],
