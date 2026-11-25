@@ -6,6 +6,7 @@ import { readFundingInputs, type FundingInputs } from "./funding-schema";
 import { readBusinessInputs, type BusinessInputs } from "./business-schema";
 import { readTargetParcels } from "./target-parcels";
 import { readMailbox, type Mailbox } from "./mailbox";
+import { readDealKeys, type DealKeyRow } from "./deal-keys";
 import type { Assessments, CounterpartyBroker, Costs, Lease, Overrides, Payments, PropertySnapshot, SettlementTerms } from "./schemas";
 
 const iso = (d: Date | null) => (d ? d.toISOString() : null);
@@ -64,6 +65,8 @@ export interface DealView {
   payments?: Payments;
   /** 集合ポストの解除番号の確認欄。省略=未確認。src/lib/deals/mailbox.ts。 */
   mailbox?: Mailbox;
+  /** 鍵の番号・種類と本数。省略=記録なし。src/lib/deals/deal-keys.ts。 */
+  keys?: DealKeyRow[];
   version: number; createdAt: string; updatedAt: string; parties: DealPartyView[];
 }
 
@@ -78,7 +81,7 @@ export function toDealView(r: Prisma.DealGetPayload<{ select: typeof DEAL_DETAIL
     assessments: readAssessments(r.assessments), costs: readCosts(r.costs), settlementTerms: readTerms(r.settlementTerms, r.overrides),
     leases: readLeases(r.leases), overrides: readOverrides(r.overrides), fundingPlan: readFundingInputs(r.planInputs),
     businessPlan: readBusinessInputs(r.planInputs), targetParcels: readTargetParcels(r.targetParcels), payments: readPayments(r.payments),
-    mailbox: readMailbox(r.checklistState),
+    mailbox: readMailbox(r.checklistState), keys: readDealKeys(r.checklistState),
     version: r.version, createdAt: r.createdAt.toISOString(), updatedAt: r.updatedAt.toISOString(), parties: r.parties,
   };
 }

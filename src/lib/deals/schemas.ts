@@ -1,5 +1,6 @@
 import { z } from "zod";
 import { mailboxSchema } from "./mailbox";
+import { dealKeysSchema } from "./deal-keys";
 import {
   BANK_ACCOUNT_TYPES, BASE_PROPERTY_KINDS, DEAL_BUSINESS_TYPES, DEAL_PARTY_ROLES, DEAL_PARTY_TYPES,
   DEAL_STATUSES, DEAL_TRADE_SIDES, LAND_RIGHTS,
@@ -252,6 +253,8 @@ export const dealUpdateSchema = z.object({
   businessPlan: businessInputsSchema.optional(),
   /** 集合ポストの解除番号の確認欄(`checklist_state.mailbox` だけを差し替える)。src/lib/deals/mailbox.ts。 */
   mailbox: mailboxSchema.optional(),
+  /** 鍵の番号・種類と本数(`checklist_state.keys` だけを差し替える)。src/lib/deals/deal-keys.ts。 */
+  keys: dealKeysSchema.optional(),
 }).strict();
 export type DealUpdateInput = z.output<typeof dealUpdateSchema>;
 

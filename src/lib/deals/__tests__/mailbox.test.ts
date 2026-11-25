@@ -28,8 +28,8 @@ describe("集合ポストの確認欄(2026-11-26 発注者)", () => {
     expect(DEAL_TRACKED_FIELDS).not.toContain("checklistState");
     expect(toDealUpdateData({ mailbox: mailboxSchema.parse(box) }, "brokerage")).toEqual({});
   });
-  it("PATCH は checklist_state を mailbox の差し替えで書く", () => {
+  it("PATCH は checklist_state を mailbox の差し替えで書く(鍵の記録の差し替えとつなぐ)", () => {
     const src = readFileSync("src/app/api/deals/[id]/route.ts", "utf8");
-    expect(src).toContain("data.checklistState = withMailbox(cur.checklistState, patch.mailbox)");
+    expect(src).toContain("if (patch.mailbox !== undefined) next = withMailbox(next, patch.mailbox)");
   });
 });
