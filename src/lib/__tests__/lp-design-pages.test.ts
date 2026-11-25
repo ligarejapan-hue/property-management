@@ -7,7 +7,7 @@ vi.mock("@/lib/sale-dm-letter/config-store", () => ({
 import { loadPublicLpPage } from "@/lib/sale-dm-letter/lp-public-loader";
 import { loadSaleDmPublicPageConfig } from "@/lib/sale-dm-letter/config-store";
 import {
-  LP_DESIGN_BY_SLUG, LP_DESIGN_KEYS, QUESTION_COMPOSE_SOURCE, lpDesignAsksContactPref, lpDesignForSlug, renderLpDesignPage, type LpDesignKey,
+  LP_DESIGN_BY_SLUG, LP_DESIGN_KEYS, LP_SATEI_SAMPLE, QUESTION_COMPOSE_SOURCE, lpDesignAsksContactPref, lpDesignForSlug, renderLpDesignPage, type LpDesignKey,
 } from "@/lib/sale-dm-letter/lp-design-pages";
 import { LP_DESIGN_COMMON_CSS, LP_DESIGN_EXTRA_CSS } from "@/lib/sale-dm-letter/lp-design-styles";
 import { INQUIRY_CLIENT_CHECK_SOURCE, LP_PAGE_HEADERS } from "@/lib/sale-dm-letter/lp-page";
@@ -66,6 +66,9 @@ const ADDED_20261125: Record<LpDesignKey, Set<string>> = {
     "お電話で直接ご相談:", "（平日 10:00〜19:00）",
     "ご事情があればお書きください（任意）",
     "お名前とお電話番号を、",
+    // 査定書の見本(2026-11-25 発注者確認)
+    "2〜3営業日で、このような査定書をお届けします。ご家族と話し合うための資料としてお使いいただけます。",
+    "画像は見本です。",
   ]),
 };
 
@@ -283,8 +286,17 @@ describe("question 案: 相談の分岐・安心の一言・電話・ご事情�
     expect(h.indexOf(line, note)).toBeGreaterThan(note);
     expect(h.indexOf(line, note)).toBeLessThan(h.indexOf('name="name"', note));
   });
-  it("見本の査定書の画像は、ファイルが無い間は出さない", () => {
-    if (!existsSync(join(process.cwd(), "public/lp-assets/brand/satei-sample.jpg"))) expect(h).not.toContain("satei-sample");
+  it("連絡先の前に査定書の見本(画像は実在・見本と明記・相談の段では出さない)", () => {
+    expect(existsSync(join(process.cwd(), "public", LP_SATEI_SAMPLE.src))).toBe(true);
+    const img = h.indexOf(LP_SATEI_SAMPLE.src);
+    expect(img).toBeGreaterThan(-1);
+    expect(h.split(LP_SATEI_SAMPLE.src).length - 1).toBe(1);
+    // 質問2の後・ご事情の欄とお届け先の欄より前、相談のときは隠れる .qn-only の中
+    expect(img).toBeLessThan(h.indexOf('data-q-note="1"'));
+    expect(img).toBeLessThan(h.indexOf('name="name"'));
+    expect(h.lastIndexOf('class="qn-only"', img)).toBeGreaterThan(h.lastIndexOf('class="stp"', img));
+    expect(h).toContain("2〜3営業日で、このような査定書をお届けします。ご家族と話し合うための資料としてお使いいただけます。");
+    expect(h).toContain("画像は見本です。");
   });
 });
 

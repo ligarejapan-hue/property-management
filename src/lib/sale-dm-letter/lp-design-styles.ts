@@ -278,7 +278,11 @@ export const LP_DESIGN_EXTRA_CSS = {
 .qnote{display:flex;flex-direction:column;gap:10px}
 .qnote textarea{width:100%;box-sizing:border-box;min-height:110px;border:1px solid var(--on-ink-2);background:transparent;color:var(--on-ink);font:500 16px/1.7 var(--goth);padding:10px 12px;border-radius:0;resize:vertical}
 .qnote textarea:focus{outline:2px solid var(--brass-l);outline-offset:2px}
-.stp>.qn-only+.qh{margin-top:30px}`,
+.stp>.qn-only+.qh{margin-top:30px}
+.qsmp{margin:0 0 26px}
+.qsmp img{display:block;width:100%;max-width:560px;height:auto;margin:0 auto}
+.qsmp figcaption{font-size:15px;line-height:1.8;color:var(--on-ink);margin-top:12px}
+.qsmp small{display:block;font-size:12px;color:var(--on-ink-2);margin-top:4px}`,
   compare: `.duo.dk .pane.a{background:var(--on-ink);color:var(--ink)}
 .duo.dk .pane.a small{color:var(--brass-d)}
 .duo.dk .pane.b{background:transparent;color:var(--on-ink);border:1px solid var(--brass)}
