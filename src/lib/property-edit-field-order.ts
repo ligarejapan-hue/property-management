@@ -25,7 +25,7 @@ const HEAD = [
   "propertyType", "businessType", "postalCode", "address", "buildingName",
   "lotNumber", "buildingNumber", "extraParcels", "realEstateNumber",
 ];
-const TAIL = ["registryStatus", "dmStatus", "inquirerName", "assignedTo", "gpsLat", "gpsLng", "note"];
+const TAIL = ["registryStatus", "dmStatus", "inquirerName", "assignedTo", "gpsLat", "gpsLng", "keyBoxLocation", "keyBoxCode", "note"];
 
 export function basicInfoOrder(propertyType: string): string[] {
   return [...HEAD, ...(isUnitType(propertyType) ? UNIT_ORDER : ["roomNo", ...OTHER_ORDER]), ...TAIL];

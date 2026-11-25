@@ -21,6 +21,7 @@ import { parseDateOnly } from "@/lib/case-dates";
 import { LEAD_EXCLUSION_FILTER_VALUES, LEAD_EXCLUSION_STATUS_VALUES } from "@/lib/lead-exclusion";
 import { INQUIRER_NAME_MAX_LENGTH, INQUIRER_NAME_TOO_LONG_MESSAGE } from "@/lib/inquirer-name";
 import { DEAL_BUSINESS_TYPES } from "@/lib/deals/constants";
+import { KEY_BOX_CODE_MAX_LENGTH, KEY_BOX_LOCATION_MAX_LENGTH } from "@/lib/key-box";
 import { PROPERTY_BUSINESS_TYPE_FILTER_VALUES } from "@/lib/property-business-type";
 
 /**
@@ -335,6 +336,10 @@ export const updatePropertySchema = z.object({
   rosenkaYear: z.number().int().optional().nullable(),
   rebuildPermission: z.enum(["yes", "no", "needs_review"]).optional().nullable(),
   architectureNote: z.string().optional().nullable(),
+  // キーボックスの設置場所・解除番号(2026-11-26 発注者)。反響の受付の窓で全員に見せる。
+  // 前後の空白は落とし、空白だけなら空(null)にする(部屋番号と同じ)。
+  keyBoxLocation: z.string().trim().max(KEY_BOX_LOCATION_MAX_LENGTH, `キーボックスの設置場所は${KEY_BOX_LOCATION_MAX_LENGTH}文字以内で入力してください`).transform((v) => (v === "" ? null : v)).optional().nullable(),
+  keyBoxCode: z.string().trim().max(KEY_BOX_CODE_MAX_LENGTH, `キーボックスの解除番号は${KEY_BOX_CODE_MAX_LENGTH}文字以内で入力してください`).transform((v) => (v === "" ? null : v)).optional().nullable(),
   note: z.string().optional().nullable(),
   assignedTo: z.string().uuid().optional().nullable(),
   // ── 「販売」区分(F3 Task7・物件編集画面から編集できる列) ──────────────────

@@ -88,6 +88,9 @@ export interface PropertyDetail {
   assigneeName: string | null;
   isArchived: boolean;
   note: string | null;
+  /** キーボックスの設置場所・解除番号(2026-11-26)。反響の受付の窓で全員に見せる。 */
+  keyBoxLocation: string | null;
+  keyBoxCode: string | null;
   version: number;
   createdBy: string;
   creatorName: string;

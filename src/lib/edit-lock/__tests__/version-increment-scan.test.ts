@@ -103,7 +103,7 @@ const VERSIONED: Record<string, string> = {
   "src/app/api/properties/[id]/parcel-detach/route.ts:77":
     "property.extraParcels(この筆を別の物件にする・2026-11-06)+version increment" +
     "(物件の行ロック→編集中の鍵の確認→版の条件つき更新。新しい物件は同じトランザクションで作る)",
-  "src/app/api/properties/[id]/route.ts:625":
+  "src/app/api/properties/[id]/route.ts:628":
     "property の編集画面フィールド一式(編集画面の本体保存窓口)+version increment",
   "src/app/api/properties/bulk-update/route.ts:97":
     "property.caseStatus/registryStatus/dmStatus/assignedTo(一括更新)+version increment",

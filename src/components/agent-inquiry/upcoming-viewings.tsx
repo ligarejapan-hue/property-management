@@ -1,6 +1,7 @@
 import type { UpcomingViewing } from "@/lib/api-client";
 import { formatJst, VIEWING_TYPE_LABEL } from "@/lib/agent-inquiry/desk-form";
 import { inquiryAgentName } from "@/lib/agent-inquiry/agent-name";
+import { KeyBoxInfo } from "./key-box-info";
 
 const propLabel = (p: { name: string; roomNo: string | null }) => (p.roomNo ? `${p.name} ${p.roomNo}` : p.name);
 
@@ -19,6 +20,7 @@ export function UpcomingViewingsView({ viewings }: { viewings: UpcomingViewing[]
               {inquiryAgentName(v.inquiry)}
               {v.inquiry.contactName ? `(${v.inquiry.contactName}様)` : ""}
               {v.attendant ? ` ・ 立会 ${v.attendant.name}` : ""}
+              <KeyBoxInfo location={v.inquiry.property.keyBoxLocation} code={v.inquiry.property.keyBoxCode} className="ml-4" />
             </li>
           ))}
         </ul>

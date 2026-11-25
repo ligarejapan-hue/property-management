@@ -90,6 +90,8 @@ export const CHANGE_FIELD_LABELS: Record<string, string> = {
   frontageDirection: "間口方角",
   rosenkaYear: "路線価年度",
   architectureNote: "建築備考",
+  keyBoxLocation: "キーボックスの設置場所",
+  keyBoxCode: "キーボックスの解除番号",
   email: "メール",
   currentZip: "現住所の郵便番号",
   currentAddress: "現住所",

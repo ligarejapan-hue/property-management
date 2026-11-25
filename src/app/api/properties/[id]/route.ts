@@ -396,6 +396,9 @@ export async function PATCH(
         roomNo: true,
         occupancyStatus: true,
         ownershipShareNote: true,
+        // キーボックス(変更履歴の「変更前」に使う・2026-11-26)。
+        keyBoxLocation: true,
+        keyBoxCode: true,
         note: true,
       },
     });

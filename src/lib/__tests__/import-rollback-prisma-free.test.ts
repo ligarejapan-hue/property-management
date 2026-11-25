@@ -68,7 +68,7 @@ describe("property-field-constants.ts は Prisma-free (Codex P1)", () => {
     expect(constantsSrc).not.toMatch(/from\s+("|')next\//);
   });
 
-  it("PROPERTY_TRACKED_FIELDS の中身 (47 項目・21-C PR-3c で postalCode・2026-09 で区分マンションの8列・2026-10-23 で契約予定日/決済予定日・2026-10-24 で問い合わせ者/除外申請3列・2026-10-25 で土地面積/計測方式/延床面積・2026-11-04 で取扱区分を追加)", () => {
+  it("PROPERTY_TRACKED_FIELDS の中身 (50 項目・21-C PR-3c で postalCode・2026-09 で区分マンションの8列・2026-10-23 で契約予定日/決済予定日・2026-10-24 で問い合わせ者/除外申請3列・2026-10-25 で土地面積/計測方式/延床面積・2026-11-04 で取扱区分・2026-11-26 でキーボックス2列を追加)", () => {
     expect(PROPERTY_TRACKED_FIELDS).toEqual([
       "propertyType",
       "address",
@@ -104,6 +104,8 @@ describe("property-field-constants.ts は Prisma-free (Codex P1)", () => {
       "rosenkaYear",
       "rebuildPermission",
       "architectureNote",
+      "keyBoxLocation",
+      "keyBoxCode",
       "note",
       "assignedTo",
       // CSV の「既存物件の更新」が書く区分マンションの8列。以前は漏れていて、

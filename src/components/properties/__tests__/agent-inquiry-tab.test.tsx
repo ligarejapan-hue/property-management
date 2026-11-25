@@ -89,7 +89,7 @@ describe("物件画面への組み込み", () => {
     expect(page).toMatch(/\{ key: "actions", label: "ネクストアクション" \},\n\s*\{ key: "inquiries", label: "反響" \},/);
   });
   it("物件ごとに作り直し(key)、物件の編集権限と資料を送れるか(反響の書き込み権限)を渡す", () => {
-    expect(page).toMatch(/<AgentInquiryTab key=\{property\.id\} propertyId=\{property\.id\} canWrite=\{canWriteProperty\} canSendMaterial=\{canSendInquiryMaterial\} \/>/);
+    expect(page).toMatch(/<AgentInquiryTab key=\{property\.id\} propertyId=\{property\.id\} canWrite=\{canWriteProperty\} canSendMaterial=\{canSendInquiryMaterial\} keyBoxLocation=\{property\.keyBoxLocation\} keyBoxCode=\{property\.keyBoxCode\} \/>/);
     expect(page).toMatch(/p\.resource === "agent_inquiry" && p\.action === "write" && p\.granted/);
   });
   it("広告の可否の変更を権限なしで断られたら、その後はボタンを出さない", () => {

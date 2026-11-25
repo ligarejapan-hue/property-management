@@ -75,6 +75,9 @@ export const DESK_PROPERTY_SELECT = {
   address: true,
   building: { select: { name: true } },
   adPermissions: { select: { medium: true, value: true } },
+  // キーボックス(2026-11-26 発注者=受付の窓を使える全員に見せる・内見の電話で業者さんへ伝える)。
+  keyBoxLocation: true,
+  keyBoxCode: true,
 } as const;
 
 export interface DeskProperty {
@@ -84,8 +87,13 @@ export interface DeskProperty {
   town: string;
   propertyType: string;
   adPermissions: Partial<Record<AdMediumKey, AdValueKey>>;
+  /** キーボックスの設置場所・解除番号(2026-11-26 発注者=全員に見せる)。 */
+  keyBoxLocation: string | null;
+  keyBoxCode: string | null;
 }
-export const DESK_PROPERTY_KEYS = ["id", "name", "roomNo", "town", "propertyType", "adPermissions"] as const;
+export const DESK_PROPERTY_KEYS = [
+  "id", "name", "roomNo", "town", "propertyType", "adPermissions", "keyBoxLocation", "keyBoxCode",
+] as const;
 
 export interface DeskPropertyRow {
   id: string;
@@ -95,6 +103,8 @@ export interface DeskPropertyRow {
   address: string;
   building: { name: string } | null;
   adPermissions: { medium: string; value: string }[];
+  keyBoxLocation: string | null;
+  keyBoxCode: string | null;
 }
 
 /**
@@ -114,5 +124,7 @@ export function toDeskProperty(row: DeskPropertyRow): DeskProperty {
     town,
     propertyType: row.propertyType,
     adPermissions: ads,
+    keyBoxLocation: row.keyBoxLocation ?? null,
+    keyBoxCode: row.keyBoxCode ?? null,
   };
 }

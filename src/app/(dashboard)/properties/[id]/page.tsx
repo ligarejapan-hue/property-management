@@ -290,6 +290,9 @@ interface ApiProperty {
   settlementPlannedOn: string | null;
   isArchived: boolean;
   note: string | null;
+  /** キーボックスの設置場所・解除番号(2026-11-26)。反響タブにも出す。 */
+  keyBoxLocation: string | null;
+  keyBoxCode: string | null;
   gpsLat: number | null;
   gpsLng: number | null;
   zoningDistrict: string | null;
@@ -1249,7 +1252,7 @@ export default function PropertyDetailPage({
         )}
         {/* 業者からの反響(設計 2026-09-28 §2.3)。広告の可否を変えられるのは物件の編集権限がある人だけ。 */}
         {activeTab === "inquiries" && (
-          <AgentInquiryTab key={property.id} propertyId={property.id} canWrite={canWriteProperty} canSendMaterial={canSendInquiryMaterial} />
+          <AgentInquiryTab key={property.id} propertyId={property.id} canWrite={canWriteProperty} canSendMaterial={canSendInquiryMaterial} keyBoxLocation={property.keyBoxLocation} keyBoxCode={property.keyBoxCode} />
         )}
         {activeTab === "comments" && (
           <CommentTab propertyId={property.id} />
@@ -1606,6 +1609,9 @@ function BasicTab({
           value={`${property.gpsLat}, ${property.gpsLng}`}
         />
       )}
+      {/* キーボックス(2026-11-26 発注者)。反響の受付の窓・反響タブにも出す。 */}
+      <Field label="キーボックスの設置場所" value={property.keyBoxLocation} />
+      <Field label="キーボックスの解除番号" value={property.keyBoxCode} />
       <div className="md:col-span-2">
         <Field label="備考" value={property.note} multiline />
       </div>
