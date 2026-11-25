@@ -13,6 +13,7 @@ import { hasPermission } from "@/lib/permissions";
 import { lockPropertyRow } from "@/lib/property-record-guard";
 import { parseCsv, OWNER_CSV_COLUMN_MAP } from "@/lib/csv-parser";
 import { normalizeAddress as normalizeAddressForLink } from "@/lib/address-normalizer";
+import { containsVariants } from "@/lib/notation";
 import { buildOwnerDedupKey, findOwnerByNameAndPhone } from "@/lib/owner-dedup";
 import { relinkOwnersToProperties } from "@/lib/owner-property-linker";
 import {
@@ -443,7 +444,8 @@ export async function POST(request: NextRequest) {
         // DB側に正規化関数は無いので、生 address で完全一致 + contains で広めに引いて
         // アプリ側で正規化比較する。同住所表記揺れは normalizeAddress に寄せる。
         const candidates = await prisma.property.findMany({
-          where: { address: { contains: rawAddr.slice(0, 8) } },
+          // ⚠頭の8文字は書き方の候補(1ー2/1-2・全角/半角)で探す。保存の形とずれて候補から落とさない(@codex)。
+          where: { OR: containsVariants("address", rawAddr.slice(0, 8)) },
           select: { id: true, address: true },
         });
         const matched = candidates

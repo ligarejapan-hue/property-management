@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { containsVariants, halfWidthDigitsInWrite, searchVariants } from "../notation";
+import { containsVariants, displayHalfWidth, halfWidthDigitsInWrite, savedTextValue, searchVariants, toHalfWidthAddress } from "../notation";
 import { buildChangeLogEntries } from "../change-log";
 
 describe("検索の書き方の違い", () => {
@@ -20,7 +20,7 @@ describe("検索の書き方の違い", () => {
 
   it("★保存した形でも見つかる(「１－２」は数字だけ半角の「1－2」で入る)", () => {
     const saved = halfWidthDigitsInWrite("property", "create", { data: { address: "東京都１－２" } }).data.address;
-    expect(saved).toBe("東京都1－2");
+    expect(saved).toBe("東京都1-2");
     expect(searchVariants("東京都１－２")).toContain(saved);
     expect(searchVariants("東京都1-2")).toContain("東京都１－２");
   });
@@ -43,7 +43,9 @@ describe("検索の書き方の違い", () => {
   it("★数が増えすぎない(3つ目からのケは変えない)", () => {
     expect(searchVariants("井ヶ谷千ヶ谷富ヶ谷").length).toBeLessThanOrEqual(9);
     expect(searchVariants("井ヶ谷千ヶ谷富ヶ谷１").length).toBeLessThanOrEqual(18);
-    expect(searchVariants("井ヶ谷千ヶ谷富ヶ谷１－２").length).toBeLessThanOrEqual(36);
+    // 区切りの字(11)× 数字の幅(2)× ケ(最大9)。ケ3つ+区切りはまれ=ふつうの住所(ケ1つ以下)は66以下。
+    expect(searchVariants("井ヶ谷千ヶ谷富ヶ谷１－２").length).toBeLessThanOrEqual(200);
+    expect(searchVariants("井土ヶ谷1-2").length).toBeLessThanOrEqual(66);
   });
 
   it("条件にして返す", () => {
@@ -65,7 +67,7 @@ describe("保存する数字を半角に", () => {
   it("★物件の住所・地番・家屋番号・物件名・号室を半角にする", () => {
     const args = { data: { address: "東京都１丁目２－３", lotNumber: "１番１", buildingNumber: "１番１の３", buildingName: "第２ビル", roomNo: "３０５", note: "１２" } };
     expect(halfWidthDigitsInWrite("property", "create", args).data).toEqual({
-      address: "東京都1丁目2－3", lotNumber: "1番1", buildingNumber: "1番1の3", buildingName: "第2ビル", roomNo: "305", note: "１２",
+      address: "東京都1丁目2-3", lotNumber: "1番1", buildingNumber: "1番1の3", buildingName: "第2ビル", roomNo: "305", note: "１２",
     });
   });
 
@@ -92,5 +94,97 @@ describe("保存する数字を半角に", () => {
     const args = { data: { fileName: "１.pdf" } };
     expect(halfWidthDigitsInWrite("attachment", "create", args)).toBe(args);
     expect(halfWidthDigitsInWrite("property", "update", { data: { address: null } }).data).toEqual({ address: null });
+  });
+});
+
+describe("数字のあいだの「ー」「－」「−」を「-」にそろえる(2026-11-25 発注者「混在しているのは修正して」)", () => {
+  it("★数字と数字のあいだの長音・全角ハイフン・マイナス・ダッシュを「-」に", () => {
+    expect(toHalfWidthAddress("東京都港区１ー２ー３")).toBe("東京都港区1-2-3");
+    expect(toHalfWidthAddress("1－2")).toBe("1-2");
+    expect(toHalfWidthAddress("1−2‐3")).toBe("1-2-3");
+    expect(toHalfWidthAddress("1―2–3—4")).toBe("1-2-3-4");
+    expect(toHalfWidthAddress("1ｰ2")).toBe("1-2");
+  });
+
+  it("★「丁目ー2」「番ー3」のように漢字のあとも「-」に", () => {
+    expect(toHalfWidthAddress("1丁目ー2")).toBe("1丁目-2");
+    expect(toHalfWidthAddress("5番ー3")).toBe("5番-3");
+  });
+
+  it("★号室の英字のあいだも(Aー101)", () => {
+    expect(toHalfWidthAddress("Aー101")).toBe("A-101");
+  });
+
+  it("★カタカナの長音は変えない(センター・コーポ・ハイツー1 の ー は音を伸ばす記号)", () => {
+    expect(toHalfWidthAddress("センター1号館")).toBe("センター1号館");
+    expect(toHalfWidthAddress("コーポ2")).toBe("コーポ2");
+    expect(toHalfWidthAddress("ハイツー1")).toBe("ハイツー1");
+    expect(toHalfWidthAddress("スーパー")).toBe("スーパー");
+  });
+
+  it("英字どうしのあいだは変えない(Park—Side)", () => {
+    expect(toHalfWidthAddress("Park—Side")).toBe("Park—Side");
+  });
+
+  it("あとに数字が来ないものは変えない", () => {
+    expect(toHalfWidthAddress("1ー")).toBe("1ー");
+    expect(toHalfWidthAddress("東京ーあ")).toBe("東京ーあ");
+  });
+
+  it("★画面・保存・変更履歴が同じ形になる", () => {
+    expect(displayHalfWidth("１ー２")).toBe("1-2");
+    expect(savedTextValue("property", "address", "１ー２")).toBe("1-2");
+    expect(savedTextValue("property", "note", "１ー２")).toBe("１ー２");
+    expect(halfWidthDigitsInWrite("owner", "update", { data: { address: "3ー4" } }).data).toEqual({ address: "3-4" });
+  });
+
+  it("★どの書き方で検索しても、どの書き方で入っている行も見つかる", () => {
+    for (const stored of ["1-2", "1ー2", "1－2", "1−2", "１－２", "１ー２"]) {
+      for (const typed of ["1-2", "1ー2", "１－２", "1−2"]) {
+        expect(searchVariants(`港区${typed}`)).toContain(`港区${stored}`);
+      }
+    }
+  });
+
+  it("★区切りが混ざった値は、数字だけ半角・全角にした形も探す(前の保存の形・@codex)", () => {
+    expect(searchVariants("港区１－２ー３")).toEqual(expect.arrayContaining(["港区1－2ー3", "港区１－２ー３", "港区1-2-3"]));
+    expect(searchVariants("港区1－2ー3")).toContain("港区１－２ー３");
+  });
+
+  it("★数字のあいだでないハイフンも、前と同じく幅の違いで探す(ハイツ-1・@codex)", () => {
+    expect(searchVariants("ハイツ－１")).toContain("ハイツ-1");
+    expect(searchVariants("ハイツ-1")).toContain("ハイツ－１");
+  });
+
+  it("★保存・画面でそろえる区切りの字は、どれで入っていても検索で見つかる(画面の「1-2」を写して探す・@codex)", () => {
+    for (const d of ["-", "－", "ー", "−", "‐", "‑", "‒", "–", "—", "―", "ｰ"]) {
+      expect(toHalfWidthAddress(`港区1${d}2`)).toBe("港区1-2");
+      expect(searchVariants("港区1-2")).toContain(`港区1${d}2`);
+    }
+  });
+
+  it("★所有者の取り込みで物件につなぐ候補も、書き方の候補で探す(頭の8文字・@codex)", async () => {
+    const { readFileSync } = await import("node:fs");
+    for (const f of ["src/app/api/import/owner-csv/route.ts", "src/lib/owner-property-linker.ts"]) {
+      const src = readFileSync(f, "utf8");
+      expect(src).toMatch(/OR: containsVariants\("address", \w+(\.address)?\.slice\(0, 8\)\)/);
+      expect(src).not.toMatch(/address: \{ contains: \w+(\.address)?\.slice\(0, 8\) \}/);
+    }
+  });
+
+  it("★区切りが2か所で字が違う行も、画面の形を写して探せる(港区1-2-3 → 1－2ー3・@codex)", () => {
+    expect(searchVariants("港区1-2-3")).toEqual(expect.arrayContaining(["港区1－2ー3", "港区1ー2-3", "港区１－２ー３"]));
+    expect(searchVariants("港区1-2-3").length).toBeLessThanOrEqual(45);
+  });
+
+  it("★区切りで始まる・終わる語でも、保存し直した「1-2」が見つかる(港区1ー・ー2・@codex)", () => {
+    expect(searchVariants("港区1ー")).toContain("港区1-");
+    expect(searchVariants("ー2")).toContain("-2");
+    expect(searchVariants("港区1-")).toContain("港区1ー");
+    expect(searchVariants("センター")).toEqual(["センター"]);
+  });
+
+  it("カタカナの長音だけの語は候補を増やさない", () => {
+    expect(searchVariants("センター")).toEqual(["センター"]);
   });
 });

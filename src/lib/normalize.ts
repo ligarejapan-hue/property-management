@@ -6,6 +6,8 @@
  * - 漢字異体字や地名辞書は対象外（将来拡張）
  */
 
+import { toHalfWidthAddress } from "./notation";
+
 // ---------- 共通ユーティリティ ----------
 
 /**
@@ -16,10 +18,12 @@
  * - 前後空白除去
  * - 連続空白の圧縮（半角/全角スペース/タブを単一半角スペースへ）
  * - 英字は lowercase に統一
+ * - 数字のあいだの「ー」などを「-」に(保存のときと同じ形・notation.ts の toHalfWidthAddress。
+ *   保存した「1-2」と取り込む「1ー2」を同じ物件として見分ける・2026-11-25 @codex P1)
  */
 function baseNormalize(input: string | null | undefined): string {
   if (input == null) return "";
-  const s = String(input).normalize("NFKC");
+  const s = toHalfWidthAddress(String(input).normalize("NFKC"));
   return s
     .replace(/[\s\u3000]+/g, " ")
     .trim()

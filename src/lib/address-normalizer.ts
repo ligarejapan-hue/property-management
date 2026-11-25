@@ -63,7 +63,7 @@ export function normalizeAddress(address: string): string {
   );
 
   // Normalize hyphens/dashes
-  normalized = normalized.replace(/[ー─‐－―−]/g, "-");
+  normalized = normalized.replace(/[ー─‐－―−‑‒–—ｰ]/g, "-"); // ⚠保存でそろえる字(notation.ts)を全部含める(@codex)
 
   // Remove spaces
   normalized = normalized.replace(/[\s　]+/g, "");
@@ -131,7 +131,7 @@ export function normalizeLotNumber(lot: string): string {
   );
 
   // Normalize hyphens
-  normalized = normalized.replace(/[ー─‐－―−]/g, "-");
+  normalized = normalized.replace(/[ー─‐－―−‑‒–—ｰ]/g, "-"); // ⚠保存でそろえる字(notation.ts)を全部含める(@codex)
 
   // Remove spaces
   normalized = normalized.replace(/[\s　]+/g, "");

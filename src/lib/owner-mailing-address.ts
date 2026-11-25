@@ -22,7 +22,7 @@
  * このモジュールが持つ。`dm-export.ts` は互換のため再エクスポートするが、
  * 定義元はここ（dm-export がこの関数を使うため、逆向きに import すると循環する）。
  */
-import { toHalfWidthDigits } from "@/lib/registry-fetch/chiban-input";
+import { toHalfWidthAddress } from "@/lib/notation";
 
 /**
  * グルーピング用に郵便番号を正規化する（比較専用・出力には使わない）。
@@ -44,7 +44,7 @@ export function normalizeAddressForGroup(
   address: string | null | undefined,
 ): string {
   if (typeof address !== "string") return "";
-  return toHalfWidthDigits(address).replace(/[\s　]+/g, " ").trim();
+  return toHalfWidthAddress(address).replace(/[\s　]+/g, " ").trim();
 }
 
 /** 送付に使う宛先。`source` は表示・判定用（この PR では保存しない）。 */

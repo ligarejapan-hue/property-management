@@ -1,5 +1,6 @@
 import { describe, it, expect } from "vitest";
 import { judgeDuplicates, normalizeForCompare, findSameContentPropertyIds } from "../find-duplicates";
+import { toHalfWidthAddress } from "@/lib/notation";
 
 const P = (
   id: string,
@@ -192,5 +193,18 @@ describe("findSameContentPropertyIds（査定ナンバーの無い依頼の二�
 
   it("「901号室」と「901」は同じ部屋と見る・共有名義のどちらかの名前が同じなら当たる", () => {
     expect(findSameContentPropertyIds(D({ roomNo: "901号室" }), [E({ ownerNames: ["別人花子", "調査太郎"] })])).toEqual(["p1"]);
+  });
+});
+
+describe("同じ内容を2回貼ったとき(保存で区切りが「-」になる・2026-11-25 @codex)", () => {
+  it("★1回目に保存した形(1–2 → 1-2)と2回目の貼り付けを同じ住所として見る", () => {
+    for (const d of ["–", "—", "‐", "‑", "‒", "ｰ", "ー", "－", "−", "―"]) {
+      const pasted = `東京都A区B1${d}2`;
+      const v = judgeDuplicates(
+        { address: pasted, lotNumber: null, externalLinkKey: null },
+        [P("p1", toHalfWidthAddress(pasted), null)],
+      );
+      expect(v.similarPropertyIds).toEqual(["p1"]);
+    }
   });
 });
