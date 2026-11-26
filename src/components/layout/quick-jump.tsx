@@ -117,21 +117,20 @@ export function isQuickJumpShortcut(e: {
 
 /**
  * ボタンの置き場所。
- * - map: 地図の画面(現地調査マップ・巡回履歴)は右側に地図の部品とパネルがあるので、左下に絵だけで置く
+ * - hidden: 地図の画面(現地調査マップ・巡回履歴)には出さない(発注者指示 2026-11-26)。Ctrl+K も効かせない
  * - raised: 下に帯がある画面(査定書の確認)は、帯に重ならないように上げる
  * - normal: 右下
  */
-export type QuickJumpPlacement = "normal" | "raised" | "map";
+export type QuickJumpPlacement = "normal" | "raised" | "hidden";
 export function quickJumpPlacement(currentPath: string): QuickJumpPlacement {
-  if (/^\/field-survey\/(map|sessions)(\/|$)/.test(currentPath)) return "map";
+  if (/^\/field-survey\/(map|sessions)(\/|$)/.test(currentPath)) return "hidden";
   if (/\/appraisal-decks\/[^/]+/.test(currentPath)) return "raised";
   return "normal";
 }
 
-const PLACEMENT_CLASSES: Record<QuickJumpPlacement, string> = {
+const PLACEMENT_CLASSES: Record<Exclude<QuickJumpPlacement, "hidden">, string> = {
   normal: "right-4 bottom-4 items-end",
   raised: "right-4 bottom-20 items-end",
-  map: "left-4 bottom-10 items-start",
 };
 
 function QuickJumpPanel({ userRole, onClose }: { userRole: string; onClose: () => void }) {
@@ -216,8 +215,11 @@ function QuickJumpPanel({ userRole, onClose }: { userRole: string; onClose: () =
 export default function QuickJump({ userRole, currentPath }: { userRole: string; currentPath: string }) {
   const [open, setOpen] = useState(false);
   const placement = quickJumpPlacement(currentPath);
+  const hidden = placement === "hidden";
 
   useEffect(() => {
+    // 出さない画面では Ctrl+K も奪わない(開いたまま別の画面へ移って急に出る、も起きない)
+    if (hidden) return;
     const onKey = (e: globalThis.KeyboardEvent) => {
       if (isQuickJumpShortcut(e)) {
         e.preventDefault();
@@ -226,8 +228,9 @@ export default function QuickJump({ userRole, currentPath }: { userRole: string;
     };
     window.addEventListener("keydown", onKey);
     return () => window.removeEventListener("keydown", onKey);
-  }, []);
+  }, [hidden]);
 
+  if (hidden) return null;
   return (
     <div
       className={`fixed z-40 flex flex-col gap-2 ${PLACEMENT_CLASSES[placement]}`}
@@ -238,11 +241,10 @@ export default function QuickJump({ userRole, currentPath }: { userRole: string;
         onClick={() => setOpen((v) => !v)}
         aria-expanded={open}
         title="困ったらここ(Ctrl+K)"
-        aria-label="困ったらここ"
         className="rounded-full shadow-lg"
       >
         <HelpCircle className="h-4 w-4" />
-        {placement !== "map" && "困ったらここ"}
+        困ったらここ
       </Button>
     </div>
   );

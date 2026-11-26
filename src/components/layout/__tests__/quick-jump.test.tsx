@@ -61,10 +61,12 @@ describe("置き場所", () => {
     expect(src).toContain('normal: "right-4 bottom-4 items-end"');
     expect(src).toContain("困ったらここ");
     expect(src).not.toContain("ModalShell");
+    expect(src).toContain("if (hidden) return null;");
   });
-  it("置き場所: 地図の画面は左下・査定書の確認は上げる・ほかは右下", () => {
-    expect(quickJumpPlacement("/field-survey/map")).toBe("map");
-    expect(quickJumpPlacement("/field-survey/sessions")).toBe("map");
+  it("置き場所: 地図の画面には出さない・査定書の確認は上げる・ほかは右下", () => {
+    expect(quickJumpPlacement("/field-survey/map")).toBe("hidden");
+    expect(quickJumpPlacement("/field-survey/sessions")).toBe("hidden");
+    expect(quickJumpPlacement("/field-survey/sessions/abc")).toBe("hidden");
     expect(quickJumpPlacement("/field-survey/candidates")).toBe("normal");
     expect(quickJumpPlacement("/properties/p1/appraisal-decks/d1")).toBe("raised");
     expect(quickJumpPlacement("/properties/p1")).toBe("normal");
