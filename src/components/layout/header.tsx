@@ -7,6 +7,7 @@ import StatusBadge, { USER_ROLE_INTENT, type BadgeIntent } from "@/components/ui
 import { ROLE_LABELS } from "@/lib/role-labels";
 import { HeaderBell } from "@/components/notifications/header-bell";
 import UserMenu from "./user-menu";
+import QuickJump from "./quick-jump";
 
 interface HeaderProps {
   userName: string;
@@ -42,6 +43,8 @@ export default function Header({ userName, userRole, currentPath, onLogout }: He
       </h1>
 
       <div className="flex shrink-0 items-center gap-2 sm:gap-4">
+        {/* どこからでも開ける検索の枠「探す」(Ctrl+K・2026-11-26)。ベルの左 */}
+        <QuickJump userRole={userRole} />
         {/* 通知 段階1: お知らせのベル(利用者メニューの左) */}
         <HeaderBell />
         {/* 見た目の設定 段階4: 利用者メニュー(名前を押すと 色テーマ をすぐ切り替え・「表示の設定」へ)。
