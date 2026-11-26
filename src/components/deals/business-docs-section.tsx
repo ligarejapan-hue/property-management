@@ -36,6 +36,18 @@ const keyRowsOf = (v: unknown): KeyRow[] => (Array.isArray(v) ? (v as KeyRow[]) 
 const keyRowBlank = (k: KeyRow) => k.label.trim() === "" && k.count.trim() === "";
 /** 鍵の行が出せる形か(空の行か、本数が 1〜99。番号・種類は空でもよい)。 */
 const keyRowOk = (k: KeyRow) => keyRowBlank(k) || (/^\d+$/.test(k.count.trim()) && Number(k.count) >= 1 && Number(k.count) <= 99);
+/**
+ * 鍵受領書の小窓の鍵の行の初めの値 = 取引の物件タブの「鍵」で記録した行(本数は文字に)。記録が無ければ空の1行。
+ * (2026-11-26 発注者「鍵の番号・種類と本数を記録しておく箇所」)
+ */
+export function keyFormRowsOf(recorded: unknown): KeyRow[] {
+  const rows = Array.isArray(recorded)
+    ? (recorded as { label?: unknown; count?: unknown }[])
+      .filter((r) => r && typeof r.count === "number")
+      .map((r) => ({ label: typeof r.label === "string" ? r.label : "", count: String(r.count) }))
+    : [];
+  return rows.length ? rows : [{ label: "", count: "" }];
+}
 type CostRow = { label: string; amount: string };
 const costRowsOf = (v: unknown): CostRow[] => (Array.isArray(v) ? (v as CostRow[]) : []);
 /** 金額の欄の文字(数で来た初期値・控えも文字にそろえる)。 */
@@ -171,7 +183,7 @@ export default function BusinessDocsSection({ dealId, active, refresh, onIssued 
 
 /** 小窓の初めの値(前回の入力・初期値)。鍵の行の本数・諸費用の金額は入力しやすいよう文字で持ち、送るときに数にする。 */
 function initialValuesOf(doc: AvailableDocument): Record<string, unknown> {
-  if (doc.docType === "key_receipt") return { ...doc.defaults, keys: [{ label: "", count: "" }] };
+  if (doc.docType === "key_receipt") return { ...doc.defaults, keys: keyFormRowsOf(doc.defaults.keys) };
   if (doc.docType === "settlement_guide_seller") {
     return { ...doc.defaults, costs: (doc.defaults.costs as { label: string; amount: number }[] ?? []).map((r) => ({ label: r.label, amount: String(r.amount) })) };
   }
@@ -528,6 +540,7 @@ function IssueDialog({ dealId, doc, version, onCancel, onDone }: {
             </Field>
             <p className="text-xs text-gray-500">番号が分からないときは、番号の欄を空けて出せます。番号も本数も空のままなら、手で書く空の行を5つ入れて出します。</p>
             <p className="text-xs text-gray-500">受領者の署名・押印の欄は空けて出します(自社が受け取るときも角印は付けません)。</p>
+            <p className="text-xs text-gray-500">鍵の行は、この取引の「物件」タブの「鍵」で記録した内容を初めから入れています(ここで直しても記録は変わりません)。</p>
             <p className="text-xs text-gray-500">集合ポストの解除番号・解除方法は、この取引の「物件」タブの「集合ポスト」の内容を載せます(「なし」なら載せません)。</p>
           </>
         )}

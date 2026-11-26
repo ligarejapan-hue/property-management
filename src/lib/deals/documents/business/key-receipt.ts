@@ -4,14 +4,14 @@ import { html } from "../html";
 import { documentHtml } from "../layout";
 import { DocOptionError } from "./receipts";
 import { DEFAULT_MAILBOX } from "../../mailbox";
+import { dealKeysSchema } from "../../deal-keys";
 import { addresseeOf, dateJa, headTable, namesOf, partiesOf, propertyLabel, signBox, type BusinessDocContext, type Choice, type ValueRow } from "./common";
 
-/** 番号・種類は空でもよい(番号が分からないことがある・2026-11-14 発注者)。 */
-const keyRow = z.object({ label: z.string().trim().max(50), count: z.number().int().min(1).max(99) }).strict();
+/** 鍵の行は取引の鍵の記録と同じ形(番号・種類は空でもよい・src/lib/deals/deal-keys.ts)。 */
 export const keyReceiptOptionsSchema = z.object({
   /** 受領者 = "self"(自社)か自社でない買主の当事者 ID。 */
   receiver: z.string().min(1).max(40),
-  keys: z.array(keyRow).max(30),
+  keys: dealKeysSchema,
   receivedOn: isoDate.nullable(),
 }).strict();
 export type KeyReceiptOptions = z.output<typeof keyReceiptOptionsSchema>;

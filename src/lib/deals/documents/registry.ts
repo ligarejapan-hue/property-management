@@ -278,7 +278,8 @@ export const BUSINESS_DOCS: BusinessDocDef[] = [
     options: keyReceiptOptionsSchema as z.ZodType<Record<string, unknown>>,
     defaults: (c) => {
       const { choices, initial } = keyReceiverChoices(c);
-      return { values: { receiver: initial, keys: [], receivedOn: null }, choices: { receiver: choices } };
+      // 鍵の行は取引の物件タブの「鍵」で記録した内容(無ければ空=小窓で1行目を空けて出す・2026-11-26 発注者)。
+      return { values: { receiver: initial, keys: c.deal.keys ?? [], receivedOn: null }, choices: { receiver: choices } };
     },
     build: (c, o) => buildKeyReceipt(c, keyReceiptOptionsSchema.parse(o)),
   },

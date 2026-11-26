@@ -23,6 +23,7 @@ import { summarizePropertyDeals } from "@/lib/property-business-type";
 import { supportsUnitFields } from "@/lib/property-building-name";
 import { dealParcelOptions, readTargetParcels } from "@/lib/deals/target-parcels";
 import { withMailbox } from "@/lib/deals/mailbox";
+import { withDealKeys } from "@/lib/deals/deal-keys";
 
 type Ctx = { params: Promise<{ id: string }> };
 const NO_STORE = { "Cache-Control": "no-store" };
@@ -123,8 +124,14 @@ export async function PATCH(request: Request, ctx: Ctx) {
           ...(patch.businessPlan !== undefined ? { business: patch.businessPlan } : {}),
         };
       }
-      // 集合ポストは checklist_state の mailbox の鍵だけを差し替える(ほかの鍵は残す)。
-      if (patch.mailbox !== undefined) data.checklistState = withMailbox(cur.checklistState, patch.mailbox);
+      // 集合ポスト・鍵の記録は checklist_state のそれぞれの鍵(mailbox / keys)だけを差し替える(ほかの鍵は残す)。
+      // 同じ保存で両方が来ても片方を落とさないよう、差し替えをつなぐ。
+      if (patch.mailbox !== undefined || patch.keys !== undefined) {
+        let next: unknown = cur.checklistState;
+        if (patch.mailbox !== undefined) next = withMailbox(next, patch.mailbox);
+        if (patch.keys !== undefined) next = withDealKeys(next, patch.keys);
+        data.checklistState = next as Record<string, unknown>;
+      }
       const res = await tx.deal.updateMany({ where: { id, version }, data: { ...data, version: { increment: 1 } } });
       if (res.count === 0) throw new ApiError(409, DEAL_VERSION_CONFLICT_MESSAGE, "VERSION_CONFLICT");
       if (statusChanges && patch.status) await syncDealDocRetention(tx, id, cur.status, patch.status);
