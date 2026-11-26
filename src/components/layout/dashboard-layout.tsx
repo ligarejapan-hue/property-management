@@ -8,6 +8,7 @@ import { signOutWithNotificationCleanup } from "@/lib/notifications/logout";
 import Sidebar from "./sidebar";
 import Header from "./header";
 import TopNav from "./top-nav";
+import QuickJump from "./quick-jump";
 import { USE_MOCK } from "@/lib/api-client";
 import ScreenProtectionProvider from "@/components/screen-protection/screen-protection-provider";
 
@@ -103,6 +104,8 @@ export default function DashboardLayout({
             <div className="mx-auto h-full w-full max-w-[1536px]">{children}</div>
           </main>
         </div>
+        {/* 画面の右下に浮かぶ「困ったらここ」(Ctrl+K でも開く・2026-11-26) */}
+        <QuickJump userRole={userRole} currentPath={pathname ?? ""} />
       </div>
     </ScreenProtectionProvider>
   );

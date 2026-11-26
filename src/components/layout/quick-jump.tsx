@@ -1,16 +1,15 @@
 "use client";
 
 /**
- * どこからでも開ける検索の枠「探す」(2026-11-26 発注者依頼「単語を入力すれば該当するページに飛ぶ」)。
- * - 右上の「探す」か Ctrl+K(Mac は ⌘K)で開く
+ * どこからでも開ける検索の枠「困ったらここ」(2026-11-26 発注者依頼「単語を入力すれば該当するページに飛ぶ」)。
+ * - 画面の右下に浮かぶボタンか Ctrl+K(Mac は ⌘K)で開く
  * - 画面の名前・別名と「やりたいこと」(答え+飛び先)を引く=lib/quick-jump/search.ts
  * - 外には何も送らない。打った言葉は記録しない
  * - 見せるのは、その人の役割で開ける画面だけ(メニューと同じ決まり)
  */
 import { useEffect, useMemo, useRef, useState, type KeyboardEvent } from "react";
 import Link from "next/link";
-import { Search, ArrowRight } from "lucide-react";
-import { ModalShell } from "@/components/ui/modal-shell";
+import { Search, ArrowRight, HelpCircle, X } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { SIDEBAR_GROUPS } from "./sidebar-model";
 import { searchQuickJump, type QuickJumpResult } from "@/lib/quick-jump/search";
@@ -49,7 +48,7 @@ export function QuickJumpResults({
     );
   }
   return (
-    <ul role="listbox" aria-label="探した結果" className="max-h-[60vh] space-y-1 overflow-y-auto">
+    <ul role="listbox" aria-label="探した結果" className="space-y-1">
       {results.map((r, i) => {
         const active = i === activeIndex;
         const cls = `block rounded-md px-3 py-2 text-left ${
@@ -116,7 +115,26 @@ export function isQuickJumpShortcut(e: {
   return !e.isComposing && !e.shiftKey && !e.altKey && (e.ctrlKey || e.metaKey) && e.key.toLowerCase() === "k";
 }
 
-function QuickJumpDialog({ userRole, onClose }: { userRole: string; onClose: () => void }) {
+/**
+ * ボタンの置き場所。
+ * - map: 地図の画面(現地調査マップ・巡回履歴)は右側に地図の部品とパネルがあるので、左下に絵だけで置く
+ * - raised: 下に帯がある画面(査定書の確認)は、帯に重ならないように上げる
+ * - normal: 右下
+ */
+export type QuickJumpPlacement = "normal" | "raised" | "map";
+export function quickJumpPlacement(currentPath: string): QuickJumpPlacement {
+  if (/^\/field-survey\/(map|sessions)(\/|$)/.test(currentPath)) return "map";
+  if (/\/appraisal-decks\/[^/]+/.test(currentPath)) return "raised";
+  return "normal";
+}
+
+const PLACEMENT_CLASSES: Record<QuickJumpPlacement, string> = {
+  normal: "right-4 bottom-4 items-end",
+  raised: "right-4 bottom-20 items-end",
+  map: "left-4 bottom-10 items-start",
+};
+
+function QuickJumpPanel({ userRole, onClose }: { userRole: string; onClose: () => void }) {
   const [query, setQuery] = useState("");
   const [activeIndex, setActiveIndex] = useState(0);
   const inputRef = useRef<HTMLInputElement>(null);
@@ -147,16 +165,24 @@ function QuickJumpDialog({ userRole, onClose }: { userRole: string; onClose: () 
   };
 
   return (
-    <ModalShell
-      title="探す"
-      size="lg"
-      onClose={onClose}
-      footer={
-        <Button variant="secondary" onClick={onClose}>
-          閉じる
-        </Button>
-      }
+    // 画面を覆わない箱(裏の画面はそのまま使える)。Esc か × で閉じる
+    <div
+      role="dialog"
+      aria-label="困ったらここ"
+      onKeyDown={(e) => {
+        if (e.key === "Escape" && !e.nativeEvent.isComposing) {
+          e.preventDefault();
+          onClose();
+        }
+      }}
+      className="flex max-h-[min(70vh,560px)] w-[min(400px,calc(100vw-2rem))] flex-col rounded-lg border border-gray-200 bg-white p-4 shadow-xl animate-pm-dialog-in motion-reduce:animate-none dark:border-gray-700 dark:bg-gray-900"
     >
+      <div className="mb-2 flex items-center justify-between">
+        <h2 className="text-base font-semibold text-gray-900 dark:text-gray-100">困ったらここ</h2>
+        <Button variant="ghost" size="sm" onClick={onClose} aria-label="閉じる" title="閉じる(Esc)">
+          <X className="h-4 w-4" />
+        </Button>
+      </div>
       <div className="relative mb-3">
         <Search className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-gray-400 dark:text-gray-500" />
         <input
@@ -168,7 +194,7 @@ function QuickJumpDialog({ userRole, onClose }: { userRole: string; onClose: () 
             setActiveIndex(0);
           }}
           onKeyDown={onKeyDown}
-          placeholder="画面の名前・やりたいこと(例: 鍵の本数を入力したい)"
+          placeholder="画面の名前・やりたいこと"
           aria-label="探す言葉"
           aria-controls="pm-quick-jump-results"
           aria-activedescendant={results.length ? QUICK_JUMP_OPTION_ID(Math.min(activeIndex, results.length - 1)) : undefined}
@@ -176,16 +202,20 @@ function QuickJumpDialog({ userRole, onClose }: { userRole: string; onClose: () 
           className="w-full rounded-md border border-gray-300 bg-white py-2 pl-9 pr-3 text-sm text-gray-900 placeholder:text-gray-400 focus:border-indigo-500 focus:outline-none focus:ring-1 focus:ring-indigo-500 dark:border-gray-700 dark:bg-gray-900 dark:text-gray-100 dark:placeholder:text-gray-500"
         />
       </div>
-      <div id="pm-quick-jump-results">
+      <div id="pm-quick-jump-results" className="min-h-0 flex-1 overflow-y-auto">
         <QuickJumpResults query={query} results={results} activeIndex={activeIndex} onPick={onClose} />
       </div>
-    </ModalShell>
+    </div>
   );
 }
 
-/** 右上の「探す」ボタン+Ctrl+K。 */
-export default function QuickJump({ userRole }: { userRole: string }) {
+/**
+ * 画面の右下に浮かぶ「困ったらここ」(2026-11-26 発注者「画面右下にフローする困ったらここみたいな箱に」)。
+ * 押すと上に箱が開く。Ctrl+K でも開く。
+ */
+export default function QuickJump({ userRole, currentPath }: { userRole: string; currentPath: string }) {
   const [open, setOpen] = useState(false);
+  const placement = quickJumpPlacement(currentPath);
 
   useEffect(() => {
     const onKey = (e: globalThis.KeyboardEvent) => {
@@ -199,20 +229,21 @@ export default function QuickJump({ userRole }: { userRole: string }) {
   }, []);
 
   return (
-    <>
+    <div
+      className={`fixed z-40 flex flex-col gap-2 ${PLACEMENT_CLASSES[placement]}`}
+    >
+      {open && <QuickJumpPanel userRole={userRole} onClose={() => setOpen(false)} />}
       <Button
-        variant="ghost"
-        size="sm"
-        onClick={() => setOpen(true)}
-        className="border border-gray-200 text-gray-600 dark:border-gray-700 dark:text-gray-300"
-        title="探す(Ctrl+K)"
-        aria-label="探す"
+        variant="primary"
+        onClick={() => setOpen((v) => !v)}
+        aria-expanded={open}
+        title="困ったらここ(Ctrl+K)"
+        aria-label="困ったらここ"
+        className="rounded-full shadow-lg"
       >
-        <Search className="h-4 w-4" />
-        <span className="hidden md:inline">探す</span>
-        <kbd className="hidden rounded border border-gray-300 px-1 text-xs text-gray-500 lg:inline dark:border-gray-600 dark:text-gray-400">Ctrl K</kbd>
+        <HelpCircle className="h-4 w-4" />
+        {placement !== "map" && "困ったらここ"}
       </Button>
-      {open && <QuickJumpDialog userRole={userRole} onClose={() => setOpen(false)} />}
-    </>
+    </div>
   );
 }
