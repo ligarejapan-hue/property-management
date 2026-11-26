@@ -13,6 +13,10 @@
 import type { CaseStatus, Prisma } from "@/generated/prisma";
 import { CASE_STATUS_DEPRECATED_MAP, type CaseStatusValue } from "@/lib/property-types";
 import type { DealStatus } from "./constants";
+import { syncCaseDatesFromDeals } from "./case-dates-sync";
+import { LINKED_DEAL_ORDER, pickLinkedDeal } from "./linked-deal";
+
+export { pickLinkedDeal };
 
 const DEAL_TO_CASE: Record<DealStatus, CaseStatusValue> = {
   considering: "contract_planned",
@@ -64,16 +68,11 @@ export function initialDealStatusForCase(caseStatus: string): DealStatus {
   return "considering";
 }
 
-/** deals は新しい順。 */
-export function pickLinkedDeal<T extends { status: string }>(deals: readonly T[]): T | null {
-  return deals.find((d) => d.status !== "cancelled") ?? deals[0] ?? null;
-}
-
 const loadDeals = (tx: Prisma.TransactionClient, propertyId: string) =>
   tx.deal.findMany({
     where: { propertyId },
     select: { id: true, status: true },
-    orderBy: [{ createdAt: "desc" }, { id: "desc" }],
+    orderBy: LINKED_DEAL_ORDER,
   });
 
 type SyncArgs = { propertyId: string; changedBy: string };
@@ -133,6 +132,8 @@ export async function syncDealFromCaseStatus(tx: Prisma.TransactionClient, { pro
     },
   });
   await syncDealDocRetention(tx, linked.id, linked.status, next);
+  // 中止になった・中止から戻ると連動する取引が変わり得る=物件の契約日・決済予定日もそろえ直す(2026-11-26)。
+  await syncCaseDatesFromDeals(tx, { propertyId, changedBy });
   return { dealId: linked.id, status: next };
 }
 

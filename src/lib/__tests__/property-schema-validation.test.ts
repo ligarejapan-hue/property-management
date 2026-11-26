@@ -128,18 +128,11 @@ describe("updatePropertySchema: dmScenarioId は小文字に揃える(最終レ�
   });
 });
 
-describe("updatePropertySchema: 契約予定日・決済予定日(案件ステータス 8〜10 の欄・2026-10-23)", () => {
-  it("YYYY-MM-DD は UTC の 0 時の Date に・空と null は未定(null)・未指定は undefined", () => {
-    const parsed = updatePropertySchema.parse({ version: 1, contractPlannedOn: "2026-11-15", settlementPlannedOn: "" });
-    expect(parsed.contractPlannedOn?.toISOString()).toBe("2026-11-15T00:00:00.000Z");
-    expect(parsed.settlementPlannedOn).toBeNull();
-    expect(updatePropertySchema.parse({ version: 1, contractPlannedOn: null }).contractPlannedOn).toBeNull();
-    expect(updatePropertySchema.parse({ version: 1 }).contractPlannedOn).toBeUndefined();
-  });
-  it("暦にない日・形の違う値は弾く", () => {
-    expect(() => updatePropertySchema.parse({ version: 1, contractPlannedOn: "2026-02-30" })).toThrow();
-    expect(() => updatePropertySchema.parse({ version: 1, settlementPlannedOn: "2026/11/15" })).toThrow();
-    expect(() => updatePropertySchema.parse({ version: 1, settlementPlannedOn: "20261115" })).toThrow();
+describe("updatePropertySchema: 契約予定日・決済予定日は物件の保存では受け付けない(取引からだけ・2026-11-26)", () => {
+  it("送られても捨てる(保存する値に入らない)", () => {
+    const parsed = updatePropertySchema.parse({ version: 1, contractPlannedOn: "2026-11-15", settlementPlannedOn: null });
+    expect("contractPlannedOn" in parsed).toBe(false);
+    expect("settlementPlannedOn" in parsed).toBe(false);
   });
 });
 

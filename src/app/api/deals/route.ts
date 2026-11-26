@@ -10,6 +10,7 @@ import { requireDeal } from "@/lib/deals/guard";
 import { DEFAULT_TERMS, dealCreateSchema, EMPTY_SNAPSHOT, type SettlementTerms } from "@/lib/deals/schemas";
 import { DEAL_BUSINESS_TYPES, DEAL_STATUSES, type DealStatus } from "@/lib/deals/constants";
 import { initialDealStatusForCase, syncCaseStatusFromDeals } from "@/lib/deals/status-link";
+import { syncCaseDatesFromDeals } from "@/lib/deals/case-dates-sync";
 import { lockPropertyRow } from "@/lib/property-record-guard";
 import { jstYear, nextDealNo } from "@/lib/deals/deal-no";
 import { jstDateString } from "@/lib/deals/datetime";
@@ -158,6 +159,9 @@ export async function POST(request: Request) {
           if (propertyId) await addSellersFromOwners(tx, { dealId: row.id, propertyId, access: sellerAccessOf(perms) });
           // 売却の取引を作っただけでは、仕入で進んだ案件ステータスを戻さない。
           if (propertyId && canMoveCase && !isSale) await syncCaseStatusFromDeals(tx, { propertyId, changedBy: session.id });
+          // 物件の契約日・決済予定日は連動する取引の日付の写し(2026-11-26 発注者「入れるのは取引からのみ」)。
+          // 売却の取引は仕入の進みを動かさない(案件ステータスと同じ)。
+          if (propertyId && !isSale) await syncCaseDatesFromDeals(tx, { propertyId, changedBy: session.id });
           return row;
         });
         await writeAuditLog({

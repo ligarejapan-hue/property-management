@@ -18,6 +18,7 @@ import { readTerms } from "@/lib/deals/inputs";
 import { sellerTaxableOf, taxPartChanged } from "@/lib/deals/calc/settlement";
 import type { ScheduleEvent } from "@/lib/deals/schedule";
 import { canChangeDealAssignee, canChangeDealStatus, caseStatusWouldMove, syncCaseStatusFromDeals, syncDealDocRetention } from "@/lib/deals/status-link";
+import { syncCaseDatesFromDeals } from "@/lib/deals/case-dates-sync";
 import { lockPropertyRow } from "@/lib/property-record-guard";
 import { summarizePropertyDeals } from "@/lib/property-business-type";
 import { supportsUnitFields } from "@/lib/property-building-name";
@@ -87,7 +88,10 @@ export async function PATCH(request: Request, ctx: Ctx) {
       // 案件ステータスと連動する(lib/deals/status-link.ts)。ロックは物件の行 → 取引の行(下の updateMany)の順。
       const statusChanges = patch.status !== undefined && patch.status !== cur.status;
       const linkedPropertyId = statusChanges ? cur.propertyId : null;
-      if (linkedPropertyId) await lockPropertyRow(tx, linkedPropertyId);
+      // 物件の契約日・決済予定日は連動する取引の日付の写し(2026-11-26 発注者)。日付か状態を送ったら物件の側もそろえる。
+      const datesPropertyId = statusChanges || patch.contractAt !== undefined || patch.settlementAt !== undefined ? cur.propertyId : null;
+      // 状態を変えるとき(linkedPropertyId)は必ず datesPropertyId も同じ物件=ロックは1回で足りる。
+      if (datesPropertyId) await lockPropertyRow(tx, datesPropertyId);
       const assigneeChanges = patch.assigneeId !== undefined && patch.assigneeId !== cur.assigneeId;
       let canMoveCase = false;
       if (statusChanges || assigneeChanges) {
@@ -149,6 +153,8 @@ export async function PATCH(request: Request, ctx: Ctx) {
         if (canMoveCase) await syncCaseStatusFromDeals(tx, { propertyId: linkedPropertyId, changedBy: session.id });
         else caseStatusNotChanged = await caseStatusWouldMove(tx, linkedPropertyId);
       }
+      // 日付は写しなので、物件を編集できない人の保存でもそろえる(物件の画面では入れられない)。
+      if (datesPropertyId) await syncCaseDatesFromDeals(tx, { propertyId: datesPropertyId, changedBy: session.id });
     });
 
     // 日付・条件・担当の変更を段取りに反映する(失敗しても保存は止めない)。

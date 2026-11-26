@@ -1549,13 +1549,8 @@ function BasicTab({
         canWrite={canWrite}
         editLockHeld={editLockHeld}
       />
-      {/* 契約予定日・決済予定日(契約予定/契約完了/決済完了のときだけ出る・2026-10-23)。 */}
-      <CaseDatesField
-        property={property}
-        onRefresh={onRefresh}
-        canWrite={canWrite}
-        editLockHeld={editLockHeld}
-      />
+      {/* 契約予定日・決済予定日(契約予定/契約完了/決済完了のときだけ出る・2026-10-23)。見せるだけ=取引から入る(2026-11-26)。 */}
+      <CaseDatesField property={property} />
       {/* 契約予定になった物件は、ここから取引を作れる(発注者指示 2026-10-25)。
           「その他」メニューの「この物件で取引を作成」と同じ行き先。 */}
       {canCreateDeal && property.caseStatus === "contract_planned" && (

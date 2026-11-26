@@ -54,6 +54,7 @@ Task 7 が直した「謄本取込が所有者の法人番号を版番号を進�
 | `src/lib/building-link/apply.ts:136` | `property.buildingId = null` のみ | (2026-10-05 棟の自動づけで追加)**編集画面で書けない項目ではない**が、`applyBuildingLink` は必ず物件の保存と同じトランザクションで、物件を作った直後(新しい行)か version を進める更新の直後に呼ばれる。版番号はその保存で1回だけ進む |
 | `src/lib/building-link/apply.ts:233` | `property.buildingId`/`buildingName` | 同上(棟へつなぎ、物件名を棟の正式な表記にそろえる) |
 | `src/lib/case-status-auto.ts:77` | `property.caseStatus` のみ | (2026-10-20 案件ステータスの自動の切り替えで追加)`caseStatus` は `property-edit-form.tsx` の FORM_FIELDS に無く、鍵を持つ人の保存が上書きしない。版を進めると、所有者の申込(公開の経路)や査定報告書の添付で、編集中の人の保存が409で負ける(D9 と同じ理由)ため進めない。物件詳細のプルダウンは版を送るが、自動は前に進めるだけなので人の選択が後勝ちでよい |
+| `src/lib/deals/case-dates-sync.ts:48` | `property.contractPlannedOn` / `settlementPlannedOn` のみ | (2026-11-26 契約日・決済予定日を取引の日付の写しにしたときに追加)この2つは物件の保存では受け付けず、編集画面にも無い=鍵を持つ人の保存が上書きしない。版を進めると、取引の保存で物件の編集中の人の保存が409で負ける(案件ステータスの連動と同じ理由)ため進めない |
 | `src/lib/registry-status-auto.ts:77` | `property.registryStatus` のみ | (2026-11-06 謄本の添付で登記状況を未取得→取得済にする自動で追加)`registryStatus` は編集画面にあるが、編集画面は変えた欄だけ送るので、登記状況を触っていない人の保存は自動の値を上書きしない。版を進めると、謄本を添付しただけで編集中の人の保存が409で負ける(D9 と同じ理由)ため進めない。その人が登記状況を自分で変えて保存したら人の選択が後勝ちでよい。取得中(謄本の取得の鍵)からは上げない |
 
 `updatedAt` が編集画面から書けないことの根拠: `src/lib/validators.ts` の `updatePropertySchema`(200-241行)・`updateOwnerSchema`(266-283行)のどちらにも `updatedAt` フィールドが無く、`property-edit-form.tsx` の `FORM_FIELDS`(105-158行)にも該当キーが無い。`dmUndeliverableAt` も両スキーマ・両フォームどちらにも存在しない。
