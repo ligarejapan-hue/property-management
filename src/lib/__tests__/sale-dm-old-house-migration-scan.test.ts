@@ -10,7 +10,7 @@ const sql = readFileSync(
 ).replace(/\r\n/g, "\n");
 const statements = sql.split("\n").filter((l) => !l.startsWith("--")).join("\n").trim();
 
-describe("古い家に auto_key を付ける migration(2026-11-08)", () => {
+describe("築年数を重ねた家(の種類)に auto_key を付ける migration(2026-11-08)", () => {
   it("★文は UPDATE 1つだけ(表・列・行の追加や削除をしない)", () => {
     expect(statements).toMatch(/^UPDATE "dm_scenarios" SET "auto_key" = 'old_house'/);
     expect(statements.split(";").filter((s) => s.trim()).length).toBe(1);

@@ -4,7 +4,7 @@ import { join } from "node:path";
 import { DEFAULT_TAGLINE, taglineForAutoKey } from "../scenario-tagline";
 
 describe("種類ごとの添え書き(2026-11-08 発注者決定)", () => {
-  it("★相続・相続(マンション)=相続/空き家=空き家/古い家=住まい", () => {
+  it("★相続・相続(マンション)=相続/空き家=空き家/築年数を重ねた家=住まい", () => {
     expect(taglineForAutoKey("inheritance")).toBe("相続・不動産のご相談窓口");
     expect(taglineForAutoKey("inheritance_unit")).toBe("相続・不動産のご相談窓口");
     expect(taglineForAutoKey("vacant")).toBe("空き家・不動産のご相談窓口");
