@@ -3,6 +3,7 @@ import type { AppRole } from "@/lib/nav/roles";
 import { isSubsequence, normalizeQuery } from "./normalize";
 import { EXTRA_PAGES, PAGE_ALIASES } from "./pages";
 import { HOWTO_ENTRIES } from "./howto-entries";
+import { manualHrefFor } from "./howto-manual";
 
 /**
  * 検索の枠の引き方(外には何も送らない・同じ言葉なら毎回同じ答え)。
@@ -19,6 +20,8 @@ export interface QuickJumpResult {
   detail: string;
   href: string;
   hrefLabel?: string;
+  /** やりかたの「マニュアルで見る」の行き先(取り扱いマニュアルの節) */
+  manualHref?: string;
   external?: boolean;
   windowName?: string;
   score: number;
@@ -113,6 +116,7 @@ function candidatesFor(role: string, menu: QuickJumpMenuGroup[]): Candidate[] {
       detail: h.answer,
       href: h.href,
       hrefLabel: h.hrefLabel,
+      manualHref: manualHrefFor(h.id),
       // 別の窓で開く画面(資料・反響の受付)は、メニューと同じ開き方にする
       external: menuItems.get(h.href)?.external,
       windowName: menuItems.get(h.href)?.windowName,

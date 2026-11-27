@@ -9,7 +9,7 @@
  */
 import { useEffect, useMemo, useRef, useState, type KeyboardEvent } from "react";
 import Link from "next/link";
-import { Search, ArrowRight, HelpCircle, X } from "lucide-react";
+import { Search, ArrowRight, HelpCircle, X, BookOpen } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { SIDEBAR_GROUPS } from "./sidebar-model";
 import { searchQuickJump, type QuickJumpResult } from "@/lib/quick-jump/search";
@@ -94,6 +94,18 @@ export function QuickJumpResults({
               <Link id={QUICK_JUMP_OPTION_ID(i)} href={r.href} className={cls} onClick={onPick}>
                 {body}
               </Link>
+            )}
+            {/* 答えの続きは取り扱いマニュアルの該当の節で(別のタブ・2026-11-27 発注者) */}
+            {r.manualHref && (
+              <a
+                href={r.manualHref}
+                target="_blank"
+                rel="noopener noreferrer"
+                className="ml-3 mt-0.5 inline-flex items-center gap-1 text-xs text-gray-500 underline hover:text-indigo-600 dark:text-gray-400 dark:hover:text-indigo-400"
+              >
+                <BookOpen className="h-3.5 w-3.5" />
+                マニュアルで見る
+              </a>
             )}
           </li>
         );

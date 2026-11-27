@@ -15,6 +15,7 @@ const howto: QuickJumpResult = {
   detail: "取引の「物件」タブで入れます。",
   href: "/deals",
   hrefLabel: "取引の一覧へ",
+  manualHref: "/docs/manual.html#deal-keys",
   score: 50,
 };
 const doc: QuickJumpResult = { kind: "page", key: "page:/docs/manual.html", title: "取り扱いマニュアル", detail: "資料", href: "/docs/manual.html", external: true, score: 10 };
@@ -35,6 +36,9 @@ describe("QuickJumpResults", () => {
     expect(html).toContain("取引の「物件」タブで入れます。");
     expect(html.match(/aria-selected="true"/g)?.length).toBe(1);
     expect(html).toContain('id="pm-quick-jump-0"');
+    // 答えの下にマニュアルの節へのリンク(別のタブ)
+    expect(html).toMatch(/href="\/docs\/manual.html#deal-keys" target="_blank" rel="noopener noreferrer"[^>]*>.*マニュアルで見る/);
+    expect(html.match(/マニュアルで見る/g)?.length).toBe(1);
     // 資料は別のタブで開く
     expect(html).toMatch(/href="\/docs\/manual.html" target="_blank" rel="noopener noreferrer"/);
   });

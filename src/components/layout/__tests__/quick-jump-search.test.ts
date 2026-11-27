@@ -5,6 +5,9 @@ import { HOWTO_ENTRIES } from "@/lib/quick-jump/howto-entries";
 import { EXTRA_PAGES, PAGE_ALIASES } from "@/lib/quick-jump/pages";
 import { SIDEBAR_GROUPS } from "@/components/layout/sidebar-model";
 import { ROLE_LEVEL } from "@/lib/nav/roles";
+import { HOWTO_MANUAL_SECTION, MANUAL_PATH } from "@/lib/quick-jump/howto-manual";
+import { readFileSync } from "node:fs";
+import path from "node:path";
 
 describe("normalizeQuery", () => {
   it("全角/半角・大小・カタカナ/ひらがな・記号をそろえる", () => {
@@ -107,5 +110,28 @@ describe("登録の中身の守り", () => {
   });
   it("別名の道はどれも知っている画面", () => {
     for (const href of Object.keys(PAGE_ALIASES)) expect(menuHrefs.has(href), href).toBe(true);
+  });
+});
+
+describe("やりかた → 取り扱いマニュアルの節", () => {
+  const manual = readFileSync(path.resolve(process.cwd(), "public/docs/manual.html"), "utf-8");
+  const ids = new Set([...manual.matchAll(/id="([^"]+)"/g)].map((m) => m[1]));
+
+  it("マニュアルそのもの以外の全件がどこかの節につながっている", () => {
+    for (const h of HOWTO_ENTRIES) {
+      if (h.href === MANUAL_PATH) continue;
+      expect(HOWTO_MANUAL_SECTION[h.id], h.id).toBeDefined();
+    }
+  });
+  it("つなぎ先の印はマニュアルに実在する・知らないやりかたの名前は無い", () => {
+    const known = new Set(HOWTO_ENTRIES.map((h) => h.id));
+    for (const [id, sec] of Object.entries(HOWTO_MANUAL_SECTION)) {
+      expect(known.has(id), id).toBe(true);
+      expect(ids.has(sec), `${id} → #${sec}`).toBe(true);
+    }
+  });
+  it("結果にマニュアルの行き先が付く", () => {
+    const r = searchQuickJump("鍵の本数を入力したい", "admin", SIDEBAR_GROUPS);
+    expect(r[0].manualHref).toBe("/docs/manual.html#deal-keys");
   });
 });
