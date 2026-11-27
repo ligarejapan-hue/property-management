@@ -288,7 +288,9 @@ export const LP_DESIGN_EXTRA_CSS = {
 .duo.dk .pane.b{background:transparent;color:var(--on-ink);border:1px solid var(--brass)}
 .duo.dk .pane.b small{color:var(--brass-l)}
 .cpq{margin-top:18px;font-family:var(--mincho);font-weight:600;font-size:16px;line-height:1.9;letter-spacing:.06em;color:var(--brass-l)}
-.cpcall{margin-top:28px}`,
+.cpcall{margin-top:28px}
+.hc{font-size:clamp(22px,calc((min(100vw,560px) - 44px) / 10),46px)}
+.hc .m>span{white-space:nowrap}`,
   editorial: `.vhero{justify-content:center;padding-block:100px 40px}
 .vh{display:flex;flex-direction:row-reverse;justify-content:space-between;gap:14px;min-height:74svh}
 .vt{writing-mode:vertical-rl;font-family:var(--mincho);font-weight:600;font-size:clamp(33px,10vw,48px);line-height:1.7;letter-spacing:.14em;margin:0}
