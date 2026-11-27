@@ -20,7 +20,7 @@ export type ResolveResult =
 
 /**
  * 導入ルートの自動。並びの先から使える種類を選ぶ。
- * 現地調査は「古い家」→ 使えない・削除済み・台帳に無いときは「空き家」(2026-11-08 発注者決定。空き家の手紙は、
+ * 現地調査は「築年数を重ねた家(の種類)」→ 使えない・削除済み・台帳に無いときは「空き家」(2026-11-08 発注者決定。空き家の手紙は、
  * 空き家と分かった物件に物件の欄で選ぶ)。
  */
 export const AUTO_KEY_BY_ROUTE: Readonly<Record<string, readonly string[]>> = Object.freeze({
