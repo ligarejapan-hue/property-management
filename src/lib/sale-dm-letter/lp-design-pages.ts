@@ -234,10 +234,12 @@ function heroQuestion(ctx: Ctx): string {
 
 function heroCompare(): string {
   return `<section class="hero dark" id="hero">${SKY}<div class="wrap" data-rv>${KICKER}` +
-    lines("h1", ["不動産の売り方は、", "二つあります"], "不動産の売り方は、二つあります") +
-    `<p class="lede f d3">どちらが合うかは、何を優先するかで決まります。当社はどちらもご案内できます。</p>` +
+    // 2026-11-27 発注者: 広告の見出しに合わせる。各行は途中で折り返さず、幅に合わせて文字を小さくする(.hc)
+    lines("h1 hc", ["ご所有の不動産、", "いくらなら売れるか"], "ご所有の不動産、いくらなら売れるか") +
+    `<p class="lede f d3">仲介で売った場合と、当社が買い取る場合。両方の金額を、根拠と一緒にお伝えします。</p>` +
     // 2026-11-25 発注者: 冒頭の直下に、答えが届くまでの日数
     `<p class="cpq f d4">仲介と買取、両方の金額を2〜3営業日でお答えします。</p>` +
+    ctaLink(LP_CTA_LABEL, " f d4") +
     SCROLLCUE(" f d4") + `</div></section>`;
 }
 

@@ -51,6 +51,16 @@ const CONTACT_TEXTS = [
   "ご希望の連絡方法", "電話", "メール", "どちらでも", "メールアドレス（メールをご希望の方）",
   "連絡のつきやすい時間帯（任意）", "指定なし", "平日 10〜12時", "平日 12〜15時", "平日 15〜19時", "いつでも",
 ];
+/** 2026-11-27 発注者: compare 案の冒頭を広告の見出しに合わせた(見本の文言を置き換えた)。 */
+const COMPARE_HERO_20261127 = [
+  "ご所有の不動産、", "いくらなら売れるか",
+  "仲介で売った場合と、当社が買い取る場合。両方の金額を、根拠と一緒にお伝えします。",
+];
+/** 置き換えたので、見本にあっても出さない文言。 */
+const REMOVED: Record<LpDesignKey, Set<string>> = {
+  base: new Set(), form: new Set(), question: new Set(), editorial: new Set(),
+  compare: new Set(["不動産の売り方は、", "二つあります", "どちらが合うかは、何を優先するかで決まります。当社はどちらもご案内できます。"]),
+};
 const ADDED_20261125: Record<LpDesignKey, Set<string>> = {
   base: new Set(), form: new Set(), editorial: new Set(),
   compare: new Set([
@@ -58,6 +68,8 @@ const ADDED_20261125: Record<LpDesignKey, Set<string>> = {
     "仲介と買取、両方の金額を2〜3営業日でお答えします。",
     "査定書は、ご家族の話し合いの材料としてお使いいただけます。",
     "お申込みのあと、平日 10:00〜19:00に担当者から1回お電話します。03-6823-2760からおかけします。メールをご希望の方には、メールでお送りします。",
+    // 2026-11-27 発注者: 冒頭を広告の見出しに合わせる
+    ...COMPARE_HERO_20261127,
   ]),
   question: new Set([
     ...CONTACT_TEXTS,
@@ -89,7 +101,7 @@ describe.each(LP_DESIGN_KEYS)("見た目 %s", (design) => {
 
   it("見本の文言をそのまま出し、足さない", () => {
     const sample = readFileSync(join(SPEC, SAMPLE[design]), "utf8");
-    const want = texts(sample).filter((t) => !SAMPLE_ONLY.has(t));
+    const want = texts(sample).filter((t) => !SAMPLE_ONLY.has(t) && !REMOVED[design].has(t));
     const got = texts(html);
     const missing = [...new Set(want)].filter((t) => !got.includes(t));
     const added = [...new Set(got)].filter((t) => !want.includes(t) && !PROD_ONLY.has(t) && !ADDED_20261125[design].has(t));
@@ -244,6 +256,34 @@ describe("compare 案の文言(2026-11-25)", () => {
       expect(o).not.toContain("両方の金額を2〜3営業日でお答えします");
       expect(o).not.toContain("からおかけします");
       expect(o).not.toContain("ご家族の話し合いの材料として");
+    }
+  });
+});
+
+describe("compare 案の冒頭: 広告の見出しに合わせる(2026-11-27)", () => {
+  const h = renderLpDesignPage("compare", input());
+  const hero = h.slice(h.indexOf('id="hero"'), h.indexOf("</section>", h.indexOf('id="hero"')));
+  it("見出しは2行・読み上げは1文", () => {
+    expect(hero).toContain('<h1 class="h1 hc" aria-label="ご所有の不動産、いくらなら売れるか">' +
+      '<span class="m" aria-hidden="true"><span>ご所有の不動産、</span></span>' +
+      '<span class="m" aria-hidden="true"><span>いくらなら売れるか</span></span></h1>');
+    expect(h).not.toContain("不動産の売り方は、");
+  });
+  it("見出しの下の文・日数の一言・申込欄へのボタンの順", () => {
+    const lede = hero.indexOf('<p class="lede f d3">仲介で売った場合と、当社が買い取る場合。両方の金額を、根拠と一緒にお伝えします。</p>');
+    const cpq = hero.indexOf('<p class="cpq f d4">仲介と買取、両方の金額を2〜3営業日でお答えします。</p>');
+    const cta = hero.indexOf('<a class="cta f d4" href="#apply"><span>無料査定を申し込む</span><span class="ar" aria-hidden="true"></span></a>');
+    expect(lede).toBeGreaterThan(0);
+    expect(cpq).toBeGreaterThan(lede);
+    expect(cta).toBeGreaterThan(cpq);
+    expect(h).toContain('id="apply"');
+  });
+  it("各行は途中で折り返さず、幅に合わせて文字を小さくする(compare 案だけ)", () => {
+    expect(LP_DESIGN_EXTRA_CSS.compare).toContain(".hc .m>span{white-space:nowrap}");
+    expect(LP_DESIGN_EXTRA_CSS.compare).toContain(".hc{font-size:clamp(22px,calc((min(100vw,560px) - 44px) / 10),46px)}");
+    for (const d of ["base", "form", "question", "editorial"] as const) {
+      expect(LP_DESIGN_EXTRA_CSS[d]).not.toContain(".hc");
+      expect(renderLpDesignPage(d, input())).not.toContain('class="h1 hc"');
     }
   });
 });
